@@ -510,7 +510,7 @@ four drift checks green, with the generated references regenerated
 in the same change as the prose that feeds them.
 
 - [x] **[M1: the generation seam and the generalized reload, with
-  the prompt slice live](2026-08-20-config-reload-implementation.md#m1-the-generation-seam-and-the-generalized-reload-with-the-prompt-slice-live).** (PR TBD) `generation.py` holding config and
+  the prompt slice live](2026-08-20-config-reload-implementation.md#m1-the-generation-seam-and-the-generalized-reload-with-the-prompt-slice-live).** (PR #229) `generation.py` holding config and
   secrets; the holder's mark, with its instability window,
   replaces `McpServers.generation` in the diff guard; `config/reload.py` with the widened
   exclusion, prepare (the re-read, whole-snapshot validation, MCP
@@ -532,7 +532,7 @@ in the same change as the prose that feeds them.
   footprint: adds the generation seam; deepens the reload from an
   MCP verb into the configuration verb whose callers stop knowing
   which halves converge where. Branch `feature/config-reload`,
-  PR TBD.
+  PR #229.
 - [ ] **M2: fillers, re-synthesized with clip reuse.** The filler
   cache becomes a generation value bound per session; prepare
   re-synthesizes only agents whose reuse key (effective filler
