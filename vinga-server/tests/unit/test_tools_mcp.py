@@ -439,6 +439,13 @@ async def test_a_resolved_secret_reaches_the_spawned_server(
     # asks the resolver the connection asks, with the entry the manager
     # was built from. What it answers is unchanged: the reference became
     # the value.
+    # White-box: resolution happens per connection, inside the
+    # transport, and the resolved value is deliberately kept on no
+    # object a reader can reach, which is the property being asserted
+    # around it. Its observable form is a child process's environment,
+    # and `test_secret_resolution.py` spawns one to read it; here the
+    # question is the reference rather than the store, and the resolver
+    # is asked with the entry the manager was built from.
     assert transport._resolve("tools", config.mcp_servers["tools"], None, "env") == {
         "API_TOKEN": "sk-test"
     }

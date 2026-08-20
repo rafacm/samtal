@@ -670,6 +670,7 @@ async def test_a_cancelled_cleanup_step_still_finishes_the_record(
     assert closed.reason == "client"
     (row,) = read(tmp_path, "select * from sessions")
     assert row["closed_at"] is not None
+    # White-box, per the note at the same pair above.
     assert session._record is None
     assert attached_taps(session) == []
     manifest = _capture_manifest(tmp_path)

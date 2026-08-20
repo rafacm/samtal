@@ -294,6 +294,9 @@ async def assert_the_task_left_nothing_behind(server: DrainingServer) -> None:
     reported: list[dict[str, Any]] = []
     loop.set_exception_handler(lambda _loop, context: reported.append(context))
     try:
+        # White-box, per the note at the first `_serve` above: task
+        # ownership is what is under test, and here the task is taken
+        # away deliberately to prove nothing else was holding it.
         task = server._drain_task
         assert task is not None
         server._drain_task = None
@@ -329,6 +332,7 @@ async def test_a_drain_that_failed_before_the_settle_says_only_its_class(
     uvicorn_that_waits_out_the_drain(monkeypatch)
     server = draining_server(cast(Any, FailingRegistry()))
 
+    # White-box, per the note at the first `_serve` above.
     with caplog.at_level("WARNING"):
         await server._serve()
 
@@ -357,6 +361,7 @@ async def test_a_drain_that_fails_during_the_settle_says_only_its_class(
     uvicorn_that_stops_mid_drain(monkeypatch)
     server = draining_server(cast(Any, SlowlyFailingRegistry()))
 
+    # White-box, per the note at the first `_serve` above.
     with caplog.at_level("WARNING"):
         await server._serve()
 
@@ -400,6 +405,7 @@ async def test_a_drain_that_outlives_its_bound_is_abandoned(
     with caplog.at_level("WARNING"):
         # The outer bound is the test's backstop; the assertion below is
         # what says the server's own bound is what let go.
+        # White-box, per the note at the first `_serve` above.
         await asyncio.wait_for(server._serve(), timeout=5)
     elapsed = time.monotonic() - started
 

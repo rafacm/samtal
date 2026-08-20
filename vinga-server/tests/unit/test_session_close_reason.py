@@ -232,11 +232,13 @@ async def test_a_latched_token_is_not_rewritten_by_a_later_one() -> None:
     only ever probabilistically reproducible from outside."""
     websocket = LoopingSocket()
     session = served(config_with_agent(), websocket)
+    # White-box, per the note at the first of these above.
     session._latch_close("idle")
     session._latch_close("drain")
     assert session._closed_reason() == "idle"
 
 
+# White-box, per the note at the first latch assertion above.
 async def test_nothing_latched_reads_as_client() -> None:
     websocket = LoopingSocket()
     session = served(config_with_agent(), websocket)

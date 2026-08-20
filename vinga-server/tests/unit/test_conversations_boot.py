@@ -201,6 +201,7 @@ def test_a_writer_that_cannot_start_leaves_stop_harmless(
     with pytest.raises(RuntimeError):
         store.start()
 
+    # White-box, per the note in the first thread assertion above.
     assert store._thread is None
     # Harmless, and still idempotent.
     store.stop()
@@ -272,5 +273,6 @@ def test_a_startup_failure_after_the_writer_started_still_stops_it(
             pass
 
     (store,) = built
+    # White-box, per the note in the first thread assertion above.
     assert store._stopped
     assert store._thread is not None and not store._thread.is_alive()

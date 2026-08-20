@@ -82,6 +82,11 @@ async def reply_broken_while_speaking(
         await synthesis.wait_cancelled()
         raise exc
 
+    # White-box: the failure under test is a device that vanishes while
+    # a sentence is being spoken, and both shapes of it are raised by
+    # the transport underneath. Standing in for the speaking step is
+    # what puts the exception at that instant rather than somewhere a
+    # socket happened to fail.
     session.runtime._speak = speak  # type: ignore[method-assign]
     with caplog.at_level("INFO"):
         await drive_reply(session, UTTERANCE)

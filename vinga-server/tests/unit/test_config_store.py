@@ -1383,6 +1383,9 @@ def test_a_marked_write_resolves_and_persists_under_one_lock(
         setup.dispose()
 
     replaced = threading.Event()
+    # White-box, per the note in the paced test above: two writers
+    # meeting inside one write is what this pins, and no public seam
+    # sits there.
     held = store_module._held
 
     def paced(stored, path):
