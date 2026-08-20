@@ -1970,5 +1970,1910 @@
         }
       ]
     }
+  ],
+  "ota_check": [
+    {
+      "channel": "vinga_server.ota",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "said_device",
+          "type": "ReportedMac"
+        },
+        {
+          "name": "board",
+          "type": "BoardName"
+        },
+        {
+          "name": "firmware",
+          "type": "FirmwareVersion"
+        },
+        {
+          "name": "code",
+          "type": "ActivationCode"
+        },
+        {
+          "name": "code",
+          "type": "ActivationCode"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "device",
+          "type": "DeviceId",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "client",
+          "type": "ClientId",
+          "required": true,
+          "nullable": true
+        },
+        {
+          "name": "board",
+          "type": "BoardName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "firmware",
+          "type": "FirmwareVersion",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "agents",
+          "type": "AgentNames",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "unloaded",
+          "type": "AgentNames",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "code",
+          "type": "ActivationCode",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "channel": "vinga_server.ota",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "said_device",
+          "type": "ReportedMac"
+        },
+        {
+          "name": "board",
+          "type": "BoardName"
+        },
+        {
+          "name": "firmware",
+          "type": "FirmwareVersion"
+        },
+        {
+          "name": "named",
+          "type": "AgentList"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "device",
+          "type": "DeviceId",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "client",
+          "type": "ClientId",
+          "required": true,
+          "nullable": true
+        },
+        {
+          "name": "board",
+          "type": "BoardName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "firmware",
+          "type": "FirmwareVersion",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "agents",
+          "type": "AgentNames",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "unloaded",
+          "type": "AgentNames",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "channel": "vinga_server.ota",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "said_device",
+          "type": "ReportedMac"
+        },
+        {
+          "name": "board",
+          "type": "BoardName"
+        },
+        {
+          "name": "firmware",
+          "type": "FirmwareVersion"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "device",
+          "type": "DeviceId",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "client",
+          "type": "ClientId",
+          "required": true,
+          "nullable": true
+        },
+        {
+          "name": "board",
+          "type": "BoardName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "firmware",
+          "type": "FirmwareVersion",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "agents",
+          "type": "AgentNames",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "unloaded",
+          "type": "AgentNames",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "channel": "vinga_server.ota",
+      "level": 20,
+      "arguments": [
+        {
+          "name": "said_device",
+          "type": "ReportedMac"
+        },
+        {
+          "name": "board",
+          "type": "BoardName"
+        },
+        {
+          "name": "firmware",
+          "type": "FirmwareVersion"
+        },
+        {
+          "name": "agent",
+          "type": "Identifier"
+        },
+        {
+          "name": "bound_tail",
+          "type": "AlsoBoundTo"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "device",
+          "type": "DeviceId",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "client",
+          "type": "ClientId",
+          "required": true,
+          "nullable": true
+        },
+        {
+          "name": "board",
+          "type": "BoardName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "firmware",
+          "type": "FirmwareVersion",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "agents",
+          "type": "AgentNames",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "unloaded",
+          "type": "AgentNames",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "activation_not_offered": [
+    {
+      "channel": "vinga_server.ota",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "device",
+          "type": "DeviceId"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "device",
+          "type": "DeviceId",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "reason",
+          "type": "NotOfferedToken",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "channel": "vinga_server.ota",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "device",
+          "type": "DeviceId"
+        },
+        {
+          "name": "reason",
+          "type": "PendingRefusal"
+        },
+        {
+          "name": "device",
+          "type": "DeviceId"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "device",
+          "type": "DeviceId",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "reason",
+          "type": "PendingRefusal",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "activation_complete": [
+    {
+      "channel": "vinga_server.ota",
+      "level": 20,
+      "arguments": [
+        {
+          "name": "device",
+          "type": "DeviceId"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "device",
+          "type": "DeviceId",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "agents",
+          "type": "AgentNames",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "activation_pending": [
+    {
+      "channel": "vinga_server.ota",
+      "level": 10,
+      "arguments": [
+        {
+          "name": "device",
+          "type": "DeviceId"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "device",
+          "type": "DeviceId",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "code",
+          "type": "ActivationCode",
+          "required": true,
+          "nullable": true
+        },
+        {
+          "name": "unloaded",
+          "type": "AgentNames",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "activation_refused": [
+    {
+      "channel": "vinga_server.ota",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "device",
+          "type": "DeviceId"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "device",
+          "type": "DeviceId",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "code",
+          "type": "ActivationCode",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "reason",
+          "type": "ActivationRefusalToken",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "channel": "vinga_server.ota",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "device",
+          "type": "DeviceId"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "device",
+          "type": "DeviceId",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "code",
+          "type": "ActivationCode",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "reason",
+          "type": "ActivationRefusalToken",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "channel": "vinga_server.ota",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "device",
+          "type": "DeviceId"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "device",
+          "type": "DeviceId",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "code",
+          "type": "ActivationCode",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "reason",
+          "type": "ActivationRefusalToken",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "ota_request_rejected": [
+    {
+      "channel": "vinga_server.ota",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "refusal",
+          "type": "OtaRefusalToken"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "onboarding_banner": [
+    {
+      "channel": "vinga_server.onboarding",
+      "level": 20,
+      "arguments": [
+        {
+          "name": "origin",
+          "type": "Identifier"
+        },
+        {
+          "name": "provenance",
+          "type": "OriginProvenance"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "origin",
+          "type": "Identifier",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "origin_source",
+          "type": "OriginSourceToken",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "onboarding",
+          "type": "Flag",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "channel": "vinga_server.onboarding",
+      "level": 20,
+      "arguments": [
+        {
+          "name": "origin",
+          "type": "Identifier"
+        },
+        {
+          "name": "provenance",
+          "type": "OriginProvenance"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "origin",
+          "type": "Identifier",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "origin_source",
+          "type": "OriginSourceToken",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "onboarding",
+          "type": "Flag",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "keyed",
+          "type": "Flag",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "onboarding_key_mismatch": [
+    {
+      "channel": "vinga_server.onboarding",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "attempted_length",
+          "type": "Count"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "attempted_length",
+          "type": "Count",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "onboarding_key_unshaped": [
+    {
+      "channel": "vinga_server.onboarding",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "attempted_length",
+          "type": "Count"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "attempted_length",
+          "type": "Count",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "auth_rejected": [
+    {
+      "channel": "vinga_server.ws",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "reason",
+          "type": "AuthRejectionToken"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "device",
+          "type": "DeviceId",
+          "required": true,
+          "nullable": true
+        },
+        {
+          "name": "reason",
+          "type": "AuthRejectionToken",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "asr_prompt_echo": [
+    {
+      "channel": "vinga_server.providers.openai_asr",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "remaining_s",
+          "type": "Real"
+        },
+        {
+          "name": "duration_s",
+          "type": "Real"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "outcome",
+          "type": "EchoOutcomeToken",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "duration_s",
+          "type": "Real",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "host",
+          "type": "Identifier",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "channel": "vinga_server.providers.openai_asr",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "remaining_s",
+          "type": "Real"
+        },
+        {
+          "name": "duration_s",
+          "type": "Real"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "outcome",
+          "type": "EchoOutcomeToken",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "duration_s",
+          "type": "Real",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "host",
+          "type": "Identifier",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "retry_ms",
+          "type": "Whole",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "channel": "vinga_server.providers.openai_asr",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "duration_s",
+          "type": "Real"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "outcome",
+          "type": "EchoOutcomeToken",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "duration_s",
+          "type": "Real",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "host",
+          "type": "Identifier",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "retry_ms",
+          "type": "Whole",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "channel": "vinga_server.providers.openai_asr",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "duration_s",
+          "type": "Real"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "outcome",
+          "type": "EchoOutcomeToken",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "duration_s",
+          "type": "Real",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "host",
+          "type": "Identifier",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "retry_ms",
+          "type": "Whole",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "channel": "vinga_server.providers.openai_asr",
+      "level": 20,
+      "arguments": [
+        {
+          "name": "duration_s",
+          "type": "Real"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "outcome",
+          "type": "EchoOutcomeToken",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "duration_s",
+          "type": "Real",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "host",
+          "type": "Identifier",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "retry_ms",
+          "type": "Whole",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "mcp_connected": [
+    {
+      "channel": "vinga_server.tools.mcp",
+      "level": 20,
+      "arguments": [
+        {
+          "name": "entry",
+          "type": "Identifier"
+        },
+        {
+          "name": "tools",
+          "type": "Count"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "entry",
+          "type": "Identifier",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "transport",
+          "type": "McpTransportToken",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "tools",
+          "type": "Count",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "duration_ms",
+          "type": "Whole",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "mcp_down": [
+    {
+      "channel": "vinga_server.tools.mcp",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "entry",
+          "type": "Identifier"
+        },
+        {
+          "name": "failure",
+          "type": "ClassNames"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "entry",
+          "type": "Identifier",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "reason",
+          "type": "McpConnectFailure",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "duration_ms",
+          "type": "Whole",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "channel": "vinga_server.tools.mcp",
+      "level": 20,
+      "arguments": [
+        {
+          "name": "entry",
+          "type": "Identifier"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "entry",
+          "type": "Identifier",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "reason",
+          "type": "McpDownToken",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "channel": "vinga_server.tools.mcp",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "entry",
+          "type": "Identifier"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "entry",
+          "type": "Identifier",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "reason",
+          "type": "McpDownToken",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "mcp_call_dropped": [
+    {
+      "channel": "vinga_server.tools.mcp",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "entry",
+          "type": "Identifier"
+        },
+        {
+          "name": "position",
+          "type": "Count"
+        },
+        {
+          "name": "error",
+          "type": "ClassNames"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "entry",
+          "type": "Identifier",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "position",
+          "type": "Count",
+          "required": true,
+          "nullable": true
+        },
+        {
+          "name": "error",
+          "type": "ClassNames",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "mcp_tool_shadowed": [
+    {
+      "channel": "vinga_server.tools.mcp",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "entry",
+          "type": "Identifier"
+        },
+        {
+          "name": "position",
+          "type": "Count"
+        },
+        {
+          "name": "owner",
+          "type": "Identifier"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "entry",
+          "type": "Identifier",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "position",
+          "type": "Count",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "owner",
+          "type": "Identifier",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "mcp_reload": [
+    {
+      "channel": "vinga_server.tools.mcp",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "reason",
+          "type": "McpRefusalToken"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "outcome",
+          "type": "McpReloadOutcomeToken",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "reason",
+          "type": "McpRefusalToken",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "channel": "vinga_server.tools.mcp",
+      "level": 20,
+      "arguments": [
+        {
+          "name": "started",
+          "type": "Count"
+        },
+        {
+          "name": "restarted",
+          "type": "Count"
+        },
+        {
+          "name": "stopped",
+          "type": "Count"
+        },
+        {
+          "name": "unchanged",
+          "type": "Count"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "outcome",
+          "type": "McpReloadOutcomeToken",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "started",
+          "type": "Count",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "restarted",
+          "type": "Count",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "stopped",
+          "type": "Count",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "unchanged",
+          "type": "Count",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "duration_ms",
+          "type": "Whole",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "memory_unreadable": [
+    {
+      "channel": "vinga_server.tools.memory",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "agent",
+          "type": "Identifier"
+        },
+        {
+          "name": "error",
+          "type": "ClassName"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "agent",
+          "type": "Identifier",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "error",
+          "type": "ClassName",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "filler_disabled": [
+    {
+      "channel": "vinga_server.filler",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "agent",
+          "type": "Identifier"
+        },
+        {
+          "name": "error",
+          "type": "ClassName"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "agent",
+          "type": "Identifier",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "error",
+          "type": "ClassName",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "capture_started": [
+    {
+      "channel": "vinga_server.capture",
+      "level": 20,
+      "arguments": [
+        {
+          "name": "session",
+          "type": "SessionId"
+        },
+        {
+          "name": "path",
+          "type": "ConfiguredPath"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "session",
+          "type": "SessionId",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "path",
+          "type": "ConfiguredPath",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "capture_declined": [
+    {
+      "channel": "vinga_server.capture",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "session",
+          "type": "SessionId"
+        },
+        {
+          "name": "directory",
+          "type": "ConfiguredPath"
+        },
+        {
+          "name": "failure",
+          "type": "ClassName"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "session",
+          "type": "SessionId",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "reason",
+          "type": "CaptureDeclinedToken",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "failure",
+          "type": "ClassName",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "channel": "vinga_server.capture",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "session",
+          "type": "SessionId"
+        },
+        {
+          "name": "free",
+          "type": "Real"
+        },
+        {
+          "name": "floor_mb",
+          "type": "Real"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "session",
+          "type": "SessionId",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "reason",
+          "type": "CaptureDeclinedToken",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "free_mb",
+          "type": "Count",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "channel": "vinga_server.capture",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "session",
+          "type": "SessionId"
+        },
+        {
+          "name": "failure",
+          "type": "ClassName"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "session",
+          "type": "SessionId",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "reason",
+          "type": "CaptureDeclinedToken",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "failure",
+          "type": "ClassName",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "capture_limit": [
+    {
+      "channel": "vinga_server.capture",
+      "level": 20,
+      "arguments": [
+        {
+          "name": "session",
+          "type": "SessionId"
+        },
+        {
+          "name": "limit_s",
+          "type": "Real"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "session",
+          "type": "SessionId",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "capture_failed": [
+    {
+      "channel": "vinga_server.capture",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "session",
+          "type": "SessionId"
+        },
+        {
+          "name": "reason",
+          "type": "CaptureWriteToken"
+        },
+        {
+          "name": "failure",
+          "type": "ClassName"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "session",
+          "type": "SessionId",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "reason",
+          "type": "CaptureWriteToken",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "failure",
+          "type": "ClassName",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "capture_pruned": [
+    {
+      "channel": "vinga_server.capture",
+      "level": 20,
+      "arguments": [
+        {
+          "name": "removed",
+          "type": "Count"
+        },
+        {
+          "name": "budget_mb",
+          "type": "Real"
+        },
+        {
+          "name": "listed",
+          "type": "SessionList"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "sessions",
+          "type": "SessionIds",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "capture_over_budget": [
+    {
+      "channel": "vinga_server.capture",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "used",
+          "type": "Real"
+        },
+        {
+          "name": "budget_mb",
+          "type": "Real"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "total_mb",
+          "type": "Count",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "capture_enabled": [
+    {
+      "channel": "vinga_server.app",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "path",
+          "type": "ConfiguredPath"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "path",
+          "type": "ConfiguredPath",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "capture_disabled": [
+    {
+      "channel": "vinga_server.app",
+      "level": 20,
+      "arguments": [
+        {
+          "name": "path",
+          "type": "ConfiguredPath"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "path",
+          "type": "ConfiguredPath",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "drain_started": [
+    {
+      "channel": "vinga_server.registry",
+      "level": 20,
+      "arguments": [
+        {
+          "name": "sessions",
+          "type": "Count"
+        },
+        {
+          "name": "timeout_s",
+          "type": "Real"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "sessions",
+          "type": "Count",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "timeout_s",
+          "type": "Real",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "drain_finished": [
+    {
+      "channel": "vinga_server.registry",
+      "level": 20,
+      "arguments": [],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "sessions",
+          "type": "Count",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "drain_incomplete": [
+    {
+      "channel": "vinga_server.registry",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "cut_mid_reply",
+          "type": "Count"
+        },
+        {
+          "name": "unfinished",
+          "type": "Count"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "sessions",
+          "type": "Count",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "cut_mid_reply",
+          "type": "Count",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "unfinished",
+          "type": "Count",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "timeout_s",
+          "type": "Real",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "device_bindings_snapshot_only": [
+    {
+      "channel": "vinga_server.device.bindings",
+      "level": 10,
+      "arguments": [
+        {
+          "name": "path",
+          "type": "ConfiguredPath"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "path",
+          "type": "ConfiguredPath",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "device_bindings_unreadable": [
+    {
+      "channel": "vinga_server.device.bindings",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "device",
+          "type": "DeviceId"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "device",
+          "type": "DeviceId",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "failure",
+          "type": "ClassName",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "api_error": [
+    {
+      "channel": "vinga_server.config.api",
+      "level": 40,
+      "arguments": [
+        {
+          "name": "failure",
+          "type": "ClassName"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "api_storage_error": [
+    {
+      "channel": "vinga_server.config.api",
+      "level": 40,
+      "arguments": [
+        {
+          "name": "failure",
+          "type": "ClassName"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
   ]
 }
