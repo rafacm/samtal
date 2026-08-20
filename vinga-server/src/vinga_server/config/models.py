@@ -1777,19 +1777,28 @@ class AgentDefaults(BaseModel):
     # inherit; a list replaces rather than extends, exactly like `mcp`,
     # so a layer naming an empty list opts out of the fragments its
     # siblings share.
+    #
+    # `AgentConfig` re-declares this field for its description alone.
+    # The two layers are in two regimes: an agent's own list is what a
+    # reload applies, and this one is what every agent's effective value
+    # is inherited THROUGH, which a reload deliberately does not move
+    # (`config/reload.py`). One description covering both would be right
+    # about one layer and wrong about the other, which is the same trap
+    # the agent write's notice exists to close.
     prompt_includes: list[NonBlankStr] | None = Field(
         default=None,
         description=(
-            "The shared prompt fragments this layer's system prompt carries, each by "
-            "the name it is defined under in prompt_fragments, injected in the order "
-            "listed and directly after the agent's own prompt. Unset inherits the "
-            "agent_defaults list; naming a list replaces the inherited one rather than "
-            "extending it, so an empty list opts an agent out of the fragments its "
-            "siblings share. Every name has to be a fragment that exists, since the "
+            "The shared prompt fragments every agent's system prompt carries unless the "
+            "agent names a list of its own, each by the name it is defined under in "
+            "prompt_fragments, injected in the order listed and directly after the "
+            "agent's own prompt. An agent naming a list replaces this one rather than "
+            "extending it, so an empty list there opts that agent out of the fragments "
+            "its siblings share. Every name has to be a fragment that exists, since the "
             "fragment is in this same database, and a name listed twice is refused. "
-            "A reload applies this list and the fragments it names alike, so an edit "
-            "here reaches a conversation at its next activation, which is a new "
-            "session or an agent switch."
+            "A reload does not apply this list, unlike an agent's own: it is the layer "
+            "every agent's effective value is inherited through, so a change here "
+            "reaches a conversation at the next server start. What a reload does apply "
+            "is an agent's own list and the text of a fragment either layer names."
         ),
     )
 
@@ -1817,6 +1826,28 @@ class AgentDefaults(BaseModel):
 
 class AgentConfig(AgentDefaults):
     """One agent: a prompt, plus whichever stages it overrides."""
+
+    # Re-declared from `AgentDefaults` for its description and nothing
+    # else: same type, same default, same validator (which is bound by
+    # field name and inherited), and a different regime, which is the
+    # whole reason it is written twice. See the comment on the layer's
+    # own declaration.
+    prompt_includes: list[NonBlankStr] | None = Field(
+        default=None,
+        description=(
+            "The shared prompt fragments this agent's system prompt carries, each by "
+            "the name it is defined under in prompt_fragments, injected in the order "
+            "listed and directly after the agent's own prompt. Unset inherits the "
+            "agent_defaults list; naming a list replaces the inherited one rather than "
+            "extending it, so an empty list opts this agent out of the fragments its "
+            "siblings share. Every name has to be a fragment that exists, since the "
+            "fragment is in this same database, and a name listed twice is refused. "
+            "A reload applies this list, so an edit here reaches a conversation at its "
+            "next activation, which is a new session or an agent switch. Inheriting "
+            "instead, by leaving it unset, inherits the agent_defaults list's regime "
+            "with it: a change made there waits for the next server start."
+        ),
+    )
 
     prompt: str = Field(
         default="",

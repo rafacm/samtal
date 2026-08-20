@@ -105,6 +105,50 @@ def test_the_reference_says_where_provider_options_are_documented() -> None:
     assert "examples/llm-anthropic.yaml" in rendered
 
 
+# The two regimes the prompt half lives in
+#
+# The drift check below holds the committed document to the models, and
+# it is exactly as right as the models are: a description that says the
+# wrong boundary passes it byte for byte. These two say what the
+# document has to mean rather than what it has to equal, which is the
+# one thing a diff cannot check, and each is the sentence an operator
+# acts on: restarting for a change a request applies, or reloading for
+# one it does not, is a wasted maintenance window either way.
+
+
+def _described(entity: str, field: str) -> str:
+    """One field's row in the generated reference, as the reader meets
+    it. Read out of the rendered document rather than off the model, so
+    what is pinned is what is published."""
+    section = docgen.reference().split(f"### {entity}\n")[1].split("\n### ")[0]
+    (row,) = [line for line in section.splitlines() if line.startswith(f"| `{field}` |")]
+    return row
+
+
+def test_the_reference_says_an_agents_own_includes_are_applied_by_a_reload() -> None:
+    """An agent's own list is one of this milestone's live slices: the
+    candidate generation takes it from the store, so an edit reaches
+    that agent at its next activation."""
+    row = _described("Agent", "prompt_includes")
+
+    assert "A reload applies this list" in row
+    assert "next activation" in row
+    assert "next server start" in row.split("Inheriting instead")[1]
+
+
+def test_the_reference_says_the_defaults_includes_wait_for_a_start() -> None:
+    """And the layer under it is not, deliberately: it is what every
+    agent's effective value is inherited through, so applying it would
+    apply a start-bound change to every agent that names nothing of its
+    own. The candidate generation keeps the previous one, which
+    `tests/unit/test_config_reload.py` proves at the apply."""
+    row = _described("Agent defaults", "prompt_includes")
+
+    assert "A reload does not apply this list" in row
+    assert "next server start" in row
+    assert "next activation" not in row
+
+
 def test_the_committed_reference_matches_the_models() -> None:
     """The same check CI runs, run here too: locally it fails in the
     suite rather than after a push."""
