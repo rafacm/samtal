@@ -18,12 +18,11 @@ scalar rather than an entity, written with their own verbs and read
 without an envelope (`Setting`). One registry tuple per tier, in the
 order the reference documents them.
 
-Imports the models, the shapes the API answers with, and the standard
-library, and nothing else, deliberately: every consumer sits above
-this, so a descriptor stays readable by the one that renders
-documentation on a machine with no database, no encryption key and no
-FastAPI, which is exactly what `docgen` is. The shapes are in
-`responses.py`, which is pydantic and nothing else for the same reason.
+Imports the models and the standard library, and nothing else,
+deliberately: every consumer sits above this, so a descriptor stays
+readable by the one that renders documentation on a machine with no
+database, no encryption key and no FastAPI, which is exactly what
+`docgen` is.
 
 A fact group is filled by the milestone that wires its consumer. Where
 a group has no consumer yet it carries its default and says which
@@ -47,7 +46,7 @@ disagree, and that is the drift this module exists to end.
 
 from collections.abc import Callable
 from dataclasses import dataclass, fields
-from typing import ClassVar, Literal
+from typing import ClassVar
 
 from pydantic import BaseModel
 
@@ -62,7 +61,6 @@ from vinga_server.config.models import (
     is_mcp_secret_key,
     is_secret_option,
 )
-from vinga_server.config.responses import Acknowledgement, Envelope
 
 # Where the example fragments and the configuration file live, relative
 # to the committed reference (docs/reference/domain-config.md). Printed
@@ -153,66 +151,6 @@ MCP_RELOAD_NOTICE = (
     "grant lists and applies them without a restart and without dropping a "
     "conversation."
 )
-
-
-# What one route of an entity kind does. Six, because the surface has
-# six, and a kind with fewer says so by listing fewer endpoints rather
-# than by carrying a flag per route: the singleton has no collection and
-# no delete, and three of the five hold no secret.
-Verb = Literal["read-all", "read-one", "write", "delete", "write-secret", "delete-secret"]
-
-READ_ALL: Verb = "read-all"
-READ_ONE: Verb = "read-one"
-WRITE: Verb = "write"
-DELETE: Verb = "delete"
-WRITE_SECRET: Verb = "write-secret"
-DELETE_SECRET: Verb = "delete-secret"
-
-
-@dataclass(frozen=True, kw_only=True)
-class Endpoint:
-    """One route of one kind, as the committed OpenAPI document has it.
-
-    That document is the contract, and most of its bytes for a route
-    come from what the handler happened to be called and what its
-    docstring happened to say: the operation id is the function's name
-    followed by its path, the summary is that name with its underscores
-    turned to spaces and title-cased, the description is the docstring
-    dedented. A route built by a factory cannot leave any of that to
-    what a generated function is named, so each is written here and
-    installed explicitly.
-
-    What is deliberately not here is what the verb settles the same way
-    for every kind: the method, the path under the kind's route, the
-    handler's parameters, the request body (a write of the kind carries
-    the kind's own model, a secret write carries the credential body),
-    and which repository call is made. Those are one rule with no
-    exception across the five, and writing them out per endpoint would
-    be five chances to disagree.
-    """
-
-    verb: Verb
-
-    # The handler's name, which is an identity rather than a label: the
-    # document's `operationId` and its `summary` are both derived from
-    # it, and both are committed bytes.
-    operation: str
-
-    # The handler's docstring, exactly as the document carries it, which
-    # is to say already dedented, because that is what FastAPI does to a
-    # docstring on its way into the description.
-    description: str
-
-    # The response model a success is declared to answer with. A listing
-    # is keyed by identity, and the kind addressed by two segments is
-    # keyed twice, which is the shape its listing has had since before
-    # there was a registry to say so.
-    response: object
-
-    # The refusals the route declares, in the order the document lists
-    # them. What each status means is `api.py`'s to describe: these say
-    # which ones this route can meet.
-    statuses: tuple[int, ...]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -369,12 +307,6 @@ class EntityDescriptor(DocumentedShape):
     # this, and stays hand-built for the reason its docstring gives.
     body: Hook = None
 
-    # The routes this kind is read and written through, in the order the
-    # committed document lists them. Each one's operation identity,
-    # description, response and statuses are written down rather than
-    # composed, for the reason `Endpoint` gives.
-    endpoints: tuple[Endpoint, ...] = ()
-
     # The refusal for an entry that is not there, used by the read, the
     # delete and the slot check. One fixed sentence naming the section,
     # never built from what was addressed (see the constants above). A
@@ -405,7 +337,11 @@ class EntityDescriptor(DocumentedShape):
     # every other fact. The two kinds whose notice does depend on what
     # was written (a device binding, whose agent may not be loaded) are
     # settings, and compute theirs at the call site as they always have.
-    notice: str | None = None
+    #
+    # Required, because every commanded kind has an answer: a write that
+    # could not say when it applies is the one thing the boot-time
+    # snapshot can catch an operator with.
+    notice: str
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -437,15 +373,14 @@ class Setting:
     # configuration, not an absence), and says so by carrying none.
     missing: str | None = None
 
-    # There are deliberately no hooks here, and no `endpoints`. A
-    # setting's routes are the ones the entity tier's six verbs cannot
-    # describe (bind by MAC, bind by activation code, unbind, set,
-    # clear), its acknowledgement and its notice are computed per
-    # request because a device binding's notice depends on whether the
-    # server has the named agent loaded, and its line in the summary
-    # tree is the agents a MAC points at rather than a kind's entry.
-    # Declaring groups nothing will fill would be an invitation to force
-    # them into a shape they are not.
+    # There is deliberately no `notice` here. A setting's routes are the
+    # ones the entity tier cannot describe (bind by MAC, bind by
+    # activation code, unbind, set, clear), its acknowledgement and its
+    # notice are computed per request because a device binding's notice
+    # depends on whether the server has the named agent loaded, and its
+    # line in the summary tree is the agents a MAC points at rather than
+    # a kind's entry. Declaring a fact nothing could answer would be an
+    # invitation to force these two into a shape they are not.
 
 
 ENTITIES: tuple[EntityDescriptor, ...] = (
@@ -481,65 +416,6 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         secret_key=is_secret_option,
         missing=NO_SUCH_PROVIDER,
         notice=RESTART_NOTICE,
-        endpoints=(
-            Endpoint(
-                verb=READ_ALL,
-                operation="read_providers",
-                description=(
-                    "Every provider, by stage and then by name: a provider is\n"
-                    "addressed by the two together, since two stages may hold one\n"
-                    "name."
-                ),
-                response=dict[str, dict[str, Envelope]],
-                statuses=(401, 409, 500),
-            ),
-            Endpoint(
-                verb=READ_ONE,
-                operation="read_provider",
-                description="One provider.",
-                response=Envelope,
-                statuses=(401, 404, 409, 422, 500),
-            ),
-            Endpoint(
-                verb=WRITE,
-                operation="write_provider",
-                description=(
-                    "Create or replace one provider from a fragment in the shape\n"
-                    "the YAML section had."
-                ),
-                response=Acknowledgement,
-                statuses=(401, 409, 422, 500),
-            ),
-            Endpoint(
-                verb=DELETE,
-                operation="remove_provider",
-                description=(
-                    "Delete one provider, and the secrets stored on it. Refused\n"
-                    "while an agent or the agent defaults still name it."
-                ),
-                response=Acknowledgement,
-                statuses=(401, 404, 409, 422, 500),
-            ),
-            Endpoint(
-                verb=WRITE_SECRET,
-                operation="write_provider_secret",
-                description=(
-                    "Store one of this provider's credentials, encrypted. The slot\n"
-                    "is the option name the credential fills, such as api_key; a\n"
-                    "stored secret takes precedence over an environment reference\n"
-                    "written for the same slot."
-                ),
-                response=Acknowledgement,
-                statuses=(401, 404, 409, 422, 500),
-            ),
-            Endpoint(
-                verb=DELETE_SECRET,
-                operation="remove_provider_secret",
-                description="Remove one stored credential. A slot holding none is a 404.",
-                response=Acknowledgement,
-                statuses=(401, 404, 409, 422, 500),
-            ),
-        ),
     ),
     EntityDescriptor(
         name="mcp-server",
@@ -563,67 +439,6 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         secret_slots="mcp_server",
         missing=NO_SUCH_MCP_SERVER,
         notice=MCP_RELOAD_NOTICE,
-        endpoints=(
-            Endpoint(
-                verb=READ_ALL,
-                operation="read_mcp_servers",
-                description="Every MCP server, by name.",
-                response=dict[str, Envelope],
-                statuses=(401, 409, 500),
-            ),
-            Endpoint(
-                verb=READ_ONE,
-                operation="read_mcp_server",
-                description="One MCP server.",
-                response=Envelope,
-                statuses=(401, 404, 409, 422, 500),
-            ),
-            Endpoint(
-                verb=WRITE,
-                operation="write_mcp_server",
-                description=(
-                    "Create or replace one MCP server. The running server applies\n"
-                    "it at the next reload, with no restart."
-                ),
-                response=Acknowledgement,
-                statuses=(401, 409, 422, 500),
-            ),
-            Endpoint(
-                verb=DELETE,
-                operation="remove_mcp_server",
-                description=(
-                    "Delete one MCP server, and the secrets stored on it. The\n"
-                    "running server stops it at the next reload."
-                ),
-                response=Acknowledgement,
-                statuses=(401, 404, 409, 422, 500),
-            ),
-            Endpoint(
-                verb=WRITE_SECRET,
-                operation="write_mcp_secret",
-                description=(
-                    "Store one of this MCP server's credentials, encrypted. The\n"
-                    "slot is `env.<KEY>` or `headers.<Key>`, which is where the value\n"
-                    "would otherwise have been written as a $VAR reference.\n"
-                    "\n"
-                    "Rotation is exactly what the ciphertext half of the reload's\n"
-                    "diff applies, so this carries the reload notice too: the entry\n"
-                    "is rebuilt with the fresh credential and reconnected."
-                ),
-                response=Acknowledgement,
-                statuses=(401, 404, 409, 422, 500),
-            ),
-            Endpoint(
-                verb=DELETE_SECRET,
-                operation="remove_mcp_secret",
-                description=(
-                    "Remove one stored credential, which the next reload applies\n"
-                    "by rebuilding the entry without it."
-                ),
-                response=Acknowledgement,
-                statuses=(401, 404, 409, 422, 500),
-            ),
-        ),
     ),
     EntityDescriptor(
         name="prompt-fragment",
@@ -660,50 +475,6 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         table="prompt_fragments",
         missing=NO_SUCH_FRAGMENT,
         notice=RESTART_NOTICE,
-        endpoints=(
-            Endpoint(
-                verb=READ_ALL,
-                operation="read_prompt_fragments",
-                description="Every shared prompt fragment, by name.",
-                response=dict[str, Envelope],
-                statuses=(401, 409, 500),
-            ),
-            Endpoint(
-                verb=READ_ONE,
-                operation="read_prompt_fragment",
-                description=(
-                    "One shared prompt fragment, with its text as it was written:\n"
-                    "it is what the model is given, and there is nothing in it to\n"
-                    "mask."
-                ),
-                response=Envelope,
-                statuses=(401, 404, 409, 422, 500),
-            ),
-            Endpoint(
-                verb=WRITE,
-                operation="write_prompt_fragment",
-                description=(
-                    "Create or replace one shared prompt fragment.\n"
-                    "\n"
-                    "It carries the restart sentence rather than the reload's: what\n"
-                    "the reload re-reads is the MCP entries, their secrets and the\n"
-                    "grant lists, and a fragment is prompt text the agents compose\n"
-                    "with at their next activation on a server that read it at boot."
-                ),
-                response=Acknowledgement,
-                statuses=(401, 409, 422, 500),
-            ),
-            Endpoint(
-                verb=DELETE,
-                operation="remove_prompt_fragment",
-                description=(
-                    "Delete one shared prompt fragment. Refused while any layer\n"
-                    "still includes it."
-                ),
-                response=Acknowledgement,
-                statuses=(401, 404, 409, 422, 500),
-            ),
-        ),
     ),
     EntityDescriptor(
         name="agent",
@@ -734,43 +505,6 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         table="agents",
         missing=NO_SUCH_AGENT,
         notice=RESTART_NOTICE,
-        endpoints=(
-            Endpoint(
-                verb=READ_ALL,
-                operation="read_agents",
-                description="Every agent, by name.",
-                response=dict[str, Envelope],
-                statuses=(401, 409, 500),
-            ),
-            Endpoint(
-                verb=READ_ONE,
-                operation="read_agent",
-                description="One agent.",
-                response=Envelope,
-                statuses=(401, 404, 409, 422, 500),
-            ),
-            Endpoint(
-                verb=WRITE,
-                operation="write_agent",
-                description=(
-                    "Create or replace one agent. Every provider and MCP server it\n"
-                    "names has to exist already, which is what the natural creation\n"
-                    "order is about."
-                ),
-                response=Acknowledgement,
-                statuses=(401, 409, 422, 500),
-            ),
-            Endpoint(
-                verb=DELETE,
-                operation="remove_agent",
-                description=(
-                    "Delete one agent. Refused while a device binding or the\n"
-                    "default agent still names it."
-                ),
-                response=Acknowledgement,
-                statuses=(401, 404, 409, 422, 500),
-            ),
-        ),
     ),
     EntityDescriptor(
         name="agent-defaults",
@@ -801,30 +535,6 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         table="agent_defaults",
         has_delete=False,
         notice=RESTART_NOTICE,
-        endpoints=(
-            Endpoint(
-                verb=READ_ONE,
-                operation="read_agent_defaults",
-                description=(
-                    "What every agent uses unless it names something else. One\n"
-                    "entry for the whole deployment, and never missing: an unwritten\n"
-                    "one reads as the empty entry."
-                ),
-                response=Envelope,
-                statuses=(401, 409, 500),
-            ),
-            Endpoint(
-                verb=WRITE,
-                operation="write_agent_defaults",
-                description=(
-                    "Replace what every agent uses unless it names something else.\n"
-                    "One entry for the whole deployment, so this is a replace and\n"
-                    "there is nothing to delete."
-                ),
-                response=Acknowledgement,
-                statuses=(401, 409, 422, 500),
-            ),
-        ),
     ),
 )
 
@@ -1004,8 +714,6 @@ __all__ = [
     "API_OPTIONS_NOTE",
     "BINDING_NOTICE",
     "CONFIG_FILE",
-    "DELETE",
-    "DELETE_SECRET",
     "ENTITIES",
     "EXAMPLES",
     "MCP_RELOAD_NOTICE",
@@ -1016,19 +724,13 @@ __all__ = [
     "NO_SUCH_MCP_SERVER",
     "NO_SUCH_PROVIDER",
     "OPTIONS_NOTE",
-    "READ_ALL",
-    "READ_ONE",
     "RESTART_NOTICE",
     "SETTINGS",
-    "WRITE",
-    "WRITE_SECRET",
     "DocumentedShape",
-    "Endpoint",
     "EntityDescriptor",
     "Hook",
     "NestedShape",
     "Setting",
-    "Verb",
     "always_shown",
     "descriptor",
     "fill",
