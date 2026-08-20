@@ -174,7 +174,6 @@ def a_variant(**overrides: object) -> type[Variant]:
 REFUSED = (
     ("an unknown channel", {"CHANNEL": "vinga_server.invented"}, "does not speak on"),
     ("a level no method emits at", {"LEVEL": logging.CRITICAL}, "no emitter method"),
-    ("one field rendered twice", {"ARGS": ("stage", "stage")}, "renders one field twice"),
     ("fewer arguments than positions", {"ARGS": ()}, "0 argument"),
     ("an argument it does not declare", {"ARGS": ("missing",)}, "does not declare"),
     (
@@ -193,6 +192,20 @@ REFUSED = (
         "no field kind",
     ),
 )
+
+
+def test_a_value_may_be_rendered_in_two_positions() -> None:
+    """Two sentences on this surface say one value twice: an activation
+    code is shown and then repeated inside the command an operator is
+    told to type, and so is the MAC beside it. Refusing that would make
+    a site pass the same value under two names to say one thing."""
+    twice = a_variant(ARGS=("stage", "stage"), TEMPLATE="a %s stage, and %s again")
+
+    with scratch_catalog():
+        declare("said_twice", variants=(twice,))
+        rendered = twice(stage=Identifier("asr")).logged()
+
+    assert rendered.args == ("asr", "asr")
 
 
 @pytest.mark.parametrize(

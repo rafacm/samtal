@@ -53,26 +53,51 @@ from typing import Any, ClassVar, Union, get_args, get_origin, get_type_hints
 from vinga_server.events.values import (
     ABSENT,
     Absent,
+    ActivationCode,
+    ActivationRefusal,
+    ActivationRefusalToken,
     AgentList,
     AgentNames,
     AlsoBoundTo,
+    AuthRejectionToken,
+    BoardName,
+    CaptureDeclined,
+    CaptureDeclinedToken,
+    CaptureWriteToken,
     ClassName,
+    ClassNames,
     ClientId,
     CloseReasonToken,
     ConfiguredPath,
     Count,
     DeviceId,
     DeviceOrUnidentified,
+    EchoOutcome,
+    EchoOutcomeToken,
     EventName,
     EventValue,
     EventValueError,
     FillerSkip,
     FillerSkipToken,
+    FirmwareVersion,
     Flag,
     FromEntry,
     Identifier,
     LanguageTag,
+    McpConnectFailure,
+    McpDown,
+    McpDownToken,
+    McpRefusalToken,
+    McpReloadOutcome,
+    McpReloadOutcomeToken,
+    McpTransportToken,
     Nothing,
+    NotOffered,
+    NotOfferedToken,
+    OriginProvenance,
+    OriginSourceToken,
+    OtaRefusalToken,
+    PendingRefusal,
     PromptSources,
     ProviderOutcomeToken,
     QuotedProvider,
@@ -81,7 +106,10 @@ from vinga_server.events.values import (
     Real,
     Rejection,
     RejectionToken,
+    ReportedMac,
     SessionId,
+    SessionIds,
+    SessionList,
     Suppression,
     SuppressionToken,
     ToolOutcomeToken,
@@ -438,8 +466,11 @@ def _check(variant: type[Variant], declared: tuple[Declared, ...]) -> None:
     # session id, and a base name cannot collide with a declared one
     # because the check above already refused that.
     names = {one.name: one for one in (*base, *declared)}
-    if len(set(variant.ARGS)) != len(variant.ARGS):
-        raise CatalogError(f"{where} renders one field twice")
+    # A value may be rendered in two positions, and two sentences on
+    # this surface do it: an activation code is shown and then repeated
+    # inside the command an operator is told to type, and so is the MAC
+    # beside it. Refusing that would make a site pass the same value
+    # under two names to say one thing twice.
     for name in variant.ARGS:
         if name not in names:
             raise CatalogError(f"{where} renders {name}, which it does not declare")
@@ -606,6 +637,7 @@ def _field_of(declared: Declared) -> EventField:
         tokens=_tokens_of(declared),
         syntax=declared.type.SYNTAX,
         bounds=declared.type.BOUNDS,
+        joined=declared.type.JOINED,
         note=declared.note,
     )
 
@@ -618,6 +650,7 @@ def _arg_of(declared: Declared) -> ArgSpec:
         syntax=declared.type.SYNTAX,
         bounds=declared.type.BOUNDS,
         grammar=declared.type.GRAMMAR,
+        joined=declared.type.JOINED,
         note=declared.rendered_note,
     )
 
@@ -1551,20 +1584,1320 @@ FILLER_PLAYED = declare(
 )
 
 
+# --- ota/: the configuration check and the activation ceremony --------
+#
+# No session exists yet at a check-in, so these records name the device
+# instead. Every one of them says what the board called itself and what
+# firmware it says it runs, which are far-side strings the endpoint
+# bounds at its decision site and the value types bound again here.
+
+OTA_CHANNEL = "vinga_server.ota"
+
+
+@dataclass(frozen=True)
+class OtaCheckActivating(Variant):
+    """An unbound device is answered with a code to show."""
+
+    CHANNEL: ClassVar[str] = OTA_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "device %s (%s, firmware %s) has no agent and is showing activation "
+        "code %s; bind it with: vinga-server config add-device %s <agent>"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("said_device", "board", "firmware", "code", "code")
+
+    device: DeviceId = value()
+    client: ClientId | None = value(
+        note=(
+            "The device UUID, bounded for the event only: the token the "
+            "reply issues is still signed for the header exactly as it "
+            "arrived."
+        )
+    )
+    board: BoardName = value(
+        note="What the device calls itself. `unknown` when it said nothing usable."
+    )
+    firmware: FirmwareVersion = value(
+        note=(
+            "The only moment a device ever states its firmware version: "
+            "the websocket handshake does not carry it."
+        )
+    )
+    agents: AgentNames = value()
+    unloaded: AgentNames = value(
+        note=(
+            "Agents this device is bound to that this process did not "
+            "load. Named on every record rather than only on the one that "
+            "complains, so a query for devices waiting on a restart is one "
+            "field."
+        )
+    )
+    code: ActivationCode = value()
+    # The header as the firmware spelled it, rendered beside the
+    # canonical form the field carries.
+    said_device: ReportedMac = value(carried=False)
+
+
+@dataclass(frozen=True)
+class OtaCheckAgentNotLoaded(Variant):
+    """The binding is there; this process is what is behind."""
+
+    CHANNEL: ClassVar[str] = OTA_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "device %s (%s, firmware %s) is bound to agent %s, which this server "
+        "has not loaded; restart to load it"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("said_device", "board", "firmware", "named")
+
+    device: DeviceId = value()
+    client: ClientId | None = value()
+    board: BoardName = value()
+    firmware: FirmwareVersion = value()
+    agents: AgentNames = value()
+    unloaded: AgentNames = value()
+    said_device: ReportedMac = value(carried=False)
+    named: AgentList = value(carried=False)
+
+
+@dataclass(frozen=True)
+class OtaCheckNoAgent(Variant):
+    """A device bound to nothing, with no default to fall back on."""
+
+    CHANNEL: ClassVar[str] = OTA_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "device %s (%s, firmware %s) has no agent: bind it under devices "
+        "or set default_agent"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("said_device", "board", "firmware")
+
+    device: DeviceId = value()
+    client: ClientId | None = value()
+    board: BoardName = value()
+    firmware: FirmwareVersion = value()
+    agents: AgentNames = value()
+    unloaded: AgentNames = value()
+    said_device: ReportedMac = value(carried=False)
+
+
+@dataclass(frozen=True)
+class OtaCheckResolved(Variant):
+    """The ordinary answer: this device has an agent to talk to."""
+
+    CHANNEL: ClassVar[str] = OTA_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "device %s (%s, firmware %s) resolved to agent %s%s"
+    ARGS: ClassVar[tuple[str, ...]] = (
+        "said_device",
+        "board",
+        "firmware",
+        "agent",
+        "bound_tail",
+    )
+
+    device: DeviceId = value()
+    client: ClientId | None = value()
+    board: BoardName = value()
+    firmware: FirmwareVersion = value()
+    agents: AgentNames = value()
+    unloaded: AgentNames = value()
+    said_device: ReportedMac = value(carried=False)
+    agent: Identifier = value(carried=False)
+    bound_tail: AlsoBoundTo = value(carried=False)
+
+
+@dataclass(frozen=True)
+class ActivationNotOfferedUnreadable(Variant):
+    """The database could not be read, so no code was minted: this
+    device may already be bound."""
+
+    CHANNEL: ClassVar[str] = OTA_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "device %s is unbound in the configuration this server started with, "
+        "but the database could not be read, so no activation code was "
+        "issued: this device may already be bound. Fix the database and it "
+        "is offered one at its next check"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("device",)
+
+    device: DeviceId = value()
+    reason: NotOfferedToken = value(fixed=NotOfferedToken(NotOffered.UNREADABLE))
+
+
+@dataclass(frozen=True)
+class ActivationNotOfferedRefused(Variant):
+    """The pending table refused to mint, and says at which bound."""
+
+    CHANNEL: ClassVar[str] = OTA_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "device %s is unbound but was offered no activation code: %s. It is "
+        "answered exactly as it was before onboarding existed, with no "
+        "token; bind it by its MAC with: vinga-server config bind-device "
+        "%s <agent>"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("device", "reason", "device")
+
+    device: DeviceId = value()
+    reason: PendingRefusal = value()
+
+
+@dataclass(frozen=True)
+class ActivationComplete(Variant):
+    """A waiting device has been claimed."""
+
+    CHANNEL: ClassVar[str] = OTA_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = (
+        "device %s is activated: its next configuration check hands it a token"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("device",)
+
+    device: DeviceId = value()
+    agents: AgentNames = value()
+
+
+@dataclass(frozen=True)
+class ActivationPending(Variant):
+    """A waiting device polled and is still waiting."""
+
+    CHANNEL: ClassVar[str] = OTA_CHANNEL
+    LEVEL: ClassVar[int] = logging.DEBUG
+    TEMPLATE: ClassVar[str] = "device %s is still waiting to be claimed"
+    ARGS: ClassVar[tuple[str, ...]] = ("device",)
+
+    device: DeviceId = value()
+    code: ActivationCode | None = value(
+        note="Null for a MAC this server holds no pending entry for."
+    )
+    unloaded: AgentNames = value()
+
+
+@dataclass(frozen=True)
+class ActivationRefusedUnreadableBody(Variant):
+    """A version-2 body that is not a JSON object."""
+
+    CHANNEL: ClassVar[str] = OTA_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "device %s sent a version-2 activation body that is not a JSON "
+        "object; it is answered as still waiting. Nothing of the body is "
+        "quoted here"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("device",)
+
+    device: DeviceId = value()
+    code: ActivationCode = value()
+    reason: ActivationRefusalToken = value(
+        fixed=ActivationRefusalToken(ActivationRefusal.UNREADABLE_BODY)
+    )
+
+
+@dataclass(frozen=True)
+class ActivationRefusedUnknownAlgorithm(Variant):
+    """A version-2 body naming an algorithm this server does not know."""
+
+    CHANNEL: ClassVar[str] = OTA_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "device %s sent a version-2 activation body naming an algorithm this "
+        "server does not know; it is answered as still waiting. The value is "
+        "not quoted here, since it is whatever the request carried"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("device",)
+
+    device: DeviceId = value()
+    code: ActivationCode = value()
+    reason: ActivationRefusalToken = value(
+        fixed=ActivationRefusalToken(ActivationRefusal.UNKNOWN_ALGORITHM)
+    )
+
+
+@dataclass(frozen=True)
+class ActivationRefusedChallengeMismatch(Variant):
+    """A version-2 body answering a challenge this server did not issue."""
+
+    CHANNEL: ClassVar[str] = OTA_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "device %s sent a version-2 activation body answering a challenge "
+        "this server did not issue for it; it is answered as still waiting"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("device",)
+
+    device: DeviceId = value()
+    code: ActivationCode = value()
+    reason: ActivationRefusalToken = value(
+        fixed=ActivationRefusalToken(ActivationRefusal.CHALLENGE_MISMATCH)
+    )
+
+
+@dataclass(frozen=True)
+class OtaRequestRejected(Variant):
+    """A request this endpoint could not read."""
+
+    CHANNEL: ClassVar[str] = OTA_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = "rejected OTA request: %s"
+    ARGS: ClassVar[tuple[str, ...]] = ("refusal",)
+
+    refusal: OtaRefusalToken = value(carried=False)
+
+
+# --- onboarding/: the banner and the short path -----------------------
+
+ONBOARDING_CHANNEL = "vinga_server.onboarding"
+
+
+@dataclass(frozen=True)
+class OnboardingOff(Variant):
+    """Devices are configured at the `server.ota_path` path."""
+
+    CHANNEL: ClassVar[str] = ONBOARDING_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = (
+        "device onboarding is off: devices are configured at the "
+        "server.ota_path path on %s (%s), which is not printed here, since "
+        "that segment is this deployment's secret"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("origin", "provenance")
+
+    origin: Identifier = value()
+    origin_source: OriginSourceToken = value()
+    onboarding: Flag = value(fixed=Flag(False))
+    provenance: OriginProvenance = value(carried=False)
+
+
+@dataclass(frozen=True)
+class OnboardingOn(Variant):
+    """Devices are configured at the short path, behind its key."""
+
+    CHANNEL: ClassVar[str] = ONBOARDING_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = (
+        "device onboarding is on: devices are configured on %s (%s), at the "
+        "short path vinga-server config ota-url prints. The path is not "
+        "repeated here, since its key stands in front of the endpoint that "
+        "issues device tokens"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("origin", "provenance")
+
+    origin: Identifier = value()
+    origin_source: OriginSourceToken = value()
+    onboarding: Flag = value(fixed=Flag(True))
+    keyed: Flag = value(
+        note=(
+            "Whether anything stands in front of the short route at all. A "
+            "fact about the deployment rather than about the key, which is "
+            "what makes it safe to say."
+        )
+    )
+    provenance: OriginProvenance = value(carried=False)
+
+
+@dataclass(frozen=True)
+class OnboardingKeyMismatch(Variant):
+    """A request carried a key-shaped segment, and not this server's."""
+
+    CHANNEL: ClassVar[str] = ONBOARDING_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "a request reached the onboarding path carrying %d characters shaped "
+        "like a key, and not this server's; neither is repeated here. Check "
+        "the URL typed into the device's captive portal against the one "
+        "vinga-server config ota-url prints"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("attempted_length",)
+
+    attempted_length: Count = value()
+
+
+@dataclass(frozen=True)
+class OnboardingKeyUnshaped(Variant):
+    """A request carried something that is not key-shaped at all."""
+
+    CHANNEL: ClassVar[str] = ONBOARDING_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "a request reached the onboarding path carrying %d characters that "
+        "are not shaped like a key at all, so they are not repeated here; "
+        "the URL to type comes from vinga-server config ota-url"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("attempted_length",)
+
+    attempted_length: Count = value()
+
+
+# --- ws.py: the handshake gate ----------------------------------------
+
+
+@dataclass(frozen=True)
+class AuthRejected(Variant):
+    """A handshake refused before the accept."""
+
+    CHANNEL: ClassVar[str] = WS_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "refused a websocket handshake from an unidentified client: %s"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("reason",)
+
+    device: DeviceId | None = value()
+    reason: AuthRejectionToken = value()
+
+
+# --- providers/openai_asr.py: the prompt-echo guard -------------------
+#
+# No session or device: providers are shared singletons that serve every
+# conversation, so these name the host instead.
+
+ASR_CHANNEL = "vinga_server.providers.openai_asr"
+
+
+@dataclass(frozen=True)
+class EchoSkipped(Variant):
+    """Under a second of budget remained, so no retry was sent."""
+
+    CHANNEL: ClassVar[str] = ASR_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "openai asr: the transcript came back as the configured prompt with "
+        "%.1f s of the timeout left, too little to retry, treating %.2f s of "
+        "audio as nothing said"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("remaining_s", "duration_s")
+
+    outcome: EchoOutcomeToken = value(
+        fixed=EchoOutcomeToken(EchoOutcome.SKIPPED),
+        note="Under a second of budget remained, so no retry was sent.",
+    )
+    duration_s: Real = value()
+    host: Identifier = value()
+    remaining_s: Real = value(carried=False)
+
+
+@dataclass(frozen=True)
+class EchoRetryTimedOut(Variant):
+    """The retry outran what the first request left of the budget."""
+
+    CHANNEL: ClassVar[str] = ASR_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "openai asr: the retry outran the timeout's remaining %.1f s, "
+        "treating %.2f s of audio as nothing said"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("remaining_s", "duration_s")
+
+    outcome: EchoOutcomeToken = value(
+        fixed=EchoOutcomeToken(EchoOutcome.TIMED_OUT),
+        note="The retry outran what the first request left of the budget.",
+    )
+    duration_s: Real = value()
+    host: Identifier = value()
+    retry_ms: Whole = value()
+    remaining_s: Real = value(carried=False)
+
+
+@dataclass(frozen=True)
+class EchoConfirmed(Variant):
+    """The retry came back as the configured prompt again."""
+
+    CHANNEL: ClassVar[str] = ASR_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "openai asr: the retry came back as the prompt again, treating "
+        "%.2f s of audio as nothing said"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("duration_s",)
+
+    outcome: EchoOutcomeToken = value(
+        fixed=EchoOutcomeToken(EchoOutcome.CONFIRMED_ECHO),
+        note="The retry came back as the configured prompt again.",
+    )
+    duration_s: Real = value()
+    host: Identifier = value()
+    retry_ms: Whole = value()
+
+
+@dataclass(frozen=True)
+class EchoConfirmedEmpty(Variant):
+    """The retry heard nothing."""
+
+    CHANNEL: ClassVar[str] = ASR_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "openai asr: the retry came back empty, treating %.2f s of audio as "
+        "nothing said"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("duration_s",)
+
+    outcome: EchoOutcomeToken = value(
+        fixed=EchoOutcomeToken(EchoOutcome.CONFIRMED_EMPTY),
+        note="The retry heard nothing.",
+    )
+    duration_s: Real = value()
+    host: Identifier = value()
+    retry_ms: Whole = value()
+
+
+@dataclass(frozen=True)
+class EchoRecovered(Variant):
+    """The retry's transcript is heard."""
+
+    CHANNEL: ClassVar[str] = ASR_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = (
+        "openai asr: the retry recovered %.2f s of audio the echo guard "
+        "would have discarded"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("duration_s",)
+
+    outcome: EchoOutcomeToken = value(
+        fixed=EchoOutcomeToken(EchoOutcome.RECOVERED),
+        note=(
+            "The retry's transcript is heard. What was recovered is not in "
+            "the sentence: conversation-derived text is banned on the events "
+            "however it was recovered (#165)."
+        ),
+    )
+    duration_s: Real = value()
+    host: Identifier = value()
+    retry_ms: Whole = value()
+
+
+# --- tools/mcp/: the MCP lifecycle ------------------------------------
+#
+# No session or device: one entry serves every conversation.
+
+MCP_CHANNEL = "vinga_server.tools.mcp"
+
+
+@dataclass(frozen=True)
+class McpConnected(Variant):
+    """An entry's connect finishes and its tools are published."""
+
+    CHANNEL: ClassVar[str] = MCP_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "mcp server %s connected with %d tool(s)"
+    ARGS: ClassVar[tuple[str, ...]] = ("entry", "tools")
+
+    entry: Identifier = value()
+    transport: McpTransportToken = value()
+    tools: Count = value(note="A count, never a list.")
+    duration_ms: Whole = value()
+
+
+@dataclass(frozen=True)
+class McpConnectFailed(Variant):
+    """An entry did not come up, and its tools are absent."""
+
+    CHANNEL: ClassVar[str] = MCP_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = "mcp server %s is unavailable, its tools are absent: %s"
+    ARGS: ClassVar[tuple[str, ...]] = ("entry", "failure")
+
+    entry: Identifier = value()
+    reason: McpConnectFailure = value()
+    duration_ms: Whole = value(note="How long the connect ran before it failed.")
+    failure: ClassNames = value(carried=False)
+
+
+@dataclass(frozen=True)
+class McpStopped(Variant):
+    """The intentional one, a shutdown or a reload."""
+
+    CHANNEL: ClassVar[str] = MCP_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "mcp server %s is stopped and its tools are gone"
+    ARGS: ClassVar[tuple[str, ...]] = ("entry",)
+    NOTE: ClassVar[str] = (
+        "The intentional one, a shutdown or a reload, and the only "
+        "`mcp_down` at INFO. No duration: how long a working connection "
+        "lasted is a different number under the same name."
+    )
+
+    entry: Identifier = value()
+    reason: McpDownToken = value(fixed=McpDownToken(McpDown.STOPPED))
+
+
+@dataclass(frozen=True)
+class McpDropped(Variant):
+    """The connection is dropped so the next session reconnects it."""
+
+    CHANNEL: ClassVar[str] = MCP_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "mcp server %s: dropping the connection after a failed call"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("entry",)
+    NOTE: ClassVar[str] = "Always beside an `mcp_call_dropped`, in that order."
+
+    entry: Identifier = value()
+    reason: McpDownToken = value(fixed=McpDownToken(McpDown.CALL_FAILED))
+
+
+@dataclass(frozen=True)
+class McpCallDropped(Variant):
+    """A tool call failed and took the connection with it."""
+
+    CHANNEL: ClassVar[str] = MCP_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "mcp server %s: the call to published tool %s failed (%s), so its "
+        "answer is lost"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("entry", "position", "error")
+
+    entry: Identifier = value()
+    position: Count | None = value(
+        note=(
+            "The tool's place in the far side's listing, counted from one. "
+            "Null for a name this connection no longer knows."
+        )
+    )
+    error: ClassNames = value(
+        note=(
+            "The failure's class name, and for a group of them the sorted "
+            "names joined with a comma. Never a message."
+        )
+    )
+
+
+@dataclass(frozen=True)
+class McpToolShadowed(Variant):
+    """A published tool is dropped because a more specific entry owns its
+    name."""
+
+    CHANNEL: ClassVar[str] = MCP_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "mcp server %s: dropping published tool %d, its name is inside the "
+        "namespace of the entry %s, which owns it"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("entry", "position", "owner")
+
+    entry: Identifier = value()
+    position: Count = value(note="The tool's place in the far side's listing.")
+    owner: Identifier = value()
+
+
+@dataclass(frozen=True)
+class McpReloadRefused(Variant):
+    """A reload that changed nothing."""
+
+    CHANNEL: ClassVar[str] = MCP_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "mcp servers were not reloaded and nothing was changed (%s)"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("reason",)
+
+    outcome: McpReloadOutcomeToken = value(
+        fixed=McpReloadOutcomeToken(McpReloadOutcome.REFUSED)
+    )
+    reason: McpRefusalToken = value(
+        note=(
+            "Chosen where the exception is classified and never built out "
+            "of its message."
+        )
+    )
+
+
+@dataclass(frozen=True)
+class McpReloadApplied(Variant):
+    """A reload that was applied."""
+
+    CHANNEL: ClassVar[str] = MCP_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = (
+        "mcp servers reloaded: %d started, %d restarted, %d stopped, %d unchanged"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("started", "restarted", "stopped", "unchanged")
+
+    outcome: McpReloadOutcomeToken = value(
+        fixed=McpReloadOutcomeToken(McpReloadOutcome.APPLIED)
+    )
+    started: Count = value()
+    restarted: Count = value()
+    stopped: Count = value()
+    unchanged: Count = value()
+    duration_ms: Whole = value(
+        note=(
+            "Measured from when the request was accepted, so it covers the "
+            "re-read as well as the apply."
+        )
+    )
+
+
+# --- tools/memory.py --------------------------------------------------
+
+MEMORY_CHANNEL = "vinga_server.tools.memory"
+
+
+@dataclass(frozen=True)
+class MemoryUnreadable(Variant):
+    """An agent's memory could not be read."""
+
+    CHANNEL: ClassVar[str] = MEMORY_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "could not read memory for agent %s (%s); it remembers nothing this round"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("agent", "error")
+
+    agent: Identifier = value()
+    error: ClassName = value()
+
+
+# --- filler.py --------------------------------------------------------
+
+FILLER_CHANNEL = "vinga_server.filler"
+
+
+@dataclass(frozen=True)
+class FillerDisabled(Variant):
+    """Filler synthesis failed for one agent."""
+
+    CHANNEL: ClassVar[str] = FILLER_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "agent %s: filler synthesis failed, latency masking is off for this "
+        "agent (%s)"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("agent", "error")
+
+    agent: Identifier = value()
+    error: ClassName = value()
+
+
+# --- capture.py: the recording surface --------------------------------
+
+CAPTURE_CHANNEL = "vinga_server.capture"
+
+
+@dataclass(frozen=True)
+class CaptureStarted(Variant):
+    """A session is being recorded."""
+
+    CHANNEL: ClassVar[str] = CAPTURE_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "session %s: capturing to %s"
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "path")
+
+    session: SessionId = value()
+    path: ConfiguredPath = value()
+
+
+@dataclass(frozen=True)
+class CaptureDirectoryUnusable(Variant):
+    """The configured directory could not be prepared."""
+
+    CHANNEL: ClassVar[str] = CAPTURE_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = "session %s: not capturing, %s is unusable (%s)"
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "directory", "failure")
+
+    session: SessionId = value()
+    reason: CaptureDeclinedToken = value(
+        fixed=CaptureDeclinedToken(CaptureDeclined.UNUSABLE)
+    )
+    failure: ClassName = value()
+    directory: ConfiguredPath = value(carried=False)
+
+
+@dataclass(frozen=True)
+class CaptureBelowFloor(Variant):
+    """The volume is nearly full."""
+
+    CHANNEL: ClassVar[str] = CAPTURE_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "session %s: not capturing, %.0f MB free is below the %.0f MB floor"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "free", "floor_mb")
+
+    session: SessionId = value()
+    reason: CaptureDeclinedToken = value(
+        fixed=CaptureDeclinedToken(CaptureDeclined.MIN_FREE_MB)
+    )
+    free_mb: Count = value()
+    # The measure the sentence renders, beside the rounded count the
+    # field keeps, and the floor it was compared against.
+    free: Real = value(carried=False)
+    floor_mb: Real = value(carried=False)
+
+
+@dataclass(frozen=True)
+class CaptureFilesUnopenable(Variant):
+    """The recording's own files would not open."""
+
+    CHANNEL: ClassVar[str] = CAPTURE_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "session %s: not capturing, could not open the files (%s)"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "failure")
+
+    session: SessionId = value()
+    reason: CaptureDeclinedToken = value(
+        fixed=CaptureDeclinedToken(CaptureDeclined.OPEN)
+    )
+    failure: ClassName = value()
+
+
+@dataclass(frozen=True)
+class CaptureLimit(Variant):
+    """A recording reached its per-session ceiling."""
+
+    CHANNEL: ClassVar[str] = CAPTURE_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "session %s: capture reached its %.0f s limit"
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "limit_s")
+
+    session: SessionId = value()
+    limit_s: Real = value(carried=False)
+
+
+@dataclass(frozen=True)
+class CaptureFailed(Variant):
+    """A recording stopped after a write failed."""
+
+    CHANNEL: ClassVar[str] = CAPTURE_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = "session %s: capture stopped after failing to %s (%s)"
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "reason", "failure")
+
+    session: SessionId = value()
+    reason: CaptureWriteToken = value(
+        note="Which of the recording's two tracks the write was for."
+    )
+    failure: ClassName = value()
+
+
+@dataclass(frozen=True)
+class CapturePruned(Variant):
+    """Old recordings were removed to stay inside the disk budget."""
+
+    CHANNEL: ClassVar[str] = CAPTURE_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "capture: pruned %d session(s) to stay under %.0f MB: %s"
+    ARGS: ClassVar[tuple[str, ...]] = ("removed", "budget_mb", "listed")
+
+    sessions: SessionIds = value(note="The ids themselves, not a count.")
+    removed: Count = value(carried=False)
+    budget_mb: Real = value(carried=False)
+    listed: SessionList = value(carried=False)
+
+
+@dataclass(frozen=True)
+class CaptureOverBudget(Variant):
+    """The disk budget is exceeded and nothing more can be pruned."""
+
+    CHANNEL: ClassVar[str] = CAPTURE_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "capture: %.0f MB on disk is over the %.0f MB budget and nothing "
+        "more can be pruned; raise max_total_mb or lower max_session_s"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("used", "budget_mb")
+
+    total_mb: Count = value()
+    used: Real = value(carried=False)
+    budget_mb: Real = value(carried=False)
+
+
+# --- app.py: what the composition root says about capture -------------
+
+APP_CHANNEL = "vinga_server.app"
+
+
+@dataclass(frozen=True)
+class CaptureEnabled(Variant):
+    """Recording is on, said once at startup."""
+
+    CHANNEL: ClassVar[str] = APP_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "session capture is on: room audio and a track of the session's "
+        "events are being written to %s"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("path",)
+
+    path: ConfiguredPath = value()
+
+
+@dataclass(frozen=True)
+class CaptureDisabled(Variant):
+    """Capture is configured but off."""
+
+    CHANNEL: ClassVar[str] = APP_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = (
+        "session capture is configured but off; set server.capture.enabled "
+        "to record to %s"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("path",)
+
+    path: ConfiguredPath = value()
+
+
+# --- registry.py: the shutdown drain ----------------------------------
+
+REGISTRY_CHANNEL = "vinga_server.registry"
+
+
+@dataclass(frozen=True)
+class DrainStarted(Variant):
+    """A shutdown begins draining."""
+
+    CHANNEL: ClassVar[str] = REGISTRY_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "draining %d session(s), up to %.0f s"
+    ARGS: ClassVar[tuple[str, ...]] = ("sessions", "timeout_s")
+
+    sessions: Count = value()
+    timeout_s: Real = value()
+
+
+@dataclass(frozen=True)
+class DrainFinished(Variant):
+    """Every reply finished speaking."""
+
+    CHANNEL: ClassVar[str] = REGISTRY_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "every session drained"
+
+    sessions: Count = value()
+
+
+@dataclass(frozen=True)
+class DrainIncomplete(Variant):
+    """A reply was cut, or a session hung."""
+
+    CHANNEL: ClassVar[str] = REGISTRY_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "drained with %d session(s) cut mid-reply and %d that did not finish"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("cut_mid_reply", "unfinished")
+
+    sessions: Count = value()
+    cut_mid_reply: Count = value()
+    unfinished: Count = value()
+    timeout_s: Real = value()
+
+
+# --- device/bindings.py: the live view of who is bound ----------------
+
+BINDINGS_CHANNEL = "vinga_server.device.bindings"
+
+
+@dataclass(frozen=True)
+class BindingsSnapshotOnly(Variant):
+    """There is no configuration database."""
+
+    CHANNEL: ClassVar[str] = BINDINGS_CHANNEL
+    LEVEL: ClassVar[int] = logging.DEBUG
+    TEMPLATE: ClassVar[str] = (
+        "no configuration database at %s: device bindings resolve from the "
+        "configuration this server was built with"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("path",)
+
+    path: ConfiguredPath = value()
+
+
+@dataclass(frozen=True)
+class BindingsUnreadable(Variant):
+    """The database could not be read, so the answer is the snapshot's."""
+
+    CHANNEL: ClassVar[str] = BINDINGS_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "cannot read the device bindings for %s; answering from the "
+        "configuration this server started with, which may be older than "
+        "the database. The failure's kind is recorded beside this line"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("device",)
+
+    device: DeviceId = value()
+    failure: ClassName = value()
+
+
+# --- config/api.py: the administration surface ------------------------
+
+CONFIG_API_CHANNEL = "vinga_server.config.api"
+
+
+@dataclass(frozen=True)
+class ApiError(Variant):
+    """The configuration API failed to handle a request."""
+
+    CHANNEL: ClassVar[str] = CONFIG_API_CHANNEL
+    LEVEL: ClassVar[int] = logging.ERROR
+    TEMPLATE: ClassVar[str] = (
+        "the configuration API failed to handle a request (%s)"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("failure",)
+
+    failure: ClassName = value(carried=False)
+
+
+@dataclass(frozen=True)
+class ApiStorageError(Variant):
+    """The configuration API met unreadable stored state."""
+
+    CHANNEL: ClassVar[str] = CONFIG_API_CHANNEL
+    LEVEL: ClassVar[int] = logging.ERROR
+    TEMPLATE: ClassVar[str] = (
+        "the configuration API met unreadable stored state (%s)"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("failure",)
+
+    failure: ClassName = value(carried=False)
+
+
+OTA_CHECK = declare(
+    "ota_check",
+    note=(
+        "What a device said about itself at its configuration check, and "
+        "what this server resolved it to. No session exists yet, so the "
+        "record names the device instead."
+    ),
+    variants=(
+        OtaCheckActivating,
+        OtaCheckAgentNotLoaded,
+        OtaCheckNoAgent,
+        OtaCheckResolved,
+    ),
+)
+
+ACTIVATION_NOT_OFFERED = declare(
+    "activation_not_offered",
+    note="An unbound device that was answered with no activation code, and why.",
+    variants=(ActivationNotOfferedUnreadable, ActivationNotOfferedRefused),
+)
+
+ACTIVATION_COMPLETE = declare(
+    "activation_complete",
+    note="A waiting device has been claimed; its next check hands it a token.",
+    variants=(ActivationComplete,),
+)
+
+ACTIVATION_PENDING = declare(
+    "activation_pending",
+    note="A waiting device polled and is still waiting.",
+    variants=(ActivationPending,),
+)
+
+ACTIVATION_REFUSED = declare(
+    "activation_refused",
+    note=(
+        "A version-2 activation poll failed one of the checks this server "
+        "can hold it to. Nothing of the body is ever quoted: the checks "
+        "name which one failed and stop there."
+    ),
+    variants=(
+        ActivationRefusedUnreadableBody,
+        ActivationRefusedUnknownAlgorithm,
+        ActivationRefusedChallengeMismatch,
+    ),
+)
+
+OTA_REQUEST_REJECTED = declare(
+    "ota_request_rejected",
+    note=(
+        "A request this endpoint could not read. The sentence is one of "
+        "three fixed refusals, so nothing a request carried is "
+        "interpolated into the retained log."
+    ),
+    variants=(OtaRequestRejected,),
+)
+
+ONBOARDING_BANNER = declare(
+    "onboarding_banner",
+    note="Where devices are configured, said once at startup.",
+    variants=(OnboardingOff, OnboardingOn),
+)
+
+ONBOARDING_KEY_MISMATCH = declare(
+    "onboarding_key_mismatch",
+    note=(
+        "A request carried a key-shaped segment, and not this server's. "
+        "Neither is repeated."
+    ),
+    variants=(OnboardingKeyMismatch,),
+)
+
+ONBOARDING_KEY_UNSHAPED = declare(
+    "onboarding_key_unshaped",
+    note="A request carried something that is not key-shaped at all.",
+    variants=(OnboardingKeyUnshaped,),
+)
+
+AUTH_REJECTED = declare(
+    "auth_rejected",
+    note=(
+        "A handshake refused before the accept. No device: nothing is "
+        "authenticated at this point, so the Device-Id header is a string "
+        "whoever opened the socket chose."
+    ),
+    variants=(AuthRejected,),
+)
+
+ASR_PROMPT_ECHO = declare(
+    "asr_prompt_echo",
+    note=(
+        "A transcript came back as the ASR prompt and the clip was retried "
+        "once without it, on what the first request left of `timeout_s`. No "
+        "session or device: providers are shared singletons that serve "
+        "every conversation, so the event names the host instead."
+    ),
+    variants=(
+        EchoSkipped,
+        EchoRetryTimedOut,
+        EchoConfirmed,
+        EchoConfirmedEmpty,
+        EchoRecovered,
+    ),
+)
+
+MCP_CONNECTED = declare(
+    "mcp_connected",
+    note=(
+        "An entry's connect finishes and its tools are published. No "
+        "session or device: one entry serves every conversation, and the "
+        "rest of this block is the same."
+    ),
+    variants=(McpConnected,),
+)
+
+MCP_DOWN = declare(
+    "mcp_down",
+    note="An entry fails to come up, or its connection is given up.",
+    variants=(McpConnectFailed, McpStopped, McpDropped),
+)
+
+MCP_CALL_DROPPED = declare(
+    "mcp_call_dropped",
+    note=(
+        "A tool call failed and the connection was dropped because of it. "
+        "The tool is said by its position in the far side's listing and "
+        "never by its name: half a published name is what the far side "
+        "called its tool."
+    ),
+    variants=(McpCallDropped,),
+)
+
+MCP_TOOL_SHADOWED = declare(
+    "mcp_tool_shadowed",
+    note="A published tool is dropped because a more specific entry owns its name.",
+    variants=(McpToolShadowed,),
+)
+
+MCP_RELOAD = declare(
+    "mcp_reload",
+    note=(
+        "A reload of the MCP servers finishes, whether or not the caller is "
+        "still connected. Exactly one per reload, at whichever of the two "
+        "phases ended it."
+    ),
+    variants=(McpReloadRefused, McpReloadApplied),
+)
+
+MEMORY_UNREADABLE = declare(
+    "memory_unreadable",
+    note="An agent's memory could not be read; it remembers nothing this round.",
+    variants=(MemoryUnreadable,),
+)
+
+FILLER_DISABLED = declare(
+    "filler_disabled",
+    note="Filler synthesis failed for one agent, so latency masking is off for it.",
+    variants=(FillerDisabled,),
+)
+
+CAPTURE_STARTED = declare(
+    "capture_started", note="A session is being recorded.", variants=(CaptureStarted,)
+)
+
+CAPTURE_DECLINED = declare(
+    "capture_declined",
+    note="A session is not being recorded, and why.",
+    variants=(CaptureDirectoryUnusable, CaptureBelowFloor, CaptureFilesUnopenable),
+)
+
+CAPTURE_LIMIT = declare(
+    "capture_limit",
+    note="A recording reached its per-session ceiling.",
+    variants=(CaptureLimit,),
+)
+
+CAPTURE_FAILED = declare(
+    "capture_failed",
+    note="A recording stopped after a write failed.",
+    variants=(CaptureFailed,),
+)
+
+CAPTURE_PRUNED = declare(
+    "capture_pruned",
+    note="Old recordings were removed to stay inside the disk budget.",
+    variants=(CapturePruned,),
+)
+
+CAPTURE_OVER_BUDGET = declare(
+    "capture_over_budget",
+    note="The disk budget is exceeded and nothing more can be pruned.",
+    variants=(CaptureOverBudget,),
+)
+
+CAPTURE_ENABLED = declare(
+    "capture_enabled",
+    note=(
+        "Said once at startup, at WARNING: recording room audio is a thing "
+        "an operator should not discover by accident."
+    ),
+    variants=(CaptureEnabled,),
+)
+
+CAPTURE_DISABLED = declare(
+    "capture_disabled",
+    note="Capture is configured but off.",
+    variants=(CaptureDisabled,),
+)
+
+DRAIN_STARTED = declare(
+    "drain_started", note="A shutdown begins draining.", variants=(DrainStarted,)
+)
+
+DRAIN_FINISHED = declare(
+    "drain_finished", note="Every reply finished speaking.", variants=(DrainFinished,)
+)
+
+DRAIN_INCOMPLETE = declare(
+    "drain_incomplete",
+    note="A reply was cut, or a session hung.",
+    variants=(DrainIncomplete,),
+)
+
+DEVICE_BINDINGS_SNAPSHOT_ONLY = declare(
+    "device_bindings_snapshot_only",
+    note=(
+        "There is no configuration database, so bindings resolve from the "
+        "boot snapshot."
+    ),
+    variants=(BindingsSnapshotOnly,),
+)
+
+DEVICE_BINDINGS_UNREADABLE = declare(
+    "device_bindings_unreadable",
+    note="The database could not be read, so the answer is the boot snapshot's.",
+    variants=(BindingsUnreadable,),
+)
+
+API_ERROR = declare(
+    "api_error",
+    note=(
+        "The configuration API failed to handle a request. The class name "
+        "and nothing else."
+    ),
+    variants=(ApiError,),
+)
+
+API_STORAGE_ERROR = declare(
+    "api_storage_error",
+    note="The configuration API met unreadable stored state.",
+    variants=(ApiStorageError,),
+)
+
+
 __all__ = [
+    "ACTIVATION_COMPLETE",
+    "ACTIVATION_NOT_OFFERED",
+    "ACTIVATION_PENDING",
+    "ACTIVATION_REFUSED",
     "AGENT_SAID",
+    "API_ERROR",
+    "API_STORAGE_ERROR",
+    "APP_CHANNEL",
+    "ASR_CHANNEL",
+    "ASR_PROMPT_ECHO",
+    "AUTH_REJECTED",
+    "ActivationComplete",
+    "ActivationNotOfferedRefused",
+    "ActivationNotOfferedUnreadable",
+    "ActivationPending",
+    "ActivationRefusedChallengeMismatch",
+    "ActivationRefusedUnknownAlgorithm",
+    "ActivationRefusedUnreadableBody",
     "AgentSaid",
+    "ApiError",
+    "ApiStorageError",
+    "AuthRejected",
     "BARGE_IN",
     "BARGE_IN_MERGED",
     "BARGE_IN_SUPPRESSED",
+    "BINDINGS_CHANNEL",
     "BargeIn",
     "BargeInInRefractory",
     "BargeInMerged",
     "BargeInUnderFloor",
     "BargeInWithoutTranscript",
+    "BindingsSnapshotOnly",
+    "BindingsUnreadable",
     "BuiltinToolCall",
+    "CAPTURE_CHANNEL",
+    "CAPTURE_DECLINED",
+    "CAPTURE_DISABLED",
+    "CAPTURE_ENABLED",
+    "CAPTURE_FAILED",
+    "CAPTURE_LIMIT",
+    "CAPTURE_OVER_BUDGET",
+    "CAPTURE_PRUNED",
+    "CAPTURE_STARTED",
+    "CONFIG_API_CHANNEL",
+    "CONVERSATIONS_CHANNEL",
+    "CONVERSATIONS_DROPPED",
+    "CONVERSATIONS_ENABLED",
+    "CONVERSATIONS_FAILED",
+    "CONVERSATIONS_PRUNED",
+    "CaptureBelowFloor",
+    "CaptureDirectoryUnusable",
+    "CaptureDisabled",
+    "CaptureEnabled",
+    "CaptureFailed",
+    "CaptureFilesUnopenable",
+    "CaptureLimit",
+    "CaptureOverBudget",
+    "CapturePruned",
+    "CaptureStarted",
+    "CatalogError",
+    "CatalogState",
+    "ConversationsDropped",
+    "ConversationsEnabled",
+    "ConversationsPruned",
+    "DEVICE_BINDINGS_SNAPSHOT_ONLY",
+    "DEVICE_BINDINGS_UNREADABLE",
+    "DRAIN_FINISHED",
+    "DRAIN_INCOMPLETE",
+    "DRAIN_STARTED",
+    "Declaration",
+    "Declared",
+    "DrainFinished",
+    "DrainIncomplete",
+    "DrainStarted",
+    "EchoConfirmed",
+    "EchoConfirmedEmpty",
+    "EchoRecovered",
+    "EchoRetryTimedOut",
+    "EchoSkipped",
+    "FILLER_CHANNEL",
+    "FILLER_DISABLED",
     "FILLER_PLAYED",
     "FILLER_SKIPPED",
+    "FillerDisabled",
     "FillerPlayed",
     "FillerSkippedForBargeIn",
     "FillerSkippedForSpeech",
@@ -1578,12 +2911,48 @@ __all__ = [
     "LlmRetryOfEntry",
     "LlmRound",
     "LlmRoundOfEntry",
+    "Logged",
+    "MCP_CALL_DROPPED",
+    "MCP_CHANNEL",
+    "MCP_CONNECTED",
+    "MCP_DOWN",
+    "MCP_RELOAD",
+    "MCP_TOOL_SHADOWED",
+    "MEMORY_CHANNEL",
+    "MEMORY_UNREADABLE",
+    "McpCallDropped",
+    "McpConnectFailed",
+    "McpConnected",
+    "McpDropped",
+    "McpReloadApplied",
+    "McpReloadRefused",
+    "McpStopped",
     "McpToolCall",
+    "McpToolShadowed",
+    "MemoryUnreadable",
+    "ONBOARDING_BANNER",
+    "ONBOARDING_CHANNEL",
+    "ONBOARDING_KEY_MISMATCH",
+    "ONBOARDING_KEY_UNSHAPED",
+    "OTA_CHANNEL",
+    "OTA_CHECK",
+    "OTA_REQUEST_REJECTED",
+    "OnboardingKeyMismatch",
+    "OnboardingKeyUnshaped",
+    "OnboardingOff",
+    "OnboardingOn",
+    "OtaCheckActivating",
+    "OtaCheckAgentNotLoaded",
+    "OtaCheckNoAgent",
+    "OtaCheckResolved",
+    "OtaRequestRejected",
     "PROMPT_ASSEMBLED",
     "PROVIDER_FAILED",
     "PromptAssembled",
     "ProviderFailed",
     "ProviderOfEntryFailed",
+    "PruneFailed",
+    "REGISTRY_CHANNEL",
     "REPLIED",
     "RejectedAgentNotLoaded",
     "RejectedAtCapacity",
@@ -1603,22 +2972,8 @@ __all__ = [
     "SpeakingStarted",
     "TOOL_CALL",
     "UnnamedToolCall",
-    "WS_CHANNEL",
-    "CONVERSATIONS_CHANNEL",
-    "CONVERSATIONS_DROPPED",
-    "CONVERSATIONS_ENABLED",
-    "CONVERSATIONS_FAILED",
-    "CONVERSATIONS_PRUNED",
-    "CatalogError",
-    "CatalogState",
-    "ConversationsDropped",
-    "ConversationsEnabled",
-    "ConversationsPruned",
-    "Declaration",
-    "Declared",
-    "Logged",
-    "PruneFailed",
     "Variant",
+    "WS_CHANNEL",
     "WriteFailed",
     "base_of",
     "catalog",
