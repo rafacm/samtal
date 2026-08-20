@@ -973,11 +973,19 @@ to apply it (mid-call tools, a respawned stdio child) would be churn
 without a cause.
 
 **Filled pauses are re-synthesized, and only where they had to be.** A
-clip is a configured phrase spoken by a configured voice, so an apply
-keeps every clip whose phrases and whose voice are what they were and
-synthesizes the rest: an edit to a prompt sends nothing to a
+clip is a configured phrase spoken by a configured voice, and the unit
+of comparison is the whole effective `filler` section: an apply keeps
+every clip whose section and whose voice are what they were, and
+synthesizes the rest. So an edit to a prompt sends nothing to a
 text-to-speech engine, and neither does an edit to a provider, whose
-voice this server goes on speaking in until it is restarted. The
+voice this server goes on speaking in until it is restarted; but an edit
+to any field of the section does, `delay_ms` included, even though the
+audio that comes back is identical to what it replaced. That is
+deliberate rather than an oversight: the section is one value, and a
+comparison that covered part of it would be a second rule about what a
+clip depends on. Synthesis is real work at the configured provider, and
+may be billed there, so a reload of a deployment with many masked agents
+costs what this says it does. The
 `fillers` section names each agent under one of three outcomes, and an
 agent whose synthesis failed is `disabled`: the reload applied, that
 agent runs with the mask off, and the next reload tries again. A
@@ -1739,9 +1747,10 @@ and cached as PCM, never at fire time: synthesis at the moment of
 masking would add TTS latency to the exact gap being masked, and a
 cached clip keeps working when the TTS provider is the thing being
 slow. Ahead of time is the server start and every `vinga-server config
-reload` after it, which re-synthesizes only the agents whose phrases or
-whose voice moved and hands the result to the next conversation; one
-already open keeps the clips it opened with. A synthesis failure logs a
+reload` after it, which re-synthesizes the agents whose effective
+`filler` section or whose voice moved, whichever field of the section it
+was, and hands the result to the next conversation; one already open
+keeps the clips it opened with. A synthesis failure logs a
 warning and leaves the feature off for that agent rather than failing
 the boot or refusing the reload.
 

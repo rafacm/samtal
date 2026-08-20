@@ -309,8 +309,8 @@ class ConfigReload:
             # not speak applies with no clip and runs with the mask off,
             # because a filler is a latency mask and a posture where a
             # text-to-speech hiccup blocked a prompt fix would invert
-            # what matters. Every clip whose phrases and whose voice are
-            # what they were is the object it already was.
+            # what matters. Every clip whose effective section and whose
+            # voice are what they were is the object it already was.
             fillers = await build_agent_fillers(
                 overlaid, self._agent_providers, previous
             )
