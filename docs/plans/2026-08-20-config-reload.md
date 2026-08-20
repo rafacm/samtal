@@ -243,14 +243,21 @@ their pools; the local models (faster-whisper, Piper, Silero) drop
 their engine references, with the honest caveat recorded that a
 library like CTranslate2 frees memory on its own schedule, so
 release is best-effort and double residency during a swap is the
-accepted cost either way. (b) Generational binding: a session binds
-`current()` once (the factory hands the runtime its generation, in
-place of the shared dict), holds it for its life, and the
-generation is retired when its last session ends; the
+accepted cost either way. (b) Generational binding, with one explicit
+binding event (the review's finding 5): the registry admits a
+`DeviceSession` before `run()`, the runtime is constructed only
+after MAC validation and the awaited bindings lookup, and many
+admitted sessions never construct one, so "the factory hands out
+the generation" is not by itself an accounting point. The runtime
+factory reads `current()` when it builds the runtime, and the
+session reports that binding to the registry in the same
+synchronous step, so admission and binding are two recorded
+states: `remove` releases the generation for a bound session and
+is a no-op on that axis for an admitted-but-never-bound one. The
 `SessionRegistry`, the only object that knows the whole session
-set, gains the disposal hook (sessions are counted per generation,
-and the registry disposes a generation that is neither current nor
-held by any session). (c) Unchanged-entry reuse: the prepare phase
+set, counts bound sessions per generation and disposes a
+generation that is neither current nor held by any bound session,
+immediately when it retires with none. (c) Unchanged-entry reuse: the prepare phase
 builds the candidate `AgentProviders` mapping reusing the running
 generation's provider object for every entry whose model and
 secret fingerprint are unchanged (the `same_provider` comparison
@@ -442,7 +449,12 @@ session across a reload), and the drift-check pins.
   only when the last of them lets go, and application shutdown
   closes current and retired providers after the drain; local-model
   double residency is not asserted numerically, but the
-  close-called-once property is.
+  close-called-once property is; finding 5's binding-event cases:
+  a rejected device id, a device with no binding, a disconnect
+  before hello (admitted, never bound, removed cleanly), and a
+  reload between admission and runtime construction (the session
+  binds the generation the factory read, and the count follows
+  it).
 - **M4**: bind a device to an agent added by apply and see it
   served at the next check-in with the binding notice, no restart;
   delete an agent with a live session, apply, the session finishes
@@ -608,6 +620,14 @@ the runtime factory runs only after MAC validation and an awaited
 bindings lookup, and many admitted sessions never construct a
 runtime. One explicit generation-binding event is needed, with
 removal handling admitted-but-never-bound sessions.
+
+*Resolution.* Adopted, the second offered shape: the session
+reports its binding to the registry in the same synchronous step
+the factory reads `current()`, admission and binding are two
+recorded states, `remove` handles the never-bound session, and the
+M3 test bullet names the four cases (bad device id, no binding,
+disconnect before hello, reload between admission and
+construction).
 
 **6 (P1). "Byte-equivalent MCP behavior" conflicts with the
 result and the no-leak claim.** `McpReloadResult` carries the
