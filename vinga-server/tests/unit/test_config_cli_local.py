@@ -80,7 +80,7 @@ LOCAL_PREAMBLE = (
 # been written in: the two halves of RESTART_NOTICE, and the clause the
 # retired preamble made the claim with. An act a reload applies may
 # carry none of them, whichever line they turn up on. Kept as phrases
-# rather than as the word "restart", which MCP_RELOAD_NOTICE uses
+# rather than as the word "restart", which RELOAD_NOTICE uses
 # legitimately to say that none is needed.
 RESTART_TIMING = (
     "until its next start",
