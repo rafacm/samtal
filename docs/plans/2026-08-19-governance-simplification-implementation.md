@@ -1043,10 +1043,14 @@ relations only, and every one of them survives untouched.
 
 ### The inventory, after M4
 
-`EntityDescriptor` carries **19 dataclass fields**, against 31 before:
-20 data facts, `secret_key`, and the `endpoints` tuple went, so the 11
-hooks plus `Endpoint` are the twelve that left. `fields_in_help` was a
-`ClassVar` on both tiers and is gone as well.
+`EntityDescriptor` carries **19 dataclass fields**, against 31 before.
+Twelve left: the 11 hooks (`from_row`, `to_row`, `before_parse`,
+`inside_write`, `read`, `write`, `delete`, `body`, `summary`, `wrote`,
+`deleted`) and the `endpoints` tuple, which is 31 - 12 = 19. What
+remains is 18 data facts and `secret_key`, the one data-shaped
+predicate. `fields_in_help` is not in either count: it was a `ClassVar`
+on both tiers, so `dataclasses.fields` never listed it, and it is
+deleted as well.
 
 **Zero `fill()` statements and zero installations**, against 27
 statements installing 49 values at import (44 callables and 5 notice
