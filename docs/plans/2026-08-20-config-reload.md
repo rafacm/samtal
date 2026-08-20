@@ -145,6 +145,13 @@ own `filler` section; M3, additionally the `providers` kind (the
 entries themselves; which entry an agent names remains
 restart-bound); M4, everything in the domain half, at which point
 the overlay becomes the identity function and retires. The overlay
+covers the `SecretStore` by the same regimes (round 2's finding
+1): the generation's secrets carry the freshly loaded MCP-server
+secrets, that half being live, and retain the previous
+generation's provider secrets until M3 installs candidate
+providers, so a provider-secret rotation stays pending in the diff
+through M1 and M2 applies and empties only when the M3 rebuild
+actually uses the new secret, which the tests pin. The overlay
 is validated whole, by the same `check_completeness` and
 `check_references` every composition passes, and an apply whose
 overlay does not compose refuses with the standard sentences:
@@ -761,6 +768,11 @@ restart-bound. Provider-secret state must follow the provider
 regime: previous identities through M1 and M2, candidate secrets
 at M3, with the rotation-stays-pending tests. An unclosed part of
 round 1's finding 1.
+
+*Resolution.* Adopted. The overlay decision now covers the
+`SecretStore` by the same regimes: fresh MCP-server secrets,
+previous provider secrets until M3, with the
+rotation-pending-through-M1-and-M2 test named.
 
 **2 (P1). The snapshot-mode resolution cannot reload from the
 sparse database it creates.** Snapshot mode is chosen before the
