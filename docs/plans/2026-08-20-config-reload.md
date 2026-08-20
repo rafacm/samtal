@@ -176,7 +176,15 @@ field-level regimes so an applied live-slice change reports
 nothing and a restart-bound change keeps reporting: the agent
 kind's reload-labeled half grows per milestone (prompt fields at
 M1, the filler section at M2) beside the grants it already has,
-and `agent_defaults` stays restart-labeled whole until M4.
+and `agent_defaults` stays restart-labeled whole until M4. The
+agent write's acknowledgement stages with the same fields (round
+2's finding 8): the agent descriptor's notice becomes mixed-regime
+prose per milestone (M1: prompt text and includes apply at a
+reload's next activation, everything else at the next start; M2
+adds the filler sentence at the next session; M4 collapses it to
+the general reload notice), pinned across the API acknowledgement,
+the CLI rendering, and the generated references in the same change
+as each stage.
 
 **The holder's mark, and its instability window.** The holder owns
 the mark #193's diff guard reads (moved here from `McpServers`,
@@ -928,6 +936,11 @@ restart-only.** An agent write carries the now-live `prompt`,
 keeps the restart notice. The agent notice becomes staged
 mixed-regime prose per milestone, collapsed at M4, pinned across
 API, CLI, and the generated references.
+
+*Resolution.* Adopted. The overlay decision now stages the agent
+notice with the fields, milestone by milestone, collapsed at M4,
+pinned across all three surfaces in the same change as each
+stage.
 
 **9 (P2). `Composition.config` remains a second, stale serving
 configuration.** Removing only the provider and filler fields
