@@ -298,12 +298,14 @@ it, and the handler awaits and answers.
 
 **The route.** `ApiRuntime` gains one optional async callable beside
 `mcp_reload` and `agent_prompt`, compared `is not None`, resolved by a
-dependency like its siblings, and answered with the prompt read's 503
-when it is absent. The route is `async def` for the reason the status
-read is, declares 401, 409, 422, 500 and 503, and gives three of them
-descriptions of their own, because the shared sentences are about
-addressing, about locks, and about reads that can answer emptily, and
-none of the three is true here.
+dependency like its siblings, and refusing with 503 when it is absent.
+The route is `async def` for the reason the status read is, declares
+401, 409, 422, 500 and 503, and gives three of them descriptions of
+their own, because the shared sentences are about addressing, about
+locks, and about reads that can answer emptily, and none of the three is
+true here. The 503 body was the shared sentence until the review round
+below made it the route's own, for the same reason its description is
+its own.
 
 **The composition root.** `config_diff_reader` is built where both
 worlds are in hand. Its stored side is `reload_domain_config`, the
@@ -380,17 +382,23 @@ a builder that performed its own read could only be tested by patching a
 module global, and a test that reaches for a private name is a design
 flag rather than a test problem.
 
-**5. The closure catches nothing.** The milestone brief asked for
-sanitized errors built in an except arm and raised after the block. There
-is no except arm, deliberately: every failure `reload_domain_config` has
-is a `ConfigError` that `REFUSAL_STATUS` already maps, and anything else
-is a bug, which the API's last-resort middleware answers as a sanitized
-500 while recording the exception's class in one fixed line. Catching it
-here to raise a `StorageError` with a sentence of this closure's would
-answer the same status with less information: the class recorded would be
-the replacement's, not the failure's. The no-leak property is the same
-either way and the sentinel suite asserts it over the refusal path that
-exists.
+**5. The closure caught nothing, and now catches half of it.** The
+milestone brief asked for sanitized errors built in an except arm and
+raised after the block, and this milestone shipped without one: every
+failure `reload_domain_config` has is a `ConfigError` that
+`REFUSAL_STATUS` already maps, and anything else is a bug, which the
+API's last-resort middleware answers as a sanitized 500 while recording
+the exception's class in one fixed line, which is more than a sentence
+of this closure's could say.
+
+The second half of that was right and the first half missed what a
+mapped type carries with it. The review round below (finding 1) is the
+correction: a typed refusal keeps its type, which is what decides the
+status, and loses its words, which the store composes over the stored
+state it refused on. So there is an except arm now, built in the handler
+and raised after it, and it is exactly the shape the brief asked for.
+What is still deliberately not caught is a failure with no type, for the
+reason above.
 
 ### Discoveries
 
@@ -438,3 +446,103 @@ Run from `vinga-server/`, at the last commit of the milestone.
 Not verified here, and not claimed: the container image and the smoke
 lane, which no part of this milestone touches, and the read against a
 real device, which it has nothing to do with.
+
+### PR review round (2026-08-20)
+
+External review of PR #228: codex exec, model gpt-5.6-sol, read-only
+against `main...2c53ae26`. Verdict: mergeable after fixes. Findings
+condensed but faithful; each carries its resolution and the commit that
+made it.
+
+**1 (P1). Invalid stored values left through the new response.** The
+closure passed the store's refusals through unchanged and the API
+serializes a refusal's sentence into `detail`, so a stored row holding
+something that is not what its column is for was quoted back to the
+caller: the regression case for a stored domain that will not compose
+asserted that the rejected value appeared. A credential pasted into the
+wrong field is exactly that shape of row. The finding named the tension
+rather than eliding it: other routes of this API do name the locations
+they refuse on, and should, because their answers already carry
+configuration; this read's answer is entity names and closed tokens, and
+its stored half is arbitrary stored bytes.
+
+*Resolution.* Adopted (`05be2c8e`), scoped to the closure boundary as
+the finding asked, with the API's refusal rendering untouched. The
+stored half keeps the store's type, which is what `REFUSAL_STATUS` turns
+into a status, and loses its sentence to one of three fixed ones, each
+saying that `vinga-server config reload` re-reads the same stored half
+and names the location, having changed nothing. The replacement is built
+in the handler and raised after the block, so neither `__cause__` nor
+`__context__` carries the original out to anything that walks an
+exception. The two stored-side cases now assert the whole fixed body and
+the absence of the value that was refused; two new cases pin the type,
+the sentence and the empty chain at the closure itself. One addition the
+finding did not name: `DatabaseBusyError` is a `ConfigError` too, so
+catching the category alone would have turned a retryable 409 into a
+422. It keeps its own type and gets its own sentence, which still says
+to make the request again.
+
+**2 (P2). The runtime-less 503 body contradicted the contract beside
+it.** The route raised the shared 503 detail, which says the reads in
+this namespace answer emptily and only the actions refuse, while its own
+documented description says the opposite and is why it refuses at all.
+The transport case checked a substring and could not see the
+contradiction.
+
+*Resolution.* Adopted (`8167a7f4`). The route raises a sentence of its
+own, the way the prompt read already carries a description of its own,
+and the transport case asserts the complete problem body and that the
+detail is not the shared one.
+
+**3 (P2). The prose promised a reload equivalence the code does not
+provide.** The closure docstring, the route description and the
+CHANGELOG read as though a diff that answers is a reload that would
+apply. The reload's second phase builds a manager per referenced entry
+and can still refuse there, on an environment reference nothing sets or
+an entry `server.local_only` forbids, long after this read answered 200.
+
+*Resolution.* Adopted (`b3857031`), as prose only. The equivalence is
+stated in the direction that holds, which is the useful one: the stored
+side is the re-read the reload begins with, so a stored half that fails
+it is refused here under the status it would be refused under there. The
+API description states the boundary where a reader of the contract meets
+it. Sharing the reload's manager preparation was not attempted and is
+the wrong fix, as the finding says: it would connect servers to answer a
+read.
+
+**4 (P2). The sentinel case stopped guarding the values that are
+read.** The plaintext, the ciphertext and the mark were captured before
+the rotation that makes the entity report as changed, so the values the
+stored side actually carried through the comparison were watched for by
+nothing, and the replacement plaintext was never checked at all.
+
+*Resolution.* Adopted (`45a48154`), by the first of the two shapes the
+finding offered. A comparison reads two sides, so both are planted: a
+plaintext, a ciphertext and a mark for the value this server booted
+with, and the same three taken after the rotation for the value stored
+while it runs, plus the environment reference name. Seven distinct
+sentinels, each asserted to be really there before any absence is
+claimed of it.
+
+### Verification, after the review round
+
+Run from `vinga-server/`, at the last commit of the round.
+
+- `uv run ruff check .`: all checks passed.
+- `uv run mypy`: success, no issues found in 3 source files.
+- `uv run pytest tests/unit -q`: 2,692 passed, 16 skipped. The count is
+  not comparable with the 2,682 above: the branch was rebased onto
+  `main` after PR #227 merged, so milestone 1's own review-round cases
+  arrived with the rebase. This round adds three, all at the closure:
+  two for the refused stored half's type, sentence and empty chain, and
+  one for the busy database that has to stay a 409.
+- `uv run pytest tests/integration -q`: 61 passed.
+- The four documentation drift checks, regenerated and diffed against
+  `../docs/reference/`: `config reference`, `conversations schema`,
+  `events reference` and `config openapi` are all clean.
+  `api-openapi.json` moved twice in this round, for the 422's
+  description and for the API description's paragraph, and is committed
+  with each of them.
+
+Not verified here, and not claimed: the container image and the smoke
+lane, which no part of this round touches.
