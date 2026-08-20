@@ -1010,3 +1010,76 @@ the default no-op with the session-owned-detector fact in its
 docstring, and M3's tests prove the injected HTTP and SDK clients
 close and that faster-whisper and Piper release their references,
 on the real classes.
+
+## Plan review round 3 (2026-08-20)
+
+External review: codex exec, model gpt-5.6-sol, read-only against
+commit 8a6273d6, judging whether round 2's resolutions close their
+findings. Verdict: ready after the P1/P2 amendments, which follow
+with their resolutions.
+
+**1 (P1). Provider disposal can race still-running worker-thread
+calls.** Cancelling an awaiting coroutine does not stop the
+`asyncio.to_thread` worker inside a transcription or synthesis
+call, so removal-triggered disposal can clear an engine a worker
+is about to read. Provider calls need an operation lease held
+until the underlying thread actually finishes, disposal waits for
+the leases, and a blocking-engine test proves the engine stays
+reachable until the worker exits.
+
+**2 (P1). The snapshot-mode resolution leaves M1 through M3
+unreleasable.** The refusals were promised "from milestone 1" but
+scheduled nowhere before M4, and every milestone publishes. The
+mode fact, both typed refusals, the snapshot-mode
+acknowledgements, the OpenAPI changes, and the mounted tests move
+into M1; M4 keeps the `DeviceBindings` conversion and the #195
+closure. A failed closure of round 2's finding 2.
+
+**3 (P1). The session-to-generation handoff has no implementable
+interface.** The factory returns only a `SessionInput`, the
+session has no registry collaborator, and `DeviceBindings`
+classifies names against its own snapshot before returning. The
+interface must be exact: raw bound and default names come back
+unclassified, the session captures one generation after the
+await, classifies against it, constructs from the same object,
+and synchronously registers its lease before yielding, with the
+release owned explicitly and both an addition and a deletion
+tested at the barrier. Round 2's finding 4 partially resolved.
+
+**4 (P1). Immediate ownership is not achievable through the
+current provider builder.** `build_provider` constructs then
+egress-checks inside one synchronous function under one
+`to_thread` call, which cannot await an async close on refusal.
+M3 names the refactor: options parsed and finished before
+allocation, one provider constructed at a time off-loop and
+transferred immediately into an async candidate owner, the egress
+check run after the transfer, the owner awaiting cleanup on every
+non-install exit, boot and reload sharing the path. Round 2's
+finding 6 not closed by prose alone.
+
+**5 (P2). The staged secret overlay has no safe `SecretStore`
+operation.** Envelopes and keys are deliberately private, so the
+overlay as written would need reach-in or exposure. `SecretStore`
+gains a deep derivation that composes two stores by entity-kind
+regime internally, returning none of envelopes, keys, plaintext,
+or fingerprints, named in M1 and tested for provider rotation
+pending through M1 and M2, MCP rotation applying in M1, and
+planted envelope bytes absent everywhere.
+
+**6 (P2). The reload response is neither additive nor complete
+across milestones.** The API models forbid extras, so gaining
+fields is a breaking change for a generated client, and M4's
+vocabulary was undefined. The final `ConfigReloadResult` schema
+publishes in M1 with the later sections declared optional and
+null until their milestone implements them; the M4 outcomes are
+defined now (agents added and removed by the apply, and whether
+`agent_defaults` changed), and device and default-agent writes
+are explicitly not reload outcomes, being check-in live.
+
+**7 (P2). The disconnect-before-hello test asserts the opposite
+of the control flow.** The runtime is constructed, and binds,
+before `_receive_hello`, so that case is bound, not never-bound.
+It is reclassified; the never-bound cases are an invalid MAC, no
+binding, and cancellation during binding resolution; and a test
+proves the pre-hello runtime's generation is released although
+the conversation cleanup block never ran.
