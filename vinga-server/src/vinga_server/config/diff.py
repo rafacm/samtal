@@ -45,6 +45,7 @@ from typing import NamedTuple, Protocol
 
 from vinga_server.config.models import (
     PROVIDER_STAGES,
+    AgentConfig,
     AgentDefaults,
     Config,
     ProviderConfig,
@@ -56,6 +57,7 @@ from vinga_server.config.responses import (
     EntityDiff,
     GrantsDiff,
     LiveKind,
+    PromptDiff,
     SingletonDiff,
 )
 from vinga_server.config.secrets import SecretStore, provider_identity
@@ -69,18 +71,39 @@ from vinga_server.config.secrets import SecretStore, provider_identity
 APPLIES: Mapping[str, Applies] = {
     "providers": Applies.RESTART,
     "mcp_servers": Applies.RELOAD,
-    "prompt_fragments": Applies.RESTART,
+    "prompt_fragments": Applies.RELOAD,
     "agent_defaults": Applies.RESTART,
     "agents": Applies.RESTART,
     "devices": Applies.CHECK_IN,
     "default_agent": Applies.CHECK_IN,
 }
 
-# And the one regime that is half of a kind rather than a kind. An agent
-# entry spans two: its `mcp` grants are what a reload derives an agent's
-# tools from, and everything else about it waits for a restart. It is
-# deliberately not in the map above, whose keys are the domain's own.
+# And the two regimes that are half of a kind rather than a kind. An
+# agent entry spans three: its `mcp` grants are what a reload derives
+# its tools from, its `prompt` and `prompt_includes` are what a reload
+# has it assemble its next activation from, and everything else about it
+# waits for a restart. Neither is in the map above, whose keys are the
+# domain's own.
 GRANTS_APPLY = Applies.RELOAD
+PROMPT_APPLY = Applies.RELOAD
+
+# Which fields of an agent entry the restart-bound comparison leaves
+# out, because a reload applies them, and what each is replaced by to
+# leave it out: the field's own "nothing here" value, so that what is
+# compared is still an agent entry rather than a model with a hole in
+# it. One mapping rather than a rule written at each site, so a field
+# that becomes live moves in one place.
+_RELOADED_AGENT_FIELDS: Mapping[str, object] = {
+    "mcp": None,
+    "prompt": "",
+    "prompt_includes": None,
+}
+
+# And the ones the prompt half compares. A subset of the above, because
+# the grants have a half of their own: what an agent may reach is
+# derived from the whole candidate configuration and answered by the MCP
+# registry, and what its prompt says is read straight off the entry.
+_PROMPT_FIELDS = ("prompt", "prompt_includes")
 
 
 class Loaded(Protocol):
@@ -154,9 +177,13 @@ def config_diff(running: Loaded, stored: Loaded, mcp: McpPending) -> ConfigDiff:
         return running.config.prompt_fragments[name] == stored.config.prompt_fragments[name]
 
     def same_agent(name: str) -> bool:
-        return _without_grants(running.config.agents[name]) == _without_grants(
+        return _restart_bound(running.config.agents[name]) == _restart_bound(
             stored.config.agents[name]
         )
+
+    def same_prompt(name: str) -> bool:
+        own, theirs = running.config.agents[name], stored.config.agents[name]
+        return all(getattr(own, field) == getattr(theirs, field) for field in _PROMPT_FIELDS)
 
     return ConfigDiff(
         providers=EntityDiff(
@@ -186,6 +213,12 @@ def config_diff(running: Loaded, stored: Loaded, mcp: McpPending) -> ConfigDiff:
             applies=APPLIES["agents"],
             **_names(running.config.agents, stored.config.agents, same_agent)._asdict(),
             grants=GrantsDiff(applies=GRANTS_APPLY, changed=mcp.grants),
+            prompt=PromptDiff(
+                applies=PROMPT_APPLY,
+                changed=_names(
+                    running.config.agents, stored.config.agents, same_prompt
+                ).changed,
+            ),
         ),
         devices=LiveKind(applies=APPLIES["devices"]),
         default_agent=LiveKind(applies=APPLIES["default_agent"]),
@@ -238,12 +271,26 @@ def _providers(side: Loaded) -> dict[str, ProviderConfig]:
 def _without_grants(layer: AgentDefaults) -> AgentDefaults:
     """One agent layer with its MCP grants taken out.
 
-    The exclusion is what keeps the agent kind honest. An agent's `mcp`
-    list is applied by the MCP reload, which derives every agent's
-    grants from the whole candidate configuration, while everything else
-    about the entry waits for a restart. Comparing the whole entry would
+    The exclusion is what keeps `agent_defaults` honest. Its `mcp` list
+    is applied by the reload, which derives every agent's grants from
+    the whole candidate configuration, while everything else about the
+    layer waits for a restart, its `prompt_includes` included: a
+    candidate generation keeps the previous `agent_defaults` whole,
+    precisely so that a change to what every agent inherits is not
+    applied through the back door. Comparing the whole layer would
     therefore report a grants-only edit as pending-restart, which is a
     change the reload has already applied or can apply without one. What
-    moved there is reported under the grants instead.
+    moved there is reported under the agents' grants instead.
     """
     return layer.model_copy(update={"mcp": None})
+
+
+def _restart_bound(agent: AgentConfig) -> AgentConfig:
+    """One agent entry with everything a reload applies taken out.
+
+    The same exclusion one layer down and wider, because an agent entry
+    holds the two prompt fields as well as the grants and a reload
+    applies all three. What is left is what genuinely waits for a
+    restart: the provider overrides and the filler section.
+    """
+    return agent.model_copy(update=dict(_RELOADED_AGENT_FIELDS))
