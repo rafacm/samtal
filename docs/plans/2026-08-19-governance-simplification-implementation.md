@@ -936,3 +936,164 @@ Run from `vinga-server/`, at the last commit of the round.
 - The record baseline is untouched: no commit in this round names
   `vinga-server/tests/unit/data/event-baseline.json`, which is what says
   the four fixes moved no lawful record.
+
+## M4: the entity registry sheds its hooks
+
+### What was done
+
+Seven commits, ordered so that each hook group leaves with the code that
+consumed it and the byte proofs stay green throughout.
+
+**The store's own four.** `from_row`, `to_row`, `before_parse` and
+`inside_write` were filled onto the descriptors by `store.py` and read
+back by `store.py`, which is a module talking to itself through a
+global. They become `_STORAGE`, a private per-kind table of a frozen
+dataclass whose four fields carry real signatures rather than
+`Callable[..., object]`. One call convention changed: `before_parse` is
+handed the name it checks, the last addressing parameter, instead of a
+splatted identity tuple, which is what its one implementation reads.
+
+**The body builder.** `views.py` filled a `partial` onto all five
+descriptors at import and called it back through them.
+`views.entity_body` has taken a descriptor since #207, so the three call
+sites pass one directly.
+
+**The summary lines.** The five `_*_summary` functions stay in `cli.py`
+and the summary tree reaches them through `_SUMMARY`, an explicit
+mapping typed as what it holds.
+
+**The effect timing.** `notice` stays a descriptor fact, per the plan
+review's finding 7, and stops being filled: the three sentences move
+from `writes.py` to the registry, beside the kinds that name them, and
+each descriptor declares its own. `writes.py` re-exports them, because
+it is the module both write paths already import their vocabulary from,
+and keeps the two answers a kind cannot give on its own,
+`binding_notice` and `secret_notice`. The field is now required rather
+than `str | None`, since every commanded kind has an answer.
+
+**The routes.** Twenty-two routes were synthesized from `Endpoint`
+tuples: a factory that set `__name__`, `__doc__` and `__signature__` on
+a generated function out of data the registry carried only so it could
+hand it back to FastAPI. Every byte of that data is the committed
+OpenAPI document. Each route is now an ordinary decorated function with
+its own name, docstring, parameters, response model and problem
+statuses, in `_entity_reads` and `_entity_writes`. `Endpoint`, `Verb`,
+the six verb constants, `_METHOD`, `READS`, `WRITES`, `_entity_routes`,
+`_install`, `_path`, `_handler`, `_parameters`, `_act` and `_collection`
+are gone. No route helper was added: the explicit spellings share
+registration boilerplate and nothing else, which is the condition the
+plan set.
+
+**The verb hooks.** With the routes written out, `read`, `write` and
+`delete` had one consumer left, the CLI's break-glass paths. Those
+become one small function per kind calling `ConfigStore`'s typed method
+by name, reached through two explicit tables, so no `EntityAccess` layer
+was added (the plan review's finding 6).
+
+**The mechanism.** `fill()`, its `object.__setattr__`, the `Hook` alias
+and `fields_in_help` (zero consumers, on both tiers) are deleted.
+
+### Deviations from the plan
+
+Two, both small.
+
+1. **`before_parse` changed shape rather than moving unchanged.** The
+   plan said the four store-internal hooks move into a typed table. A
+   table whose entries carry real signatures cannot hold a check called
+   as `hook(*identity)` when identity is a tuple of unknown length, so
+   the one implementation is now `Callable[[str], None]` taking the name
+   and is called with `identity[-1]`. Behavior is unchanged for the one
+   kind that has one; what changed is that the type says what it takes.
+
+2. **The three notice sentences moved module.** The plan said `notice`
+   is declared inline like every other data fact. It could not be while
+   its strings lived in `writes.py`, which imports the registry, so
+   `RESTART_NOTICE`, `BINDING_NOTICE` and `MCP_RELOAD_NOTICE` moved to
+   `entities.py` and `writes.py` re-exports them. Nothing outside the
+   package changed its import, and no sentence changed a byte.
+
+### Discoveries
+
+**The OpenAPI document was byte-identical on the first regeneration.**
+The explicit routes reproduce the synthesis exactly because FastAPI
+derives `operationId` from the endpoint function's `__name__` and its
+path, `summary` from that name title-cased, and `description` from
+`inspect.cleandoc` of the docstring. Writing a real function with the
+same name and the same docstring text produces the same bytes, which is
+why the factory's three assignments existed at all. That is also the
+whole argument against the factory: it was carrying a document's prose
+as data in order to reconstitute a function that would produce the
+document.
+
+**The import-graph claim was never tested, and could not be.** The
+registry's docstring has always said it is readable on a machine with no
+database, no encryption key and no FastAPI. That was true of the import
+and false of the contents: four modules wrote to the descriptors at
+their own import, so what one held depended on what had been imported.
+The new test in `test_config_entities.py` imports the registry in a
+child interpreter that has loaded nothing else and holds two things
+against it, the loaded module set and the per-descriptor set of unset
+facts, the second compared against this process with all five consumers
+explicitly imported first. A planted `object.__setattr__` in `views.py`
+fails it.
+
+**`test_config_entities.py` had no hook expectations to lose.** The
+plan's brief expected some. The registry's own suite pinned data-fact
+relations only, and every one of them survives untouched.
+
+### The inventory, after M4
+
+`EntityDescriptor` carries **19 dataclass fields**, against 31 before:
+20 data facts, `secret_key`, and the `endpoints` tuple went, so the 11
+hooks plus `Endpoint` are the twelve that left. `fields_in_help` was a
+`ClassVar` on both tiers and is gone as well.
+
+**Zero `fill()` statements and zero installations**, against 27
+statements installing 49 values at import (44 callables and 5 notice
+strings; 45 keyword arguments statically, one of which was a loop body
+that ran five times). `store.py` had 16 statements, `writes.py` 5,
+`cli.py` 5, `views.py` 1.
+
+Line counts, before and after: `entities.py` 990 → 651, `api.py`
+2,067 → 2,202, `cli.py` 2,284 → 2,361, `writes.py` 195 → 147,
+`store.py` 2,160 → 2,160, `views.py` 456 → 456. The configuration
+package as a whole: 12,460 → 12,285. `api.py` gained 22 explicit entity
+routes (13 route decorators before, 35 after) and lost ten generation
+helpers; `entities.py` lost the 22 `Endpoint` literals that carried
+their prose.
+
+Import-order coupling: **none**. `api.py`, `cli.py`, `store.py`,
+`views.py` and `writes.py` no longer depend on each other having been
+imported for a descriptor to be whole, and importing the registry alone
+pulls in `vinga_server.config.models` and what that reaches, and none of
+the five.
+
+### Verification
+
+Run from `vinga-server/`, at the last commit of the milestone.
+
+- `uv run ruff check .`: all checks passed.
+- `uv run mypy`: success, no issues found in 3 source files. (The lane
+  is scoped to the events package; nothing in this milestone is in it.)
+- `uv run pytest tests/unit -q`: 2,638 passed, 16 skipped. (2,637 before
+  the milestone; the one added is the registry-wholeness test.)
+- `uv run pytest tests/integration -q`: 60 passed.
+- The four documentation drift checks, regenerated and diffed against
+  `../docs/reference/`: `config reference`, `conversations schema`,
+  `events reference` and `config openapi` are all clean.
+  `docs/reference/api-openapi.json` and `docs/reference/domain-config.md`
+  are **byte-identical**, which is this milestone's core proof, and
+  neither file is touched by any commit in it.
+- The response-byte, CLI-rendering, acknowledgement and reference-doc
+  suites pass unmodified: `test_api_openapi.py`,
+  `test_config_api_reads.py`, `test_config_api_writes.py`,
+  `test_config_cli_rendering.py`, `test_config_cli_local.py`,
+  `test_config_reads.py` and `test_config_docgen.py` are unchanged in
+  this milestone's diff. The only test file that changed is
+  `test_config_entities.py`, which gained a test and lost none.
+- The wholeness test was proved by mutation rather than trusted: an
+  `object.__setattr__` planted in `views.py` turns it red, and removing
+  it turns it green again.
+
+Not verified here, and not claimed: the container image and the smoke
+lane, for the reason M1 gives.
