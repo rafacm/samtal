@@ -179,6 +179,21 @@ def events_of(session: DeviceSession) -> SessionEvents:
     return session._events
 
 
+def attached_taps(session: DeviceSession) -> list[Any]:
+    """The consumers still attached to this session's events.
+
+    White-box in the read, and the asymmetry is deliberate on the
+    production side: `attach` and `detach` are public and a reader is
+    not, because nothing in the server asks who is listening. What the
+    suites using this claim is that a session which ended detached what
+    it attached, and a tap left behind is a consumer still being written
+    to after the store it writes into has stopped, which surfaces as a
+    failure in whatever runs next rather than in the session that
+    leaked it.
+    """
+    return list(events_of(session)._taps)
+
+
 def stamp_with(session: DeviceSession, clock: Any) -> None:
     """Make this session's events read a clock the test wrote.
 
@@ -249,7 +264,7 @@ async def open_session(
     raise AssertionError("the session never opened")
 
 
-def listening_in_realtime(session: DeviceSession) -> None:
+def listening_in(session: DeviceSession, mode: str) -> None:
     """A device that streams its microphone continuously.
 
     White-box, deliberately, and the last of this file's three. The mode
@@ -262,8 +277,14 @@ def listening_in_realtime(session: DeviceSession) -> None:
     are about, so a session left in the default mode would answer their
     question with the wrong policy rather than fail.
     """
-    session._listen_mode = "realtime"
+    session._listen_mode = mode
     session.listening = True
+
+
+def listening_in_realtime(session: DeviceSession) -> None:
+    """A device that streams its microphone continuously, which is what
+    most of these suites want."""
+    listening_in(session, "realtime")
 
 
 async def masked_session(config: Config, mac: str, scripts: dict[str, Any] | None = None):

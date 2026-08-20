@@ -353,6 +353,11 @@ def test_a_failed_writes_own_words_reach_no_record_or_consumer(
     assert capture is not None
 
     with caplog.at_level("DEBUG"):
+        # White-box, per the docstring: a real failed write raises what
+        # the filesystem, the wave module or a JSON encoder happens to
+        # raise, and what is under test is that whatever it holds does
+        # not reach the record. Planting the exception is what makes
+        # "whatever it holds" a value this test can hunt for.
         capture._disable(CaptureWrite.AUDIO, planted())
 
     failed = only(caplog, "capture_failed")

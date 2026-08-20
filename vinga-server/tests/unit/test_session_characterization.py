@@ -37,6 +37,7 @@ from tests.support.configs import BOTH_MAC, POET_MAC, POET_TONE, base_config, co
 from tests.support.events import events, only
 from tests.support.providers import ScriptedLlm, StallingLlm
 from tests.support.sessions import call, drive_reply, session_for, start_reply
+from tests.support.sockets import spoken
 from tests.support.wire import connect, send_pcm, shake_hands, speech_pcm
 from vinga_server.app import create_app
 from vinga_server.config import Config
@@ -328,7 +329,7 @@ async def test_a_chunk_too_short_to_fill_a_frame_leaves_the_filler_armed(
     played = only(caplog, "filler_played")
     assert played.agent == "poet"
     assert events(caplog, "filler_skipped") == []
-    assert session.runtime._turns[-1].content == f"{SHORT_SENTENCE.strip()} {TAIL_SENTENCE}"
+    assert spoken(socket) == [SHORT_SENTENCE.strip(), TAIL_SENTENCE]
 
 
 async def test_the_fillers_first_frame_stamps_and_attributes_speaking_started(
@@ -401,6 +402,11 @@ async def test_a_filler_sounding_never_sends_the_replys_packets(
         {"poet": PausingLlm(SHORT_SENTENCE, FILLER_DELAY_MS / 1000 * 3, TAIL_SENTENCE)},
         log=log,
     )
+    # White-box: what is pinned is the feed order into the one Opus
+    # encoder a session shares between the reply and the mask, and an
+    # encoder's feed order leaves no trace in the frames that come out
+    # of it. Wrapping the edge's own encoder is what makes the order
+    # observable; building a second one would observe a second order.
     session._encoder = cast(Any, RecordingEncoder(session._encoder, log))
     with caplog.at_level("INFO"):
         await drive_reply(session, UTTERANCE)
@@ -461,7 +467,7 @@ async def test_the_shutdown_waits_out_a_reply_that_is_still_generating(
     assert not session.runtime.replying()
     assert socket.frames, "the reply was cut off before it spoke"
     assert socket.closed is not None
-    assert session.runtime._turns[-1].content == "All done."
+    assert spoken(socket) == ["All done."]
 
 
 @pytest.mark.parametrize(

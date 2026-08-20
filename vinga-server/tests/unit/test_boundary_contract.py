@@ -30,7 +30,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from tests.support.boundary import FakeDevice, StubRuntime
 from tests.support.configs import DEVICE_MAC, config_with_agent
-from tests.support.sessions import device_session
+from tests.support.sessions import device_session, listening_in
 from tests.support.wire import connect, send_pcm, shake_hands, speech_pcm
 from vinga_server import __version__
 from vinga_server.app import create_app
@@ -339,6 +339,10 @@ async def test_an_interruption_cancels_the_reply_and_answers_the_new_one() -> No
         ("reply_started",),
     ]
     assert device.turn_ends == 2
+    # White-box: the history is what the next round is written against,
+    # and the only thing that reads it is a model. Driving a third round
+    # to see it would add a third reply to a scenario whose whole claim
+    # is what two of them did, so the shape is asserted where it is.
     assert [turn.role for turn in runtime._turns] == ["user", "user", "assistant"]
     assert not device.paused, "a manual stop needs no confirmation, so nothing was held"
 
@@ -356,7 +360,13 @@ async def test_the_end_of_a_user_turn_counts_as_activity() -> None:
     spoke and hang up on a live conversation."""
     for mode in ("realtime", "auto"):
         session = device_session(config_with_agent(), DEVICE_MAC)
-        session._listen_mode = mode
+        listening_in(session, mode)
+        # White-box for this line and the three reads below it: the idle
+        # watchdog's clock is a timestamp the edge keeps, and what it
+        # decides is whether a live conversation is hung up on after a
+        # configured silence. The public observation is waiting that
+        # silence out, so a test of "the mark moved" would be a test
+        # that sits through a timeout it did not move.
         session._mark_activity()
         before = session._last_activity
         assert before is not None
@@ -412,6 +422,11 @@ async def test_a_device_that_vanishes_mid_tool_call_reports_device_gone() -> Non
     transport's own exception to notice the device left."""
     socket = ScriptedMcpSocket()
     session = device_session(config_with_agent(), DEVICE_MAC, websocket=socket)
+    # White-box: the edge starts device discovery from inside `run`,
+    # after a hello this session never received, and what is under test
+    # is the transport underneath a discovered tool. Building the client
+    # over the session's own MCP send is what `_start_device_discovery`
+    # does, minus the handshake that is not the subject.
     session._device_tools = DeviceToolClient(
         session._send_mcp, "contract", "vinga-server", __version__
     )

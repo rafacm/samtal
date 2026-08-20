@@ -192,6 +192,11 @@ def test_a_capture_cut_off_mid_session_is_still_readable(tmp_path: Path) -> None
     # The pod goes: the descriptors are gone and nothing patches the
     # header. Whatever reached the file is all there is, which is why
     # the writer flushes as it goes rather than buffering.
+    # White-box for both files this capture holds: the failure under
+    # test is the process going away with its descriptors, which is what
+    # leaves a stale WAV header behind, and no public call closes a file
+    # without also finishing the recording properly. Closing them out
+    # from under the writer is the pod being killed.
     capture._wav.close()  # type: ignore[union-attr]
     capture._events.close()  # type: ignore[union-attr]
 
@@ -262,6 +267,8 @@ def test_a_write_that_fails_does_not_take_the_session_with_it(tmp_path: Path) ->
     opened = time.monotonic()
     capture = store(tmp_path).open("s1", opened, MANIFEST)
     assert capture is not None
+    # White-box, same reason: a write that fails needs a file that
+    # cannot be written to, and nothing public makes one.
     capture._wav.close()  # type: ignore[union-attr]
     # No exception: a conversation is worth more than a recording of it.
     capture.microphone(tone(100), opened)

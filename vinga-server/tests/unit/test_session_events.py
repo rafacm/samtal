@@ -12,7 +12,6 @@ did not change when the fields arrived.
 
 import asyncio
 import json
-from dataclasses import replace
 from typing import Any, cast
 
 import pytest
@@ -29,7 +28,14 @@ from tests.support.configs import (
 )
 from tests.support.events import events, only
 from tests.support.providers import ScriptedLlm
-from tests.support.sessions import _nothing, call, reply_with, run_reply, session_for
+from tests.support.sessions import (
+    _nothing,
+    call,
+    drive_reply,
+    reply_with,
+    run_reply,
+    session_for,
+)
 from tests.support.wire import connect, say_something, shake_hands
 from vinga_server.app import create_app
 from vinga_server.build_info import REVISION_ENV, revision
@@ -189,6 +195,11 @@ async def test_a_reply_starts_speaking_only_once(
     session.websocket = cast(Any, Sink())
     with caplog.at_level("INFO"):
         await session.send_audio(PlayableAudio([b"frame"]))
+        # White-box: a new reply restarts the pacing clock, and what is
+        # under test is that the event still fires once for the reply
+        # rather than once per restart. The public restart is a whole
+        # second reply, which would fire the event legitimately and
+        # prove nothing about the one under way.
         session._pace_start = None
         await session.send_audio(PlayableAudio([b"frame"]))
 
@@ -226,10 +237,8 @@ async def test_the_session_hands_a_locked_language_back_as_a_hint(
         async def send_text(self, text: str) -> None:
             return None
 
-    session = session_for(base_config(), BOTH_MAC)
-    assert session.runtime._providers is not None
     asr = LockingAsr()
-    session.runtime._providers = replace(session.runtime._providers, asr=asr)
+    session = session_for(base_config(), BOTH_MAC, stages={"asr": cast(Any, asr)})
     session.websocket = cast(Any, TextSink())
 
     async def speak(synthesis: Any, resampler: Any, into: list[str]) -> None:
@@ -238,12 +247,16 @@ async def test_the_session_hands_a_locked_language_back_as_a_hint(
         synthesis.cancel()
         into.append(synthesis.sentence)
 
+    # White-box: the audio is skipped so that two whole replies run at
+    # the speed of their scripts. What is under test is the language
+    # lock crossing between them, and a reply that really speaks would
+    # make this a test about pacing.
     session.runtime._speak = speak  # type: ignore[method-assign]
     session.send_audio = _nothing  # type: ignore[method-assign]
 
     with caplog.at_level("INFO"):
-        await session.runtime._reply(b"\x00\x00" * 320)
-        await session.runtime._reply(b"\x00\x00" * 320)
+        await drive_reply(session, b"\x00\x00" * 320)
+        await drive_reply(session, b"\x00\x00" * 320)
 
     assert asr.hints == [None, "es"]
     first, second = events(caplog, "heard")
@@ -401,7 +414,7 @@ async def test_the_device_is_told_speech_starts_only_when_it_does() -> None:
     session = session_for(base_config(), POET_MAC, {"poet": cast(Any, Thinking([]))})
     session.websocket = cast(Any, Recorder())
     session.send_audio = _nothing  # type: ignore[method-assign]
-    await session.runtime._reply(b"\x00\x00" * 320)
+    await drive_reply(session, b"\x00\x00" * 320)
 
     assert order.index("model thinking") < order.index("tts start")
     assert order.index("first token") < order.index("tts start")
