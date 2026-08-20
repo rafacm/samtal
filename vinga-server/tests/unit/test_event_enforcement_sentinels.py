@@ -654,3 +654,81 @@ def test_forgiving_recovers_a_misplaced_value_without_repeating_it(
     assert SENTINEL not in consumer.rendered()
     assert SENTINEL not in repr(capture.payloads)
     assert capture.payloads, "the capture recorded nothing, so this proves nothing"
+
+
+# --- and the one report that is not about a construction --------------
+#
+# A tap that raises is reported on the emitter's own channel, and that
+# report used to name the exception's class. PR #217's review found the
+# hole and parked the fix here: a class name looks like the safest
+# string in Python, and `type(name, (Exception,), {})` accepts any
+# string as one. A tap is by definition code this module does not own,
+# and an exporter holding whatever a far side answered it with can raise
+# an exception whose NAME is those bytes.
+
+
+class Hostile:
+    """A consumer that fails with an exception built out of the bytes it
+    was holding, which is what a real exporter's failure looks like when
+    the far side chose them."""
+
+    def emit(self, emission: Emission) -> None:
+        raise type(SENTINEL, (Exception,), {})()
+
+
+def test_a_failing_taps_exception_names_nothing_at_all(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """By equality on the report's own `args`, so the claim is what the
+    line says rather than that one spelling is missing from it. The
+    tap's class name survives and the exception's does not, which is the
+    asymmetry: a tap is an object this server's composition attached,
+    and which consumer is broken is the whole of what makes the line
+    actionable."""
+    events.set_enforcement(events.STRICT)
+    hostile = Hostile()
+    attach_server_tap(hostile)
+
+    try:
+        with caplog.at_level("DEBUG"):
+            ServerEvents(CHANNEL).emit(
+                lambda: CheckedIn(device=DeviceId(DEVICE), board=BoardName("board"))
+            )
+    finally:
+        detach_server_tap(hostile)
+
+    (report,) = [one for one in caplog.records if not hasattr(one, "event")]
+    assert report.args == ("Hostile",)
+    assert report.getMessage() == "an event tap (Hostile) failed and was skipped"
+    assert SENTINEL not in both_formats(caplog)
+
+
+def test_a_failing_log_taps_exception_names_nothing_either(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The sharpest case, since the report goes back onto the channel
+    that just failed: the emission still reaches the taps ahead of the
+    log, and nothing the broken handler raised is written anywhere."""
+
+    class HostileHandler(logging.Handler):
+        def handle(self, record: logging.LogRecord) -> bool:
+            raise type(SENTINEL, (Exception,), {})()
+
+    events.set_enforcement(events.STRICT)
+    channel = logging.getLogger(CHANNEL)
+    handler = HostileHandler()
+    channel.addHandler(handler)
+    consumer = Tap()
+    attach_server_tap(consumer)
+
+    try:
+        ServerEvents(CHANNEL).emit(
+            lambda: CheckedIn(device=DeviceId(DEVICE), board=BoardName("board"))
+        )
+    finally:
+        channel.removeHandler(handler)
+        detach_server_tap(consumer)
+
+    assert consumer.seen[0].payload["event"] == "checked"
+    assert SENTINEL not in consumer.rendered()
+    assert SENTINEL not in both_formats(caplog)

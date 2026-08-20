@@ -380,7 +380,10 @@ def test_the_tap_failure_is_a_plain_sentence_and_not_an_event(
     (report,) = [record for record in caplog.records if not hasattr(record, "event")]
     assert report.name == SESSION_LOGGER
     assert report.levelno == logging.WARNING
-    assert "Broken" in report.getMessage() and "RuntimeError" in report.getMessage()
+    # The tap's own class name and nothing else. What the tap raised is
+    # deliberately unsaid: the sentinel suite drives that half.
+    assert report.args == ("Broken",)
+    assert report.getMessage() == "an event tap (Broken) failed and was skipped"
     assert payload_of(report) == {}
 
 
