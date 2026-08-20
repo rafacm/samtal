@@ -255,10 +255,13 @@ class EntityDescriptor(DocumentedShape):
     table: str | None = None
 
     # Which of this kind's key names carry a credential, asked at every
-    # depth of an entry the display path walks. Data rather than a hook,
-    # and one rule per kind rather than one per surface: it is the same
-    # predicate the models refuse an inline value under, so what a write
-    # rejects and what a read masks cannot come to disagree.
+    # depth of an entry the display path walks. The one field here whose
+    # value is a function, and it earns it: this is a rule about names,
+    # declared in the entry beside the kind it is true of, not behavior
+    # a surface installs. One rule per kind rather than one per surface,
+    # and it is the same predicate the models refuse an inline value
+    # under, so what a write rejects and what a read masks cannot come
+    # to disagree.
     #
     # The wider reading is the default, because a kind that has not
     # thought about the question should mask more rather than less: it
@@ -272,9 +275,9 @@ class EntityDescriptor(DocumentedShape):
     # The refusal for an entry that is not there, used by the read, the
     # delete and the slot check. One fixed sentence naming the section,
     # never built from what was addressed (see the constants above). A
-    # string rather than a hook, because nothing about the answer depends
-    # on the request any more; the singleton has no missing case, and
-    # says so by carrying none.
+    # string rather than anything computed at the request, because
+    # nothing about the answer depends on the request any more; the
+    # singleton has no missing case, and says so by carrying none.
     missing: str | None = None
 
     # When a write of this kind takes effect, which is one sentence per
