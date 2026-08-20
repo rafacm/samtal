@@ -369,7 +369,13 @@ def _bad_request(message: OtaRefusal) -> JSONResponse:
     interpolated into either channel, which is what keeps a header this
     endpoint could not read out of the log a deployment ships.
     """
-    events.warning("rejected OTA request: %s", message, event="ota_request_rejected")
+    # `str(...)` because the argument reaches every tap as the object
+    # itself: a member of the closed set is a `str` subclass, and a
+    # consumer that met one where it has always met a plain string would
+    # be reading a change nobody made on purpose.
+    events.warning(
+        "rejected OTA request: %s", str(message), event="ota_request_rejected"
+    )
     return JSONResponse({"error": message}, status_code=400)
 
 

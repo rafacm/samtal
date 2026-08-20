@@ -1253,7 +1253,7 @@
       "level": 30,
       "template": "rejected OTA request: %s",
       "argument_types": [
-        "OtaRefusal"
+        "str"
       ],
       "fields": [
         "event"
