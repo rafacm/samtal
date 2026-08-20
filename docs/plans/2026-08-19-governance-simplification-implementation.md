@@ -643,10 +643,11 @@ given above.
 
 ### What was done
 
-Eleven commits, in the order the pin-before-reshaping lens forces: the
+Thirteen commits, in the order the pin-before-reshaping lens forces: the
 vocabulary, the declarations, the baseline, one correction, the
-conversion, then the four deletions and the two obligations that outlive
-them.
+conversion, then the four deletions, the two obligations that outlive
+them, the prose that had to stop describing a module that is gone, and
+this section's own arithmetic.
 
 **The vocabulary.** `events/values.py` gains what the remaining
 thirty-three events are written in: a Device-Id header as the firmware
@@ -708,7 +709,7 @@ by some driver's run, proved by mutation.
 Five, each with its reason.
 
 1. **The production line count is not "roughly half of 4,287"; it is
-   6,207.** The plan's expectation was that the catalog, the vocabulary,
+   6,203.** The plan's expectation was that the catalog, the vocabulary,
    the emitters and the generator would land at roughly half of the
    registry-era machinery. They did not, and the reason is legible in
    the diff rather than hidden in it: about nine hundred lines of the old
@@ -791,8 +792,8 @@ looked at and left.
 
 ### The inventory, after M3
 
-Production event machinery: 6,207 lines
-(`events/__init__.py` 905, `events/values.py` 1,554,
+Production event machinery: 6,203 lines
+(`events/__init__.py` 900, `events/values.py` 1,555,
 `events/catalog.py` 3,062, `events_docgen.py` 545, `events_cli.py` 141),
 against 6,273 after M2 and 4,287 before the plan. `events_schema.py` is
 gone. Deviation 1 above says why the plan's halving did not happen and
