@@ -1563,15 +1563,19 @@ def _acknowledged(acknowledgement: Mapping[str, object]) -> None:
 # are written beside each other and cannot come to describe one act
 # differently, which is the class of drift #134 was.
 #
-# The five commanded kinds' rows are not written out per kind. Where a
-# kind is on the API, what addresses one entry of it, which section it
-# occupies in the configuration document, what a delete of one answers
-# and when that takes effect are facts of its descriptor, filled by the
-# modules that own them, and the builders below turn them into rows.
-# What is written by hand is what a descriptor does not describe: the
-# devices and the default agent are settings written with their own
-# verbs, and the secret slots are addressed under an entity rather than
-# as one.
+# The five commanded kinds' rows are half built and half written out,
+# split along what a kind is against what a kind does. Where a kind is
+# on the API, what addresses one entry of it, which section it occupies
+# in the configuration document and when a write of it takes effect are
+# data on its descriptor, and the builders below read them straight off
+# it. What a break-glass act does is not: it is a named `ConfigStore`
+# method and a named sentence from `writes.py`, so those rows are
+# written out one per kind and reached through the two tables above.
+#
+# What is written entirely by hand is what a descriptor does not
+# describe at all: the devices and the default agent are settings
+# written with their own verbs, and the secret slots are addressed under
+# an entity rather than as one.
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -1609,10 +1613,12 @@ class Act:
 def _act(args: argparse.Namespace) -> None:
     """One act, run whichever way it was reached.
 
-    The acknowledgement and the notice come from here either way: over
-    HTTP they are what the API answered, and locally they are what the
-    kind's descriptor says the API answers for that act, printed by the
-    same renderer.
+    The acknowledgement and the notice reach the same renderer either
+    way. Over HTTP they are what the API answered. Locally they are
+    built by the act's own `local`, from the two homes the API's route
+    builds its answer from: the sentence is `writes.py`'s, and the
+    timing is the kind's `notice`, which is a descriptor fact because it
+    is about what was written rather than about the path that wrote it.
     """
     act: Act = args.act
     if args.local:
