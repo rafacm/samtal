@@ -245,12 +245,24 @@ configuration's.
 Run from `vinga-server/`, at the last commit of the milestone.
 
 - `uv run ruff check .`: all checks passed.
-- `uv run pytest tests/unit -q`: recorded below with the counts.
-- `uv run pytest tests/integration -q`: recorded below with the counts.
+- `uv run mypy`: success, no issues found in 3 source files. Its scope is
+  the events package, which this milestone does not touch.
+- `uv run pytest tests/unit -q`: 2,735 passed, 16 skipped. (2,692 at the
+  end of #193's review round; the 43 new cases are the holder's 7, the
+  secret derivation's 5, the apply's 19, snapshot mode's 5, and the
+  seven added to existing suites for the nested-section equality, the
+  reload's own 409 description, the snapshot refusal at the route, the
+  fragment kind's regime, the include half of an agent entry, and the
+  barrier position between an apply's two swaps.)
+- `uv run pytest tests/integration -q`: 61 passed, the same count as
+  #193 left: the two cases this milestone changes were already there and
+  were rewritten rather than added to.
 - The four documentation drift checks, regenerated and diffed against
-  `../docs/reference/`: `api-openapi.json` and `domain-config.md` change
-  deliberately and are committed in this milestone; `events.md` and
-  `conversations-schema.md` are byte-untouched.
+  `../docs/reference/`: all four clean. `api-openapi.json` and
+  `domain-config.md` change deliberately and are committed in this
+  milestone; `events.md` and `conversations-schema.md` are byte-untouched
+  and are absent from this milestone's commits, which is what says no
+  event and no conversation column moved.
 
 Not verified here, and not claimed: the container image, the smoke lane,
 and anything against a real device, none of which this milestone
