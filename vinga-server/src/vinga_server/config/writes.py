@@ -17,18 +17,24 @@ act differently.
 
 from collections.abc import Sequence
 
-from vinga_server.config.entities import BINDING_NOTICE, MCP_RELOAD_NOTICE, RESTART_NOTICE
+from vinga_server.config.entities import (
+    AGENT_NOTICE,
+    BINDING_NOTICE,
+    RELOAD_NOTICE,
+    RESTART_NOTICE,
+    SNAPSHOT_NOTICE,
+)
 from vinga_server.config.secrets import EntityKind
 
-# The three sentences a write can end with are declared on the registry,
+# The sentences a write can end with are declared on the registry,
 # beside the kinds that name them, and re-exported here because this is
 # the module both write paths already import their vocabulary from. What
 # is written here is the choosing: the two answers that depend on
 # something a kind cannot know on its own.
 
 
-def binding_notice(unloaded: Sequence[str] = ()) -> str:
-    """When a device write takes effect, which depends on one thing.
+def binding_notice(unloaded: Sequence[str] = (), snapshot_only: bool = False) -> str:
+    """When a device write takes effect, which depends on two things.
 
     The binding itself is live. The agent it names is not: a server
     builds an agent's providers at boot, so a binding to an agent
@@ -36,7 +42,17 @@ def binding_notice(unloaded: Sequence[str] = ()) -> str:
     "no restart is needed" there would be a promise the device cannot
     keep. `unloaded` is the names this server has not loaded, empty when
     every one of them is loaded and the write is live.
+
+    `snapshot_only` is the server that reads no store at all, and it
+    answers before either of those: what is live about a binding is that
+    a running server re-reads the rows, and a server serving a
+    configuration it was handed re-reads nothing. The one true thing
+    left to say is that the write is stored, which is what the sentence
+    says. Written here rather than at the two call sites because this is
+    already where a device write's answer is decided.
     """
+    if snapshot_only:
+        return SNAPSHOT_NOTICE
     return RESTART_NOTICE if unloaded else BINDING_NOTICE
 
 
@@ -51,7 +67,7 @@ def secret_notice(kind: EntityKind) -> str:
     two per kind, each statically one of these sentences; one CLI
     command covers both kinds, so it asks here.
     """
-    return MCP_RELOAD_NOTICE if kind == "mcp_server" else RESTART_NOTICE
+    return RELOAD_NOTICE if kind == "mcp_server" else RESTART_NOTICE
 
 
 def wrote_provider(stage: str, name: str) -> str:
@@ -123,10 +139,12 @@ CLEARED_DEFAULT_AGENT = "default agent cleared; the devices map is now the allow
 
 
 __all__ = [
+    "AGENT_NOTICE",
     "BINDING_NOTICE",
     "CLEARED_DEFAULT_AGENT",
-    "MCP_RELOAD_NOTICE",
+    "RELOAD_NOTICE",
     "RESTART_NOTICE",
+    "SNAPSHOT_NOTICE",
     "WROTE_AGENT_DEFAULTS",
     "binding_notice",
     "bound_device",

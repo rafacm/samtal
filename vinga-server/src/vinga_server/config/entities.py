@@ -106,7 +106,7 @@ NO_SUCH_AGENT = "agents: no agent of that name exists"
 NO_SUCH_DEVICE = "devices: no device with that MAC is bound"
 
 
-# When a write takes effect. Three sentences, because there are three
+# When a write takes effect. Five sentences, because there are five
 # answers, and each is a fact of what was written rather than of the
 # route or the command that wrote it: the descriptors below name one
 # each, `writes.py` chooses between them where the answer depends on
@@ -114,9 +114,9 @@ NO_SUCH_DEVICE = "devices: no device with that MAC is bound"
 # came back.
 
 # Printed after most mutating commands, and answered with most
-# successful writes over HTTP. The configuration is a boot-time snapshot
-# by design, and a write that quietly waits for a restart is the one
-# thing about that design an operator can be caught by, so the write
+# successful writes over HTTP. Most of the configuration is read once at
+# start by design, and a write that quietly waits for a restart is the
+# one thing about that design an operator can be caught by, so the write
 # itself says when it takes effect.
 RESTART_NOTICE = (
     "This applies at the next server start: the configuration is read once at boot."
@@ -132,16 +132,42 @@ BINDING_NOTICE = (
 )
 
 # The second, and unlike the first it is asked for rather than noticed:
-# a running server re-reads the MCP entries, the secrets stored on them
-# and the agents' grant lists when the reload asks it to. Written on the
-# writes that the reload actually applies and nowhere else, because a
-# notice that is right about one field of a fragment and wrong about the
-# rest is worse than the conservative sentence.
-MCP_RELOAD_NOTICE = (
+# a running server re-reads the stored configuration and applies what it
+# can apply while it runs when the reload asks it to. Written on the
+# kinds the reload applies whole and nowhere else, because a notice that
+# is right about one field of a fragment and wrong about the rest is
+# worse than the conservative sentence; the kind whose fields fall on
+# both sides of that line says so itself, below.
+RELOAD_NOTICE = (
     "This applies when the running server is asked to reload: run "
-    "`vinga-server config reload`, which re-reads the MCP servers and the agents' "
-    "grant lists and applies them without a restart and without dropping a "
-    "conversation."
+    "`vinga-server config reload`, which re-reads the stored configuration and applies "
+    "it without a restart and without dropping a conversation."
+)
+
+# The third, for the one kind whose fields are not all in one regime. An
+# agent's prompt and the fragments it includes are assembled at an
+# activation, so a reload puts them in front of the next one; its
+# provider overrides and its filler section are built at boot and wait
+# for the next start. Both halves are stated, because a write that
+# carried either sentence alone would be exactly right about part of
+# what was just written and exactly wrong about the rest.
+AGENT_NOTICE = (
+    "This applies in two parts. The `prompt` and `prompt_includes` fields apply when the "
+    "running server is asked to reload, at each conversation's next activation: run "
+    "`vinga-server config reload`. Everything else about the agent, and the agent itself "
+    "if it is new, applies at the next server start, because that is when its providers "
+    "are built."
+)
+
+# The fourth, for a server that was handed its configuration rather than
+# reading one: the test lane's shape and an embedded caller's. Nothing
+# this process serves reads the store these writes land in, so neither
+# of the two live sentences above is true of them, and the one thing
+# that is true is that the write is stored.
+SNAPSHOT_NOTICE = (
+    "This is stored and takes effect when a server starts from this store: the server "
+    "answering this request serves a configuration it was given rather than one it read "
+    "from a store, so nothing it is running reads what was just written."
 )
 
 
@@ -389,7 +415,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         table="mcp_servers",
         secret_slots="mcp_server",
         missing=NO_SUCH_MCP_SERVER,
-        notice=MCP_RELOAD_NOTICE,
+        notice=RELOAD_NOTICE,
     ),
     EntityDescriptor(
         name="prompt-fragment",
@@ -425,7 +451,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         moved_key="prompt_fragments",
         table="prompt_fragments",
         missing=NO_SUCH_FRAGMENT,
-        notice=RESTART_NOTICE,
+        notice=RELOAD_NOTICE,
     ),
     EntityDescriptor(
         name="agent",
@@ -455,7 +481,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         moved_key="agents",
         table="agents",
         missing=NO_SUCH_AGENT,
-        notice=RESTART_NOTICE,
+        notice=AGENT_NOTICE,
     ),
     EntityDescriptor(
         name="agent-defaults",
@@ -628,12 +654,12 @@ def always_shown(model: type[BaseModel]) -> tuple[str, ...]:
 
 
 __all__ = [
+    "AGENT_NOTICE",
     "API_OPTIONS_NOTE",
     "BINDING_NOTICE",
     "CONFIG_FILE",
     "ENTITIES",
     "EXAMPLES",
-    "MCP_RELOAD_NOTICE",
     "NESTED",
     "NO_SUCH_AGENT",
     "NO_SUCH_DEVICE",
@@ -641,8 +667,10 @@ __all__ = [
     "NO_SUCH_MCP_SERVER",
     "NO_SUCH_PROVIDER",
     "OPTIONS_NOTE",
+    "RELOAD_NOTICE",
     "RESTART_NOTICE",
     "SETTINGS",
+    "SNAPSHOT_NOTICE",
     "DocumentedShape",
     "EntityDescriptor",
     "NestedShape",

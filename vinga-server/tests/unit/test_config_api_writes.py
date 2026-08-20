@@ -47,8 +47,9 @@ from vinga_server.config.store import (
     ConfigStore,
 )
 from vinga_server.config.writes import (
+    AGENT_NOTICE,
     BINDING_NOTICE,
-    MCP_RELOAD_NOTICE,
+    RELOAD_NOTICE,
     RESTART_NOTICE,
 )
 from vinga_server.db import DATABASE_FILENAME, open_database
@@ -182,16 +183,19 @@ def test_a_write_says_what_it_did_and_when_it_applies(
 
 
 def _expected_notice(method: str, path: str) -> str:
-    """Which of the three sentences a write carries, by what it wrote.
+    """Which of the sentences a write carries, by what it wrote.
 
     The default is the boot-time snapshot one; the exceptions are the
-    default agent, which the running server re-reads, and the MCP
-    entries, which a reload applies.
+    default agent, which the running server re-reads, the MCP entries
+    and the prompt fragments, which a reload applies whole, and the
+    agents, whose fields fall on both sides of that line.
     """
     if (method, path) == ("delete", "/default-agent"):
         return BINDING_NOTICE
-    if path.startswith("/mcp-servers/"):
-        return MCP_RELOAD_NOTICE
+    if path.startswith(("/mcp-servers/", "/prompt-fragments/")):
+        return RELOAD_NOTICE
+    if path.startswith("/agents/"):
+        return AGENT_NOTICE
     return RESTART_NOTICE
 
 
@@ -293,21 +297,31 @@ def test_the_default_agent_notice_is_about_the_row_too(
 
 
 def test_everything_else_still_waits_for_a_restart(serving_client: TestClient) -> None:
-    """The exception is device bindings, and the loaded agents do not
-    widen it: writing the agent itself is still a boot-time change."""
+    """The exceptions are device bindings and the fields a reload
+    applies, and the loaded agents do not widen either: writing an
+    agent's providers is still a boot-time change, and the sentence the
+    write carries says so beside the half that is not."""
     _pipeline(serving_client)
 
     answer = serving_client.put("/agents/sam", json={"prompt": "You are Sam still."})
 
-    assert answer.json()["notice"] == RESTART_NOTICE
+    assert answer.json()["notice"] == AGENT_NOTICE
+    # Both halves said, because both are true of what was just written:
+    # the prompt reaches the next activation of a reloaded server, and
+    # everything else about the agent waits for the start that builds
+    # its providers.
+    assert "prompt_includes" in AGENT_NOTICE
+    assert "next server start" in AGENT_NOTICE
 
 
 # The third sentence: what a reload applies
 #
 # Every mutation of an MCP entry, its stored secrets included, since
 # rotation is exactly what the ciphertext half of the reload's diff
-# applies. And nothing else, since a reload re-reads the entries and the
-# grant lists and no other part of a configuration.
+# applies, and every mutation of a prompt fragment, whose text a reload
+# puts in front of the next activation of every agent that includes it.
+# And nothing else whole: a provider is built at boot, and an agent
+# entry is the one kind whose fields fall on both sides of the line.
 
 
 MCP_MUTATIONS = [
@@ -315,12 +329,14 @@ MCP_MUTATIONS = [
     ("put", "/mcp-servers/weather/secrets/headers.Authorization", {"secret": "a-token"}),
     ("delete", "/mcp-servers/weather/secrets/headers.Authorization", None),
     ("delete", "/mcp-servers/weather", None),
+    ("put", "/prompt-fragments/house", {"text": "The house is quiet."}),
+    ("delete", "/prompt-fragments/house", None),
 ]
 
 
 @pytest.mark.usefixtures("store")
 @pytest.mark.parametrize(("method", "path", "body"), MCP_MUTATIONS)
-def test_every_mcp_mutation_names_the_reload(
+def test_every_mutation_a_reload_applies_names_the_reload(
     serving_client: TestClient, method: str, path: str, body: object
 ) -> None:
     _pipeline(serving_client)
@@ -329,18 +345,18 @@ def test_every_mcp_mutation_names_the_reload(
         serving_client.put(
             "/mcp-servers/weather/secrets/headers.Authorization", json={"secret": "a-token"}
         )
+        serving_client.put("/prompt-fragments/house", json={"text": "The house is quiet."})
 
     answer = serving_client.request(method.upper(), path, json=body)
 
     assert answer.status_code == 200, answer.text
-    assert answer.json()["notice"] == MCP_RELOAD_NOTICE
+    assert answer.json()["notice"] == RELOAD_NOTICE
 
 
 PROVIDER_MUTATIONS = [
     ("put", "/providers/llm/claude", {"type": "anthropic", "model": "m"}),
     ("put", "/providers/llm/claude/secrets/api_key", {"secret": "a-key"}),
     ("delete", "/providers/llm/claude/secrets/api_key", None),
-    ("put", "/agents/sam", {"prompt": "You are Sam."}),
     ("put", "/agent-defaults", {"llm": "claude", "asr": "whisper"}),
 ]
 
@@ -351,10 +367,10 @@ def test_the_writes_a_reload_does_not_apply_still_name_the_restart(
     serving_client: TestClient, method: str, path: str, body: object
 ) -> None:
     """A provider is built at boot and a credential of one is read then,
-    so neither is reloadable. An agent fragment mixes the two: its `mcp`
-    list is what a reload applies and its prompt, providers and filler
-    are not, and a notice right about one field and wrong about the rest
-    is worse than the conservative one."""
+    so neither is reloadable, and `agent_defaults` is what the effective
+    values every agent inherits are read through, which a reload
+    deliberately does not move. The one kind whose fields fall on both
+    sides of the line is the agent, and it says both, below."""
     _pipeline(serving_client)
     if method == "delete":
         serving_client.put("/providers/llm/claude/secrets/api_key", json={"secret": "a-key"})
@@ -912,7 +928,7 @@ def test_a_fragment_is_written_and_read_back_byte_for_byte(
     assert written.status_code == 200, written.text
     assert written.json() == {
         "wrote": "prompt-fragment household",
-        "notice": RESTART_NOTICE,
+        "notice": RELOAD_NOTICE,
     }
     assert client.get("/prompt-fragments/household").json() == {
         "entity": {"text": FRAGMENT},
@@ -939,7 +955,7 @@ def test_a_fragment_is_deleted_unless_something_includes_it(
 
     assert gone.json() == {
         "wrote": "prompt-fragment household deleted",
-        "notice": RESTART_NOTICE,
+        "notice": RELOAD_NOTICE,
     }
     assert client.get("/prompt-fragments/household").status_code == 404
 

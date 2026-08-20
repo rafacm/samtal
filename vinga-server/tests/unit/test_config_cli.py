@@ -50,7 +50,7 @@ from vinga_server.config.entities import (
     NO_SUCH_PROVIDER,
 )
 from vinga_server.config.store import NOT_A_STAGE
-from vinga_server.config.writes import BINDING_NOTICE
+from vinga_server.config.writes import BINDING_NOTICE, RELOAD_NOTICE
 from vinga_server.db import open_database, schema
 
 
@@ -129,14 +129,18 @@ def test_a_missing_fragment_file_is_named(run, capsys: pytest.CaptureFixture[str
 def test_every_mutating_command_says_when_the_write_applies(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The configuration is a boot-time snapshot by design, which makes
-    a write that quietly waits for a restart the one thing about that
-    design an operator can be caught by."""
+    """Most of the configuration is read once at start, which makes a
+    write that quietly waits for a restart the one thing about that
+    design an operator can be caught by.
+
+    The agent is the kind whose fields fall on both sides of the line,
+    so its answer says both halves, and what this asserts of it is the
+    half that is still the restart."""
     run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
     assert cli.RESTART_NOTICE in capsys.readouterr().err
 
     run("set", "agent", "sam", "-f", "-", stdin="llm: claude\n")
-    assert cli.RESTART_NOTICE in capsys.readouterr().err
+    assert "at the next server start" in capsys.readouterr().err
 
     run("set-default-agent", "sam")
     assert cli.RESTART_NOTICE in capsys.readouterr().err
@@ -182,7 +186,9 @@ def test_a_prompt_fragment_is_written_shown_and_listed(
     assert run("set", "prompt-fragment", "household", "-f", "-", stdin=FRAGMENT_INPUT) == 0
     written = capsys.readouterr()
     assert written.out == "wrote prompt-fragment household\n"
-    assert cli.RESTART_NOTICE in written.err
+    # A fragment is prompt text, which a reload puts in front of the
+    # next activation of every agent that includes it.
+    assert RELOAD_NOTICE in written.err
 
     assert run("show", "prompt-fragment", "household") == 0
     assert _document(capsys.readouterr().out) == {"text": FRAGMENT_TEXT}
