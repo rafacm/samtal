@@ -690,6 +690,11 @@ promises.** The vocabulary needs a closed third outcome for an
 agent whose synthesis failed, with the generation still applying,
 the CLI rendering it, and the response tested directly.
 
+*Resolution.* Adopted. The result vocabulary is a closed
+three-outcome set whose third member means the generation applied
+with no clip for that agent, the CLI renders it, and the M2 test
+bullet asserts the response body and the rendering directly.
+
 **9 (P2). The #195 resolution retains a falsely-live write path
 in snapshot mode.** With no engine, a device-binding or
 default-agent write can still acknowledge next-check-in
