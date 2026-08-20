@@ -481,9 +481,21 @@ REPLY_TIMEOUT_S = 30.0
 
 
 async def wait_for_reply(session: DeviceSession) -> None:
-    """Wait out the reply in flight, the way the shutdown waits one out.
-    Public throughout: `drain` is what the edge itself asks."""
+    """Wait out the reply in flight, and let whatever happened inside it
+    reach the caller.
+
+    `drain` is the bound and nothing else. Its contract is that a reply
+    which failed is a reply which finished, deliberately, because that
+    is what the edge needs to know; so it answers True for a task
+    holding an exception, and a suite that waited through it alone would
+    walk past a failure that arrived late. The task is awaited after it,
+    which is the line that raises. Held before the wait rather than
+    after, because a barge-in landing in between replaces it.
+    """
+    reply = reply_in_flight(session)
+    assert reply is not None, "no reply was in flight to wait for"
     assert await session.runtime.drain(REPLY_TIMEOUT_S), "the reply never finished"
+    await reply
 
 
 def start_reply(session: DeviceSession, pcm: bytes, result: Any = None) -> None:
@@ -494,8 +506,8 @@ def start_reply(session: DeviceSession, pcm: bytes, result: Any = None) -> None:
     The runtime's own public entry point, named here so that the suites
     driving a reply name it in one place. `result` is a transcription
     that already exists, which is what a confirmed barge-in hands it.
-    Whether the reply has finished is `replying()`; waiting for it is
-    `drain()`."""
+    Whether the reply has finished is `replying()`; waiting for it out
+    is `wait_for_reply` above, which raises what it was holding."""
     session.runtime.start_reply(pcm, result)
 
 
