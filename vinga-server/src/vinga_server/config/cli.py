@@ -1343,12 +1343,14 @@ def _summary(document: Mapping[str, object]) -> str:
 
 # How one entry of each kind reads in that tree, after its name: which
 # engine a provider is, how an MCP server is reached, what a fragment
-# costs, what an agent overrides. A fact of the kind, so the descriptor
-# carries it and the tree above asks rather than knowing five answers.
+# costs, what an agent overrides. Five answers to one question, so the
+# tree above asks by kind rather than knowing them, and the table that
+# answers is at the foot of this group: it is read here and written here,
+# which is the whole of what a per-kind mapping has to be.
 
 
 def _summarized(kind: str, body: Mapping[str, object]) -> str:
-    return str(entities.descriptor(kind).summary(body))
+    return _SUMMARY[kind](body)
 
 
 def _provider_summary(body: Mapping[str, object]) -> str:
@@ -1384,11 +1386,13 @@ def _agent_defaults_summary(body: Mapping[str, object]) -> str:
     return f": {_inline(body) or '(none)'}"
 
 
-entities.fill("provider", summary=_provider_summary)
-entities.fill("mcp-server", summary=_mcp_server_summary)
-entities.fill("prompt-fragment", summary=_prompt_fragment_summary)
-entities.fill("agent", summary=_agent_summary)
-entities.fill("agent-defaults", summary=_agent_defaults_summary)
+_SUMMARY: dict[str, Callable[[Mapping[str, object]], str]] = {
+    "provider": _provider_summary,
+    "mcp-server": _mcp_server_summary,
+    "prompt-fragment": _prompt_fragment_summary,
+    "agent": _agent_summary,
+    "agent-defaults": _agent_defaults_summary,
+}
 
 
 def _stored_slots(secrets: Sequence[Mapping[str, object]]) -> dict[tuple[str, str], list[str]]:
