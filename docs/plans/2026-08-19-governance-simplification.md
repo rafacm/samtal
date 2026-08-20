@@ -386,7 +386,7 @@ carries its baseline proof inside its own PR.
   drift step, held to the semantic-completeness test the goal
   section states. After this milestone the structures that must
   agree per event are one declaration and one golden line.
-- [x] **[M4: the entity registry sheds its hooks](2026-08-19-governance-simplification-implementation.md#m4-the-entity-registry-sheds-its-hooks).** (PR TBD) As decided above:
+- [x] **[M4: the entity registry sheds its hooks](2026-08-19-governance-simplification-implementation.md#m4-the-entity-registry-sheds-its-hooks).** (PR #221) As decided above:
   store-internal hooks inlined, routes and commands calling the
   store's existing typed methods directly, `body` and
   `summary` and `wrote`/`deleted` called directly, `notice` declared
