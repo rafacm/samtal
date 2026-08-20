@@ -172,7 +172,13 @@ retryable 409 it already has. `Composition` carries the holder;
 the closures that today capture the boot `Config`
 (`bespoke_runtime_factory`, `_prompt_preview`,
 `config_diff_reader`) capture the holder instead and read
-`current()` at their existing convergence points.
+`current()` at their existing convergence points. What the
+generation comes to own, `Composition` stops owning (the review's
+finding 10): the standalone `agent_fillers` field goes in M2 and
+`agent_providers` in M3, each becoming a read of the holder where
+a caller genuinely needs the current world and a generation read
+where it needs its own, so no stored duplicate can disagree with
+the world being served.
 
 **One endpoint, and what happens to the MCP route?** The
 generalized endpoint is `POST /runtime/config/reload`, and it
@@ -732,3 +738,8 @@ fillers while `Composition` keeps `agent_providers` and
 `agent_fillers` makes two structures that must agree. The
 standalone fields go or become read-through derivations with no
 stored duplicate.
+
+*Resolution.* Adopted. The holder decision now states that what
+the generation comes to own `Composition` stops owning:
+`agent_fillers` goes in M2 and `agent_providers` in M3, with
+callers moved to the holder or their bound generation.
