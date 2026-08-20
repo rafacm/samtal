@@ -107,6 +107,26 @@ landing on it. Also: assuming locality from a provider's shape, or a
 new provider type skipping the egress declaration because it is
 "obviously" local; an undeclared provider is a hole in the guarantee.
 
+### A beta database is never left behind
+
+From the first image called a beta onward, every database that image
+creates or touches is upgradeable by every later image: a migration
+that cannot upgrade in place is a bug, not a decision. Until a beta
+is declared, upgrades are best-effort from the first revision
+forward, which the upgrade tests prove, and migration history is
+never rewritten as a cleanup; squashing would be a compatibility
+decision requiring a superseding record and a tested reset path.
+
+**Example.** The `0002` to `0004` configuration revisions: additive,
+reviewed, and proven against rows written before them.
+
+**Counterexample.** Folding the four configuration revisions into a
+rewritten baseline to save three files, leaving a database stamped
+at the old baseline considered migrated while missing columns.
+
+Decision:
+[ADR](../adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md).
+
 ### Thin device, smart server
 
 The intelligence lives server-side, so behavior improves without

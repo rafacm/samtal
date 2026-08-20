@@ -2578,12 +2578,25 @@ migration. The follow-up audit the plan and the review both name
 previously accepted provider URL shapes, legacy-name recovery) is
 filed as issue #225 and scoped out of this plan.
 
-No pointer was added to `principles.md`: the floor is an operational
-promise about databases, narrower than the product promises that page
-holds, and the ADR system's README already routes decisions to
-records. The plan review round did not judge it a product promise
-either; if a beta declaration later elevates it, that change cites
-the record per the ADR README's own rule.
+The principles pointer question resolved the other way in review:
+this section first declined it as an operational promise, and the PR
+round judged the beta guarantee externally falsifiable and therefore
+a product promise by the page's own definition, which is precisely
+the conditional the plan's M7 wrote. `principles.md` now carries "A
+beta database is never left behind" citing the ADR, added by the
+round's fix.
+
+### PR review round (2026-08-20)
+
+codex-cli 0.147.0, gpt-5.6-terra, against aa1fae9c. One finding.
+
+**1 (P2). The operator-facing upgrade guarantee is missing from the
+principles index.** The ADR's beta promise is externally falsifiable
+and meets the page's definition of a product promise; the plan's M7
+required the pointer exactly when review judged that condition true.
+
+*Resolution.* Adopted. The product-promise entry above was added and
+this section's earlier reasoning corrected rather than erased.
 
 ### Deviations
 
