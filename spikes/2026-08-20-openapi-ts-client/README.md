@@ -46,12 +46,17 @@ probe under `tsx` 4.23.12, pinned the same way.
 
 A generated client that compiles can still be unusable, so each
 sub-project carries a `consumer.ts` making the same six claims about
-the types it was given. Nothing in either fixture runs: there is no
-server, and `tsc --noEmit` is the whole test.
+the types it was given. Five of the six are compile-time, and
+`tsc --noEmit` is their whole test: there is no server.
 
-1. **Authentication.** The bearer token every operation requires.
+1. **Authentication.** The bearer token every operation requires. This
+   is the one claim settled by running rather than by compiling, in
+   `probe.ts` below.
 2. **Five entities, read and write and delete.** Providers, MCP
-   servers, prompt fragments, agents, agent defaults.
+   servers, prompt fragments, agents, agent defaults. The agent
+   defaults have no delete, because a singleton that always exists has
+   no state a DELETE could reach; the fixtures assert that absence
+   rather than substituting another resource for it.
 3. **Typed non-2xx problem responses.** The RFC 9457 problem document
    the API answers refusals with.
 4. **Optional versus nullable.** One field of each character, since
@@ -62,7 +67,9 @@ server, and `tsc --noEmit` is the whole test.
    through, so a type that refused unknown keys would make the provider
    form unwritable.
 6. **Operation identity.** Whether an operation is reachable under the
-   `operation_id` the document gives it.
+   `operation_id` the document gives it, over an exhaustive inventory
+   of all thirty-eight, checked in both directions so an addition is as
+   loud as a loss.
 
 The claims are written in the vocabulary of
 [`shared/expect.ts`](shared/expect.ts), shared because it is the same
