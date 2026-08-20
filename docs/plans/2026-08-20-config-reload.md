@@ -542,7 +542,7 @@ in the same change as the prose that feeds them.
   clips otherwise; synthesis failure degrades as boot does and is
   reported in the result's fillers section; the fill-once assert
   retires with the lifespan seam. Branch `feature/config-reload-m2`
-  stacked on M1, PR TBD.
+  stacked on M1, PR #230.
 - [ ] **M3: providers, the hard slice.** `Provider.close()` and
   the concrete overrides; generational binding (the factory hands
   each runtime its generation; the registry counts sessions per
