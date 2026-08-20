@@ -302,7 +302,7 @@ drift checks green.
   reload's diff question in read-only form; callers never learn
   connection identity, secret marks, or slice anatomy. Branch
   `feature/config-diff`, PR #227.
-- [x] **[M2: the route, complete](2026-08-20-config-diff-read-implementation.md#m2-the-route-complete).** (PR TBD) The typed response models,
+- [x] **[M2: the route, complete](2026-08-20-config-diff-read-implementation.md#m2-the-route-complete).** (PR #228) The typed response models,
   published once with the `mcp_servers` lists and the
   `agents.grants` entry included; the `ApiRuntime` field, the
   composition-root closure running the reload's re-read in a worker
@@ -314,7 +314,7 @@ drift checks green.
   the one seam (an async diff callable on `ApiRuntime`) and deepens
   the composition root by one closure built where the boot world is
   already in hand. Branch `feature/config-diff-m2` stacked on M1,
-  PR TBD.
+  PR #228.
 
 ## Test strategy
 
