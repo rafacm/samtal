@@ -386,8 +386,11 @@ class FillersReload(BaseModel):
 
     resynthesized: list[str] = Field(
         description=(
-            "The agents whose filler clip was made again, because the phrases or the "
-            "voice behind them moved, sorted."
+            "The agents whose filler clip was made again, sorted: a field of the "
+            "effective `filler` section moved, or the voice that speaks it did. The "
+            "whole section is the unit, so an edit to `delay_ms` alone is here too, "
+            "with audio identical to what it replaced; every agent named here cost a "
+            "round of text-to-speech work at the configured provider."
         )
     )
     reused: list[str] = Field(

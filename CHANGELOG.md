@@ -28,10 +28,12 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   per activation, so a rewritten prompt, fragment or `instructions`
   reaches a conversation at its next activation, which is a new session
   or an agent switch, and filler clips are bound by a conversation when
-  it opens, so a re-synthesized one reaches the next conversation. Only
-  an agent whose phrases or whose voice moved is synthesized again, so an
-  edit to a prompt sends nothing to a text-to-speech engine, and an agent
-  whose synthesis fails applies with no clip and runs unmasked rather
+  it opens, so a re-synthesized one reaches the next conversation. An
+  agent is synthesized again when any field of its effective `filler`
+  section moved or when the voice that speaks it did, so an edit to a
+  prompt sends nothing to a text-to-speech engine while an edit to
+  `delay_ms` alone is a round of work at the configured provider, and an
+  agent whose synthesis fails applies with no clip and runs unmasked rather
   than making the reload refuse, which the answer's `fillers` section
   reports under its own outcome. The answer carries one section per kind,
   with the sections a later release will fill declared now and answering

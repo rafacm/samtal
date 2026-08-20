@@ -83,10 +83,15 @@ activation and cached for it, so a rewritten prompt, fragment or
 `instructions` reaches a conversation at its next activation, which is
 a new session or an agent switch. Filled pauses are synthesized during
 the reload and bound by a conversation when it opens, so an edited
-phrase reaches the next conversation and never changes what one
-already open is masking with; only an agent whose phrases or whose
-voice moved is synthesized again, and one whose synthesis fails runs
-unmasked rather than making the reload refuse.
+filler section reaches the next conversation and never changes what
+one already open is masking with. An agent is synthesized again when
+any field of its effective `filler` section moved or when the voice
+that speaks it did, and its clips are carried over as they are
+otherwise: the whole section is the unit of comparison, so an edit to
+`delay_ms` alone is a round of text-to-speech work at the configured
+provider even though the audio it produces is identical, while an
+edit anywhere else in the configuration is none. An agent whose
+synthesis fails runs unmasked rather than making the reload refuse.
 
 The agent is the one kind whose fields fall on several sides of that
 line, so a write to one says all of them: its prompt and its includes
