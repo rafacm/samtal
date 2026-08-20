@@ -366,8 +366,17 @@ option validation runs to completion before anything is
 constructed, so a trailing unknown option can no longer refuse
 after a model loaded, and the post-construction egress check runs
 inside the owner that already holds the object, so an egress
-refusal closes what it just built; the same ordering applies to
-boot construction, which shares the builder. From there the
+refusal closes what it just built. That ordering is not reachable
+through today's builder, whose single synchronous function
+constructs, then egress-checks, under one worker-thread call that
+cannot await an async close (round 3's finding 4), so M3 names
+the refactor: options are parsed and finished first, each
+provider is constructed one at a time off-loop, the returned
+object transfers immediately into an async candidate owner, and
+the egress check runs after the transfer, with the owner awaiting
+cleanup on egress refusal, later-entry failure, cancellation, and
+boot failure alike; boot and reload construct through this one
+path. From there the
 provider-world builder owns every unique provider it constructs
 until installation transfers ownership to the new generation, and
 on any exit that is not an install (a later entry's build fails, a
@@ -1093,6 +1102,12 @@ transferred immediately into an async candidate owner, the egress
 check run after the transfer, the owner awaiting cleanup on every
 non-install exit, boot and reload sharing the path. Round 2's
 finding 6 not closed by prose alone.
+
+*Resolution.* Adopted. The ownership decision now names the
+builder refactor with exactly that shape: per-provider off-loop
+construction, immediate transfer to the async owner, egress after
+transfer, awaited cleanup on every non-install exit, one path for
+boot and reload.
 
 **5 (P2). The staged secret overlay has no safe `SecretStore`
 operation.** Envelopes and keys are deliberately private, so the
