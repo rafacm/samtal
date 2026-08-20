@@ -9,6 +9,29 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **A running server says what it has not picked up yet** (#193).
+  `GET /api/runtime/config/diff` answers what the database holds that
+  the server is not serving, kind by kind: the entity names added,
+  removed and changed, and for each kind the boundary its changes
+  converge at, which is `restart` for the boot-time snapshot, `reload`
+  for the MCP entries and the agents' grants, and `check-in` for the
+  device bindings and the default agent, which a device is answered as
+  it asks and which are therefore never pending. Until now the only
+  trace of a pending change was the sentence in a write's
+  acknowledgement, which is gone the moment the response is read.
+  Changed means the stored state differs from what is running rather
+  than that something was written, so an edit changed back before
+  anyone looked produces no diff, and an entity whose stored credential
+  was set again is reported as changed because what is compared is an
+  opaque mark over the ciphertext. The MCP half is compared against the
+  entries running right now rather than the ones the process booted
+  with, so a change a reload has already applied is not reported as
+  pending. Entity names and those labels are the whole of the answer:
+  no bodies, no values and no marks cross the surface. The stored half
+  is the same re-read the MCP reload makes, so a stored configuration
+  that will not compose, or a credential that will not decrypt, is
+  refused here in the same words it would be refused there.
+
 - **Database upgrades have a written compatibility floor.** The
   2026-08-20 ADR records what was previously implicit: upgrades are
   supported from the first beta image onward, best-effort from the

@@ -1294,6 +1294,7 @@ named after any word a route might want:
 
 ```
 GET                 /api/runtime/agents/{name}/prompt
+GET                 /api/runtime/config/diff
 GET                 /api/runtime/mcp-servers
 POST                /api/runtime/mcp-servers/reload
 ```
@@ -1301,9 +1302,16 @@ POST                /api/runtime/mcp-servers/reload
 The first answers the system prompt a session opening now as that agent
 would be sent, block by block with the size of each, which [What the
 model is actually sent](#what-the-model-is-actually-sent) describes and
-`vinga-server config prompt` prints. The second answers what each
-configured MCP server is doing right now, which [What the MCP servers
-are doing](#what-the-mcp-servers-are-doing) describes and `vinga-server
+`vinga-server config prompt` prints. The second answers what the
+database holds that this server is not serving, kind by kind: the names
+added, removed and changed, and for each kind whether its changes reach
+a conversation at the next restart, at the next reload, or at a device's
+next check-in, which is what makes it possible to say whether a write is
+still waiting. It carries entity names and those labels and nothing
+else, so a rotated credential shows up as the provider that holds it
+being listed as changed. The third answers what each configured MCP
+server is doing right now, which [What the MCP servers are
+doing](#what-the-mcp-servers-are-doing) describes and `vinga-server
 config status` prints. The reload applies the stored MCP entries and
 grant lists to the running server, which [Applying an MCP change without
 a restart](#applying-an-mcp-change-without-a-restart) describes and

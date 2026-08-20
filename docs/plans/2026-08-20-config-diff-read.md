@@ -302,7 +302,7 @@ drift checks green.
   reload's diff question in read-only form; callers never learn
   connection identity, secret marks, or slice anatomy. Branch
   `feature/config-diff`, PR #227.
-- [ ] **M2: the route, complete.** The typed response models,
+- [x] **[M2: the route, complete](2026-08-20-config-diff-read-implementation.md#m2-the-route-complete).** (PR TBD) The typed response models,
   published once with the `mcp_servers` lists and the
   `agents.grants` entry included; the `ApiRuntime` field, the
   composition-root closure running the reload's re-read in a worker
