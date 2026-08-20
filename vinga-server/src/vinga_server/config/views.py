@@ -42,7 +42,6 @@ The record path is the opposite decision, deliberately, and
 """
 
 from collections.abc import Callable, Mapping, Sequence
-from functools import partial
 
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
@@ -63,9 +62,9 @@ from vinga_server.config.store import Entity, Snapshot, StoredSecret, stored_sec
 
 # Entity envelopes
 #
-# Which builder shows one entry is a fact about the kind, so it is the
-# kind's descriptor that says it and these are the names its callers
-# know it by.
+# One builder shows an entry of any kind (`entity_body` below), given
+# the kind's descriptor. These are the names its callers know it by,
+# one per kind, so a caller that holds a provider says so.
 
 
 def entity(kind: str, read: Entity[object]) -> dict[str, object]:
@@ -142,7 +141,10 @@ def listing(kind: str, snapshot: Snapshot) -> dict[str, object]:
     descriptor = entities.descriptor(kind)
     stored = _by_entity(snapshot)
     return {
-        name: _envelope(descriptor.body(entry), stored.get((descriptor.secret_slots, name), ()))
+        name: _envelope(
+            entity_body(descriptor, entry),
+            stored.get((descriptor.secret_slots, name), ()),
+        )
         for name, entry in sorted(getattr(snapshot.domain, descriptor.moved_key).items())
     }
 
@@ -155,7 +157,7 @@ def providers(snapshot: Snapshot) -> dict[str, dict[str, object]]:
     return {
         stage: {
             name: _envelope(
-                descriptor.body(entry),
+                entity_body(descriptor, entry),
                 stored.get((descriptor.secret_slots, f"{stage}.{name}"), ()),
             )
             for name, entry in sorted(getattr(snapshot.domain.providers, stage).items())
@@ -304,15 +306,6 @@ def _absent(field: FieldInfo, value: object) -> bool:
     )
 
 
-# Which builder shows one entry of each kind. One builder for all five,
-# because what differs between them is the descriptor it is given rather
-# than the way an entry is shown. `provider_record` is deliberately not
-# among them: a record is not a display, and what it leaves out and why
-# is its own docstring's.
-for _kind in entities.ENTITIES:
-    entities.fill(_kind.name, body=partial(entity_body, _kind))
-
-
 def provider_record(entry: ProviderConfig) -> dict[str, object]:
     """One provider as it may be *recorded*: written into a capture's
     manifest and into a conversation's session row, kept for as long as
@@ -390,9 +383,16 @@ def reference_value(body: Mapping[str, object], key: str) -> object:
 
 
 def _body(kind: str, entry: object) -> dict[str, object]:
-    """One entry as its kind is shown, through the builder the kind's
-    descriptor names."""
-    return entities.descriptor(kind).body(entry)
+    """One entry as its kind is shown: the one builder above, given the
+    kind's descriptor.
+
+    One builder for all five, because what differs between them is the
+    descriptor it is given rather than the way an entry is shown.
+    `provider_record` is deliberately not reached through here: a record
+    is not a display, and what it leaves out and why is its own
+    docstring's.
+    """
+    return entity_body(entities.descriptor(kind), entry)
 
 
 def _bodies(section: Mapping[str, object], kind: str) -> dict[str, object]:
