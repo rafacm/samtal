@@ -579,10 +579,13 @@ RELOAD_REFUSED_DESCRIPTION = (
 # emptily, which is exactly what this one must not do.
 DIFF_REFUSED_DESCRIPTION = (
     "The stored half was refused: it does not compose into a valid snapshot, or a "
-    "credential stored in it will not decrypt under the configured keys. It is the "
-    "same read the MCP reload makes and the same refusal, so a diff that answers this "
-    "is telling you a reload would be refused too. Nothing was compared and nothing "
-    "was changed."
+    "credential stored in it will not decrypt under the configured keys. The `detail` "
+    "is fixed and names nothing, which is this refusal alone among the ones this API "
+    "answers with: what was refused is stored state, the sentence for it would be "
+    "composed over that state, and this read's answers are entity names and labels "
+    "only. `POST /runtime/mcp-servers/reload` re-reads the same stored half, refuses "
+    "on the same state, and names the location it refused on, having changed nothing. "
+    "Nothing was compared here and nothing was changed."
 )
 
 DIFF_MOVED_DESCRIPTION = (
