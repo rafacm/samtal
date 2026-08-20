@@ -25,8 +25,13 @@ from vinga_server.config.models import normalize_mac
 from vinga_server.device.boundary import WEBSOCKET_PATH
 from vinga_server.device.session import DeviceSession
 from vinga_server.events import ServerEvents
-from vinga_server.events.catalog import RejectedAtCapacity
-from vinga_server.events.values import DeviceId, DeviceOrUnidentified, SessionId
+from vinga_server.events.catalog import AuthRejected, RejectedAtCapacity
+from vinga_server.events.values import (
+    AuthRejectionToken,
+    DeviceId,
+    DeviceOrUnidentified,
+    SessionId,
+)
 
 events = ServerEvents(__name__)
 
@@ -113,12 +118,8 @@ async def conversation(websocket: WebSocket) -> None:
         # choosing into the retained log surface, one record per attempt
         # and as fast as they could connect. The reason token is what a
         # reader can act on, and it is this server's own word.
-        events.warning(
-            "refused a websocket handshake from an unidentified client: %s",
-            refusal,
-            event="auth_rejected",
-            device=None,
-            reason=refusal,
+        events.emit(
+            lambda: AuthRejected(device=None, reason=AuthRejectionToken(refusal))
         )
         # Closed before the accept, so the upgrade is answered 403 and no
         # websocket is ever established.

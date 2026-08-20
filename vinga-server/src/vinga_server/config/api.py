@@ -119,6 +119,8 @@ from vinga_server.config.writes import (
 from vinga_server.conversations import api as conversations
 from vinga_server.db import open_database
 from vinga_server.events import ServerEvents
+from vinga_server.events.catalog import ApiError, ApiStorageError
+from vinga_server.events.values import ClassName
 
 # The pending table, imported like anything else since issue #143 split
 # the onboarding package. It used to be a forward reference, because the
@@ -1830,11 +1832,8 @@ class _SanitizedErrors:
             # front of it, and the path is request-controlled too. The
             # class name is the most that can be said about a failure
             # here that a request could not have written.
-            events.error(
-                "the configuration API failed to handle a request (%s)",
-                type(exc).__name__,
-                event="api_error",
-            )
+            failure = exc
+            events.emit(lambda: ApiError(failure=ClassName.of(failure)))
             if started:
                 # Half a response is already on the wire, so there is
                 # nothing left to say that would not corrupt it. Ended
@@ -1923,11 +1922,8 @@ def _refusal(status: int) -> Callable[[Request, Exception], Any]:
             # its chain to anything that walks it. The sentence goes to
             # the caller, which is the channel that was sanitized for
             # it.
-            events.error(
-                "the configuration API met unreadable stored state (%s)",
-                type(exc).__name__,
-                event="api_storage_error",
-            )
+            failure = exc
+            events.emit(lambda: ApiStorageError(failure=ClassName.of(failure)))
         # Every type this handler is registered for is a ConfigError, so
         # the check is about typing rather than about doubt; an
         # exception that arrived some other way has nothing structured

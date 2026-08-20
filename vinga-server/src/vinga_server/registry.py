@@ -15,6 +15,8 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from vinga_server.events import ServerEvents
+from vinga_server.events.catalog import DrainFinished, DrainIncomplete, DrainStarted
+from vinga_server.events.values import Count, Real
 
 if TYPE_CHECKING:  # the session imports nothing from here
     from vinga_server.device.session import DeviceSession
@@ -75,13 +77,10 @@ class SessionRegistry:
         if not sessions:
             return
 
-        events.info(
-            "draining %d session(s), up to %.0f s",
-            len(sessions),
-            timeout_s,
-            event="drain_started",
-            sessions=len(sessions),
-            timeout_s=timeout_s,
+        events.emit(
+            lambda: DrainStarted(
+                sessions=Count(len(sessions)), timeout_s=Real(timeout_s)
+            )
         )
         # The drain's budget is what a reply is given, rather than some
         # constant inside the session: an operator who raises drain_s to
@@ -111,17 +110,13 @@ class SessionRegistry:
         # and reporting it as a clean drain would hide exactly that.
         cut = sum(1 for task in done if task.exception() is None and not task.result())
         if pending or cut:
-            events.warning(
-                "drained with %d session(s) cut mid-reply and %d that did not finish",
-                cut,
-                len(pending),
-                event="drain_incomplete",
-                sessions=len(sessions),
-                cut_mid_reply=cut,
-                unfinished=len(pending),
-                timeout_s=timeout_s,
+            events.emit(
+                lambda: DrainIncomplete(
+                    sessions=Count(len(sessions)),
+                    cut_mid_reply=Count(cut),
+                    unfinished=Count(len(pending)),
+                    timeout_s=Real(timeout_s),
+                )
             )
         else:
-            events.info(
-                "every session drained", event="drain_finished", sessions=len(sessions)
-            )
+            events.emit(lambda: DrainFinished(sessions=Count(len(sessions))))

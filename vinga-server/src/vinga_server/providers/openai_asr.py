@@ -48,6 +48,14 @@ from openai import NOT_GIVEN, APITimeoutError, AsyncOpenAI, Omit
 
 from vinga_server.config.models import ProviderConfig
 from vinga_server.events import ServerEvents
+from vinga_server.events.catalog import (
+    EchoConfirmed,
+    EchoConfirmedEmpty,
+    EchoRecovered,
+    EchoRetryTimedOut,
+    EchoSkipped,
+)
+from vinga_server.events.values import Identifier, Real, Whole
 from vinga_server.providers.base import (
     AsrProvider,
     AsrResult,
@@ -307,14 +315,12 @@ class OpenAiAsr(AsrProvider):
         loop = asyncio.get_running_loop()
         remaining_s = deadline - loop.time()
         if remaining_s < RETRY_FLOOR_S:
-            events.warning(
-                "openai asr: the transcript came back as the configured prompt "
-                "with %.1f s of the timeout left, too little to retry, "
-                "treating %.2f s of audio as nothing said",
-                remaining_s,
-                duration_s,
-                event="asr_prompt_echo",
-                **self._echo_fields("skipped", duration_s),
+            events.emit(
+                lambda: EchoSkipped(
+                    duration_s=Real(duration_s),
+                    host=Identifier(self.host),
+                    remaining_s=Real(remaining_s),
+                )
             )
             return ""
         logger.warning(
@@ -338,32 +344,32 @@ class OpenAiAsr(AsrProvider):
                 )
         except (TimeoutError, APITimeoutError):
             retry_ms = round((loop.time() - started) * 1000)
-            events.warning(
-                "openai asr: the retry outran the timeout's remaining %.1f s, "
-                "treating %.2f s of audio as nothing said",
-                remaining_s,
-                duration_s,
-                event="asr_prompt_echo",
-                **self._echo_fields("timed_out", duration_s, retry_ms),
+            events.emit(
+                lambda: EchoRetryTimedOut(
+                    duration_s=Real(duration_s),
+                    host=Identifier(self.host),
+                    retry_ms=Whole(retry_ms),
+                    remaining_s=Real(remaining_s),
+                )
             )
             return ""
         retry_ms = round((loop.time() - started) * 1000)
         if self._is_echoed_prompt(retry):
-            events.warning(
-                "openai asr: the retry came back as the prompt again, "
-                "treating %.2f s of audio as nothing said",
-                duration_s,
-                event="asr_prompt_echo",
-                **self._echo_fields("confirmed_echo", duration_s, retry_ms),
+            events.emit(
+                lambda: EchoConfirmed(
+                    duration_s=Real(duration_s),
+                    host=Identifier(self.host),
+                    retry_ms=Whole(retry_ms),
+                )
             )
             return ""
         if not retry:
-            events.warning(
-                "openai asr: the retry came back empty, "
-                "treating %.2f s of audio as nothing said",
-                duration_s,
-                event="asr_prompt_echo",
-                **self._echo_fields("confirmed_empty", duration_s, retry_ms),
+            events.emit(
+                lambda: EchoConfirmedEmpty(
+                    duration_s=Real(duration_s),
+                    host=Identifier(self.host),
+                    retry_ms=Whole(retry_ms),
+                )
             )
             return ""
         # The recovered transcript is not in the sentence, and naming
@@ -373,38 +379,15 @@ class OpenAiAsr(AsrProvider):
         # 2026-08-17), however it was recovered; what was said reaches
         # the session below and, when recording is on, the conversation
         # store, which is the surface that holds content.
-        events.info(
-            "openai asr: the retry recovered %.2f s of audio "
-            "the echo guard would have discarded",
-            duration_s,
-            event="asr_prompt_echo",
-            **self._echo_fields("recovered", duration_s, retry_ms),
+        events.emit(
+            lambda: EchoRecovered(
+                duration_s=Real(duration_s),
+                host=Identifier(self.host),
+                retry_ms=Whole(retry_ms),
+            )
         )
         return retry
 
-    def _echo_fields(
-        self, outcome: str, duration_s: float, retry_ms: int | None = None
-    ) -> dict[str, object]:
-        """What one tripped guard's `asr_prompt_echo` carries beside its
-        name: exactly one event per trip, so retained logs can say how
-        often the guard was swallowing real speech and what each retry
-        cost. `retry_ms` is absent when no retry was sent, which is what
-        a skip is. No `session` or `device`: providers are shared
-        singletons with no session identity, so the event names the
-        host instead, like the entry it belongs to.
-
-        The five outcomes share these three fields and differ in level
-        and sentence, which is why they are gathered here rather than
-        written out at each site; the event's own name belongs to the
-        call, beside the sentence it goes with."""
-        fields: dict[str, object] = {
-            "outcome": outcome,
-            "duration_s": duration_s,
-            "host": self.host,
-        }
-        if retry_ms is not None:
-            fields["retry_ms"] = retry_ms
-        return fields
 
     def _is_echoed_prompt(self, text: str) -> bool:
         """Whether the model handed the prompt back instead of hearing

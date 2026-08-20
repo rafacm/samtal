@@ -23,6 +23,8 @@ from typing import Any
 from vinga_server.config import Config
 from vinga_server.config.responses import McpReloadResult, McpServerStatus
 from vinga_server.config.secrets import SecretStore
+from vinga_server.events.catalog import McpToolShadowed
+from vinga_server.events.values import Count, Identifier
 from vinga_server.providers import ToolDef
 from vinga_server.runtime.prompt import GuidanceBlock, ServerInstructions
 from vinga_server.tools import names
@@ -220,16 +222,16 @@ class McpServers:
                 # different tool.
                 self._reported.add((entry, tool.name))
                 position = manager.listed_at(tool.name)
-                events.warning(
-                    "mcp server %s: dropping published tool %d, its name is inside the "
-                    "namespace of the entry %s, which owns it",
-                    entry,
-                    position,
-                    owner,
-                    event="mcp_tool_shadowed",
-                    entry=entry,
-                    position=position,
-                    owner=owner,
+                # Bound as defaults rather than closed over: this thunk
+                # is built inside a loop, and a closure would read
+                # whichever tool the loop had reached by the time the
+                # guard called it.
+                events.emit(
+                    lambda at=position, by=owner: McpToolShadowed(  # type: ignore[misc]
+                        entry=Identifier(entry),
+                        position=Count(at),
+                        owner=Identifier(by),
+                    )
                 )
         return kept
 

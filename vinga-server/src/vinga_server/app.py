@@ -25,6 +25,8 @@ from vinga_server.config.secrets import SecretStore
 from vinga_server.conversations import ConversationStore, migrate_existing
 from vinga_server.device.bindings import DeviceBindings
 from vinga_server.events import EventEnforcementError, ServerEvents, resolve_enforcement
+from vinga_server.events.catalog import CaptureDisabled, CaptureEnabled
+from vinga_server.events.values import ConfiguredPath
 from vinga_server.filler import AgentFillers, build_agent_fillers
 from vinga_server.providers import ProviderError, build_agent_providers
 from vinga_server.registry import SessionRegistry
@@ -300,23 +302,11 @@ async def _build_composition(
         # carried them; the narrowing (#120) left that half of the
         # sentence describing nothing the capture writes, and a warning
         # about what reaches a disk has to be exact in both directions.
-        events.warning(
-            "session capture is on: room audio and a track of the session's events "
-            "are being written to %s",
-            capture_section.dir,
-            event="capture_enabled",
-            path=str(capture_section.dir),
-        )
+        events.emit(lambda: CaptureEnabled(path=ConfiguredPath(capture_section.dir)))
     elif capture_section is not None:
         # Said out loud, because a configured section that records
         # nothing is otherwise a silence an operator has to debug.
-        events.info(
-            "session capture is configured but off; set server.capture.enabled "
-            "to record to %s",
-            capture_section.dir,
-            event="capture_disabled",
-            path=str(capture_section.dir),
-        )
+        events.emit(lambda: CaptureDisabled(path=ConfiguredPath(capture_section.dir)))
     # The live half of the configuration API, attached to the shell
     # `create_app` mounted. Starlette runs no lifespan for a mounted
     # application, so the objects its requests resolve are installed from

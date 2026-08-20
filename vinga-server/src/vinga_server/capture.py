@@ -46,6 +46,26 @@ from pathlib import Path
 from typing import Any, BinaryIO, TextIO
 
 from vinga_server.events import ServerEvents
+from vinga_server.events.catalog import (
+    CaptureBelowFloor,
+    CaptureDirectoryUnusable,
+    CaptureFailed,
+    CaptureFilesUnopenable,
+    CaptureLimit,
+    CaptureOverBudget,
+    CapturePruned,
+    CaptureStarted,
+)
+from vinga_server.events.values import (
+    CaptureWriteToken,
+    ClassName,
+    ConfiguredPath,
+    Count,
+    Real,
+    SessionId,
+    SessionIds,
+    SessionList,
+)
 
 events = ServerEvents(__name__)
 
@@ -237,15 +257,12 @@ class SessionCapture:
         # worse than rendering it: `Emission.args` is deliberately not
         # copied for a tap, so a consumer was given the live exception,
         # its chain and everything the chain closes over.
-        events.warning(
-            "session %s: capture stopped after failing to %s (%s)",
-            self._session_id,
-            doing,
-            type(exc).__name__,
-            event="capture_failed",
-            session=self._session_id,
-            reason=doing,
-            failure=type(exc).__name__,
+        events.emit(
+            lambda: CaptureFailed(
+                session=SessionId(self._session_id),
+                reason=CaptureWriteToken(doing),
+                failure=ClassName.of(exc),
+            )
         )
         self._stopped = True
         with contextlib.suppress(Exception):
@@ -292,12 +309,11 @@ class SessionCapture:
         conversation carries on; only the recording stops."""
         if self._closing:
             return
-        events.info(
-            "session %s: capture reached its %.0f s limit",
-            self._session_id,
-            self._max_session_s,
-            event="capture_limit",
-            session=self._session_id,
+        events.emit(
+            lambda: CaptureLimit(
+                session=SessionId(self._session_id),
+                limit_s=Real(self._max_session_s),
+            )
         )
         self.close()
 
@@ -511,24 +527,22 @@ class CaptureStore:
                     path.unlink()
             removed.append(oldest.stem)
         if removed:
-            events.info(
-                "capture: pruned %d session(s) to stay under %.0f MB: %s",
-                len(removed),
-                self._max_total_mb,
-                ", ".join(removed),
-                event="capture_pruned",
-                sessions=removed,
+            events.emit(
+                lambda: CapturePruned(
+                    sessions=SessionIds(tuple(removed)),
+                    removed=Count(len(removed)),
+                    budget_mb=Real(self._max_total_mb),
+                    listed=SessionList.of(tuple(removed)),
+                )
             )
         over = self._total_mb()
         if over > self._max_total_mb:
-            events.warning(
-                "capture: %.0f MB on disk is over the %.0f MB budget and "
-                "nothing more can be pruned; raise max_total_mb or lower "
-                "max_session_s",
-                over,
-                self._max_total_mb,
-                event="capture_over_budget",
-                total_mb=round(over),
+            events.emit(
+                lambda: CaptureOverBudget(
+                    total_mb=Count(round(over)),
+                    used=Real(over),
+                    budget_mb=Real(self._max_total_mb),
+                )
             )
         return removed
 
@@ -554,28 +568,27 @@ class CaptureStore:
             self.directory.mkdir(parents=True, exist_ok=True)
             self.prune()
             free_mb = self._free_mb()
-        except OSError as exc:
-            events.warning(
-                "session %s: not capturing, %s is unusable (%s)",
-                session_id,
-                self.directory,
-                type(exc).__name__,
-                event="capture_declined",
-                session=session_id,
-                reason="unusable",
-                failure=type(exc).__name__,
+        except OSError as raised:
+            # Bound to an ordinary local first: `except ... as` unbinds
+            # its name when the block ends, and the thunk below is built
+            # here and called inside the emitter's guard.
+            failure = raised
+            events.emit(
+                lambda: CaptureDirectoryUnusable(
+                    session=SessionId(session_id),
+                    failure=ClassName.of(failure),
+                    directory=ConfiguredPath(self.directory),
+                )
             )
             return None
         if free_mb < self._min_free_mb:
-            events.warning(
-                "session %s: not capturing, %.0f MB free is below the %.0f MB floor",
-                session_id,
-                free_mb,
-                self._min_free_mb,
-                event="capture_declined",
-                session=session_id,
-                reason="min_free_mb",
-                free_mb=round(free_mb),
+            events.emit(
+                lambda: CaptureBelowFloor(
+                    session=SessionId(session_id),
+                    free_mb=Count(round(free_mb)),
+                    free=Real(free_mb),
+                    floor_mb=Real(self._min_free_mb),
+                )
             )
             return None
         capture = SessionCapture(
@@ -589,25 +602,19 @@ class CaptureStore:
         self._active.add(session_id)
         try:
             capture.start()
-        except OSError as exc:
+        except OSError as raised:
+            failure = raised
             self._active.discard(session_id)
-            events.warning(
-                "session %s: not capturing, could not open the files (%s)",
-                session_id,
-                type(exc).__name__,
-                event="capture_declined",
-                session=session_id,
-                reason="open",
-                failure=type(exc).__name__,
+            events.emit(
+                lambda: CaptureFilesUnopenable(
+                    session=SessionId(session_id), failure=ClassName.of(failure)
+                )
             )
             return None
-        events.info(
-            "session %s: capturing to %s",
-            session_id,
-            capture.wav_path,
-            event="capture_started",
-            session=session_id,
-            path=str(capture.wav_path),
+        events.emit(
+            lambda: CaptureStarted(
+                session=SessionId(session_id), path=ConfiguredPath(capture.wav_path)
+            )
         )
         return capture
 

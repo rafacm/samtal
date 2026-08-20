@@ -21,6 +21,8 @@ import re
 from pathlib import Path
 
 from vinga_server.events import ServerEvents
+from vinga_server.events.catalog import MemoryUnreadable
+from vinga_server.events.values import ClassName, Identifier
 
 events = ServerEvents(__name__)
 
@@ -70,14 +72,11 @@ class MemoryStore:
         except FileNotFoundError:
             return ""
         except (OSError, ValueError) as exc:
-            events.warning(
-                "could not read memory for agent %s (%s); it remembers nothing this "
-                "round",
-                agent,
-                type(exc).__name__,
-                event="memory_unreadable",
-                agent=agent,
-                error=type(exc).__name__,
+            failure = exc
+            events.emit(
+                lambda: MemoryUnreadable(
+                    agent=Identifier(agent), error=ClassName.of(failure)
+                )
             )
             return ""
 

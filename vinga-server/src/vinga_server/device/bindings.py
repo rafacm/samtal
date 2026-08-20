@@ -50,6 +50,8 @@ from vinga_server.config.models import normalize_mac
 from vinga_server.config.store import LiveBinding, read_live_binding
 from vinga_server.db import DATABASE_FILENAME, read_engine
 from vinga_server.events import ServerEvents
+from vinga_server.events.catalog import BindingsSnapshotOnly, BindingsUnreadable
+from vinga_server.events.values import ClassName, ConfiguredPath, DeviceId
 
 events = ServerEvents(__name__)
 
@@ -124,12 +126,8 @@ class DeviceBindings:
         """
         path = config.server.database.dir / DATABASE_FILENAME
         if not path.exists():
-            events.debug(
-                "no configuration database at %s: device bindings resolve from the "
-                "configuration this server was built with",
-                path,
-                event="device_bindings_snapshot_only",
-                path=str(path),
+            events.emit(
+                lambda: BindingsSnapshotOnly(path=ConfiguredPath(path))
             )
             return cls(config, None)
         return cls(config, read_engine(config.server.database.dir))
@@ -224,14 +222,10 @@ class DeviceBindings:
         structured field rather than into the sentence so the sentence
         is the same string every time.
         """
-        events.warning(
-            "cannot read the device bindings for %s; answering from the configuration "
-            "this server started with, which may be older than the database. The "
-            "failure's kind is recorded beside this line",
-            mac,
-            event="device_bindings_unreadable",
-            device=mac,
-            failure=type(exc).__name__,
+        events.emit(
+            lambda: BindingsUnreadable(
+                device=DeviceId(mac), failure=ClassName.of(exc)
+            )
         )
 
 
