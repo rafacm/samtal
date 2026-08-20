@@ -183,26 +183,36 @@ equal `DOMAIN_KEYS` exactly, so the sixth kind arrives with a
 failing test naming this module. This is the two-structures rule
 applied to the plan's own new data.
 
-**Milestone 2 deepens `McpServers` instead of exporting its
-anatomy.** The new read answers "which stored entries differ from
-the world this registry is running", taking the stored candidate
-(entries and secrets) and answering with names in the diff's
-vocabulary. It is the reload's prepare-phase question asked without
-doing anything: presence from the current slice's entries,
-connection identity through the same `_connection_identity` the
-reload's `same_as` uses, stored secrets through the same
-fingerprint, prompt-only fields (instructions,
-`use_server_instructions`) through the slice, and no manager is
-ever built. The alternative, exposing the current generation's
-entry configurations for `config/diff.py` to compare, would teach
-the diff module connection identity and secret marks, two facts
-that are the MCP package's to know. Grant derivation for the stored
-side reuses the one derivation that exists (`mcp_for_agent`'s
-defaults-then-own rule) rather than restating it; the milestone
-either calls it through a composed view of the stored domain or
-factors the rule to a function both `Config` and the diff path
-call, whichever the diff in front of the implementer keeps
-smaller.
+**The MCP generation retains a comparison identity for every
+entry, and `McpServers` is deepened rather than exported.** The
+world the registry swaps today cannot answer the diff's question
+for every entry: managers exist only for the entries some agent
+references, and the slice keeps names, grants and prompt fields,
+so an unused entry has no retained connection fields and no secret
+mark to compare (the review's finding 1). The install that swaps a
+generation in, at boot and at reload alike, therefore also retains
+one opaque comparison identity per configured entry, every entry
+and not only the referenced ones, computed from the connection
+identity the reload's `same_as` already uses, the prompt-only
+fields (`instructions`, `use_server_instructions`,
+`inject_prompts`), and the entry's stored-secret fingerprint. The
+identities are swapped atomically with the world they describe,
+and one derivation computes them for the running side at install
+and for the stored candidate at diff time, so the two sides cannot
+disagree about what identity means. The new public read on
+`McpServers` takes the stored candidate and answers in the diff's
+vocabulary (added, removed, changed) by comparing identities; no
+manager is ever built, and callers never learn connection
+identity, secret marks, or slice anatomy. The alternative,
+exposing the generation's entry configurations for
+`config/diff.py` to compare, would teach the diff module exactly
+those facts, which are the MCP package's to know. Grant derivation
+for the stored side reuses the one derivation that exists
+(`mcp_for_agent`'s defaults-then-own rule) rather than restating
+it; the milestone either calls it through a composed view of the
+stored domain or factors the rule to a function both `Config` and
+the diff path call, whichever the diff in front of the implementer
+keeps smaller.
 
 ## Module layout
 
@@ -351,6 +361,14 @@ instructions and `use_server_instructions`; managers keep
 configuration and secret marks but exist only for referenced
 entries, so an unused entry has no retained connection fields or
 fingerprint to compare against.
+
+*Resolution.* Adopted. The design decision "The MCP generation
+retains a comparison identity for every entry" now states it: the
+install retains one opaque identity per configured entry,
+referenced or not, computed at boot and reload from connection
+identity, prompt-only fields, and the secret fingerprint, swapped
+atomically with the world, derived by one function for both sides,
+and consumed by the public registry diff read.
 
 **2 (P1). M1 ships a false-negative diff for unapplied MCP and
 grant changes.** Answering `{"applies": "reload"}` alone hides
