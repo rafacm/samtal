@@ -281,7 +281,7 @@ Every merge leaves `main` releasable: the image publishes on every
 push, so each milestone ends with lint, both suites, and the doc
 drift checks green.
 
-- [ ] **M1: the whole comparison, unexposed.** `config/diff.py`
+- [x] **[M1: the whole comparison, unexposed](2026-08-20-config-diff-read-implementation.md#m1-the-whole-comparison-unexposed).** (PR TBD) `config/diff.py`
   with the regime map, the `DOMAIN_KEYS` completeness pin, and the
   model-plus-fingerprint comparison for the restart-bound kinds
   (providers as `stage.name`, prompt fragments, agents and
