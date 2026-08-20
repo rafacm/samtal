@@ -92,8 +92,8 @@ def _identity(name: str, entry: McpServerConfig, secrets: SecretStore) -> str:
     """
     digest = hashlib.sha256()
     for part in (
-        _connection_identity(entry).model_dump_json(),
-        json.dumps({key: getattr(entry, key) for key in _PROMPT_ONLY_FIELDS}),
+        _canonical(_connection_identity(entry).model_dump(mode="python")),
+        _canonical({key: getattr(entry, key) for key in _PROMPT_ONLY_FIELDS}),
         secrets.fingerprint("mcp_server", name),
     ):
         # Length-prefixed, the rule the fingerprint itself follows: no
@@ -101,6 +101,31 @@ def _identity(name: str, entry: McpServerConfig, secrets: SecretStore) -> str:
         digest.update(f"{len(part)}:".encode())
         digest.update(part.encode("utf-8"))
     return digest.hexdigest()
+
+
+def _canonical(dumped: object) -> str:
+    """One part of an identity as characters to digest, in a form that
+    cannot fail on anything a valid entry holds.
+
+    Totality is the whole of why this is not `model_dump_json`. A model
+    field takes whatever a `str` can hold, and an unpaired surrogate is
+    one of the things it can: it passes validation, it has no UTF-8
+    encoding at all, and asking pydantic for JSON text raises a
+    serialization error. This runs at every boot, for every configured
+    entry including the ones nothing connects to, and that exception is
+    not one the startup path classifies, so it would reach an operator
+    as a library traceback out of uvicorn. Dumping to Python values and
+    escaping every non-ASCII character keeps the answer text this cannot
+    raise on: an unpaired surrogate becomes its own escape and compares
+    as itself.
+
+    Deliberately not `SecretStore.fingerprint`'s own encoder, which
+    follows the same rule for its own reasons. Each digest is only ever
+    compared with itself, so the two never have to agree, and sharing a
+    call to `json.dumps` would tie together two things that are free to
+    change apart.
+    """
+    return json.dumps(dumped, ensure_ascii=True, default=str)
 
 
 def _nothing_shipped(_entry: str) -> tuple[GuidanceBlock, ...]:

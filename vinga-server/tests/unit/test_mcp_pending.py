@@ -112,6 +112,25 @@ def test_an_entry_written_and_written_back_is_not_pending() -> None:
     assert servers.pending_against(unused()).changed == ()
 
 
+def test_an_entry_holding_an_unpaired_surrogate_is_still_comparable() -> None:
+    """A model field takes whatever a `str` can hold, and an unpaired
+    surrogate is one of the things it can: it passes validation and it
+    has no UTF-8 encoding at all.
+
+    An identity taken by asking pydantic for JSON text raises on one,
+    and it raises at the boot that takes an identity per configured
+    entry, on a failure the startup path does not classify, so what an
+    operator would meet is a library traceback rather than a refusal
+    naming the entry.
+    """
+    lone = unused(command="/usr/bin/mcp-\ud800")
+
+    servers = McpServers.build(lone)
+
+    assert servers.pending_against(lone).changed == ()
+    assert servers.pending_against(unused()).changed == ("tools",)
+
+
 async def test_a_prompt_only_edit_is_pending_and_the_connection_still_stands() -> None:
     """The two answers differ on purpose. `instructions` is prompt text
     the connection never sees, so the reload reports the entry as
