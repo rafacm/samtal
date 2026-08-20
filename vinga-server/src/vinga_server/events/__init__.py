@@ -248,17 +248,30 @@ def _offer(tap: EventTap, emission: Emission, channel: logging.Logger) -> None:
     not be able to cost the operator a log line."""
     try:
         tap.emit(emission)
-    except Exception as exc:  # noqa: BLE001 - a consumer never breaks the surface
-        # The class names and nothing else, and no `event` field: a
-        # report that went back through the taps would let a broken
-        # tap recurse into itself, and a tap may be an exporter
-        # holding whatever a far side answered it with.
+    except Exception:  # noqa: BLE001 - a consumer never breaks the surface
+        # The tap's own class name and nothing else, and no `event`
+        # field: a report that went back through the taps would let a
+        # broken tap recurse into itself.
+        #
+        # Nothing about the exception, which is the correction PR #217's
+        # review parked here. This used to name its class, and a class
+        # name looks like the safest string in Python: `type(name,
+        # (Exception,), {})` accepts any string as one, name validation
+        # included, so a tap that is an exporter holding whatever a far
+        # side answered it with can raise an exception whose NAME is
+        # those bytes. The handler does not bind it either: what is
+        # never looked at cannot leak later.
+        #
+        # The tap's own class name stays, and the asymmetry is the
+        # point. A tap is an object this server's composition attached,
+        # so its class is a program object rather than anything a caller
+        # or a far side supplied, and which consumer is broken is the
+        # whole of what makes this line actionable.
         _report(
             channel,
             logging.WARNING,
-            "an event tap (%s) failed and was skipped: %s",
+            "an event tap (%s) failed and was skipped",
             type(tap).__name__,
-            type(exc).__name__,
         )
 
 
