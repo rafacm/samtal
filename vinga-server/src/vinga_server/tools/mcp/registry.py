@@ -8,21 +8,24 @@ needs both halves: which tools an agent may reach right now, which
 entry owns a published name, what an entry is doing, and the call
 that carries out a decision a caller already made.
 
-The reload is next door, in `reload.py`, and reaches back through
-this class: the exclusion it holds and the swap it makes are this
-registry's own state.
+The reload's two phases are next door, in `reload.py`, and the
+second of them reaches back through this class: the swap it makes is
+this registry's own state. What is not here any more is when a reload
+may run and how long it is held: one apply at a time is a property of
+the whole configuration and not of the MCP half, so the exclusion
+lives with the generalized apply that owns every half (#191).
 """
 
 import asyncio
 import contextlib
 import time
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from typing import Any
 
 from vinga_server.config import Config
 from vinga_server.config.diff import McpPending
-from vinga_server.config.responses import McpReloadResult, McpServerStatus
+from vinga_server.config.responses import McpServerStatus
 from vinga_server.config.secrets import SecretStore
 from vinga_server.events.catalog import McpToolShadowed
 from vinga_server.events.values import Count, Identifier
@@ -31,9 +34,7 @@ from vinga_server.runtime.prompt import GuidanceBlock, ServerInstructions
 from vinga_server.tools import names
 
 from . import events
-from . import reload as reloading
 from .manager import UNUSED, McpManager, McpServerDown, _managers_for
-from .reload import McpReload, _Preparation
 from .slice import McpSlice, _allowed, _shadowed
 
 
@@ -85,29 +86,6 @@ class McpServers:
         # transitions, so the instant its status carries is when this
         # configuration took effect, which is what this is.
         self._since = time.time()
-        # And which world is installed, counted rather than timed: an
-        # instant cannot say that two reads saw the same one, because
-        # two installs can land inside a clock's resolution.
-        self._generation = 0
-        # Whether a reload is between its two phases right now. A plain
-        # flag rather than a lock because a second reload is refused
-        # rather than queued: it would apply a configuration read after
-        # the first one's, to a world the first one is in the middle of
-        # changing.
-        self._reloading = False
-        # The apply in flight, if any. Held because it outlives the
-        # request that asked for it when that request is cancelled, and
-        # the loop keeps only a weak reference to a task nobody awaits.
-        self._applying: asyncio.Task[McpReload] | None = None
-        # And the preparation in flight, held for that reason and for a
-        # stronger one. Its re-read runs in a worker thread, taking the
-        # database's write lock and waiting out its busy timeout, and a
-        # thread is not a thing that can be cancelled: a caller who goes
-        # away while it is running leaves it running. The exclusion has
-        # to outlive it or the next reload's read meets the first one's
-        # still holding the lock, and answers a caller who did nothing
-        # wrong that the database is busy.
-        self._preparing: asyncio.Task[_Preparation] | None = None
 
     @classmethod
     def build(cls, config: Config, secrets: SecretStore | None = None) -> "McpServers":
@@ -145,35 +123,6 @@ class McpServers:
         configuration, and `status()` is where that one is answered.
         """
         return self._managers[entry]
-
-    @property
-    def generation(self) -> int:
-        """Which world is installed, as a number that moves whenever one
-        is.
-
-        Cheap, and read on the loop this registry lives on: a caller
-        composing an answer that spans an await captures this before it
-        and reads it again afterwards, and an unchanged mark is what
-        says the world it read is still the world that is running. A
-        reload can otherwise land inside that await and leave two halves
-        describing states that never coexisted.
-
-        Advanced by the install and by nothing else, so it counts worlds
-        rather than requests: a reload that refused installed nothing
-        and moves nothing.
-        """
-        return self._generation
-
-    @property
-    def reloading(self) -> bool:
-        """Whether a reload is between its two phases right now.
-
-        The exclusion, read from outside. An apply outlives the caller
-        that asked for it, so this is how anything waiting for the world
-        to settle knows that the second phase has finished and the next
-        reload would be answered rather than refused.
-        """
-        return self._reloading
 
     async def start_all(self) -> None:
         """Connect every server concurrently, so one slow box does not
@@ -336,92 +285,6 @@ class McpServers:
             [entry for agent in agents for entry in self._configured.entries_for(agent)]
         )
 
-    async def reload(
-        self, read: Callable[[], tuple[Config, SecretStore | None]]
-    ) -> McpReload:
-        """Apply a freshly read configuration to what is running.
-
-        `read` is the re-read of the stored configuration, handed in
-        rather than done here: opening a database belongs to the layer
-        that owns one, and this layer owns where it runs. It runs in a
-        worker thread, because it takes the database's write lock and
-        waits out its busy timeout, and this coroutine is on the event
-        loop that every live conversation is on.
-
-        Two phases, and only the second touches anything running.
-        Preparation validates and builds every manager the new world
-        needs; any failure there (an unset `$VAR`, a credential that will
-        not decrypt, an egress declaration `server.local_only` forbids)
-        refuses with the managers and the grants exactly as they were.
-        Application then stops what is going, starts what is new, and
-        swaps the slice, so the grants change at one instant rather than
-        across one.
-
-        Being unreachable is not a preparation failure, which is the
-        boot's rule carried over: a candidate that connects to nothing
-        applies as a down manager with its reason on the status surface,
-        revived when a session that would use it opens.
-
-        One at a time. A second reload while one is running is refused
-        rather than queued, because it would carry a configuration read
-        later than the first one's into a world the first one is halfway
-        through changing.
-
-        The second phase finishes whatever happens to the caller. A
-        client that disconnects cancels the handler awaiting this, and a
-        cancellation landing between the stops and the swap would leave
-        stopped managers in the live set and started ones reachable by
-        nobody, with the exclusion released as though the reload were
-        done. So the apply runs in a task of its own behind a shield:
-        cancelling the request cancels the waiting, and the world still
-        arrives in one piece.
-
-        Which is also why the `mcp_reload` event is emitted at the two
-        ends rather than here: a refusal says so where it is
-        classified, and an apply says so as its last act, from inside
-        the shielded task. One reload is therefore one event, whether
-        or not anybody is still waiting for the answer.
-
-        The preparation is behind a shield of its own, and for a
-        different reason. Nothing it does can leave a half-changed
-        world, but its re-read runs in a worker thread, and a thread
-        cannot be cancelled: a client that disconnects during it leaves
-        it holding the database's write lock for as long as it takes.
-        Releasing the exclusion there would let the next reload start a
-        read against a lock the last one still holds, and answer a
-        caller who did nothing wrong that the database is busy. So both
-        halves are owned tasks, and the exclusion is held until
-        whichever of them is still running has finished.
-        """
-        return await reloading.reload(self, read)
-
-    def _hold_until(self, running: "asyncio.Task[Any] | None") -> None:
-        """Keep the exclusion until this half of the reload has really
-        finished, whatever happened to the caller.
-
-        A second reload starting against a world the first is still
-        changing, or against a database lock the first is still holding,
-        is exactly what the exclusion is for, and a cancelled caller
-        stops neither of those from being true.
-        """
-        if running is None or running.done():
-            self._release(running)
-        else:
-            running.add_done_callback(self._release)
-
-    def _release(self, finished: "asyncio.Task[Any] | None") -> None:
-        """The reload is over, however it ended. Also where a half whose
-        caller went away has its outcome consumed, so it does not end as
-        an unretrieved exception at shutdown: that is true of a
-        preparation a client abandoned mid-read as much as of an
-        apply."""
-        self._reloading = False
-        self._applying = None
-        self._preparing = None
-        if finished is not None and finished.done():
-            with contextlib.suppress(Exception, asyncio.CancelledError):
-                finished.exception()
-
     def _install(self, keep: dict[str, McpManager], configured: McpSlice) -> None:
         """The swap, and everything it decides at once: which managers a
         tool snapshot reaches, and which entries an agent's grant
@@ -438,11 +301,6 @@ class McpServers:
         self._shadowed = _shadowed(keep)
         self._reported = set()
         self._since = time.time()
-        # The mark moves with the world it describes, which is what
-        # makes it usable as a guard: the comparison identities ride the
-        # slice above, so there is no instant at which the mark and what
-        # it stands for disagree.
-        self._generation += 1
 
     def status(self) -> dict[str, dict[str, Any]]:
         """What every configured entry is doing right now, by name.
@@ -523,7 +381,7 @@ class McpServers:
         The baseline is the generation that is installed, never the
         configuration this process booted on. The MCP half is the one
         half a running server replaces: `POST
-        /runtime/mcp-servers/reload` swaps this world while the process
+        /runtime/config/reload` swaps this world while the process
         runs, so a comparison against the boot would report changes a
         reload has already applied, which is the one thing an answer
         about what is pending must not do.
@@ -544,19 +402,6 @@ class McpServers:
         for it, and not how either world is held.
         """
         return self._configured.pending_against(McpSlice.of(config, secrets), self._agents)
-
-    async def reload_result(
-        self, read: Callable[[], tuple[Config, SecretStore | None]]
-    ) -> McpReloadResult:
-        """The reload above, as the answer the API sends: what it did
-        and what is running now, taken with no await between the two.
-
-        Beside `typed_status` and for the same reason. The composition
-        root hands this to the API as the reload it may call, so the
-        handler applies a configuration and answers with the result,
-        and composes nothing.
-        """
-        return await reloading.reload_result(self, read)
 
     def timeout_for(self, entry: str) -> float | None:
         manager = self._managers.get(entry)

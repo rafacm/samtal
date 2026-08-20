@@ -35,8 +35,11 @@ import uvicorn
 from mcp.server.fastmcp import FastMCP
 from sse_starlette.sse import AppStatus
 
-from tests.support.configs import STDIO_SERVER
+from tests.support.configs import STDIO_SERVER, world
 from vinga_server.config import Config, McpServerConfig
+from vinga_server.config.boot import BootConfig
+from vinga_server.config.reload import ConfigReload
+from vinga_server.config.responses import ConfigReloadResult
 from vinga_server.config.secrets import SecretStore
 from vinga_server.tools.mcp import McpServerManager, McpServers
 
@@ -148,8 +151,51 @@ async def started(config: Config, secrets: SecretStore | None = None) -> McpServ
 
 
 def reading(config: Config, secrets: SecretStore | None = None):
-    """The re-read a reload is handed, standing in for the database."""
-    return lambda: (config, secrets)
+    """The re-read a reload is handed, standing in for the database.
+
+    A `BootConfig` because that is what `reload_domain_config` answers
+    with and what the apply is typed against: the composed models and
+    the stored secrets beside them, which is one value rather than two
+    that could be passed in the wrong order.
+    """
+    loaded = BootConfig(config, secrets if secrets is not None else SecretStore())
+    return lambda: loaded
+
+
+class Applying:
+    """The generalized apply of one running registry, with the stored
+    half a test moves between calls.
+
+    The production shape holds its re-read for the life of the server,
+    since where a server's database is does not change per request. A
+    test's does: what these suites vary is exactly what the store would
+    say next. So the read is a field here and `apply` takes the next one,
+    while the object underneath is the same one across calls, which is
+    what the exclusion tests need in order to have an exclusion to test.
+
+    The running world is the configuration the registry was built from,
+    which is what makes the overlay the identity function for these
+    suites: what they are about is the MCP half, and an apply that
+    changed a prompt as well would be two subjects in one assertion.
+    """
+
+    def __init__(
+        self, servers: McpServers, running: Config, secrets: SecretStore | None = None
+    ) -> None:
+        self.stored = reading(running, secrets)
+        self.generations = world(running, secrets)
+        self._applying = ConfigReload(self.generations, servers, lambda: self.stored())
+
+    @property
+    def running(self) -> bool:
+        """Whether an apply is between its two phases right now."""
+        return self._applying.running
+
+    async def apply(self, read=None) -> ConfigReloadResult:
+        """One apply, against `read` as the stored half from now on."""
+        if read is not None:
+            self.stored = read
+        return await self._applying.apply()
 
 
 # --- one HTTP server, for the length of a block -----------------------

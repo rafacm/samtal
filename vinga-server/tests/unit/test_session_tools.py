@@ -30,6 +30,7 @@ from tests.support.configs import (
 from tests.support.mcp_stdio_server import SHADOWED_TOOL_ENV
 from tests.support.providers import ScriptedLlm
 from tests.support.sessions import call, history, run_reply, session_for, talking
+from tests.support.tools_mcp import Applying, reading
 from tests.support.wire import connect, say_something, sentences, shake_hands, tone_strength
 from vinga_server.app import create_app
 from vinga_server.config import Config
@@ -429,7 +430,9 @@ async def test_a_name_that_changes_owner_between_calls_is_refused_not_rerouted(
         (slot,) = session.runtime._reserve_tools([call(name)])
         assert session.runtime._turn.reserved(slot).entry == "home"
 
-        await servers.reload(lambda: (shadowing_config(inner=True), None))
+        await Applying(servers, shadowing_config(inner=False)).apply(
+            reading(shadowing_config(inner=True))
+        )
         # The move really happened, or this test proves nothing: the
         # name is the inner entry's now, and its tool answers
         # differently, so a reroute would be visible in the result.
@@ -514,7 +517,9 @@ async def test_a_reload_between_replies_changes_what_the_next_one_may_reach() ->
         await run_reply(session, "hello")
         offered_before = {tool.name for tool in script.seen[0][1]}
 
-        await servers.reload(lambda: (registry_config(granted=True), None))
+        await Applying(servers, registry_config(granted=False)).apply(
+            reading(registry_config(granted=True))
+        )
         await run_reply(session, "hello again")
     finally:
         await servers.stop_all()

@@ -33,6 +33,7 @@ from tests.support.mcp_stdio_server import (
     SECOND_VOICE,
     SHIPPED_INSTRUCTIONS,
 )
+from tests.support.tools_mcp import Applying, reading
 from vinga_server import logs
 from vinga_server.config import Config, McpServerConfig
 from vinga_server.config.cli import RELOAD_READ_TIMEOUT_S
@@ -788,10 +789,10 @@ async def test_a_prompt_that_never_answers_bounds_the_boot_and_the_reload() -> N
         assert servers.guidance_for_agent("assistant") == ()
 
         began = time.monotonic()
-        applied = await servers.reload(lambda: (after, None))
+        applied = (await Applying(servers, before).apply(reading(after))).mcp
         reloaded = time.monotonic() - began
 
-        assert applied.restarted == ("tools",)
+        assert applied.restarted == ["tools"]
         assert reloaded < CONNECT_TIMEOUT_S + PROMPT_DISCOVERY_TIMEOUT_S + STOP_TIMEOUT_S + 2.0
         assert "tools__secret_word" in [tool.name for tool in servers.tools_for(["tools"])]
         # The prompt that answered is injected; the one that did not is

@@ -142,6 +142,31 @@ class RunningConfigMovedError(ConfigError):
     """
 
 
+class SnapshotOnlyError(ConfigError):
+    """This server was composed from a configuration handed to it rather
+    than read from a store, so there is no store that describes the
+    world it is serving.
+
+    The state a test lane and an embedded caller run in: the snapshot is
+    the whole truth there is, and it is authoritative for exactly that
+    reason. What follows is that the two surfaces which span the two
+    sides have nothing to span. A comparison would put the running world
+    against a database that describes some other server, or none at all;
+    an apply would install that database as this server's whole domain
+    half. Both refuse, in one sentence saying so, rather than answering
+    something that looks like an answer.
+
+    A sibling of the two refusals above and under their status for the
+    same reason theirs is: nothing was changed. Unlike theirs, making
+    the request again will not help, and the sentence says so, since the
+    only thing that changes this is starting a server from a store.
+
+    Here rather than beside its raiser for the reason the others are:
+    what knows the mode is the composition root, and what has to answer
+    it with a status code is the configuration API.
+    """
+
+
 class StorageError(ConfigError):
     """The stored state cannot be read as configuration, or the database
     could not be read or written at all. Not the caller's mistake."""

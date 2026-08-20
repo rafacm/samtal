@@ -4,7 +4,7 @@ running.
 The registry is the real one, and the read under test is the one an
 operator's "what have I written that is not in effect" goes through. Its
 baseline is the generation that is installed rather than the boot, which
-is the whole reason it exists: `POST /runtime/mcp-servers/reload` swaps
+is the whole reason it exists: `POST /runtime/config/reload` swaps
 that world while the process runs, and an answer taken against the boot
 would report changes a reload has already applied.
 
@@ -20,9 +20,10 @@ import pytest
 from cryptography.fernet import Fernet, MultiFernet
 
 from tests.support.configs import config_with as domain_config
-from tests.support.tools_mcp import entry_data, reading, started
+from tests.support.tools_mcp import Applying, entry_data, reading, started
 from tests.support.tools_mcp import reload_config as config_with
 from vinga_server.config import Config
+from vinga_server.config.boot import BootConfig
 from vinga_server.config.loader import ConfigError
 from vinga_server.config.secrets import (
     SecretLocation,
@@ -194,11 +195,11 @@ async def test_a_prompt_only_edit_is_pending_and_the_connection_still_stands(
 
         assert servers.pending_against(after).changed == ("tools",)
 
-        applied = await servers.reload(reading(after))
+        applied = (await Applying(servers, before).apply(reading(after))).mcp
 
         # Nothing about the connection moved, and the entry is not
         # pending any more.
-        assert applied.unchanged == ("tools",)
+        assert applied.unchanged == ["tools"]
         assert servers.manager_of("tools") is kept
         assert servers.status()["tools"]["state"] == CONNECTED
         assert servers.pending_against(after).changed == ()
@@ -226,9 +227,9 @@ async def test_an_inject_prompts_edit_is_pending_and_the_reload_reconnects() -> 
 
         assert servers.pending_against(after).changed == ("tools",)
 
-        applied = await servers.reload(reading(after))
+        applied = (await Applying(servers, before).apply(reading(after))).mcp
 
-        assert applied.restarted == ("tools",)
+        assert applied.restarted == ["tools"]
         assert servers.manager_of("tools") is not was
         assert servers.pending_against(after).changed == ()
     finally:
@@ -239,11 +240,12 @@ async def test_the_identities_are_swapped_with_the_world_they_describe() -> None
     """A reload's baseline moves with it: what was pending a moment ago
     is what is running now, and the same read taken against the same
     stored world answers with nothing."""
-    servers = McpServers.build(unused())
+    running = unused()
+    servers = McpServers.build(running)
     after = unused(tool_timeout_s=3.5)
     assert servers.pending_against(after).changed == ("tools",)
 
-    await servers.reload(reading(after))
+    await Applying(servers, running).apply(reading(after))
 
     assert servers.pending_against(after) == servers.pending_against(after)
     assert servers.pending_against(after).changed == ()
@@ -251,23 +253,31 @@ async def test_the_identities_are_swapped_with_the_world_they_describe() -> None
     assert servers.pending_against(unused()).changed == ("tools",)
 
 
-async def test_the_generation_mark_moves_only_when_a_world_is_installed() -> None:
-    """What M2's read captures across its own await. A refused reload
-    installs nothing, so it moves nothing."""
+async def test_the_mark_moves_only_when_a_world_is_installed() -> None:
+    """What the comparison read captures across its own await. A refused
+    apply installs nothing, so it moves nothing; an apply that installs
+    reads as unstable while it is doing it and settles one further on.
+
+    The mark is the generation holder's rather than the registry's, and
+    that is the whole point of moving it there: an apply changes serving
+    state more than once, and a mark that counted only this half would
+    be steady over a window in which the world had already moved.
+    """
     config = unused()
     servers = McpServers.build(config)
-    booted = servers.generation
+    reloads = Applying(servers, config)
+    booted = reloads.generations.mark
 
-    def refuse() -> tuple[Config, SecretStore | None]:
+    def refuse() -> BootConfig:
         raise ConfigError("invalid config in the database: agents.sam has no llm")
 
     with pytest.raises(ConfigError):
-        await servers.reload(refuse)
-    assert servers.generation == booted
+        await reloads.apply(refuse)
+    assert reloads.generations.mark == booted
 
-    await servers.reload(reading(config))
+    await reloads.apply(reading(config))
 
-    assert servers.generation != booted
+    assert reloads.generations.mark != booted
 
 
 # The grants, agent by agent
@@ -322,7 +332,7 @@ async def test_a_deleted_agent_s_grants_stay_pending_until_a_reload() -> None:
     try:
         assert servers.pending_against(after).grants == ("helper",)
 
-        await servers.reload(reading(after))
+        await Applying(servers, before).apply(reading(after))
 
         assert servers.pending_against(after).grants == ()
     finally:
@@ -346,7 +356,7 @@ async def test_a_deleted_agent_written_back_is_pending_again() -> None:
     deleted = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
     servers = McpServers.build(booted)
     try:
-        await servers.reload(reading(deleted))
+        await Applying(servers, booted).apply(reading(deleted))
         assert servers.pending_against(deleted).grants == ()
 
         assert servers.pending_against(booted).grants == ("helper",)
@@ -374,7 +384,7 @@ async def test_an_agent_a_reload_installed_is_still_not_a_grant_change() -> None
     )
     servers = McpServers.build(booted)
     try:
-        await servers.reload(reading(added))
+        await Applying(servers, booted).apply(reading(added))
 
         assert servers.pending_against(narrowed).grants == ()
     finally:

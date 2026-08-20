@@ -96,6 +96,7 @@ from tests.support.configs import (
     idle_config,
     masked_config,
     watchdog_config,
+    world,
 )
 from tests.support.providers import (
     STALL_S,
@@ -137,6 +138,7 @@ from tests.support.sessions import (
 from tests.support.sockets import RecordingSocket
 from tests.support.stores import CAPTURE_MANIFEST, corrupt, tone
 from tests.support.stores import store as capture_store
+from tests.support.tools_mcp import Applying as McpApplying
 from tests.support.tools_mcp import config_granting as mcp_granting
 from tests.support.tools_mcp import entry_data as mcp_entry_data
 from tests.support.tools_mcp import reading as mcp_reading
@@ -474,12 +476,13 @@ async def turned_away(
     config: Config, device_id: str, resolution: DeviceAgents | None = None
 ) -> None:
     """One connection that never becomes a session."""
+    generations = world(config)
     factory = bespoke_runtime_factory(
-        config, build_agent_providers(config), McpServers({}), None, {}
+        generations, build_agent_providers(config), McpServers({}), None, {}
     )
     session = DeviceSession(
         cast(Any, TurnedAwaySocket(device_id)),
-        config,
+        generations,
         factory,
         bindings=None if resolution is None else cast(Any, ScriptedBindings(resolution)),
     )
@@ -1327,15 +1330,16 @@ async def drive_mcp_reload_refused(_: Path) -> None:
     refusal that needs no broken database to provoke."""
     before = mcp_config({"tools": mcp_entry_data()}, {"assistant": ["tools"]})
     servers = await mcp_started(before)
+    reloads = McpApplying(servers, before)
     # White-box: a reload refused because one is already running needs
-    # two reloads overlapping, and the public overlap is a race.
-    servers._reloading = True
+    # two applies overlapping, and the public overlap is a race.
+    reloads._applying._running = True
     try:
-        await servers.reload(mcp_reading(before))
+        await reloads.apply(mcp_reading(before))
     except ReloadInProgressError:
         pass
     finally:
-        servers._reloading = False
+        reloads._applying._running = False
         await servers.stop_all()
 
 
@@ -1347,7 +1351,7 @@ async def drive_mcp_reload_applied(_: Path) -> None:
     )
     servers = await mcp_started(before)
     try:
-        await servers.reload(mcp_reading(after))
+        await McpApplying(servers, before).apply(mcp_reading(after))
     finally:
         await servers.stop_all()
 

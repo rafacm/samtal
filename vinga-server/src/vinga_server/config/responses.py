@@ -19,10 +19,11 @@ reads and the one that must not drift.
 
 Beside the models, and for the same reason, the three runtime surfaces
 the API is handed: the protocol a status read is taken through, and the
-shapes of the callables a reload is applied by and the stored-versus-
-running comparison is read through. All three are stated in typing and
-these models, which is what lets a route say what it was handed without
-the module that renders the document loading the MCP SDK to find out.
+shapes of the callables the generalized reload is applied by and the
+stored-versus-running comparison is read through. All three are stated
+in typing and these models, which is what lets a route say what it was
+handed without the module that renders the document loading the MCP SDK
+to find out.
 
 Every model forbids extra keys, so a field that is answered is a field
 that was declared. The descriptions are the document's prose, written
@@ -298,18 +299,24 @@ class McpReloadResult(BaseModel):
     )
 
 
-# What a reload did, in the order a person reads it: what arrived, what
-# was made again, what went, and what nothing happened to. Presentation,
-# which is why it is a tuple and not a set, but presentation of the
-# result's own fields: read off the model rather than listed again, so a
-# fifth outcome is one line on the model and the CLI prints it. `servers`
-# is the status mapping carried beside the outcomes rather than an
-# outcome, and it is the only field the rule below leaves out.
-RELOAD_OUTCOMES = tuple(
-    name
-    for name, field in McpReloadResult.model_fields.items()
-    if get_origin(field.annotation) is list and get_args(field.annotation) == (str,)
-)
+def outcomes(section: type[BaseModel]) -> tuple[str, ...]:
+    """One reload section's outcome lists, in the order it declares
+    them: every field that is a list of names.
+
+    Presentation, which is why the answer is a tuple and not a set, but
+    presentation of the model's own fields: read off the declaration
+    rather than listed again, so an outcome added to a section is one
+    line on that section and the CLI prints it. What the rule leaves out
+    is every field that is not a list of names, which today is the MCP
+    status mapping and the agent-defaults flag; each of those is
+    rendered where its own shape is understood.
+    """
+    return tuple(
+        name
+        for name, field in section.model_fields.items()
+        if get_origin(field.annotation) is list and get_args(field.annotation) == (str,)
+    )
+
 
 
 class McpStatusSource(Protocol):
@@ -331,16 +338,201 @@ class McpStatusSource(Protocol):
     def typed_status(self) -> dict[str, McpServerStatus]: ...
 
 
-# And what applies a re-read of the stored configuration to that
-# registry: a callable, because what it closes over (the configuration
-# this process booted on, and the managers that are running) is the
-# composition root's business and not this API's. It answers the whole
-# of the reload's reply, taken in one breath where the two phases live,
-# so the handler applies a configuration and adds nothing to what came
-# back. None is the honest answer for an application without a server,
-# and the route refuses rather than pretending to have applied
+# What one reload applied, kind by kind
+#
+# The whole schema is published at once, sections this server does not
+# fill yet included, and that is the #193 lesson rather than a taste:
+# every model here forbids extra keys, so a client generated from a
+# smaller schema would reject a grown answer. A section whose milestone
+# has not landed answers null, and the milestone that lands it changes
+# a value and a description and never the shape (#191).
+
+
+class PromptsReload(BaseModel):
+    """The prompt text a reload put in front of the agents that use it."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    changed: list[str] = Field(
+        description=(
+            "The agents whose own prompt or whose resolved shared fragments now differ "
+            "from what this server was serving, sorted. Each of them assembles the new "
+            "text at its next activation, which is a new session or an agent switch; a "
+            "conversation already in progress keeps the prompt it was activated with. "
+            "The MCP guidance that also goes into an assembly is not counted here: what "
+            "moved there is reported entry by entry under `mcp`, since that is where a "
+            "connection is what changed. An agent the stored configuration added or "
+            "removed is not here either, because the agents this server can serve are "
+            "still what it started with."
+        )
+    )
+
+
+class FillersReload(BaseModel):
+    """What a reload did to the pre-synthesized filled pauses.
+
+    Answered as null until the milestone that makes fillers a reloaded
+    kind: this server applies a reload without touching a clip, and an
+    empty three-way answer would say it had considered every agent and
+    found nothing to do.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    resynthesized: list[str] = Field(
+        description=(
+            "The agents whose filler clip was made again, because the phrases or the "
+            "voice behind them moved, sorted."
+        )
+    )
+    reused: list[str] = Field(
+        description=(
+            "The agents whose filler clip was carried over unchanged, sorted. Reuse is "
+            "the point of the comparison: an edit to a prompt never re-synthesizes a "
+            "clip."
+        )
+    )
+    disabled: list[str] = Field(
+        description=(
+            "The agents whose synthesis failed, sorted. The reload applied and those "
+            "agents run with the latency mask off, because a filler is a mask and a "
+            "posture where a text-to-speech hiccup blocked a prompt fix would invert "
+            "what matters."
+        )
+    )
+
+
+class ProvidersReload(BaseModel):
+    """What a reload did to the built providers.
+
+    Answered as null until the milestone that makes providers a reloaded
+    kind, for the reason the fillers section is.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    built: list[str] = Field(
+        description=(
+            "The provider entries this reload constructed, as `<stage>.<name>`, sorted: "
+            "written since, or changed in a way that a running instance cannot be."
+        )
+    )
+    reused: list[str] = Field(
+        description=(
+            "The provider entries carried into the new world as the objects they "
+            "already were, sorted. An entry whose model and stored credentials are "
+            "unchanged is never built again, which is what keeps a prompt edit from "
+            "reloading a local model."
+        )
+    )
+    retired: list[str] = Field(
+        description=(
+            "The provider entries no world after this one uses, sorted. Their resources "
+            "are released once the last conversation holding them has ended, not at the "
+            "instant this answered."
+        )
+    )
+
+
+class AgentsReload(BaseModel):
+    """What a reload did to the set of agents this server can serve.
+
+    Answered as null until the milestone that makes the agent set a
+    reloaded kind, for the reason the two sections above are.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    added: list[str] = Field(
+        description=(
+            "The agents this server can serve now and could not before, sorted. A "
+            "device bound to one of them reaches it at its next check-in."
+        )
+    )
+    removed: list[str] = Field(
+        description=(
+            "The agents this server can no longer be asked for, sorted. A conversation "
+            "already talking as one of them finishes on the world it was built with."
+        )
+    )
+    defaults_changed: bool = Field(
+        description=(
+            "Whether `agent_defaults` moved, which is a boolean because there is one of "
+            "it for the whole deployment and nothing to name. What it changes reaches "
+            "every agent that inherits the field that moved."
+        )
+    )
+
+
+class ConfigReloadResult(BaseModel):
+    """What one reload applied to this running server, kind by kind, and
+    what is running once it had been applied.
+
+    One request applies a stored change and says what the change was, so
+    believing a write took effect when it did not takes a deliberate act
+    of not reading the reply. Which kinds a reload can apply grows
+    milestone by milestone; the sections below that this server does not
+    apply yet answer null rather than an empty answer, because an empty
+    three-way answer would claim that every agent was considered and
+    nothing needed doing.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    mcp: McpReloadResult
+    prompts: PromptsReload
+    fillers: FillersReload | None = None
+    providers: ProvidersReload | None = None
+    agents: AgentsReload | None = None
+
+
+def flags(section: type[BaseModel]) -> tuple[str, ...]:
+    """One reload section's yes-or-no answers, in the order it declares
+    them.
+
+    The sibling of `outcomes` above and the other half of what a section
+    can say: a kind there is one of has nothing to name, so what moved
+    about it is a boolean. Read off the declaration for the same reason,
+    so that a flag added to a section is a flag the CLI prints.
+    """
+    return tuple(
+        name for name, field in section.model_fields.items() if field.annotation is bool
+    )
+
+
+def _section(annotation: object) -> type[BaseModel]:
+    """The model behind one section of the result, whether or not the
+    section is optional. A section that is not filled yet is declared
+    `Model | None`, and what a renderer needs is the model either way."""
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return annotation
+    return next(
+        argument
+        for argument in get_args(annotation)
+        if isinstance(argument, type) and issubclass(argument, BaseModel)
+    )
+
+
+# Which sections one reload answers with and what shape each of them
+# is, read off the result rather than written down beside it: a section
+# added to the model is a section the CLI renders, and a field whose
+# shape the rendering has no rule for is a failing test rather than
+# output that quietly went missing.
+RELOAD_SECTIONS: dict[str, type[BaseModel]] = {
+    name: _section(field.annotation)
+    for name, field in ConfigReloadResult.model_fields.items()
+}
+
+# And what applies a re-read of the stored configuration to this
+# running server: a callable, because what it closes over (the
+# generation holder, the MCP managers, and where the blocking re-read
+# runs) is the composition root's business and not this API's. It
+# answers the whole of the reload's reply, composed where the phases
+# live, so the handler applies a configuration and adds nothing to what
+# came back. None is the honest answer for an application without a
+# server, and the route refuses rather than pretending to have applied
 # something.
-type McpReloader = Callable[[], Awaitable[McpReloadResult]]
+type ConfigReloader = Callable[[], Awaitable[ConfigReloadResult]]
 
 
 class PromptBlock(BaseModel):
@@ -448,12 +640,13 @@ class Applies(StrEnum):
     """When a change of this kind reaches a conversation.
 
     Three boundaries and no fourth, because the server has three.
-    `restart` is the boot-time snapshot, which is most of the
-    configuration. `reload` is what `POST /runtime/mcp-servers/reload`
-    applies while the process runs, which is the MCP entries and the
-    agents' grants. `check-in` is what a device is answered as it asks,
-    the bindings and the default agent, which are therefore in effect
-    within seconds of a write and never pending at all.
+    `restart` is what this process reads once and serves until it is
+    started again. `reload` is what `POST /runtime/config/reload`
+    applies while the process runs, which is the MCP entries, the
+    agents' grants, the shared prompt fragments and each agent's own
+    prompt text. `check-in` is what a device is answered as it asks, the
+    bindings and the default agent, which are therefore in effect within
+    seconds of a write and never pending at all.
     """
 
     RESTART = "restart"
@@ -517,17 +710,43 @@ class GrantsDiff(BaseModel):
     )
 
 
-class AgentsDiff(EntityDiff):
-    """The agents, whose entries span two regimes: an agent's `mcp` list
-    is what a reload derives its tools from, and everything else about
-    the entry waits for a restart.
+class PromptDiff(BaseModel):
+    """The agents whose prompt text the stored configuration would move,
+    which is the half of an agent entry a reload assembles again rather
+    than the half a restart loads."""
 
-    So a grants-only edit is deliberately absent from `changed` above
-    and reported under `grants` instead, and an answer that named it in
-    both would be claiming a restart that nothing is waiting for.
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    applies: Applies
+    changed: tuple[str, ...] = Field(
+        description=(
+            "The agents whose stored `prompt` or `prompt_includes` differs from what "
+            "this server is serving, sorted. A reload applies both, and each agent that "
+            "moved assembles the new text at its next activation. Only agents both "
+            "sides hold are compared: a reload keeps the agents this server started "
+            "with, so an agent the database has added or deleted rides the added or "
+            "removed lists above and nothing about its prompt is pending here. The "
+            "fragments the includes name are their own kind, and an edit to a "
+            "fragment's text is reported there rather than against every agent that "
+            "carries it."
+        )
+    )
+
+
+class AgentsDiff(EntityDiff):
+    """The agents, whose entries span three regimes: an agent's `mcp`
+    list is what a reload derives its tools from, its `prompt` and
+    `prompt_includes` are what a reload assembles its next activation
+    from, and everything else about the entry waits for a restart.
+
+    So a grants-only or prompt-only edit is deliberately absent from
+    `changed` above and reported under `grants` or `prompt` instead, and
+    an answer that named it in both would be claiming a restart that
+    nothing is waiting for.
     """
 
     grants: GrantsDiff
+    prompt: PromptDiff
 
 
 class SingletonDiff(BaseModel):
@@ -713,14 +932,18 @@ class Acknowledgement(BaseModel):
     )
     notice: str = Field(
         description=(
-            "When the change takes effect, as one of three sentences. Configuration is "
-            "a boot-time snapshot, so most writes apply at the next server start. A "
-            "device binding and the default agent are read by the running server, so "
-            "they apply at the device's next OTA check or connection with no restart, "
-            "unless they name an agent this server has not loaded, which is the case "
-            "that carries the restart sentence again. A write to an MCP server entry "
-            "or to one of its secret slots names the reload instead, since that is "
-            "what applies it to a running server."
+            "When the change takes effect, as one of a handful of sentences. Most of "
+            "the configuration is read once at start, so most writes apply at the next "
+            "server start. A device binding and the default agent are read by the "
+            "running server, so they apply at the device's next OTA check or "
+            "connection with no restart, unless they name an agent this server has not "
+            "loaded, which is the case that carries the restart sentence again. A "
+            "write to an MCP server entry, to one of its secret slots or to a prompt "
+            "fragment names the reload instead, since that is what applies it to a "
+            "running server. A write to an agent names both, its prompt fields being "
+            "applied by the reload and the rest of it built at the next start. A "
+            "server serving a configuration no store describes says that the write is "
+            "stored and takes effect when a server boots from that store."
         )
     )
 
