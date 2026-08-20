@@ -429,7 +429,7 @@ cases about a mutable object to two about the mapping and the wiring.
 
 ### Deviations from the plan
 
-Seven, each recorded because it moved something the plan named.
+Eight, each recorded because it moved something the plan named.
 
 **1. The reuse key's provider half is the running provider object, not
 an identity string.** The plan says "the identity of the agent's TTS
@@ -482,7 +482,19 @@ declaration is there and the overlay reads it. The restart-bound
 exclusion mapping is derived from it rather than listed, taking each
 field's default off `AgentConfig`.
 
-**7. The boot's order moved.** Synthesis now runs before the generation
+**7. The agent notice merged with PR #229's review round rather than
+replacing it.** This milestone was built on the commit before that
+round, which had just widened `AGENT_NOTICE` to name the `mcp` grants
+and the two clocks the applied half had. Rebasing onto it made the
+sentence carry four applied fields and three clocks: the prompt fields
+at the next activation, the grants at the next utterance, the filler
+section at the next conversation, and everything else at the next start.
+The round's own pin asserts the sentence whole, so it was widened in the
+same breath, and the same merge runs through `Acknowledgement.notice`,
+the `API_DESCRIPTION`, the docgen prose and the four README sites that
+name the halves.
+
+**8. The boot's order moved.** Synthesis now runs before the generation
 is built rather than after everything else, which put it in front of the
 conversation writer's start. `test_conversations_boot.py` proves that a
 boot failing after the writer started still stops it, and filler
@@ -525,10 +537,11 @@ Run from `vinga-server/`, at the last commit of the milestone.
 - `uv run ruff check .`: all checks passed.
 - `uv run mypy`: success, no issues found in 3 source files. Its scope is
   the events package, which this milestone does not touch.
-- `uv run pytest tests/unit -q`: 2,741 passed, 16 skipped. (2,735 at the
-  end of M1; the net six are eight new cases in `test_config_reload.py`
-  and two in `test_config_diff.py`, less the four `test_filler_cache.py`
-  cases that were about a mutable object that no longer exists.)
+- `uv run pytest tests/unit -q`: 2,744 passed, 16 skipped. (2,738 at the
+  end of PR #229's review round, which this milestone was rebased onto;
+  the net six are eight new cases in `test_config_reload.py` and two in
+  `test_config_diff.py`, less the four `test_filler_cache.py` cases that
+  were about a mutable object that no longer exists.)
 - `uv run pytest tests/integration -q`: 61 passed, the same count as M1
   left: the one case this milestone changes was already there and was
   amended rather than added to.
