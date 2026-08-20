@@ -41,6 +41,7 @@ from vinga_server.config.boot import BootConfig
 from vinga_server.config.reload import ConfigReload
 from vinga_server.config.responses import ConfigReloadResult
 from vinga_server.config.secrets import SecretStore
+from vinga_server.providers import build_agent_providers
 from vinga_server.tools.mcp import McpServerManager, McpServers
 
 # --- what a suite reads its own subject by ----------------------------
@@ -177,6 +178,11 @@ class Applying:
     which is what makes the overlay the identity function for these
     suites: what they are about is the MCP half, and an apply that
     changed a prompt as well would be two subjects in one assertion.
+
+    The engines are the ones that configuration names, built here for
+    the same reason: an apply synthesizes the filled pauses of the world
+    it installs, and one handed no engines would be exercising a server
+    that cannot speak.
     """
 
     def __init__(
@@ -184,7 +190,12 @@ class Applying:
     ) -> None:
         self.stored = reading(running, secrets)
         self.generations = world(running, secrets)
-        self._applying = ConfigReload(self.generations, servers, lambda: self.stored())
+        self._applying = ConfigReload(
+            self.generations,
+            servers,
+            lambda: self.stored(),
+            build_agent_providers(running),
+        )
 
     @property
     def running(self) -> bool:

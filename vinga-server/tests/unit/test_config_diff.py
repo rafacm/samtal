@@ -22,6 +22,7 @@ from vinga_server.config import Config
 from vinga_server.config.boot import BootConfig
 from vinga_server.config.diff import (
     APPLIES,
+    FILLER_APPLY,
     GRANTS_APPLY,
     PROMPT_APPLY,
     McpPending,
@@ -261,15 +262,65 @@ def test_a_grants_only_edit_is_not_claimed_pending_restart() -> None:
 
 def test_an_edit_beside_the_reloaded_fields_is_still_pending_a_restart() -> None:
     """The exclusion is a named list of fields and not a general
-    softening: the rest of the entry converges where it always did. The
-    filler section is the case, since it is what a start synthesizes."""
+    softening: the rest of the entry converges where it always did. A
+    provider override is the case, since it is what a start builds."""
     running = granting("tools")
     stored = config_with(
+        providers={
+            "llm": {"mock": {"type": "mock"}, "other": {"type": "mock"}},
+            "asr": {"mock": {"type": "mock"}},
+            "tts": {"mock": {"type": "mock"}},
+            "vad": {"mock": {"type": "mock"}},
+        },
         mcp_servers={"tools": entry_data()},
-        agents={"assistant": {"prompt": "A", "mcp": [], "filler": {"enabled": False}}},
+        agents={"assistant": {"prompt": "A", "mcp": [], "llm": "other"}},
     )
 
     assert diff_of(running, stored).agents.changed == ("assistant",)
+
+
+def test_a_filler_only_edit_rides_the_filler_half() -> None:
+    """An agent's own `filler` section is what a reload synthesizes its
+    next session's clips from, so an edit to it is not waiting for a
+    restart and is reported under its own half rather than in the
+    restart-bound list."""
+    running = config_with(agents={"assistant": {"prompt": "A"}})
+    stored = config_with(
+        agents={
+            "assistant": {
+                "prompt": "A",
+                "filler": {"enabled": True, "phrases": ["Hmm..."]},
+            }
+        }
+    )
+
+    answer = diff_of(running, stored)
+
+    assert answer.agents.changed == ()
+    assert answer.agents.filler.changed == ("assistant",)
+    assert answer.agents.filler.applies is FILLER_APPLY
+    assert answer.agents.filler.applies is Applies.RELOAD
+    assert answer.agents.applies is Applies.RESTART
+
+
+def test_an_agent_defaults_filler_edit_stays_pending_a_restart() -> None:
+    """The layer under every agent is not the agent's own half. What
+    `agent_defaults.filler` holds is inherited by every agent that
+    configures none, and a candidate generation keeps the previous
+    layer whole, so the edit waits for the start that reads it and is
+    reported against `agent_defaults`."""
+    stages = dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
+    running = config_with(agent_defaults=stages, agents={"assistant": {"prompt": "A"}})
+    stored = config_with(
+        agent_defaults=stages | {"filler": {"enabled": True, "phrases": ["Hmm..."]}},
+        agents={"assistant": {"prompt": "A"}},
+    )
+
+    answer = diff_of(running, stored)
+
+    assert answer.agent_defaults.changed is True
+    assert answer.agent_defaults.applies is Applies.RESTART
+    assert answer.agents.filler.changed == ()
 
 
 def test_the_grants_answer_is_the_registry_s_and_rides_the_reload() -> None:

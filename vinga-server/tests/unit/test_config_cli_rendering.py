@@ -37,6 +37,7 @@ from vinga_server.config.loader import ConfigError
 from vinga_server.config.responses import (
     RELOAD_SECTIONS,
     ConfigReloadResult,
+    FillersReload,
     McpReloadResult,
     PromptsReload,
     flags,
@@ -447,7 +448,12 @@ def test_a_prompt_refusal_carries_nothing_of_the_body() -> None:
 # refuses a body that is not one.
 
 
-def _applied(servers: McpServers, prompts: Sequence[str] = (), **outcome: object):
+def _applied(
+    servers: McpServers,
+    prompts: Sequence[str] = (),
+    fillers: FillersReload | None = None,
+    **outcome: object,
+):
     """A server that answers a reload with what it applied and what is
     running, standing in for a registry these tests deliberately do not
     start. Every half, because that is what the callable a running
@@ -462,6 +468,9 @@ def _applied(servers: McpServers, prompts: Sequence[str] = (), **outcome: object
                 servers=servers.typed_status(),
             ),
             prompts=PromptsReload(changed=list(prompts)),
+            fillers=fillers
+            if fillers is not None
+            else FillersReload(resynthesized=[], reused=[], disabled=[]),
         )
 
     return reload
@@ -474,7 +483,11 @@ def test_reload_prints_what_it_did_and_what_is_running(
     servers = _configured({"weather": entry}, {"sam": ["weather"]})
     run.runtime["mcp_servers"] = servers
     run.runtime["reload"] = _applied(
-        servers, prompts=("sam",), started=("weather",), stopped=("gone",)
+        servers,
+        prompts=("sam",),
+        fillers=FillersReload(resynthesized=["sam"], reused=["kid"], disabled=["mute"]),
+        started=("weather",),
+        stopped=("gone",),
     )
 
     assert run("reload") == 0
@@ -488,10 +501,17 @@ def test_reload_prints_what_it_did_and_what_is_running(
     # The prompt half beside the MCP one, since an apply moves both.
     assert "prompts:" in printed
     assert "  changed: sam" in printed
+    # And the filler half, all three outcomes, the degraded one
+    # included: an agent whose voice would not speak is what an operator
+    # most needs to read off this, since the reload applied anyway.
+    assert "fillers:" in printed
+    assert "  resynthesized: sam" in printed
+    assert "  reused: kid" in printed
+    assert "  disabled: mute" in printed
     # And every section this server does not apply yet, named rather
     # than missing: a kind that vanished from the output would read as a
     # kind with nothing to report.
-    for section in ("fillers", "providers", "agents"):
+    for section in ("providers", "agents"):
         assert f"{section}: {cli.NOT_APPLIED}" in printed
     # And the status underneath, which is what says whether an entry
     # that started actually connected.

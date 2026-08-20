@@ -188,7 +188,10 @@ def test_the_reload_answers_over_a_real_socket(served_api, tmp_path: Path) -> No
             "servers": {},
         },
         "prompts": {"changed": []},
-        "fillers": None,
+        # Present and empty rather than null: this server applies the
+        # filled pauses, and it considered every agent it has, which is
+        # none.
+        "fillers": {"resynthesized": [], "reused": [], "disabled": []},
         "providers": None,
         "agents": None,
     }

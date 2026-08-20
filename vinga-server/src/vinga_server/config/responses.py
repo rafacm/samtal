@@ -371,10 +371,15 @@ class PromptsReload(BaseModel):
 class FillersReload(BaseModel):
     """What a reload did to the pre-synthesized filled pauses.
 
-    Answered as null until the milestone that makes fillers a reloaded
-    kind: this server applies a reload without touching a clip, and an
-    empty three-way answer would say it had considered every agent and
-    found nothing to do.
+    Three outcomes and no fourth, because a reload makes exactly one of
+    three decisions about an agent that masks its latency. An agent that
+    masks none, or has just switched masking off, is in none of the
+    three: there was no decision to make about it, and naming it under
+    an outcome would say there had been.
+
+    Which clips a conversation plays is decided when it opens, so
+    everything here reaches the next conversation and none of it changes
+    what an open one is masking with.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -389,7 +394,8 @@ class FillersReload(BaseModel):
         description=(
             "The agents whose filler clip was carried over unchanged, sorted. Reuse is "
             "the point of the comparison: an edit to a prompt never re-synthesizes a "
-            "clip."
+            "clip, and neither does an edit to a provider, whose voice this server goes "
+            "on speaking in until it is restarted."
         )
     )
     disabled: list[str] = Field(
@@ -397,7 +403,7 @@ class FillersReload(BaseModel):
             "The agents whose synthesis failed, sorted. The reload applied and those "
             "agents run with the latency mask off, because a filler is a mask and a "
             "posture where a text-to-speech hiccup blocked a prompt fix would invert "
-            "what matters."
+            "what matters. The next reload tries again."
         )
     )
 
@@ -643,10 +649,11 @@ class Applies(StrEnum):
     `restart` is what this process reads once and serves until it is
     started again. `reload` is what `POST /runtime/config/reload`
     applies while the process runs, which is the MCP entries, the
-    agents' grants, the shared prompt fragments and each agent's own
-    prompt text. `check-in` is what a device is answered as it asks, the
-    bindings and the default agent, which are therefore in effect within
-    seconds of a write and never pending at all.
+    agents' grants, the shared prompt fragments, each agent's own prompt
+    text and each agent's own filled pauses. `check-in` is what a device
+    is answered as it asks, the bindings and the default agent, which are
+    therefore in effect within seconds of a write and never pending at
+    all.
     """
 
     RESTART = "restart"
@@ -733,20 +740,45 @@ class PromptDiff(BaseModel):
     )
 
 
+class FillerDiff(BaseModel):
+    """The agents whose filled pauses the stored configuration would
+    move, which is the half of an agent entry a reload synthesizes again
+    rather than the half a restart loads."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    applies: Applies
+    changed: tuple[str, ...] = Field(
+        description=(
+            "The agents whose stored `filler` section differs from what this server is "
+            "serving, sorted. A reload synthesizes the new clips in each agent's own "
+            "voice and the next session plays them; a conversation already open goes on "
+            "masking with the clips it opened on. Only agents both sides hold are "
+            "compared, for the reason the prompt half gives. What `agent_defaults.filler` "
+            "holds is not compared here: it is inherited by every agent that configures "
+            "none of its own and it waits for a restart, so an edit to it is reported "
+            "against `agent_defaults` instead."
+        )
+    )
+
+
 class AgentsDiff(EntityDiff):
-    """The agents, whose entries span three regimes: an agent's `mcp`
+    """The agents, whose entries span four regimes: an agent's `mcp`
     list is what a reload derives its tools from, its `prompt` and
     `prompt_includes` are what a reload assembles its next activation
-    from, and everything else about the entry waits for a restart.
+    from, its `filler` is what a reload synthesizes its next session's
+    filled pauses from, and everything else about the entry waits for a
+    restart.
 
-    So a grants-only or prompt-only edit is deliberately absent from
-    `changed` above and reported under `grants` or `prompt` instead, and
-    an answer that named it in both would be claiming a restart that
-    nothing is waiting for.
+    So a grants-only, prompt-only or filler-only edit is deliberately
+    absent from `changed` above and reported under `grants`, `prompt` or
+    `filler` instead, and an answer that named it in both would be
+    claiming a restart that nothing is waiting for.
     """
 
     grants: GrantsDiff
     prompt: PromptDiff
+    filler: FillerDiff
 
 
 class SingletonDiff(BaseModel):
