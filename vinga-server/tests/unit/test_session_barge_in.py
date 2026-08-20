@@ -22,7 +22,13 @@ from fastapi.testclient import TestClient
 from tests.support.configs import LONG_REPLY, config_with_agent
 from tests.support.events import events, only
 from tests.support.providers import ConfirmingAsr, GatedAsr, ScriptedLlm, ScriptedVad
-from tests.support.sessions import realtime_session, start_reply, wait_for_reply
+from tests.support.sessions import (
+    end_utterance,
+    realtime_session,
+    reply_in_flight,
+    start_reply,
+    wait_for_reply,
+)
 from tests.support.sockets import spoken
 from tests.support.wire import (
     assert_endpointed_speech,
@@ -51,32 +57,11 @@ SLOW_REPLY = (
 )
 
 
-def ended_utterance(session):
-    """End the utterance the way the endpointer ends one.
-
-    White-box, deliberately, and the only shape of reach-in these four
-    tests keep besides the two below. The endpointer-driven end is a
-    decision the endpointer makes while audio is being fed, and the
-    device has no message for it: `listen stop` is the manual end, which
-    is a different gate with a different rule, and it is the one thing
-    these tests must not use. Reaching it publicly would mean a real VAD
-    classifying synthetic tones and ending an utterance at a moment
-    nothing in the test chose, which is the timing every case here
-    depends on.
-    """
-    return session.runtime._turntaking.finish_utterance(endpointed=True)
-
-
 def reply_task(session):
-    """The reply task in flight.
-
-    White-box, deliberately: `replying()` answers True for the reply
-    that was already running and for a replacement started in its place,
-    and what two of these tests claim is precisely that the gate did NOT
-    replace it. Task identity is the only thing that tells those apart,
-    and no interface carries it.
-    """
-    return session.runtime._reply_task
+    """The reply task in flight, named here because two of these tests
+    claim the gate did not replace it and `replying()` answers the same
+    either way. `sessions.py` carries the justification."""
+    return reply_in_flight(session)
 
 
 def test_a_short_blip_does_not_interrupt_the_reply(
@@ -206,10 +191,10 @@ async def test_a_barge_in_during_transcription_merges_the_sentence(
 
     with caplog.at_level("INFO"):
         await session.runtime.audio(head)
-        await ended_utterance(session)
+        await end_utterance(session)
         await asyncio.sleep(0.05)  # the reply is now held inside ASR
         await session.runtime.audio(tail)
-        await ended_utterance(session)
+        await end_utterance(session)
         asr.release.set()
         await wait_for_reply(session)
 
@@ -258,7 +243,7 @@ async def test_an_unconfirmed_barge_in_pauses_and_resumes_the_reply(
         pace_before = session._pace_start
 
         await session.runtime.audio(speech_pcm(600))
-        finish = asyncio.create_task(ended_utterance(session))
+        finish = asyncio.create_task(end_utterance(session))
         await asyncio.sleep(0.05)
         # Paused: the confirmation is in flight and no frames move.
         assert not session._pace_resume.is_set()
@@ -321,7 +306,7 @@ async def test_a_failed_confirmation_is_reported_as_the_provider_failure_it_is(
         while socket.frames < 3:
             await asyncio.sleep(0.02)
         await session.runtime.audio(speech_pcm(600))
-        await ended_utterance(session)
+        await end_utterance(session)
         # The reply lives, which is why this needs saying out loud.
         assert reply_task(session) is reply
         await wait_for_reply(session)
@@ -361,7 +346,7 @@ async def test_a_confirmed_barge_in_reuses_the_transcript_and_the_lock(
         while socket.frames < 3:
             await asyncio.sleep(0.02)
         await session.runtime.audio(speech_pcm(600))
-        await ended_utterance(session)
+        await end_utterance(session)
         await wait_for_reply(session)
 
     assert asr.calls == 2

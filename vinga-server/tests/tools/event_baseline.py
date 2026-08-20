@@ -121,10 +121,18 @@ from tests.support.sessions import (
     _nothing,
     call,
     device_session,
+    drive_reply,
+    end_utterance,
+    events_of,
     masked_session,
+    plant_utterance,
     realtime_session,
+    reply_in_flight,
     run_reply,
     session_for,
+    start_reply,
+    turn_taking,
+    with_device,
 )
 from tests.support.sockets import RecordingSocket
 from tests.support.stores import CAPTURE_MANIFEST, corrupt, tone
@@ -348,6 +356,9 @@ def drive_write_failed(directory: Path) -> None:
         gate.let_through()
         store.record_turn("alpha", a_turn())
         gate.wait()
+        # White-box, as in `test_conversations_store.py`: an accepted
+        # write that the database then refuses is only reachable with a
+        # broken engine.
         store._engine = Raising()  # type: ignore[assignment]
         gate.open_forever()
     finally:
@@ -531,16 +542,18 @@ async def failing_reply(stage: str, provider: Any, watch: Any = None) -> Any:
         async def send_text(self, text: str) -> None:
             return None
 
-    session = session_for(base_config(), POET_MAC, {"poet": ScriptedLlm(["One sentence."])})
-    session.runtime._providers = replace(
-        session.runtime._providers, **{stage: cast(Any, provider)}
+    session = session_for(
+        base_config(),
+        POET_MAC,
+        {"poet": ScriptedLlm(["One sentence."])},
+        stages={stage: cast(Any, provider)},
     )
     session.websocket = cast(Any, TextSink())
-    session._mac = POET_MAC
+    with_device(session, POET_MAC)
     session.send_audio = _nothing  # type: ignore[method-assign]
     if watch is not None:
-        session._events.attach(watch)
-    await session.runtime._reply(UTTERANCE)
+        events_of(session).attach(watch)
+    await drive_reply(session, UTTERANCE)
     return session
 
 
@@ -548,10 +561,8 @@ async def speaking_reply(config: Config, asr: Any) -> Any:
     """A session whose reply is past its own ASR and already speaking,
     which is where the last two barge-in gates are reached from."""
     session, socket = realtime_session(config, asr)
-    session.runtime._turntaking.endpointer = ScriptedEndpointer(speech_ms=600)
-    session.runtime._reply_task = asyncio.create_task(
-        session.runtime._reply(speech_pcm(600))
-    )
+    turn_taking(session).endpointer = ScriptedEndpointer(speech_ms=600)
+    start_reply(session, speech_pcm(600))
     while socket.frames < 3:
         await asyncio.sleep(0.02)
     return session
@@ -618,8 +629,8 @@ async def drive_llm_round(_: Path) -> None:
     script = ScriptedLlm([["Two words.", Usage(prompt_tokens=140, completion_tokens=12)]])
     session = speaking_session({"poet": script})
     script.identity = replace(script.identity, model=MODEL)  # type: ignore[attr-defined]
-    await session.runtime._reply(UTTERANCE)
-    await unregistered(ScriptedLlm(["Two words."])).runtime._reply(UTTERANCE)
+    await drive_reply(session, UTTERANCE)
+    await drive_reply(unregistered(ScriptedLlm(["Two words."])), UTTERANCE)
 
 
 async def drive_provider_failed(_: Path) -> None:
@@ -632,11 +643,11 @@ def drive_prompt_assembled(_: Path) -> None:
 
 
 async def drive_heard(_: Path) -> None:
-    await speaking_session({"poet": ScriptedLlm(["Two words."])}).runtime._reply(UTTERANCE)
+    await drive_reply(speaking_session({"poet": ScriptedLlm(["Two words."])}), UTTERANCE)
 
 
 async def drive_replied(_: Path) -> None:
-    await speaking_session({"poet": ScriptedLlm(["Two words."])}).runtime._reply(UTTERANCE)
+    await drive_reply(speaking_session({"poet": ScriptedLlm(["Two words."])}), UTTERANCE)
 
 
 async def drive_tool_call(directory: Path) -> None:
@@ -699,41 +710,41 @@ async def drive_barge_in_manual(_: Path) -> None:
     the reply had not spoken, so no speaking_ms is carried."""
     asr = GatedAsr()
     session, _socket = realtime_session(config_with_agent(), asr)
-    session.runtime._turntaking.endpointer = ScriptedEndpointer(speech_ms=600)
-    session.runtime._turntaking._utterance = bytearray(speech_pcm(320))
-    await session.runtime._turntaking.finish_utterance(endpointed=True)
+    turn_taking(session).endpointer = ScriptedEndpointer(speech_ms=600)
+    plant_utterance(session, speech_pcm(320))
+    await end_utterance(session)
     await asyncio.sleep(0.05)
-    session.runtime._turntaking._utterance = bytearray(speech_pcm(320))
-    await session.runtime._turntaking.finish_utterance()
+    plant_utterance(session, speech_pcm(320))
+    await end_utterance(session, endpointed=False)
     asr.release.set()
-    await session.runtime._reply_task
+    await reply_in_flight(session)
 
 
 async def drive_barge_in_under_the_floor(_: Path) -> None:
     asr = GatedAsr()
     session, _socket = realtime_session(config_with_agent(), asr)
-    session.runtime._turntaking.endpointer = ScriptedEndpointer(speech_ms=600)
-    session.runtime._turntaking._utterance = bytearray(speech_pcm(320))
-    await session.runtime._turntaking.finish_utterance(endpointed=True)
+    turn_taking(session).endpointer = ScriptedEndpointer(speech_ms=600)
+    plant_utterance(session, speech_pcm(320))
+    await end_utterance(session)
     await asyncio.sleep(0.05)
-    session.runtime._turntaking.endpointer = ScriptedEndpointer(speech_ms=100)
-    session.runtime._turntaking._utterance = bytearray(speech_pcm(320))
-    await session.runtime._turntaking.finish_utterance(endpointed=True)
+    turn_taking(session).endpointer = ScriptedEndpointer(speech_ms=100)
+    plant_utterance(session, speech_pcm(320))
+    await end_utterance(session)
     asr.release.set()
-    await session.runtime._reply_task
+    await reply_in_flight(session)
 
 
 async def drive_barge_in_merged(_: Path) -> None:
     asr = GatedAsr()
     session, _socket = realtime_session(config_with_agent(), asr)
-    session.runtime._turntaking.endpointer = ScriptedEndpointer(speech_ms=600)
-    session.runtime._turntaking._utterance = bytearray(speech_pcm(320))
-    await session.runtime._turntaking.finish_utterance(endpointed=True)
+    turn_taking(session).endpointer = ScriptedEndpointer(speech_ms=600)
+    plant_utterance(session, speech_pcm(320))
+    await end_utterance(session)
     await asyncio.sleep(0.05)
-    session.runtime._turntaking._utterance = bytearray(speech_pcm(480))
-    await session.runtime._turntaking.finish_utterance(endpointed=True)
+    plant_utterance(session, speech_pcm(480))
+    await end_utterance(session)
     asr.release.set()
-    await session.runtime._reply_task
+    await reply_in_flight(session)
 
 
 async def drive_barge_in_in_the_refractory_window(_: Path) -> None:
@@ -744,9 +755,9 @@ async def drive_barge_in_in_the_refractory_window(_: Path) -> None:
     asr = ConfirmingAsr(AsrResult(text="stop"))
     asr.release.set()
     session = await speaking_reply(config, asr)
-    session.runtime._turntaking._utterance = bytearray(speech_pcm(600))
-    await session.runtime._turntaking.finish_utterance(endpointed=True)
-    await session.runtime._reply_task
+    plant_utterance(session, speech_pcm(600))
+    await end_utterance(session)
+    await reply_in_flight(session)
 
 
 async def drive_barge_in_without_a_transcript(_: Path) -> None:
@@ -757,9 +768,9 @@ async def drive_barge_in_without_a_transcript(_: Path) -> None:
     asr = ConfirmingAsr(AsrResult(text=""))
     asr.release.set()
     session = await speaking_reply(config, asr)
-    session.runtime._turntaking._utterance = bytearray(speech_pcm(600))
-    await session.runtime._turntaking.finish_utterance(endpointed=True)
-    await session.runtime._reply_task
+    plant_utterance(session, speech_pcm(600))
+    await end_utterance(session)
+    await reply_in_flight(session)
 
 
 async def drive_barge_in_confirmed(_: Path) -> None:
@@ -771,9 +782,9 @@ async def drive_barge_in_confirmed(_: Path) -> None:
     asr = ConfirmingAsr(AsrResult(text="stop and listen"))
     asr.release.set()
     session = await speaking_reply(config, asr)
-    session.runtime._turntaking._utterance = bytearray(speech_pcm(600))
-    await session.runtime._turntaking.finish_utterance(endpointed=True)
-    await session.runtime._reply_task
+    plant_utterance(session, speech_pcm(600))
+    await end_utterance(session)
+    await reply_in_flight(session)
 
 
 # runtime/filler_runner.py
@@ -781,25 +792,25 @@ async def drive_barge_in_confirmed(_: Path) -> None:
 
 async def drive_filler_skipped_for_speech(_: Path) -> None:
     session = await masked_session(masked_config(), POET_MAC, {"poet": StallingLlm([STALL_S])})
-    session.runtime._reply_task = asyncio.create_task(session.runtime._reply(UTTERANCE))
+    start_reply(session, UTTERANCE)
     await asyncio.sleep(DELAY_MS / 1000 / 3)
-    session.runtime._turntaking.endpointer.feed(SPEECH)
-    await session.runtime._reply_task
+    turn_taking(session).endpointer.feed(SPEECH)
+    await reply_in_flight(session)
 
 
 async def drive_filler_skipped_for_a_barge_in(_: Path) -> None:
     session = await masked_session(masked_config(), POET_MAC, {"poet": StallingLlm([STALL_S])})
-    session.runtime._reply_task = asyncio.create_task(session.runtime._reply(UTTERANCE))
+    start_reply(session, UTTERANCE)
     await asyncio.sleep(DELAY_MS / 1000 / 3)
-    session.runtime._turntaking._pause_output()
+    turn_taking(session)._pause_output()
     await asyncio.sleep(DELAY_MS / 1000)
-    session.runtime._turntaking._resume_output()
-    await session.runtime._reply_task
+    turn_taking(session)._resume_output()
+    await reply_in_flight(session)
 
 
 async def drive_filler_played(_: Path) -> None:
     session = await masked_session(masked_config(), POET_MAC, {"poet": StallingLlm([STALL_S])})
-    await session.runtime._reply(UTTERANCE)
+    await drive_reply(session, UTTERANCE)
 
 
 EDGE = "vinga_server.device.session"
@@ -958,6 +969,8 @@ def drive_capture_failed(directory: Path) -> None:
     opened = time.monotonic()
     capture = capture_store(directory).open("s1", opened, CAPTURE_MANIFEST)
     assert capture is not None
+    # White-box: a real failed write needs a file that cannot be
+    # written to, and nothing public makes one.
     capture._wav.close()  # type: ignore[union-attr]
     capture.microphone(tone(100, 1000), opened)
     capture.microphone(tone(100, 1000), opened + 3.0)
@@ -983,6 +996,9 @@ def drive_capture_over_budget(directory: Path) -> None:
     """Over the budget with nothing left to drop: the newest capture is
     never pruned."""
     keeper = recorded(directory, sessions=1)
+    # White-box: the case is a store already over its budget with only
+    # the newest capture left, and the public route there is recording
+    # gigabytes.
     keeper._max_total_mb = 0.01
     assert keeper.prune() == []
 
@@ -1267,6 +1283,9 @@ async def drive_mcp_stopped(_: Path) -> None:
 async def drive_mcp_call_dropped(_: Path) -> None:
     manager = await mcp_running(mcp_entry())
     try:
+        # White-box: the dropped answer is the MCP session's own call
+        # raising after the tool was dispatched, which a cooperating
+        # server does not do.
         with patched(
             manager._session,
             "call_tool",
@@ -1305,6 +1324,8 @@ async def drive_mcp_reload_refused(_: Path) -> None:
     refusal that needs no broken database to provoke."""
     before = mcp_config({"tools": mcp_entry_data()}, {"assistant": ["tools"]})
     servers = await mcp_started(before)
+    # White-box: a reload refused because one is already running needs
+    # two reloads overlapping, and the public overlap is a race.
     servers._reloading = True
     try:
         await servers.reload(mcp_reading(before))

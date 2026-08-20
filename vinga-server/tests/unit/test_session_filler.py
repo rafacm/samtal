@@ -30,6 +30,7 @@ from tests.support.sessions import (
     masked_session,
     session_for,
     start_reply,
+    turn_taking,
     wait_for_reply,
 )
 from tests.support.sockets import RecordingSocket, spoken
@@ -222,8 +223,8 @@ async def test_a_fire_into_live_user_speech_is_skipped(
         # the property under test is precisely what happens at one
         # instant of the reply. Planting it is what makes the instant
         # choosable.
-        assert session.runtime._turntaking.endpointer is not None
-        session.runtime._turntaking.endpointer.feed(SPEECH)
+        assert turn_taking(session).endpointer is not None
+        turn_taking(session).endpointer.feed(SPEECH)
         await wait_for_reply(session)
 
     skipped = only(caplog, "filler_skipped")
@@ -254,9 +255,9 @@ async def test_a_fire_during_a_barge_in_confirmation_is_skipped(
         # clocks agreeing, and this test is about what the fire rule
         # reads while the pause is on, not about how the pause got
         # there, which the barge-in suite owns.
-        session.runtime._turntaking._pause_output()
+        turn_taking(session)._pause_output()
         await asyncio.sleep(DELAY_MS / 1000)
-        session.runtime._turntaking._resume_output()
+        turn_taking(session)._resume_output()
         await wait_for_reply(session)
 
     skipped = only(caplog, "filler_skipped")
