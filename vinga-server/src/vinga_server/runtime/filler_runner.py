@@ -56,13 +56,14 @@ class TurnView(Protocol):
 
 
 class FillerCache(Protocol):
-    """What this runner asks of the boot-time clip cache: is there one
-    for this agent, give me that one, give me this one or nothing.
+    """What this runner asks of the clip cache its session bound: is
+    there one for this agent, give me that one, give me this one or
+    nothing.
 
     Three reads and no writes, declared as the surface rather than as a
-    type, so the server's own `AgentFillers` and a plain dictionary of
+    type, so the mapping a generation carries and a plain dictionary of
     clips are equally what this runner takes. A test that hands it two
-    entries should not have to build the server's cache to do it."""
+    entries should not have to build a world to do it."""
 
     def __contains__(self, name: object, /) -> bool: ...
 
@@ -74,12 +75,13 @@ class FillerCache(Protocol):
 class FillerRunner:
     """One turn's latency mask at a time, for the life of one connection.
 
-    `fillers` is the boot-time clip cache keyed by agent, held by
-    reference because the boot fills it once synthesis has run, so a
-    runner built before the clips exist still sees them; empty means no
-    agent masks its latency. `agents` is what the device is bound to,
-    which is what the arming rule asks rather than only the agent
-    talking now."""
+    `fillers` is the clip cache keyed by agent, read off the generation
+    this session bound and never asked for again: a reload that
+    re-synthesizes a clip reaches the next session rather than this
+    conversation, which is what keeps the masking a turn was armed under
+    from changing under it. Empty means no agent masks its latency.
+    `agents` is what the device is bound to, which is what the arming
+    rule asks rather than only the agent talking now."""
 
     def __init__(
         self,

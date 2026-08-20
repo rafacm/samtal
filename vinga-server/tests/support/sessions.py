@@ -115,15 +115,19 @@ def device_session(
     reads across an apply has to build its session against the holder
     the apply installs into. Everything else gets a holder over the
     configuration it passed, which is the world that server serves and
-    the only one it will ever serve."""
+    the only one it will ever serve.
+
+    `fillers` are the clips that world holds, since a session binds them
+    off its generation rather than being handed them: a suite that wants
+    a masked session says which clips the world has, and a suite that
+    hands its own holder in has already said."""
     if generations is None:
-        generations = world(config)
+        generations = world(config, fillers=fillers)
     factory = bespoke_runtime_factory(
         generations,
         providers if providers is not None else agent_providers(config),
         mcp_servers if mcp_servers is not None else McpServers({}),
         memory,
-        fillers if fillers is not None else {},
         conversations,
     )
     session = session_module.DeviceSession(cast(Any, websocket), generations, factory)
@@ -258,7 +262,7 @@ def served(
     opens and closes."""
     generations = world(config)
     factory = bespoke_runtime_factory(
-        generations, build_agent_providers(config), McpServers({}), None, {}, conversations
+        generations, build_agent_providers(config), McpServers({}), None, conversations
     )
     return DeviceSession(
         cast(Any, websocket), generations, factory, conversations=conversations
@@ -318,7 +322,7 @@ async def masked_session(config: Config, mac: str, scripts: dict[str, Any] | Non
     a recording socket, listening in realtime so the after-reply state
     is assertable."""
     fillers = await build_agent_fillers(config, build_agent_providers(config))
-    session = session_for(config, mac, scripts, fillers=fillers)
+    session = session_for(config, mac, scripts, fillers=fillers.clips)
     session.websocket = cast(Any, RecordingSocket())
     listening_in_realtime(session)
     return session

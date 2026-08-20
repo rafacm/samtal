@@ -1,6 +1,6 @@
 import asyncio
 import contextlib
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
 from fastapi import FastAPI
@@ -40,9 +40,9 @@ from vinga_server.device.bindings import DeviceBindings
 from vinga_server.events import EventEnforcementError, ServerEvents, resolve_enforcement
 from vinga_server.events.catalog import CaptureDisabled, CaptureEnabled
 from vinga_server.events.values import ConfiguredPath
-from vinga_server.filler import AgentFillers, build_agent_fillers
+from vinga_server.filler import build_agent_fillers
 from vinga_server.generation import Generation, Generations
-from vinga_server.providers import ProviderError, build_agent_providers
+from vinga_server.providers import AgentProviders, ProviderError, build_agent_providers
 from vinga_server.registry import SessionRegistry
 from vinga_server.runtime import prompt
 from vinga_server.runtime.pipeline import bespoke_runtime_factory
@@ -208,16 +208,6 @@ async def _build_composition(
     # changed by the open below happening later in this build.
     bindings = DeviceBindings.open(config)
     stack.callback(bindings.dispose)
-    # The world new work binds, and the only place it is replaced. The
-    # boot's configuration and the credentials loaded with it are the
-    # first generation; a reload composes the next one and installs it
-    # here. Built this early because everything below either reads it or
-    # is handed it: an empty store rather than None for a deployment
-    # whose credentials are all environment references, so that a
-    # generation is one shape rather than two.
-    generations = Generations(
-        Generation(config, secrets if secrets is not None else SecretStore())
-    )
     # The devices waiting to be claimed, and the codes they are showing.
     # Runtime state owned by this app and shared with the configuration
     # API below, which is where a code becomes a binding. Always built,
@@ -250,21 +240,15 @@ async def _build_composition(
     # of blocking work, and the loop this now runs on is the one uvicorn
     # is waiting on.
     agent_providers = await asyncio.to_thread(build_agent_providers, config, secrets)
-    # Filled below, once the providers exist, since synthesis is async;
-    # empty means no agent masks its latency, which is the default. The
-    # cache is handed to the runtime factory here and filled there, and
-    # answers "nothing for this agent" the whole time in between.
-    agent_fillers = AgentFillers()
     # What was said, kept where it can be queried. Absent unless the
     # section exists and says so, which is what keeps recording a
     # conversation something an operator asks for.
     #
     # The constructor opens and migrates the file, so a directory the
     # server cannot write fails the boot rather than the first
-    # conversation. The writer thread is started below rather than here,
-    # and the stop is registered before the start: a writer whose thread
-    # will not start is exactly the case where the stop has to run
-    # anyway.
+    # conversation. The stop is registered before the start below: a
+    # writer whose thread will not start is exactly the case where the
+    # stop has to run anyway.
     conversations_section = config.server.conversations
     database_dir = config.server.database.dir
     conversations = (
@@ -286,20 +270,42 @@ async def _build_composition(
         migrate_existing(database_dir)
     else:
         stack.callback(conversations.stop)
+        # Started here rather than at the end of the build, in front of
+        # everything a boot can still fail in: the stop above is
+        # registered on the exit stack, so a failure after this point
+        # unwinds through it, and a writer started later would be one
+        # more window where a refusal leaves a thread behind.
+        conversations.start()
+    # The filled pauses, in each agent's own voice. Synthesized here
+    # rather than beside the providers because synthesis is async, and
+    # before the generation below because they are part of the world it
+    # is: startup is still before the first conversation, which is what
+    # "ahead of time" means. An agent whose synthesis fails runs with
+    # the feature off rather than failing the boot.
+    fillers = await build_agent_fillers(config, agent_providers)
+    # The world new work binds, and the only place it is replaced. The
+    # boot's configuration, the credentials loaded with it and the clips
+    # synthesized from the two are the first generation; a reload
+    # composes the next one and installs it here. An empty store rather
+    # than None for a deployment whose credentials are all environment
+    # references, so that a generation is one shape rather than two.
+    generations = Generations(
+        Generation(config, secrets if secrets is not None else SecretStore(), fillers.clips)
+    )
     # How one conversation is built for one connection, closed over
-    # once here: the providers, the MCP servers, the memory store and
-    # the filler clips all outlive any single websocket, and a device
-    # session should not have to name them to get a conversation. Built
-    # after all four exist, and after the filler cache, which is filled
-    # at startup and which this closure sees fill. The store goes with
-    # them for the same reason: it outlives every connection, and the
-    # per-session recorder is derived from it here.
+    # once here: the providers, the MCP servers and the memory store all
+    # outlive any single websocket, and a device session should not have
+    # to name them to get a conversation. The clips are not among them
+    # and are read off the generation per connection, which is what
+    # makes a re-synthesized one converge at the next session. The store
+    # is closed over for the reason the first three are: it outlives
+    # every connection, and the per-session recorder is derived from it
+    # here.
     runtime_factory = bespoke_runtime_factory(
         generations,
         agent_providers,
         mcp_servers,
         memory,
-        agent_fillers,
         conversations,
     )
     # What a device says about itself at OTA check-in, kept for the
@@ -357,7 +363,12 @@ async def _build_composition(
         config.agents,
         pending,
         mcp_servers,
-        config_reloader(generations, mcp_servers, lambda: reload_domain_config(config)),
+        config_reloader(
+            generations,
+            mcp_servers,
+            lambda: reload_domain_config(config),
+            agent_providers,
+        ),
         _prompt_preview(generations, mcp_servers, memory),
         config_diff_reader(
             # One side of the comparison: what this process is serving,
@@ -414,7 +425,6 @@ async def _build_composition(
         memory=memory,
         sessions=sessions,
         agent_providers=agent_providers,
-        agent_fillers=agent_fillers,
         conversations=conversations,
         runtime_factory=runtime_factory,
         device_facts=device_facts,
@@ -422,15 +432,6 @@ async def _build_composition(
         api=api_runtime,
     )
     app.state.composition = composition
-    # Started once everything it records for exists, and stopped by the
-    # callback registered at its construction above.
-    if conversations is not None:
-        conversations.start()
-    # Synthesized here rather than beside the providers because synthesis
-    # is async: startup is still before the first conversation, which is
-    # what "at boot" is for. An agent whose synthesis fails runs with the
-    # feature off rather than failing the boot.
-    agent_fillers.fill(await build_agent_fillers(config, agent_providers))
     # Connected last, and closed first on the way out so stdio child
     # processes do not outlive the server. A server that will not connect
     # only logs a warning. The stop is registered in front of the start
@@ -478,16 +479,20 @@ RELOAD_DATABASE_BUSY = (
 
 
 def config_reloader(
-    generations: Generations, servers: McpServers, read: Callable[[], Loaded]
+    generations: Generations,
+    servers: McpServers,
+    read: Callable[[], Loaded],
+    agent_providers: Mapping[str, AgentProviders],
 ) -> ConfigReloader:
     """What the configuration API's reload route calls.
 
     Closed over here because this is where every piece is known: the
     holder whose generation a reload replaces, the managers that are
-    running, and the re-read of the stored half, which goes to the apply
-    as a plain function rather than being done here so that the layers
-    below stay clear of the database and the apply decides where a
-    blocking read runs.
+    running, the engines whose voices a re-synthesized filler is spoken
+    in, and the re-read of the stored half, which goes to the apply as a
+    plain function rather than being done here so that the layers below
+    stay clear of the database and the apply decides where a blocking
+    read runs.
 
     What comes back is the endpoint's whole answer, composed where the
     phases live: this is the wiring between an application that must not
@@ -505,7 +510,7 @@ def config_reloader(
     at all is a bug and is left alone, for the reason the comparison
     leaves one alone.
     """
-    applying = ConfigReload(generations, servers, read)
+    applying = ConfigReload(generations, servers, read, agent_providers)
 
     async def reload() -> ConfigReloadResult:
         """One apply, refused in this route's words rather than the

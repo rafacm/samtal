@@ -478,7 +478,7 @@ async def turned_away(
     """One connection that never becomes a session."""
     generations = world(config)
     factory = bespoke_runtime_factory(
-        generations, build_agent_providers(config), McpServers({}), None, {}
+        generations, build_agent_providers(config), McpServers({}), None
     )
     session = DeviceSession(
         cast(Any, TurnedAwaySocket(device_id)),

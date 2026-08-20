@@ -543,7 +543,7 @@ def _guarded(tmp_path: Path, store: ConversationStore) -> tuple[Any, Any]:
     captures = CaptureStore(tmp_path / "captures", 900.0, 2000.0, 0.0)
     generations = world(config)
     factory = bespoke_runtime_factory(
-        generations, build_agent_providers(config), McpServers({}), None, {}, store
+        generations, build_agent_providers(config), McpServers({}), None, store
     )
     websocket = LoopingSocket()
     session = DeviceSession(

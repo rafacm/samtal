@@ -217,7 +217,7 @@ async def masked_session(
 ) -> Any:
     """A session with its filler clips built the way boot builds them,
     speaking to a socket that records what it hears."""
-    fillers = await build_agent_fillers(config, build_agent_providers(config))
+    fillers = (await build_agent_fillers(config, build_agent_providers(config))).clips
     assert fillers, "the config under test is supposed to have filler clips"
     session = session_for(config, mac, scripts, fillers=fillers)
     session.websocket = cast(Any, ProbingSocket(probe, log))
@@ -509,9 +509,11 @@ async def test_a_filler_ends_quietly_when_the_send_path_raises(
     """The same for the mask, and for the same reason twice over: a
     broken mask must never break the reply it masks, nor report itself
     as a failure of the pipeline."""
-    fillers = await build_agent_fillers(
-        stuttering_config(), build_agent_providers(stuttering_config())
-    )
+    fillers = (
+        await build_agent_fillers(
+            stuttering_config(), build_agent_providers(stuttering_config())
+        )
+    ).clips
     session = session_for(
         stuttering_config(),
         POET_MAC,

@@ -494,7 +494,7 @@ class PipelineRuntime:
         agent_providers: dict[str, AgentProviders],
         mcp_servers: McpServers,
         memory: MemoryStore | None,
-        fillers: FillerCache | None,
+        fillers: FillerCache,
         agents: Sequence[str],
         recorder: TurnRecorder | None = None,
     ) -> None:
@@ -1695,7 +1695,6 @@ def bespoke_runtime_factory(
     agent_providers: dict[str, AgentProviders],
     mcp_servers: McpServers,
     memory: MemoryStore | None,
-    fillers: FillerCache,
     conversations: TurnStore | None = None,
 ) -> RuntimeFactory:
     """The composition root's half of the seam: everything this runtime
@@ -1703,13 +1702,19 @@ def bespoke_runtime_factory(
 
     The device edge calls what comes back with a device to speak
     through, the session's observability, and the agents the device is
-    bound to, and never learns what an LLM is. `fillers` is the clip
-    cache the boot fills once synthesis has run, held by reference so a
-    factory built before the clips exist still sees them.
+    bound to, and never learns what an LLM is.
 
-    `conversations` is closed over the same way, and is the reason the
-    recorder reaches a runtime without the `RuntimeFactory` type moving:
-    the store outlives every connection, and the per-session channel is
+    The clip cache is not closed over, and that is the one thing here
+    worth reading twice. It belongs to a world rather than to a process,
+    so it is read off the generation at the moment a runtime is built
+    and handed to that runtime as a value (#191). What that decides is
+    where a re-synthesized clip converges: a conversation goes on
+    masking with the clips it opened on, and the next session gets the
+    ones the reload made, which is the same clock the providers keep.
+
+    `conversations` is closed over, and is the reason the recorder
+    reaches a runtime without the `RuntimeFactory` type moving: the
+    store outlives every connection, and the per-session channel is
     derived here from the identity the edge already hands over. None
     means no store, which is every deployment that has not asked for one.
 
@@ -1728,7 +1733,7 @@ def bespoke_runtime_factory(
             agent_providers,
             mcp_servers,
             memory,
-            fillers,
+            generations.current().fillers,
             agents,
             None if conversations is None else SessionTurns(conversations, events.session_id),
         )

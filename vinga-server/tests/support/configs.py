@@ -17,6 +17,7 @@ the shared shape reaches every suite at once.
 
 import sys
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,7 @@ import yaml
 from vinga_server.config import Config, compose_config, load_file_config
 from vinga_server.config.models import DOMAIN_KEYS
 from vinga_server.config.secrets import SecretStore
+from vinga_server.filler import FillerClips
 from vinga_server.generation import Generation, Generations
 
 # --- the device the handshake presents -------------------------------
@@ -334,7 +336,11 @@ def load_config_from_data(data: dict) -> Config:
         return compose_config(load_file_config(path), domain_data, str(path))
 
 
-def world(config: Config, secrets: SecretStore | None = None) -> Generations:
+def world(
+    config: Config,
+    secrets: SecretStore | None = None,
+    fillers: Mapping[str, FillerClips] | None = None,
+) -> Generations:
     """One server's generation holder, holding `config` as the world it
     serves.
 
@@ -345,9 +351,16 @@ def world(config: Config, secrets: SecretStore | None = None) -> Generations:
     suite about anything other than reloading wants and what it used to
     have.
 
-    `secrets` defaults to an empty store rather than None for the reason
-    the composition root's does: a deployment whose credentials are all
-    environment references has no stored secret, and one shape of
-    generation is easier to reason about than two.
+    `secrets` and `fillers` default to empty rather than None for the
+    reason the composition root's do: a deployment whose credentials are
+    all environment references has no stored secret, one where no agent
+    masks its latency has no clip, and one shape of generation is easier
+    to reason about than two.
     """
-    return Generations(Generation(config, secrets if secrets is not None else SecretStore()))
+    return Generations(
+        Generation(
+            config,
+            secrets if secrets is not None else SecretStore(),
+            fillers if fillers is not None else {},
+        )
+    )

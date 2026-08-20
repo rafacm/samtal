@@ -121,7 +121,7 @@ async def test_the_filler_speaks_in_the_active_agents_voice_after_a_handover(
     chosen from the agent active at fire time, so the turn after a
     handover masks in the new agent's voice."""
     config = masked_config()
-    fillers = await build_agent_fillers(config, build_agent_providers(config))
+    fillers = (await build_agent_fillers(config, build_agent_providers(config))).clips
     # Two voices, two clips: what "in its own voice" means in PCM.
     assert fillers["poet"].clips != fillers["tutor"].clips
     scripts = {
@@ -292,7 +292,11 @@ async def test_a_fire_during_a_barge_in_confirmation_is_skipped(
 async def test_the_feature_is_off_by_default(caplog: pytest.LogCaptureFixture) -> None:
     """A config with no filler section builds no clips, and a session
     without any masks nothing however slow the reply."""
-    assert await build_agent_fillers(base_config(), build_agent_providers(base_config())) == {}
+    off = await build_agent_fillers(base_config(), build_agent_providers(base_config()))
+    assert off.clips == {}
+    # And in none of the three outcome lists: an agent that masks
+    # nothing is not a decision a reload made.
+    assert (off.resynthesized, off.reused, off.disabled) == ((), (), ())
 
     session = session_for(base_config(), POET_MAC, {"poet": cast(Any, StallingLlm([0.3]))})
     session.websocket = cast(Any, RecordingSocket())
@@ -325,7 +329,11 @@ async def test_a_synthesis_failure_disables_the_agent_with_a_warning(
     providers["poet"] = replace(providers["poet"], tts=cast(Any, BrokenTts()))
     providers["tutor"] = replace(providers["tutor"], tts=cast(Any, SilentTts()))
     with caplog.at_level("WARNING"):
-        assert await build_agent_fillers(config, providers) == {}
+        built = await build_agent_fillers(config, providers)
+    assert built.clips == {}
+    # And both are named under the one outcome that means "applied with
+    # no clip for this agent", which is what a reload reports them as.
+    assert built.disabled == ("poet", "tutor")
 
     disabled = {record.agent: record.error for record in events(caplog, "filler_disabled")}
     assert disabled == {"poet": "RuntimeError", "tutor": "ValueError"}
