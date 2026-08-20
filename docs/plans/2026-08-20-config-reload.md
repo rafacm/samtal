@@ -235,11 +235,18 @@ One apply must not race another: the MCP reload's exclusion
 whole generalized reload.
 
 **What does the result look like?** A `ConfigReloadResult` in
-`config/responses.py` with one section per kind, published complete
-for the kinds that are live at that milestone and extended per
-milestone (a response model gaining a field is additive for
-clients, unlike #193's diff where the closed shape had to publish
-once; the OpenAPI byte pin makes each extension a reviewed diff).
+`config/responses.py` with one section per kind, and the schema
+publishes exactly once, in M1, because these models forbid extra
+keys and a generated client holding an earlier schema would
+reject a grown response (round 3's finding 6, the #193 lesson
+again): the sections for milestones not yet implemented are
+declared optional and answer null until their milestone fills
+them, so later milestones change values and descriptions, never
+the wire schema. The M4 vocabulary is defined now: the agents
+section reports the agents the apply added and removed and
+whether `agent_defaults` changed; device bindings and the default
+agent are deliberately not reload outcomes, being check-in
+live.
 The MCP section is exactly the existing `McpReloadResult`, whole
 and unchanged, nested inside the new result (the review's finding
 6): not only the four outcome lists but the `servers` status
@@ -1141,6 +1148,11 @@ null until their milestone implements them; the M4 outcomes are
 defined now (agents added and removed by the apply, and whether
 `agent_defaults` changed), and device and default-agent writes
 are explicitly not reload outcomes, being check-in live.
+
+*Resolution.* Adopted. The result decision now publishes the
+final schema in M1 with optional sections null until their
+milestone, defines the M4 vocabulary (agents added and removed,
+`agent_defaults` changed), and states the check-in exclusion.
 
 **7 (P2). The disconnect-before-hello test asserts the opposite
 of the control flow.** The runtime is constructed, and binds,
