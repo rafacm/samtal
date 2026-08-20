@@ -138,12 +138,21 @@ field-level regimes so an applied live-slice change reports
 nothing and a restart-bound change keeps reporting: the agent
 kind's reload-labeled half grows per milestone (prompt fields at
 M1, the filler section at M2) beside the grants it already has,
-and `agent_defaults` stays restart-labeled whole until M4. The holder also owns the
-one operator-visible generation counter: #193's diff guard reads it
-(the mark moves here from `McpServers`, whose own counter becomes
-an internal detail or is dropped), and every apply advances it
-exactly once, after its last swap point. `Composition` carries the
-holder; the closures that today capture the boot `Config`
+and `agent_defaults` stays restart-labeled whole until M4.
+
+**The holder's mark, and its instability window.** The holder owns
+the mark #193's diff guard reads (moved here from `McpServers`,
+whose own counter becomes an internal detail or is dropped), and
+the mark is not a bare counter, because an apply has more than one
+swap point and a counter advanced only at the end would leave a
+window in which the diff sees a moved world under an unmoved mark
+(the review's finding 2). The holder reads as unstable from before
+the apply's first serving-state change until after its last, and
+the settled mark advances once per apply: the diff guard treats
+"unstable at either sample" and "mark moved between samples"
+identically, re-reading within its bound and then answering the
+retryable 409 it already has. `Composition` carries the holder;
+the closures that today capture the boot `Config`
 (`bespoke_runtime_factory`, `_prompt_preview`,
 `config_diff_reader`) capture the holder instead and read
 `current()` at their existing convergence points.
@@ -409,8 +418,11 @@ session across a reload), and the drift-check pins.
   and new sessions cannot reach it; the diff reports nothing for
   an applied agent-set change.
 - **Concurrency, every milestone**: the widened exclusion refuses
-  a second apply; the #193 barrier test keeps passing with the
-  holder's counter as the mark.
+  a second apply; the #193 barrier test moves onto the holder's
+  mark and gains the three positions finding 2 names: the barrier
+  before the generation assignment, between the assignment and the
+  MCP install, and after the install, each answering one world or
+  the retryable 409, never a mixture.
 - **No-leak**: the reload result carries entry and agent names and
   closed outcome tokens only; the sentinel pattern from #193's
   route (plant, force the wrong-key refusal, assert absence in
@@ -520,6 +532,11 @@ before the first serving-state change until after the last swap,
 the diff must answer the retryable 409 on instability, and the
 barrier tests must sit before the assignment, between the two
 swaps, and after the install.
+
+*Resolution.* Adopted. The holder's mark is now defined with an
+instability window spanning first to last swap point, the diff
+guard treats instability and movement identically, and the
+concurrency bullet names the three barrier positions.
 
 **3 (P1). M2 synthesizes fillers against a provider identity that
 is not running.** Keying reuse by the candidate TTS identity while
