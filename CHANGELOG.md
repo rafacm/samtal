@@ -9,6 +9,29 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **The stored configuration can be applied to a running server**
+  (#191). `POST /api/runtime/config/reload`, which
+  `vinga-server config reload` calls, re-reads the stored configuration
+  and applies every kind this release can apply while the process runs:
+  the `mcp_servers` entries with the secrets stored on them, the agents'
+  effective `mcp` grant lists, the shared prompt fragments, and each
+  agent's own `prompt` and `prompt_includes`. Editing an agent's persona
+  or a fragment it includes no longer costs a restart and every
+  conversation on the server. Nothing is swapped, stopped or started
+  until the whole new world has been composed, validated and built, so a
+  refusal has changed nothing at all; one apply runs at a time, and a
+  second is refused as retryable having changed nothing. When a live
+  conversation meets the change depends on which half moved: the tools
+  an agent may reach are snapshotted per reply, so a moved MCP entry is
+  picked up on the next utterance, while prompt text is assembled once
+  per activation, so a rewritten prompt, fragment or `instructions`
+  reaches a conversation at its next activation, which is a new session
+  or an agent switch. The answer carries one section per kind, with the
+  sections a later release will fill declared now and answering null, so
+  a client generated from this contract keeps reading later ones.
+  Everything else still waits for the start that reads it: the
+  providers, the agent set, `agent_defaults`, and the server section.
+
 - **A running server says what it has not picked up yet** (#193).
   `GET /api/runtime/config/diff` answers what the database holds that
   the server is not serving, kind by kind: the entity names added,
@@ -72,6 +95,40 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   CI.
 
 ### Changed
+
+- **`POST /api/runtime/mcp-servers/reload` is replaced by
+  `POST /api/runtime/config/reload`** (#191), and the old path is gone
+  rather than aliased. `vinga-server config reload` moved with it and
+  takes no new arguments. The successful body is what the old route
+  answered, nested under the new result's `mcp` section, and the
+  outcomes, the status document and the status codes are unchanged. The
+  one other deliberate difference is the sentence a refused stored half
+  carries: it is now fixed and names no location, for the reason the
+  comparison read beside it already carried a fixed one, since what a
+  reload refuses on is arbitrary stored state and a sentence composed
+  over it can quote a value written into the wrong field. A server
+  started from the same store refuses on the same state and names the
+  location it refused on.
+
+- **A prompt fragment's write now names the reload** (#191), and an
+  agent's write names both boundaries, since an agent entry is the one
+  kind whose fields fall on either side of the line.
+
+- **The comparison read reports the two halves of an agent entry
+  separately** (#191). `GET /api/runtime/config/diff` gains
+  `agents.prompt` beside `agents.grants`, both labelled `reload`, and
+  `prompt_fragments` now carries the `reload` label rather than
+  `restart`. A prompt-only edit therefore leaves the restart-bound agent
+  lists empty, exactly as a grants-only edit already did.
+
+- **A server serving a configuration it was handed rather than read**
+  refuses both surfaces that span the two sides (#191, closing part of
+  #195). The comparison read and the apply answer a fixed 409 saying
+  that no stored configuration describes what the server is running, and
+  a device or default-agent write acknowledges that it is stored and
+  takes effect when a server boots from that store. That is the test
+  lane's and an embedded caller's shape; an ordinary deployment reads
+  its configuration from a store and is unaffected.
 
 - **The tests reach for the names a caller reaches for, and the ones
   that still do not say why** (#210). A committed tokenizer walk

@@ -1787,8 +1787,9 @@ class AgentDefaults(BaseModel):
             "extending it, so an empty list opts an agent out of the fragments its "
             "siblings share. Every name has to be a fragment that exists, since the "
             "fragment is in this same database, and a name listed twice is refused. "
-            "Fragments are part of the boot-time snapshot, so a change here reaches a "
-            "conversation at the next server start rather than at a reload."
+            "A reload applies this list and the fragments it names alike, so an edit "
+            "here reaches a conversation at its next activation, which is a new "
+            "session or an agent switch."
         ),
     )
 
