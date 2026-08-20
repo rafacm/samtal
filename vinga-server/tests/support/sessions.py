@@ -310,6 +310,17 @@ async def drive_reply(session: DeviceSession, pcm: bytes) -> None:
     await session.runtime._reply(pcm)
 
 
+# Long enough that a wedged reply fails the assertion rather than the
+# suite's own scheduling, and never reached when the code is correct.
+REPLY_TIMEOUT_S = 30.0
+
+
+async def wait_for_reply(session: DeviceSession) -> None:
+    """Wait out the reply in flight, the way the shutdown waits one out.
+    Public throughout: `drain` is what the edge itself asks."""
+    assert await session.runtime.drain(REPLY_TIMEOUT_S), "the reply never finished"
+
+
 def start_reply(session: DeviceSession, pcm: bytes) -> None:
     """A reply in flight, registered the way an utterance registers one,
     so that everything asking whether this session is replying (the idle
