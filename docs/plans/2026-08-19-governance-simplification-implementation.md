@@ -638,3 +638,209 @@ Run from `vinga-server/`, at `6f05f2b3`.
 
 The image and the smoke lane remain unverified here, for the reason
 given above.
+
+## M3: convert the server channels and delete the reconciliation apparatus
+
+### What was done
+
+Eleven commits, in the order the pin-before-reshaping lens forces: the
+vocabulary, the declarations, the baseline, one correction, the
+conversion, then the four deletions and the two obligations that outlive
+them.
+
+**The vocabulary.** `events/values.py` gains what the remaining
+thirty-three events are written in: a Device-Id header as the firmware
+spelled it and an activation code as two more machine forms, what a
+board says it is and what firmware it runs as two more descriptors, the
+session ids a prune removed as a list, a group of exception class names
+joined into one, two more formatted fragments, and eleven closed sets
+nothing had closed but a tuple in the untyped registry.
+
+One of those sets moved home rather than being restated. The OTA
+endpoint's three fixed refusals were literals in `ota/reply.py` and a
+tuple in `events_schema.py`, which is two homes for one closed set; the
+endpoint reaches for `OtaRefusal`'s members now, so what the set holds
+and what a rejection says are one fact.
+
+**The declarations.** Fifty variants across the twelve server channels,
+transcribed into the catalog and proved rather than reviewed: a
+temporary test held all thirty-three events equal to their old
+declarations, channel, level, template, argument kinds and constraints,
+field order, requiredness, nullability, token sets, syntaxes, bounds and
+notes included. It passed on the first run and retired with the entries
+it compared against.
+
+**The baseline.** Widened from thirty-one paths on two channels to
+eighty-one on all fourteen, with fifty drivers ported from
+`test_server_event_pins.py`, which drove every one of those paths onto
+its own decision already. Captured green before a line of the conversion
+was written.
+
+**The conversion.** Forty-nine emit sites across sixteen modules. Their
+declarations left `events_schema.py`, three spread builders went with
+the sites that spread them, and `test_event_schema_conformance.py` went
+with the duplication its three reconciliation claims existed to
+reconcile. The record baseline is byte-identical: it appears in no
+commit of this milestone after the one that captured it.
+
+**The deletions.** The seventeen fault codes, the two-step judging, the
+variant matching, the field and argument kind checks, the recovery
+rebuild and the four keyword methods on each emitter, and with them the
+registry seam they read their declarations through; then
+`events_schema.py` itself, once its vocabulary had moved to
+`events/values.py` and its channels to `events/catalog.py`. `EventSpec`,
+`EventVariant`, `EventField` and `ArgSpec` were not moved at all: they
+described a declaration, and a declaration that IS its emission needs no
+description, so `events_docgen.py` reads the variants themselves.
+
+**The parked fix.** PR #217's review round left two reports naming an
+exception's class name. `_offer`'s says nothing about the exception now,
+and the handler does not bind it; the last-resort `GUARD_MESSAGE` was
+resolved by deletion, since it belonged to the untyped path's guard.
+
+**The obligations.** The static walk retired with the last conversion,
+as the plan said it would, and what the drivers are held to instead is
+the catalog: all eighty-five constructible variants have to be produced
+by some driver's run, proved by mutation.
+
+### Deviations from the plan
+
+Five, each with its reason.
+
+1. **The production line count is not "roughly half of 4,287"; it is
+   6,207.** The plan's expectation was that the catalog, the vocabulary,
+   the emitters and the generator would land at roughly half of the
+   registry-era machinery. They did not, and the reason is legible in
+   the diff rather than hidden in it: about nine hundred lines of the old
+   registry's prose notes moved into the catalog rather than
+   disappearing, the value vocabulary that replaced the seventeen-fault
+   runtime matrix is a module of types where the matrix was a hundred
+   lines of branching, and a typed variant spells one value per line with
+   its own name, its own type and its own note where a registry literal
+   packed a variant's whole field table into a nested dict. What the plan
+   was really buying is in the other two numbers: the structures that
+   must agree per event fell from nine to two, and event-focused tests
+   fell from 10,757 lines to 7,236.
+
+2. **The conformance suite was deleted inside the conversion commit
+   rather than in one of its own.** The plan lists the deletions as
+   separate commits. This one had nothing left to check the moment the
+   last registry declaration went: its walk found no sites, its sidecars
+   named no paths, and its coherence claims read an empty registry.
+   Deleting it in the commit that emptied it is what keeps every commit
+   in this milestone green.
+
+3. **One commit corrects an earlier one rather than the surface.**
+   Moving the OTA refusals into `OtaRefusal` gave the sentence's one
+   argument a new type: a `StrEnum` member renders exactly as its value,
+   so the log line did not move, but `Emission.args` reaches every tap as
+   the object itself and a consumer that had always met a plain string
+   would have started meeting an enumeration member. The baseline caught
+   it, and the fix is its own commit before the conversion, so the
+   conversion's own diff still touches no baseline.
+
+4. **`declare()` now admits a value rendered in two positions.** Two
+   sentences on this surface say one value twice: an activation code is
+   shown and then repeated inside the command an operator is told to
+   type, and so is the MAC beside it. The check that refused it would
+   have made a site pass one value under two names to say one thing.
+
+5. **The internal event's fourteen variants are built rather than
+   written out.** They differ in exactly one class-level fact, and a
+   variant is a declaration rather than behavior, so fourteen
+   hand-written classes would be one fact restated fourteen times. The
+   declaration carries an `internal` flag, which is what the
+   documentation prints and what the every-variant-is-driven obligation
+   exempts it by, in place of the walk's exemption by name.
+
+### Discoveries
+
+**The transcription was right on the first run.** All thirty-three
+events' derived descriptions were equal to the registry's, which is the
+third time this has held (M1's four, M2's twenty, M3's thirty-three) and
+the reason none of the three conversions moved a record.
+
+**A thunk built inside a loop needs its values bound as defaults.** Two
+sites emit from inside a loop, and a closure over the loop variable
+would read whichever agent or tool the loop had reached by the time the
+guard called it. `ruff`'s B023 finds it; the fix is a default argument,
+which still satisfies a zero-argument callable.
+
+**A driver that builds an app needs a database of its own, again.** M2
+recorded this for the session channel and it holds for every OTA and
+onboarding driver too: the next app to find a migrated database resolves
+its device bindings from it rather than from the configuration it was
+built with, which turns a check-in into a different answer entirely.
+
+**The descriptor bounds could come home after all.** The untyped
+registry restated `config/models.py`'s three limits because it imported
+the standard library and nothing else. `events/values.py` can import
+them, because `config/models.py` reaches only `runtime/prompt.py` and
+`tools/names.py` and neither touches the event surface. One home for the
+number, and the restatement the conformance suite existed to hold equal
+is gone.
+
+**Two reports one line apart, and only one of them was in scope.**
+`_offer`'s failed-tap sentence is fixed here. `runtime/pipeline.py`'s
+turn-recorder report has exactly the same shape, a `logger.warning`
+naming `type(exc).__name__` for a consumer that raised, and it is not
+fixed: it is not the events package's, it was not on PR #217's parked
+list, and it is the same design question as the class-name FIELDS that
+issue #219 owns. Recorded here so it is not mistaken for having been
+looked at and left.
+
+### The inventory, after M3
+
+Production event machinery: 6,207 lines
+(`events/__init__.py` 905, `events/values.py` 1,554,
+`events/catalog.py` 3,062, `events_docgen.py` 545, `events_cli.py` 141),
+against 6,273 after M2 and 4,287 before the plan. `events_schema.py` is
+gone. Deviation 1 above says why the plan's halving did not happen and
+what did.
+
+Event-focused tests: 7,236 lines across 13 unit files and 3 support
+modules, against 10,757 before the plan. Deleted outright:
+`test_event_schema_conformance.py` (2,558), `test_event_enforcement.py`
+(1,357), `tests/support/schema.py` (34). Cut down:
+`test_server_event_pins.py` from 1,931 to 495,
+`test_event_enforcement_sentinels.py` from 982 to 734. New since the
+plan: `tests/tools/event_baseline.py` (1,564), which is the record
+baseline's harness and its eighty-one drivers.
+
+The structures that must agree, per event: **one declaration and one
+golden line**. Before the plan there were nine: the `EventSpec`
+declaration, the emit site's spelled-out template, its positional args,
+its `event=` name, its keyword fields, its `PINNED_BY` entry, its
+`TOKEN_SOURCES` entry where it had a token, its `SPREAD_INVENTORY` entry
+where it spread a dict, and its prose pin. The four sidecars do not
+exist.
+
+The surface itself is unchanged: 58 events in 99 variants across 14
+channels, 57 production and 1 internal.
+
+### Verification
+
+Run from `vinga-server/`, at the last commit of the milestone.
+
+- `uv run ruff check .`: all checks passed.
+- `uv run mypy`: success, no issues found in 3 source files.
+- `uv run pytest tests/unit -q`: 2,627 passed, 16 skipped. (3,089 at the
+  end of M2's review round; the forty-seven prose pins, the
+  hundred-odd enforcement-matrix cases and the conformance suite's
+  parametrizations that retired with the untyped path outnumber what the
+  vocabulary, the descriptor rewrite and the tap sentinels added.)
+- `uv run pytest tests/integration -q`: 60 passed.
+- The four documentation drift checks, regenerated and diffed against
+  `../docs/reference/`: `config reference`, `conversations schema`,
+  `events reference` and `config openapi` are all clean.
+  `docs/reference/events.md` is regenerated and committed; its counts are
+  unchanged.
+- The record baseline is byte-identical across the conversion:
+  `vinga-server/tests/unit/data/event-baseline.json` was written before
+  the conversion commit and appears in no commit after it.
+- The exhaustiveness obligation was proved by mutation rather than
+  trusted: dropping one driver turns the lane red on both the
+  every-variant-is-produced check and the one-driver-per-path check.
+
+Not verified here, and not claimed: the container image and the smoke
+lane, for the reason M1 gives.
