@@ -29,7 +29,6 @@ from urllib.parse import urlsplit
 
 from fastapi import Request
 
-from vinga_server.config import Config
 from vinga_server.config.models import ServerConfig
 from vinga_server.device.boundary import WEBSOCKET_PATH
 from vinga_server.events.catalog import OnboardingOff, OnboardingOn
@@ -71,7 +70,7 @@ def assemble(scheme: str, netloc: NetLoc, path: str = "") -> str:
     return f"{scheme}://{netloc}{path}"
 
 
-def websocket_url_for(config: Config, request: Request) -> str:
+def websocket_url_for(server: ServerConfig, request: Request) -> str:
     """The websocket URL to hand this device: the configured one, or the
     address it just reached the OTA endpoint on.
 
@@ -79,7 +78,7 @@ def websocket_url_for(config: Config, request: Request) -> str:
     into the reply is the netloc the request arrived with, exactly as it
     arrived. Cannot fail, and trusts no forwarded header.
     """
-    configured = config.server.websocket_url
+    configured = server.websocket_url
     if configured:
         return configured
     scheme = "wss" if request.url.scheme == "https" else "ws"

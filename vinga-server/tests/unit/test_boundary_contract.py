@@ -29,7 +29,7 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from tests.support.boundary import FakeDevice, StubRuntime
-from tests.support.configs import DEVICE_MAC, config_with_agent
+from tests.support.configs import DEVICE_MAC, config_with_agent, world
 from tests.support.sessions import device_session, listening_in
 from tests.support.wire import connect, send_pcm, shake_hands, speech_pcm
 from vinga_server import __version__
@@ -281,7 +281,7 @@ def runtime_for(config: Config, device: FakeDevice, llm: Any = None) -> Any:
         providers["assistant"] = type(agent)(
             llm=llm, asr=agent.asr, tts=agent.tts, vad=agent.vad
         )
-    factory = bespoke_runtime_factory(config, providers, McpServers({}), None, {})
+    factory = bespoke_runtime_factory(world(config), providers, McpServers({}), None, {})
     return factory(cast(DeviceOutput, device), SessionEvents("contract"), ["assistant"])
 
 

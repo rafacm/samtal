@@ -43,7 +43,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from vinga_server.audio.resample import Resampler
-from vinga_server.config import Config
 from vinga_server.conversations.records import (
     SessionTurns,
     ToolInvocation,
@@ -99,6 +98,7 @@ from vinga_server.events.values import (
     UnnamedToolSource,
     Whole,
 )
+from vinga_server.generation import Generations
 from vinga_server.providers import (
     AgentProviders,
     AsrResult,
@@ -489,7 +489,7 @@ class PipelineRuntime:
     def __init__(
         self,
         output: DeviceOutput,
-        config: Config,
+        generations: Generations,
         events: SessionEvents,
         agent_providers: dict[str, AgentProviders],
         mcp_servers: McpServers,
@@ -499,7 +499,19 @@ class PipelineRuntime:
         recorder: TurnRecorder | None = None,
     ) -> None:
         self._output = output
-        self._config = config
+        # The world this runtime reads its configuration out of, asked
+        # rather than kept: a reload replaces it, and the two reads
+        # below are at the two moments the answer is allowed to change
+        # (#191). An activation assembles the prompt from the generation
+        # current at that instant; the reply's own timeout is a
+        # restart-only setting that every generation carries the same
+        # value of.
+        self._generations = generations
+        # The file half, taken once because a generation never replaces
+        # it: a reload composes the stored domain half onto this
+        # process's own server section, so every generation carries the
+        # same one.
+        self._server = generations.current().config.server
         self._events = events
         self.session_id = events.session_id
         self._agent_providers = agent_providers
@@ -543,7 +555,7 @@ class PipelineRuntime:
         # the barge-in gates. It reaches back through `ReplyControl`,
         # which this class satisfies structurally, so the reply task and
         # the conversation history stay on this side of the seam.
-        self._turntaking = TurnTaking(events, output, config.server, self)
+        self._turntaking = TurnTaking(events, output, self._server, self)
         self._reply_task: asyncio.Task[None] | None = None
         # This turn's latency mask, if any agent this device is bound to
         # has one. It reads the floor through `TurnView`, which the
@@ -757,7 +769,7 @@ class PipelineRuntime:
         `expired()` check is what keeps an SDK timeout raised just
         before the watchdog's deadline from being retried as if the
         watchdog had fired."""
-        timeout_s = self._config.server.llm_first_token_timeout_s
+        timeout_s = self._server.llm_first_token_timeout_s
         loop = asyncio.get_running_loop()
         for attempt in ("first", "retry"):
             events = self._watched_stream(provider, make_stream())
@@ -919,9 +931,10 @@ class PipelineRuntime:
             raise _not_allowed(name, self._agents)
         self._agent = name
         self._providers = self._agent_providers[name]
+        config = self._generations.current().config
         self._know_how = prompt.know_how(
-            self._config.prompt_for_agent(name),
-            self._config.fragments_for_agent(name),
+            config.prompt_for_agent(name),
+            config.fragments_for_agent(name),
             self._mcp_servers.guidance_for_agent(name),
         )
         self._prompt_assembled(name, self._know_how)
@@ -1678,7 +1691,7 @@ class PipelineRuntime:
 
 
 def bespoke_runtime_factory(
-    config: Config,
+    generations: Generations,
     agent_providers: dict[str, AgentProviders],
     mcp_servers: McpServers,
     memory: MemoryStore | None,
@@ -1710,7 +1723,7 @@ def bespoke_runtime_factory(
     ) -> SessionInput:
         return PipelineRuntime(
             output,
-            config,
+            generations,
             events,
             agent_providers,
             mcp_servers,

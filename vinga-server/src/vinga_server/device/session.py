@@ -59,8 +59,12 @@ from vinga_server.capture import (
     DeviceFacts,
     SessionCapture,
 )
-from vinga_server.config import Config
-from vinga_server.config.models import CLIENT_ID_LIMIT, bounded_descriptor, normalize_mac
+from vinga_server.config.models import (
+    CLIENT_ID_LIMIT,
+    ServerConfig,
+    bounded_descriptor,
+    normalize_mac,
+)
 from vinga_server.config.views import provider_record
 from vinga_server.conversations import ConversationStore, SessionSink
 from vinga_server.device.bindings import DeviceBindings
@@ -93,6 +97,7 @@ from vinga_server.events.values import (
     Real,
     Whole,
 )
+from vinga_server.generation import Generations
 from vinga_server.protocol import framing, messages
 from vinga_server.protocol import mcp as mcp_protocol
 from vinga_server.providers.base import ToolDef
@@ -155,7 +160,7 @@ class DeviceSession:
     def __init__(
         self,
         websocket: WebSocket,
-        config: Config,
+        generations: Generations,
         runtime_factory: RuntimeFactory,
         captures: CaptureStore | None = None,
         device_facts: DeviceFacts | None = None,
@@ -163,14 +168,29 @@ class DeviceSession:
         conversations: ConversationStore | None = None,
     ) -> None:
         self.websocket = websocket
-        self.config = config
+        # The world this server is serving, asked rather than kept: a
+        # reload replaces it while sessions are open, and what this
+        # class reads out of it is read where it is needed (#191). The
+        # file half rides along inside it and never moves, which is what
+        # lets the limits below come through the same door as the
+        # provider entries a manifest records.
+        self._generations = generations
+        # The file half, taken once because it is the one half a
+        # generation never replaces: a reload composes the stored domain
+        # half onto this process's own server section, so every
+        # generation carries the same one.
+        self._server: ServerConfig = generations.current().config.server
         # Which agents this device may talk to, asked at connect. A
         # caller that has no live view (a test with a configuration in
         # hand and no database behind it) gets the snapshot-only one,
         # which resolves what the configuration says: one resolution
         # path, rather than a live one and a fallback one that could
         # come to disagree about a rule they both implement.
-        self._bindings = bindings if bindings is not None else DeviceBindings.snapshot_only(config)
+        self._bindings = (
+            bindings
+            if bindings is not None
+            else DeviceBindings.snapshot_only(generations.current().config)
+        )
         self._captures = captures
         # The conversation record, an optional collaborator exactly like
         # the captures above: absent unless the deployment asked for one,
@@ -417,7 +437,7 @@ class DeviceSession:
             # this; what is left for the cap is the session that keeps
             # talking, and the auto-mode device the watchdog leaves
             # alone.
-            async with asyncio.timeout(self.config.server.limits.max_session_s):
+            async with asyncio.timeout(self._server.limits.max_session_s):
                 await self._serve()
             # The serve loop returned, which is the device having closed
             # the socket. Latched here rather than left to the render in
@@ -430,7 +450,7 @@ class DeviceSession:
             self._events.emit(
                 lambda: SessionLimit(
                     duration_s=Real(self._open_duration_s()),
-                    limit_s=Real(self.config.server.limits.max_session_s),
+                    limit_s=Real(self._server.limits.max_session_s),
                 )
             )
             # The firmware reads a close as the end of a conversation and
@@ -649,7 +669,7 @@ class DeviceSession:
         variable names rather than secrets, which the config schema
         enforces.
         """
-        server = self.config.server
+        server = self._server
         return {
             "session": self.session_id,
             "started_at": datetime.now(UTC).isoformat(),
@@ -694,11 +714,18 @@ class DeviceSession:
         if self._agent is None:
             return {}
         described: dict[str, Any] = {}
+        # The world as it is now rather than as it was at connect. What
+        # a manifest records is what served this session, and until
+        # providers become part of a generation the entries a reload can
+        # move are not the ones a session was built with; reading the
+        # current world is the same answer with one door to change when
+        # they are.
+        config = self._generations.current().config
         for stage in ("llm", "asr", "tts", "vad"):
-            name, _ = self.config.provider_for_agent(self._agent, stage)
+            name, _ = config.provider_for_agent(self._agent, stage)
             if name is None:
                 continue
-            entry = getattr(self.config.providers, stage).get(name)
+            entry = getattr(config.providers, stage).get(name)
             if entry is None:
                 continue
             described[stage] = {"name": name, **provider_record(entry)}
@@ -755,7 +782,7 @@ class DeviceSession:
         close the instant the reply ended and the user would get no
         window at all to answer what they just heard.
         """
-        timeout = self.config.server.limits.idle_timeout_s
+        timeout = self._server.limits.idle_timeout_s
         loop = asyncio.get_running_loop()
         while True:
             now = loop.time()
@@ -860,7 +887,7 @@ class DeviceSession:
         if not self.listening:
             self._note_dropped("not_listening")
             return
-        if not self.config.server.barge_in and self._replying():
+        if not self._server.barge_in and self._replying():
             # Barge-in off: this is a board whose echo cancellation is
             # not trusted, so what arrives while the server speaks may be
             # the server. Dropped here, before the decode, and nothing

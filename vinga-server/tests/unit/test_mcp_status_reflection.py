@@ -35,6 +35,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from mcp.server.fastmcp import FastMCP
 
+from tests.support.configs import world
 from tests.support.mcp_reflecting_server import REFLECTED_ENV
 from tests.support.tools_mcp import serving
 from vinga_server import logs
@@ -139,7 +140,7 @@ def prompt_api(directory: Path, servers: McpServers, entry: dict[str, object]) -
             TOKEN,
             directory,
             mcp_servers=servers,
-            agent_prompt=_prompt_preview(config_with(entry), servers, None),
+            agent_prompt=_prompt_preview(world(config_with(entry)), servers, None),
         ),
     )
     return served

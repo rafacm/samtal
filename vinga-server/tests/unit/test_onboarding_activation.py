@@ -57,7 +57,7 @@ def _secret(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def short_path(client: TestClient) -> str:
-    return onboarding_path(onboarding_key(client.app.state.composition.config.server))
+    return onboarding_path(onboarding_key(client.app.state.composition.server))
 
 
 # What an unbound device receives

@@ -141,7 +141,7 @@ async def conversation(websocket: WebSocket) -> None:
 
     session = DeviceSession(
         websocket,
-        comp.config,
+        comp.generations,
         comp.runtime_factory,
         comp.capture,
         comp.device_facts,

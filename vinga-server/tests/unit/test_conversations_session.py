@@ -30,7 +30,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from starlette.websockets import WebSocketDisconnect
 
-from tests.support.configs import DEVICE_MAC, DEVICE_UUID, recording_config
+from tests.support.configs import DEVICE_MAC, DEVICE_UUID, recording_config, world
 from tests.support.sessions import WRITER_TIMEOUT_S as TIMEOUT_S
 from tests.support.sessions import Gate, attached_taps, drive_reply, open_session, until
 from tests.support.sockets import LoopingSocket
@@ -541,12 +541,13 @@ def _guarded(tmp_path: Path, store: ConversationStore) -> tuple[Any, Any]:
     """
     config = recording_config(tmp_path)
     captures = CaptureStore(tmp_path / "captures", 900.0, 2000.0, 0.0)
+    generations = world(config)
     factory = bespoke_runtime_factory(
-        config, build_agent_providers(config), McpServers({}), None, {}, store
+        generations, build_agent_providers(config), McpServers({}), None, {}, store
     )
     websocket = LoopingSocket()
     session = DeviceSession(
-        cast(Any, websocket), config, factory, captures, conversations=store
+        cast(Any, websocket), generations, factory, captures, conversations=store
     )
     return session, websocket
 

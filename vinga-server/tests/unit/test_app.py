@@ -8,9 +8,14 @@ from vinga_server.config import Config
 
 
 def test_given_config_is_the_one_the_app_serves() -> None:
+    """Both halves of it, and through the two doors the composition now
+    has: the file half is kept as itself, and the domain half is the
+    world the first generation holds, which is what a reload replaces
+    and a handler therefore asks for rather than keeps."""
     config = Config(server={"port": 9999})
     with entered_app(config) as (app, _):
-        assert app.state.composition.config is config
+        assert app.state.composition.server is config.server
+        assert app.state.composition.generations.current().config is config
 
 
 def test_app_without_a_config_loads_one(
@@ -22,7 +27,7 @@ def test_app_without_a_config_loads_one(
     app, and carried to the build on the seed."""
     monkeypatch.setenv("VINGA_SERVER__DATABASE__DIR", str(tmp_path / "db"))
     with entered_app() as (app, _):
-        assert isinstance(app.state.composition.config, Config)
+        assert isinstance(app.state.composition.generations.current().config, Config)
 
 
 @pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json"])
