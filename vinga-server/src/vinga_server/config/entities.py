@@ -116,6 +116,45 @@ NO_SUCH_AGENT = "agents: no agent of that name exists"
 NO_SUCH_DEVICE = "devices: no device with that MAC is bound"
 
 
+# When a write takes effect. Three sentences, because there are three
+# answers, and each is a fact of what was written rather than of the
+# route or the command that wrote it: the descriptors below name one
+# each, `writes.py` chooses between them where the answer depends on
+# something a kind cannot know, and both write paths print whichever
+# came back.
+
+# Printed after most mutating commands, and answered with most
+# successful writes over HTTP. The configuration is a boot-time snapshot
+# by design, and a write that quietly waits for a restart is the one
+# thing about that design an operator can be caught by, so the write
+# itself says when it takes effect.
+RESTART_NOTICE = (
+    "This applies at the next server start: the configuration is read once at boot."
+)
+
+# The first exception: a running server reads device bindings and the
+# default agent as a device asks for them, so binding a board is done
+# with the board in front of you rather than at the next maintenance
+# window.
+BINDING_NOTICE = (
+    "This applies at the device's next OTA check or connection: a running server "
+    "reads device bindings as it needs them, so no restart is needed."
+)
+
+# The second, and unlike the first it is asked for rather than noticed:
+# a running server re-reads the MCP entries, the secrets stored on them
+# and the agents' grant lists when the reload asks it to. Written on the
+# writes that the reload actually applies and nowhere else, because a
+# notice that is right about one field of a fragment and wrong about the
+# rest is worse than the conservative sentence.
+MCP_RELOAD_NOTICE = (
+    "This applies when the running server is asked to reload: run "
+    "`vinga-server config reload`, which re-reads the MCP servers and the agents' "
+    "grant lists and applies them without a restart and without dropping a "
+    "conversation."
+)
+
+
 # What one route of an entity kind does. Six, because the surface has
 # six, and a kind with fewer says so by listing fewer endpoints rather
 # than by carrying a flag per route: the singleton has no collection and
@@ -361,11 +400,11 @@ class EntityDescriptor(DocumentedShape):
     # When a write of this kind takes effect, which is one sentence per
     # kind rather than one per route: an MCP server and its stored
     # credentials are what a reload re-reads, and everything else waits
-    # for the restart that reads the configuration again. A string and
-    # not a hook, because nothing about the answer depends on what was
-    # written. The two kinds whose notice does depend on that (a device
-    # binding, whose agent may not be loaded) are settings, and compute
-    # theirs at the call site as they always have.
+    # for the restart that reads the configuration again. Effect timing
+    # is static and about the kind, so it is declared inline above like
+    # every other fact. The two kinds whose notice does depend on what
+    # was written (a device binding, whose agent may not be loaded) are
+    # settings, and compute theirs at the call site as they always have.
     notice: str | None = None
 
 
@@ -441,6 +480,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         secret_slots="provider",
         secret_key=is_secret_option,
         missing=NO_SUCH_PROVIDER,
+        notice=RESTART_NOTICE,
         endpoints=(
             Endpoint(
                 verb=READ_ALL,
@@ -522,6 +562,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         table="mcp_servers",
         secret_slots="mcp_server",
         missing=NO_SUCH_MCP_SERVER,
+        notice=MCP_RELOAD_NOTICE,
         endpoints=(
             Endpoint(
                 verb=READ_ALL,
@@ -618,6 +659,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         moved_key="prompt_fragments",
         table="prompt_fragments",
         missing=NO_SUCH_FRAGMENT,
+        notice=RESTART_NOTICE,
         endpoints=(
             Endpoint(
                 verb=READ_ALL,
@@ -691,6 +733,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         moved_key="agents",
         table="agents",
         missing=NO_SUCH_AGENT,
+        notice=RESTART_NOTICE,
         endpoints=(
             Endpoint(
                 verb=READ_ALL,
@@ -757,6 +800,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         moved_key="agent_defaults",
         table="agent_defaults",
         has_delete=False,
+        notice=RESTART_NOTICE,
         endpoints=(
             Endpoint(
                 verb=READ_ONE,
@@ -958,11 +1002,13 @@ def fill(name: str, **facts: object) -> None:
 
 __all__ = [
     "API_OPTIONS_NOTE",
+    "BINDING_NOTICE",
     "CONFIG_FILE",
     "DELETE",
     "DELETE_SECRET",
     "ENTITIES",
     "EXAMPLES",
+    "MCP_RELOAD_NOTICE",
     "NESTED",
     "NO_SUCH_AGENT",
     "NO_SUCH_DEVICE",
@@ -972,6 +1018,7 @@ __all__ = [
     "OPTIONS_NOTE",
     "READ_ALL",
     "READ_ONE",
+    "RESTART_NOTICE",
     "SETTINGS",
     "WRITE",
     "WRITE_SECRET",
