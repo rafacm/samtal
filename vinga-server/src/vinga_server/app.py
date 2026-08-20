@@ -19,8 +19,15 @@ from vinga_server.config.api import (
     mount_api,
     open_store,
 )
-from vinga_server.config.boot import load_boot_config, reload_domain_config
-from vinga_server.config.responses import McpReloader, McpReloadResult
+from vinga_server.config.boot import BootConfig, load_boot_config, reload_domain_config
+from vinga_server.config.diff import Loaded, config_diff
+from vinga_server.config.loader import RunningConfigMovedError
+from vinga_server.config.responses import (
+    ConfigDiff,
+    ConfigDiffReader,
+    McpReloader,
+    McpReloadResult,
+)
 from vinga_server.config.secrets import SecretStore
 from vinga_server.conversations import ConversationStore, migrate_existing
 from vinga_server.device.bindings import DeviceBindings
@@ -319,7 +326,11 @@ async def _build_composition(
     # built. The reload goes with them, because applying a fresh read to
     # those managers is the one action that namespace serves, and the
     # prompt assembly goes with them because what it answers is what a
-    # session opening now would be sent.
+    # session opening now would be sent. The diff read goes with them
+    # because one of the two worlds it compares is this one: the
+    # configuration this process booted and the MCP entries running
+    # right now, which are not the same thing once a reload has been
+    # applied.
     #
     # Before the yield and therefore before any request: uvicorn serves
     # nothing until this generator has yielded, so no request can see a
@@ -331,6 +342,18 @@ async def _build_composition(
         mcp_servers,
         _mcp_reloader(config, mcp_servers),
         _prompt_preview(config, mcp_servers, memory),
+        config_diff_reader(
+            # One side of the comparison: what this process is serving.
+            # A store with nothing in it rather than None is the same
+            # world as a deployment whose credentials are all
+            # environment references, and it keeps the comparison from
+            # having to know about a second shape of side.
+            BootConfig(config, secrets if secrets is not None else SecretStore()),
+            mcp_servers,
+            # And the other side, which is the reload's own re-read of
+            # the stored half, run where the reload runs it.
+            lambda: reload_domain_config(config),
+        ),
     )
     # The configuration database, opened once here rather than on every
     # request (#142), and migrated in the same call because nothing may
@@ -421,6 +444,80 @@ def _mcp_reloader(config: Config, servers: McpServers) -> McpReloader:
         return await servers.reload_result(read)
 
     return reload
+
+
+# How many times one diff may read the stored half before it gives up:
+# the first read and two more. A bound rather than a loop, because a
+# world moving under every attempt is a server being reloaded in a tight
+# cycle, and answering "ask again" then is more honest than reading a
+# database until one of the attempts happens to win.
+DIFF_LOADS = 3
+
+# And what it says when it gives up. The whole of the advice is to make
+# the request again: nothing is wrong, nothing was changed, and the next
+# one lands in a world that is holding still unless the reloads keep
+# coming.
+CONFIG_MOVED = (
+    "the running configuration changed while this comparison was being read, so the "
+    "answer would have described two states that never existed together. Nothing was "
+    "changed by this request; make it again."
+)
+
+
+def config_diff_reader(
+    running: Loaded, servers: McpServers, read: Callable[[], Loaded]
+) -> ConfigDiffReader:
+    """What the configuration API's diff read calls.
+
+    Closed over here for the reason the reload is: the world this
+    process booted, the credentials loaded beside it and the registry a
+    reload replaces are known at the composition root and nowhere else,
+    and the API application must not learn which kind of configuration
+    converges where.
+
+    `read` is the stored half, handed in rather than done here, exactly
+    as the reload hands its own re-read to the registry: opening a
+    database belongs to the layer that owns one, and what this function
+    owns is where that read runs and what makes its answer one world.
+    The composition root passes `reload_domain_config`, which is the
+    settled decision that the diff's stored side is the reload's own
+    re-read: the same migration, the same verification that every stored
+    credential opens, and the same whole-snapshot validation, so a
+    stored half the reload would refuse is refused here in the same
+    words and with the same type.
+
+    One world, and this is the whole of how. The read is blocking (it
+    takes the database's write lock and waits out its busy timeout), so
+    it runs in a worker thread, and that await is itself the window: a
+    reload can install a new set of MCP entries while it is in flight,
+    leaving a stored generation compared against a runtime that never
+    held it. The registry's generation mark is therefore taken on this
+    loop before the read and read again after it, and the comparison
+    runs only if it did not move, with no await of its own between that
+    check and the answer. A mark that keeps moving refuses with the
+    retryable 409 rather than composing a mixture.
+
+    Nothing here catches a failure of `read`'s. Everything
+    `reload_domain_config` refuses with is a `ConfigError` the API turns
+    into a status, and anything else is a bug, which the API's
+    last-resort middleware answers as a sanitized 500 while recording
+    the exception's class. A fixed sentence of this closure's would say
+    less than that and hide the class it was standing in for.
+    """
+
+    async def diff() -> ConfigDiff:
+        for _ in range(DIFF_LOADS):
+            mark = servers.generation
+            stored = await asyncio.to_thread(read)
+            if servers.generation == mark:
+                return config_diff(
+                    running,
+                    stored,
+                    servers.pending_against(stored.config, stored.secrets),
+                )
+        raise RunningConfigMovedError(CONFIG_MOVED)
+
+    return diff
 
 
 def _prompt_preview(
