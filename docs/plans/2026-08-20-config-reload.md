@@ -211,12 +211,20 @@ unchanged: a change a reload already applied reports nothing.
 
 **Fillers: what is the reuse key, which voice synthesizes, and
 when do sessions see the change?** The reuse key is the pair the
-synthesis actually depends on: the agent's effective filler section
-(`filler_for_agent`) and the identity of the agent's effective TTS
-provider entry (entry model plus its secret fingerprint, the
-comparison #193 built). In milestone 2 providers are not yet
-generational, so synthesis always uses the running TTS providers;
-once milestone 3 lands, it uses the candidate generation's. A
+synthesis actually depends on, and before milestone 3 that pair is
+read from the running world on both sides (the review's finding
+3): the agent's filler section from the candidate overlay, and the
+identity of the agent's TTS binding as it is actually running,
+because that is the voice milestone 2 synthesizes with. A
+provider or provider-secret edit therefore neither invalidates nor
+replaces a clip in M2: the voice it describes is still
+restart-bound, the clips that exist are the running voice's, and
+the change stays visible in the diff instead of being reported
+applied. Once milestone 3 makes providers generational, the key's
+provider half becomes the candidate generation's effective TTS
+entry identity (entry model plus secret fingerprint, the
+comparison #193 built) and synthesis uses the candidate's
+provider. A
 filler synthesis failure during an apply degrades exactly as boot
 does (the agent runs with the feature off, an event says so) and
 does not refuse the apply: fillers are a latency mask, and a
@@ -401,8 +409,10 @@ session across a reload), and the drift-check pins.
   half after apply.
 - **M2**: clip reuse pinned by object identity across an apply
   that edits only a prompt; a phrase edit re-synthesizes only that
-  agent; synthesis failure degrades and reports; a session's
-  filler timing does not change mid-session.
+  agent; a provider-only or provider-secret-only edit preserves
+  clip identity and stays pending in the diff (finding 3's case);
+  synthesis failure degrades and reports; a session's filler
+  timing does not change mid-session.
 - **M3**: unchanged-entry reuse pinned by provider object identity
   (a prompt-only apply reuses every provider); a changed entry
   builds anew and the old provider closes when the last bound
@@ -545,6 +555,12 @@ voice is still restart-bound. Before M3 the reuse and synthesis
 key is the running TTS binding; provider-only edits neither
 invalidate nor replace clips and stay visible in the diff; M3
 switches the key to the candidate identity.
+
+*Resolution.* Adopted. The fillers decision now keys reuse and
+synthesis by the running TTS binding before M3, provider edits
+neither invalidate nor replace clips and stay pending in the diff,
+the M2 test bullet carries the named case, and M3 moves the key to
+the candidate identity.
 
 **4 (P1). Provider preparation and shutdown have no complete
 resource owner.** The plan covered retirement of installed
