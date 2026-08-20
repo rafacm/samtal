@@ -267,3 +267,84 @@ Run from `vinga-server/`, at the last commit of the milestone.
 Not verified here, and not claimed: the container image, the smoke lane,
 and anything against a real device, none of which this milestone
 touches.
+
+### PR review round (2026-08-20)
+
+External review of PR #229: codex exec, model gpt-5.6-sol, read-only
+against `main...f1fce4ba`. Verdict: mergeable after fixes. Three
+findings, all P2, condensed but faithful; each carries its resolution
+and the commit that made it.
+
+**1 (P2). The agent write's notice put the MCP grants on the wrong side
+of the line.** `AGENT_NOTICE` named `prompt` and `prompt_includes` as
+the half a reload applies and swept the rest into "everything else",
+while the reload applies an agent's effective `mcp` grants too: the
+candidate slice derives them from the stored configuration, the route's
+own description says so, and the comparison read has reported them under
+a `reload` label since #193. An operator acting on the sentence would
+restart a server for a grant edit a request applies.
+
+*Resolution.* Adopted (`0207941a`). The sentence names all three fields
+and states the two clocks the applied half has, since prompt text is
+assembled once per activation while the tools an agent may reach are
+snapshotted per reply. Pinned whole rather than by substring on both
+surfaces that print it, the API acknowledgement and the CLI's stderr
+line, because what an operator reads is the sentence rather than the
+fields it happens to contain.
+
+**2 (P2). The prompt boundary was documented wrongly in both
+directions.** `prompt_includes` is declared on `AgentDefaults` and
+inherited by `AgentConfig`, so one description covered two layers in two
+regimes: it claimed the defaults' list reloads, which this milestone's
+own apply test proves start-bound, and the prompt-fragment handler's
+docstring and the README's operational-trap paragraph still sent an
+operator to restart for a change a request applies. The drift checks
+could not see any of it, because they hold the committed document to the
+models and a description naming the wrong boundary passes them exactly.
+
+*Resolution.* Adopted (`b0b4992f`). `AgentConfig` re-declares the field
+for its description alone, same type, same default and the same
+validator, which is bound by name and inherited; the handler and the
+README say the boundary that holds; both references were regenerated.
+Two semantic assertions join the drift check, in its spirit and doing
+what a diff cannot: they read the two rows out of the generated
+reference and pin the sentence each has to mean. Proved to bite by
+putting the old shared description back on the agent, which fails one of
+them while the byte-for-byte check stays green.
+
+**3 (P2). Nothing proved that an agent's own include list is applied.**
+The overlay takes two fields off a retained agent and only one was
+pinned: removing `"prompt_includes": fresh.prompt_includes` left the
+suite green, because the fragment cases moved a fragment's text, which
+the fragment kind's own wholesale replacement applies, and the prompt
+cases moved an agent's prompt, which the other half of the same line
+applies.
+
+*Resolution.* Adopted (`7ee907e2`). An apply-level case whose answer
+nothing else can produce: two fragments exist in both worlds with the
+same text, so replacing the fragment kind replaces it with a copy of
+itself, and the agent's own list moving between them is the only
+difference an apply can read. It asserts the installed generation's
+names and resolved text, the result's `prompts.changed`, what the next
+activation sends the model, and that the comparison clears. Proved to
+bite by removing that line from the overlay and running the reload,
+comparison, API and holder suites: one failure, this case, with 321
+other tests still passing.
+
+### Verification, after the review round
+
+Run from `vinga-server/`, at the last commit of the round.
+
+- `uv run ruff check .`: all checks passed.
+- `uv run mypy`: success, no issues found in 3 source files.
+- `uv run pytest tests/unit -q`: 2,738 passed, 16 skipped. The three new
+  cases are this round's: the agent's own include list at the apply, and
+  the two semantic pins on the generated reference.
+- `uv run pytest tests/integration -q`: 61 passed, unchanged.
+- The four documentation drift checks: all clean.
+  `api-openapi.json` and `domain-config.md` moved with the descriptions
+  and are committed with them; `events.md` and `conversations-schema.md`
+  are byte-untouched by this round as by the milestone.
+
+The image and the smoke lane remain unverified here, for the reason
+given above.
