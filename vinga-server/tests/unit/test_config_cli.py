@@ -50,7 +50,7 @@ from vinga_server.config.entities import (
     NO_SUCH_PROVIDER,
 )
 from vinga_server.config.store import NOT_A_STAGE
-from vinga_server.config.writes import BINDING_NOTICE, RELOAD_NOTICE
+from vinga_server.config.writes import AGENT_NOTICE, BINDING_NOTICE, RELOAD_NOTICE
 from vinga_server.db import open_database, schema
 
 
@@ -134,13 +134,15 @@ def test_every_mutating_command_says_when_the_write_applies(
     design an operator can be caught by.
 
     The agent is the kind whose fields fall on both sides of the line,
-    so its answer says both halves, and what this asserts of it is the
-    half that is still the restart."""
+    so its answer says both halves and is asserted whole: it is the one
+    sentence an operator can act on wrongly in either direction, by
+    restarting for a field a reload applies or by reloading for one it
+    does not."""
     run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
     assert cli.RESTART_NOTICE in capsys.readouterr().err
 
     run("set", "agent", "sam", "-f", "-", stdin="llm: claude\n")
-    assert "at the next server start" in capsys.readouterr().err
+    assert capsys.readouterr().err == f"{AGENT_NOTICE}\n"
 
     run("set-default-agent", "sam")
     assert cli.RESTART_NOTICE in capsys.readouterr().err
