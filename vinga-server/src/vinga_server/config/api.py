@@ -602,6 +602,18 @@ NO_RUNTIME_DIFF_DESCRIPTION = (
     "answer: an empty diff would say that everything stored is already in effect."
 )
 
+# And what the caller is told, which is not the shared sentence: that
+# one says the reads in this namespace answer emptily, and this read
+# refuses precisely because an empty answer would be a claim about a
+# server that is not there. A document that describes one thing and a
+# body that says another leave the reader to decide which to believe.
+NO_RUNTIME_DIFF = (
+    "this API has no running server around it, so there is nothing to compare the "
+    "stored configuration with. An empty diff is not the honest answer here, since it "
+    "would say that everything stored is already in effect. A deployment reaches this "
+    "read on its server's own port."
+)
+
 
 @dataclass
 class StoreHandle:
@@ -1517,7 +1529,7 @@ def _runtime(api: FastAPI) -> None:
         # decided where both are in hand, and a handler that took the
         # answer apart would be holding an invariant it cannot keep.
         if diff is None:
-            raise NoRuntimeError(PROBLEM_DESCRIPTIONS[503])
+            raise NoRuntimeError(NO_RUNTIME_DIFF)
         return await diff()
 
 

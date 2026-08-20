@@ -27,6 +27,7 @@ from vinga_server.config.api import (
     DIFF_REFUSED_DESCRIPTION,
     MALFORMED_REQUEST_DESCRIPTION,
     MOUNT_PATH,
+    NO_RUNTIME_DIFF,
     NO_RUNTIME_DIFF_DESCRIPTION,
     NO_RUNTIME_PROMPT_DESCRIPTION,
     PROBLEM_DESCRIPTIONS,
@@ -803,12 +804,18 @@ def test_an_application_without_a_server_has_nothing_to_compare(
 ) -> None:
     """Unlike the status read, there is no honest empty answer: an empty
     diff would say that everything stored is already in effect, which is
-    a claim about a running server there is none of."""
+    a claim about a running server there is none of.
+
+    The whole body, because the sentence is the point. The shared 503
+    says the reads in this namespace answer emptily, which is what this
+    route refuses to do, so it carries one of its own and the document's
+    description of the same status says the same thing.
+    """
     response = client.get(DIFF_PATH)
 
     assert response.status_code == 503
-    assert set(response.json()) == PROBLEM_KEYS
-    assert "no running server" in response.json()["detail"]
+    assert response.json() == problem(503, NO_RUNTIME_DIFF)
+    assert response.json()["detail"] != PROBLEM_DESCRIPTIONS[503]
 
 
 def test_the_diff_answers_every_kind_with_its_own_regime(directory: Path) -> None:
