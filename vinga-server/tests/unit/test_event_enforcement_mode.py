@@ -163,11 +163,15 @@ main.main()
 # its enforcement is the quiet failure #155 exists to end.
 OPTIMIZED = """
 from vinga_server import events
+from vinga_server.events.catalog import ConversationsDropped
+from vinga_server.events.values import SessionId
 
 print("DEBUG=" + str(__debug__))
 events.set_enforcement("strict")
 try:
-    events.ServerEvents("vinga_server.ota").info("nothing", event="invented")
+    events.ServerEvents("vinga_server.conversations.store").emit(
+        lambda: ConversationsDropped(session=SessionId("has a space"))
+    )
 except events.EventSchemaError:
     print("REFUSED")
 """
@@ -263,8 +267,10 @@ def test_an_unusable_value_does_not_block_a_recovery_command(tmp_path: Path) -> 
 
 
 def test_optimized_python_still_refuses_an_invalid_emission(tmp_path: Path) -> None:
-    """`python -O` strips `assert` statements, so validation is written
-    in explicit conditions that raise. This is what says so."""
+    """`python -O` strips `assert` statements, so every check on this
+    path is written as an explicit condition that raises: the value
+    types' own, and the construction guard's around them. This is what
+    says so."""
     done = run(OPTIMIZED, tmp_path, None, "-O")
 
     assert done.returncode == 0, done.stderr

@@ -1,64 +1,26 @@
-"""Every event this server may emit, declared: name, channel, level,
-sentence, arguments and fields.
+"""The vocabulary every declared event is written in, and the shapes a
+generated reference reads it through.
 
-The retained JSON records are the observability surface
-([ADR](../../docs/adr/2026-08-04-json-logs-are-the-observability-surface.md)),
-and they carry metadata and nothing else ([the content and telemetry
-ADR](../../docs/adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)).
-Until #155 that second rule was a convention held by review vigilance:
-nineteen of the roughly thirty findings across the 2026-08-14 refactoring
-batch's review rounds were leak-shaped content on the retained log, each
-found and fixed by hand. This module is what turns the convention into
-data. One declaration per event says exactly what it is allowed to be,
-so a field carrying far-side bytes becomes a schema violation a test
-lane refuses rather than a finding somebody has to notice.
+What used to live here was the registry: one hand-written declaration
+per event, describing an emission that a call site restated and a
+validator reconciled the two halves of. The declarations are typed
+variants in `events/catalog.py` now, and a variant IS its emission, so
+the reconciliation and the descriptions both went with the conversion
+(#210).
 
-Three properties of the declarations are load-bearing:
-
-- **There is no free-text kind.** Every string field is a trusted
-  configured identifier (trusted by provenance: an operator wrote it,
-  and its domain here is the configuration's own rather than a tighter
-  one this module invented), a token from a closed set, a class name, a
-  bounded machine id with a syntax, or a `DESCRIPTOR`: a far-side
-  string retained deliberately, lawful only where its decision site
-  bounds and sanitizes it, and declared with the maximum length and
-  character constraint that site guarantees. `DESCRIPTOR` exists
-  because the content-and-telemetry ADR's 2026-08-17 amendment says
-  bounded device-descriptor metadata is metadata: what a device says
-  ABOUT ITSELF at check-in may ride the events once bounded, while what
-  a person said through it may not. A registry that could not say
-  "this field deliberately carries sanitized far-side bytes" would
-  launder those fields as identifiers instead of naming them.
-- **The sentence is part of the declaration.** `Emission.args` reaches
-  every tap and the formatter renders the template, so a payload rule
-  that ignored the message would leave the other half of the record
-  unguarded. Each variant therefore declares the exact template string
-  and the kind of every argument position.
-- **A variant is one whole emission shape.** One flat field table
-  cannot describe this surface: `session_rejected` is emitted with
-  three arities across four templates on two channels, `ota_check` with
-  three, `mcp_reload`'s applied and refused answers carry mutually
-  exclusive fields, and several events change level with shape. A
-  variant is exactly what one emit site, or one branch of one,
-  produces. Conditional presence is expressed by variants wherever the
-  condition follows the site, and by `required=False` only where it is
-  value-dependent inside a single site (`language` on `heard` when the
-  engine detected, the token counts on `llm_round` when the provider
-  reported them).
+What is left is the vocabulary underneath them: the kinds a value may
+take, the named syntaxes and descriptor bounds it is held to, the
+composed grammars a sentence's fragments follow, and the `EventSpec`
+shape the documentation generator reads a declaration through. All of
+it moves into the events package with the last of this module; it is
+still here only because the generator has not been pointed at the
+catalog alone yet.
 
 The module imports the standard library and nothing else, which is what
 keeps the arrows pointing downward: every subsystem imports `events`,
 `events` imports this, and neither imports a subsystem.
-
-What lives here is the declaration only. Enforcement at emit time is
-M2's, and the generated `docs/reference/events.md` is M3's; both read
-this module rather than restating it. The tap contract is events only,
-so `SessionEvents.vad()` and `.dropped()`, which are capture side
-channels sampled per frame, are outside the registry deliberately, the
-way they are outside the tap contract.
 """
 
-import logging
 import re
 from dataclasses import dataclass
 from enum import Enum
@@ -675,71 +637,4 @@ SOURCE_KEY_PATTERN = (
     rf"|instructions:{_CONFIGURED_NAME}"
     rf"|server_instructions:{_CONFIGURED_NAME}"
     rf"|server_prompt:{_CONFIGURED_NAME}:[1-9][0-9]*"
-)
-
-
-# --- the declarations -------------------------------------------------
-#
-# Grouped by the subsystem that emits them, in the order a request meets
-# them: the device's check-in, its session, the pipeline inside it, the
-# providers behind that, then the server's own lifecycle surfaces.
-
-
-_SPECS: list[EventSpec] = [
-]
-
-
-# --- the one event no emit site produces ------------------------------
-#
-# The forgiving mode's recovery event (M2). An emission that matches no
-# declared variant becomes this one: the fixed token, the emitter's own
-# trusted identity, a fixed sentence and no arguments, so a hostile
-# name, key, value, message or argument in the original call reaches
-# nothing. It is declared here like any other event, because a tap fed a
-# shape the generated reference denies exists would make the reference a
-# liar; it has no ordinary emit site, so the conformance walk exempts it
-# by name the way the `extra=` guard exempts `events.py`.
-
-SCHEMA_VIOLATION = "schema_violation"
-
-SCHEMA_VIOLATION_MESSAGE = (
-    "an event was refused by the event schema and replaced by this one; "
-    "reproduce it under VINGA_EVENTS_ENFORCEMENT=strict to see which"
-)
-
-_SPECS.append(
-    EventSpec(
-        SCHEMA_VIOLATION,
-        internal=True,
-        note=(
-            "What the emitter emits in forgiving mode when an "
-            "emission cannot be recovered into a declared shape. Fixed at "
-            "ERROR, because `log_level` admits roots above WARNING and a "
-            "complaint that vanishes under one is no complaint."
-        ),
-        variants=tuple(
-            EventVariant(
-                channel=channel,
-                level=logging.ERROR,
-                message=SCHEMA_VIOLATION_MESSAGE,
-                args=(),
-                fields=(
-                    session_payload() if channel == SESSION_CHANNEL else server_payload()
-                ),
-            )
-            for channel in CHANNELS
-        ),
-    )
-)
-
-
-REGISTRY: dict[str, EventSpec] = {spec.name: spec for spec in _SPECS}
-
-# The production surface: everything an ordinary emit site may produce.
-PRODUCTION_EVENTS: frozenset[str] = frozenset(
-    name for name, spec in REGISTRY.items() if not spec.internal
-)
-
-INTERNAL_EVENTS: frozenset[str] = frozenset(
-    name for name, spec in REGISTRY.items() if spec.internal
 )

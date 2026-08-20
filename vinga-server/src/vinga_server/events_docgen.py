@@ -7,14 +7,10 @@ this reads the declarations as the markdown reference committed at
 prints. CI regenerates the committed copy and diffs it byte for byte, so
 the document cannot say anything the declarations do not.
 
-There are two homes for those declarations while #210's conversion is in
-flight, and rendering both is what keeps the document whole rather than
-half a surface: `events/catalog.py` for the events already converted to
-typed variants, and `events_schema.py`'s registry for the rest. The
-catalog answers the same `EventSpec` shape through `described()`, so
-this module reads one sequence and neither source gets a rendering of
-its own. `documented()` is where the two meet, and it goes when the
-registry does.
+The declarations are the typed variants in `events/catalog.py`, and
+`described()` is how a variant answers the `EventSpec` shape this
+renders: what a variant declares about itself is enough to describe it,
+which is the whole point of a declaration that IS its emission.
 
 That is what makes this the place field and token facts belong. The
 README's event table used to carry them in prose nothing checked, which
@@ -41,7 +37,6 @@ from vinga_server.events_schema import (
     CHANNELS,
     GRAMMARS,
     IDENTIFIER_DOMAIN,
-    REGISTRY,
     SERVER_CHANNELS,
     SESSION_CHANNEL,
     SOURCE_FORMS,
@@ -57,20 +52,11 @@ from vinga_server.events_schema import (
 
 
 def documented() -> dict[str, EventSpec]:
-    """Every event the reference describes, from both of its sources.
-
-    The order is the order a reader meets them: the registry's
-    unconverted production events in declaration order, then the
-    catalog's converted ones, then the internal recovery event last,
-    which is where it has always been. A converted event therefore moves
-    within the document and nothing else about it changes, which is what
-    the regenerated reference shows.
-    """
-    production = {
-        name: spec for name, spec in REGISTRY.items() if not spec.internal
-    }
-    internal = {name: spec for name, spec in REGISTRY.items() if spec.internal}
-    return {**production, **{spec.name: spec for spec in described()}, **internal}
+    """Every event the reference describes, in the catalog's own
+    declaration order, which is the order a reader meets them: a
+    device's check-in, its session, the pipeline inside it, the
+    providers behind that, then the server's own lifecycle surfaces."""
+    return {spec.name: spec for spec in described()}
 
 # Where the reference's prose wraps. The tables cannot wrap (a row is a
 # line), so only paragraphs go through this.
@@ -164,8 +150,7 @@ def reference() -> str:
         "Generated from the declarations by `vinga-server events reference`. Do",
         "not edit this file by hand: CI regenerates it and fails on any difference,",
         "so an edit here is reverted by the next run. The declarations live in",
-        "`vinga-server/src/vinga_server/events/catalog.py` and, for the events not",
-        "yet converted to it, in `vinga-server/src/vinga_server/events_schema.py`.",
+        "`vinga-server/src/vinga_server/events/catalog.py`.",
         "",
         *_paragraph(
             f"The structured events are this server's observability surface "
@@ -179,12 +164,15 @@ def reference() -> str:
         ),
         "",
         *_paragraph(
-            "The emitters hold every emission to what is written here before any "
-            "of it is dispatched, and `VINGA_EVENTS_ENFORCEMENT` decides what "
-            "happens to one that does not match. `forgiving` recovers the "
-            "emission into a declared shape, or replaces it with "
-            "`schema_violation` where it cannot, and says so on the emitter's "
-            "own channel; `strict` raises instead."
+            "A site does not describe an emission; it constructs one. Every "
+            "variant below is a type, its values are types, and its sentence "
+            "and argument order are derived from its own fields, so an "
+            "emission that is not one of these shapes cannot be built at all. "
+            "What is left at runtime is the construction itself, which happens "
+            "inside the emitter's guard, and `VINGA_EVENTS_ENFORCEMENT` "
+            "decides what a construction that refuses costs. `forgiving` says "
+            "so once on the emitter's own channel and dispatches "
+            "`schema_violation` in its place; `strict` raises instead."
         ),
         "",
         *_paragraph(
@@ -208,8 +196,7 @@ def reference() -> str:
             "surface does: `session_rejected` is emitted with three arities "
             "across four templates on two channels, `mcp_reload`'s applied and "
             "refused answers carry mutually exclusive fields, and several events "
-            "change level with shape. A runtime emission matches exactly one "
-            "variant or it is a violation."
+            "change level with shape. A site constructs exactly one of them."
         ),
         "",
         *_paragraph(
@@ -222,8 +209,8 @@ def reference() -> str:
         *_paragraph(
             "A variant's field table is the WHOLE payload a tap receives, base "
             "fields included: `event` everywhere, and `session` and `device` on "
-            "the session channel, where the emitter owns them and a caller "
-            "supplying one is itself a violation. On a server channel `session` "
+            "the session channel, where the emitter owns them and a variant "
+            "declaring one is refused at import. On a server channel `session` "
             "and `device` are ordinary fields, declared where they are carried. "
             "Required says the field is always present in that variant; nullable "
             "says it may be present and null. An argument position carries the "
@@ -255,11 +242,12 @@ def reference() -> str:
         "",
         *_paragraph(
             f"There is no free-text kind, which is the property the whole "
-            f"registry exists to keep. Every string field is one of these, and a "
-            f"field that would need prose is a design error the taxonomy refuses "
-            f"to encode. A trusted identifier's domain is {IDENTIFIER_DOMAIN}: "
-            f"what the configuration itself guarantees, since a registry claiming "
-            f"more would turn a lawful deployment's traffic into violations."
+            f"vocabulary exists to keep. Every string field is one of these, and "
+            f"a field that would need prose is a design error the taxonomy "
+            f"refuses to encode. A trusted identifier's domain is "
+            f"{IDENTIFIER_DOMAIN}: what the configuration itself guarantees, "
+            f"since a value type claiming more would refuse a lawful "
+            f"deployment's traffic."
         ),
         "",
         "| Kind | What it is |",
@@ -383,9 +371,9 @@ def _event_section(spec: EventSpec) -> list[str]:
     if spec.internal:
         lines += [
             *_paragraph(
-                "**Internal.** No ordinary emit site produces this event, and "
-                "the conformance walk exempts it by name for that reason; the "
-                "emitter itself is its only producer."
+                "**Internal.** No ordinary emit site produces this event: the "
+                "emitter itself is its only producer, which is what the "
+                "declaration's own `internal` flag says."
             ),
             "",
         ]

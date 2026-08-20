@@ -23,25 +23,26 @@ session event is stamped by the session loop, because the capture's
 audio is; a server event is stamped by `time.monotonic`, because
 `create_app` emits before any loop is running.
 
-Everything below emits through the schema seam (#155). This suite is
-about the machinery rather than the surface: it emits four synthetic
-names, a handful of production names in shapes production never gives
-them, and a channel no subsystem owns, because that is what isolates
-dispatch from the events themselves. Strict enforcement would refuse
-every one of those by design, so the suite declares exactly what it
-emits in the scratch registry below and installs it around each test.
-The declarations are therefore a second reading of this file: an
-emission this suite adds and does not declare fails here rather than
-passing quietly.
+This suite is about the machinery rather than the surface, so it emits
+shapes the production surface does not have: a handful of synthetic
+events whose whole purpose is to be dispatched, copied, and refused by a
+broken consumer. They are declared through the public declaration
+interface into a catalog of this file's own, which is what keeps them
+out of the generated reference and the golden inventory. The
+declarations are therefore a second reading of this file: an emission
+this suite adds and does not declare fails at import rather than passing
+quietly.
 """
 
 import asyncio
 import logging
 from collections.abc import Iterator
+from dataclasses import dataclass
+from typing import ClassVar
 
 import pytest
 
-from tests.support.schema import scratch_registry
+from tests.support.catalog import scratch_catalog
 from vinga_server.events import (
     SESSION_LOGGER,
     Emission,
@@ -52,98 +53,125 @@ from vinga_server.events import (
     server_emitters,
     session_clock,
 )
-from vinga_server.events_schema import (
-    SESSION_CHANNEL,
-    EventSpec,
-    EventVariant,
-    arg_identifier,
-    identifier,
-    server_payload,
-    session_payload,
-    sources,
-    whole,
-)
+from vinga_server.events.catalog import Variant, declare, value
+from vinga_server.events.values import Identifier, PromptSources, Whole
 
-CHANNEL = "vinga_server.test_events"
+# A channel this server really speaks on, because a variant names one:
+# what makes these emissions synthetic is their shapes, not somewhere
+# nothing listens.
+CHANNEL = "vinga_server.ota"
+
+SESSION_CHANNEL = "vinga_server.session"
 
 
-def said(
-    channel: str, level: int, message: str, args: tuple = (), **fields: object
-) -> EventVariant:
-    """One shape this suite emits, declared the way the registry
-    declares one, with the channel's own base fields underneath."""
-    payload = session_payload if channel == SESSION_CHANNEL else server_payload
-    return EventVariant(
-        channel=channel,
-        level=level,
-        message=message,
-        args=args,
-        fields=payload(**fields),  # type: ignore[arg-type]
-    )
+@dataclass(frozen=True)
+class Said(Variant):
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "said %s"
+    ARGS: ClassVar[tuple[str, ...]] = ("what",)
+
+    what: Identifier = value(carried=False)
 
 
-ONE = arg_identifier()
+@dataclass(frozen=True)
+class AlsoSaid(Variant):
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "also said %s"
+    ARGS: ClassVar[tuple[str, ...]] = ("what",)
 
-# What this suite is allowed to say. Four synthetic names for the
-# dispatch tests, and three production names it exercises with a channel
-# or a payload the production surface does not have: `heard` with a
-# field standing in for a real one, `ota_check` on the synthetic
-# channel, `capture_enabled` as the event a server emitter fires where
-# no loop is running.
-SCRATCH = (
-    EventSpec(
-        "one",
-        variants=(
-            said(SESSION_CHANNEL, logging.INFO, "before %s", (ONE,)),
-            said(SESSION_CHANNEL, logging.INFO, "still %s", (ONE,)),
-            said(SESSION_CHANNEL, logging.INFO, "recorded"),
-            said(SESSION_CHANNEL, logging.INFO, "something"),
-            said(SESSION_CHANNEL, logging.INFO, "a"),
-            said(SESSION_CHANNEL, logging.INFO, "something happened", sources=sources()),
-            said(CHANNEL, logging.DEBUG, "a"),
-            said(CHANNEL, logging.INFO, "something"),
-        ),
-    ),
-    EventSpec(
-        "two",
-        variants=(
-            said(SESSION_CHANNEL, logging.INFO, "while %s", (ONE,), extra_field=whole()),
-            said(SESSION_CHANNEL, logging.INFO, "still %s", (ONE,)),
-            said(SESSION_CHANNEL, logging.INFO, "not recorded"),
-            said(SESSION_CHANNEL, logging.INFO, "recorded nowhere"),
-            said(CHANNEL, logging.INFO, "b"),
-        ),
-    ),
-    EventSpec(
-        "three",
-        variants=(
-            said(SESSION_CHANNEL, logging.INFO, "after %s", (ONE,)),
-            said(CHANNEL, logging.WARNING, "c"),
-        ),
-    ),
-    EventSpec("four", variants=(said(CHANNEL, logging.ERROR, "d"),)),
-    EventSpec(
-        "heard",
-        variants=(
-            said(SESSION_CHANNEL, logging.INFO, "something %s", (ONE,), text=identifier()),
-        ),
-    ),
-    EventSpec(
-        "ota_check",
-        variants=(
-            said(CHANNEL, logging.INFO, "checked in %s", (ONE,), device=identifier(required=False)),
-            said(CHANNEL, logging.INFO, "checked in again", device=identifier(required=False)),
-        ),
-    ),
-    EventSpec("capture_enabled", variants=(said(CHANNEL, logging.INFO, "capture is on"),)),
-)
+    extra_field: Whole = value()
+    # Said and not stored, which is what leaves this variant one field
+    # of its own: the payload order a tap sees is the base, then that.
+    what: Identifier = value(carried=False)
+
+
+@dataclass(frozen=True)
+class LastSaid(Variant):
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "last said %s"
+    ARGS: ClassVar[tuple[str, ...]] = ("what",)
+
+    what: Identifier = value(carried=False)
+
+
+@dataclass(frozen=True)
+class Nested(Variant):
+    """The one shape carrying a nested value, which is what a shallow
+    copy would share between a tap and the retained record."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "something happened"
+
+    sources: PromptSources = value()
+
+
+@dataclass(frozen=True)
+class CheckedIn(Variant):
+    CHANNEL: ClassVar[str] = CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "checked in %s"
+    ARGS: ClassVar[tuple[str, ...]] = ("device",)
+
+    device: Identifier = value()
+
+
+@dataclass(frozen=True)
+class CheckedInAgain(Variant):
+    CHANNEL: ClassVar[str] = CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "checked in again"
+
+
+@dataclass(frozen=True)
+class SaidAtDebug(Variant):
+    CHANNEL: ClassVar[str] = CHANNEL
+    LEVEL: ClassVar[int] = logging.DEBUG
+    TEMPLATE: ClassVar[str] = "a"
+
+
+@dataclass(frozen=True)
+class SaidAtInfo(Variant):
+    CHANNEL: ClassVar[str] = CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "b"
+
+
+@dataclass(frozen=True)
+class SaidAtWarning(Variant):
+    CHANNEL: ClassVar[str] = CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = "c"
+
+
+@dataclass(frozen=True)
+class SaidAtError(Variant):
+    CHANNEL: ClassVar[str] = CHANNEL
+    LEVEL: ClassVar[int] = logging.ERROR
+    TEMPLATE: ClassVar[str] = "d"
 
 
 @pytest.fixture(autouse=True)
-def _scratch_schema() -> Iterator[None]:
-    """Every test in this file emits against the declarations above,
-    and every other suite in the process keeps the real registry."""
-    with scratch_registry(SCRATCH):
+def _scratch() -> Iterator[None]:
+    """Every declaration this file makes is its own. A scratch event
+    that reached the production catalog would reach the generated
+    reference and the golden inventory with it.
+
+    Declared inside the fixture rather than at import, because
+    `declare()` registers into whichever catalog is installed and the
+    production one is installed at import.
+    """
+    with scratch_catalog():
+        declare("one", variants=(Said, CheckedIn))
+        declare("two", variants=(AlsoSaid, CheckedInAgain))
+        declare("three", variants=(LastSaid,))
+        declare("nested", variants=(Nested,))
+        declare(
+            "levels", variants=(SaidAtDebug, SaidAtInfo, SaidAtWarning, SaidAtError)
+        )
         yield
 
 
@@ -224,11 +252,13 @@ def test_a_tap_sees_every_event_until_it_detaches(caplog: pytest.LogCaptureFixtu
     tap = Recorder()
 
     with caplog.at_level("INFO"):
-        events.info("before %s", "attaching", event="one")
+        events.emit(lambda: Said(what=Identifier("attaching")))
         events.attach(tap)
-        events.info("while %s", "attached", event="two", extra_field=7)
+        events.emit(
+            lambda: AlsoSaid(what=Identifier("attached"), extra_field=Whole(7))
+        )
         events.detach(tap)
-        events.info("after %s", "detaching", event="three")
+        events.emit(lambda: LastSaid(what=Identifier("detaching")))
 
     assert [emission.payload["event"] for emission in tap.seen] == ["two"]
     # The log never stopped, which is the half a detach must not touch.
@@ -243,7 +273,7 @@ def test_a_tap_sees_every_event_until_it_detaches(caplog: pytest.LogCaptureFixtu
     ]
     # And the sentence unrendered, so a consumer can render it the way
     # the log does or ignore it.
-    assert tap.seen[0].message == "while %s"
+    assert tap.seen[0].message == "also said %s"
     assert tap.seen[0].args == ("attached",)
     assert tap.seen[0].level == logging.INFO
 
@@ -262,7 +292,7 @@ def test_the_log_is_the_last_consumer_told(caplog: pytest.LogCaptureFixture) -> 
 
     with caplog.at_level("INFO"):
         events.attach_capture(spy)
-        events.info("something %s", "happened", event="heard", text="hello")
+        events.emit(lambda: Nested(sources=PromptSources({"persona": 4})))
 
     (payload, _, records_at_the_time) = spy.seen[0]
     assert records_at_the_time == 0, "the capture was told after the record existed"
@@ -278,9 +308,9 @@ def test_the_capture_detaches_and_the_events_carry_on(caplog: pytest.LogCaptureF
 
     with caplog.at_level("INFO"):
         events.attach_capture(spy)
-        events.info("recorded", event="one")
+        events.emit(lambda: Said(what=Identifier("recorded")))
         events.detach_capture()
-        events.info("not recorded", event="two")
+        events.emit(lambda: AlsoSaid(what=Identifier("not"), extra_field=Whole(1)))
 
     assert [payload["event"] for payload, _, _ in spy.seen] == ["one"]
     assert [record.event for record in caplog.records] == ["one", "two"]
@@ -298,10 +328,10 @@ def test_a_second_capture_replaces_the_first(caplog: pytest.LogCaptureFixture) -
     with caplog.at_level("INFO"):
         events.attach_capture(first)
         events.attach_capture(second)
-        events.info("recorded", event="one")
+        events.emit(lambda: Said(what=Identifier("recorded")))
         events.vad(120.0, True, False)
         events.detach_capture()
-        events.info("recorded nowhere", event="two")
+        events.emit(lambda: AlsoSaid(what=Identifier("nowhere"), extra_field=Whole(1)))
 
     assert [payload["event"] for payload, _, _ in first.seen] == []
     assert [payload["event"] for payload, _, _ in second.seen] == ["one"]
@@ -323,8 +353,8 @@ def test_a_tap_that_raises_starves_neither_the_log_nor_the_taps_after_it(
     with caplog.at_level("INFO"):
         events.attach(broken)
         events.attach(after)
-        events.info("still %s", "said", event="one")
-        events.info("still %s", "said", event="two")
+        events.emit(lambda: Said(what=Identifier("said")))
+        events.emit(lambda: AlsoSaid(what=Identifier("said"), extra_field=Whole(1)))
 
     # It was not detached by its own failure: a consumer that fails once
     # is not a consumer that is gone.
@@ -345,7 +375,7 @@ def test_the_tap_failure_is_a_plain_sentence_and_not_an_event(
 
     with caplog.at_level("INFO"):
         events.attach(Broken())
-        events.info("something", event="one")
+        events.emit(lambda: Said(what=Identifier("something")))
 
     (report,) = [record for record in caplog.records if not hasattr(record, "event")]
     assert report.name == SESSION_LOGGER
@@ -364,11 +394,11 @@ def test_a_tap_cannot_rewrite_what_the_log_keeps(caplog: pytest.LogCaptureFixtur
     events.attach(after)
 
     with caplog.at_level("INFO"):
-        events.info("something happened", event="one", sources={"persona": 4})
+        events.emit(lambda: Nested(sources=PromptSources({"persona": 4})))
 
     (record,) = caplog.records
     assert payload_of(record) == {
-        "event": "one",
+        "event": "nested",
         "session": "s1",
         "device": None,
         "sources": {"persona": 4},
@@ -376,7 +406,7 @@ def test_a_tap_cannot_rewrite_what_the_log_keeps(caplog: pytest.LogCaptureFixtur
     assert record.getMessage() == "something happened"
     # Nested as well as top level, and the tap after it is shown the
     # event rather than the edit.
-    assert after.seen[0].payload["event"] == "one"
+    assert after.seen[0].payload["event"] == "nested"
     assert after.seen[0].payload["sources"] == {"persona": 4}
 
 
@@ -394,20 +424,20 @@ def test_a_server_tap_reaches_an_emitter_built_after_it_attached(
     try:
         with caplog.at_level("INFO"):
             later = ServerEvents(CHANNEL)
-            later.info("checked in %s", "device", event="ota_check", device="aa:bb")
+            later.emit(lambda: CheckedIn(device=Identifier("aa:bb")))
     finally:
         detach_server_tap(tap)
 
-    assert [emission.payload["event"] for emission in tap.seen] == ["ota_check"]
+    assert [emission.payload["event"] for emission in tap.seen] == ["one"]
     # No session and no device default: a server event names what it is
     # about explicitly.
-    assert tap.seen[0].payload == {"event": "ota_check", "device": "aa:bb"}
+    assert tap.seen[0].payload == {"event": "one", "device": "aa:bb"}
     assert caplog.records[0].name == CHANNEL
     assert later in server_emitters()
 
     # And nothing after the detach.
     with caplog.at_level("INFO"):
-        later.info("checked in again", event="ota_check")
+        later.emit(lambda: CheckedInAgain())
     assert len(tap.seen) == 1
 
 
@@ -417,10 +447,10 @@ def test_a_server_emitter_carries_every_level(caplog: pytest.LogCaptureFixture) 
     surface."""
     events = ServerEvents(CHANNEL)
     with caplog.at_level("DEBUG"):
-        events.debug("a", event="one")
-        events.info("b", event="two")
-        events.warning("c", event="three")
-        events.error("d", event="four")
+        events.emit(lambda: SaidAtDebug())
+        events.emit(lambda: SaidAtInfo())
+        events.emit(lambda: SaidAtWarning())
+        events.emit(lambda: SaidAtError())
 
     assert [record.levelno for record in caplog.records] == [
         logging.DEBUG,
@@ -436,7 +466,7 @@ def test_a_broken_server_tap_reports_on_the_emitters_own_channel(
     attach_server_tap(Broken())
     try:
         with caplog.at_level("INFO"):
-            ServerEvents(CHANNEL).info("something", event="one")
+            ServerEvents(CHANNEL).emit(lambda: SaidAtInfo())
     finally:
         detach_server_tap(_only_broken_tap())
 
@@ -470,7 +500,7 @@ def test_a_server_event_is_emitted_where_no_loop_is_running(
     attach_server_tap(tap)
     try:
         with caplog.at_level("INFO"):
-            ServerEvents(CHANNEL).info("capture is on", event="capture_enabled")
+            ServerEvents(CHANNEL).emit(lambda: SaidAtInfo())
     finally:
         detach_server_tap(tap)
 
@@ -490,7 +520,7 @@ async def test_a_session_event_is_stamped_with_the_session_loop(
     tap = Recorder()
     events.attach(tap)
     with caplog.at_level("INFO"):
-        events.info("something", event="one")
+        events.emit(lambda: Said(what=Identifier("something")))
 
     assert tap.seen[0].at == pytest.approx(loop.time(), abs=0.05)
 
@@ -507,8 +537,8 @@ def test_the_clock_is_a_dependency_rather_than_an_assumption(
     attach_server_tap(taps[1])
     try:
         with caplog.at_level("INFO"):
-            session.info("a", event="one")
-            server.info("b", event="two")
+            session.emit(lambda: Said(what=Identifier("a")))
+            server.emit(lambda: SaidAtInfo())
     finally:
         detach_server_tap(taps[1])
 
