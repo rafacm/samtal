@@ -1,0 +1,317 @@
+"""Which configuration kind takes effect at which boundary, and how two
+configuration worlds are judged the same.
+
+A running server holds one snapshot of the domain configuration and the
+database holds another, and the question between them is what an
+operator has written that is not in effect yet. Answering it needs two
+facts that live nowhere else, which is what this module is: the regime
+map, saying which kind converges at a restart, at an MCP reload, or at
+the next device check-in, and the comparison that decides an entity of
+a kind has moved.
+
+Equality is model inequality plus `SecretStore.fingerprint`, the opaque
+per-entity mark that exists for exactly this question and can be asked
+without a key. Nothing rendered, nothing masked and nothing decrypted
+enters the comparison, so what comes out is entity names and closed
+tokens by construction rather than by filtering: there is no value here
+to leave out.
+
+Changed means the stored state differs from the baseline, never that
+something was written. An edit changed back before anyone looked
+produces no diff, and a stored secret set again to the same plaintext
+counts as different, because its ciphertext fingerprint moves even when
+the value may not have. That is the store's own posture (rebuilding is
+the safe direction to be wrong in) and it is the one the MCP reload's
+`same_as` already takes.
+
+Pure, and deliberately: both sides arrive composed, with the stored
+secrets that were loaded beside them, so the tests build two worlds
+from the support factories and nothing here opens a database. The MCP
+half arrives composed too, as `McpPending`: the world a reload swaps is
+the registry's to know, and its honest baseline is the generation that
+is installed rather than the one this process booted on.
+"""
+
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from enum import StrEnum
+from typing import NamedTuple, Protocol
+
+from vinga_server.config.models import (
+    PROVIDER_STAGES,
+    AgentDefaults,
+    Config,
+    ProviderConfig,
+)
+from vinga_server.config.secrets import SecretStore, provider_identity
+
+
+class Applies(StrEnum):
+    """When a written change reaches a conversation.
+
+    Three boundaries and no fourth, because the server has three. Most
+    of the configuration is a boot-time snapshot, so it waits for a
+    restart. The MCP half is applied by
+    `POST /runtime/mcp-servers/reload`, which swaps the registry's world
+    while the process runs. Device bindings and the default agent are
+    read per check-in, so a write of one is in effect within seconds
+    and is never pending at all.
+    """
+
+    RESTART = "restart"
+    RELOAD = "reload"
+    CHECK_IN = "check-in"
+
+
+# Which kind converges where: the one decision site, as data.
+#
+# Held to `models.DOMAIN_KEYS` by a test, so a seventh domain kind
+# arrives with a failing test naming this module rather than falling
+# silently out of the answer. That is the two-structures rule applied to
+# this map: what the domain is has one home, and this reads it.
+APPLIES: Mapping[str, Applies] = {
+    "providers": Applies.RESTART,
+    "mcp_servers": Applies.RELOAD,
+    "prompt_fragments": Applies.RESTART,
+    "agent_defaults": Applies.RESTART,
+    "agents": Applies.RESTART,
+    "devices": Applies.CHECK_IN,
+    "default_agent": Applies.CHECK_IN,
+}
+
+# And the one regime that is half of a kind rather than a kind. An agent
+# entry spans two: its `mcp` grants are what a reload derives an agent's
+# tools from, and everything else about it waits for a restart. It is
+# deliberately not in the map above, whose keys are the domain's own.
+GRANTS_APPLY = Applies.RELOAD
+
+
+class Loaded(Protocol):
+    """One side of the comparison: a composed configuration, and the
+    stored secrets that were loaded with it.
+
+    A protocol rather than `config.boot.BootConfig`, which is what both
+    sides are at a running server: importing that module opens a
+    database and runs its migrations, and judging two configurations
+    equal needs neither. It is also the whole of what a test has to
+    supply, which is a configuration it built and a store it filled.
+    """
+
+    @property
+    def config(self) -> Config: ...
+
+    @property
+    def secrets(self) -> SecretStore: ...
+
+
+@dataclass(frozen=True)
+class McpPending:
+    """What the MCP world running right now differs from a stored
+    candidate by, in the diff's own vocabulary.
+
+    Composed by the registry rather than here, because what an MCP entry
+    is compared by (its connection identity, the prompt fields a
+    connection never sees, the mark of its stored credentials) is that
+    package's knowledge, and because its baseline is the generation that
+    is installed rather than the configuration this process booted on.
+
+    `grants` is agent names and the other three are entry names. An
+    agent is here when the tools it may reach would move, which a reload
+    applies without a restart; an agent only the stored side knows is
+    not here at all, since its grants describe a world that begins at
+    the restart that adds it.
+    """
+
+    added: tuple[str, ...] = ()
+    removed: tuple[str, ...] = ()
+    changed: tuple[str, ...] = ()
+    grants: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class EntityDiff:
+    """One kind of named entity, as the difference between two worlds:
+    what the stored side has and the running one does not, what it no
+    longer has, and what both have under one name and disagree about."""
+
+    applies: Applies
+    added: tuple[str, ...]
+    removed: tuple[str, ...]
+    changed: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class GrantsDiff:
+    """The agents whose effective MCP grants the stored side would move.
+
+    Beside the agents rather than under `mcp_servers` because it is a
+    fact about agents, and separate from the agents' own lists because
+    it converges at a different boundary.
+    """
+
+    applies: Applies
+    changed: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class AgentsDiff(EntityDiff):
+    """The agents, whose entries span two regimes: everything but the
+    grants waits for a restart, and the grants ride the reload."""
+
+    grants: GrantsDiff
+
+
+@dataclass(frozen=True)
+class SingletonDiff:
+    """A kind there is exactly one of, which therefore has nothing to
+    name: it moved or it did not."""
+
+    applies: Applies
+    changed: bool
+
+
+@dataclass(frozen=True)
+class LiveKind:
+    """A kind the running server reads per check-in, answered with its
+    label and no comparison.
+
+    Deliberately no lists. What is stored for a device binding or for
+    the default agent is already served by the entity reads and is in
+    effect by that device's next check-in, so a `changed` here would
+    dress a fact that is not pending as a diff. The label is what keeps
+    the knowledge of why in this server rather than in every consumer.
+    """
+
+    applies: Applies
+
+
+@dataclass(frozen=True)
+class ConfigDiff:
+    """What the database holds that the running server is not serving,
+    kind by kind, in the order the domain declares them."""
+
+    providers: EntityDiff
+    mcp_servers: EntityDiff
+    prompt_fragments: EntityDiff
+    agent_defaults: SingletonDiff
+    agents: AgentsDiff
+    devices: LiveKind
+    default_agent: LiveKind
+
+
+def config_diff(running: Loaded, stored: Loaded, mcp: McpPending) -> ConfigDiff:
+    """The whole answer: what each kind differs by, and when each
+    difference would take effect.
+
+    `running` is what this process is serving and `stored` is what the
+    database holds now; both are composed snapshots with the secrets
+    loaded beside them, so this compares two whole worlds rather than
+    two documents. `mcp` is the registry's own answer, taken against the
+    generation that is installed, and it is carried through rather than
+    recomputed: the boot's MCP entries are not the running server's,
+    because a reload can have replaced them since.
+    """
+    running_providers = _providers(running)
+    stored_providers = _providers(stored)
+
+    def same_provider(identity: str) -> bool:
+        """Both halves of a provider: the entry as it is written, and
+        the credentials stored behind it, which an operator rotates
+        without touching a field of the entry."""
+        if running_providers[identity] != stored_providers[identity]:
+            return False
+        return running.secrets.fingerprint("provider", identity) == stored.secrets.fingerprint(
+            "provider", identity
+        )
+
+    def same_fragment(name: str) -> bool:
+        return running.config.prompt_fragments[name] == stored.config.prompt_fragments[name]
+
+    def same_agent(name: str) -> bool:
+        return _without_grants(running.config.agents[name]) == _without_grants(
+            stored.config.agents[name]
+        )
+
+    return ConfigDiff(
+        providers=EntityDiff(
+            APPLIES["providers"], *_names(running_providers, stored_providers, same_provider)
+        ),
+        mcp_servers=EntityDiff(APPLIES["mcp_servers"], mcp.added, mcp.removed, mcp.changed),
+        prompt_fragments=EntityDiff(
+            APPLIES["prompt_fragments"],
+            *_names(
+                running.config.prompt_fragments,
+                stored.config.prompt_fragments,
+                same_fragment,
+            ),
+        ),
+        agent_defaults=SingletonDiff(
+            APPLIES["agent_defaults"],
+            _without_grants(running.config.agent_defaults)
+            != _without_grants(stored.config.agent_defaults),
+        ),
+        agents=AgentsDiff(
+            APPLIES["agents"],
+            *_names(running.config.agents, stored.config.agents, same_agent),
+            grants=GrantsDiff(GRANTS_APPLY, mcp.grants),
+        ),
+        devices=LiveKind(APPLIES["devices"]),
+        default_agent=LiveKind(APPLIES["default_agent"]),
+    )
+
+
+class _Names(NamedTuple):
+    """The three name lists one kind answers with, so that a comparison
+    and the entry it fills in cannot come to disagree about their
+    order."""
+
+    added: tuple[str, ...]
+    removed: tuple[str, ...]
+    changed: tuple[str, ...]
+
+
+def _names(
+    running: Mapping[str, object],
+    stored: Mapping[str, object],
+    same: Callable[[str], bool],
+) -> _Names:
+    """Which names one kind gained, lost, and holds differently.
+
+    `same` is asked only about a name both sides have, so it may index
+    either of them. Sorted, because these are read by a person and by a
+    client comparing two answers, and neither should see an order that
+    depends on how a mapping was built.
+    """
+    return _Names(
+        added=tuple(sorted(set(stored) - set(running))),
+        removed=tuple(sorted(set(running) - set(stored))),
+        changed=tuple(
+            sorted(name for name in set(running) & set(stored) if not same(name))
+        ),
+    )
+
+
+def _providers(side: Loaded) -> dict[str, ProviderConfig]:
+    """Every provider entry of one side, by the identity a provider is
+    named by everywhere: its stage and its name together, which is what
+    the store addresses its secrets under and what every refusal
+    prints."""
+    return {
+        provider_identity(stage, name): entry
+        for stage in PROVIDER_STAGES
+        for name, entry in getattr(side.config.providers, stage).items()
+    }
+
+
+def _without_grants(layer: AgentDefaults) -> AgentDefaults:
+    """One agent layer with its MCP grants taken out.
+
+    The exclusion is what keeps the agent kind honest. An agent's `mcp`
+    list is applied by the MCP reload, which derives every agent's
+    grants from the whole candidate configuration, while everything else
+    about the entry waits for a restart. Comparing the whole entry would
+    therefore report a grants-only edit as pending-restart, which is a
+    change the reload has already applied or can apply without one. What
+    moved there is reported under the grants instead.
+    """
+    return layer.model_copy(update={"mcp": None})
