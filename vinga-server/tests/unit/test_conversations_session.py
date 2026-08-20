@@ -50,7 +50,7 @@ from vinga_server.conversations.store import (
 from vinga_server.device import session as session_module
 from vinga_server.device.session import DeviceSession
 from vinga_server.events import Emission
-from vinga_server.events_docgen import documented
+from vinga_server.events.catalog import carried_values, catalog
 from vinga_server.providers import build_agent_providers
 from vinga_server.runtime.pipeline import bespoke_runtime_factory
 from vinga_server.tools.mcp import McpServers
@@ -90,22 +90,18 @@ def declared_fields() -> dict[str, set[str]]:
     base fields are dropped here because the store keeps them on the row
     and on the session rather than in the payload column.
 
-    Read through the documentation generator's own sequence rather than
-    from either source directly, because while #210's conversion is in
-    flight there are two: the typed catalog for an event that has
-    converted and the registry for one that has not. `documented()` is
-    the one place that already answers both, and recreating that union
-    here is exactly the second structure the conversion exists to
-    remove.
+    Read off the catalog itself, which is the one home of what an event
+    may carry: recreating that surface here would be exactly the second
+    structure the conversion exists to remove.
     """
     return {
         name: {
-            field
-            for variant in spec.variants
-            for field in variant.fields
-            if field not in {"event", "session", "device"}
+            one.name
+            for variant in declaration.variants
+            for one in carried_values(variant)
+            if one.name not in {"event", "session", "device"}
         }
-        for name, spec in documented().items()
+        for name, declaration in catalog().items()
     }
 
 

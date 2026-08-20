@@ -34,12 +34,13 @@ from vinga_server.events.catalog import (
     PruneFailed,
     Variant,
     WriteFailed,
+    carried_values,
     declaration_of,
     declare,
     payload_shape,
+    tokens_of,
     value,
 )
-from vinga_server.events.catalog import described as descriptions
 from vinga_server.events.values import (
     ABSENT,
     Absent,
@@ -425,9 +426,11 @@ def test_a_fixed_token_narrows_the_declared_set_to_the_one_it_says() -> None:
 
     assert described is declaration
 
-    fields = descriptions()[-1].variants[0].fields
+    (reason,) = [one for one in carried_values(Latched) if one.name == "reason"]
 
-    assert fields["reason"].tokens == frozenset({"drain"})
+    assert tokens_of(reason) == frozenset({"drain"})
+    assert CloseReasonToken.TOKENS is not None
+    assert len(CloseReasonToken.TOKENS) > 1
 
 
 # --- and every value is the type its field declares -------------------

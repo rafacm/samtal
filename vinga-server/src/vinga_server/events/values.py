@@ -31,50 +31,378 @@ receives, and they differ where a path is concerned: the field carries
 the path as text, the sentence renders the object, and that is the
 shape the surface has today.
 
-Transitional, and stated so it is not mistaken for the end state: the
-kinds, the syntaxes, the descriptor bounds and the composed grammars are
-imported from `events_schema.py` rather than restated here, because that
-module is still the one home of those facts while the untyped registry
-survives.
-When the last emit site converts and the registry goes (M3), they move
-into this module and the import disappears; a copy made now would be
-the second structure the plan exists to remove.
+The kinds, the syntaxes, the descriptor bounds and the composed grammars
+live here too. They were the untyped registry's while it survived and
+was the one home of them; they came here with the last conversion, since
+a kind is what a value IS here rather than a claim a declaration makes
+about it.
 """
 
 import os
 import re
 from dataclasses import dataclass
-from enum import StrEnum
+from enum import Enum, StrEnum
+from functools import cache
 from typing import Any, ClassVar, Final
 
-from vinga_server.events_schema import (
-    ACTIVATION_CODE,
-    AGENT_LIST,
-    ALSO_BOUND_TO,
-    BOARD_BOUNDS,
-    CLIENT_BOUNDS,
-    DEVICE_OR_UNIDENTIFIED,
-    EMPTY_FRAGMENT,
-    EVENT_NAME,
-    FIRMWARE_BOUNDS,
-    FROM_ENTRY,
-    LANGUAGE,
-    MAC,
-    ORIGIN_PROVENANCE,
-    QUOTED_PROVIDER,
-    QUOTED_TOOL_NAME,
-    REACHING_HOST,
-    REPORTED_MAC,
-    SESSION_ID,
-    SESSION_LIST,
-    SOURCE_KEY_PATTERN,
-    ArgKind,
-    Bounds,
-    Grammar,
-    Kind,
-    Syntax,
-    matcher,
+from vinga_server.config.models import BOARD_LIMIT, CLIENT_ID_LIMIT, FIRMWARE_LIMIT
+
+# --- what a value may be ----------------------------------------------
+
+
+class Kind(Enum):
+    """The shapes a payload field may take. A field that wants prose is
+    a design error this enum refuses to encode."""
+
+    # A trusted name the operator or this server chose: an agent, a
+    # configuration entry, a pipeline stage, a path, an origin. Its
+    # domain is the configuration's own (`IDENTIFIER_DOMAIN`): non-empty
+    # once stripped, and nothing further, because nothing further is
+    # what the operator was promised. Trusted is about provenance, not
+    # about shape.
+    IDENTIFIER = "identifier"
+    # One value out of the field's declared closed set.
+    TOKEN = "token"
+    # An exception or type name. `JOINED` admits the ", "-separated form
+    # a group of them renders as.
+    CLASS_NAME = "class_name"
+    # A bounded machine form this server minted or normalized, with a
+    # per-field syntax rather than a generic "bounded string".
+    ID = "id"
+    # A far-side string retained deliberately, bounded and sanitized at
+    # its decision site and bounded again here.
+    DESCRIPTOR = "descriptor"
+    INT = "int"
+    FLOAT = "float"
+    BOOL = "bool"
+    # An `int >= 0` whose meaning is "how many".
+    COUNT = "count"
+    IDENTIFIER_LIST = "identifier_list"
+    ID_LIST = "id_list"
+    # The one structured kind: a mapping from prompt provenance to
+    # character counts.
+    SOURCES = "sources"
+
+
+class ArgKind(Enum):
+    """The shapes a `%` argument may take.
+
+    Beside the field kinds rather than instead of them, because the
+    rendered sentence carries shapes no field does: a configured path
+    object, and formatted fragments of identifiers whose grammar the
+    declaration names. Widening `IDENTIFIER` to cover a punctuated
+    fragment would have made the tightest kind the loosest one.
+    """
+
+    IDENTIFIER = "identifier"
+    TOKEN = "token"
+    CLASS_NAME = "class_name"
+    ID = "id"
+    # Reuses the corresponding field's bounds and character constraint:
+    # a lawful descriptor necessarily reaches the argument positions
+    # that render it.
+    DESCRIPTOR = "descriptor"
+    INT = "int"
+    FLOAT = "float"
+    BOOL = "bool"
+    COUNT = "count"
+    # A trusted configured path, `Path` or `str`.
+    PATHLIKE = "pathlike"
+    # A formatted fragment of identifiers, validated against the named
+    # grammar rather than against a string type.
+    COMPOSED = "composed"
+
+
+@dataclass(frozen=True)
+class Syntax:
+    """The form one `ID` value takes, named so a generated reference can
+    print it and a value type can hold values to it."""
+
+    name: str
+    pattern: str
+    max_length: int
+    note: str = ""
+
+
+@dataclass(frozen=True)
+class Bounds:
+    """What a `DESCRIPTOR` value's decision site guarantees, restated
+    here so the value type enforces it a second time.
+
+    `charset` is a rule rather than a set: `printable` means every
+    character satisfies `str.isprintable()`, which is false for every
+    control character, for the separators, and for the non-ASCII spaces.
+    That is exactly the set that has to go: a newline would split one
+    retained record into two, and a terminal escape would let whoever
+    sent it paint an operator's screen.
+    """
+
+    max_length: int
+    charset: str = "printable"
+
+
+@dataclass(frozen=True)
+class Grammar:
+    """One `COMPOSED` argument's shape, with the code that builds it.
+
+    Naming the builder is what keeps the grammar honest: a fragment
+    nobody assembles is a pattern somebody guessed.
+    """
+
+    name: str
+    pattern: str
+    builders: tuple[str, ...]
+    note: str = ""
+
+
+@cache
+def matcher(pattern: str) -> re.Pattern[str]:
+    """One anchored matcher per pattern, compiled once.
+
+    Anchored here rather than in every declaration, so a pattern cannot
+    be written unanchored by accident and admit a prefix.
+    """
+    return re.compile(rf"\A(?:{pattern})\Z")
+
+
+# --- the syntaxes ------------------------------------------------------
+
+MAC = Syntax(
+    "mac",
+    r"[0-9a-f]{2}(?::[0-9a-f]{2}){5}",
+    17,
+    "The canonical form `normalize_mac` answers with.",
 )
+
+REPORTED_MAC = Syntax(
+    "reported_mac",
+    r"[0-9A-Fa-f]{2}(?:[:-][0-9A-Fa-f]{2}){5}",
+    17,
+    "The Device-Id header as the firmware sent it, which the OTA "
+    "sentence renders beside the normalized form the field carries. "
+    "Only a header `normalize_mac` accepted ever reaches that sentence, "
+    "so the looser separator and case are the whole of the difference.",
+)
+
+SESSION_ID = Syntax(
+    "session_id",
+    r"[0-9A-Za-z_-]{1,64}",
+    64,
+    "A token this server minted. Production ids are `uuid4().hex`; the "
+    "syntax is the bounded machine form rather than that one spelling, "
+    "because the capture and store suites drive sessions of their own "
+    "naming and a session id is never far-side bytes whoever chose it.",
+)
+
+ACTIVATION_CODE = Syntax(
+    "activation_code",
+    r"[0-9]{6}",
+    6,
+    "A claim ticket read off a screen, not a credential.",
+)
+
+EVENT_NAME = Syntax(
+    "event_name",
+    r"[a-z][a-z0-9_]{0,63}",
+    64,
+    "The registry's own key, carried in the payload as `event`.",
+)
+
+LANGUAGE = Syntax(
+    "language",
+    r"[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{1,8})*",
+    16,
+    "A language code as an ASR engine reports it: the bare ISO 639 code "
+    "or a tagged form such as `en-US`.",
+)
+
+SYNTAXES: dict[str, Syntax] = {
+    one.name: one
+    for one in (MAC, REPORTED_MAC, SESSION_ID, ACTIVATION_CODE, EVENT_NAME, LANGUAGE)
+}
+
+
+# --- the descriptor bounds --------------------------------------------
+#
+# Imported from the decision sites rather than restated: `config/models.py`
+# holds `BOARD_LIMIT`, `FIRMWARE_LIMIT` and `CLIENT_ID_LIMIT`, which are
+# what the check-in truncates to, and a fact has one home. The import
+# direction allows it, which is the whole reason the restatement the
+# untyped registry needed is gone: `config/models.py` imports pydantic and
+# the standard library and no part of the event surface, so nothing here
+# is reached back into.
+
+BOARD_BOUNDS = Bounds(BOARD_LIMIT)
+FIRMWARE_BOUNDS = Bounds(FIRMWARE_LIMIT)
+CLIENT_BOUNDS = Bounds(CLIENT_ID_LIMIT)
+
+# What a trusted configured name may be, which is what the
+# configuration says and no more.
+#
+# `NonBlankStr`, the type behind an agent name, a provider entry name
+# and a provider type, is `StringConstraints(strip_whitespace=True,
+# min_length=1)`: any non-empty string once stripped. It admits quotes,
+# control characters and any length at all. An agent called
+# `secondary"agent` is lawful configuration today, so a value type
+# claiming a tighter domain would turn that deployment's every
+# `session_open` into a refusal, and forgiving mode would then replace
+# the emission: lawful traffic mangled by a claim the configuration
+# never made.
+#
+# So the identifier kinds and the grammars below describe what
+# configuration guarantees. Narrowing belongs at configuration
+# semantics, where a refusal reaches the operator who can fix it, not
+# here, where it reaches a log line nobody asked for.
+IDENTIFIER_DOMAIN = "a non-empty string once stripped, as NonBlankStr defines it"
+
+
+# --- the composed grammars --------------------------------------------
+#
+# Bounded by STRUCTURE rather than by character class or length: what a
+# fragment promises is its shape (a parenthesized tail, a quoted name, a
+# comma-joined list), never what an operator may have called something.
+
+# One configured name inside a fragment. Any non-empty run of
+# characters, newlines included, because that is the domain above.
+_NAME = r"[\s\S]+"
+
+EMPTY_FRAGMENT = Grammar(
+    "empty_fragment",
+    r"",
+    ("vinga_server.events.values:Nothing",),
+    "The nothing a site renders where it has nothing to add. Declared "
+    "rather than left untyped, so a variant that may only say nothing "
+    "says exactly that.",
+)
+
+ALSO_BOUND_TO = Grammar(
+    "also_bound_to",
+    rf"(?: \(also bound to {_NAME}\))?",
+    ("vinga_server.events.values:AlsoBoundTo.of",),
+    "The tail naming the agents a device is bound to beside the one "
+    "that answered, empty for a device bound to exactly one. The names "
+    "inside it are comma joined, and the grammar does not say so: a "
+    "configured name may itself hold a comma, so the joined fragment "
+    "cannot be parsed back into the names that made it, and a pattern "
+    "claiming otherwise would refuse a lawful deployment.",
+)
+
+AGENT_LIST = Grammar(
+    "agent_list",
+    _NAME,
+    ("vinga_server.events.values:AgentList.of",),
+    "The configured agent names a device is bound to, comma-joined. "
+    "Non-empty, and nothing further: see the tail grammar above for why "
+    "the joining is not part of the claim.",
+)
+
+SESSION_LIST = Grammar(
+    "session_list",
+    r"[0-9A-Za-z_-]{1,64}(?:, [0-9A-Za-z_-]{1,64})*",
+    ("vinga_server.events.values:SessionList.of",),
+    "The session ids a prune removed, comma-joined.",
+)
+
+QUOTED_TOOL_NAME = Grammar(
+    "quoted_tool_name",
+    r' "[\s\S]+"',
+    ("vinga_server.events.values:QuotedToolName.of",),
+    "A builtin's name, which is this server's own word, bounded here by "
+    "the quoting alone. A device tool's "
+    "name is the board's vocabulary and an unknown one is whatever the "
+    "model invented, so neither is ever rendered here.",
+)
+
+FROM_ENTRY = Grammar(
+    "from_entry",
+    r' from entry "[\s\S]+"',
+    ("vinga_server.events.values:FromEntry.of",),
+    "The configured MCP entry a call reached, never the far side's own "
+    "tool name. Entry names are separately held to `[A-Za-z0-9_-]+` by "
+    "the configuration, which makes this grammar a floor rather than "
+    "the whole truth; the floor is what the registry may claim, since "
+    "the tighter rule is configuration's to keep and to change.",
+)
+
+QUOTED_PROVIDER = Grammar(
+    "quoted_provider",
+    r' "[\s\S]+"',
+    ("vinga_server.events.values:QuotedProvider.of",),
+    "The configuration entry the failing provider is, bounded by the "
+    "quoting alone.",
+)
+
+REACHING_HOST = Grammar(
+    "reaching_host",
+    r"(?: reaching [\s\S]+)?",
+    ("vinga_server.events.values:ReachingHost.of",),
+    "Where the call was going, empty for an engine that runs in this "
+    "process.",
+)
+
+ORIGIN_PROVENANCE = Grammar(
+    "origin_provenance",
+    r"(?:from|guessed from) [\s\S]+",
+    (
+        "vinga_server.onboarding.origin:Origin.provenance",
+        "vinga_server.events.values:OriginProvenance",
+    ),
+    "Which configuration key the banner's origin came out of, and "
+    "whether it was read or inferred.",
+)
+
+DEVICE_OR_UNIDENTIFIED = Grammar(
+    "device_or_unidentified",
+    r"[0-9a-f]{2}(?::[0-9a-f]{2}){5}|an unidentified device",
+    ("vinga_server.events.values:DeviceOrUnidentified.of",),
+    "The MAC behind a Device-Id header this server recognizes, or the "
+    "fixed phrase. Nothing else: with device auth off nothing has "
+    "verified that header, so an unrecognized one names no device at "
+    "all.",
+)
+
+GRAMMARS: dict[str, Grammar] = {
+    one.name: one
+    for one in (
+        EMPTY_FRAGMENT,
+        ALSO_BOUND_TO,
+        AGENT_LIST,
+        SESSION_LIST,
+        QUOTED_TOOL_NAME,
+        FROM_ENTRY,
+        QUOTED_PROVIDER,
+        REACHING_HOST,
+        ORIGIN_PROVENANCE,
+        DEVICE_OR_UNIDENTIFIED,
+    )
+}
+
+
+# --- the provenance grammar of `prompt_assembled.sources` -------------
+#
+# The know-how half only. `prompt_assembled` deliberately reports the
+# cached half of the prompt and excludes the per-round memory read, so
+# `memory` is refused here like any unknown prefix, even though it is a
+# provenance token elsewhere in the prompt assembly.
+
+SOURCE_FORMS = (
+    "persona",
+    "fragment:<name>",
+    "instructions:<entry>",
+    "server_instructions:<entry>",
+    "server_prompt:<entry>:<position>",
+)
+
+_CONFIGURED_NAME = r"[A-Za-z0-9_-]+"
+
+SOURCE_KEY_PATTERN = (
+    rf"persona"
+    rf"|fragment:{_CONFIGURED_NAME}"
+    rf"|instructions:{_CONFIGURED_NAME}"
+    rf"|server_instructions:{_CONFIGURED_NAME}"
+    rf"|server_prompt:{_CONFIGURED_NAME}:[1-9][0-9]*"
+)
+
 
 # A type name, which is what a `CLASS_NAME` admits. Here rather than
 # beside the emitter because it is the `ClassName` value type's own

@@ -8,9 +8,11 @@ prints. CI regenerates the committed copy and diffs it byte for byte, so
 the document cannot say anything the declarations do not.
 
 The declarations are the typed variants in `events/catalog.py`, and
-`described()` is how a variant answers the `EventSpec` shape this
-renders: what a variant declares about itself is enough to describe it,
-which is the whole point of a declaration that IS its emission.
+There is no second description for this to read. A variant's class-level
+facts, its declared values and the value types those name carry every
+property the tables below print, which is the whole point of a
+declaration that IS its emission: what a generator would have restated
+is what a caller constructs.
 
 That is what makes this the place field and token facts belong. The
 README's event table used to carry them in prose nothing checked, which
@@ -32,31 +34,43 @@ machine whose server will not start.
 import logging
 import textwrap
 
-from vinga_server.events.catalog import described
-from vinga_server.events_schema import (
+from vinga_server.events.catalog import (
     CHANNELS,
-    GRAMMARS,
-    IDENTIFIER_DOMAIN,
     SERVER_CHANNELS,
     SESSION_CHANNEL,
+    Declaration,
+    Declared,
+    Variant,
+    carried_values,
+    catalog,
+    rendered_values,
+    tokens_of,
+)
+from vinga_server.events.values import (
+    GRAMMARS,
+    IDENTIFIER_DOMAIN,
     SOURCE_FORMS,
     SOURCE_KEY_PATTERN,
     SYNTAXES,
     ArgKind,
-    ArgSpec,
-    EventField,
-    EventSpec,
-    EventVariant,
     Kind,
 )
 
 
-def documented() -> dict[str, EventSpec]:
+def documented() -> dict[str, Declaration]:
     """Every event the reference describes, in the catalog's own
     declaration order, which is the order a reader meets them: a
     device's check-in, its session, the pipeline inside it, the
     providers behind that, then the server's own lifecycle surfaces."""
-    return {spec.name: spec for spec in described()}
+    return catalog()
+
+
+def channels_of(declaration: Declaration) -> frozenset[str]:
+    return frozenset(one.CHANNEL for one in declaration.variants)
+
+
+def levels_of(declaration: Declaration) -> frozenset[int]:
+    return frozenset(one.LEVEL for one in declaration.variants)
 
 # Where the reference's prose wraps. The tables cannot wrap (a row is a
 # line), so only paragraphs go through this.
@@ -355,18 +369,20 @@ def reference() -> str:
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
-def _index_row(spec: EventSpec) -> str:
+def _index_row(spec: Declaration) -> str:
     name = f"`{spec.name}`" + (" (internal)" if spec.internal else "")
-    channels = spec.channels
+    channels = channels_of(spec)
     if channels == frozenset(CHANNELS):
         rides = f"every channel ({len(CHANNELS)})"
     else:
         rides = ", ".join(f"`{channel}`" for channel in sorted(channels))
-    levels = ", ".join(logging.getLevelName(level) for level in sorted(spec.levels))
+    levels = ", ".join(
+        logging.getLevelName(level) for level in sorted(levels_of(spec))
+    )
     return f"| {name} | {rides} | {levels} | {len(spec.variants)} |"
 
 
-def _event_section(spec: EventSpec) -> list[str]:
+def _event_section(spec: Declaration) -> list[str]:
     lines = [f"### `{spec.name}`", ""]
     if spec.internal:
         lines += [
@@ -384,25 +400,27 @@ def _event_section(spec: EventSpec) -> list[str]:
     return lines
 
 
-def _variant_section(position: int, variant: EventVariant) -> list[str]:
+def _variant_section(position: int, variant: type[Variant]) -> list[str]:
     """One variant, whole. The heading is numbered because a channel and
     a level do not identify one: three of `activation_refused`'s ride
     the same channel at the same level and differ in their sentence."""
     lines = [
-        f"#### Variant {position}: `{variant.channel}` at {logging.getLevelName(variant.level)}",
+        f"#### Variant {position}: `{variant.CHANNEL}` "
+        f"at {logging.getLevelName(variant.LEVEL)}",
         "",
     ]
-    if variant.note:
-        lines += [*_paragraph(variant.note), ""]
-    lines += ["```text", variant.message, "```", ""]
-    if variant.args:
+    if variant.NOTE:
+        lines += [*_paragraph(variant.NOTE), ""]
+    lines += ["```text", variant.TEMPLATE, "```", ""]
+    rendered = rendered_values(variant)
+    if rendered:
         lines += [
             "| # | Argument | Nullable | Constraint | Note |",
             "| --- | --- | --- | --- | --- |",
             *[
-                f"| {index} | `{arg.kind.name}` | {_yes(arg.nullable)} | "
-                f"{_arg_constraint(arg)} | {_cell(arg.note)} |"
-                for index, arg in enumerate(variant.args, start=1)
+                f"| {index} | `{one.type.ARG_KIND.name}` | {_yes(one.nullable)} | "
+                f"{_arg_constraint(one)} | {_cell(one.rendered_note)} |"
+                for index, one in enumerate(rendered, start=1)
             ],
             "",
         ]
@@ -412,42 +430,45 @@ def _variant_section(position: int, variant: EventVariant) -> list[str]:
         "| Field | Kind | Required | Nullable | Constraint | Note |",
         "| --- | --- | --- | --- | --- | --- |",
         *[
-            f"| `{name}` | `{field.kind.name}` | {_yes(field.required)} | "
-            f"{_yes(field.nullable)} | {_field_constraint(field)} | {_cell(field.note)} |"
-            for name, field in variant.fields.items()
+            f"| `{one.name}` | `{one.type.KIND.name}` | {_yes(one.required)} | "
+            f"{_yes(one.nullable)} | {_field_constraint(one)} | {_cell(one.note)} |"
+            for one in carried_values(variant)
         ],
         "",
     ]
     return lines
 
 
-def _field_constraint(field: EventField) -> str:
+def _field_constraint(declared: Declared) -> str:
     """What holds this field's values, beside its kind."""
-    if field.kind is Kind.TOKEN:
-        return _tokens(field.tokens)
-    if field.kind is Kind.ID:
-        return _syntax(field)
-    if field.kind is Kind.ID_LIST:
-        return f"each element: {_syntax(field)}"
-    if field.kind is Kind.DESCRIPTOR:
-        return _bounds(field)
-    if field.kind is Kind.CLASS_NAME and field.joined:
+    kind = declared.type.KIND
+    if kind is Kind.TOKEN:
+        return _tokens(tokens_of(declared))
+    if kind is Kind.ID:
+        return _syntax(declared)
+    if kind is Kind.ID_LIST:
+        return f"each element: {_syntax(declared)}"
+    if kind is Kind.DESCRIPTOR:
+        return _bounds(declared)
+    if kind is Kind.CLASS_NAME and declared.type.JOINED:
         return "one name, or several joined with `, `"
-    if field.kind is Kind.SOURCES:
+    if kind is Kind.SOURCES:
         return "keyed by the prompt provenance grammar, with counts for values"
     return ""
 
 
-def _arg_constraint(arg: ArgSpec) -> str:
-    if arg.kind is ArgKind.TOKEN:
-        return _tokens(arg.tokens)
-    if arg.kind is ArgKind.ID:
-        return _syntax(arg)
-    if arg.kind is ArgKind.DESCRIPTOR:
-        return _bounds(arg)
-    if arg.kind is ArgKind.COMPOSED and arg.grammar is not None:
-        return f"the `{arg.grammar.name}` grammar"
-    if arg.kind is ArgKind.CLASS_NAME and arg.joined:
+def _arg_constraint(declared: Declared) -> str:
+    kind = declared.type.ARG_KIND
+    grammar = declared.type.GRAMMAR
+    if kind is ArgKind.TOKEN:
+        return _tokens(tokens_of(declared))
+    if kind is ArgKind.ID:
+        return _syntax(declared)
+    if kind is ArgKind.DESCRIPTOR:
+        return _bounds(declared)
+    if kind is ArgKind.COMPOSED and grammar is not None:
+        return f"the `{grammar.name}` grammar"
+    if kind is ArgKind.CLASS_NAME and declared.type.JOINED:
         return "one name, or several joined with `, `"
     return ""
 
@@ -474,16 +495,18 @@ def _token(value: str) -> str:
     return "`'" + value.replace("|", "\\|") + "'`"
 
 
-def _syntax(declared: EventField | ArgSpec) -> str:
-    if declared.syntax is None:
+def _syntax(declared: Declared) -> str:
+    syntax = declared.type.SYNTAX
+    if syntax is None:
         return ""
-    return f"the `{declared.syntax.name}` syntax"
+    return f"the `{syntax.name}` syntax"
 
 
-def _bounds(declared: EventField | ArgSpec) -> str:
-    if declared.bounds is None:
+def _bounds(declared: Declared) -> str:
+    bounds = declared.type.BOUNDS
+    if bounds is None:
         return ""
-    return f"at most {declared.bounds.max_length} characters, every one {declared.bounds.charset}"
+    return f"at most {bounds.max_length} characters, every one {bounds.charset}"
 
 
 def _yes(value: bool) -> str:

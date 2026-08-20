@@ -1,13 +1,13 @@
 """What this server may say, declared once per event as typed variants.
 
-The registry in `events_schema.py` describes an emission; a catalog
-entry IS one. That is the whole difference, and everything else follows
-from it. A site used to restate the template, the argument order, the
-event name and the field set at every call, and five structures had to
-agree for one record to be lawful: the declaration, the call, the pin,
-the sidecar entry and the conformance walk's reading of the source.
-Here the call constructs the declaration, so there is nothing left for
-it to disagree with.
+The registry this replaced described an emission; a catalog entry IS
+one. That is the whole difference, and everything else follows from it.
+A site used to restate the template, the argument order, the event name
+and the field set at every call, and five structures had to agree for
+one record to be lawful: the declaration, the call, the pin, the sidecar
+entry and the conformance walk's reading of the source. Here the call
+constructs the declaration, so there is nothing left for it to disagree
+with.
 
 **One declaration per event code, holding a discriminated set of typed
 variants.** An event is not one shape: `conversations_failed` says two
@@ -34,10 +34,9 @@ payload builder drops it, while a nullable one keeps its key.
 
 **Documentation facts are declaration metadata.** Notes, the constraint
 a value type carries, the syntaxes and the bounds are declared here and
-on the value types, never introspected from prose. `events_docgen.py`
-renders them through `described()`, which answers the same `EventSpec`
-shape the untyped registry answers, so one generator serves both while
-the conversion is in flight.
+on the value types, never introspected from prose, and there is no
+second description of a declaration for a generator to read: the
+reference reads the declarations themselves.
 
 The module imports the value vocabulary and the standard library, and
 imports no subsystem: the arrows keep pointing downward.
@@ -118,14 +117,55 @@ from vinga_server.events.values import (
     UnnamedToolSource,
     Whole,
 )
-from vinga_server.events_schema import (
-    CHANNELS,
-    SESSION_CHANNEL,
-    ArgSpec,
-    EventField,
-    EventSpec,
-    EventVariant,
+
+# --- the channels -----------------------------------------------------
+#
+# The channel is the scope, and it is a compatibility fact: `logs.py`
+# writes `record.name` as the `logger` field of every JSON record, and a
+# collector filters on it. One session channel, named rather than
+# derived from a file so that splitting the code across packages cannot
+# rename it, and one channel per server subsystem, each built on that
+# subsystem's own module name.
+#
+# Named here rather than beside each area, because the tuple below has to
+# be one reading of them rather than a second list: `CHANNELS` is what a
+# variant's channel is checked against and what the recovery event is
+# declared on, and both are needed before the first declaration runs.
+
+SESSION_CHANNEL = "vinga_server.session"
+
+APP_CHANNEL = "vinga_server.app"
+CAPTURE_CHANNEL = "vinga_server.capture"
+CONFIG_API_CHANNEL = "vinga_server.config.api"
+CONVERSATIONS_CHANNEL = "vinga_server.conversations.store"
+BINDINGS_CHANNEL = "vinga_server.device.bindings"
+FILLER_CHANNEL = "vinga_server.filler"
+ONBOARDING_CHANNEL = "vinga_server.onboarding"
+OTA_CHANNEL = "vinga_server.ota"
+ASR_CHANNEL = "vinga_server.providers.openai_asr"
+REGISTRY_CHANNEL = "vinga_server.registry"
+MCP_CHANNEL = "vinga_server.tools.mcp"
+MEMORY_CHANNEL = "vinga_server.tools.memory"
+WS_CHANNEL = "vinga_server.ws"
+
+SERVER_CHANNELS: tuple[str, ...] = (
+    APP_CHANNEL,
+    CAPTURE_CHANNEL,
+    CONFIG_API_CHANNEL,
+    CONVERSATIONS_CHANNEL,
+    BINDINGS_CHANNEL,
+    FILLER_CHANNEL,
+    ONBOARDING_CHANNEL,
+    OTA_CHANNEL,
+    ASR_CHANNEL,
+    REGISTRY_CHANNEL,
+    MCP_CHANNEL,
+    MEMORY_CHANNEL,
+    WS_CHANNEL,
 )
+
+CHANNELS: tuple[str, ...] = (SESSION_CHANNEL, *SERVER_CHANNELS)
+
 
 # The levels an event may be emitted at, which are the four the emitters
 # expose as methods.
@@ -620,79 +660,41 @@ def payload_shape(variant: type[Variant]) -> tuple[Declared, ...]:
 
 # --- what the generated reference reads -------------------------------
 #
-# The same `EventSpec` shape the untyped registry answers, derived from
-# the declarations rather than restated beside them. Transitional: one
-# generator serves both sources while the conversion is in flight, and
-# it goes when the registry does.
+# Nothing beyond the declarations themselves. A variant's class-level
+# facts, its `Declared` values and the value types those name carry
+# every property the reference prints, so the generator reads them
+# rather than a second description built beside them.
 
 
-def _tokens_of(declared: Declared) -> frozenset[str] | None:
+def tokens_of(declared: Declared) -> frozenset[str] | None:
     """The closed set one declared value admits.
 
     The type's own, or the single member where the variant fixes it: a
     variant that always says `no_agent` declares that one reason and not
-    the four its enumeration holds, which is what the untyped registry
-    spelled out variant by variant.
+    the four its enumeration holds. Public because it is what a
+    reference prints and what a caller reading the catalog would
+    otherwise re-derive from `fixed`.
     """
     if declared.fixed is not None and declared.type.TOKENS is not None:
         return frozenset({str(declared.fixed.carried())})
     return declared.type.TOKENS
 
 
-def _field_of(declared: Declared) -> EventField:
-    return EventField(
-        kind=declared.type.KIND,
-        required=declared.required,
-        nullable=declared.nullable,
-        tokens=_tokens_of(declared),
-        syntax=declared.type.SYNTAX,
-        bounds=declared.type.BOUNDS,
-        joined=declared.type.JOINED,
-        note=declared.note,
-    )
+def rendered_values(variant: type[Variant]) -> tuple[Declared, ...]:
+    """The values one variant's sentence renders, in `%` order.
 
-
-def _arg_of(declared: Declared) -> ArgSpec:
-    return ArgSpec(
-        kind=declared.type.ARG_KIND,
-        nullable=declared.nullable,
-        tokens=_tokens_of(declared),
-        syntax=declared.type.SYNTAX,
-        bounds=declared.type.BOUNDS,
-        grammar=declared.type.GRAMMAR,
-        joined=declared.type.JOINED,
-        note=declared.rendered_note,
-    )
-
-
-def _variant_of(variant: type[Variant]) -> EventVariant:
-    # The base as well as the variant's own, because `ARGS` may render a
-    # base value and a reference has to describe the position it lands
-    # in.
+    The base as well as the variant's own, because `ARGS` may name a
+    base value and a reference has to describe the position it lands in.
+    """
     by_name = {one.name: one for one in payload_shape(variant)}
-    return EventVariant(
-        channel=variant.CHANNEL,
-        level=variant.LEVEL,
-        message=variant.TEMPLATE,
-        note=variant.NOTE,
-        args=tuple(_arg_of(by_name[name]) for name in variant.ARGS),
-        fields={
-            one.name: _field_of(one) for one in payload_shape(variant) if one.carried
-        },
-    )
+    return tuple(by_name[name] for name in variant.ARGS)
 
 
-def described() -> tuple[EventSpec, ...]:
-    """Every declared event, as the documentation generator reads it."""
-    return tuple(
-        EventSpec(
-            name=declaration.name,
-            note=declaration.note,
-            internal=declaration.internal,
-            variants=tuple(_variant_of(one) for one in declaration.variants),
-        )
-        for declaration in _state.declarations.values()
-    )
+def carried_values(variant: type[Variant]) -> tuple[Declared, ...]:
+    """The whole payload one variant produces, in the order a record
+    carries it."""
+    return tuple(one for one in payload_shape(variant) if one.carried)
+
 
 
 # --- conversations/store.py: the system of record for content ---------
@@ -701,7 +703,6 @@ def described() -> tuple[EventSpec, ...]:
 # smallest channel on the surface, which is what makes it the one that
 # proves the machinery rather than exercises it.
 
-CONVERSATIONS_CHANNEL = "vinga_server.conversations.store"
 
 
 @dataclass(frozen=True)
@@ -814,7 +815,6 @@ CONVERSATIONS_PRUNED = declare(
 # by rendering the first of them, which is why `ARGS` may name a base
 # value at all.
 
-WS_CHANNEL = "vinga_server.ws"
 
 
 @dataclass(frozen=True)
@@ -1602,7 +1602,6 @@ FILLER_PLAYED = declare(
 # firmware it says it runs, which are far-side strings the endpoint
 # bounds at its decision site and the value types bound again here.
 
-OTA_CHANNEL = "vinga_server.ota"
 
 
 @dataclass(frozen=True)
@@ -1859,7 +1858,6 @@ class OtaRequestRejected(Variant):
 
 # --- onboarding/: the banner and the short path -----------------------
 
-ONBOARDING_CHANNEL = "vinga_server.onboarding"
 
 
 @dataclass(frozen=True)
@@ -1964,7 +1962,6 @@ class AuthRejected(Variant):
 # No session or device: providers are shared singletons that serve every
 # conversation, so these name the host instead.
 
-ASR_CHANNEL = "vinga_server.providers.openai_asr"
 
 
 @dataclass(frozen=True)
@@ -2082,7 +2079,6 @@ class EchoRecovered(Variant):
 #
 # No session or device: one entry serves every conversation.
 
-MCP_CHANNEL = "vinga_server.tools.mcp"
 
 
 @dataclass(frozen=True)
@@ -2244,7 +2240,6 @@ class McpReloadApplied(Variant):
 
 # --- tools/memory.py --------------------------------------------------
 
-MEMORY_CHANNEL = "vinga_server.tools.memory"
 
 
 @dataclass(frozen=True)
@@ -2264,7 +2259,6 @@ class MemoryUnreadable(Variant):
 
 # --- filler.py --------------------------------------------------------
 
-FILLER_CHANNEL = "vinga_server.filler"
 
 
 @dataclass(frozen=True)
@@ -2285,7 +2279,6 @@ class FillerDisabled(Variant):
 
 # --- capture.py: the recording surface --------------------------------
 
-CAPTURE_CHANNEL = "vinga_server.capture"
 
 
 @dataclass(frozen=True)
@@ -2421,7 +2414,6 @@ class CaptureOverBudget(Variant):
 
 # --- app.py: what the composition root says about capture -------------
 
-APP_CHANNEL = "vinga_server.app"
 
 
 @dataclass(frozen=True)
@@ -2456,7 +2448,6 @@ class CaptureDisabled(Variant):
 
 # --- registry.py: the shutdown drain ----------------------------------
 
-REGISTRY_CHANNEL = "vinga_server.registry"
 
 
 @dataclass(frozen=True)
@@ -2502,7 +2493,6 @@ class DrainIncomplete(Variant):
 
 # --- device/bindings.py: the live view of who is bound ----------------
 
-BINDINGS_CHANNEL = "vinga_server.device.bindings"
 
 
 @dataclass(frozen=True)
@@ -2539,7 +2529,6 @@ class BindingsUnreadable(Variant):
 
 # --- config/api.py: the administration surface ------------------------
 
-CONFIG_API_CHANNEL = "vinga_server.config.api"
 
 
 @dataclass(frozen=True)
@@ -2933,6 +2922,7 @@ __all__ = [
     "CAPTURE_OVER_BUDGET",
     "CAPTURE_PRUNED",
     "CAPTURE_STARTED",
+    "CHANNELS",
     "CONFIG_API_CHANNEL",
     "CONVERSATIONS_CHANNEL",
     "CONVERSATIONS_DROPPED",
@@ -3038,6 +3028,8 @@ __all__ = [
     "SCHEMA_VIOLATION",
     "SCHEMA_VIOLATION_DECLARATION",
     "SCHEMA_VIOLATION_MESSAGE",
+    "SERVER_CHANNELS",
+    "SESSION_CHANNEL",
     "SESSION_CLOSED",
     "SESSION_IDLE",
     "SESSION_LIMIT",
@@ -3056,13 +3048,15 @@ __all__ = [
     "WS_CHANNEL",
     "WriteFailed",
     "base_of",
+    "carried_values",
     "catalog",
     "declaration_of",
     "declare",
     "declared_values",
-    "described",
     "install",
     "installed",
     "payload_shape",
+    "rendered_values",
+    "tokens_of",
     "value",
 ]
