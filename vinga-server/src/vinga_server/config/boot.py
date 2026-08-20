@@ -14,18 +14,18 @@ otherwise fail later:
 5. compose the two halves into `Config` and validate the whole snapshot,
    which is the same last line of defence it has always been.
 
-The engine is closed here: the configuration is a boot-time snapshot,
-so nothing after this reads the database except `DeviceBindings`
+The engine is closed here: what this reads is a snapshot, so nothing
+after this reads the database except `DeviceBindings`
 (`vinga_server.device.bindings`), which reads only the `devices` and
 `domain_settings` tables, through a read engine of its own, so that
 binding a device applies at that device's next OTA check or connection,
-and `reload_domain_config` below, which a running server runs on
-request to apply the MCP half of a change without restarting.
+and `reload_domain_config` below, which a running server runs on request
+to apply what it can apply while it runs (`config/reload.py`).
 
 Both exceptions are of the same shape, and it is the shape the boot
 contract keeps: a named, bounded slice of the domain half, re-read
 deliberately, with everything else still fixed at the moment this ran.
-A CLI write to anything else while the server runs is picked up at the
+A CLI write to anything the reload does not apply is picked up at the
 next start, by design.
 """
 

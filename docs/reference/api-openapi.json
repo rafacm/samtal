@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "vinga-server configuration API",
-    "description": "The domain half of one vinga-server deployment's configuration: providers, MCP servers, agents, devices, and the credentials they use. Every request carries a bearer token, whose value is the environment variable `server.api.secret_env` names.\n\nA read of one entity is a write of it. The `entity` half of the envelope an addressed read answers is resubmittable as it stands: a PUT replaces the model-shaped half and never the credentials stored beside it, so an edit is read it, change it, send the whole of it back, and the fields a read leaves out are the ones that mean absence and mean the same absence on the way back. An environment reference reads back as itself and resubmits as itself. A value shown as the mask, `********`, resubmits as keep the stored value, which is substituted before the fragment is validated; that mask written where nothing is stored is refused, naming the field where the field is one this API declares. An unchanged stored secret needs no action at all: the envelope's `secrets` mapping is informational, and rotating a credential is the secret PUT, which is the one door a plaintext value enters by. Everything else a read answers is display-only, and named here so the writable category has a stated boundary: that `secrets` mapping; the identity keys of every listing, which address the target URL rather than belonging in a body; both halves of the whole-configuration read, which has no PUT of its own; the pending-device listing, which is the running server's state; and everything under `/runtime` and `/conversations`, which is not stored configuration at all. The writable shapes are that one `entity` and the three bodies this document describes as arguments rather than as entities: a device's `agents`, the default agent's `name`, and a credential's `secret`.\n\nConfiguration is a boot-time snapshot, so a successful write applies at the next server start rather than immediately. Device bindings are the one exception: a running server reads them, and the default agent, as a device asks for them, so binding or unbinding a device applies at that device's next OTA check or connection. The exception ends where the agent does, since a server builds an agent's providers at boot: a binding naming an agent this server has not loaded waits for the restart that loads it. Every write says which of the two happened, in its `notice`.\n\nA device with no binding and no default agent to cover it is answered at its configuration check with a six-digit activation code, which it shows on its screen and speaks. `/devices/pending` lists the devices showing one, keyed by the code, and posting to `/devices/pending/{code}` binds the device showing it. That listing is the running server's own state rather than stored configuration: a restart forgets it, and the devices come back with fresh codes.\n\nThe `/runtime` namespace is the running server's own state as well, and is kept apart from the entity namespaces because an entity may legally be named after any word a route might want. `/runtime/mcp-servers` says what each configured MCP server is doing right now: connected or down, since when, what it published, and which agents may reach it. Nothing there is read from the database, so it cannot disagree with what is running.\n\n`GET /runtime/agents/{name}/prompt` is the other read there: the system prompt a session opening now as that agent would be sent, block by block, with the provenance and the character count of each and the total. It is assembled from the loaded agents, the running MCP slice and the memory store rather than from the database, so it cannot disagree with what a session would get, and it is a preview of a new session rather than a readback of a running one: a conversation already in progress holds the half it assembled at its own activation.\n\n`GET /runtime/config/diff` is the third read there, and the one that spans both sides: what the database holds that this server is not serving, kind by kind, as the entity names added, removed and changed, each kind carrying the boundary its changes converge at. `restart` is the boot-time snapshot; `reload` is what the MCP reload below applies, which is the MCP entries and the agents' grants; `check-in` is the device bindings and the default agent, which a device is answered as it asks and which are therefore never pending, so they carry the label alone and no lists. Changed means the stored state differs from the comparison baseline rather than that something was written: an edit changed back before anyone looked produces no diff, and a rewritten stored secret counts as different, because what is compared is an opaque mark over the ciphertext and it moves even when the plaintext may not have. Entity names and those labels are the whole of the answer: no bodies, no values and no marks cross it. The MCP half is compared against the entries running now rather than the ones this process booted with, so a change a reload has already applied is not reported as pending. What an answer does not say is that applying what it lists would succeed: it compares configuration and connects nothing, while the reload below goes on to build a server for every entry an agent references and can still refuse on one of those.\n\n`POST /runtime/mcp-servers/reload` is the second exception to the boot-time snapshot, and unlike device bindings it is asked for rather than noticed. It re-reads the `mcp_servers` entries, the secrets stored on them and the agents' `mcp` grant lists, and applies them to the running server: entries are started, restarted, stopped or left alone, and no conversation is dropped. When a live conversation meets the result depends on which half of an entry moved. The tools it may reach are snapshotted per reply, so a started, restarted or stopped entry is picked up on its next utterance. An entry's `instructions` is prompt text, and prompt text is assembled at an activation and cached for it, so a rewrite reaches a conversation at its next activation, a new session or an agent switch, and never a reply of one already running; `GET /runtime/agents/{name}/prompt` previews what a session opening now would be sent. Everything else about an agent still waits for a restart, which is why writes to those keep saying so.\n\nThe `/conversations` namespace is not stored configuration either: it reads the conversation store, the record of what was said, which `server.conversations.enabled` switches on. Three reads: the session list newest first, one session whole, and one session's turns oldest first with the calls each turn made nested under it. The two listings are cursor-paginated on monotonic row ids that are never reused, and the session read is singular and takes neither `limit` nor `cursor`. A deployment that never recorded answers 404; one that recorded and has since switched recording off still serves what it recorded, because switching recording off stops the writer and not the reader. Content columns come back as they were stored, which is null where text storage was off, and every session says which way its switches were set.\n\nA provider entry carries whatever options its `type` takes, and those are passed through rather than declared, so no schema can list them. Until typed option models land (#88) they are documented in the example fragments under `vinga-server/examples/`, which is also where the measured numbers behind each default are kept.",
+    "description": "The domain half of one vinga-server deployment's configuration: providers, MCP servers, agents, devices, and the credentials they use. Every request carries a bearer token, whose value is the environment variable `server.api.secret_env` names.\n\nA read of one entity is a write of it. The `entity` half of the envelope an addressed read answers is resubmittable as it stands: a PUT replaces the model-shaped half and never the credentials stored beside it, so an edit is read it, change it, send the whole of it back, and the fields a read leaves out are the ones that mean absence and mean the same absence on the way back. An environment reference reads back as itself and resubmits as itself. A value shown as the mask, `********`, resubmits as keep the stored value, which is substituted before the fragment is validated; that mask written where nothing is stored is refused, naming the field where the field is one this API declares. An unchanged stored secret needs no action at all: the envelope's `secrets` mapping is informational, and rotating a credential is the secret PUT, which is the one door a plaintext value enters by. Everything else a read answers is display-only, and named here so the writable category has a stated boundary: that `secrets` mapping; the identity keys of every listing, which address the target URL rather than belonging in a body; both halves of the whole-configuration read, which has no PUT of its own; the pending-device listing, which is the running server's state; and everything under `/runtime` and `/conversations`, which is not stored configuration at all. The writable shapes are that one `entity` and the three bodies this document describes as arguments rather than as entities: a device's `agents`, the default agent's `name`, and a credential's `secret`.\n\nA write is stored, and when it reaches a running server depends on the kind. Most of the configuration is read once at start and served until the next one: the providers, the agent set, `agent_defaults`, and the whole server section, which is this process's own file and is never re-read. The rest converges at one of two other boundaries. Device bindings and the default agent are read as a device asks for them, so binding or unbinding a device applies at that device's next OTA check or connection; that exception ends where the agent does, since a server builds an agent's providers at start, so a binding naming an agent this server has not loaded waits for the restart that loads it. The MCP entries with the secrets stored on them, the agents' `mcp` grant lists, the shared prompt fragments and each agent's own prompt text are applied by `POST /runtime/config/reload`, without a restart and without dropping a conversation. Every write says which of these happened, in its `notice`, and an agent write says two things because an agent entry's fields fall on both sides of that line.\n\nA device with no binding and no default agent to cover it is answered at its configuration check with a six-digit activation code, which it shows on its screen and speaks. `/devices/pending` lists the devices showing one, keyed by the code, and posting to `/devices/pending/{code}` binds the device showing it. That listing is the running server's own state rather than stored configuration: a restart forgets it, and the devices come back with fresh codes.\n\nThe `/runtime` namespace is the running server's own state as well, and is kept apart from the entity namespaces because an entity may legally be named after any word a route might want. `/runtime/mcp-servers` says what each configured MCP server is doing right now: connected or down, since when, what it published, and which agents may reach it. Nothing there is read from the database, so it cannot disagree with what is running.\n\n`GET /runtime/agents/{name}/prompt` is the other read there: the system prompt a session opening now as that agent would be sent, block by block, with the provenance and the character count of each and the total. It is assembled from the loaded agents, the running MCP slice and the memory store rather than from the database, so it cannot disagree with what a session would get, and it is a preview of a new session rather than a readback of a running one: a conversation already in progress holds the half it assembled at its own activation.\n\n`GET /runtime/config/diff` is the third read there, and the one that spans both sides: what the database holds that this server is not serving, kind by kind, as the entity names added, removed and changed, each kind carrying the boundary its changes converge at. `restart` is what this process read once and serves until it is started again; `reload` is what the apply below puts in place, which is the MCP entries, the agents' grants, the shared prompt fragments and each agent's own prompt text; `check-in` is the device bindings and the default agent, which a device is answered as it asks and which are therefore never pending, so they carry the label alone and no lists. The agents' entry spans all three, so their kind carries two entries of its own beside the restart-bound lists: `grants` and `prompt`, each labelled `reload`. Changed means the stored state differs from the comparison baseline rather than that something was written: an edit changed back before anyone looked produces no diff, and a rewritten stored secret counts as different, because what is compared is an opaque mark over the ciphertext and it moves even when the plaintext may not have. Entity names and those labels are the whole of the answer: no bodies, no values and no marks cross it. The MCP half is compared against the entries running now rather than the ones this process booted with, so a change a reload has already applied is not reported as pending. What an answer does not say is that applying what it lists would succeed: it compares configuration and connects nothing, while the reload below goes on to build a server for every entry an agent references and can still refuse on one of those.\n\n`POST /runtime/config/reload` is the one action in that namespace, and unlike device bindings it is asked for rather than noticed. It re-reads the stored configuration and applies every kind it can apply while the process runs: the `mcp_servers` entries with the secrets stored on them, the agents' `mcp` grant lists, the shared prompt fragments, and each agent's own prompt text and includes. Entries are started, restarted, stopped or left alone, and no conversation is dropped. Nothing is swapped, stopped or started until the whole new world has been composed, validated and built, so a refusal has changed nothing at all. When a live conversation meets the result depends on which half moved. The tools it may reach are snapshotted per reply, so a started, restarted or stopped entry is picked up on its next utterance. Prompt text is assembled at an activation and cached for it, so an agent's prompt, a fragment it includes and an entry's `instructions` alike reach a conversation at its next activation, which is a new session or an agent switch, and never a reply of one already running; `GET /runtime/agents/{name}/prompt` previews what a session opening now would be sent. Everything else about an agent still waits for a restart, which is why writes to those keep saying so.\n\nThe `/conversations` namespace is not stored configuration either: it reads the conversation store, the record of what was said, which `server.conversations.enabled` switches on. Three reads: the session list newest first, one session whole, and one session's turns oldest first with the calls each turn made nested under it. The two listings are cursor-paginated on monotonic row ids that are never reused, and the session read is singular and takes neither `limit` nor `cursor`. A deployment that never recorded answers 404; one that recorded and has since switched recording off still serves what it recorded, because switching recording off stops the writer and not the reader. Content columns come back as they were stored, which is null where text storage was off, and every session says which way its switches were set.\n\nA provider entry carries whatever options its `type` takes, and those are passed through rather than declared, so no schema can list them. Until typed option models land (#88) they are documented in the example fragments under `vinga-server/examples/`, which is also where the measured numbers behind each default are kept.",
     "version": "1"
   },
   "servers": [
@@ -2430,18 +2430,18 @@
         }
       }
     },
-    "/runtime/mcp-servers/reload": {
+    "/runtime/config/reload": {
       "post": {
-        "summary": "Reload Mcp Servers",
-        "description": "Re-read the MCP servers and the agents' grants, and apply\nthem to this running server.\n\nThe one action in this namespace, and the one exception to\n\"configuration applies at the next start\" that a request rather\nthan a device asks for. What it re-reads is the `mcp_servers`\nentries, the secrets stored on them and the effective `mcp`\nlists, and nothing else: an agent's prompt, its providers, its\nmemory and the whole server section stay as this process booted\nthem, so a new agent still waits for the restart that builds it.\n\nNothing is stopped or started until every manager the new\nconfiguration needs has been built, so a refusal (422) has\nchanged nothing at all. A server that merely will not connect is\nnot a refusal: it applies, and says `down` with its reason\nbelow, and is reconnected in the background when a session that\nwould use it opens.\n\nLive conversations are not dropped, and when one meets the\nresult depends on which half of an entry moved. The tools an\nagent may reach are snapshotted per reply, so a session picks\nthose up on its next utterance; a call in flight on a server\nthis stopped fails into the same error result a server dropping\nmid-call produces. An entry's `instructions` is prompt text,\nwhich is assembled at an activation and cached for it, so a\nrewrite reaches a conversation at its next activation, a new\nsession or an agent switch. Such an entry is reported\n`unchanged` here, which is a statement about its connection: the\nconnection is what did not change.\n\nOne reload runs at a time: a concurrent one is refused with 409\nand has changed nothing, like a write that could not take the\ndatabase's lock.",
-        "operationId": "reload_mcp_servers_runtime_mcp_servers_reload_post",
+        "summary": "Reload Config",
+        "description": "Apply the stored configuration to this running server.\n\nThe one action in this namespace, and the one way a stored\nchange reaches a running server without a restart. What it\napplies is every kind this server can apply while it runs, which\ntoday is the MCP entries with the secrets stored on them and the\nagents' effective `mcp` grant lists, the shared prompt\nfragments, and each agent's own prompt text and includes.\nEverything else still waits for the start that reads it: the\nproviders, the agent set, `agent_defaults`, and the whole server\nsection, which is this process's own file and is never re-read.\n\nNothing is swapped, stopped or started until the whole new world\nhas been composed, validated and built, so a refusal (422) has\nchanged nothing at all. A server that merely will not connect is\nnot a refusal: it applies, and says `down` with its reason under\n`mcp.servers`, and is reconnected in the background when a\nsession that would use it opens.\n\nLive conversations are not dropped, and when one meets the\nresult depends on which half moved. The tools an agent may reach\nare snapshotted per reply, so a session picks those up on its\nnext utterance; a call in flight on a server this stopped fails\ninto the same error result a server dropping mid-call produces.\nPrompt text is assembled at an activation and cached for it, so\nan agent's own prompt, a fragment it includes and an entry's\n`instructions` alike reach a conversation at its\nnext activation, which is a new session or an agent switch, and\nnever a reply of one already running. Such an entry is reported `unchanged`\nunder `mcp`, which is a statement about its connection: the\nconnection is what did not change.\n\nThe world arrives in two steps, which is what makes the sentence\nabove per half rather than per apply: what a new activation\nassembles from is put in place first, and the MCP managers are\nstopped, started and swapped after it, so a session activating\nbetween the two sees the new prompts with the old tool world for\nat most one utterance. Nothing else can interleave, because one\napply runs at a time.\n\nOne apply runs at a time: a concurrent one is refused with 409\nand has changed nothing, like a write that could not take the\ndatabase's lock. A server serving a configuration that no store\ndescribes refuses with 409 as well, and says that starting from\na store is what changes it.",
+        "operationId": "reload_config_runtime_config_reload_post",
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/McpReloadResult"
+                  "$ref": "#/components/schemas/ConfigReloadResult"
                 }
               }
             }
@@ -2457,7 +2457,7 @@
             }
           },
           "409": {
-            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
+            "description": "Either an apply of this server's configuration is already running, or the configuration database's write lock is held by another request, or this server serves a configuration that no store describes and so has nothing to apply. Nothing was changed. The first two clear on their own and the request can be made again; the third is what this server is, and only starting one from a store changes it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2467,7 +2467,7 @@
             }
           },
           "422": {
-            "description": "The stored configuration was refused: it does not compose into a valid snapshot, or a server it names could not be built (an environment reference nothing sets, a stored credential that will not decrypt, an entry `server.local_only` forbids). Nothing was stopped, started or swapped, and the running servers are exactly as they were.",
+            "description": "The stored configuration was refused: it does not compose into a valid snapshot, it composes into one this server cannot serve yet (a prompt fragment deleted while something still restart-bound names it), a credential stored in it will not open under the configured keys, or a server it names could not be built (an environment reference nothing sets, an entry `server.local_only` forbids). Nothing was swapped, stopped or started, and the running server is exactly as it was. The `detail` is fixed and names no location, which this refusal shares with the comparison read beside it and with nothing else in this API: what was refused is arbitrary stored state, and a sentence composed over it can quote a value that was written into the wrong field. A server started from this store refuses on the same state and names the location it refused on.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2502,7 +2502,7 @@
     "/runtime/config/diff": {
       "get": {
         "summary": "Read Config Diff",
-        "description": "What the database holds that this server is not serving, kind\nby kind, with the boundary each kind's changes converge at.\n\nThe read the other two in this namespace cannot give: they say\nwhat is running, the entity reads say what is stored, and the\nquestion an operator actually has after a write is what stands\nbetween the two. Most of the configuration is a boot-time\nsnapshot, so most of an answer here is waiting for a restart;\nthe MCP entries and the agents' grants are waiting for the\nreload below; device bindings and the default agent are read as\na device asks and are therefore never pending, so they carry\ntheir label and no lists.\n\nNames and labels, and nothing else. No entity bodies, no values,\nno masks and no secret marks cross this surface: what a\ncredential change looks like here is the entity holding it\nlisted as changed.\n\nThe stored half is the re-read the reload begins with, so a\nstored configuration that will not compose, or a credential in\nit that will not decrypt, is refused here under the status it\nwould be refused under there. That equivalence runs one way\nonly: this compares configuration and connects nothing, while a\nreload goes on to build a server per referenced entry and can\nstill refuse on one of those, so an answer here says what has\nnot been applied and never that applying it would succeed.\nThe running half is read on the loop that owns it, either side\nof that database read: a reload landing in between would leave\nthe two halves describing states that never existed together, so\nsuch an answer is not composed at all and the request is refused\nas retryable instead.",
+        "description": "What the database holds that this server is not serving, kind\nby kind, with the boundary each kind's changes converge at.\n\nThe read the other two in this namespace cannot give: they say\nwhat is running, the entity reads say what is stored, and the\nquestion an operator actually has after a write is what stands\nbetween the two. Most of the configuration is a boot-time\nsnapshot, so most of an answer here is waiting for a restart;\nthe MCP entries and the agents' grants are waiting for the\nreload below; device bindings and the default agent are read as\na device asks and are therefore never pending, so they carry\ntheir label and no lists.\n\nNames and labels, and nothing else. No entity bodies, no values,\nno masks and no secret marks cross this surface: what a\ncredential change looks like here is the entity holding it\nlisted as changed.\n\nThe stored half is the re-read the reload begins with, so a\nstored configuration that will not compose, or a credential in\nit that will not decrypt, is refused here under the status it\nwould be refused under there. That equivalence runs one way\nonly: this compares configuration and connects nothing, while a\nreload goes on to compose the world it would serve and to build\na server per referenced entry, and can still refuse on either,\nso an answer here says what has not been applied and never that\napplying it would succeed.\nThe running half is read on the loop that owns it, either side\nof that database read: a reload landing in between would leave\nthe two halves describing states that never existed together, so\nsuch an answer is not composed at all and the request is refused\nas retryable instead.",
         "operationId": "read_config_diff_runtime_config_diff_get",
         "responses": {
           "200": {
@@ -2526,7 +2526,7 @@
             }
           },
           "409": {
-            "description": "Either the configuration database's write lock is held by another request, or the running MCP world was replaced by a reload while this read was between its two halves. An answer built across such a change would describe two states that never existed together, so it is refused instead. Nothing was changed and the request can be retried.",
+            "description": "Either the configuration database's write lock is held by another request, the running world was replaced by a reload while this read was between its two halves, or this server serves a configuration that no store describes and so has nothing to compare. An answer built across a reload would describe two states that never existed together, so it is refused instead. Nothing was changed. The first two clear on their own and the request can be made again; the third is what this server is, and only starting one from a store changes it.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2536,7 +2536,7 @@
             }
           },
           "422": {
-            "description": "The stored half was refused: it does not compose into a valid snapshot, or a credential stored in it will not decrypt under the configured keys. The `detail` is fixed and names nothing, which is this refusal alone among the ones this API answers with: what was refused is stored state, the sentence for it would be composed over that state, and this read's answers are entity names and labels only. `POST /runtime/mcp-servers/reload` re-reads the same stored half, refuses on the same state, and names the location it refused on, having changed nothing. Nothing was compared here and nothing was changed.",
+            "description": "The stored half was refused: it does not compose into a valid snapshot, or a credential stored in it will not decrypt under the configured keys. The `detail` is fixed and names nothing, which this refusal shares with the reload beside it and with nothing else this API answers with: what was refused is stored state, the sentence for it would be composed over that state, and this read's answers are entity names and labels only. A server started from this store refuses on the same state and names the location it refused on. Nothing was compared here and nothing was changed.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2872,7 +2872,7 @@
           "notice": {
             "type": "string",
             "title": "Notice",
-            "description": "When the change takes effect, as one of three sentences. Configuration is a boot-time snapshot, so most writes apply at the next server start. A device binding and the default agent are read by the running server, so they apply at the device's next OTA check or connection with no restart, unless they name an agent this server has not loaded, which is the case that carries the restart sentence again. A write to an MCP server entry or to one of its secret slots names the reload instead, since that is what applies it to a running server."
+            "description": "When the change takes effect, as one of a handful of sentences. Most of the configuration is read once at start, so most writes apply at the next server start. A device binding and the default agent are read by the running server, so they apply at the device's next OTA check or connection with no restart, unless they name an agent this server has not loaded, which is the case that carries the restart sentence again. A write to an MCP server entry, to one of its secret slots or to a prompt fragment names the reload instead, since that is what applies it to a running server. A write to an agent names both, its prompt fields being applied by the reload and the rest of it built at the next start. A server serving a configuration no store describes says that the write is stored and takes effect when a server boots from that store."
           }
         },
         "additionalProperties": false,
@@ -2915,6 +2915,9 @@
           },
           "grants": {
             "$ref": "#/components/schemas/GrantsDiff"
+          },
+          "prompt": {
+            "$ref": "#/components/schemas/PromptDiff"
           }
         },
         "additionalProperties": false,
@@ -2924,10 +2927,45 @@
           "added",
           "removed",
           "changed",
-          "grants"
+          "grants",
+          "prompt"
         ],
         "title": "AgentsDiff",
-        "description": "The agents, whose entries span two regimes: an agent's `mcp` list\nis what a reload derives its tools from, and everything else about\nthe entry waits for a restart.\n\nSo a grants-only edit is deliberately absent from `changed` above\nand reported under `grants` instead, and an answer that named it in\nboth would be claiming a restart that nothing is waiting for."
+        "description": "The agents, whose entries span three regimes: an agent's `mcp`\nlist is what a reload derives its tools from, its `prompt` and\n`prompt_includes` are what a reload assembles its next activation\nfrom, and everything else about the entry waits for a restart.\n\nSo a grants-only or prompt-only edit is deliberately absent from\n`changed` above and reported under `grants` or `prompt` instead, and\nan answer that named it in both would be claiming a restart that\nnothing is waiting for."
+      },
+      "AgentsReload": {
+        "properties": {
+          "added": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Added",
+            "description": "The agents this server can serve now and could not before, sorted. A device bound to one of them reaches it at its next check-in."
+          },
+          "removed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Removed",
+            "description": "The agents this server can no longer be asked for, sorted. A conversation already talking as one of them finishes on the world it was built with."
+          },
+          "defaults_changed": {
+            "type": "boolean",
+            "title": "Defaults Changed",
+            "description": "Whether `agent_defaults` moved, which is a boolean because there is one of it for the whole deployment and nothing to name. What it changes reaches every agent that inherits the field that moved."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "added",
+          "removed",
+          "defaults_changed"
+        ],
+        "title": "AgentsReload",
+        "description": "What a reload did to the set of agents this server can serve.\n\nAnswered as null until the milestone that makes the agent set a\nreloaded kind, for the reason the two sections above are."
       },
       "Applies": {
         "type": "string",
@@ -2937,7 +2975,7 @@
           "check-in"
         ],
         "title": "Applies",
-        "description": "When a change of this kind reaches a conversation.\n\nThree boundaries and no fourth, because the server has three.\n`restart` is the boot-time snapshot, which is most of the\nconfiguration. `reload` is what `POST /runtime/mcp-servers/reload`\napplies while the process runs, which is the MCP entries and the\nagents' grants. `check-in` is what a device is answered as it asks,\nthe bindings and the default agent, which are therefore in effect\nwithin seconds of a write and never pending at all."
+        "description": "When a change of this kind reaches a conversation.\n\nThree boundaries and no fourth, because the server has three.\n`restart` is what this process reads once and serves until it is\nstarted again. `reload` is what `POST /runtime/config/reload`\napplies while the process runs, which is the MCP entries, the\nagents' grants, the shared prompt fragments and each agent's own\nprompt text. `check-in` is what a device is answered as it asks, the\nbindings and the default agent, which are therefore in effect within\nseconds of a write and never pending at all."
       },
       "AssembledPrompt": {
         "properties": {
@@ -3027,6 +3065,54 @@
         ],
         "title": "ConfigDocument",
         "description": "The whole domain configuration of one deployment, masked."
+      },
+      "ConfigReloadResult": {
+        "properties": {
+          "mcp": {
+            "$ref": "#/components/schemas/McpReloadResult"
+          },
+          "prompts": {
+            "$ref": "#/components/schemas/PromptsReload"
+          },
+          "fillers": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FillersReload"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "providers": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProvidersReload"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "agents": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentsReload"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "mcp",
+          "prompts"
+        ],
+        "title": "ConfigReloadResult",
+        "description": "What one reload applied to this running server, kind by kind, and\nwhat is running once it had been applied.\n\nOne request applies a stored change and says what the change was, so\nbelieving a write took effect when it did not takes a deliberate act\nof not reading the reply. Which kinds a reload can apply grows\nmilestone by milestone; the sections below that this server does not\napply yet answer null rather than an empty answer, because an empty\nthree-way answer would claim that every agent was considered and\nnothing needed doing."
       },
       "ConversationDetail": {
         "properties": {
@@ -3728,6 +3814,43 @@
         "title": "Envelope",
         "description": "One entity as a read returns it: the entity, and its stored-secret\nslots beside it."
       },
+      "FillersReload": {
+        "properties": {
+          "resynthesized": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Resynthesized",
+            "description": "The agents whose filler clip was made again, because the phrases or the voice behind them moved, sorted."
+          },
+          "reused": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reused",
+            "description": "The agents whose filler clip was carried over unchanged, sorted. Reuse is the point of the comparison: an edit to a prompt never re-synthesizes a clip."
+          },
+          "disabled": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Disabled",
+            "description": "The agents whose synthesis failed, sorted. The reload applied and those agents run with the latency mask off, because a filler is a mask and a posture where a text-to-speech hiccup blocked a prompt fix would invert what matters."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "resynthesized",
+          "reused",
+          "disabled"
+        ],
+        "title": "FillersReload",
+        "description": "What a reload did to the pre-synthesized filled pauses.\n\nAnswered as null until the milestone that makes fillers a reloaded\nkind: this server applies a reload without touching a clip, and an\nempty three-way answer would say it had considered every agent and\nfound nothing to do."
+      },
       "GrantsDiff": {
         "properties": {
           "applies": {
@@ -3979,6 +4102,85 @@
         ],
         "title": "PromptBlock",
         "description": "One block of an assembled system prompt."
+      },
+      "PromptDiff": {
+        "properties": {
+          "applies": {
+            "$ref": "#/components/schemas/Applies"
+          },
+          "changed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Changed",
+            "description": "The agents whose stored `prompt` or `prompt_includes` differs from what this server is serving, sorted. A reload applies both, and each agent that moved assembles the new text at its next activation. Only agents both sides hold are compared: a reload keeps the agents this server started with, so an agent the database has added or deleted rides the added or removed lists above and nothing about its prompt is pending here. The fragments the includes name are their own kind, and an edit to a fragment's text is reported there rather than against every agent that carries it."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "applies",
+          "changed"
+        ],
+        "title": "PromptDiff",
+        "description": "The agents whose prompt text the stored configuration would move,\nwhich is the half of an agent entry a reload assembles again rather\nthan the half a restart loads."
+      },
+      "PromptsReload": {
+        "properties": {
+          "changed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Changed",
+            "description": "The agents whose own prompt or whose resolved shared fragments now differ from what this server was serving, sorted. Each of them assembles the new text at its next activation, which is a new session or an agent switch; a conversation already in progress keeps the prompt it was activated with. The MCP guidance that also goes into an assembly is not counted here: what moved there is reported entry by entry under `mcp`, since that is where a connection is what changed. An agent the stored configuration added or removed is not here either, because the agents this server can serve are still what it started with."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "changed"
+        ],
+        "title": "PromptsReload",
+        "description": "The prompt text a reload put in front of the agents that use it."
+      },
+      "ProvidersReload": {
+        "properties": {
+          "built": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Built",
+            "description": "The provider entries this reload constructed, as `<stage>.<name>`, sorted: written since, or changed in a way that a running instance cannot be."
+          },
+          "reused": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reused",
+            "description": "The provider entries carried into the new world as the objects they already were, sorted. An entry whose model and stored credentials are unchanged is never built again, which is what keeps a prompt edit from reloading a local model."
+          },
+          "retired": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Retired",
+            "description": "The provider entries no world after this one uses, sorted. Their resources are released once the last conversation holding them has ended, not at the instant this answered."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "built",
+          "reused",
+          "retired"
+        ],
+        "title": "ProvidersReload",
+        "description": "What a reload did to the built providers.\n\nAnswered as null until the milestone that makes providers a reloaded\nkind, for the reason the fillers section is."
       },
       "SecretSlot": {
         "properties": {
@@ -4592,7 +4794,7 @@
               }
             ],
             "default": null,
-            "description": "The shared prompt fragments this layer's system prompt carries, each by the name it is defined under in prompt_fragments, injected in the order listed and directly after the agent's own prompt. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the fragments its siblings share. Every name has to be a fragment that exists, since the fragment is in this same database, and a name listed twice is refused. Fragments are part of the boot-time snapshot, so a change here reaches a conversation at the next server start rather than at a reload.",
+            "description": "The shared prompt fragments this layer's system prompt carries, each by the name it is defined under in prompt_fragments, injected in the order listed and directly after the agent's own prompt. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the fragments its siblings share. Every name has to be a fragment that exists, since the fragment is in this same database, and a name listed twice is refused. A reload applies this list and the fragments it names alike, so an edit here reaches a conversation at its next activation, which is a new session or an agent switch.",
             "title": "Prompt Includes"
           },
           "prompt": {
@@ -4715,7 +4917,7 @@
               }
             ],
             "default": null,
-            "description": "The shared prompt fragments this layer's system prompt carries, each by the name it is defined under in prompt_fragments, injected in the order listed and directly after the agent's own prompt. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the fragments its siblings share. Every name has to be a fragment that exists, since the fragment is in this same database, and a name listed twice is refused. Fragments are part of the boot-time snapshot, so a change here reaches a conversation at the next server start rather than at a reload.",
+            "description": "The shared prompt fragments this layer's system prompt carries, each by the name it is defined under in prompt_fragments, injected in the order listed and directly after the agent's own prompt. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the fragments its siblings share. Every name has to be a fragment that exists, since the fragment is in this same database, and a name listed twice is refused. A reload applies this list and the fragments it names alike, so an edit here reaches a conversation at its next activation, which is a new session or an agent switch.",
             "title": "Prompt Includes"
           }
         },

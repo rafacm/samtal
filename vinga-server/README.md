@@ -835,9 +835,10 @@ database. The text is injected as written, with no heading over it: it
 is prompt text the operator composed, and a heading would editorialize.
 Its indentation and its own blank lines are part of it, and the only
 bytes trimmed are whitespace at the two ends of the whole prompt, which
-the surface above reports trimmed with them. Fragments are part of the
-boot-time snapshot, so writing or editing one applies at the next server
-start, and the write says so.
+the surface above reports trimmed with them. A fragment is one of the
+kinds `vinga-server config reload` applies, so writing or editing one
+reaches every agent that includes it at that agent's next activation,
+and the write says so.
 
 **Each block is counted** because every one of them competes with the
 others for the context budget of a small local model, and there is no
@@ -917,11 +918,11 @@ deployment's credentials could reflect it in either. Published names
 are the exception because the model has to be given them and an
 operator has to be able to write one down.
 
-### Applying an MCP change without a restart
+### Applying a change without a restart
 
-Configuration is a boot-time snapshot, so writing an entry and granting
-it to an agent used to cost a restart and every conversation on the
-server. `vinga-server config reload` applies them instead:
+Most of the configuration is read once at start, so writing an entry and
+granting it to an agent used to cost a restart and every conversation on
+the server. `vinga-server config reload` applies what it can instead:
 
 ```console
 $ vinga-server config set mcp-server weather -f weather.yaml
@@ -930,10 +931,16 @@ This applies when the running server is asked to reload: run
 `vinga-server config reload`, which ...
 $ vinga-server config set agent house -f house.yaml
 $ vinga-server config reload
-started: weather
-restarted: (none)
-stopped: (none)
-unchanged: home
+mcp:
+  started: weather
+  restarted: (none)
+  stopped: (none)
+  unchanged: home
+prompts:
+  changed: house
+fillers: (this server does not apply this kind without a restart)
+providers: (this server does not apply this kind without a restart)
+agents: (this server does not apply this kind without a restart)
 
 home: connected since 2026-08-13T09:12:03.104213+00:00
   tools: home__turn_on_light, home__turn_off_light
@@ -943,15 +950,17 @@ weather: connected since 2026-08-13T11:02:44.118902+00:00
   agents: house
 ```
 
-**What it applies** is the `mcp_servers` entries, the secrets stored on
-them, and the agents' effective `mcp` grant lists (`agents.<name>.mcp`
-and `agent_defaults.mcp`), re-read from the configuration database. An
-entry that is new or newly referenced is started, one whose fragment or
-whose stored secrets changed is stopped and rebuilt (so rotating a
-credential applies here too), one that is gone or no longer referenced
-is stopped, and an unchanged one keeps the connection it had, untouched.
-The four outcomes come back with the status document, so one command
-both applies and verifies.
+**What it applies** is the `mcp_servers` entries with the secrets stored
+on them, the agents' effective `mcp` grant lists (`agents.<name>.mcp`
+and `agent_defaults.mcp`), the shared `prompt_fragments`, and each
+agent's own `prompt` and `prompt_includes`, all re-read from the
+configuration database. An MCP entry that is new or newly referenced is
+started, one whose fragment or whose stored secrets changed is stopped
+and rebuilt (so rotating a credential applies here too), one that is
+gone or no longer referenced is stopped, and an unchanged one keeps the
+connection it had, untouched. The MCP outcomes come back with the status
+document, so one command both applies and verifies, and the sections for
+the kinds a later release will apply are named rather than missing.
 
 An entry whose `instructions` is all that changed is `unchanged`, and
 that word is about the connection: nothing was reconnected, and the new
@@ -960,31 +969,35 @@ text configures a prompt and not a connection, so dropping a live one
 to apply it (mid-call tools, a respawned stdio child) would be churn
 without a cause.
 
-**What still needs a restart** is everything else, and that includes
-most of an agent: its prompt, its providers, its memory and its filler
-are built at boot, so a new agent waits for the start that builds them,
-and a write to an agent says "restart" even when it changed only the
-`mcp` list. Providers, provider credentials and the whole `server`
-section (including the configuration file itself) are boot-time as they
-always were.
+**What still needs a restart** is the rest: an agent's providers, its
+memory and its filler are built at start, so a new agent waits for the
+one that builds them, and a write to an agent says both halves, since
+its prompt fields are applied and the rest of it is not. Providers,
+provider credentials, `agent_defaults` and the whole `server` section
+(including the configuration file itself) are start-time as they always
+were.
 
-**No session is dropped.** The tools an agent may reach are snapshotted
-per reply, so a conversation in progress meets the new world on its next
-utterance; a tool call in flight on a server the reload stopped fails
-into the same error result a server dropping mid-call produces, which
-the assistant explains in its own words.
+**No session is dropped**, and when one meets the change depends on
+which half moved. The tools an agent may reach are snapshotted per
+reply, so a conversation in progress meets the new tool world on its
+next utterance; a tool call in flight on a server the reload stopped
+fails into the same error result a server dropping mid-call produces,
+which the assistant explains in its own words. Prompt text is assembled
+once per activation and cached for it, so a rewritten prompt, fragment
+or `instructions` reaches a conversation at its next activation, which
+is a new session or an agent switch, and never mid-reply.
 
-**Nothing is half applied.** Every manager the new configuration needs
-is built before anything running is touched, so an unset `$VAR`, a
+**Nothing is half applied.** The whole new world is composed, validated
+and built before anything running is touched, so an unset `$VAR`, a
 credential that will not decrypt, an entry `server.local_only` forbids,
-or a stored configuration that will not validate refuses the reload and
-leaves the servers exactly as they were. A server that merely will not
-connect is not that: it applies, shows `down` with its reason, and is
-reconnected in the background like any other. One reload runs at a time;
-a second is refused with the retryable 409 a contended write answers
-with, having changed nothing.
+or a stored configuration that will not compose into something this
+server can serve refuses the reload and leaves it exactly as it was. A
+server that merely will not connect is not that: it applies, shows
+`down` with its reason, and is reconnected in the background like any
+other. One apply runs at a time; a second is refused with the retryable
+409 a contended write answers with, having changed nothing.
 
-Over the API it is `POST /api/runtime/mcp-servers/reload`.
+Over the API it is `POST /api/runtime/config/reload`.
 
 ## Stack
 
@@ -1169,22 +1182,23 @@ that is where the measured numbers and the field findings behind each
 provider option are kept. `config list` and `config show` read back what
 is stored, with every secret masked.
 
-**A change applies at the next server start.** The configuration is read
-once at boot, so an edit made while the server runs is picked up when it
-is restarted, and every mutating command says so. The API says the same
-sentence in the answer to that write. There are two exceptions, below,
-and each write says which of the three cases it is in.
+**Most of a change applies at the next server start.** The providers,
+the agent set, the agent defaults and the `server` section are read once
+at boot, so an edit to any of them while the server runs is picked up
+when it is restarted, and every mutating command says so. The API says
+the same sentence in the answer to that write. There are two exceptions,
+below, and each write says which case it is in.
 
-**The MCP servers are one, applied on request.** Writing an entry,
-rotating a secret on it, or changing which agents may reach it takes
-effect when a running server is asked to reload, with no restart and no
-session dropped: that is [Applying an MCP change without a
-restart](#applying-an-mcp-change-without-a-restart). Those writes name
-`vinga-server config reload` instead of the restart. A write to an
-agent does not, even though its `mcp` list is part of what a reload
-applies: the rest of an agent (prompt, providers, memory, filler) is
-built at boot, and a notice right about one field and wrong about the
-others would be worse than the conservative one.
+**The reload is one, applied on request.** Writing an MCP entry,
+rotating a secret on it, changing which agents may reach it, editing a
+prompt fragment or rewriting an agent's own prompt takes effect when a
+running server is asked to reload, with no restart and no session
+dropped: that is [Applying a change without a
+restart](#applying-a-change-without-a-restart). Those writes name
+`vinga-server config reload` instead of the restart. A write to an agent
+names both, because an agent entry is the one kind whose fields fall on
+both sides of the line: its prompt and its includes are applied, and its
+providers, memory and filler are built at start.
 
 **Device bindings are the other, applied by being noticed.** A running
 server reads the devices table and the default agent as a device asks
@@ -1296,7 +1310,7 @@ named after any word a route might want:
 GET                 /api/runtime/agents/{name}/prompt
 GET                 /api/runtime/config/diff
 GET                 /api/runtime/mcp-servers
-POST                /api/runtime/mcp-servers/reload
+POST                /api/runtime/config/reload
 ```
 
 The first answers the system prompt a session opening now as that agent
@@ -1312,9 +1326,9 @@ else, so a rotated credential shows up as the provider that holds it
 being listed as changed. The third answers what each configured MCP
 server is doing right now, which [What the MCP servers are
 doing](#what-the-mcp-servers-are-doing) describes and `vinga-server
-config status` prints. The reload applies the stored MCP entries and
-grant lists to the running server, which [Applying an MCP change without
-a restart](#applying-an-mcp-change-without-a-restart) describes and
+config status` prints. The reload applies what the stored configuration
+holds to the running server, which [Applying a change without a
+restart](#applying-a-change-without-a-restart) describes and
 `vinga-server config reload` prints; it is the only route here that
 changes what the server is doing rather than what is stored.
 
@@ -1363,17 +1377,20 @@ than a fragment: that one, a device binding (`{"agents": [...]}`), and
 the default agent (`{"name": "..."}`), whose DELETE clears it.
 
 **A successful write says when it takes effect.** It answers
-`{"wrote": "...", "notice": "..."}`, and the notice is one of three
-sentences. Most writes carry the boot-time snapshot one: the
-configuration is read once at boot, so the write applies at the next
-server start. A device binding and the default agent carry the second,
-because a running server reads them: they apply at the device's next OTA
-check or connection, unless they name an agent this server has not
-loaded, which brings the first sentence back. An MCP server entry and
-the secret slots on it carry the third, which names the reload above,
-since that is what applies them to a running server. Nothing about a
-running conversation changes when a write lands, in any of the three
-cases; a reload is what makes the third one take effect.
+`{"wrote": "...", "notice": "..."}`, and the notice is one of a handful
+of sentences. Most writes carry the start-time one: the providers, the
+agent set and the agent defaults are read once at boot, so the write
+applies at the next server start. A device binding and the default agent
+carry the second, because a running server reads them: they apply at the
+device's next OTA check or connection, unless they name an agent this
+server has not loaded, which brings the first sentence back. An MCP
+server entry, the secret slots on it and a prompt fragment carry the
+third, which names the reload above, since that is what applies them to
+a running server. An agent carries a fourth that says both, its prompt
+fields being applied by the reload and the rest of it not. Nothing about
+a running conversation changes when a write lands, in any of these
+cases; a reload is what makes the third and the applied half of the
+fourth take effect.
 
 **A refusal is an RFC 9457 problem document**, served as
 `application/problem+json`, and carries the sentence the CLI prints in
@@ -1430,8 +1447,9 @@ and `set-secret`, opens the database directly, and prints on stderr
 every time that it bypasses the API. When a change made this way is
 observed is then the write's own answer, in the same three cases as
 over the API: the next server start for most of it, the next `config
-reload` for an MCP entry and the secrets stored on it, and the device's
-next check-in for a binding. Every other command refuses the flag by
+reload` for an MCP entry, the secrets stored on it, a prompt fragment
+and an agent's prompt fields, and the device's next check-in for a
+binding. Every other command refuses the flag by
 naming the four. It does not check whether a server is running:
 there is no reliable way to, and a wrong refusal would wedge the
 recovery path in exactly the situation it exists for. What makes that
@@ -2272,8 +2290,8 @@ the variable names, so the file belongs on the data volume and in
 access-controlled backups, not in a repository.
 
 And the operational one, said again because it is the trap of a
-boot-time snapshot: **most of an edit applies at the next server
-start.** A `config set` of a provider, an agent, a prompt fragment or
+configuration read once at start: **most of an edit applies at the next
+server start.** A `config set` of a provider, an agent, a prompt fragment or
 the agent defaults against a running deployment is accepted by that
 server and changes nothing it is doing until the process restarts, which
 both the command and the API's answer say every time they write. Two
@@ -2393,11 +2411,11 @@ reaches the API.
 Every `--local` invocation prints one line on stderr saying that it
 bypasses the API, and every write under it then says when it takes
 effect, the same sentence the API answers that act with: the next server
-start, the next `config reload` for an MCP entry or a secret on one, or
-the device's next check-in for a binding. That is not a warning about a
-hazard: it is the boot-time snapshot contract and its two exceptions,
-said out loud at the one moment an operator is most likely to expect
-otherwise. The line itself is printed rather than enforced
+start, the next `config reload` for an MCP entry, a secret on one, a
+prompt fragment or an agent's prompt, or the device's next check-in for
+a binding. That is not a warning about a hazard: it is the start-time
+contract and its two exceptions, said out loud at the one moment an
+operator is most likely to expect otherwise. The line itself is printed rather than enforced
 because there is no reliable way to tell whether a server is running
 against the same file, and a wrong refusal would wedge the recovery path
 in exactly the situation it exists for. Concurrency is safe regardless:
