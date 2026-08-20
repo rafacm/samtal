@@ -95,9 +95,26 @@ migrate.** Reasons:
   the lane means (in-memory configuration becomes stored state) for
   no property this plan needs.
 
+One consequence must be said rather than inherited (the review's
+finding 9): in snapshot mode there is no engine, so a device
+binding or default-agent write through the mounted API lands in a
+database the bindings never read, while the acknowledgement
+claims next-check-in convergence. Under this plan the honest
+sentence exists for the first time: in snapshot mode those writes
+are acknowledged with the reload notice, because a generalized
+reload re-reads the store into a new generation and the bindings
+serve the current generation, so the reload is exactly when the
+write takes effect. The write path learns the mode as one fact on
+`ApiRuntime` beside `loaded_agents`, chosen where `binding_notice`
+already chooses; the diff's `check-in` label for the two settings
+follows the same fact in milestone 4. A mounted snapshot-mode test
+covers the loop the finding names: write, check-in unchanged,
+reload, check-in converged, and restart equivalent.
+
 #195 is closed when this plan's review round settles, citing this
 section; milestone 4 carries the `DeviceBindings` change that makes
-the decision real.
+the decision real, and the snapshot-mode acknowledgement above
+lands with it.
 
 ## The issue's open questions, and the ones the code map raises
 
@@ -701,6 +718,13 @@ default-agent write can still acknowledge next-check-in
 convergence that snapshot mode cannot see. The plan must define
 runtime-write behavior in snapshot mode and add a mounted
 snapshot-mode test across write, check-in, reload, and restart.
+
+*Resolution.* Adopted, the third offered shape: snapshot-mode
+device and default-agent writes acknowledge the reload notice,
+which under this plan is exactly when they take effect; the mode
+is one fact on `ApiRuntime` chosen where `binding_notice` chooses,
+the diff's `check-in` label follows the same fact in M4, and the
+mounted snapshot-mode loop test is named in the #195 section.
 
 **10 (P2). Duplicate provider and filler ownership surfaces in
 `Composition`.** Widening `Generation` to own providers and
