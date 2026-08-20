@@ -65,6 +65,7 @@ from vinga_server.app import create_app
 from vinga_server.capture import CaptureStore
 from vinga_server.config import Config
 from vinga_server.events import Emission, attach_server_tap, detach_server_tap
+from vinga_server.events.values import CaptureWrite
 from vinga_server.filler import build_agent_fillers
 from vinga_server.logs import _STANDARD_ATTRIBUTES, JsonFormatter
 from vinga_server.providers import build_agent_providers
@@ -352,7 +353,7 @@ def test_a_failed_writes_own_words_reach_no_record_or_consumer(
     assert capture is not None
 
     with caplog.at_level("DEBUG"):
-        capture._disable("write audio", planted())
+        capture._disable(CaptureWrite.AUDIO, planted())
 
     failed = only(caplog, "capture_failed")
     assert SENTINEL not in failed.getMessage()

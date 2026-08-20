@@ -57,6 +57,7 @@ from vinga_server.events.catalog import (
     CaptureStarted,
 )
 from vinga_server.events.values import (
+    CaptureWrite,
     CaptureWriteToken,
     ClassName,
     ConfiguredPath,
@@ -247,7 +248,7 @@ class SessionCapture:
     def _expired(self, now: float) -> bool:
         return self._at(now) >= self._max_session_s
 
-    def _disable(self, doing: str, exc: BaseException) -> None:
+    def _disable(self, doing: CaptureWrite, exc: BaseException) -> None:
         # The class name and never the exception (the PR #153 review).
         # Every caller here catches a bare `Exception` around a write,
         # so what arrives is whatever the filesystem, the wave module or
@@ -287,7 +288,7 @@ class SessionCapture:
             channel.add(pcm, at, self._start_frame)
             self._flush(self._frame_of(now) - int(FLUSH_LAG_S * CAPTURE_RATE))
         except Exception as exc:  # noqa: BLE001 - capture never breaks a session
-            self._disable("write audio", exc)
+            self._disable(CaptureWrite.AUDIO, exc)
 
     def _flush(self, up_to_frame: int) -> None:
         assert self._wav is not None
@@ -358,7 +359,7 @@ class SessionCapture:
             # leading up to a hard stop are the ones worth having.
             self._events.flush()
         except Exception as exc:  # noqa: BLE001 - capture never breaks a session
-            self._disable("write an event", exc)
+            self._disable(CaptureWrite.EVENT, exc)
 
     def vad(self, speech_ms: float, listening: bool, replying: bool, now: float) -> None:
         """The endpointer's opinion, sampled every frame rather than only

@@ -27,6 +27,7 @@ from vinga_server.device.session import DeviceSession
 from vinga_server.events import ServerEvents
 from vinga_server.events.catalog import AuthRejected, RejectedAtCapacity
 from vinga_server.events.values import (
+    AuthRejection,
     AuthRejectionToken,
     DeviceId,
     DeviceOrUnidentified,
@@ -86,22 +87,29 @@ def signed_device_id(device_id: str) -> str:
         return device_id.strip().lower()
 
 
-def refusal_reason(device_auth: DeviceAuth | None, websocket: WebSocket) -> str | None:
+def refusal_reason(
+    device_auth: DeviceAuth | None, websocket: WebSocket
+) -> AuthRejection | None:
     """Why this handshake is refused, or None when it may proceed.
 
     The identity a token is checked against is the pair the OTA reply
     signed for, read from the headers the firmware sets: `Device-Id`
     holds the MAC and `Client-Id` the device UUID.
+
+    A member rather than a string, because the answer IS the closed set
+    the event declares: a spelling this returned that the set does not
+    hold would be a refusal the surface cannot report, and the type is
+    what makes that unwritable rather than caught at emit.
     """
     if device_auth is None:
         return None
     token = bearer_token(websocket.headers.get("authorization", ""))
     if token is None:
-        return "no_token"
+        return AuthRejection.NO_TOKEN
     device_id = signed_device_id(websocket.headers.get("device-id", ""))
     client_id = websocket.headers.get("client-id", "").strip()
     if not device_auth.verify(token, client_id, device_id):
-        return "bad_token"
+        return AuthRejection.BAD_TOKEN
     return None
 
 

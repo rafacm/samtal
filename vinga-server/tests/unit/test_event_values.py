@@ -16,8 +16,10 @@ reason the sentinel suite gives: a substring hunt proves only that this
 spelling did not appear.
 """
 
+import inspect
 import os
 from pathlib import Path
+from typing import get_args
 
 import pytest
 
@@ -558,19 +560,73 @@ def test_the_mcp_reload_words_are_the_ones_the_reload_answers_with() -> None:
 
 
 def test_the_remaining_server_sets_are_the_words_their_sites_write() -> None:
-    """The small ones, gathered: a handshake refusal, a declined
-    recording, a failed write's track, the echo guard's outcome and a
-    configured transport."""
-    assert frozenset(AuthRejection) == frozenset({"no_token", "bad_token"})
+    """The small ones whose decision site fixes them per variant or
+    reads them off configuration: a declined recording, the echo guard's
+    outcome, a version-2 poll's refusal, and a configured transport.
+
+    Restated rather than typed at the site, and for two different
+    reasons. The first three are `fixed=` on their variants, so no site
+    passes them at all and there is nothing to type. The fourth is the
+    configuration's own `Literal`, which is its schema and its generated
+    reference, not this module's to name.
+    """
     assert frozenset(CaptureDeclined) == frozenset({"unusable", "min_free_mb", "open"})
-    assert frozenset(CaptureWrite) == frozenset({"write audio", "write an event"})
     assert frozenset(EchoOutcome) == frozenset(
         {"skipped", "timed_out", "confirmed_echo", "confirmed_empty", "recovered"}
     )
-    assert frozenset(McpTransport) == frozenset({"stdio", "streamable_http"})
     assert frozenset(ActivationRefusal) == frozenset(
         {"unreadable_body", "unknown_algorithm", "challenge_mismatch"}
     )
+
+    from vinga_server.config.models import McpServerConfig
+
+    assert frozenset(McpTransport) == frozenset(
+        get_args(McpServerConfig.model_fields["transport"].annotation)
+    )
+
+
+# --- and the three sets whose decision site is typed by them ----------
+#
+# The stronger arrangement, where the site does not write a word at all:
+# its own signature is the enumeration, so a spelling the set does not
+# hold is unwritable rather than caught at emit. Asserted by identity
+# against what the site really answers, which is what tells this apart
+# from a test that restates the members beside them.
+
+
+def test_a_refused_handshake_answers_a_member_rather_than_a_word() -> None:
+    from vinga_server.ws import refusal_reason
+
+    signature = inspect.signature(refusal_reason)
+
+    assert signature.return_annotation == (AuthRejection | None)
+    assert frozenset(AuthRejection) == frozenset({"no_token", "bad_token"})
+
+
+def test_a_failed_capture_write_names_its_track_by_member() -> None:
+    from vinga_server.capture import SessionCapture
+
+    doing = inspect.signature(SessionCapture._disable).parameters["doing"]
+
+    assert doing.annotation is CaptureWrite
+    assert frozenset(CaptureWrite) == frozenset({"write audio", "write an event"})
+
+
+def test_the_banners_origin_carries_a_member_rather_than_a_key_name() -> None:
+    """By identity on what `public_origin` really answers, which is the
+    half a signature cannot give: a dataclass annotated with the type
+    still takes whatever it is handed."""
+    from vinga_server.config import ServerConfig
+    from vinga_server.onboarding.origin import public_origin
+
+    answered = [
+        public_origin(ServerConfig(public_url="https://vinga.example")).source,
+        public_origin(ServerConfig(websocket_url="wss://vinga.example/ws")).source,
+        public_origin(ServerConfig()).source,
+    ]
+
+    assert [type(one) for one in answered] == [OriginSource] * 3
+    assert frozenset(answered) == frozenset(OriginSource)
 
 
 def test_the_two_new_fragments_are_built_by_the_types_that_declare_them() -> None:
