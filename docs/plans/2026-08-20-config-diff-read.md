@@ -58,14 +58,15 @@ running world can differ from the boot: `POST
 generation while the process runs. Diffing MCP entries against the
 boot snapshot would therefore claim pending changes a reload already
 applied, which is exactly what the issue forbids. The honest
-baseline for the MCP half is the registry's current generation, and
-reading that requires a small new read on `McpServers`, so the work
-is split: milestone 1 labels the kind as reload-governed and claims
-nothing pending for it (allowed by the issue: excluded or labeled),
-and milestone 2 adds the real added/removed/changed answer computed
-against the current generation. Under-reporting between the
-milestones is the safe direction to be wrong in; over-claiming is
-the direction the issue names as the failure.
+baseline for the MCP half is the registry's current generation,
+which requires retained state and a new read on `McpServers` (the
+design decision below). The endpoint does not ship in halves: a
+label-only interim answer was considered and rejected by the review
+(finding 2), because it would hide stored MCP and grant changes
+that are genuinely pending, a false negative rather than a safe
+under-claim. Milestone 1 builds the whole comparison unexposed,
+with no route and no published schema, and milestone 2 exposes the
+complete read.
 
 **Where does the route live?** `GET /runtime/config/diff`. The
 `/runtime` namespace exists precisely because it can never collide
@@ -156,9 +157,11 @@ knows from `GET /config`:
       "prompt_fragments": {"applies": "restart", "added": [], "removed": [],
                            "changed": []},
       "agents":           {"applies": "restart", "added": [], "removed": [],
-                           "changed": []},
+                           "changed": [],
+                           "grants": {"applies": "reload", "changed": []}},
       "agent_defaults":   {"applies": "restart", "changed": false},
-      "mcp_servers":      {"applies": "reload"},
+      "mcp_servers":      {"applies": "reload", "added": [], "removed": [],
+                           "changed": []},
       "devices":          {"applies": "check-in"},
       "default_agent":    {"applies": "check-in"}
     }
@@ -171,10 +174,11 @@ is stored for either is already served by the entity reads and is
 in effect by the next check-in, so a `changed` flag there would
 dress a non-pending fact as a diff. `applies` values come from a
 closed `StrEnum` declared with the models: `restart`, `reload`,
-`check-in`. Milestone 2 extends `mcp_servers` with the
-added/removed/changed lists and gives `agents` a nested
-reload-labeled `grants` entry listing agents whose effective grants
-differ from the current generation.
+`check-in`. The schema is published exactly once, complete, when
+milestone 2 lands the route: the response models forbid extra keys
+like every model in `responses.py`, so a client generated from a
+smaller interim schema would reject a grown response, and no
+interim schema therefore ever exists (the review's finding 6).
 
 **Completeness is pinned, not remembered.** The regime map must
 cover the domain, and a domain kind added next year must not
@@ -216,17 +220,20 @@ keeps smaller.
 
 ## Module layout
 
-- `config/diff.py` (new): the comparison and the regime map.
-- `config/responses.py`: `ConfigDiff` and its per-kind models, the
-  `applies` token enum.
-- `config/api.py`: the `ApiRuntime` field, the dependency resolver,
-  the `GET /runtime/config/diff` route in `_runtime`, and the
-  `API_DESCRIPTION` paragraph that rewrites the "boot-time
+- `config/diff.py` (new, M1): the comparison and the regime map.
+- `tools/mcp/registry.py` (M1): the per-entry comparison
+  identities retained at install, the generation mark, and the
+  pending-against-stored read; `slice.py`, `manager.py` and
+  `reload.py` as far as the install path needs to carry the
+  identities, factoring an existing private helper only where that
+  is smaller than calling through the registry.
+- `config/responses.py` (M2): `ConfigDiff` and its per-kind
+  models, the `applies` token enum.
+- `config/api.py` (M2): the `ApiRuntime` field, the dependency
+  resolver, the `GET /runtime/config/diff` route in `_runtime`,
+  and the `API_DESCRIPTION` paragraph that rewrites the "boot-time
   snapshot" story to mention the read.
-- `app.py`: the closure builder beside `_mcp_reloader`.
-- `tools/mcp/registry.py` (M2): the pending-against-stored read;
-  `slice.py` and `manager.py` only if factoring an existing private
-  helper for it is smaller than calling through the registry.
+- `app.py` (M2): the closure builder beside `_mcp_reloader`.
 - Docs: `docs/reference/api-openapi.json` regenerated (drift
   checked); `vinga-server/README.md`'s `/runtime` route block;
   `CHANGELOG.md`. `docs/reference/domain-config.md` is untouched
@@ -239,29 +246,36 @@ Every merge leaves `main` releasable: the image publishes on every
 push, so each milestone ends with lint, both suites, and the doc
 drift checks green.
 
-- [ ] **M1: the diff read, honest about what it cannot yet see.**
-  `config/diff.py` with the regime map and the model-plus-
-  fingerprint comparison for the restart-bound kinds (providers,
-  prompt fragments, agents and `agent_defaults` with `mcp`
-  excluded); devices and `default_agent` labeled `check-in` with no
-  lists; `mcp_servers` labeled `reload` with no lists; the typed
-  response models; the `ApiRuntime` field and 503; the async route;
-  the OpenAPI regeneration with the route inventory pin; the README
-  block and CHANGELOG entry. Design footprint: adds the one seam
-  (a `Snapshot`-to-diff callable) and the one module that knows
-  convergence boundaries; deepens the composition root by one
-  closure built where the boot world is already in hand. Branch
+- [ ] **M1: the whole comparison, unexposed.** `config/diff.py`
+  with the regime map, the `DOMAIN_KEYS` completeness pin, and the
+  model-plus-fingerprint comparison for the restart-bound kinds
+  (providers as `stage.name`, prompt fragments, agents and
+  `agent_defaults` with `mcp` excluded); the MCP generation's
+  retained per-entry comparison identities computed at install, the
+  generation mark the install advances, and the public `McpServers`
+  read answering added/removed/changed plus effective-grant changes
+  against a stored candidate; unit tests at both interfaces,
+  including every named MCP case in the test strategy. No route, no
+  response models in the OpenAPI document, no behavior change; the
+  committed reference documents are untouched and the drift checks
+  prove it. Design footprint: adds the one module that knows
+  convergence boundaries, and deepens `McpServers` with the
+  reload's diff question in read-only form; callers never learn
+  connection identity, secret marks, or slice anatomy. Branch
   `feature/config-diff`, PR TBD.
-- [ ] **M2: the MCP half against the current generation.**
-  The `McpServers` read described above; `config/diff.py` composes
-  it into `mcp_servers.added/removed/changed` and the reload-labeled
-  `agents.grants` list; the route's composition stays await-free
-  after the store load; OpenAPI regenerated; the README sentence
-  that says the MCP half reports against the running generation.
-  Design footprint: deepens `McpServers` with the reload's diff
-  question in read-only form; callers never learn connection
-  identity, secret marks, or slice anatomy. Branch
-  `feature/config-diff-m2` stacked on M1, PR TBD.
+- [ ] **M2: the route, complete.** The typed response models,
+  published once with the `mcp_servers` lists and the
+  `agents.grants` entry included; the `ApiRuntime` field, the
+  composition-root closure running the reload's re-read in a worker
+  thread with the generation-mark retry; the async route with its
+  503 and its 409; the OpenAPI regeneration with the route
+  inventory pin; the transport, sentinel, concurrency, and
+  integration tests; the `API_DESCRIPTION` paragraph, the README
+  `/runtime` block, and the CHANGELOG entry. Design footprint: adds
+  the one seam (an async diff callable on `ApiRuntime`) and deepens
+  the composition root by one closure built where the boot world is
+  already in hand. Branch `feature/config-diff-m2` stacked on M1,
+  PR TBD.
 
 ## Test strategy
 
@@ -339,11 +353,11 @@ definition (grep for the defaults-then-own rule cited in review).
 - **Fingerprint semantics surprise an operator** (a re-set of the
   same value reports changed). Documented in the API description
   sentence for the read: changed means written since boot.
-- **The M1 gap around MCP pending changes is misread as "nothing
-  pending".** The `mcp_servers` entry is never empty lists in M1;
-  it is the label alone, a shape that says "not answered here yet",
-  and the README sentence says the reload surface owns that answer
-  until M2 lands in the same release train.
+- **M1 lands machinery no route reaches yet.** Accepted for one
+  milestone by design: publishing a partial schema was the worse
+  trade (findings 2 and 6), the new interfaces are exercised by
+  their own unit suites in the same PR, and the route is the next
+  PR in the stack.
 - **Scope creep toward #191.** The generation story stays
   MCP-only, exactly as it is today; nothing here retains new state
   for other kinds, so #191 inherits a read to re-baseline, not a
@@ -376,6 +390,12 @@ stored MCP and grant changes that are still pending; the issue
 permits labeling or excluding changes that are already live, not
 hiding pending ones. Keep M1 internal with no route, or combine the
 milestones.
+
+*Resolution.* Adopted, as the first offered cut: milestone 1 builds
+the whole comparison unexposed (no route, no published schema) and
+milestone 2 exposes the complete read. The open-questions section,
+the milestones, the module layout, and the risk that replaced the
+label-only gap now say so.
 
 **3 (P1). The claimed one-world read can combine states that never
 coexisted.** The await around the stored load is itself the race
