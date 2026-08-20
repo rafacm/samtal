@@ -70,8 +70,12 @@ def test_a_moved_timestamp_does_not_verify(auth: DeviceAuth) -> None:
 def test_a_token_past_its_expiry_does_not_verify() -> None:
     auth = DeviceAuth(SECRET, expire_s=60)
     assert auth.verify(auth.issue(CLIENT, DEVICE), CLIENT, DEVICE)
-    # Sign at an older timestamp rather than sleep for a minute: the
-    # boundary is the token's age, and the age is arithmetic.
+    # White-box for the three signatures in this file. What is under
+    # test is a boundary in time: a token one second past its expiry,
+    # one second inside it, and one whose timestamp was tampered with.
+    # The issuer stamps "now" and offers no way to say when, so the
+    # public route to a token a minute old is a test that sleeps for a
+    # minute, and the boundary itself would still be untestable.
     old = int(time.time()) - 61
     assert not auth.verify(f"{auth._sign(CLIENT, DEVICE, old)}.{old}", CLIENT, DEVICE)
 

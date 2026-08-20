@@ -558,6 +558,12 @@ def test_a_parser_failure_carries_no_parser_exception(tmp_path: Path) -> None:
     fragment = tmp_path / "broken.yaml"
     fragment.write_text(f"prompt: '{SECRET}\n", encoding="utf-8")
 
+    # White-box for this refusal test: what is under test is the
+    # exception's CHAIN, and a chain is not printed. The command prints
+    # one sanitized line, which the runner-driven tests beside this one
+    # assert; a __cause__ or a __context__ still holding the library's
+    # own exception is reachable only from where the refusal is raised,
+    # and anything that renders a traceback would find it there.
     with pytest.raises(cli.ConfigError) as caught:
         cli._fragment(str(fragment))
 

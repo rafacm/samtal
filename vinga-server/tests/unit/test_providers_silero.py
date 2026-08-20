@@ -31,13 +31,26 @@ class ScriptedDetector:
         return WINDOW_BYTES // 2
 
 
-def scripted_endpointer(probs: list[float], **kwargs: float) -> SileroEndpointer:
+def scripted_endpointer(
+    probs: list[float], detector: "ScriptedDetector | None" = None, **kwargs: float
+) -> SileroEndpointer:
+    """An endpointer whose model answers the probabilities the test
+    wrote down.
+
+    White-box, deliberately, and the only reach-in in this file. The
+    ONNX model is loaded inside the endpointer, from a file the test
+    lane does not ship, and the state machine under test is the one that
+    reads its probabilities: what a window was scored is the input, and
+    an endpointer takes audio rather than scores. Handed back rather
+    than read off again, so the one test that asks the model what it was
+    told holds the object it planted.
+    """
     endpointer = SileroEndpointer(
         threshold=kwargs.get("threshold", 0.5),
         trailing_silence_ms=kwargs.get("trailing_silence_ms", 700.0),
         max_utterance_ms=kwargs.get("max_utterance_ms", 10_000.0),
     )
-    endpointer._detector = ScriptedDetector(probs)
+    endpointer._detector = detector if detector is not None else ScriptedDetector(probs)
     return endpointer
 
 
@@ -114,8 +127,9 @@ def test_odd_sized_chunks_are_buffered_into_whole_windows() -> None:
 
 
 def test_reset_forgets_speech_and_resets_the_model_state() -> None:
-    endpointer = scripted_endpointer([0.9] * 10)
+    detector = ScriptedDetector([0.9] * 10)
+    endpointer = scripted_endpointer([0.9] * 10, detector)
     feed_windows(endpointer, 10)
     endpointer.reset()
-    assert endpointer._detector.resets == 1
+    assert detector.resets == 1
     assert not any(feed_windows(endpointer, 40))

@@ -109,7 +109,7 @@ def test_a_wedged_git_does_not_hold_up_a_boot(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.delenv(REVISION_ENV, raising=False)
 
     def times_out(*args: object, **kwargs: object) -> None:
-        raise subprocess.TimeoutExpired(cmd="git", timeout=build_info._GIT_TIMEOUT_S)
+        raise subprocess.TimeoutExpired(cmd="git", timeout=1)
 
     monkeypatch.setattr(build_info.subprocess, "run", times_out)
     assert revision() == UNKNOWN_REVISION

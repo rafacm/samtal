@@ -101,6 +101,10 @@ def test_the_token_lifetime_is_configurable(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setenv(SECRET_ENV, "d" * 64)
     auth = build_device_auth(Config(server={"auth": {"token_expire_s": 60}}))
     assert auth is not None
+    # White-box: what a configured lifetime does is refuse a token that
+    # much older, and a token that old cannot be issued, only signed at
+    # a chosen instant, which is a reach of its own (`test_auth.py`).
+    # Reading the setting is the shorter of the two reaches.
     assert auth._expire_s == 60
 
 

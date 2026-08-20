@@ -133,6 +133,10 @@ async def test_an_unanswered_call_can_be_abandoned_from_outside() -> None:
     with pytest.raises(TimeoutError):
         async with asyncio.timeout(0.05):
             await device.client.call("self_audio_speaker_set_volume", {"volume": 40})
+    # White-box: an abandoned call leaves an entry in the client's
+    # pending map, and a map that grows per timed-out call is memory
+    # nothing reports. What it costs is a session that has been talking
+    # to a slow board for an hour, which no assertion can wait for.
     assert device.client._pending == {}
 
 

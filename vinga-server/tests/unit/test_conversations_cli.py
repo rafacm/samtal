@@ -385,6 +385,10 @@ def test_the_refusal_carries_no_exception_chain(tmp_path: Path, recorded) -> Non
     from vinga_server.conversations.store import purge as purge_directly
 
     recorded(("keep", NOW, "aa:aa:aa:aa:aa:aa"))
+    # White-box: the failure under test is the delete itself raising
+    # with the database's own words in it, and only the database can
+    # produce that, unreliably. Standing in for the one function the
+    # command calls is what makes the failure a fact of the test.
     original = store_module._delete_sessions
 
     def poisoned(*_args: object, **_kwargs: object):

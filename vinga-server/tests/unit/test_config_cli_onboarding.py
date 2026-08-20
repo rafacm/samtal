@@ -704,6 +704,12 @@ def test_the_url_refusals_carry_no_library_exception() -> None:
     """The chain, not just the message: httpx's InvalidURL quotes the
     character it refused and its position, and anything that walks a
     chain reads what it holds."""
+    # White-box for this refusal test: what is under test is the
+    # exception's CHAIN, and a chain is not printed. The command prints
+    # one sanitized line, which the runner-driven tests beside this one
+    # assert; a __cause__ or a __context__ still holding the library's
+    # own exception is reachable only from where the refusal is raised,
+    # and anything that renders a traceback would find it there.
     with pytest.raises(cli.ConfigError) as caught:
         cli._device_url(f"https://voice.example/x/AB\n{PASTED}/", "the URL given to doctor")  # noqa: SLF001
 
@@ -832,6 +838,9 @@ def test_a_location_that_cannot_be_read_is_not_a_canonical_slash() -> None:
         request=httpx.Request("GET", "https://voice.example/x/ABCDEFGH"),
     )
 
+    # White-box: this rule sits between two libraries, and the
+    # docstring above says why the public route cannot reach it here.
+    # The redirect is built by hand for the same reason.
     assert cli._canonical_slash(response) is None  # noqa: SLF001
 
 

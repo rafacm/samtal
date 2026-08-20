@@ -173,6 +173,12 @@ def test_a_url_refusal_carries_no_parser_exception(
     """The chain, not just the message: a ValueError from the URL parser
     holds the text it refused, and anything that walks a chain reads
     what it holds."""
+    # White-box for this refusal test: what is under test is the
+    # exception's CHAIN, and a chain is not printed. The command prints
+    # one sanitized line, which the runner-driven tests beside this one
+    # assert; a __cause__ or a __context__ still holding the library's
+    # own exception is reachable only from where the refusal is raised,
+    # and anything that renders a traceback would find it there.
     with pytest.raises(ConfigError) as caught:
         cli._permitted(f"http://localhost:{SECRET}/api", "--api-url")
 
