@@ -95,26 +95,40 @@ migrate.** Reasons:
   the lane means (in-memory configuration becomes stored state) for
   no property this plan needs.
 
-One consequence must be said rather than inherited (the review's
-finding 9): in snapshot mode there is no engine, so a device
-binding or default-agent write through the mounted API lands in a
-database the bindings never read, while the acknowledgement
-claims next-check-in convergence. Under this plan the honest
-sentence exists for the first time: in snapshot mode those writes
-are acknowledged with the reload notice, because a generalized
-reload re-reads the store into a new generation and the bindings
-serve the current generation, so the reload is exactly when the
-write takes effect. The write path learns the mode as one fact on
-`ApiRuntime` beside `loaded_agents`, chosen where `binding_notice`
-already chooses; the diff's `check-in` label for the two settings
-follows the same fact in milestone 4. A mounted snapshot-mode test
-covers the loop the finding names: write, check-in unchanged,
-reload, check-in converged, and restart equivalent.
+One consequence must be said rather than inherited (round 1's
+finding 9, corrected by round 2's finding 2): in snapshot mode
+there is no engine behind the bindings, and the database the
+mounted API creates beside them is sparse, holding only what was
+written since. A reload from that store would load a
+binding-and-nothing world as the complete domain half, and the
+first amendment's promise that snapshot-mode writes converge at
+the reload was therefore impossible as written. The honest design
+is refusal, not a seeded baseline: a server composed from a
+supplied snapshot has no store that describes its world, so in
+snapshot mode the generalized reload and the stored-vs-running
+diff both refuse with one fixed typed sentence saying exactly
+that, a sibling in the closed refusal set mapped to 409. This
+also closes a latent #193 edge the correction exposed: in
+snapshot mode today, the diff read would compare the sparse store
+against the served snapshot and claim the whole world pending,
+which is the care point's failure mode in an
+unreachable-in-production configuration; from milestone 1 it
+refuses instead. Device and default-agent writes in snapshot mode
+are acknowledged with their own fixed sentence, that the write is
+stored and takes effect when a server boots from this store,
+which is the one true sentence available: nothing this process
+serves reads it. The mode is one fact on `ApiRuntime` beside
+`loaded_agents`, chosen where `binding_notice` already chooses.
+The unit lane keeps its meaning untouched: no seeding, no delta
+semantics, no lane migration; the mounted snapshot-mode tests pin
+the write acknowledgement, the diff refusal, and the reload
+refusal.
 
-#195 is closed when this plan's review round settles, citing this
-section; milestone 4 carries the `DeviceBindings` change that makes
-the decision real, and the snapshot-mode acknowledgement above
-lands with it.
+#195 is closed when milestone 4 lands, not when the plan settles,
+citing this section: the decision (snapshot mode kept, the lane
+stays, the runtime surfaces refuse honestly) is made here, and M4
+is where `DeviceBindings` reading the current generation makes it
+real.
 
 ## The issue's open questions, and the ones the code map raises
 
@@ -738,6 +752,8 @@ which under this plan is exactly when they take effect; the mode
 is one fact on `ApiRuntime` chosen where `binding_notice` chooses,
 the diff's `check-in` label follows the same fact in M4, and the
 mounted snapshot-mode loop test is named in the #195 section.
+(Superseded: round 2's finding 2 showed this shape impossible;
+see its resolution.)
 
 **10 (P2). Duplicate provider and filler ownership surfaces in
 `Composition`.** Widening `Generation` to own providers and
@@ -783,10 +799,25 @@ replace the in-memory world. The promised write-reload-converge
 loop is impossible without a seeded baseline or delta semantics,
 and #195 must not close on it. Round 1's finding 9 unresolved.
 
+*Resolution.* Adopted, by refusal rather than a baseline: in
+snapshot mode the generalized reload and the diff both refuse with
+one fixed typed 409 sentence (there is no store describing this
+server's world), snapshot-mode device and default-agent writes
+acknowledge that the write is stored and takes effect when a
+server boots from this store, no seeding and no lane migration,
+and #195 closes at M4 rather than at plan settle. The #195
+section records the latent #193 snapshot-mode diff edge this
+fixes.
+
 **3 (P1). The snapshot-mode diff cannot represent the pending
 bindings round 1's resolution introduced.** `LiveKind` has no
 comparison payload, so a snapshot-mode write pending a reload has
 no honest response shape under the published schema.
+
+*Resolution.* Resolved by finding 2's shape: snapshot mode has no
+pending-bindings answer to represent because the diff refuses
+there; the published schema is untouched and the label-only live
+regime remains the database mode's answer.
 
 **4 (P1). Agent binding and generation binding race at M4.** The
 session resolves bindings, then separately the factory reads
