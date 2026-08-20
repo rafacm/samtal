@@ -32,7 +32,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from tests.support.configs import DEVICE_MAC, DEVICE_UUID, recording_config
 from tests.support.sessions import WRITER_TIMEOUT_S as TIMEOUT_S
-from tests.support.sessions import Gate, drive_reply, open_session, until
+from tests.support.sessions import Gate, attached_taps, drive_reply, open_session, until
 from tests.support.sockets import LoopingSocket
 from tests.support.wire import connect, say_something, send_pcm, sentences, shake_hands, speech_pcm
 from vinga_server.app import create_app
@@ -578,7 +578,7 @@ async def test_a_device_that_vanishes_at_the_hello_opens_no_record(
 
     assert read(tmp_path, "select * from sessions") == []
     assert _capture_manifest(tmp_path) is None
-    assert session._events._taps == [], "a consumer was left attached"
+    assert attached_taps(session) == [], "a consumer was left attached"
 
 
 @pytest.mark.parametrize("step", ["_start_device_discovery", "_start_idle_watchdog"])
@@ -609,8 +609,13 @@ async def test_a_failure_after_the_open_still_finishes_the_record(
     (row,) = read(tmp_path, "select * from sessions")
     assert row["closed_at"] is not None
     assert row["close_reason"] == "error"
+    # White-box for the two collaborator reads: a session gives back
+    # what it took, and a released collaborator has no public form,
+    # which is the point of releasing it. A record still open is a row
+    # nobody closes and a capture still open is a manifest that never
+    # says it finished, both of which show up in another process.
     assert session._record is None
-    assert session._events._taps == [], "a consumer was left attached"
+    assert attached_taps(session) == [], "a consumer was left attached"
     assert session._capture is None
     manifest = _capture_manifest(tmp_path)
     # The manifest's capture block is rewritten by the close, so its
@@ -624,6 +629,10 @@ async def _opened(session: Any, websocket: Any) -> None:
     do: it sleeps the thread, and this session is a task beside it."""
     for _ in range(500):
         await asyncio.sleep(0.01)
+        # White-box, for the reason `sessions.open_session` gives at
+        # the same wait: the handshake's completion is recorded nowhere
+        # else, and a caller that polled the runtime alone would return
+        # a session still mid-accept.
         if session._opened_at is not None and websocket.inbox.empty():
             return
     raise AssertionError("the session never opened")
@@ -662,7 +671,7 @@ async def test_a_cancelled_cleanup_step_still_finishes_the_record(
     (row,) = read(tmp_path, "select * from sessions")
     assert row["closed_at"] is not None
     assert session._record is None
-    assert session._events._taps == []
+    assert attached_taps(session) == []
     manifest = _capture_manifest(tmp_path)
     assert manifest is not None and manifest["capture"]["complete"] is True
 
@@ -861,6 +870,9 @@ async def test_a_failed_write_costs_the_batch_and_not_the_conversation(
             gate.let_through()
             await drive_reply(session, UTTERANCE)
             gate.wait()
+            # White-box: the failure under test is the database going
+            # away between a turn and the close that follows it, and
+            # only a broken engine puts it exactly there.
             store._engine = Broken()  # type: ignore[assignment]
             gate.open_forever()
             await websocket.close(1000, "goodbye")

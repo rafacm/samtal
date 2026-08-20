@@ -153,6 +153,14 @@ async def test_a_cleanup_failure_is_the_reason_when_nothing_else_is(
     async def refuse() -> None:
         raise ValueError("the step would not finish")
 
+    # White-box for this file's four reaches. What a session says ended
+    # it is a token on the closing event, which the tests above read
+    # from the log; these three are about the latch underneath it, and a
+    # latch is only ever the right answer when two causes race. A race
+    # driven from outside is reproducible with a probability, so the
+    # rule (first cause wins, nothing rewrites it, an unlatched close
+    # reads as the device hanging up) is asserted at the one place it is
+    # written.
     with caplog.at_level("INFO"):
         await session._cleanly("the conversation", refuse())
 
@@ -198,6 +206,9 @@ async def test_a_disconnect_a_drain_arrives_behind_is_still_a_client_close(
         reached.set()
         await release.wait()
 
+    # White-box, same file, different half: the window under test is
+    # inside one cleanup step, and holding the close there is how a
+    # drain arriving mid-close becomes a fact rather than a race.
     session._stop_idle_watchdog = held  # type: ignore[method-assign]
     registry = SessionRegistry(max_sessions=8)
     assert registry.try_add(session)

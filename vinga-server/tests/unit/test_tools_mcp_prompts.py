@@ -328,6 +328,14 @@ async def discovered(
     passed as the identity here and tested where it belongs, over a
     real entry holding a real credential, in
     `test_mcp_status_reflection.py`."""
+    # White-box for this file's four reaches into the discovery unit.
+    # What each of them is about is a decision taken while a connection
+    # is being made to an untrusted server: which blocks are admitted,
+    # what a refusal says, and what is never built at all. The public
+    # form is a running MCP server behaving badly on purpose, and the
+    # cases here are the ones no cooperating server produces: a block
+    # one character past the cap, a listing that cannot be read, a
+    # rendering that must not be allocated.
     return await prompts._discovered(  # type: ignore[arg-type]
         "tools", stdio_entry(**overrides), session, capabilities, lambda text: text
     )

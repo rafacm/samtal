@@ -606,6 +606,11 @@ def test_a_refused_handshake_answers_a_member_rather_than_a_word() -> None:
 def test_a_failed_capture_write_names_its_track_by_member() -> None:
     from vinga_server.capture import SessionCapture
 
+    # White-box, and it is a source reading rather than a call: the
+    # claim is that a closed set is named by its members at the one site
+    # that passes them, and a signature's annotation is where that is
+    # written. Nothing about a running capture reports which type its
+    # own parameter is declared as.
     doing = inspect.signature(SessionCapture._disable).parameters["doing"]
 
     assert doing.annotation is CaptureWrite

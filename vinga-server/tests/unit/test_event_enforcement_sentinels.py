@@ -975,6 +975,10 @@ def test_a_failed_capture_write_refuses_carrying_nothing(
     def refuse(*_args: object, **_kwargs: object) -> None:
         raise hostile()
 
+    # White-box, same reason as the capture pins: the failure under
+    # test is the audio writer raising an exception whose class name is
+    # the sentinel, and no public call can make a healthy WAV writer do
+    # that.
     capture._mic.add = refuse  # type: ignore[method-assign]
 
     try:

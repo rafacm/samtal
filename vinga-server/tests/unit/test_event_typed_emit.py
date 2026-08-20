@@ -468,6 +468,10 @@ def test_reporting_swallows_whatever_the_channel_does(broken_log: None) -> None:
     """The helper itself, since everything above depends on it: what is
     being protected is a reply, and what is being lost is one diagnostic
     line about a diagnostic line."""
+    # White-box: this is the last-resort report, the one that runs when
+    # the logging channel itself is broken. Everything public above
+    # depends on it swallowing, and a swallow that worked is by
+    # definition a swallow that left no record to observe.
     events_module._report(
         logging.getLogger(CHANNEL), logging.ERROR, "anything %s", "at all"
     )

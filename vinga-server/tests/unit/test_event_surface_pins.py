@@ -59,8 +59,15 @@ from tests.support.device_tools import FakeDevice
 from tests.support.events import only
 from tests.support.mcp_stdio_server import SHADOWED_TOOL_ENV
 from tests.support.providers import ScriptedLlm, Unreachable
-from tests.support.sessions import call, device_session, run_reply, session_for
-from tests.support.sockets import RecordingSocket
+from tests.support.sessions import (
+    call,
+    device_session,
+    drive_reply,
+    events_of,
+    run_reply,
+    session_for,
+)
+from tests.support.sockets import RecordingSocket, spoken
 from tests.tools.event_baseline import Failing, failing_reply, turned_away
 from vinga_server.config import Config
 from vinga_server.logs import _STANDARD_ATTRIBUTES, TEXT_FORMAT, JsonFormatter
@@ -165,7 +172,7 @@ def assert_unnamed(
 def watched(session: Any) -> Consumer:
     """A consumer attached to one session's events."""
     consumer = Consumer()
-    session._events.attach(consumer)
+    events_of(session).attach(consumer)
     return consumer
 
 
@@ -242,7 +249,7 @@ async def test_an_utterance_reaches_no_part_of_the_heard_record(
     session = uttering(SENTINEL)
     consumer = watched(session)
     with caplog.at_level("DEBUG"):
-        await session.runtime._reply(UTTERANCE)
+        await drive_reply(session, UTTERANCE)
 
     heard = only(caplog, "heard")
     assert_unnamed_in(heard, SENTINEL)
@@ -270,13 +277,13 @@ async def test_a_whole_exchange_reaches_no_record_of_itself(
     session = uttering(SENTINEL)
     consumer = watched(session)
     with caplog.at_level("DEBUG"):
-        await session.runtime._reply(UTTERANCE)
+        await drive_reply(session, UTTERANCE)
 
     assert only(caplog, "replied").sentences == 1  # type: ignore[attr-defined]
     assert_unnamed_anywhere(caplog, consumer, SENTINEL)
-    # And the reply really was spoken: the history holds it, which is
-    # where what was said is true.
-    assert SENTINEL in session.runtime._turns[-1].content
+    # And the reply really was spoken, which is what makes the hunt
+    # above mean something: the device was told the sentence.
+    assert any(SENTINEL in sentence for sentence in spoken(session.websocket))
 
 
 async def test_what_one_agent_said_before_a_handover_reaches_no_record(
@@ -328,6 +335,9 @@ async def test_tool_call_for_a_device_tool(caplog: pytest.LogCaptureFixture) -> 
     published = f"self_{TOOL_SENTINEL}"
     script = ScriptedLlm([[call(published)], "Done."])
     session = session_for(base_config(), POET_MAC, {"poet": script})
+    # White-box: a board's tools arrive from a discovery run the edge
+    # starts over the wire, and this session has no socket. What the
+    # case needs is a device-published name on the surface at all.
     session._device_tools = device.client
     consumer = watched(session)
     with caplog.at_level("DEBUG"):
