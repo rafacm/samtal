@@ -155,12 +155,13 @@ def test_the_document_describes_every_route_the_api_serves() -> None:
         # and an agent may be named `prompt`.
         "/runtime/agents/{name}/prompt": ["get"],
         "/runtime/mcp-servers": ["get"],
-        "/runtime/mcp-servers/reload": ["post"],
-        # And the read that spans both sides, under `/runtime/config/`
-        # rather than beside the entity reads: what it answers is a fact
-        # about this running server, and the two-segment path leaves the
-        # namespace open for the apply that will sit beside it.
+        # And the two that span both sides, under `/runtime/config/`
+        # rather than beside the entity reads: one answers what is
+        # stored and not yet served, the other puts it in front of the
+        # server, and the two-segment path is what lets an operator's
+        # read and its apply sit beside each other.
         "/runtime/config/diff": ["get"],
+        "/runtime/config/reload": ["post"],
         # The conversation store's reads. Their route functions live in
         # vinga_server/conversations/api.py and are registered on the
         # same application, which is what puts them here: a route

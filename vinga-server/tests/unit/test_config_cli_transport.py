@@ -36,6 +36,7 @@ from vinga_server import db as db_module
 from vinga_server.config import cli
 from vinga_server.config.api import MOUNT_PATH, build_api
 from vinga_server.config.loader import ConfigError
+from vinga_server.config.responses import McpReloadResult, outcomes
 from vinga_server.db import DATABASE_FILENAME
 
 
@@ -346,7 +347,13 @@ def test_reload_gives_the_server_longer_to_answer_than_a_write(
     assert cli.RELOAD_READ_TIMEOUT_S >= 2 * envelope
 
     made: list[httpx.Client] = []
-    empty = dict.fromkeys(cli.RELOAD_OUTCOMES, []) | {"servers": {}}
+    empty = {
+        "mcp": dict.fromkeys(outcomes(McpReloadResult), []) | {"servers": {}},
+        "prompts": {"changed": []},
+        "fillers": None,
+        "providers": None,
+        "agents": None,
+    }
 
     def answer(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=empty if "reload" in request.url.path else {})

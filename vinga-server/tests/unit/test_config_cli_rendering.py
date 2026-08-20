@@ -24,7 +24,7 @@ prompt's reader came to see whole, and the escape sequence that must not
 reach the terminal on any of them.
 """
 
-from dataclasses import asdict
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -34,8 +34,15 @@ from tests.support.config_cli import runner
 from tests.support.config_cli import showing as _showing
 from vinga_server.config import Config, cli
 from vinga_server.config.loader import ConfigError
-from vinga_server.config.responses import McpReloadResult
-from vinga_server.tools.mcp import McpReload, McpServers
+from vinga_server.config.responses import (
+    RELOAD_SECTIONS,
+    ConfigReloadResult,
+    McpReloadResult,
+    PromptsReload,
+    flags,
+    outcomes,
+)
+from vinga_server.tools.mcp import McpServers
 
 
 @pytest.fixture
@@ -440,17 +447,21 @@ def test_a_prompt_refusal_carries_nothing_of_the_body() -> None:
 # refuses a body that is not one.
 
 
-def _applied(servers: McpServers, **outcome: object):
-    """A server that answers a reload with what it did and what is
+def _applied(servers: McpServers, prompts: Sequence[str] = (), **outcome: object):
+    """A server that answers a reload with what it applied and what is
     running, standing in for a registry these tests deliberately do not
-    start. Both halves, because both are what the callable a running
-    server hands the API answers with: they are composed where the two
+    start. Every half, because that is what the callable a running
+    server hands the API answers with: they are composed where the
     phases are, so that nothing can happen between them."""
+    lists = ("started", "restarted", "stopped", "unchanged")
 
-    async def reload() -> McpReloadResult:
-        return McpReloadResult(
-            **{field: list(names) for field, names in asdict(McpReload(**outcome)).items()},
-            servers=servers.typed_status(),
+    async def reload() -> ConfigReloadResult:
+        return ConfigReloadResult(
+            mcp=McpReloadResult(
+                **{name: list(outcome.get(name, ())) for name in lists},
+                servers=servers.typed_status(),
+            ),
+            prompts=PromptsReload(changed=list(prompts)),
         )
 
     return reload
@@ -462,18 +473,45 @@ def test_reload_prints_what_it_did_and_what_is_running(
     entry = {"transport": "streamable_http", "url": "http://127.0.0.1:9/mcp"}
     servers = _configured({"weather": entry}, {"sam": ["weather"]})
     run.runtime["mcp_servers"] = servers
-    run.runtime["mcp_reload"] = _applied(servers, started=("weather",), stopped=("gone",))
+    run.runtime["reload"] = _applied(
+        servers, prompts=("sam",), started=("weather",), stopped=("gone",)
+    )
 
     assert run("reload") == 0
 
     printed = capsys.readouterr().out
-    assert "started: weather" in printed
-    assert "restarted: (none)" in printed
-    assert "stopped: gone" in printed
-    assert "unchanged: (none)" in printed
+    assert "mcp:" in printed
+    assert "  started: weather" in printed
+    assert "  restarted: (none)" in printed
+    assert "  stopped: gone" in printed
+    assert "  unchanged: (none)" in printed
+    # The prompt half beside the MCP one, since an apply moves both.
+    assert "prompts:" in printed
+    assert "  changed: sam" in printed
+    # And every section this server does not apply yet, named rather
+    # than missing: a kind that vanished from the output would read as a
+    # kind with nothing to report.
+    for section in ("fillers", "providers", "agents"):
+        assert f"{section}: {cli.NOT_APPLIED}" in printed
     # And the status underneath, which is what says whether an entry
     # that started actually connected.
     assert "weather: down since " in printed
+
+
+def test_the_reload_listing_renders_every_field_of_every_section() -> None:
+    """The named failure to test for: a section's field that is neither
+    a list of names nor a flag would drop silently out of the rendering
+    above, and an operator would be reading an answer with a hole in it.
+
+    Read off the models rather than listed here, so a field added to a
+    section is either rendered or fails this."""
+    for section, shape in RELOAD_SECTIONS.items():
+        rendered = set(outcomes(shape)) | set(flags(shape))
+        # The MCP status document is the one field rendered by a
+        # listing of its own rather than by the rules above, which is
+        # what makes it the one exception this pin states.
+        unrendered = set(shape.model_fields) - rendered
+        assert unrendered == ({"servers"} if section == "mcp" else set())
 
 
 def test_reload_prints_the_refusal_the_api_answered(
@@ -497,13 +535,20 @@ def test_reload_refuses_an_answer_it_cannot_read(
 
 
 def _reload_answer(**overrides: object) -> dict[str, object]:
-    """One reload answer as the API returns it, with one field replaced
-    by whatever a test wants to see refused."""
-    return (
-        dict.fromkeys(cli.RELOAD_OUTCOMES, [])
+    """One reload answer as the API returns it, with one field of its
+    MCP section replaced by whatever a test wants to see refused."""
+    mcp = (
+        dict.fromkeys(outcomes(McpReloadResult), [])
         | {"servers": {"weather": _status_entry()}}
         | overrides
     )
+    return {
+        "mcp": mcp,
+        "prompts": {"changed": []},
+        "fillers": None,
+        "providers": None,
+        "agents": None,
+    }
 
 
 @pytest.mark.parametrize(
@@ -512,7 +557,14 @@ def _reload_answer(**overrides: object) -> dict[str, object]:
         pytest.param(_reload_answer(started=[{"leak": ANSWERED}]), id="outcome-object"),
         pytest.param(_reload_answer(unchanged=ANSWERED), id="outcome-not-a-list"),
         pytest.param(
-            {outcome: [] for outcome in cli.RELOAD_OUTCOMES}, id="servers-missing"
+            {
+                "mcp": dict.fromkeys(outcomes(McpReloadResult), []),
+                "prompts": {"changed": []},
+                "fillers": None,
+                "providers": None,
+                "agents": None,
+            },
+            id="servers-missing",
         ),
         pytest.param(
             _reload_answer(servers={"weather": _status_entry(state=ANSWERED)}),
