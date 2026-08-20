@@ -308,11 +308,15 @@ timer changes.
 list. (a) `Provider` gains an async `close()`, default no-op,
 overridden where a real resource is held: the long-lived HTTP
 clients (ElevenLabs, the OpenAI and Anthropic SDK clients) close
-their pools; the local models (faster-whisper, Piper, Silero) drop
-their engine references, with the honest caveat recorded that a
-library like CTranslate2 frees memory on its own schedule, so
-release is best-effort and double residency during a swap is the
-accepted cost either way. (b) Generational binding, with one explicit
+their pools; faster-whisper and Piper drop their held engine and
+voice references, with the honest caveat recorded that a library
+like CTranslate2 frees memory on its own schedule, so release is
+best-effort and double residency during a swap is the accepted
+cost either way. `SileroVad` keeps the default no-op, corrected
+by the review (round 2's finding 11): it holds tuning values
+only, and each session's endpointer owns its detector and is gone
+with the session before any generation disposal, which its
+docstring says. (b) Generational binding, with one explicit
 binding event (the review's finding 5): the registry admits a
 `DeviceSession` before `run()`, the runtime is constructed only
 after MAC validation and the awaited bindings lookup, and many
@@ -571,7 +575,11 @@ session across a reload), and the drift-check pins.
   closes current and retired providers after the drain; finding
   6's same-entry cases: a trailing unknown option refuses before
   anything is constructed, and an egress refusal after
-  construction closes the object it just built; local-model
+  construction closes the object it just built; finding 11's
+  concrete teardowns, proven on the real classes and not only the
+  fake: an injected HTTP client and an injected SDK client are
+  closed by their providers' `close()`, and faster-whisper and
+  Piper release their held engine and voice references; local-model
   double residency is not asserted numerically, but the
   close-called-once property is; finding 5's binding-event cases:
   a rejected device id, a device with no binding, a disconnect
@@ -996,3 +1004,9 @@ and SDK clients must be proven closed and faster-whisper and
 Piper proven to release their engines, while `SileroVad` holds
 only tuning values (each session's endpointer owns its detector)
 and keeps the default no-op, documented.
+
+*Resolution.* Adopted. The lifecycle decision corrects Silero to
+the default no-op with the session-owned-detector fact in its
+docstring, and M3's tests prove the injected HTTP and SDK clients
+close and that faster-whisper and Piper release their references,
+on the real classes.
