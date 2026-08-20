@@ -370,7 +370,18 @@ three places, all rewritten here), `DeviceBindings`' loaded set
 and fallback configuration (the #195 decision above), and the
 prompt preview's 404 branch. A new agent is part of the next
 generation and servable from the swap; a deleted agent's live
-sessions finish on the generation they bound. The per-session
+sessions finish on the generation they bound, and the activation
+rule makes that survivable at every activation, not only across
+utterances (round 2's finding 5): `_activate_agent` reads the
+current generation when it holds the agent and falls back to the
+session's bound generation when it does not, so a mid-session
+handover to a deleted-but-session-bound agent keeps that agent's
+last-served prompt world instead of indexing a missing entry.
+Before M4 the fallback is unreachable, because the overlay
+retains every previous agent; the rule is stated in M1's
+docstring and becomes load-bearing at M4, tested with a live
+multi-agent session switching to the deleted agent after the
+apply. The per-session
 bound-agent list stays per-session, correctly: it is the device's
 binding, not the server's capability.
 
@@ -854,6 +865,12 @@ entry. The deletion rule must be explicit: current configuration
 when the agent exists there, the session's bound generation when
 it does not, tested with a live switch to a
 deleted-but-session-bound agent.
+
+*Resolution.* Adopted, exactly that rule: the current generation
+when it holds the agent, the session's bound generation when it
+does not, unreachable before M4 because the overlay retains every
+agent, with the mid-session switch test named in the agent-set
+decision.
 
 **6 (P1). Total ownership still misses failures inside one
 provider build.** A factory can allocate before options validation
