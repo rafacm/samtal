@@ -35,6 +35,25 @@ class RecordingSocket:
         self.frames += 1
 
 
+def spoken(socket: RecordingSocket) -> list[str]:
+    """What this device was told it is about to hear, sentence by
+    sentence.
+
+    A reply announces each sentence with a `tts sentence_start` before
+    its audio, so this is the device-facing view of what was said, which
+    is what makes it a test's view of it too. Announced rather than
+    heard: a sentence cut off by a barge-in was announced and only
+    partly played, so a suite about what the user actually heard asks a
+    different question.
+    """
+    messages = [json.loads(text) for text in socket.texts]
+    return [
+        message["text"]
+        for message in messages
+        if message.get("type") == "tts" and message.get("state") == "sentence_start"
+    ]
+
+
 class LoopingSocket:
     """Enough websocket for `run`: the hello, then a receive that waits
     until something closes the session.
