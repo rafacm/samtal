@@ -1101,3 +1101,70 @@ Run from `vinga-server/`, at the last commit of the milestone.
 
 Not verified here, and not claimed: the container image and the smoke
 lane, for the reason M1 gives.
+
+### PR review round (2026-08-20)
+
+External review of PR #221, read-only against commit `bd639c96`.
+Verdict: mergeable after fixes. Three findings, all adopted, each with
+the commit that made it.
+
+**1 (P2). The wholeness test compared the wrong thing.** It recorded
+which of a descriptor's facts were None and compared only those sets, so
+it saw a fact installed over a default and missed one installed over a
+declared value: a consumer running
+`object.__setattr__(entry, "notice", "different")` passed it. It was
+also blind to the dataclass quietly losing `frozen=True`, after which
+ordinary assignment does the same thing and both processes end up
+agreeing on the same wrong value.
+
+*Resolution.* Adopted (`8f01b765`). Every field of every entry of all
+three tiers is serialized and compared against the child interpreter,
+with models and predicates normalized to their qualified names, and a
+second test assigns to each entry and expects `FrozenInstanceError`. The
+two serializers travel into the child as their own source, so what a
+fact compares as has one definition rather than one per side. Proved by
+mutation three ways: a planted `object.__setattr__` over an unset fact,
+one over a declared value, and dropping `frozen=True` from the four
+dataclasses each turn the suite red, and only the middle one was
+invisible before.
+
+**2 (P3). The inventory's arithmetic summed to neither number.** It
+said 19 dataclass fields against 31 and then decomposed the change as
+20 data facts, `secret_key` and `endpoints`, mixing what remains with
+what left.
+
+*Resolution.* Adopted (`e70d7e2c`). Stated as the subtraction it is:
+twelve fields left, the 11 hooks named one by one plus `endpoints`, and
+31 - 12 = 19; what remains is 18 data facts and `secret_key`.
+`fields_in_help` is named as what it was, a `ClassVar` that
+`dataclasses.fields` never listed, so it is in neither count.
+
+**3 (P3). Two comments in `cli.py` still described the old shape.** The
+acts section said what a delete answers is a descriptor fact filled by
+the modules that own it, and `_act`'s docstring said the local path
+prints what the kind's descriptor says the API answers. Neither survived
+the milestone.
+
+*Resolution.* Adopted (`f5e87d6e`). Rewritten along the line the change
+actually drew: where a kind is on the API, what addresses one entry,
+which section it occupies and when a write takes effect are still read
+straight off the descriptor, and what an act does is written out per
+kind. `_act`'s docstring names the two homes its answer is built from,
+which are the two the API's own route builds its answer from. Two
+comments in `entities.py` went the same way while the file was open:
+`secret_key` and `missing` contrasted themselves with a hook type the
+module no longer declares.
+
+### Verification, after the review round
+
+Run from `vinga-server/`, at the last commit of the round.
+
+- `uv run ruff check .`: all checks passed.
+- `uv run mypy`: success, no issues found in 3 source files.
+- `uv run pytest tests/unit -q`: 2,639 passed, 16 skipped (2,638 at the
+  end of M4; the one new test is finding 1's frozen check).
+- `uv run pytest tests/integration -q`: 60 passed.
+- The four documentation drift checks: all clean.
+  `docs/reference/api-openapi.json` and
+  `docs/reference/domain-config.md` are still byte-identical, and no
+  commit in this round or in the milestone touches either file.
