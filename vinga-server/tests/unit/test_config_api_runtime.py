@@ -55,6 +55,7 @@ from vinga_server.config.responses import (
     ConfigDiff,
     ConfigReloadResult,
     EntityDiff,
+    FillerDiff,
     GrantsDiff,
     LiveKind,
     McpReloadResult,
@@ -66,6 +67,7 @@ from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
 from vinga_server.config.store import ConfigStore
 from vinga_server.db import open_database
 from vinga_server.logs import JsonFormatter
+from vinga_server.providers import build_agent_providers
 from vinga_server.runtime import prompt
 from vinga_server.runtime.prompt import Guidance
 from vinga_server.tools.mcp import (
@@ -481,7 +483,10 @@ def test_a_read_that_fails_unexpectedly_answers_without_quoting_it(
     def read() -> BootConfig:
         raise RuntimeError(f"could not connect using {sentinel}")
 
-    reload = config_reloader(world(config_with({}, [])), servers, read)
+    running = config_with({}, [])
+    reload = config_reloader(
+        world(running), servers, read, build_agent_providers(running)
+    )
 
     with caplog.at_level("INFO"):
         with serving(directory, servers, reload) as client:
@@ -846,6 +851,7 @@ def answer(
     mcp_servers: tuple[str, ...] = (),
     grants: tuple[str, ...] = (),
     prompts: tuple[str, ...] = (),
+    fillers: tuple[str, ...] = (),
 ) -> ConfigDiff:
     """One whole diff, the way the composition root composes one: every
     kind present with its own regime, and whatever this case is about
@@ -864,6 +870,7 @@ def answer(
             **NOTHING,
             grants=GrantsDiff(applies=Applies.RELOAD, changed=grants),
             prompt=PromptDiff(applies=Applies.RELOAD, changed=prompts),
+            filler=FillerDiff(applies=Applies.RELOAD, changed=fillers),
         ),
         devices=LiveKind(applies=Applies.CHECK_IN),
         default_agent=LiveKind(applies=Applies.CHECK_IN),
@@ -913,7 +920,7 @@ def test_an_application_without_a_server_has_nothing_to_compare(
 def test_the_diff_answers_every_kind_with_its_own_regime(directory: Path) -> None:
     """The whole shape on the wire, since this is the contract a client
     generates against: seven kinds, each labelled, the two live ones
-    carrying their label and nothing else, and the two halves an agent
+    carrying their label and nothing else, and the three halves an agent
     entry converges by beside the agents rather than inside their
     lists."""
     composed = answer(
@@ -921,6 +928,7 @@ def test_the_diff_answers_every_kind_with_its_own_regime(directory: Path) -> Non
         mcp_servers=("tools",),
         grants=("assistant",),
         prompts=("assistant",),
+        fillers=("assistant",),
     )
 
     with serving(directory, None, config_diff=comparing(composed)) as client:
@@ -954,6 +962,7 @@ def test_the_diff_answers_every_kind_with_its_own_regime(directory: Path) -> Non
             "changed": [],
             "grants": {"applies": "reload", "changed": ["assistant"]},
             "prompt": {"applies": "reload", "changed": ["assistant"]},
+            "filler": {"applies": "reload", "changed": ["assistant"]},
         },
         "devices": {"applies": "check-in"},
         "default_agent": {"applies": "check-in"},

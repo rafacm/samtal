@@ -55,6 +55,7 @@ from vinga_server.config.responses import (
     Applies,
     ConfigDiff,
     EntityDiff,
+    FillerDiff,
     GrantsDiff,
     LiveKind,
     PromptDiff,
@@ -78,32 +79,44 @@ APPLIES: Mapping[str, Applies] = {
     "default_agent": Applies.CHECK_IN,
 }
 
-# And the two regimes that are half of a kind rather than a kind. An
-# agent entry spans three: its `mcp` grants are what a reload derives
-# its tools from, its `prompt` and `prompt_includes` are what a reload
-# has it assemble its next activation from, and everything else about it
-# waits for a restart. Neither is in the map above, whose keys are the
-# domain's own.
+# And the three regimes that are half of a kind rather than a kind. An
+# agent entry spans four: its `mcp` grants are what a reload derives its
+# tools from, its `prompt` and `prompt_includes` are what a reload has it
+# assemble its next activation from, its `filler` is what a reload
+# synthesizes its next session's filled pauses from, and everything else
+# about it waits for a restart. None of them is in the map above, whose
+# keys are the domain's own.
 GRANTS_APPLY = Applies.RELOAD
 PROMPT_APPLY = Applies.RELOAD
+FILLER_APPLY = Applies.RELOAD
+
+# Which fields of an agent entry the prompt half compares, and which the
+# filler half does. Two tuples rather than one, because they are two
+# answers with two convergence points: prompt text reaches a conversation
+# at its next activation and a clip at the next session.
+_PROMPT_FIELDS = ("prompt", "prompt_includes")
+_FILLER_FIELDS = ("filler",)
+
+# And every field of an agent entry a reload composes into the world it
+# installs, which is those two halves and not the grants: what an agent
+# may reach is derived from the whole candidate configuration and
+# answered by the MCP registry, while what its prompt says and what it
+# masks with are read straight off the entry. Read by the overlay in
+# `config/reload.py` as well as here, so that a field becoming live is
+# one line in one module rather than two that must agree.
+OVERLAID_AGENT_FIELDS = _PROMPT_FIELDS + _FILLER_FIELDS
 
 # Which fields of an agent entry the restart-bound comparison leaves
 # out, because a reload applies them, and what each is replaced by to
-# leave it out: the field's own "nothing here" value, so that what is
-# compared is still an agent entry rather than a model with a hole in
-# it. One mapping rather than a rule written at each site, so a field
-# that becomes live moves in one place.
+# leave it out: the field's own default, so that what is compared is
+# still an agent entry rather than a model with a hole in it. Derived
+# from the declaration above and the grants beside it, so the three
+# cannot come to disagree about which fields a restart is still waiting
+# for.
 _RELOADED_AGENT_FIELDS: Mapping[str, object] = {
-    "mcp": None,
-    "prompt": "",
-    "prompt_includes": None,
+    name: AgentConfig.model_fields[name].get_default()
+    for name in ("mcp", *OVERLAID_AGENT_FIELDS)
 }
-
-# And the ones the prompt half compares. A subset of the above, because
-# the grants have a half of their own: what an agent may reach is
-# derived from the whole candidate configuration and answered by the MCP
-# registry, and what its prompt says is read straight off the entry.
-_PROMPT_FIELDS = ("prompt", "prompt_includes")
 
 
 class Loaded(Protocol):
@@ -181,9 +194,15 @@ def config_diff(running: Loaded, stored: Loaded, mcp: McpPending) -> ConfigDiff:
             stored.config.agents[name]
         )
 
-    def same_prompt(name: str) -> bool:
+    def same_fields(name: str, fields: tuple[str, ...]) -> bool:
         own, theirs = running.config.agents[name], stored.config.agents[name]
-        return all(getattr(own, field) == getattr(theirs, field) for field in _PROMPT_FIELDS)
+        return all(getattr(own, field) == getattr(theirs, field) for field in fields)
+
+    def same_prompt(name: str) -> bool:
+        return same_fields(name, _PROMPT_FIELDS)
+
+    def same_filler(name: str) -> bool:
+        return same_fields(name, _FILLER_FIELDS)
 
     return ConfigDiff(
         providers=EntityDiff(
@@ -217,6 +236,12 @@ def config_diff(running: Loaded, stored: Loaded, mcp: McpPending) -> ConfigDiff:
                 applies=PROMPT_APPLY,
                 changed=_names(
                     running.config.agents, stored.config.agents, same_prompt
+                ).changed,
+            ),
+            filler=FillerDiff(
+                applies=FILLER_APPLY,
+                changed=_names(
+                    running.config.agents, stored.config.agents, same_filler
                 ).changed,
             ),
         ),

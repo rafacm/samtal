@@ -10,12 +10,19 @@ different moments say so in the answer rather than in the caller's head.
 Two phases and one exclusion.
 
 Preparation re-reads the stored domain half, composes the world this
-server may actually serve, validates it whole, and builds every MCP
-manager that world needs, with nothing running touched: a failure
-anywhere in it is a refusal that changed nothing. Application then puts
-the world in place, generation first and MCP install after it, inside
-one instability window, so a reader either sees the world before or the
-world after and never a mixture.
+server may actually serve, validates it whole, synthesizes the filled
+pauses that world needs and builds every MCP manager it needs, with
+nothing running touched: a failure anywhere in it is a refusal that
+changed nothing. Application then puts the world in place, generation
+first and MCP install after it, inside one instability window, so a
+reader either sees the world before or the world after and never a
+mixture.
+
+The one thing preparation does that cannot refuse is the synthesis. A
+filled pause is a latency mask, so an agent whose voice will not speak
+applies with no clip and runs with the mask off, exactly as a boot
+leaves it; a posture where a text-to-speech hiccup blocked a prompt fix
+would invert which of the two matters.
 
 The world a generation serves is an OVERLAY and never the stored
 snapshot whole, which is the part worth reading twice. Most of the
@@ -49,11 +56,11 @@ beside wiring.
 import asyncio
 import contextlib
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from vinga_server.config.diff import Loaded
+from vinga_server.config.diff import OVERLAID_AGENT_FIELDS, Loaded
 from vinga_server.config.loader import (
     ConfigError,
     DatabaseBusyError,
@@ -65,9 +72,15 @@ from vinga_server.config.models import (
     check_completeness,
     check_references,
 )
-from vinga_server.config.responses import ConfigReloadResult, PromptsReload
+from vinga_server.config.responses import (
+    ConfigReloadResult,
+    FillersReload,
+    PromptsReload,
+)
 from vinga_server.config.secrets import EntityKind
+from vinga_server.filler import Fillers, build_agent_fillers
 from vinga_server.generation import Generation, Generations
+from vinga_server.providers import AgentProviders
 from vinga_server.tools.mcp import McpServers
 from vinga_server.tools.mcp import reload as mcp
 
@@ -111,6 +124,7 @@ class _Candidate:
 
     generation: Generation
     prompts: tuple[str, ...]
+    fillers: Fillers
     mcp: mcp.McpCandidate
 
 
@@ -130,10 +144,22 @@ class ConfigReload:
     """
 
     def __init__(
-        self, generations: Generations, servers: McpServers, read: Callable[[], Loaded]
+        self,
+        generations: Generations,
+        servers: McpServers,
+        read: Callable[[], Loaded],
+        agent_providers: Mapping[str, AgentProviders],
     ) -> None:
         self._generations = generations
         self._servers = servers
+        # The engines this server is running, which the filler synthesis
+        # needs one of: the voice a clip is spoken in is the one that is
+        # actually running, because providers are built at a start and a
+        # reload does not replace them yet (#191). Handed in for the
+        # reason the read is, and required rather than optional because
+        # every server has them; the milestone that makes providers
+        # generational is where this stops being a field.
+        self._agent_providers = agent_providers
         # The stored half, handed in rather than read here: opening a
         # database belongs to the layer that owns one, and what this
         # class owns is where that read runs and what is done with what
@@ -175,14 +201,21 @@ class ConfigReload:
 
         Two phases, and only the second touches anything running.
         Preparation re-reads the stored half, composes and validates the
-        world this server may serve, and builds every MCP manager that
-        world needs; any failure there (a stored snapshot that will not
-        compose, an overlay that no longer does, an unset `$VAR`, a
-        credential that will not decrypt, an entry `server.local_only`
-        forbids) refuses with the generation and the managers exactly as
-        they were. Application then swaps the generation and stops,
-        starts and installs the MCP world, so what a new activation
-        binds moves at one instant rather than across one.
+        world this server may serve, synthesizes its filled pauses and
+        builds every MCP manager that world needs; any failure there (a
+        stored snapshot that will not compose, an overlay that no longer
+        does, an unset `$VAR`, a credential that will not decrypt, an
+        entry `server.local_only` forbids) refuses with the generation
+        and the managers exactly as they were. Application then swaps the
+        generation and stops, starts and installs the MCP world, so what
+        a new activation binds moves at one instant rather than across
+        one.
+
+        A synthesis that fails is the one failure in there that is not a
+        refusal: the world applies with no clip for that agent and the
+        answer names it, because a filled pause is a mask and a reload
+        that refused over one would hold back everything else it was
+        asked to apply.
 
         Being unreachable is not a preparation failure, which is the
         boot's rule carried over: a candidate that connects to nothing
@@ -270,15 +303,30 @@ class ConfigReload:
         try:
             stored = await self._stored()
             previous = self._generations.current()
-            generation = _composed(previous, stored)
+            overlaid = _composed(previous.config, stored.config)
+            # Synthesized here, in the phase that can only refuse, and
+            # deliberately not able to refuse: an agent whose voice would
+            # not speak applies with no clip and runs with the mask off,
+            # because a filler is a latency mask and a posture where a
+            # text-to-speech hiccup blocked a prompt fix would invert
+            # what matters. Every clip whose phrases and whose voice are
+            # what they were is the object it already was.
+            fillers = await build_agent_fillers(
+                overlaid, self._agent_providers, previous
+            )
             # The MCP half is built from the stored world and not from
             # the overlay, because the MCP half is not overlaid: entries
             # and grants are what a reload has always applied whole, and
             # the managers this builds are the ones the install puts in
             # place.
             return _Candidate(
-                generation=generation,
-                prompts=_reassembled(previous.config, generation.config),
+                generation=Generation(
+                    overlaid,
+                    stored.secrets.composed(previous.secrets, LIVE_SECRETS),
+                    fillers.clips,
+                ),
+                prompts=_reassembled(previous.config, overlaid),
+                fillers=fillers,
                 mcp=await mcp.prepare(stored.config, stored.secrets),
             )
         except asyncio.CancelledError:
@@ -345,9 +393,13 @@ class ConfigReload:
         return ConfigReloadResult(
             mcp=applied,
             prompts=PromptsReload(changed=list(candidate.prompts)),
+            fillers=FillersReload(
+                resynthesized=list(candidate.fillers.resynthesized),
+                reused=list(candidate.fillers.reused),
+                disabled=list(candidate.fillers.disabled),
+            ),
             # Null rather than empty until the milestones that fill
             # them: see `ConfigReloadResult`.
-            fillers=None,
             providers=None,
             agents=None,
         )
@@ -380,22 +432,22 @@ class ConfigReload:
                 finished.exception()
 
 
-def _composed(previous: Generation, stored: Loaded) -> Generation:
+def _composed(previous: Config, stored: Config) -> Config:
     """The world this server may serve once the stored half has been
-    read: the previous generation with the live slices replaced, and
+    read: the previous configuration with the live slices replaced, and
     nothing else.
 
     The overlay, and its whole rule for this milestone: the shared
     prompt fragments as the store holds them, and each retained agent's
-    own `prompt` and `prompt_includes`. The agent set does not move, so
-    an agent the store has added is not served and an agent it has
-    deleted is still served; `agent_defaults` does not move either, so
-    an edit to the fragments every agent inherits stays pending until
-    the restart that reads it. That is not caution: the effective-value
-    helpers inherit through `agent_defaults`, so a candidate that took
-    it would apply a restart-bound change through the back door, and one
-    that took the agent set would let an activation index an entry that
-    is not there.
+    own `prompt`, `prompt_includes` and `filler`. The agent set does not
+    move, so an agent the store has added is not served and an agent it
+    has deleted is still served; `agent_defaults` does not move either,
+    so an edit to the fragments or the filled pauses every agent
+    inherits stays pending until the restart that reads it. That is not
+    caution: the effective-value helpers inherit through
+    `agent_defaults`, so a candidate that took it would apply a
+    restart-bound change through the back door, and one that took the
+    agent set would let an activation index an entry that is not there.
 
     Validated whole, by the same two checks every composition passes, so
     a combination of live and restart-bound slices that does not add up
@@ -406,22 +458,20 @@ def _composed(previous: Generation, stored: Loaded) -> Generation:
     """
     agents = {
         name: agent
-        if (fresh := stored.config.agents.get(name)) is None
-        else agent.model_copy(
-            update={"prompt": fresh.prompt, "prompt_includes": fresh.prompt_includes}
-        )
-        for name, agent in previous.config.agents.items()
+        if (fresh := stored.agents.get(name)) is None
+        else agent.model_copy(update={name: getattr(fresh, name) for name in OVERLAID_AGENT_FIELDS})
+        for name, agent in previous.agents.items()
     }
     # `model_copy` rather than a re-validation of a dumped snapshot:
     # every value here came out of a model that has already been
     # validated field by field, so what is left to check is the whole,
     # which `_validated` does with the very functions the model's own
     # validator calls.
-    overlaid = previous.config.model_copy(
-        update={"prompt_fragments": dict(stored.config.prompt_fragments), "agents": agents}
+    overlaid = previous.model_copy(
+        update={"prompt_fragments": dict(stored.prompt_fragments), "agents": agents}
     )
     _validated(overlaid)
-    return Generation(overlaid, stored.secrets.composed(previous.secrets, LIVE_SECRETS))
+    return overlaid
 
 
 def _validated(candidate: Config) -> None:
