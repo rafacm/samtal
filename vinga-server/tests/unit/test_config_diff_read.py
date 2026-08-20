@@ -13,10 +13,11 @@ takes a real database and a real key to demonstrate. The
 running half is read either side of that database read, so an answer is
 one world or it is no answer at all, which takes a reload landing in the
 middle of one. And nothing of a credential travels, which takes a
-credential: the plaintext, the ciphertext the database holds, the mark
-taken over it and the name of an environment variable are four distinct
-sentinels here, each asserted absent from the answer, from a refusal,
-and from what the server wrote about either.
+credential: a plaintext, the ciphertext the database holds and the mark
+taken over it, for the value this server booted with and again for the
+value stored while it runs, plus the name of an environment variable,
+are seven distinct sentinels here, each asserted absent from the answer,
+from a refusal, and from what the server wrote about either.
 """
 
 import asyncio
@@ -68,19 +69,25 @@ DIFF_PATH = f"{MOUNT_PATH}/runtime/config/diff"
 
 STAGES = ("llm", "asr", "tts", "vad")
 
-# The four forms a stored credential takes, each planted where an answer
-# that carried it would have to put it, and each shaped so that a
-# substring check for it cannot match by accident.
+# The forms a stored credential takes, each planted where an answer that
+# carried it would have to put it, and each shaped so that a substring
+# check for it cannot match by accident.
 #
 # The plaintext is what an operator typed. The envelope is what the
 # database holds, which a read that serialized a row rather than a name
 # would carry. The mark is what the comparison itself asks about, which
 # is the one an implementation could plausibly put in an answer by
-# accident, since it is opaque and looks harmless. And the environment
-# variable's name is the fourth: it is not a credential, but it says
-# where one is kept, and it is written in the entity body this read must
-# never echo.
+# accident, since it is opaque and looks harmless. Each of those three
+# exists twice over, once per side of the comparison, and the case below
+# takes both. And the environment variable's name is the last: it is not
+# a credential, but it says where one is kept, and it is written in the
+# entity body this read must never echo.
 PLAINTEXT = "sk-diff-1f2e3d4c-never-a-real-credential"
+
+# What the same slot holds after a rotation, which is what the stored
+# side of the comparison is reading while the running side still holds
+# the one above.
+ROTATED = "sk-diff-8a6b5c4d-also-never-a-real-credential"
 
 ENV_NAME = "VINGA_DIFF_SENTINEL_ENV_5b7c9d"
 
@@ -144,6 +151,18 @@ def envelope_of(directory: Path) -> str:
     # back is the text the file holds rather than a value some accessor
     # decoded.
     return str(json.loads(secrets)["api_key"]["enc"])
+
+
+def mark_of(directory: Path) -> str:
+    """The mark the comparison takes over what the database holds for
+    the planted slot right now, which is the stored side's half of the
+    question `same_provider` asks."""
+    engine = open_database(directory)
+    try:
+        snapshot = ConfigStore(engine, load_keys()).load()
+    finally:
+        engine.dispose()
+    return snapshot.secrets.fingerprint("provider", "llm.mock")
 
 
 def written(caplog: pytest.LogCaptureFixture) -> str:
@@ -297,35 +316,52 @@ async def test_a_busy_database_stays_the_retryable_refusal() -> None:
 def test_neither_an_answer_nor_a_refusal_carries_a_credential(
     directory: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """All four forms, over both paths, in the body and in the log.
+    """Every form of both sides, over both paths, in the body and in the
+    log.
 
-    The successful answer is the path that reads the mark, decides an
-    entity is changed by it, and has to say so with a name. The refusal
-    is the path where the stored half could not be read at all, which is
-    where an implementation reaching for detail would reach for the
-    thing it failed on.
+    The successful answer is the path that reads the marks, decides an
+    entity is changed by them, and has to say so with a name. The
+    refusal is the path where the stored half could not be read at all,
+    which is where an implementation reaching for detail would reach for
+    the thing it failed on.
+
+    Both sides, because a comparison reads two. The credential is
+    rotated so that the entity really is reported as changed, which
+    means the running side holds one value and the stored side holds
+    another, and each has a plaintext, a ciphertext and a mark of its
+    own. Sentinels taken only before the rotation would leave the values
+    the route actually consulted on the stored side unchecked, which is
+    the whole half that arrives from the database at request time.
     """
     stored(directory, secret=PLAINTEXT, llm={"type": "mock", "api_key_env": ENV_NAME})
     booted = load_boot_config()
-    ciphertext = envelope_of(directory)
-    mark = booted.secrets.fingerprint("provider", "llm.mock")
-    sentinels = (PLAINTEXT, ciphertext, mark, ENV_NAME)
-    # Four distinct strings that are actually there, so an absence
-    # asserted below is an absence rather than an empty needle.
-    assert len(set(sentinels)) == 4
-    assert all(sentinels)
+    # What the running side is holding: the value this server booted
+    # with, the ciphertext it was loaded from, and the mark taken over
+    # it, which is one of the two things the comparison reads.
+    booted_side = (
+        PLAINTEXT,
+        envelope_of(directory),
+        booted.secrets.fingerprint("provider", "llm.mock"),
+    )
 
     with caplog.at_level("INFO"):
         with entered_client(booted.config, booted.secrets) as served:
-            # A rotation of the same slot, so the entity really is
-            # reported as changed: this is the answer that has the most
-            # to leak.
             rotated = served.put(
                 f"{MOUNT_PATH}/providers/llm/mock/secrets/api_key",
-                json={"secret": "another-value-entirely"},
+                json={"secret": ROTATED},
                 headers=headers(),
             )
             assert rotated.status_code == 200, rotated.text
+            # And what the stored side is holding from here on, which is
+            # the other thing the comparison reads.
+            stored_side = (ROTATED, envelope_of(directory), mark_of(directory))
+            sentinels = (*booted_side, *stored_side, ENV_NAME)
+            # Seven distinct strings that are all really there, so an
+            # absence asserted below is an absence rather than an empty
+            # needle or a value that was never read.
+            assert len(set(sentinels)) == 7
+            assert all(sentinels)
+
             answered = served.get(DIFF_PATH, headers=headers())
 
             assert answered.status_code == 200, answered.text
