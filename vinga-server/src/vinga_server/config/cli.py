@@ -88,7 +88,11 @@ from vinga_server.config.writes import (
     BINDING_NOTICE,
     RESTART_NOTICE,
     cleared_secret,
+    deleted_agent,
     deleted_device,
+    deleted_mcp_server,
+    deleted_prompt_fragment,
+    deleted_provider,
     secret_notice,
     wrote_secret,
 )
@@ -1661,32 +1665,101 @@ def _fragment_body(
     return body
 
 
-def _deleting(descriptor: entities.EntityDescriptor) -> Callable[[argparse.Namespace], Any]:
-    """The break-glass delete: this kind's row taken out of the database
-    through its own verb, answered with the sentence and the notice the
-    API answers the same act with. Both are read off the descriptor
-    rather than repeated here, which is what keeps the two paths saying
-    one thing."""
+# The break-glass paths, written out per kind: one entry read or one row
+# deleted through the repository's own verb for that kind, answered with
+# what the API answers the same act with.
+#
+# Per kind rather than through the descriptor, because the generic
+# version needed `ConfigStore`'s methods hung on the registry as unbound
+# callables, which is the store publishing its own interface through a
+# global for one caller's convenience. What that caller wanted was the
+# typed method, and it can have it by name. The two halves of the answer
+# still have one home each: the sentence is `writes.py`'s, which is what
+# keeps this path and the API saying one thing, and the timing is the
+# kind's own `notice`.
 
-    def delete(args: argparse.Namespace) -> Any:
-        identity = _identity(descriptor, args)
-        with _store(args) as store:
-            descriptor.delete(store, *identity)
-        return {"wrote": descriptor.deleted(*identity), "notice": descriptor.notice}
-
-    return delete
+_PROVIDER = entities.descriptor("provider")
+_MCP_SERVER = entities.descriptor("mcp-server")
+_PROMPT_FRAGMENT = entities.descriptor("prompt-fragment")
+_AGENT = entities.descriptor("agent")
+_AGENT_DEFAULTS = entities.descriptor("agent-defaults")
 
 
-def _showing(descriptor: entities.EntityDescriptor) -> Callable[[argparse.Namespace], Any]:
-    """The break-glass read: one entry, masked by the view the API shows
-    it through, in the envelope every kind is read in."""
+def _deleting_provider(args: argparse.Namespace) -> Any:
+    with _store(args) as store:
+        store.delete_provider(args.stage, args.name)
+    return {"wrote": deleted_provider(args.stage, args.name), "notice": _PROVIDER.notice}
 
-    def show(args: argparse.Namespace) -> Any:
-        with _store(args) as store:
-            read = descriptor.read(store, *_identity(descriptor, args))
-        return views.entity(descriptor.name, read)
 
-    return show
+def _deleting_mcp_server(args: argparse.Namespace) -> Any:
+    with _store(args) as store:
+        store.delete_mcp_server(args.name)
+    return {"wrote": deleted_mcp_server(args.name), "notice": _MCP_SERVER.notice}
+
+
+def _deleting_prompt_fragment(args: argparse.Namespace) -> Any:
+    with _store(args) as store:
+        store.delete_prompt_fragment(args.name)
+    return {
+        "wrote": deleted_prompt_fragment(args.name),
+        "notice": _PROMPT_FRAGMENT.notice,
+    }
+
+
+def _deleting_agent(args: argparse.Namespace) -> Any:
+    with _store(args) as store:
+        store.delete_agent(args.name)
+    return {"wrote": deleted_agent(args.name), "notice": _AGENT.notice}
+
+
+def _showing_provider(args: argparse.Namespace) -> Any:
+    with _store(args) as store:
+        read = store.read_provider(args.stage, args.name)
+    return views.provider(read)
+
+
+def _showing_mcp_server(args: argparse.Namespace) -> Any:
+    with _store(args) as store:
+        read = store.read_mcp_server(args.name)
+    return views.mcp_server(read)
+
+
+def _showing_prompt_fragment(args: argparse.Namespace) -> Any:
+    with _store(args) as store:
+        read = store.read_prompt_fragment(args.name)
+    return views.prompt_fragment(read)
+
+
+def _showing_agent(args: argparse.Namespace) -> Any:
+    with _store(args) as store:
+        read = store.read_agent(args.name)
+    return views.agent(read)
+
+
+def _showing_agent_defaults(args: argparse.Namespace) -> Any:
+    with _store(args) as store:
+        read = store.read_agent_defaults()
+    return views.agent_defaults(read)
+
+
+# Which of them each kind's row is built with. Keyed by the same names
+# the registry uses, so a kind added there without one here is a
+# KeyError at import rather than a command that quietly has no
+# break-glass path.
+_LOCAL_DELETE: dict[str, Callable[[argparse.Namespace], Any]] = {
+    "provider": _deleting_provider,
+    "mcp-server": _deleting_mcp_server,
+    "prompt-fragment": _deleting_prompt_fragment,
+    "agent": _deleting_agent,
+}
+
+_LOCAL_SHOW: dict[str, Callable[[argparse.Namespace], Any]] = {
+    "provider": _showing_provider,
+    "mcp-server": _showing_mcp_server,
+    "prompt-fragment": _showing_prompt_fragment,
+    "agent": _showing_agent,
+    "agent-defaults": _showing_agent_defaults,
+}
 
 
 SET_ENTITY: dict[str, Act] = {
@@ -1710,7 +1783,7 @@ DELETE_ENTITY: dict[str, Act] = {
         answers=Acknowledgement,
         refusal=UNREADABLE_WRITE,
         render=_acknowledged,
-        local=_deleting(kind),
+        local=_LOCAL_DELETE[kind.name],
     )
     for kind in entities.ENTITIES
     if kind.has_delete
@@ -1722,7 +1795,7 @@ SHOW_ENTITY: dict[str, Act] = {
         path=_entity_path(kind),
         answers=Envelope,
         render=_print_entity,
-        local=_showing(kind),
+        local=_LOCAL_SHOW[kind.name],
     )
     for kind in entities.ENTITIES
 }

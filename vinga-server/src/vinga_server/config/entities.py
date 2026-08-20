@@ -24,28 +24,26 @@ readable by the one that renders documentation on a machine with no
 database, no encryption key and no FastAPI, which is exactly what
 `docgen` is.
 
-A fact group is filled by the milestone that wires its consumer. Where
-a group has no consumer yet it carries its default and says which
-milestone fills it, so that nothing here is a value nothing validates.
-The exceptions, filled now, are the facts that are data or prose: the
-three vocabularies a kind is addressed in (its route, its key in the
-configuration document, its table), whether it has a delete, whether
-stored secrets can hang on it, and what a read or a delete of an entry
-that is not there answers.
+Every fact is declared here, in the entry a reader meets the kind at,
+and nothing is installed onto a descriptor afterwards. That is what the
+frozen dataclass says and, since #210's fourth milestone, what it means:
+there is no `fill`, no import-time mutation, and therefore no order the
+modules above have to be imported in for a descriptor to be whole.
 
-A fact whose value is a function written in terms of another module's
-machinery is filled by that module instead, through `fill` below, since
-this one is deliberately importable without any of it: the row mappings
-are written in terms of the repository's row helpers and the body
-builders in terms of the masking rules, and the command that renders
-the documentation has neither a database nor an encryption key. One
-registry filled from several modules, rather than one registry per
-consumer, is the whole point: two copies of a kind's facts can come to
-disagree, and that is the drift this module exists to end.
+Which is possible because the facts are data or prose, and only ever
+those: the three vocabularies a kind is addressed in (its route, its key
+in the configuration document, its table), whether it has a delete,
+whether stored secrets can hang on it, which of its keys carry a
+credential, what a read or a delete of an entry that is not there
+answers, and when a write of it takes effect. Behavior is not a fact
+about a kind. A row mapping is written in terms of the repository's own
+helpers, a masked body in terms of the masking rules, a route in terms
+of FastAPI, and each of those lives with the code it is written in,
+where its caller can see it and its signature can be honest.
 """
 
 from collections.abc import Callable
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from typing import ClassVar
 
 from pydantic import BaseModel
@@ -85,12 +83,6 @@ _OPTIONS_CONTRACT = (
 _OPTIONS_WHERE = ", which is also where the measured numbers behind each default are kept."
 OPTIONS_NOTE = f"{_OPTIONS_CONTRACT} below{_OPTIONS_WHERE}"
 API_OPTIONS_NOTE = f"{_OPTIONS_CONTRACT} under `vinga-server/examples/`{_OPTIONS_WHERE}"
-
-# A function a milestone hangs on a descriptor once it has a caller.
-# Deliberately loose: each group's signature is settled beside the code
-# that calls it, and naming one here would be a guess dressed up as a
-# contract.
-Hook = Callable[..., object] | None
 
 # What a read or a delete of an entry that is not there says. One fixed
 # sentence per kind, naming the section and the fact and never the
@@ -209,7 +201,6 @@ class NestedShape(DocumentedShape):
 
     command: ClassVar[None] = None
     examples: ClassVar[tuple[str, ...]] = ()
-    fields_in_help: ClassVar[bool] = False
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -229,7 +220,6 @@ class EntityDescriptor(DocumentedShape):
     # rather than the two byte-identical copies the inventory found.
     command: str
     examples: tuple[str, ...] = ()
-    fields_in_help: ClassVar[bool] = True
 
     # Addressing. The API path prefix, and the parameters that address
     # one entry under it, in order: they are the URL's path parameters
@@ -264,29 +254,6 @@ class EntityDescriptor(DocumentedShape):
     # repository's.
     table: str | None = None
 
-    # Store facts, filled by `store.py`, because each is written in
-    # terms of the repository's own row helpers. The row mapping's
-    # default path is `model_validate`/`model_dump`, and a hook is what
-    # a kind pays when its model demands one, which the inventory proved
-    # for exactly three of the five. `before_parse` and `inside_write`
-    # are the checks the quirky kinds run around their write.
-    from_row: Hook = None
-    to_row: Hook = None
-    before_parse: Hook = None
-    inside_write: Hook = None
-
-    # The repository's verbs for this kind, filled by `store.py` as
-    # unbound methods, so a caller passes the store it holds. Named here
-    # rather than built out of `name` at the call site, because a name
-    # assembled into an attribute lookup is a reference nothing checks,
-    # and because what a kind's own method does before it addresses
-    # anything is part of the verb: a provider's stage is made canonical
-    # there, and a read that skipped it would answer a different
-    # refusal.
-    read: Hook = None
-    write: Hook = None
-    delete: Hook = None
-
     # Which of this kind's key names carry a credential, asked at every
     # depth of an entry the display path walks. Data rather than a hook,
     # and one rule per kind rather than one per surface: it is the same
@@ -302,11 +269,6 @@ class EntityDescriptor(DocumentedShape):
     # configuration an operator reads back rather than a credential.
     secret_key: Callable[[str], bool] = is_mcp_secret_key
 
-    # View facts, filled by `views.py`: the body builder that masks one
-    # entry for display. `views.provider_record` is deliberately not
-    # this, and stays hand-built for the reason its docstring gives.
-    body: Hook = None
-
     # The refusal for an entry that is not there, used by the read, the
     # delete and the slot check. One fixed sentence naming the section,
     # never built from what was addressed (see the constants above). A
@@ -314,20 +276,6 @@ class EntityDescriptor(DocumentedShape):
     # on the request any more; the singleton has no missing case, and
     # says so by carrying none.
     missing: str | None = None
-
-    # CLI facts, filled by `cli.py`: how one entry of this kind reads in
-    # the summary tree, after the name it is listed under. The
-    # subparser's name is `name` and its arguments are `addressing`, so
-    # there is nothing else for the grammar to carry.
-    summary: Hook = None
-
-    # Writes facts, filled by `writes.py`, which is where the sentences
-    # an operator reads are written once for both write paths. `wrote`
-    # and `deleted` are given the identity that was addressed; the
-    # singleton's takes none, because its acknowledgement names no
-    # entry.
-    wrote: Hook = None
-    deleted: Hook = None
 
     # When a write of this kind takes effect, which is one sentence per
     # kind rather than one per route: an MCP server and its stored
@@ -676,40 +624,6 @@ def always_shown(model: type[BaseModel]) -> tuple[str, ...]:
     return shape.always_shown if shape is not None else ()
 
 
-def fill(name: str, **facts: object) -> None:
-    """Fill one fact group on a descriptor, from the module that owns
-    the code the facts are.
-
-    Every fact about a kind that is data is written in the registry
-    above, where a reader meets the kind. A fact whose value is a
-    function cannot always be: the row mapping a kind pays when its
-    model demands one is written in terms of the repository's own row
-    helpers, and the body builder that masks one entry is written in
-    terms of the masking rules, and this module is deliberately readable
-    without either, because the command that renders the documentation
-    runs on a machine with no database and no encryption key. So the
-    owning module fills its own group at its import, beside the code it
-    is filling in, and the registry stays one object rather than one
-    copy per consumer that can come to disagree.
-
-    Once each, and only over a fact that is still unset: a group filled
-    twice would mean two modules claiming the same knowledge, which is
-    the thing this ends rather than a thing to allow.
-    """
-    target = _BY_NAME[name]
-    declared = {field.name for field in fields(target)}
-    for fact, value in facts.items():
-        if fact not in declared:
-            raise ValueError(f"{name}: no descriptor fact is called {fact}")
-        if getattr(target, fact) is not None:
-            raise ValueError(f"{name}.{fact} is already filled")
-        # The descriptor is frozen because nothing about a kind changes
-        # while the process runs, and nothing here does: this is the
-        # declaration itself, arriving from the one module that can
-        # write it.
-        object.__setattr__(target, fact, value)
-
-
 __all__ = [
     "API_OPTIONS_NOTE",
     "BINDING_NOTICE",
@@ -728,12 +642,10 @@ __all__ = [
     "SETTINGS",
     "DocumentedShape",
     "EntityDescriptor",
-    "Hook",
     "NestedShape",
     "Setting",
     "always_shown",
     "descriptor",
-    "fill",
     "leads_with",
     "setting",
 ]

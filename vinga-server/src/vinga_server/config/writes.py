@@ -17,7 +17,6 @@ act differently.
 
 from collections.abc import Sequence
 
-from vinga_server.config import entities
 from vinga_server.config.entities import BINDING_NOTICE, MCP_RELOAD_NOTICE, RESTART_NOTICE
 from vinga_server.config.secrets import EntityKind
 
@@ -121,17 +120,6 @@ def wrote_agent_defaults() -> str:
 
 
 CLEARED_DEFAULT_AGENT = "default agent cleared; the devices map is now the allowlist"
-
-
-# What a write of one kind says it did, hung on the kind so that both
-# write paths ask one place instead of choosing at their own call site.
-entities.fill("provider", wrote=wrote_provider, deleted=deleted_provider)
-entities.fill("mcp-server", wrote=wrote_mcp_server, deleted=deleted_mcp_server)
-entities.fill(
-    "prompt-fragment", wrote=wrote_prompt_fragment, deleted=deleted_prompt_fragment
-)
-entities.fill("agent", wrote=wrote_agent, deleted=deleted_agent)
-entities.fill("agent-defaults", wrote=wrote_agent_defaults)
 
 
 __all__ = [
