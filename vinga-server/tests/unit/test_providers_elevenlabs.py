@@ -23,15 +23,21 @@ from vinga_server.providers.elevenlabs_tts import ElevenLabsTts
 SENTINEL = "sk-test-4f8b2c9e-never-a-real-credential"
 
 
-def provider(
-    handler: object, **overrides: object
-) -> ElevenLabsTts:
-    """A provider wired to a mock transport, so nothing leaves the test."""
-    client = httpx.AsyncClient(
+def mock_client(handler: object) -> httpx.AsyncClient:
+    """A client that answers from the handler, so nothing leaves the
+    test."""
+    return httpx.AsyncClient(
         base_url="https://api.elevenlabs.io",
         transport=httpx.MockTransport(handler),  # type: ignore[arg-type]
         headers={"xi-api-key": "test-key"},
     )
+
+
+def provider(
+    handler: object, **overrides: object
+) -> ElevenLabsTts:
+    """A provider wired to a mock transport, so nothing leaves the test."""
+    client = mock_client(handler)
     options: dict[str, object] = {
         "voice_id": "voice-1",
         "model": "eleven_flash_v2_5",
@@ -434,14 +440,16 @@ async def test_a_failure_while_releasing_a_cancelled_sentence_keeps_the_cancella
 async def test_a_falsey_injected_client_is_still_the_one_used() -> None:
     """`client or ...` drops a double that answers False to a truth test,
     which any object defining __bool__ or __len__ does, and builds a real
-    client in its place."""
-    given = Falsey()
-    tts = ElevenLabsTts(
-        voice_id="voice-1",
-        model="eleven_flash_v2_5",
-        output_format="pcm_24000",
-        sample_rate=24000,
-        api_key="test-key",
-        client=given,  # type: ignore[arg-type]
-    )
-    assert tts._client is given
+    client in its place. Asked the way a caller would see it: the audio
+    only arrives if the request went to the injected client's transport,
+    and a dropped one would have gone to ElevenLabs."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, content=b"\x00\x01")
+
+    tts = provider(handler, client=Falsey(mock_client(handler)))
+
+    assert await collect(tts) == b"\x00\x01"
+    assert len(seen) == 1

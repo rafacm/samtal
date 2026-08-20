@@ -29,7 +29,7 @@ from vinga_server.config.secrets import (
 from vinga_server.providers import ProviderError, build_provider
 from vinga_server.providers.anthropic_llm import AnthropicLlm
 from vinga_server.providers.openai_llm import OpenAiCompatibleLlm
-from vinga_server.tools.mcp import McpServerManager, transport
+from vinga_server.tools.mcp import McpServerManager
 
 ENV_ECHO_SERVER = Path(__file__).parents[1] / "support" / "mcp_env_echo_server.py"
 
@@ -58,13 +58,28 @@ def _store(*locations: SecretLocation, keys: MultiFernet | None = None) -> Secre
     )
 
 
+def key_of(provider: object) -> str | None:
+    """What the built client will authenticate with.
+
+    White-box, deliberately, and stated once here rather than at six
+    assertions. The credential a deployment resolves is handed to the
+    vendor SDK's client inside the provider and reported by no public
+    surface, which is the property that makes the resolution safe: the
+    value goes nowhere a reader could reach it. So the only way to
+    establish that it arrived is to look where it went, and the negative
+    half below, that a sibling entry's secret is not a fallback, has no
+    observable form at all.
+    """
+    return provider._client.api_key  # type: ignore[attr-defined]
+
+
 def test_a_stored_credential_reaches_a_real_anthropic_client() -> None:
     config = ProviderConfig.model_validate({"type": "anthropic", "model": "claude-sonnet-5"})
 
     provider = build_provider("llm", "claude", config, secrets=_store(CLAUDE))
 
     assert isinstance(provider, AnthropicLlm)
-    assert provider._client.api_key == SECRET
+    assert key_of(provider) == SECRET
     # The entry it was built from never held it, which is the whole
     # reason ciphertext lives beside the models rather than in them.
     assert SECRET not in repr(config)
@@ -80,7 +95,7 @@ def test_a_stored_credential_reaches_a_real_openai_compatible_client() -> None:
     provider = build_provider("llm", "local", config, secrets=_store(stored))
 
     assert isinstance(provider, OpenAiCompatibleLlm)
-    assert provider._client.api_key == SECRET
+    assert key_of(provider) == SECRET
 
 
 def test_ciphertext_wins_over_the_reference_written_for_the_same_slot(
@@ -96,7 +111,7 @@ def test_ciphertext_wins_over_the_reference_written_for_the_same_slot(
 
     provider = build_provider("llm", "claude", config, secrets=_store(CLAUDE))
 
-    assert provider._client.api_key == SECRET
+    assert key_of(provider) == SECRET
 
 
 def test_without_a_store_the_behaviour_is_exactly_todays(
@@ -107,12 +122,12 @@ def test_without_a_store_the_behaviour_is_exactly_todays(
         {"type": "anthropic", "model": "claude-sonnet-5", "api_key_env": "VINGA_TEST_KEY"}
     )
 
-    assert build_provider("llm", "claude", config)._client.api_key == "sk-from-the-environment"
+    assert key_of(build_provider("llm", "claude", config)) == "sk-from-the-environment"
 
     # An empty store is not a store that answers: the environment
     # reference still resolves, and an unset one still fails the build.
     assert (
-        build_provider("llm", "claude", config, secrets=SecretStore())._client.api_key
+        key_of(build_provider("llm", "claude", config, secrets=SecretStore()))
         == "sk-from-the-environment"
     )
     monkeypatch.delenv("VINGA_TEST_KEY")
@@ -127,7 +142,7 @@ def test_a_secret_for_another_entry_is_not_reachable_from_this_one() -> None:
 
     provider = build_provider("llm", "haiku", config, secrets=_store(CLAUDE))
 
-    assert provider._client.api_key is None
+    assert key_of(provider) is None
 
 
 def test_building_leaks_nothing_into_the_logs(caplog: pytest.LogCaptureFixture) -> None:
@@ -239,15 +254,15 @@ async def test_the_manager_keeps_no_decrypted_credential() -> None:
         await manager.stop()
 
 
-async def test_a_stored_header_reaches_a_real_request(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The same question for the other transport, answered by what
-    arrived on the wire. The stub refuses the handshake, which is fine:
-    the request carrying the header is what is under test, and a server
-    that will not talk is a warning rather than a failure by design."""
-    monkeypatch.delenv("WEATHER_TOKEN", raising=False)
-    slot = SecretLocation.mcp_server("weather", "headers.Authorization")
+async def headers_on_the_wire(
+    headers: dict[str, str], store: SecretStore | None
+) -> dict[str, str]:
+    """What an MCP server would actually receive from this entry.
+
+    The stub refuses the handshake, which is fine: the request carrying
+    the headers is what is under test, and a server that will not talk
+    is a warning rather than a failure by design.
+    """
     received: list[dict[str, str]] = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -268,11 +283,11 @@ async def test_a_stored_header_reaches_a_real_request(
             {
                 "transport": "streamable_http",
                 "url": f"http://127.0.0.1:{stub.server_port}/mcp",
-                "headers": {"Authorization": "$WEATHER_TOKEN", "X-Region": "eu"},
+                "headers": headers,
             }
         )
 
-        manager = McpServerManager("weather", config, _store(slot))
+        manager = McpServerManager("weather", config, store)
         await manager.start()
         await manager.stop()
     finally:
@@ -281,19 +296,40 @@ async def test_a_stored_header_reaches_a_real_request(
         stub.server_close()
 
     assert received, "the client never reached the stub"
+    return received[0]
+
+
+async def test_a_stored_header_reaches_a_real_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same question for the other transport, answered by what
+    arrived on the wire."""
+    monkeypatch.delenv("WEATHER_TOKEN", raising=False)
+    slot = SecretLocation.mcp_server("weather", "headers.Authorization")
+
+    sent = await headers_on_the_wire(
+        {"Authorization": "$WEATHER_TOKEN", "X-Region": "eu"}, _store(slot)
+    )
+
     # The stored secret shadowed the $VAR that was never set, and the
     # header beside it came along.
-    assert received[0]["authorization"] == SECRET
-    assert received[0]["x-region"] == "eu"
+    assert sent["authorization"] == SECRET
+    assert sent["x-region"] == "eu"
 
 
-def test_an_mcp_server_without_a_store_still_reads_its_references(
+async def test_an_mcp_server_without_a_store_still_reads_its_references(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No store is the deployment every configuration has today: the
-    $VAR is read from the server's own environment, at construction, so
-    an unset one fails the boot."""
+    $VAR is read from the server's own environment, and an unset one
+    fails the boot at construction."""
     monkeypatch.setenv("WEATHER_TOKEN", "from-the-environment")
+
+    sent = await headers_on_the_wire({"Authorization": "$WEATHER_TOKEN"}, None)
+
+    assert sent["authorization"] == "from-the-environment"
+
+    monkeypatch.delenv("WEATHER_TOKEN")
     config = McpServerConfig.model_validate(
         {
             "transport": "streamable_http",
@@ -301,14 +337,5 @@ def test_an_mcp_server_without_a_store_still_reads_its_references(
             "headers": {"Authorization": "$WEATHER_TOKEN"},
         }
     )
-
-    # Constructing the manager is half of what is under test: it is
-    # where an unset reference fails the boot, below.
-    McpServerManager("weather", config)
-    assert transport._resolve("weather", config, None, "headers") == {
-        "Authorization": "from-the-environment"
-    }
-
-    monkeypatch.delenv("WEATHER_TOKEN")
     with pytest.raises(ValueError, match="WEATHER_TOKEN"):
         McpServerManager("weather", config)
