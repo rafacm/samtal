@@ -1,12 +1,12 @@
-"""What a converted emit path produced before it was converted.
+"""What every emit path produces, recorded so a change to it is loud.
 
 The #143 wire baseline, applied to log records. A conversion milestone's
 whole claim is that the surface did not move, and the honest way to make
 that claim is to record what every path produces, convert, record again,
-and show the two are the same file. So this drives each emit path in
-scope and captures the five dimensions a consumer sees: the channel, the
-numeric level, the unrendered template, the TYPES of the arguments
-behind it, and the payload's keys.
+and show the two are the same file. So this drives each of the
+eighty-one paths and captures the five dimensions a consumer sees: the
+channel, the numeric level, the unrendered template, the TYPES of the
+arguments behind it, and the payload's keys.
 
 Types rather than values for the arguments, and keys rather than values
 for the payload, because a baseline is about shape: a temporary
@@ -14,38 +14,36 @@ directory and a class name move between runs, and a file that changed
 every run would be a file nobody reads. What the values are is the
 golden inventory's question and the behavioral suites'.
 
-**The path list is not self-claimed.** A runtime harness proves only
-what it executes, so the obligation comes from a static reading of the
-source instead. `sites()` below walks the scoped modules and answers
-every emit path in them, in BOTH of the shapes a path can have: the
-untyped `events.warning(..., event=...)` call and the typed
-`events.emit(lambda: Variant(...))` thunk. The drivers' identities must
-equal that walk's exactly, in both directions, so a sixth path with no
-driver and a driver naming no path each fail the same way, before a
-conversion and after it.
+**The completeness claim comes from the catalog, not from this file.** A
+runtime harness proves only what it executes, so on its own a set of
+drivers proves whatever it happens to run. Every variant the catalog
+declares is constructible, and therefore directly drivable, so
+`tests/unit/test_event_baseline.py` holds all eighty-five of them to
+being produced by some driver's run, and a declaration nothing can
+produce fails the lane. Beside it, the smaller claim these drivers can
+give themselves: one driver per identity, eighty-one of them, and every
+record a driver keeps is the event that driver names.
 
-Reading both shapes is the correction PR #217's review forced. The first
-version of this borrowed the conformance suite's walk, which recognizes
-only the untyped shape; once the store converted, that walk found zero
-sites in scope while the harness claimed five, and an obligation of the
-form "every one of nothing is claimed" is no obligation at all.
+There used to be a static walk here instead, reading the scoped modules
+for emit sites and holding the drivers equal to what it found. It
+existed because an untyped emit site was invisible to anything but a
+reading of the source: the only way to know a path had no driver was to
+find the path in the code. It retired with the last conversion (#210),
+along with its chooser-reading, its emitter-binding reading and the
+planted sources it was proved on.
 
-The walk also reads which event each path emits, which is the `event=`
-keyword for an untyped site and the declaration behind the constructed
-variant for a typed one, so the test can hold each path to producing its
-own record rather than to producing something.
-
-`tests/unit/test_event_baseline.py` holds these obligations, proves the
-walk on planted sources, and compares the capture with the committed
-file. Regenerate it deliberately:
+`identity` is where a path is, and `event` is what it emits, which is
+what its capture is filtered to: a session driver reaches its decision
+by holding a whole conversation, so its run emits every neighbouring
+path's records too. Regenerate the committed file deliberately:
 
     uv run python -m tests.tools.event_baseline
 
-The drivers reach into the store the way the pin suite they replace
-does: a writer parked on its gate, an engine that raises, a clock the
-harness chose. Those reach-ins are the price of driving a failure path
-deterministically, and they are the same ones `test_conversations_store.py`
-pays.
+The drivers reach into the store and the capture the way the pin suites
+they came from do: a writer parked on its gate, an engine that raises, a
+free-space reading that refuses, a clock the harness chose. Those
+reach-ins are the price of driving a failure path deterministically, and
+they are the same ones `test_conversations_store.py` pays.
 """
 
 import asyncio
