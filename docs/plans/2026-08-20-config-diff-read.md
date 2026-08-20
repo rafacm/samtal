@@ -78,9 +78,9 @@ side by side. The alternatives (`/runtime/config-diff`,
 
 **What is compared?** Typed models and secret fingerprints, never
 rendered documents. Both sides hold the same entity models (the
-boot `Config`'s domain fields and the stored `Snapshot.domain` are
-validated through one set of models, which is the store's own
-design), so "changed" is model inequality; pydantic equality is
+boot and the re-read compose through one set of models, which is
+the store's own design), so "changed" is model inequality; pydantic
+equality is
 exact and needs no masking because nothing rendered ever enters the
 comparison. Stored secrets are compared through
 `SecretStore.fingerprint(kind, identity)`, the public opaque mark
@@ -136,25 +136,39 @@ composition runs with no await of its own, which is the
 sentence its callers stop having to know: which configuration kind
 converges at which boundary, and how equality between two
 configuration worlds is judged. It exports one function taking the
-running side (the boot `Config` and its `SecretStore`) and the
-stored side (a `Snapshot`) and returning the typed response model.
-The regime map (which kind carries which `applies` token) lives
-here as data, beside the comparison that uses it. Deletion test:
+running side and the stored side, each a composed `Config` with its
+`SecretStore` (the boot's, and the re-read's), and returning the
+typed result; it is pure, so its tests build both sides from the
+support factories and never touch a database. The regime map (which
+kind carries which `applies` token) lives here as data, beside the
+comparison that uses it. Deletion test:
 inlined into `app.py` the composition root would own comparison
 rules; inlined into `api.py` it would break that module's standing
 contract that the API never learns what configuration means. Both
 callers get harder to read, so the module stands.
 
-**The API learns nothing; the composition root wires a closure.**
-`ApiRuntime` gains one optional field beside `mcp_reload` and
-`agent_prompt`: a callable from a stored `Snapshot` to the diff
-response, `None` for an application built without a server around
-it, answered by the route with the honest 503 the prompt read
-already answers. `app.py` builds the closure beside `_mcp_reloader`
-and `_prompt_preview`, where the boot configuration and its secrets
-are already in hand; the route reads the stored snapshot through
-its own store dependency and hands it over. The seam is compared
-`is not None`, never by truthiness.
+**The API learns nothing; the composition root wires a closure,
+and the stored side is the reload's own re-read.** `ApiRuntime`
+gains one optional field beside `mcp_reload` and `agent_prompt`: an
+async callable producing the diff response, `None` for an
+application built without a server around it, answered by the route
+with the honest 503 the prompt read already answers, and compared
+`is not None`, never by truthiness. `app.py` builds the closure
+beside `_mcp_reloader` and `_prompt_preview`, where the boot
+configuration and its secrets are already in hand. The settled
+decision says the stored side is the same re-read the MCP reload
+uses, and the reload's re-read is `reload_domain_config`, not a raw
+`ConfigStore.load` (the review's finding 4): it opens and migrates
+the database, verifies that every stored secret opens under the
+configured keys, and composes and validates the whole snapshot. The
+closure runs exactly that in a worker thread, the way
+`_mcp_reloader`'s read half does, so a stored half whose secrets do
+not open, or one that is model-valid but fails whole-snapshot
+validation, refuses through the same typed errors the reload
+refuses through, mapped by `REFUSAL_STATUS`. The cost is the
+reload's cost, the database write lock held for the read's
+duration, priced in for an operator inspection read. The route
+stays ignorant of all of it: it awaits the callable and answers.
 
 **The response is typed in `config/responses.py`,** the way
 `McpReloadResult` is, and kind-keyed the way the whole-config
@@ -308,6 +322,10 @@ transport cases beside the existing `/runtime` suite.
   503; the happy path returns the typed shape; the route joins the
   pinned inventory in `test_api_openapi.py` and the committed
   document is regenerated in the same change.
+- **Stored-side failure paths**: a wrong encryption key (stored
+  secrets that do not open) and a stored domain that is model-valid
+  but fails whole-snapshot validation both answer the same typed
+  refusals the MCP reload answers, proven at the route.
 - **Concurrency**: a barrier-driven test forces a reload's install
   between the diff's stored load and its composition, and asserts
   the answer is a re-read of one world or the retryable 409, never
@@ -363,9 +381,11 @@ definition (grep for the defaults-then-own rule cited in review).
   load and its composition. The rule is stated in the route
   docstring the way `reload_result` states it.
 - **The stored half fails to load** (unreadable database, secrets
-  that do not open). The diff route meets it exactly as `GET
-  /config` does: the typed refusals map through `REFUSAL_STATUS`,
-  and no new failure vocabulary is invented.
+  that do not open, a stored domain that is model-valid but fails
+  whole-snapshot validation). The diff route meets all of it
+  exactly as the MCP reload does, because it runs the reload's own
+  re-read: the typed refusals map through `REFUSAL_STATUS`, and no
+  new failure vocabulary is invented.
 - **Fingerprint semantics surprise an operator** (a re-set of the
   same value reports changed). Documented in the API description
   sentence for the read: changed means written since boot.
@@ -435,6 +455,13 @@ fails like the reload is false as written. Use
 `reload_domain_config` in the worker, and test a wrong encryption
 key and a stored domain that is model-valid but fails
 whole-snapshot validation.
+
+*Resolution.* Adopted. The closure decision now says the stored
+side runs `reload_domain_config` in a worker thread, the way
+`_mcp_reloader`'s read half does, with the write-lock cost named;
+the diff function takes two composed `Config`s with their
+`SecretStore`s and stays pure; both named failure tests are in the
+test strategy and the risk table.
 
 **5 (P1). Restricting grant comparison to agents present on both
 sides hides live revocation for removed agents.** A boot-loaded
