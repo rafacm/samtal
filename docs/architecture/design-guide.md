@@ -129,12 +129,20 @@ caller uses. The caller-facing surface is right there: the model
 provider is what receives the prompt, so `RecordingLlm` in
 `tests/support/providers.py` keeps the system prompt of every round
 it was asked for, and `tests/unit/test_session_prompt.py` asserts
-against `llm.systems`, which is what the session actually sent. One
-test in that file does compare `llm.systems` with
-`session.runtime._know_how.text`, because its claim is exactly that
-with no memory store the cached half is the whole prompt; a reach-in
-with a stated reason is the flag being answered, not an exemption
-from it.
+against `llm.systems`, which is what the session actually sent.
+
+One test in that file used to compare `llm.systems` with
+`session.runtime._know_how.text`, with a stated reason, because its
+claim is exactly that with no memory store the cached half is the
+whole prompt. The #210 sweep found the reason did not hold: what the
+half holds is `runtime.prompt.know_how`'s answer, which is a public
+name and the one the activation itself calls, and that it was
+assembled once rather than rebuilt is what `CountingServers.asked`
+says, since rebuilding is what asks. The test compares against those
+two now. The lesson is the rule's own, and worth keeping beside it: a
+stated reason is the flag being answered rather than an exemption from
+it, and an answer can turn out to be wrong later, which is what
+re-asking the question across a whole suite is for.
 
 The operator-facing read, `GET /runtime/agents/{name}/prompt`, is a
 separate interface with a separate job. It previews what an agent
