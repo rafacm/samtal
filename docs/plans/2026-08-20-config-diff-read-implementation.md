@@ -415,3 +415,26 @@ writes providers and an agent, sees them pending, writes two MCP entries,
 reloads, and sees the MCP half go quiet while the providers stay pending.
 That contrast is the whole reason the labels exist, and it took no
 scaffolding beyond the pipeline the file already had.
+
+### Verification
+
+Run from `vinga-server/`, at the last commit of the milestone.
+
+- `uv run ruff check .`: all checks passed.
+- `uv run mypy`: success, no issues found in 3 source files. Its scope is
+  the events package, which this milestone does not touch.
+- `uv run pytest tests/unit -q`: 2,682 passed, 16 skipped. (Milestone 1
+  left 2,667 passed; the 15 new cases are the nine beside the other
+  `/runtime` routes and the six in `test_config_diff_read.py`.)
+- `uv run pytest tests/integration -q`: 61 passed, one more than
+  milestone 1's 60, which is the diff's own end-to-end case.
+- The four documentation drift checks, regenerated and diffed against
+  `../docs/reference/`: `config reference`, `conversations schema`,
+  `events reference` and `config openapi` are all clean.
+  `api-openapi.json` is the only reference document this milestone
+  touches, and it is committed with the route that changed it; the other
+  three are byte-identical to what milestone 1 left.
+
+Not verified here, and not claimed: the container image and the smoke
+lane, which no part of this milestone touches, and the read against a
+real device, which it has nothing to do with.
