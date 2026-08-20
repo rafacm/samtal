@@ -29,12 +29,24 @@ from sqlalchemy import text
 
 from tests.support.apps import entered_client
 from tests.support.configs import config_with
+from tests.support.problems import problem
 from tests.support.tools_mcp import entry_data
-from vinga_server.app import DIFF_LOADS, config_diff_reader
+from vinga_server.app import (
+    DIFF_DATABASE_BUSY,
+    DIFF_LOADS,
+    DIFF_REFUSED,
+    DIFF_UNREADABLE,
+    config_diff_reader,
+)
 from vinga_server.config import Config
 from vinga_server.config.api import MOUNT_PATH
 from vinga_server.config.boot import BootConfig, load_boot_config
-from vinga_server.config.loader import RunningConfigMovedError
+from vinga_server.config.loader import (
+    ConfigError,
+    DatabaseBusyError,
+    RunningConfigMovedError,
+    StorageError,
+)
 from vinga_server.config.secrets import (
     MASTER_KEY_ENV,
     SecretLocation,
@@ -144,14 +156,20 @@ def written(caplog: pytest.LogCaptureFixture) -> str:
 
 
 @pytest.mark.usefixtures("keys")
-def test_a_stored_secret_that_will_not_open_refuses_as_the_reload_does(
+def test_a_stored_secret_that_will_not_open_refuses_under_the_reload_s_status(
     directory: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The stored side runs `reload_domain_config`, which verifies that
     every stored credential opens before it composes anything, so a
-    deployment whose key has been rotated away from its secrets meets
-    the same refusal here as it would at a reload: the repository's own
-    sentence, naming the slot and never the value."""
+    deployment whose key has been rotated away from its secrets is
+    refused here under the status a reload would refuse under.
+
+    The sentence is this route's own and not the store's. What the store
+    would have said names the slot, which would be within this API's
+    ordinary contract and outside this read's, whose whole answer is
+    names and labels; the fixed sentence says where the location can be
+    had instead.
+    """
     stored(directory, secret=PLAINTEXT)
     booted = load_boot_config()
 
@@ -163,9 +181,8 @@ def test_a_stored_secret_that_will_not_open_refuses_as_the_reload_does(
         refused = served.get(DIFF_PATH, headers=headers())
 
     assert refused.status_code == 422
-    detail = refused.json()["detail"]
-    assert "cannot be decrypted" in detail
-    assert "provider llm.mock api_key" in detail
+    assert refused.json() == problem(422, DIFF_REFUSED)
+    assert "api_key" not in refused.text
 
 
 @pytest.mark.usefixtures("keys")
@@ -177,7 +194,13 @@ def test_a_stored_domain_that_will_not_compose_refuses_the_same_way(
     it, which is why it is planted as a row, and it is exactly what an
     interrupted migration or another build's write can leave behind. The
     whole-snapshot validation is part of the re-read, so this is a
-    refusal rather than an answer computed over half a world."""
+    refusal rather than an answer computed over half a world.
+
+    And the value the stored row held is the point of the fixed
+    sentence: what a refused row holds is whatever was written into it,
+    which is as likely to be a credential pasted into the wrong column
+    as a name somebody mistyped. The store names it, this read does
+    not."""
     stored(directory)
     booted = load_boot_config()
     engine = open_database(directory)
@@ -191,7 +214,79 @@ def test_a_stored_domain_that_will_not_compose_refuses_the_same_way(
         refused = served.get(DIFF_PATH, headers=headers())
 
     assert refused.status_code == 422
-    assert 'unknown llm provider "ghost"' in refused.json()["detail"]
+    assert refused.json() == problem(422, DIFF_REFUSED)
+    assert "ghost" not in refused.text
+
+
+# What a refused stored half says, and what it stops carrying
+
+
+REJECTED = "sk-stored-in-the-wrong-column-3a7f"
+
+# A world with no MCP entries at all: what these cases are about is the
+# refusal, and the registry is here only because the closure holds one.
+NO_ENTRIES = config_with()
+
+
+def failing(exc: Exception) -> Callable[[], BootConfig]:
+    def read() -> BootConfig:
+        raise exc
+
+    return read
+
+
+@pytest.mark.parametrize(
+    ("raised", "answered", "sentence"),
+    [
+        (ConfigError, ConfigError, DIFF_REFUSED),
+        (StorageError, StorageError, DIFF_UNREADABLE),
+    ],
+)
+async def test_a_refused_stored_half_keeps_its_type_and_loses_its_words(
+    raised: type[Exception], answered: type[Exception], sentence: str
+) -> None:
+    """The type is what the API turns into a status, so it survives; the
+    sentence is composed over stored state, so it does not.
+
+    The chain is the other half of the same rule. A replacement raised
+    inside the handler would carry the original as its `__context__`,
+    and anything walking an exception (a logger, a traceback renderer, a
+    debugger attached to a running deployment) would find the words
+    again with the sanitizing bypassed.
+    """
+    diff = config_diff_reader(
+        BootConfig(NO_ENTRIES, SecretStore()),
+        McpServers.build(NO_ENTRIES),
+        failing(raised(f'agents.assistant.llm: unknown llm provider "{REJECTED}"')),
+    )
+
+    with pytest.raises(answered) as caught:
+        await diff()
+
+    assert str(caught.value) == sentence
+    assert type(caught.value) is answered
+    assert REJECTED not in str(caught.value)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+
+
+async def test_a_busy_database_stays_the_retryable_refusal() -> None:
+    """The one stored-side refusal whose status is neither 422 nor 500:
+    a sentence of its own so that "make the request again" is still said
+    to whoever meets it, and its own type so that it still answers
+    409."""
+    diff = config_diff_reader(
+        BootConfig(NO_ENTRIES, SecretStore()),
+        McpServers.build(NO_ENTRIES),
+        failing(DatabaseBusyError(f"cannot migrate the database at /srv/{REJECTED}")),
+    )
+
+    with pytest.raises(DatabaseBusyError) as caught:
+        await diff()
+
+    assert str(caught.value) == DIFF_DATABASE_BUSY
+    assert REJECTED not in str(caught.value)
+    assert caught.value.__context__ is None
 
 
 # What must not travel

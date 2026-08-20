@@ -21,7 +21,11 @@ from vinga_server.config.api import (
 )
 from vinga_server.config.boot import BootConfig, load_boot_config, reload_domain_config
 from vinga_server.config.diff import Loaded, config_diff
-from vinga_server.config.loader import RunningConfigMovedError
+from vinga_server.config.loader import (
+    DatabaseBusyError,
+    RunningConfigMovedError,
+    StorageError,
+)
 from vinga_server.config.responses import (
     ConfigDiff,
     ConfigDiffReader,
@@ -463,6 +467,41 @@ CONFIG_MOVED = (
     "changed by this request; make it again."
 )
 
+# What a refused stored half says instead of what the store said.
+#
+# Every other refusal this application answers with names the location
+# it refused on, and that is the right contract for a surface whose
+# answers already carry configuration. This read's answers do not: they
+# are entity names and closed tokens, chosen so that there is nothing to
+# filter. A sentence composed over stored state breaks that, and not
+# only in theory, since a stored value that is not what its column is
+# for is exactly the shape of thing that gets refused, and a credential
+# pasted into the wrong field is exactly that shape of thing.
+#
+# So the three sentences below are fixed, one per status this read can
+# refuse the stored half with, and each says where the location is
+# available instead. The types are the store's own, so `REFUSAL_STATUS`
+# still decides the status.
+DIFF_REFUSED = (
+    "the stored configuration cannot be compared with what this server is running: it "
+    "does not compose into a valid snapshot, or a credential stored in it will not "
+    "open under the configured keys. Where exactly is deliberately not said here, "
+    "because this read answers with entity names and labels and a sentence about a "
+    "stored value is the one thing it never carries. `vinga-server config reload` "
+    "re-reads the same stored half, refuses on the same state, and names the location "
+    "it refused on, having changed nothing."
+)
+
+DIFF_UNREADABLE = (
+    "the stored configuration could not be read, for a reason that is not this "
+    "request's. The failure is recorded in this server's log."
+)
+
+DIFF_DATABASE_BUSY = (
+    "the configuration database is busy: another process holds the write lock, so the "
+    "stored half could not be read. Nothing was changed; make the request again."
+)
+
 
 def config_diff_reader(
     running: Loaded, servers: McpServers, read: Callable[[], Loaded]
@@ -497,18 +536,42 @@ def config_diff_reader(
     check and the answer. A mark that keeps moving refuses with the
     retryable 409 rather than composing a mixture.
 
-    Nothing here catches a failure of `read`'s. Everything
-    `reload_domain_config` refuses with is a `ConfigError` the API turns
-    into a status, and anything else is a bug, which the API's
-    last-resort middleware answers as a sanitized 500 while recording
-    the exception's class. A fixed sentence of this closure's would say
-    less than that and hide the class it was standing in for.
+    A refused read keeps its type and loses its words. The type is what
+    the API turns into a status and is the store's own; the sentence is
+    replaced by one of the three fixed ones above, because the store
+    composes its sentences over the state it refused and this read's
+    answers carry names and labels and nothing else. A failure with no
+    type at all is a bug and is left alone: the API's last-resort
+    middleware answers it as a sanitized 500 and records the exception's
+    class, which is more than any sentence here could say.
     """
+
+    async def stored_half() -> Loaded:
+        """The stored configuration, read off this loop and refused in
+        this route's words rather than the store's.
+
+        Built in the handler and raised after it, which is this
+        codebase's rule and load bearing here: raised inside one, the
+        replacement would carry the original as its context, and the
+        original is what holds the stored bytes. Neither `__cause__` nor
+        `__context__` reaches the caller, and the caller is a response
+        body.
+        """
+        refusal: ConfigError | None = None
+        try:
+            return await asyncio.to_thread(read)
+        except DatabaseBusyError:
+            refusal = DatabaseBusyError(DIFF_DATABASE_BUSY)
+        except StorageError:
+            refusal = StorageError(DIFF_UNREADABLE)
+        except ConfigError:
+            refusal = ConfigError(DIFF_REFUSED)
+        raise refusal
 
     async def diff() -> ConfigDiff:
         for _ in range(DIFF_LOADS):
             mark = servers.generation
-            stored = await asyncio.to_thread(read)
+            stored = await stored_half()
             if servers.generation == mark:
                 return config_diff(
                     running,
