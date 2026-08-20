@@ -358,6 +358,16 @@ drained, closes the current generation's providers and any retired
 generation still held, so the close a provider gained in this
 milestone runs at every end a provider can meet.
 
+Teardown never refuses (round 2's finding 7): a raising `close()`
+cannot fail an apply whose serving state already changed, strand
+the holder unstable, or put third-party prose anywhere. Disposal
+awaits its cleanup within a bound, classifies a failure by
+exception class only with the prose suppressed, and the apply
+always finishes its install, settles the mark, and releases the
+exclusion whatever teardown did; the close-raises sentinel test
+proves the apply succeeds and neither the response nor the logs
+carry the planted text.
+
 A provider refusal also needs an HTTP identity it does not have
 today (the review's finding 7): `ProviderError` is not a
 `ConfigError`, and only the boot-failure handler knows it. The
@@ -906,6 +916,11 @@ leak third-party prose. Teardown is non-refusing and bounded,
 failures classified by class only, and the apply always finishes
 install, settlement, and release, with a close-raises-sentinel
 test.
+
+*Resolution.* Adopted verbatim: the teardown-never-refuses
+paragraph in the providers decision states the bound, the
+class-only classification, the guaranteed
+install-settle-release, and the sentinel test.
 
 **8 (P2). M1 and M2 leave agent-write acknowledgements falsely
 restart-only.** An agent write carries the now-live `prompt`,
