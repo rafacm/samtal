@@ -2,17 +2,17 @@
 
 An event's payload is metadata and nothing else ([the content and
 telemetry ADR](../../../../docs/adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)),
-and until now that was a claim the registry made ABOUT a value: a field
-said "this position holds a session id" and a validator read the value
-back at emit time to see whether it did. This module makes it a claim
-the value itself carries. A `SessionId` is a session id because it
+and it used to be a claim a registry made ABOUT a value: a field said
+"this position holds a session id" and a validator read the value back
+at emit time to see whether it did. This module makes it a claim the
+value itself carries. A `SessionId` is a session id because it
 could not have been constructed otherwise, and a site that has one has
 already proved it.
 
 Three properties are load-bearing, and none of them is incidental:
 
 - **Construction is the check.** Every type here refuses at
-  construction what the registry used to refuse at emit. The annotation
+  construction what a validator used to refuse at emit. The annotation
   alone proves nothing at runtime, so the check is explicit and runs
   whatever a type checker did or did not see.
 - **A refusal never repeats what it refused.** The value handed to a
@@ -320,7 +320,7 @@ FROM_ENTRY = Grammar(
     "The configured MCP entry a call reached, never the far side's own "
     "tool name. Entry names are separately held to `[A-Za-z0-9_-]+` by "
     "the configuration, which makes this grammar a floor rather than "
-    "the whole truth; the floor is what the registry may claim, since "
+    "the whole truth; the floor is what this surface may claim, since "
     "the tighter rule is configuration's to keep and to change.",
 )
 
@@ -839,7 +839,7 @@ class Descriptor(TextValue):
     device says ABOUT ITSELF at check-in is metadata once bounded, while
     what a person said through it never is. The bound is the subclass's,
     because the decision site's is, and it is applied here a second time
-    for the reason the registry applied it a second time: the site that
+    for the reason the untyped registry applied it a second time: the site that
     bounds it and the surface that carries it are different pieces of
     code, and only one of them is this one.
     """
@@ -926,15 +926,16 @@ class PromptSources(EventValue):
 
 # --- the closed sets, as types ----------------------------------------
 #
-# A token used to be a string a site wrote and a set the registry
+# A token used to be a string a site wrote and a set a registry
 # restated; here it is a member of an enumeration, so a site that names
 # one has named a value that exists. The enumerations are restated from
-# their decision sites rather than imported from them, for the reason
-# `events_schema.py` restates the descriptor bounds: this package
-# imports the standard library and the schema and nothing else, and the
-# decision sites live in `device/`, `runtime/` and `conversations/`,
-# which import THIS. The unit tests hold the restatements equal to their
-# sites, which is where the conformance walk's token check goes.
+# their decision sites rather than imported from them, because those
+# sites live in `device/`, `runtime/`, `onboarding/` and `tools/`, all of
+# which import THIS and would close a cycle. The unit tests hold the
+# restatements equal to their sites, which is where the retired
+# conformance walk's token check went. The descriptor bounds are the one
+# exception and ARE imported, because `config/models.py` reaches nothing
+# in this package.
 
 
 class CloseReason(StrEnum):
@@ -1319,7 +1320,7 @@ class McpRefusalToken(TokenValue):
 # has nothing to add. Those positions are bounded by STRUCTURE, never by
 # a character class or a length, because what they hold is configured
 # names and what an operator may call something is not this module's
-# business. Each is a value type whose grammar is the registry's own, so
+# business. Each is a value type declaring its own grammar, so
 # a fragment that does not fit the shape its declaration prints cannot
 # be constructed.
 

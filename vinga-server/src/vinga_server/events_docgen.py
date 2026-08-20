@@ -21,12 +21,12 @@ kind, token set, syntax and bound is here, where a wrong claim turns a
 lane red.
 
 Everything here is deterministic: no timestamps, no set iteration, and
-the events, variants and fields come out in the registry's own
+the events, variants and fields come out in the catalog's own
 declaration order. Token sets and channel sets are sorted, since those
 are the only unordered things a declaration holds.
 
 Read-only, and deliberately so: nothing here opens a database, reads a
-configuration file, or needs a key. It imports the registry and the
+configuration file, or needs a key. It imports the catalog and the
 standard library, which is what lets the command in front of it run on a
 machine whose server will not start.
 """

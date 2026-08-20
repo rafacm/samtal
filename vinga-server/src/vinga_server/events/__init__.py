@@ -18,7 +18,7 @@ runtime owns: `device/`, `runtime/` and every server subsystem import
 downward into this module, and it imports none of them. It also stopped
 being a payload factory that call sites logged around and became the thing
 that emits: a site says
-`events.info("heard %.2f s", seconds, event="heard", duration_s=seconds)`
+`events.emit(lambda: Heard(agent=..., duration_s=Real(seconds)))`
 and the emitter builds the payload, wraps it, and hands it to every
 attached consumer.
 
@@ -57,27 +57,24 @@ is stamped with `time.monotonic`, because server events fire where no loop
 is running: `create_app` reports its capture directory before the server
 serves anything.
 
-And nothing leaves either emitter unjudged. `events_schema.py` declares
-every event this server may emit, and `_emit` holds each emission to
-that declaration before a single consumer sees it (#155): what the
-caller passed is checked BEFORE the base fields are merged, so a spread
-carrying `session=` cannot replace the emitter's own identity, and the
-finished payload is then matched whole against the event's declared
-variants, sentence and arguments included. Which of the two things that
-buys happens depends on `VINGA_EVENTS_ENFORCEMENT`: `strict` raises, so
-a lane, an import or a REPL refuses a violation outright, and
-`forgiving` recovers, so a telemetry bug can never cost a reply.
+And a site cannot say a thing `catalog.py` does not declare. It hands
+`emit()` a thunk that builds a typed variant instead of restating a
+template, an argument order, an event name and a field set: the
+declaration owns all four, and every value is a type that refuses at
+construction what it does not admit, so there is nothing left for a call
+to get wrong (#155, #210). What there used to be was a validator that
+read the finished payload back and judged it against a registry, and it
+went with the duplication it existed to reconcile.
 
-That is the untyped path, and it is being replaced one area at a time
-(#210). A converted site hands `emit()` a thunk that builds a typed
-variant from `catalog.py` instead of restating a template, an argument
-order, an event name and a field set: the declaration owns all four, so
-there is nothing left for a call to get wrong and nothing left to
-judge it against. What survives is the guard, because construction can
-still fail on a value, and the two modes above, because what a failed
-construction costs must still be a log line rather than a reply. Both
-paths dispatch the same `Emission` to the same taps, which is what the
-committed record baseline proves rather than assumes.
+What survives at runtime is the guard, because construction can still
+fail on a value, and `VINGA_EVENTS_ENFORCEMENT` decides what that costs:
+`strict` raises, so a lane, an import or a REPL refuses outright, and
+`forgiving` says so once on the emitter's own channel and dispatches the
+declared `schema_violation` instead, so a telemetry bug can never cost a
+reply. The thunk is what makes that possible: building, validating,
+rendering and serializing all happen inside the guard, where
+`emit(SomeVariant(...))` would have evaluated the constructor on
+whatever path was emitting.
 """
 
 import asyncio
@@ -322,14 +319,12 @@ ENFORCEMENT_MODES = (STRICT, FORGIVING)
 _enforcement = STRICT
 
 class EventSchemaError(Exception):
-    """What strict mode raises when an emission is not what the registry
-    says that event is.
+    """What strict mode raises when an emission could not be built.
 
-    Its text names registry-owned identifiers only. A declared event or
-    field name may be said, because the registry owns it; an undeclared
-    event name, an undeclared field name and every field value are
-    caller-supplied bytes under this module's own model, so they are
-    reported as a fixed code and a count instead."""
+    Its text names catalog-owned identifiers only: a fixed label and a
+    fixed code. What a thunk was holding when it refused is
+    caller-supplied bytes under this module's own model, and so is the
+    name of the class it raised, so neither is said at all."""
 
 
 class EventEnforcementError(Exception):
