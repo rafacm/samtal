@@ -25,7 +25,7 @@ from vinga_server import __version__
 from vinga_server.auth import DeviceAuth
 from vinga_server.build_info import revision
 from vinga_server.composition import Composition
-from vinga_server.config import Config
+from vinga_server.config import ServerConfig
 from vinga_server.config.models import (
     BOARD_LIMIT,
     CLIENT_ID_LIMIT,
@@ -106,10 +106,10 @@ def token_for(
     return device_auth.issue(client_id, mac)
 
 
-def timezone_offset_minutes(config: Config) -> int:
+def timezone_offset_minutes(server: ServerConfig) -> int:
     """Minutes east of UTC for the device clock, from the config or from the
     server's own current offset."""
-    configured = config.server.timezone_offset_minutes
+    configured = server.timezone_offset_minutes
     if configured is not None:
         return configured
     offset = datetime.now().astimezone().utcoffset()
@@ -138,7 +138,7 @@ def reported_board(payload: dict[str, Any]) -> str:
 
 async def check_version(request: Request) -> Response:
     comp: Composition = request.app.state.composition
-    config: Config = comp.config
+    server: ServerConfig = comp.server
 
     device_id = request.headers.get("device-id", "").strip()
     client_id = request.headers.get("client-id", "").strip()
@@ -217,7 +217,7 @@ async def check_version(request: Request) -> Response:
         "said_device": ReportedMac(device_id),
     }
 
-    activation = await _activation(comp, config, resolution, mac, client_id, board, version)
+    activation = await _activation(comp, server, resolution, mac, client_id, board, version)
 
     if activation is not None:
         # A code is a claim ticket read off a screen, not a credential:
@@ -254,7 +254,7 @@ async def check_version(request: Request) -> Response:
         {
             "server_time": {
                 "timestamp": int(time.time() * 1000),
-                "timezone_offset": timezone_offset_minutes(config),
+                "timezone_offset": timezone_offset_minutes(server),
             },
             # No image to offer: echoing the reported version back is how the
             # firmware reads "up to date", since it only updates for a
@@ -269,9 +269,9 @@ async def check_version(request: Request) -> Response:
                 # device showing a code has nothing to reach yet, and the
                 # firmware persists what it is handed, so an empty string
                 # clears one another server left in NVS.
-                "url": websocket_url_for(config, request),
+                "url": websocket_url_for(server, request),
                 "token": token_for(comp.device_auth, client_id, mac, agents),
-                "version": config.server.protocol_version,
+                "version": server.protocol_version,
             },
         }
     )
@@ -280,7 +280,7 @@ async def check_version(request: Request) -> Response:
 
 async def _activation(
     comp: Composition,
-    config: Config,
+    server: ServerConfig,
     resolution: DeviceAgents,
     mac: str,
     client_id: str,
@@ -310,7 +310,7 @@ async def _activation(
     correctly and simply not warn.
     """
     unbound = await activation_for(
-        comp.pending, config.server, resolution, mac, client_id, board, firmware
+        comp.pending, server, resolution, mac, client_id, board, firmware
     )
     match unbound.outcome:
         case "unreadable":
@@ -343,14 +343,14 @@ async def describe(request: Request) -> Response:
     """A human check that the endpoint is reachable and pointed somewhere
     sensible. Devices only ever POST here."""
     comp: Composition = request.app.state.composition
-    config: Config = comp.config
+    server: ServerConfig = comp.server
     return PlainTextResponse(
         f"vinga-server {__version__} (revision {revision()}) OTA endpoint.\n"
-        f"Devices are sent to {websocket_url_for(config, request)} "
-        f"(protocol version {config.server.protocol_version}).\n"
+        f"Devices are sent to {websocket_url_for(server, request)} "
+        f"(protocol version {server.protocol_version}).\n"
         # The path this was reached on, so the line is the URL that
         # works rather than the one this server would recommend.
-        f"{portal_url_line(config.server, request.url.path)}\n"
+        f"{portal_url_line(server, request.url.path)}\n"
     )
 
 

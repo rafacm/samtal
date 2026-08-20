@@ -40,7 +40,7 @@ from typing import Any, cast
 import pytest
 
 import vinga_server.device.session as session_module
-from tests.support.configs import DEVICE_MAC, POET_MAC, base_config
+from tests.support.configs import DEVICE_MAC, POET_MAC, base_config, world
 from tests.support.events import only
 from tests.support.providers import ScriptedLlm, Unreachable
 from tests.support.sockets import LoopingSocket, RecordingSocket
@@ -48,6 +48,7 @@ from vinga_server.config import Config
 from vinga_server.device.session import DeviceSession
 from vinga_server.events import SessionEvents
 from vinga_server.filler import build_agent_fillers
+from vinga_server.generation import Generations
 from vinga_server.providers import ToolCall, Turn, build_agent_providers
 from vinga_server.runtime.pipeline import bespoke_runtime_factory
 from vinga_server.tools.mcp import McpServers
@@ -93,6 +94,7 @@ def device_session(
     websocket: Any = None,
     mcp_servers: McpServers | None = None,
     conversations: Any = None,
+    generations: Generations | None = None,
 ) -> session_module.DeviceSession:
     """A device session with a real bespoke runtime behind it, built the
     way `run` builds one: the agents resolved from the binding, then the
@@ -105,16 +107,26 @@ def device_session(
     and is what a deployment with no MCP entries has. `conversations` is
     the store a turn's record is handed to, None everywhere but in the
     suite that is about the record, which is what a deployment that has
-    not asked for one has."""
+    not asked for one has.
+
+    `generations` is the holder the server would hand the factory, and
+    it is a parameter for the one kind of test that needs it: a reload
+    replaces what the holder answers, so a suite about what a session
+    reads across an apply has to build its session against the holder
+    the apply installs into. Everything else gets a holder over the
+    configuration it passed, which is the world that server serves and
+    the only one it will ever serve."""
+    if generations is None:
+        generations = world(config)
     factory = bespoke_runtime_factory(
-        config,
+        generations,
         providers if providers is not None else agent_providers(config),
         mcp_servers if mcp_servers is not None else McpServers({}),
         memory,
         fillers if fillers is not None else {},
         conversations,
     )
-    session = session_module.DeviceSession(cast(Any, websocket), config, factory)
+    session = session_module.DeviceSession(cast(Any, websocket), generations, factory)
     # White-box, deliberately, and the only three sites in this file that
     # are. These two lines are `run`'s own, transcribed: it resolves the
     # binding, keeps the agents, and calls the factory with the session,
@@ -141,6 +153,7 @@ def session_for(
     mcp_servers: McpServers | None = None,
     conversations: Any = None,
     stages: dict[str, Any] | None = None,
+    generations: Generations | None = None,
 ) -> DeviceSession:
     """A device session with a real bespoke runtime behind it, built the
     way `run` builds one, with the named agents' LLMs replaced by
@@ -155,6 +168,7 @@ def session_for(
         websocket,
         mcp_servers,
         conversations,
+        generations,
     )
 
 
@@ -242,11 +256,12 @@ def served(
     is the store, which reaches a session twice over: through the factory
     that binds its turn recorder, and as the collaborator the session
     opens and closes."""
+    generations = world(config)
     factory = bespoke_runtime_factory(
-        config, build_agent_providers(config), McpServers({}), None, {}, conversations
+        generations, build_agent_providers(config), McpServers({}), None, {}, conversations
     )
     return DeviceSession(
-        cast(Any, websocket), config, factory, conversations=conversations
+        cast(Any, websocket), generations, factory, conversations=conversations
     )
 
 

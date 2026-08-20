@@ -22,12 +22,13 @@ from dataclasses import dataclass
 
 from vinga_server.auth import DeviceAuth
 from vinga_server.capture import CaptureStore, DeviceFacts
-from vinga_server.config import Config
+from vinga_server.config import ServerConfig
 from vinga_server.config.api import ApiRuntime
 from vinga_server.conversations import ConversationStore
 from vinga_server.device.bindings import DeviceBindings
 from vinga_server.device.boundary import RuntimeFactory
 from vinga_server.filler import AgentFillers
+from vinga_server.generation import Generations
 from vinga_server.onboarding import PendingDevices
 from vinga_server.providers import AgentProviders
 from vinga_server.registry import SessionRegistry
@@ -56,9 +57,21 @@ class Composition:
     None with device authentication off, `memory` without a memory
     section, `conversations` unless recording is on, `capture` unless
     capture is configured and enabled.
+
+    Two fields say where configuration comes from, and the split is the
+    point (#191). `server` is the file half: the port, the limits, the
+    directories, the barge-in tuning, everything this process read once
+    at startup and will read again only at the next one. `generations`
+    is the domain half, which a reload can replace while the process
+    runs, so it is a holder to ask rather than a snapshot to keep: a
+    handler that captured what it answers would be serving a world this
+    server may have stopped serving. There is deliberately no whole
+    `Config` here any more, because a second copy of the domain half
+    would be a stale one the moment an apply lands.
     """
 
-    config: Config
+    server: ServerConfig
+    generations: Generations
     device_auth: DeviceAuth | None
     bindings: DeviceBindings
     pending: PendingDevices

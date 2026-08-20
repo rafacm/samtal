@@ -19,18 +19,20 @@ from vinga_server.config.api import (
     mount_api,
     open_store,
 )
-from vinga_server.config.boot import BootConfig, load_boot_config, reload_domain_config
+from vinga_server.config.boot import load_boot_config, reload_domain_config
 from vinga_server.config.diff import Loaded, config_diff
 from vinga_server.config.loader import (
     DatabaseBusyError,
+    ReloadInProgressError,
     RunningConfigMovedError,
     StorageError,
 )
+from vinga_server.config.reload import ConfigReload
 from vinga_server.config.responses import (
     ConfigDiff,
     ConfigDiffReader,
-    McpReloader,
-    McpReloadResult,
+    ConfigReloader,
+    ConfigReloadResult,
 )
 from vinga_server.config.secrets import SecretStore
 from vinga_server.conversations import ConversationStore, migrate_existing
@@ -39,6 +41,7 @@ from vinga_server.events import EventEnforcementError, ServerEvents, resolve_enf
 from vinga_server.events.catalog import CaptureDisabled, CaptureEnabled
 from vinga_server.events.values import ConfiguredPath
 from vinga_server.filler import AgentFillers, build_agent_fillers
+from vinga_server.generation import Generation, Generations
 from vinga_server.providers import ProviderError, build_agent_providers
 from vinga_server.registry import SessionRegistry
 from vinga_server.runtime import prompt
@@ -205,6 +208,16 @@ async def _build_composition(
     # changed by the open below happening later in this build.
     bindings = DeviceBindings.open(config)
     stack.callback(bindings.dispose)
+    # The world new work binds, and the only place it is replaced. The
+    # boot's configuration and the credentials loaded with it are the
+    # first generation; a reload composes the next one and installs it
+    # here. Built this early because everything below either reads it or
+    # is handed it: an empty store rather than None for a deployment
+    # whose credentials are all environment references, so that a
+    # generation is one shape rather than two.
+    generations = Generations(
+        Generation(config, secrets if secrets is not None else SecretStore())
+    )
     # The devices waiting to be claimed, and the codes they are showing.
     # Runtime state owned by this app and shared with the configuration
     # API below, which is where a code becomes a binding. Always built,
@@ -282,7 +295,7 @@ async def _build_composition(
     # them for the same reason: it outlives every connection, and the
     # per-session recorder is derived from it here.
     runtime_factory = bespoke_runtime_factory(
-        config,
+        generations,
         agent_providers,
         mcp_servers,
         memory,
@@ -344,20 +357,25 @@ async def _build_composition(
         config.agents,
         pending,
         mcp_servers,
-        _mcp_reloader(config, mcp_servers),
-        _prompt_preview(config, mcp_servers, memory),
+        config_reloader(generations, mcp_servers, lambda: reload_domain_config(config)),
+        _prompt_preview(generations, mcp_servers, memory),
         config_diff_reader(
-            # One side of the comparison: what this process is serving.
-            # A store with nothing in it rather than None is the same
-            # world as a deployment whose credentials are all
-            # environment references, and it keeps the comparison from
-            # having to know about a second shape of side.
-            BootConfig(config, secrets if secrets is not None else SecretStore()),
+            # One side of the comparison: what this process is serving,
+            # read at the moment the comparison is composed rather than
+            # captured here, because a reload replaces it.
+            generations,
             mcp_servers,
             # And the other side, which is the reload's own re-read of
             # the stored half, run where the reload runs it.
             lambda: reload_domain_config(config),
         ),
+        # Whether there is a store behind what this process serves. The
+        # bindings view decided it once, at the open above, and it is
+        # the same question: a directory with no database in it is a
+        # configuration this server was handed. The two surfaces that
+        # span both sides refuse in that mode, and a device write says
+        # what it can honestly say.
+        bindings.snapshot_authoritative,
     )
     # The configuration database, opened once here rather than on every
     # request (#142), and migrated in the same call because nothing may
@@ -387,7 +405,8 @@ async def _build_composition(
     # here: it was passed into the gate in `create_app` and is held
     # nowhere.
     composition = Composition(
-        config=config,
+        server=config.server,
+        generations=generations,
         device_auth=device_auth,
         bindings=bindings,
         pending=pending,
@@ -422,30 +441,95 @@ async def _build_composition(
     return composition
 
 
-def _mcp_reloader(config: Config, servers: McpServers) -> McpReloader:
+# What a refused reload says instead of what the store said.
+#
+# The same rule the comparison beside it follows, and for the same
+# reason: what a reload refuses on is arbitrary stored state, and a
+# sentence composed over it can quote a value that was written into the
+# wrong field. A credential pasted where a model expects a name is
+# exactly that shape of thing, and it is exactly the shape of thing a
+# refusal is composed over.
+#
+# So the three sentences below are fixed, one per status a refused
+# stored half can carry, and the types are the store's own, so
+# `REFUSAL_STATUS` still decides the status. Where the location is
+# available instead is a server started from this store, which refuses
+# on the same state and prints the location it refused on.
+RELOAD_REFUSED = (
+    "the reload was refused and nothing was changed: the stored configuration does not "
+    "compose into a snapshot this server can serve, a credential stored in it will not "
+    "open under the configured keys, or a server it names could not be built. Where "
+    "exactly is deliberately not said here, because a sentence about a stored value is "
+    "the one thing a reload's answer never carries. A server started from this store "
+    "refuses on the same state and names the location it refused on."
+)
+
+RELOAD_UNREADABLE = (
+    "the reload was refused and nothing was changed: this server's configuration could "
+    "not be read, for a reason that is not this request's. The failure is recorded in "
+    "this server's log."
+)
+
+RELOAD_DATABASE_BUSY = (
+    "the configuration database is busy: another process holds the write lock, so the "
+    "stored configuration could not be read. Nothing was changed; make the request "
+    "again."
+)
+
+
+def config_reloader(
+    generations: Generations, servers: McpServers, read: Callable[[], Loaded]
+) -> ConfigReloader:
     """What the configuration API's reload route calls.
 
-    Closed over here because this is where both halves are known: the
-    configuration this process booted on, whose `server` section the
-    stored domain half is composed onto, and the managers that are
-    running. The re-read goes to the registry as a plain function rather
-    than being done here, which keeps the tools layer clear of the
-    database and leaves the registry deciding where a blocking read runs
-    (a worker thread) and when it is allowed to run at all.
+    Closed over here because this is where every piece is known: the
+    holder whose generation a reload replaces, the managers that are
+    running, and the re-read of the stored half, which goes to the apply
+    as a plain function rather than being done here so that the layers
+    below stay clear of the database and the apply decides where a
+    blocking read runs.
 
-    What comes back is the endpoint's whole answer, composed by the
-    registry: this is the wiring between an application that must not
-    load the MCP layer and a layer that must not know what a route is,
-    and a shape either of them had to take apart would be a third
-    place that knew both.
+    What comes back is the endpoint's whole answer, composed where the
+    phases live: this is the wiring between an application that must not
+    load the MCP layer or the runtime and a layer that must not know
+    what a route is, and a shape either of them had to take apart would
+    be a third place that knew both.
+
+    A refused apply keeps its type and loses its words, the shape the
+    comparison read below already has. The type is what the API turns
+    into a status; the sentence is replaced by one of the three fixed
+    ones above, because the apply composes its refusals over the stored
+    state it refused on. `ReloadInProgressError` is the one refusal that
+    passes through as itself: it is about this server's own exclusion
+    and was never composed over anything stored. A failure with no type
+    at all is a bug and is left alone, for the reason the comparison
+    leaves one alone.
     """
+    applying = ConfigReload(generations, servers, read)
 
-    def read() -> tuple[Config, SecretStore]:
-        reloaded = reload_domain_config(config)
-        return reloaded.config, reloaded.secrets
+    async def reload() -> ConfigReloadResult:
+        """One apply, refused in this route's words rather than the
+        store's.
 
-    async def reload() -> McpReloadResult:
-        return await servers.reload_result(read)
+        Built in the handler and raised after it, which is this
+        codebase's rule and load bearing here: raised inside one, the
+        replacement would carry the original as its context, and the
+        original is what holds the stored bytes. Neither `__cause__` nor
+        `__context__` reaches the caller, and the caller is a response
+        body.
+        """
+        refusal: ConfigError | None = None
+        try:
+            return await applying.apply()
+        except ReloadInProgressError:
+            raise
+        except DatabaseBusyError:
+            refusal = DatabaseBusyError(RELOAD_DATABASE_BUSY)
+        except StorageError:
+            refusal = StorageError(RELOAD_UNREADABLE)
+        except ConfigError:
+            refusal = ConfigError(RELOAD_REFUSED)
+        raise refusal
 
     return reload
 
@@ -469,10 +553,10 @@ CONFIG_MOVED = (
 
 # What a refused stored half says instead of what the store said.
 #
-# Every other refusal this application answers with names the location
-# it refused on, and that is the right contract for a surface whose
-# answers already carry configuration. This read's answers do not: they
-# are entity names and closed tokens, chosen so that there is nothing to
+# Most refusals this application answers with name the location they
+# refused on, and that is the right contract for a surface whose answers
+# already carry configuration. This read's answers do not: they are
+# entity names and closed tokens, chosen so that there is nothing to
 # filter. A sentence composed over stored state breaks that, and not
 # only in theory, since a stored value that is not what its column is
 # for is exactly the shape of thing that gets refused, and a credential
@@ -480,16 +564,17 @@ CONFIG_MOVED = (
 #
 # So the three sentences below are fixed, one per status this read can
 # refuse the stored half with, and each says where the location is
-# available instead. The types are the store's own, so `REFUSAL_STATUS`
-# still decides the status.
+# available instead, which is a server started from this store. The
+# apply beside this one refuses in the same shape and for the same
+# reason. The types are the store's own, so `REFUSAL_STATUS` still
+# decides the status.
 DIFF_REFUSED = (
     "the stored configuration cannot be compared with what this server is running: it "
     "does not compose into a valid snapshot, or a credential stored in it will not "
     "open under the configured keys. Where exactly is deliberately not said here, "
     "because this read answers with entity names and labels and a sentence about a "
-    "stored value is the one thing it never carries. `vinga-server config reload` "
-    "re-reads the same stored half, refuses on the same state, and names the location "
-    "it refused on, having changed nothing."
+    "stored value is the one thing it never carries. A server started from this store "
+    "refuses on the same state and names the location it refused on."
 )
 
 DIFF_UNREADABLE = (
@@ -504,15 +589,22 @@ DIFF_DATABASE_BUSY = (
 
 
 def config_diff_reader(
-    running: Loaded, servers: McpServers, read: Callable[[], Loaded]
+    generations: Generations, servers: McpServers, read: Callable[[], Loaded]
 ) -> ConfigDiffReader:
     """What the configuration API's diff read calls.
 
-    Closed over here for the reason the reload is: the world this
-    process booted, the credentials loaded beside it and the registry a
-    reload replaces are known at the composition root and nowhere else,
-    and the API application must not learn which kind of configuration
+    Closed over here for the reason the reload is: the holder whose
+    generation is what this server is serving, and the registry a reload
+    replaces, are known at the composition root and nowhere else, and
+    the API application must not learn which kind of configuration
     converges where.
+
+    The running side is read from the holder at the moment the
+    comparison is composed rather than captured when this is built. That
+    is the whole of what makes the answer keep its promise once a reload
+    can apply something: a comparison against the boot would report as
+    pending exactly the changes an apply has already made, which is the
+    one thing an answer about what is pending must not do.
 
     `read` is the stored half, handed in rather than done here, exactly
     as the reload hands its own re-read to the registry: opening a
@@ -539,13 +631,16 @@ def config_diff_reader(
     One world, and this is the whole of how. The read is blocking (it
     takes the database's write lock and waits out its busy timeout), so
     it runs in a worker thread, and that await is itself the window: a
-    reload can install a new set of MCP entries while it is in flight,
-    leaving a stored generation compared against a runtime that never
-    held it. The registry's generation mark is therefore taken on this
-    loop before the read and read again after it, and the comparison
-    runs only if it did not move, with no await of its own between that
-    check and the answer. A mark that keeps moving refuses with the
-    retryable 409 rather than composing a mixture.
+    reload can install a new world while it is in flight, leaving a
+    stored generation compared against a runtime that never held it. The
+    holder's mark is therefore taken on this loop before the read and
+    read again after it, and the comparison runs only if it was settled
+    both times and did not move, with no await of its own between that
+    check and the answer. An apply changes serving state more than once,
+    so the mark reads as nothing at all while one is running, and a
+    sample that has no number is as good a reason to read again as two
+    that disagree. A mark that keeps moving refuses with the retryable
+    409 rather than composing a mixture.
 
     A refused read keeps its type and loses its words. The type is what
     the API turns into a status and is the store's own; the sentence is
@@ -581,11 +676,14 @@ def config_diff_reader(
 
     async def diff() -> ConfigDiff:
         for _ in range(DIFF_LOADS):
-            mark = servers.generation
+            mark = generations.mark
             stored = await stored_half()
-            if servers.generation == mark:
+            # `is not None` and not equality alone: two unstable samples
+            # are two moments inside an apply rather than one world that
+            # held still, and equality would call them the same.
+            if mark is not None and generations.mark == mark:
                 return config_diff(
-                    running,
+                    generations.current(),
                     stored,
                     servers.pending_against(stored.config, stored.secrets),
                 )
@@ -595,15 +693,20 @@ def config_diff_reader(
 
 
 def _prompt_preview(
-    config: Config, servers: McpServers, memory: MemoryStore | None
+    generations: Generations, servers: McpServers, memory: MemoryStore | None
 ) -> Callable[[str], Awaitable[prompt.Assembled | None]]:
     """What the configuration API's prompt read calls.
 
     Closed over here for the reason the reload is: the three things an
-    assembly needs (the configuration this process loaded, the MCP
-    registry that is running, and the memory store this server writes)
-    are known at the composition root and nowhere else, and the API
-    application must not learn what a prompt is made of.
+    assembly needs (the holder whose generation is what this server
+    serves, the MCP registry that is running, and the memory store this
+    server writes) are known at the composition root and nowhere else,
+    and the API application must not learn what a prompt is made of.
+
+    The configuration is read from the holder per request, exactly as an
+    activation reads it, which is what keeps this a preview of what a
+    session opening now would be sent rather than of what one opening at
+    boot would have been.
 
     An agent this server did not load answers None rather than raising,
     so the route decides what a missing one means. The guidance is read
@@ -614,6 +717,7 @@ def _prompt_preview(
     """
 
     async def assemble(agent: str) -> prompt.Assembled | None:
+        config = generations.current().config
         if agent not in config.agents:
             return None
         half = prompt.know_how(
