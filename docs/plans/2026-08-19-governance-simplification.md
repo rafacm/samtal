@@ -362,7 +362,7 @@ carries its baseline proof inside its own PR.
   and kept. The baseline runs pre- and post-conversion inside the PR
   and is committed with the implementation doc section.
 - [x] **[M3: convert the server channels and delete the
-  reconciliation apparatus](2026-08-19-governance-simplification-implementation.md#m3-convert-the-server-channels-and-delete-the-reconciliation-apparatus).** (PR TBD) The remaining server-scope sites
+  reconciliation apparatus](2026-08-19-governance-simplification-implementation.md#m3-convert-the-server-channels-and-delete-the-reconciliation-apparatus).** (PR #220) The remaining server-scope sites
   convert; `events_schema.py`'s registry, the enforcement matrix,
   and the recovery machinery reduce to the catalog, the construction
   guard, and the descriptor bounds; `test_event_schema_conformance.py`
