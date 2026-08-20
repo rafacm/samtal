@@ -165,7 +165,13 @@ secrets, that half being live, and retain the previous
 generation's provider secrets until M3 installs candidate
 providers, so a provider-secret rotation stays pending in the diff
 through M1 and M2 applies and empties only when the M3 rebuild
-actually uses the new secret, which the tests pin. The overlay
+actually uses the new secret, which the tests pin. Envelopes and
+keys are deliberately private, so the composition is a deep
+operation on `SecretStore` itself (round 3's finding 5): a
+derivation that takes the two stores and the per-kind regime and
+composes internally, returning a store and never an envelope, a
+key, plaintext, or a fingerprint, named in M1 beside its three
+tests. The overlay
 is validated whole, by the same `check_completeness` and
 `check_references` every composition passes, and an apply whose
 overlay does not compose refuses with the standard sentences:
@@ -470,6 +476,9 @@ equality plus secret fingerprints, exactly as the diff's does, so
   `api.py` the route would learn what a reload is made of; inlined
   into `app.py` the composition root would grow a second
   responsibility beyond wiring.
+- `config/secrets.py` (M1): the deep two-store derivation the
+  secret overlay composes through, exposing no envelope, key,
+  plaintext, or fingerprint.
 - `config/api.py` (M1): the route swap in `_runtime`
   (`POST /runtime/config/reload` in, the MCP route out), the
   `API_DESCRIPTION` rewrite, `ApiRuntime`'s reload field retyped
@@ -1117,6 +1126,11 @@ regime internally, returning none of envelopes, keys, plaintext,
 or fingerprints, named in M1 and tested for provider rotation
 pending through M1 and M2, MCP rotation applying in M1, and
 planted envelope bytes absent everywhere.
+
+*Resolution.* Adopted. `config/secrets.py` joins the module
+layout: `SecretStore` gains the deep two-store derivation composed
+internally by entity-kind regime, exposing nothing, named in M1
+with the three tests.
 
 **6 (P2). The reload response is neither additive nor complete
 across milestones.** The API models forbid extras, so gaining
