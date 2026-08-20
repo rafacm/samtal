@@ -743,3 +743,101 @@ stored duplicate.
 the generation comes to own `Composition` stops owning:
 `agent_fillers` goes in M2 and `agent_providers` in M3, with
 callers moved to the holder or their bound generation.
+
+## Plan review round 2 (2026-08-20)
+
+External review: codex exec, model gpt-5.6-sol, read-only against
+commit e0017a68, judging whether round 1's resolutions close their
+findings. Verdict: not ready; a third round runs after these
+amendments. Findings condensed but faithful; each carries its
+resolution.
+
+**1 (P1). The staged overlay omits the secret half of provider
+identity.** `Generation` receives a `SecretStore`, the diff
+compares provider secrets through the running side's fingerprint,
+and installing freshly loaded secrets in M1 would report a
+provider-secret rotation applied while the provider is
+restart-bound. Provider-secret state must follow the provider
+regime: previous identities through M1 and M2, candidate secrets
+at M3, with the rotation-stays-pending tests. An unclosed part of
+round 1's finding 1.
+
+**2 (P1). The snapshot-mode resolution cannot reload from the
+sparse database it creates.** Snapshot mode is chosen before the
+mounted API creates its database, so a binding-only write creates
+a store holding that binding and nothing else; a reload would load
+it as the complete domain half and either fail validation or
+replace the in-memory world. The promised write-reload-converge
+loop is impossible without a seeded baseline or delta semantics,
+and #195 must not close on it. Round 1's finding 9 unresolved.
+
+**3 (P1). The snapshot-mode diff cannot represent the pending
+bindings round 1's resolution introduced.** `LiveKind` has no
+comparison payload, so a snapshot-mode write pending a reload has
+no honest response shape under the published schema.
+
+**4 (P1). Agent binding and generation binding race at M4.** The
+session resolves bindings, then separately the factory reads
+`current()`; a reload deleting an agent between them produces a
+resolved list the factory's generation cannot serve. One pinned
+handoff is needed: capture one generation on the loop, filter
+against it, and pass that exact generation to construction and
+accounting, with a barrier test.
+
+**5 (P1). A deleted agent cannot survive a later activation as
+promised.** `_activate_agent` reads `current()` from M1 and also
+serves mid-session handovers; after an M4 deletion the current
+world has no such agent and a switch to it would index a missing
+entry. The deletion rule must be explicit: current configuration
+when the agent exists there, the session's bound generation when
+it does not, tested with a live switch to a
+deleted-but-session-bound agent.
+
+**6 (P1). Total ownership still misses failures inside one
+provider build.** A factory can allocate before options validation
+finishes, and `build_provider` can allocate then refuse at the
+egress check; in both cases the object never reaches the world
+builder. Ownership must begin the instant allocation succeeds:
+options validated before construction, post-construction checks
+run by an owner already holding the object, applied to boot too,
+with same-entry tests for a trailing unknown option and an egress
+refusal after construction. Round 1's finding 4 not fully closed.
+
+**7 (P2). Provider close failures have no safe post-swap policy.**
+Disposal can run after the generation assignment; a raising
+`close()` must not fail the apply, strand the mark unstable, or
+leak third-party prose. Teardown is non-refusing and bounded,
+failures classified by class only, and the apply always finishes
+install, settlement, and release, with a close-raises-sentinel
+test.
+
+**8 (P2). M1 and M2 leave agent-write acknowledgements falsely
+restart-only.** An agent write carries the now-live `prompt`,
+`prompt_includes`, and later `filler` fields while the descriptor
+keeps the restart notice. The agent notice becomes staged
+mixed-regime prose per milestone, collapsed at M4, pinned across
+API, CLI, and the generated references.
+
+**9 (P2). `Composition.config` remains a second, stale serving
+configuration.** Removing only the provider and filler fields
+leaves a public full `Config` that disagrees with the generation
+after M1. The full domain snapshot leaves `Composition`; callers
+keep the restart-only server half and read the domain through the
+holder or their bound generation; `composition.config` reads join
+the grep-backed closure inventory.
+
+**10 (P2). The byte-equivalent MCP claim contradicts the
+intentional transport deltas.** The path, the nesting, and the
+sanitized 422 detail all change by design. The plan must list the
+deltas and pin the invariant that the nested MCP section equals
+the former successful result, keeping the MCP-status exception in
+the no-leak section. An incomplete resolution of round 1's
+finding 6.
+
+**11 (P3). The provider tests do not prove the concrete
+teardowns, and Silero is misdescribed.** A fake-provider suite
+passes if every real provider inherits the no-op; injected HTTP
+and SDK clients must be proven closed and faster-whisper and
+Piper proven to release their engines, while `SileroVad` holds
+only tuning values (each session's endpointer owns its detector)
+and keeps the default no-op, documented.
