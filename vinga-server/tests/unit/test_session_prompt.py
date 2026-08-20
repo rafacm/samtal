@@ -24,6 +24,7 @@ from vinga_server.runtime.prompt import (
     ServerInstructions,
     ServerPrompt,
     guidance_heading,
+    know_how,
     server_instructions_heading,
     server_prompt_heading,
 )
@@ -97,21 +98,27 @@ async def test_the_model_receives_exactly_the_blocks_that_are_reported(
             "tutor": {"prompt": "TUTOR", "tts": "alto"},
         }
     )
+    guidance = (Guidance("home", "  Ask first.\n\n"),)
     llm = RecordingLlm()
     with caplog.at_level("INFO"):
-        session = session_with(
-            CountingServers((Guidance("home", "  Ask first.\n\n"),)), {"poet": llm}, config=config
-        )
+        session = session_with(CountingServers(guidance), {"poet": llm}, config=config)
         await run_reply(session, "hello")
 
     (system,) = llm.systems
     (assembled,) = prompt_events(caplog)
-    # The surface reports a size per block and a size for the whole,
-    # and with no memory in the way the whole is what the model read.
-    assert assembled.characters == len(system)
-    assert sum(assembled.sources.values()) + len("\n\n") == len(system)
-    # The interior of the guidance is what its author wrote; only the
-    # end of the whole prompt was trimmed.
+    # What this agent's half is, asked of the assembler that owns the
+    # question rather than restated here: the session's claim is that
+    # what it sent and what it reported are exactly that, and a rule
+    # written out a second time would be the drift it is meant to catch.
+    expected = know_how(
+        config.prompt_for_agent("poet"), config.fragments_for_agent("poet"), guidance
+    )
+    assert system == expected.text
+    assert assembled.characters == expected.characters
+    assert assembled.sources == expected.sizes()
+    # And these really are the inputs that make a lazy assembler lie:
+    # the persona's own padding is gone from both ends of the prompt and
+    # the guidance's interior is what its author wrote.
     assert system.startswith("POET")
     assert "Ask first." in system
     assert not system.endswith("\n")
@@ -277,26 +284,29 @@ async def test_activation_logs_what_the_know_how_half_holds(
 ) -> None:
     store = MemoryStore(tmp_path)
     await store.remember("poet", "the user is vegetarian")
+    config = base_config()
+    guidance = (Guidance("home", GUIDANCE),)
     llm = RecordingLlm()
     with caplog.at_level("INFO"):
         session = session_with(
-            CountingServers((Guidance("home", GUIDANCE),)),
-            {"poet": llm},
-            memory=store,
+            CountingServers(guidance), {"poet": llm}, memory=store, config=config
         )
         await run_reply(session, "hello")
 
     (system,) = llm.systems
     (assembled,) = prompt_events(caplog)
     assert assembled.agent == "poet"
-    # The event counts the know-how half and stops there: the memory
-    # block is in the prompt and outside the count, which is what the
-    # slice below says.
-    assert "vegetarian" in system
-    assert "vegetarian" not in system[: assembled.characters]
-    assert system[: assembled.characters].startswith("POET")
-    assert set(assembled.sources) == {"persona", "instructions:home"}
-    assert assembled.sources["persona"] == len("POET")
+    # The event reports this agent's half exactly, sizes and total.
+    expected = know_how(
+        config.prompt_for_agent("poet"), config.fragments_for_agent("poet"), guidance
+    )
+    assert assembled.characters == expected.characters
+    assert assembled.sources == expected.sizes()
+    # The half is the prompt's opening and the memory block follows it:
+    # in what the model read, and outside what the event counts.
+    assert system.startswith(expected.text)
+    assert "vegetarian" not in expected.text
+    assert "vegetarian" in system[expected.characters :]
     # Memory is deliberately absent: this fires once per activation and
     # memory is read per round, and the event carries neither its size
     # nor a word of what it holds.
