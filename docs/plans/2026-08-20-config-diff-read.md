@@ -328,6 +328,16 @@ transport cases beside the existing `/runtime` suite.
   503; the happy path returns the typed shape; the route joins the
   pinned inventory in `test_api_openapi.py` and the committed
   document is regenerated in the same change.
+- **The MCP cases that decide the design** (unit, at the registry's
+  new read and the diff function): an unused entry's
+  connection-field edit reports changed; an unused entry's
+  stored-secret rotation reports changed; a prompt-only edit
+  (`instructions`, `use_server_instructions`, `inject_prompts`)
+  reports changed without any connection difference; effective
+  grants compare through the defaults-then-own rule, so moving a
+  grant between `agent_defaults` and the agent without changing the
+  effective set reports nothing; a deleted boot-loaded agent's
+  grants report changed before a reload and nothing after it.
 - **Stored-side failure paths**: a wrong encryption key (stored
   secrets that do not open) and a stored domain that is model-valid
   but fails whole-snapshot validation both answer the same typed
@@ -348,9 +358,10 @@ transport cases beside the existing `/runtime` suite.
   both log formats.
 - **Integration** (`tests/integration/test_config_api.py`): boot a
   real server, write a provider through the API, read the diff and
-  see it pending; bind a device and see no pending claim; M2: edit
-  an MCP server, see it pending, reload, and see the diff empty
-  again, which is the end-to-end proof of the care point.
+  see it pending; bind a device and see no pending claim; make one
+  connection-changing MCP edit and one prompt-only MCP edit, see
+  both pending, reload, and see the diff empty again, which is the
+  end-to-end proof of the care point.
 
 ## The standing review lenses, pre-answered
 
@@ -519,6 +530,13 @@ whether the design works.** One referenced-entry edit plus reload
 would pass even if unused entries, prompt-only fields, secret
 rotation, grant inheritance, removed agents, or the reload race
 were all broken. Name those tests.
+
+*Resolution.* Adopted. The test strategy now names each case: the
+unused entry's connection edit and secret rotation, the prompt-only
+edit, inheritance through the defaults-then-own rule including the
+no-effective-change move, the deleted agent before and after
+reload, the barrier-driven race, and an integration pass carrying
+both a connection-changing and a prompt-only edit through a reload.
 
 **9 (P2). "Changed means written since boot" is false.** Model
 equality reports state difference, not write history: an edit
