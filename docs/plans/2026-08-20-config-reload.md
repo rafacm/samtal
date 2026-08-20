@@ -612,16 +612,26 @@ session across a reload), and the drift-check pins.
 errors the boot and the MCP reload refuse through, with the #228
 lesson applied from the start: stored-side refusal sentences that
 can embed stored bytes are replaced at the endpoint boundary with
-fixed sentences, types preserved, chains cut. The result model is
-names and closed tokens.
+fixed sentences, types preserved, chains cut. The new sections
+carry names and closed tokens; the nested MCP section carries the
+status document, whose own pinned no-leak properties travel with
+it, which is the one standing exception to the names-and-tokens
+sentence.
 
-**Pin before reshaping.** The MCP route's behavior moves, not
-changes: its transport suite migrates to the new path in the same
-change, and the MCP section of the result keeps its shape and
-vocabulary, byte-pinned through the OpenAPI document. The
-activation path's behavior for a server that never applies is
-pinned by the existing suites, which must pass unmodified in M1
-except where they name the retired route or the moved counter.
+**Pin before reshaping.** The MCP move has exactly three
+intentional transport deltas, listed so nothing else may change
+(round 2's finding 10): the path, the success body's nesting
+under the new result's MCP section, and the stored-side 422
+detail becoming a fixed sentence. Everything else is invariant
+and pinned as such: the serialized MCP section of a successful
+generalized reload equals the former route's successful body, the
+lifecycle outcomes and status document unchanged, the status
+codes unchanged, proven by the migrated transport suite plus one
+equality test over the nested section, byte-pinned through the
+OpenAPI document. The activation path's behavior for a server
+that never applies is pinned by the existing suites, which must
+pass unmodified in M1 except where they name the retired route or
+the moved counter.
 
 **Closed sets mapped to decision sites.** Result outcomes per
 section are declared closed sets chosen where the apply actually
@@ -644,8 +654,9 @@ inventory (four sites) likewise before M4.
 ## Risks and mitigations
 
 - **M1 is the widest milestone** (endpoint swap, holder, diff
-  rewire, doc sweep). Mitigation: the MCP behavior moves verbatim
-  behind the new path with its migrated suite as the proof; the
+  rewire, doc sweep). Mitigation: the MCP move is bounded by the
+  three named deltas with the nested-equality pin as the proof;
+  the
   prompt slice itself is small; if the diff rewire grows past
   review size, the milestone may land the holder counter first and
   the brief says so, but the route swap and the prompt slice stay
@@ -970,6 +981,13 @@ deltas and pin the invariant that the nested MCP section equals
 the former successful result, keeping the MCP-status exception in
 the no-leak section. An incomplete resolution of round 1's
 finding 6.
+
+*Resolution.* Adopted. The pin-before-reshaping lens now lists
+the three intentional deltas (path, nesting, sanitized 422
+detail) and pins the nested-section equality with unchanged
+outcomes, status document, and status codes; the no-leak lens
+keeps the MCP-status exception explicitly; the M1 risk bullet
+stops claiming a verbatim move.
 
 **11 (P3). The provider tests do not prove the concrete
 teardowns, and Silero is misdescribed.** A fake-provider suite
