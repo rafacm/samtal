@@ -52,6 +52,11 @@ class ScriptedLlm(LlmProvider):
     def __init__(self, rounds: Sequence[Step]) -> None:
         self._rounds = list(rounds)
         self.seen: list[tuple[Sequence[Turn], Sequence[ToolDef], ToolChoice]] = []
+        # The system prompt of every round, the way `RecordingLlm` keeps
+        # it: what the model was sent is the only place from outside a
+        # session that the assembled prompt is visible, and a suite about
+        # tools often has to ask both questions of one round.
+        self.systems: list[str] = []
 
     async def stream(
         self,
@@ -60,6 +65,7 @@ class ScriptedLlm(LlmProvider):
         tools: Sequence[ToolDef] = (),
         tool_choice: ToolChoice = "auto",
     ) -> AsyncIterator[LlmEvent]:
+        self.systems.append(system)
         self.seen.append((list(turns), list(tools), tool_choice))
         step = self._rounds[min(len(self.seen) - 1, len(self._rounds) - 1)]
         for item in [step] if isinstance(step, str) else step:

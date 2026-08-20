@@ -224,6 +224,12 @@ def session_with(
     config = config_with_agent()
     websocket = FakeWebsocket()
     session = session_for(config, DEVICE_MAC, websocket=websocket)
+    # White-box: the shutdown's grace path turns on there being a reply
+    # in flight, and what these tests enumerate is how that reply then
+    # behaves: finishes inside the grace, runs past it, raises. Starting
+    # a real one produces exactly one of those shapes and needs a model,
+    # a voice and a device to do it, so the shapes that matter would be
+    # the ones no test could reach.
     session.runtime._reply_task = reply
     return session, websocket
 

@@ -23,7 +23,13 @@ import pytest
 from tests.support.configs import POET_MAC, TIMEOUT_S, watchdog_config
 from tests.support.events import events, only
 from tests.support.providers import STALL_S, StallingLlm
-from tests.support.sessions import run_reply, session_for
+from tests.support.sessions import (
+    listening_in_realtime,
+    run_reply,
+    session_for,
+    start_reply,
+    wait_for_reply,
+)
 from tests.support.sockets import RecordingSocket
 from vinga_server.providers import (
     LlmEvent,
@@ -97,12 +103,11 @@ async def test_a_second_stall_gives_the_round_up_and_the_session_keeps_listening
     session = session_for(watchdog_config(), POET_MAC, {"poet": cast(Any, llm)})
     socket = RecordingSocket()
     session.websocket = cast(Any, socket)
-    session._listen_mode = "realtime"
-    session.listening = True
+    listening_in_realtime(session)
 
     with caplog.at_level("INFO"):
-        session.runtime._reply_task = asyncio.create_task(session.runtime._reply(b"\x00\x00" * 320))
-        await session.runtime._reply_task
+        start_reply(session, b"\x00\x00" * 320)
+        await wait_for_reply(session)
 
     assert llm.calls == 2
     assert only(caplog, "llm_retry").round == 1
@@ -193,7 +198,7 @@ async def test_a_cancel_during_the_watchdog_window_still_lands(
     session.websocket = cast(Any, socket)
 
     with caplog.at_level("INFO"):
-        session.runtime._reply_task = asyncio.create_task(session.runtime._reply(b"\x00\x00" * 320))
+        start_reply(session, b"\x00\x00" * 320)
         await asyncio.sleep(0.05)
         await session.runtime.cancel_reply()
 

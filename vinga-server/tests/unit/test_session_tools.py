@@ -29,7 +29,7 @@ from tests.support.configs import (
 )
 from tests.support.mcp_stdio_server import SHADOWED_TOOL_ENV
 from tests.support.providers import ScriptedLlm
-from tests.support.sessions import call, run_reply, session_for
+from tests.support.sessions import call, history, run_reply, session_for, talking
 from tests.support.wire import connect, say_something, sentences, shake_hands, tone_strength
 from vinga_server.app import create_app
 from vinga_server.config import Config
@@ -101,24 +101,31 @@ async def test_history_keeps_the_speech_and_not_the_tool_exchange() -> None:
     session = session_for(base_config(), POET_MAC, {"poet": script})
     await run_reply(session, "do it")
 
-    assert session.runtime._turns == [Turn("user", "do it"), Turn("assistant", "It did not work.")]
+    assert await history(session, script) == [
+        Turn("user", "do it"),
+        Turn("assistant", "It did not work."),
+    ]
     # The structured turns existed, but only inside the reply.
     assert any(turn.tool_calls for turns, _, _ in script.seen for turn in turns)
 
 
 async def test_switch_agent_is_offered_only_where_there_is_somewhere_to_go() -> None:
-    one = session_for(base_config(), POET_MAC)
-    both = session_for(base_config(), BOTH_MAC)
-    # `random_number` is in both snapshots, being the builtin under no
+    # What was offered is what the model was handed, which is where a
+    # snapshot goes and the only place it is observable from outside.
+    alone = ScriptedLlm(["Nobody to hand over to."])
+    paired = ScriptedLlm(["Somebody to hand over to."])
+    one = session_for(base_config(), POET_MAC, {"poet": alone})
+    both = session_for(base_config(), BOTH_MAC, {"poet": paired})
+    await run_reply(one, "hello")
+    await run_reply(both, "hello")
+
+    # `random_number` is offered to both, being the builtin under no
     # condition at all; the conditional one is the difference.
-    assert [tool.name for tool in one.runtime._tool_snapshot()] == ["random_number"]
-    assert [tool.name for tool in both.runtime._tool_snapshot()] == [
-        "switch_agent",
-        "random_number",
-    ]
+    assert [tool.name for tool in alone.seen[0][1]] == ["random_number"]
+    assert [tool.name for tool in paired.seen[0][1]] == ["switch_agent", "random_number"]
     # The enum carries the device's full bound list, which is what lets
     # the agent answer "who can I talk to?".
-    (tool,) = [t for t in both.runtime._tool_snapshot() if t.name == "switch_agent"]
+    (tool,) = [t for t in paired.seen[0][1] if t.name == "switch_agent"]
     assert tool.input_schema["properties"]["agent"]["enum"] == ["poet", "tutor"]
     assert switch_agent_tool(["poet", "tutor"]).description.count("poet") == 1
 
@@ -129,16 +136,17 @@ async def test_a_successful_switch_hands_over_to_the_other_agent() -> None:
     session = session_for(base_config(), BOTH_MAC, {"poet": poet, "tutor": tutor})
 
     assert await run_reply(session, "get me the tutor") == ["Tutor here, hello."]
-    assert session._agent == "tutor"
-    assert session.runtime._providers is not None
-    assert await session.runtime._system_prompt() == "TUTOR"
+    assert talking(session) == "tutor"
+    # Talking as the tutor means being sent the tutor's prompt.
+    assert tutor.systems == ["TUTOR"]
 
     # The new agent saw the conversation so far plus an ephemeral turn
     # telling it to greet, and that turn is not in the history.
     (turns, _, _) = tutor.seen[0]
     assert turns[0] == Turn("user", "get me the tutor")
     assert turns[-1].content == pipeline_module.SWITCH_GREETING
-    assert all(turn.content != pipeline_module.SWITCH_GREETING for turn in session.runtime._turns)
+    kept = await history(session, tutor)
+    assert all(turn.content != pipeline_module.SWITCH_GREETING for turn in kept)
 
 
 async def test_the_old_agents_words_stay_its_own_turn() -> None:
@@ -148,7 +156,7 @@ async def test_the_old_agents_words_stay_its_own_turn() -> None:
     tutor = ScriptedLlm(["Tutor here."])
     session = session_for(base_config(), BOTH_MAC, {"poet": poet, "tutor": tutor})
     assert await run_reply(session, "the tutor please") == ["Tutor here."]
-    assert [turn.content for turn in session.runtime._turns] == [
+    assert [turn.content for turn in await history(session, tutor)] == [
         "the tutor please",
         "One moment.",
         "Tutor here.",
@@ -161,7 +169,7 @@ async def test_a_switch_to_an_unbound_agent_is_refused_by_the_agent_talking() ->
     )
     session = session_for(base_config(), BOTH_MAC, {"poet": poet})
     assert await run_reply(session, "get me the stranger") == ["I cannot reach that one."]
-    assert session._agent == "poet"
+    assert talking(session) == "poet"
 
     (result,) = [
         result for turns, _, _ in poet.seen for turn in turns for result in turn.tool_results
@@ -182,7 +190,7 @@ async def test_a_switch_to_the_agent_already_speaking_is_refused(
 
     with caplog.at_level("INFO"):
         assert await run_reply(session, "let me talk to the poet") == ["I am the poet already."]
-    assert session._agent == "poet"
+    assert talking(session) == "poet"
     # No handover was announced, and the second round continued the
     # reply rather than greeting a user who is already mid-conversation.
     assert not [record for record in caplog.records if getattr(record, "event", "") == "handover"]
@@ -205,7 +213,7 @@ async def test_only_one_handover_happens_per_reply() -> None:
     session = session_for(base_config(), BOTH_MAC, {"poet": poet, "tutor": tutor})
 
     assert await run_reply(session, "keep switching") == ["Staying put, then."]
-    assert session._agent == "tutor"
+    assert talking(session) == "tutor"
     (result,) = [
         result for turns, _, _ in tutor.seen for turn in turns for result in turn.tool_results
     ]
@@ -220,7 +228,7 @@ async def test_two_switches_in_one_round_honour_the_first_and_refuse_the_rest() 
     tutor = ScriptedLlm(["Tutor here."])
     session = session_for(base_config(), BOTH_MAC, {"poet": poet, "tutor": tutor})
     await run_reply(session, "both please")
-    assert session._agent == "tutor"
+    assert talking(session) == "tutor"
 
 
 async def test_remembering_is_offered_and_executed_when_memory_is_configured(
@@ -232,11 +240,8 @@ async def test_remembering_is_offered_and_executed_when_memory_is_configured(
     )
     session = session_for(base_config(), POET_MAC, {"poet": script}, memory=store)
 
-    assert [tool.name for tool in session.runtime._tool_snapshot()] == [
-        "remember",
-        "random_number",
-    ]
     assert await run_reply(session, "remember I am vegetarian") == ["I will keep that in mind."]
+    assert [tool.name for tool in script.seen[0][1]] == ["remember", "random_number"]
     assert "the user is vegetarian" in store.read("poet")
 
     (result,) = [
@@ -252,8 +257,8 @@ async def test_a_random_number_is_offered_with_no_configuration_and_drawn_when_a
     script = ScriptedLlm([[call("random_number", minimum=1, maximum=6)], "You got a four."])
     session = session_for(base_config(), POET_MAC, {"poet": script}, memory=None)
 
-    assert [tool.name for tool in session.runtime._tool_snapshot()] == ["random_number"]
     assert await run_reply(session, "roll a die") == ["You got a four."]
+    assert [tool.name for tool in script.seen[0][1]] == ["random_number"]
 
     (result,) = [
         result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
@@ -282,9 +287,13 @@ async def test_a_random_range_that_cannot_be_drawn_from_comes_back_as_an_error()
 async def test_a_remembered_fact_is_in_the_next_replys_prompt(tmp_path: Path) -> None:
     store = MemoryStore(tmp_path)
     await store.remember("poet", "the user is vegetarian")
-    session = session_for(base_config(), POET_MAC, memory=store)
-    assert "the user is vegetarian" in await session.runtime._system_prompt()
-    assert (await session.runtime._system_prompt()).startswith("POET")
+    script = ScriptedLlm(["Noted."])
+    session = session_for(base_config(), POET_MAC, {"poet": script}, memory=store)
+    await run_reply(session, "what do you know about me?")
+
+    (system,) = script.systems
+    assert "the user is vegetarian" in system
+    assert system.startswith("POET")
 
 
 async def test_malformed_arguments_come_back_as_an_error_result() -> None:
@@ -410,6 +419,13 @@ async def test_a_name_that_changes_owner_between_calls_is_refused_not_rerouted(
     session = session_for(base_config(), POET_MAC, mcp_servers=servers)
     try:
         assert servers.owner_of(name) == "home"
+        # White-box for the four reads in this test, per the docstring:
+        # the window is between a reservation and the dispatch it routes
+        # by, and it is only a window because a reload lands inside it.
+        # A reply driven around it would put a model round, a synthesis
+        # and a device send between the two, so the reload would have to
+        # be timed into a gap the test does not control, and what is
+        # under test is the routing rather than any of that.
         (slot,) = session.runtime._reserve_tools([call(name)])
         assert session.runtime._turn.reserved(slot).entry == "home"
 
@@ -558,5 +574,9 @@ async def test_a_tool_of_an_entry_whose_name_holds_the_separator_is_dispatched()
     assert result.content == "rhubarb"
     # The entry's own timeout, taken from the same reservation the
     # dispatch routes by rather than from a second reading of the name.
+    # White-box: how long a tool may take is read off the reservation
+    # the dispatch routes by, and nothing outside reports it. A timeout
+    # observed by waiting one out would be a seven-and-a-half second
+    # test that proves the bound fired, not which entry it came from.
     reserved = session.runtime._classified(call("home__inside__secret_word"), 0)
     assert session.runtime._timeout_for(reserved) == 7.5
