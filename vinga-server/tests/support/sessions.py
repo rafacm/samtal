@@ -35,6 +35,7 @@ from tests.support.providers import ScriptedLlm, Unreachable
 from tests.support.sockets import LoopingSocket, RecordingSocket
 from vinga_server.config import Config
 from vinga_server.device.session import DeviceSession
+from vinga_server.events import SessionEvents
 from vinga_server.filler import build_agent_fillers
 from vinga_server.providers import ToolCall, Turn, build_agent_providers
 from vinga_server.runtime.pipeline import bespoke_runtime_factory
@@ -160,6 +161,51 @@ def session_with(
         memory=memory,
         mcp_servers=servers,
     )
+
+
+def events_of(session: DeviceSession) -> SessionEvents:
+    """A session's observability.
+
+    White-box in the reach and public in everything it is used for. The
+    session builds its own events object and publishes no accessor,
+    which is right for production: the runtime is handed one at
+    construction and nothing else in the server asks a session for it.
+    A suite about what a session emitted has no other way to attach a
+    tap to that one object, and attaching to a second one would be
+    watching something the session does not use. `attach`, `detach` and
+    `session_id` on what comes back are the interface a tap's own
+    consumers use.
+    """
+    return session._events
+
+
+def stamp_with(session: DeviceSession, clock: Any) -> None:
+    """Make this session's events read a clock the test wrote.
+
+    White-box, deliberately. `SessionEvents` takes its clock at
+    construction, exactly so that what stamps an event is visible and
+    swappable, and the session constructs its own; nothing hands one in,
+    and adding a parameter to `DeviceSession` for it would be production
+    surface with no production caller. What the reads below are for is
+    an interval or an ordering between two stamps, which a real clock
+    can put in the same microsecond and which no surface reports
+    separately from the values it is comparing.
+    """
+    events_of(session)._clock = clock
+
+
+def with_device(session: DeviceSession, mac: str) -> DeviceSession:
+    """The MAC the handshake would have read off the Device-Id header.
+
+    White-box, and the same construction `device_session` explains: a
+    session built below the websocket never ran `run`, which is where a
+    device identity is read and normalized. Every event and every stored
+    turn carries the device it is about, so a suite about either has to
+    say which device this was, and there is no other way to say it
+    without a socket and a handshake.
+    """
+    session._mac = mac
+    return session
 
 
 def served(
@@ -334,15 +380,17 @@ async def wait_for_reply(session: DeviceSession) -> None:
     assert await session.runtime.drain(REPLY_TIMEOUT_S), "the reply never finished"
 
 
-def start_reply(session: DeviceSession, pcm: bytes) -> None:
+def start_reply(session: DeviceSession, pcm: bytes, result: Any = None) -> None:
     """A reply in flight, registered the way an utterance registers one,
     so that everything asking whether this session is replying (the idle
     watchdog, the shutdown, the barge-in gates) sees it.
 
     The runtime's own public entry point, named here so that the suites
-    driving a reply name it in one place. Whether it has finished is
-    `replying()`; waiting for it is `drain()`."""
-    session.runtime.start_reply(pcm, None)
+    driving a reply name it in one place. `result` is a transcription
+    that already exists, which is what a confirmed barge-in hands it.
+    Whether the reply has finished is `replying()`; waiting for it is
+    `drain()`."""
+    session.runtime.start_reply(pcm, result)
 
 
 async def _nothing(*args: object, **kwargs: object) -> None:
@@ -367,11 +415,7 @@ async def reply_with(
         stages={provider_stage: cast(Any, Unreachable(provider_stage, exc))},
     )
     session.websocket = cast(Any, TextSink())
-    # White-box, and the same construction `device_session` explains: a
-    # session built below the websocket never ran the handshake that
-    # reads the Device-Id header, and the event under test names the
-    # device it failed for.
-    session._mac = POET_MAC
+    with_device(session, POET_MAC)
     session.send_audio = _nothing  # type: ignore[method-assign]
     with caplog.at_level("INFO"):
         await drive_reply(session, b"\x00\x00" * 320)
