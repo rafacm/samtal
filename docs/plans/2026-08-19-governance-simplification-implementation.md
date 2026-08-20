@@ -1242,7 +1242,7 @@ its output.
 | 3 | Five entities need no handwritten mirror | Partial | Partial |
 | 4 | No server internals beyond the document | Pass | Pass |
 | 5a | Probe: authentication | Pass | Fail |
-| 5b | Probe: read, write, delete for five entities | Pass | Pass |
+| 5b | Probe: read, write, delete for five entities | Pass (14 of 14; the agent defaults have no delete) | Pass (same) |
 | 5c | Probe: typed non-2xx problem responses | Pass | Pass |
 | 5d | Probe: optional versus nullable | Pass | Pass with a flag |
 | 5e | Probe: provider extension properties | Pass | Pass |
@@ -1315,21 +1315,48 @@ forgetting authentication compiles and fails at runtime with 401 on
 every call. That is what a failing probe looks like, and it is recorded
 rather than worked around.
 
-**5b. Read, write and delete for the five entities.** Both pass, for
-providers, MCP servers, prompt fragments, agents and agent defaults,
-with each call's response annotated with the type it must return
+**5b. Read, write and delete for the five entities.** Both pass what
+there is to pass, which is not fifteen operations but fourteen. The
+result is per entity:
+
+| Entity | Read | Write | Delete |
+| --- | --- | --- | --- |
+| Provider | Pass | Pass | Pass |
+| MCP server | Pass | Pass | Pass |
+| Prompt fragment | Pass | Pass | Pass |
+| Agent | Pass | Pass | Pass |
+| Agent defaults | Pass | Pass | Not applicable |
+
+Each call's response is annotated with the type it must return
 (`Envelope` for a read, `Acknowledgement` for a write or a delete) so
-that a client typing its answers `unknown` would fail to compile. Two
-things the probe turned up and the fixtures state in comments. First,
-`/agent-defaults` has no DELETE: the document declares GET and PUT and
-nothing else, because the defaults are a singleton that always exists,
-so the delete probe for that entity is `DELETE /default-agent`, which
-is the operation an admin UI's "clear this" control would call.
-Second, `holds<T>(x)` would also accept `any`, so the provider read in
-both fixtures additionally pins `data` and `error` to exactly
-`Envelope | undefined` and `Problem | undefined` with an invariant type
-equality, which is the assertion that would catch a generator handing
-back `any`.
+that a client typing its answers `unknown` would fail to compile.
+
+**The agent defaults have no delete, by design.** The document declares
+GET and PUT on `/agent-defaults` and nothing else: the defaults are a
+singleton that always exists, so there is no state a DELETE could
+reach and nothing for it to mean. That third of the probe is therefore
+not applicable to this entity rather than passing, and neither fixture
+substitutes another resource for it. Both instead assert the absence:
+the Hey API fixture pins that the only two exports matching
+`*AgentDefaults*` are the read and the write, and the openapi-fetch
+fixture pins `paths["/agent-defaults"]["delete"]` as `undefined` and
+keeps a `@ts-expect-error` on the call itself. A delete appearing later
+is a loud diff in both.
+
+`/default-agent` is a separate resource and is probed as one. The
+defaults are the provider references every agent inherits; the default
+agent is which agent covers a device with no binding of its own. It has
+all three operations, and its delete is the one an admin UI's "no
+default agent" control would call. An earlier draft of this section
+counted that delete as the agent defaults', which was wrong: it is a
+different resource with a different meaning, and the correction is
+review finding 3.
+
+One more thing the probe turned up: `holds<T>(x)` would also accept
+`any`, so the provider read in both fixtures additionally pins `data`
+and `error` to exactly `Envelope | undefined` and `Problem | undefined`
+with an invariant type equality, which is the assertion that would
+catch a generator handing back `any`.
 
 **5c. Typed non-2xx problem responses.** Both pass. Every refusal in
 the document is `application/problem+json` carrying the RFC 9457
