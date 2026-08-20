@@ -105,7 +105,17 @@ def _identity(name: str, entry: McpServerConfig, secrets: SecretStore) -> str:
 
 def _canonical(dumped: object) -> str:
     """One part of an identity as characters to digest, in a form that
-    cannot fail on anything a valid entry holds.
+    does not depend on how the value was built and cannot fail on
+    anything a valid entry holds.
+
+    The keys are sorted because an entry's `env` and `headers` are
+    mappings and their order is not part of what they mean: two models
+    holding the same pairs in a different order ARE equal, which is what
+    the reload's own comparison says of them, so an identity that moved
+    with insertion order would report a change nobody made. Nothing
+    guarantees the order a mapping arrives in either, since it is
+    whatever a stored document was written in and whatever a JSON
+    decoder handed back.
 
     Totality is the whole of why this is not `model_dump_json`. A model
     field takes whatever a `str` can hold, and an unpaired surrogate is
@@ -125,7 +135,7 @@ def _canonical(dumped: object) -> str:
     call to `json.dumps` would tie together two things that are free to
     change apart.
     """
-    return json.dumps(dumped, ensure_ascii=True, default=str)
+    return json.dumps(dumped, sort_keys=True, ensure_ascii=True, default=str)
 
 
 def _nothing_shipped(_entry: str) -> tuple[GuidanceBlock, ...]:

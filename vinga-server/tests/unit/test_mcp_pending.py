@@ -44,6 +44,16 @@ def unused(**overrides: object) -> Config:
     return config_with({"tools": entry_data(**overrides)}, {"assistant": []})
 
 
+def unused_http(**overrides: object) -> Config:
+    """The same, on the transport whose mappings are `headers` rather
+    than `env`. Nothing connects to it, so the URL names a port nothing
+    is listening on."""
+    return config_with(
+        {"tools": {"transport": "streamable_http", "url": "http://127.0.0.1:1/mcp"} | overrides},
+        {"assistant": []},
+    )
+
+
 def granting(defaults: list[object] | None, own: list[object] | None) -> Config:
     """One entry, granted at whichever layer the case is about, so that
     a grant can be moved between the two without changing what the agent
@@ -129,6 +139,34 @@ def test_an_entry_holding_an_unpaired_surrogate_is_still_comparable() -> None:
 
     assert servers.pending_against(lone).changed == ()
     assert servers.pending_against(unused()).changed == ("tools",)
+
+
+def test_an_entry_whose_env_was_written_in_another_order_is_unchanged() -> None:
+    """The pairs are what an `env` means and their order is not: two
+    entries holding the same pairs are equal as models, which is what
+    the reload's own comparison already says of them. An identity that
+    moved with insertion order would report a change nobody made, and
+    nothing fixes that order: it is whatever a stored document was
+    written in and whatever a decoder handed back.
+    """
+    servers = McpServers.build(unused(env={"FIRST": "1", "SECOND": "2"}))
+
+    assert servers.pending_against(unused(env={"SECOND": "2", "FIRST": "1"})).changed == ()
+    # And a pair that really moved is still reported, so the case above
+    # cannot pass by comparing nothing.
+    assert servers.pending_against(unused(env={"FIRST": "1", "SECOND": "3"})).changed == (
+        "tools",
+    )
+
+
+def test_an_entry_whose_headers_were_written_in_another_order_is_unchanged() -> None:
+    """The same rule on the other transport, where the mapping an
+    operator writes most of is `headers` rather than `env`."""
+    servers = McpServers.build(unused_http(headers={"X-One": "1", "X-Two": "2"}))
+
+    pending = servers.pending_against(unused_http(headers={"X-Two": "2", "X-One": "1"}))
+
+    assert pending.changed == ()
 
 
 async def test_a_prompt_only_edit_is_pending_and_the_connection_still_stands() -> None:
