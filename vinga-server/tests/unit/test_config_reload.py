@@ -116,6 +116,69 @@ async def test_the_shared_fragments_are_applied_whole() -> None:
     assert result.prompts.changed == ["assistant"]
 
 
+# Two fragments that both exist in both worlds and say different
+# things, so that moving an agent's own list between them is the only
+# thing an apply can be reading. The fragment kind is replaced wholesale
+# either way, and here it is replaced with an identical copy of itself.
+QUIET = "The house is quiet."
+
+LOUD = "The house is loud."
+
+BOTH_FRAGMENTS = {"quiet": {"text": QUIET}, "loud": {"text": LOUD}}
+
+
+def including(*fragments: str) -> Config:
+    """One agent whose own `prompt_includes` names these, over a
+    fragment kind that does not move."""
+    return served(
+        prompt_fragments=BOTH_FRAGMENTS,
+        agents={
+            "assistant": {"prompt": "A", "prompt_includes": list(fragments)}
+        },
+    )
+
+
+async def test_an_agents_own_include_list_is_applied() -> None:
+    """The other half of the agent's prompt slice, on its own.
+
+    The case is built so that nothing else could produce the answer:
+    both fragments exist in both worlds with the same text, so replacing
+    the fragment kind changes nothing, and the agent's own list is the
+    only thing that moved. An apply that dropped `prompt_includes` from
+    the overlay would leave the agent including `quiet` and every
+    assertion below would fail.
+    """
+    running, stored = including("quiet"), including("loud")
+    generations = world(running)
+    servers = McpServers.build(running)
+    reload = ConfigReload(generations, servers, reading(stored))
+    diff = config_diff_reader(generations, servers, reading(stored))
+
+    pending = await diff()
+    assert pending.agents.prompt.changed == ("assistant",)
+
+    result = await reload.apply()
+
+    # The world being served names the new fragment and resolves it to
+    # the new text, which is the pair an activation reads.
+    served_now = generations.current().config
+    assert served_now.agents["assistant"].prompt_includes == ["loud"]
+    assert [fragment.text for fragment in served_now.fragments_for_agent("assistant")] == [
+        LOUD
+    ]
+    assert result.prompts.changed == ["assistant"]
+
+    # And the next activation is what actually reaches the model.
+    llm = RecordingLlm()
+    await run_reply(talking_to(running, generations, llm), "hello")
+    assert LOUD in llm.systems[-1]
+    assert QUIET not in llm.systems[-1]
+
+    # The comparison clears, which is the care point: what an apply has
+    # already applied is not reported as pending.
+    assert (await diff()).agents.prompt.changed == ()
+
+
 async def test_an_agent_defaults_include_does_not_reach_an_inheriting_agent() -> None:
     """The inheritance path the overlay exists for. `agent_defaults` is
     what every effective-value helper falls back through, so installing
