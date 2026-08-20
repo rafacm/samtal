@@ -85,7 +85,7 @@ import time
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, replace
-from typing import Any, Protocol
+from typing import Any, NoReturn, Protocol
 
 from vinga_server.events.catalog import (
     SCHEMA_VIOLATION,
@@ -324,7 +324,10 @@ class EventSchemaError(Exception):
     Its text names catalog-owned identifiers only: a fixed label and a
     fixed code. What a thunk was holding when it refused is
     caller-supplied bytes under this module's own model, and so is the
-    name of the class it raised, so neither is said at all."""
+    name of the class it raised, so neither is said at all.
+
+    Raised through `_refuse` below, which is what keeps that true of the
+    exception as an object and not only of its text."""
 
 
 class EventEnforcementError(Exception):
@@ -589,6 +592,47 @@ def _construct(
     return _Refusal(UNBUILT_LABEL, Fault(CONSTRUCTION_FAILED))
 
 
+def _refuse(text: str) -> NoReturn:
+    """Raise the refusal, carrying nothing but its own sentence.
+
+    The one place strict mode lets anything out of this module, and the
+    place a leak hides if it is not closed here. Half the converted
+    sites emit from inside an `except` arm, because that is where a
+    failure is known: a capture that could not open its files, a
+    provider that raised, an API handler sanitizing what it caught.
+    Python attaches whatever exception is being handled anywhere up the
+    stack to any exception raised while it is, so the refusal this
+    module raises about a thunk it deliberately never looked at would
+    arrive at a lane's stderr with the original bolted to it under
+    `__context__`, message and chain and all.
+
+    `raise ... from None` does NOT fix that. It sets `__cause__` to None
+    and `__suppress_context__` to True, which stops the default
+    traceback printing the context; the object is still attached and
+    still reachable from anything that walks the chain, which is exactly
+    the distinction between hiding a value and not having it. So the
+    refusal is raised, caught here, scrubbed, and re-raised bare: a bare
+    `raise` re-raises the exception that is already being handled and
+    does not re-attach a context, so what leaves this frame holds
+    neither a cause nor a context.
+
+    Closed here rather than at the call sites, and that is the decision
+    worth stating. Twenty-nine sites in this package can reach an emit
+    while an exception is being handled, eleven of them lexically inside
+    the arm and eighteen through one call from it, and every future one
+    would have to remember. This is a property of the emitter: nothing
+    it raises carries anything it was handed.
+    """
+    refusal = EventSchemaError(text)
+    try:
+        raise refusal
+    except EventSchemaError as escaping:
+        escaping.__cause__ = None
+        escaping.__context__ = None
+        escaping.__suppress_context__ = True
+        raise
+
+
 def _built(
     log: logging.Logger,
     channel: str,
@@ -623,7 +667,7 @@ def _built(
     if isinstance(outcome, Checked):
         return outcome
     if _enforcement == STRICT:
-        raise EventSchemaError(refusal_text(outcome.label, (outcome.fault,)))
+        _refuse(refusal_text(outcome.label, (outcome.fault,)))
     _report(log, logging.ERROR, REFUSAL_MESSAGE, outcome.label, outcome.fault.rendered())
     return _replacement(safe)
 
