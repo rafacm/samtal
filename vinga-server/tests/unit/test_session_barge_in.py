@@ -24,6 +24,7 @@ from tests.support.events import events, only
 from tests.support.providers import ConfirmingAsr, GatedAsr, ScriptedLlm, ScriptedVad
 from tests.support.sessions import (
     end_utterance,
+    history,
     realtime_session,
     reply_in_flight,
     start_reply,
@@ -211,6 +212,12 @@ async def test_a_barge_in_during_transcription_merges_the_sentence(
     (asked, _tools, _choice) = script.seen[-1]
     assert list(asked) == [Turn("user", "800 ms")]
     assert spoken(socket) == ["You said 800 ms."]
+    # And the sentence the device heard became the turn the next round
+    # is written against, which is the other half of "one reply".
+    assert await history(session, script) == [
+        Turn("user", "800 ms"),
+        Turn("assistant", "You said 800 ms."),
+    ]
 
 
 async def test_an_unconfirmed_barge_in_pauses_and_resumes_the_reply(
@@ -271,6 +278,12 @@ async def test_an_unconfirmed_barge_in_pauses_and_resumes_the_reply(
     assert spoken(socket) == [held]
     assert len(script.seen) == 1
     assert list(script.seen[0][0]) == [Turn("user", "the question")]
+    # The reply played to the end, so the whole of it is the turn the
+    # next round is written against.
+    assert await history(session, script) == [
+        Turn("user", "the question"),
+        Turn("assistant", held),
+    ]
 
 
 async def test_a_failed_confirmation_is_reported_as_the_provider_failure_it_is(
@@ -369,3 +382,10 @@ async def test_a_confirmed_barge_in_reuses_the_transcript_and_the_lock(
         Turn("user", "stop and listen"),
     ]
     assert spoken(socket) == [SLOW_REPLY, "Answering stop and listen."]
+    # And the answer that did finish is history, beside the two
+    # utterances: what the user heard, and only that.
+    assert await history(session, script) == [
+        Turn("user", "the question"),
+        Turn("user", "stop and listen"),
+        Turn("assistant", "Answering stop and listen."),
+    ]
