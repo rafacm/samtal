@@ -185,3 +185,117 @@ def test_the_reload_answers_over_a_real_socket(served_api, tmp_path: Path) -> No
         "unchanged": [],
         "servers": {},
     }
+
+
+# The stored-versus-running diff
+#
+# The care point of the whole read, over a real socket: what is pending
+# is what has not been applied, and what has been applied stops being
+# pending the moment it is. Only a running server can show the second
+# half, because the thing that applies an MCP change is a request made
+# to the server that is serving the diff.
+
+DIFF = "/runtime/config/diff"
+
+RELOAD = "/runtime/mcp-servers/reload"
+
+# Entries no agent grants, so nothing is ever connected for them and the
+# reload starts and stops nothing. They are the case the comparison
+# turns on: an entry with no manager still has to be compared, and a
+# prompt-only edit still has to be reported.
+TOOLS = {"transport": "stdio", "command": "/bin/echo", "args": ["tools"]}
+
+WEATHER = {"transport": "stdio", "command": "/bin/echo", "args": ["weather"]}
+
+
+def test_the_diff_reports_what_this_server_has_not_picked_up(
+    served_api, boot_directory: Path
+) -> None:
+    """One server lifetime, from an empty domain to a configured one.
+
+    Everything written here is written after the server booted, so the
+    diff is the only surface that says so. The two boundaries are what
+    the case is about: the providers and the agent wait for a restart
+    and stay pending for the whole run, while the MCP entries are
+    applied by a request and stop being pending as soon as it is made.
+    """
+    with served_api(boot_directory) as api_url:
+        client = httpx.Client(
+            base_url=api_url, headers={"Authorization": f"Bearer {_token()}"}, timeout=30
+        )
+        try:
+            # A fresh start serving an empty domain: nothing is pending,
+            # and every kind still says where its changes converge.
+            settled = client.get(DIFF).json()
+            assert settled["providers"] == {
+                "applies": "restart",
+                "added": [],
+                "removed": [],
+                "changed": [],
+            }
+            assert settled["devices"] == {"applies": "check-in"}
+            assert settled["default_agent"] == {"applies": "check-in"}
+
+            for method, path, body in PIPELINE:
+                assert client.request(method, path, json=body).status_code == 200, path
+
+            configured = client.get(DIFF).json()
+            assert configured["providers"]["added"] == [
+                "asr.ears",
+                "llm.mock",
+                "tts.voice",
+                "vad.gate",
+            ]
+            assert configured["agents"]["added"] == ["assistant"]
+            assert configured["agent_defaults"]["changed"] is True
+            # The device the pipeline bound is the claim this read must
+            # not make: a binding is read as the device asks for it, so
+            # it was in effect within seconds of the write and there is
+            # nothing here to report.
+            assert configured["devices"] == {"applies": "check-in"}
+            assert configured["default_agent"] == {"applies": "check-in"}
+
+            # The MCP half, which is the half a running server can apply.
+            assert client.put("/mcp-servers/tools", json=TOOLS).status_code == 200
+            assert client.put("/mcp-servers/weather", json=WEATHER).status_code == 200
+            assert client.get(DIFF).json()["mcp_servers"] == {
+                "applies": "reload",
+                "added": ["tools", "weather"],
+                "removed": [],
+                "changed": [],
+            }
+
+            assert client.post(RELOAD).status_code == 200
+            applied = client.get(DIFF).json()
+            assert applied["mcp_servers"]["added"] == []
+            # And the restart-bound half is untouched by the reload,
+            # which is the whole reason the two carry different labels.
+            assert applied["providers"]["added"] == configured["providers"]["added"]
+
+            # One edit to what a connection is made of, and one to text
+            # that no connection ever sees. Both are stored changes the
+            # running server has not applied, and an answer that reported
+            # only the first would hide a rewrite an operator is waiting
+            # for.
+            assert (
+                client.put(
+                    "/mcp-servers/tools", json=TOOLS | {"args": ["tools", "again"]}
+                ).status_code
+                == 200
+            )
+            assert (
+                client.put(
+                    "/mcp-servers/weather", json=WEATHER | {"instructions": "Ask first."}
+                ).status_code
+                == 200
+            )
+            assert client.get(DIFF).json()["mcp_servers"]["changed"] == [
+                "tools",
+                "weather",
+            ]
+
+            # Applied, and therefore no longer pending.
+            assert client.post(RELOAD).status_code == 200
+            assert client.get(DIFF).json()["mcp_servers"]["changed"] == []
+        finally:
+            client.close()
