@@ -9,6 +9,15 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **Database upgrades have a written compatibility floor.** The
+  2026-08-20 ADR records what was previously implicit: upgrades are
+  supported from the first beta image onward, best-effort from the
+  first revision until then (which the upgrade tests already prove),
+  and migration history is never rewritten as a cleanup; squashing
+  would be a compatibility decision with a superseding record and a
+  tested reset path. Nothing about the databases changes; the
+  promise's terms are now a record instead of an assumption.
+
 - **The frontend's client seam is decided, and the evidence is
   committed** (#210). `spikes/2026-08-20-openapi-ts-client/` generates a
   TypeScript client from `docs/reference/api-openapi.json` twice, once
