@@ -402,7 +402,7 @@ carries its baseline proof inside its own PR.
   global registry) and restores locality to `api.py` and `cli.py`;
   the descriptor becomes what its docstring already claims to be,
   the home of facts a model cannot carry.
-- [x] **[M5: the OpenAPI client spike](2026-08-19-governance-simplification-implementation.md#m5-the-openapi-client-spike).** (PR TBD) Run Hey API's openapi-ts and
+- [x] **[M5: the OpenAPI client spike](2026-08-19-governance-simplification-implementation.md#m5-the-openapi-client-spike).** (PR #222) Run Hey API's openapi-ts and
   openapi-typescript with openapi-fetch against the committed
   document, generator versions pinned and outputs required to be
   deterministic with no manual edits. Acceptance criteria, recorded
