@@ -26,9 +26,9 @@ from typing import Any, cast
 import pytest
 
 import vinga_server.device.session as session_module
-from tests.support.configs import base_config
+from tests.support.configs import BOTH_MAC, base_config
 from tests.support.providers import ScriptedLlm
-from tests.support.sessions import session_for
+from tests.support.sessions import agent_providers, device_session
 from vinga_server.config import Config
 from vinga_server.providers import ToolCall, TtsProvider, build_agent_providers
 
@@ -124,21 +124,50 @@ class TimedSocket:
 
 
 def slow_session(
-    rounds: Sequence[Any], tts: SlowTts, config: Config | None = None
+    rounds: Sequence[Any],
+    tts: SlowTts,
+    config: Config | None = None,
+    llm: Any = None,
+    mac: str = "aa:bb:cc:dd:ee:01",
+    providers: dict[str, Any] | None = None,
 ) -> tuple[session_module.DeviceSession, TimedSocket]:
-    script = ScriptedLlm(rounds)
-    session = session_for(config or base_config(), "aa:bb:cc:dd:ee:01", {"poet": script})
-    assert session.runtime._providers is not None
-    session.runtime._providers = replace(session.runtime._providers, tts=tts)
+    """A session whose voice takes its time, built with the engines it
+    is to run on rather than having them written over afterwards."""
     socket = TimedSocket()
-    session.websocket = cast(Any, socket)
+    session = device_session(
+        config or base_config(),
+        mac,
+        providers
+        if providers is not None
+        else agent_providers(
+            config or base_config(),
+            {"poet": ScriptedLlm(rounds) if llm is None else llm},
+            {"tts": tts},
+        ),
+        websocket=cast(Any, socket),
+    )
     return session, socket
 
 
-async def speak_a_reply(session: session_module.DeviceSession) -> list[str]:
-    spoken: list[str] = []
-    await session.runtime._speak_reply("anything", spoken)
-    return spoken
+async def speak_a_reply(
+    session: session_module.DeviceSession, spoken: list[str] | None = None
+) -> list[str]:
+    """One reply for a transcript the test names, with the real audio
+    path underneath it, answering the sentences whose audio finished.
+
+    White-box, deliberately, and the only reach-in shape this file
+    keeps. Every case here is about when a sentence starts synthesizing
+    relative to when its predecessor stops playing, so the audio path
+    has to be the real one and cannot be driven from a device that plays
+    nothing. The public route takes an utterance and hands it to
+    whatever ear the configuration built, which decides the transcript
+    these tests name, and it reports a reply's sentences only as paced
+    audio, which is the thing being measured rather than a way to read
+    it.
+    """
+    into = [] if spoken is None else spoken
+    await session.runtime._speak_reply("anything", into)
+    return into
 
 
 async def test_a_sentence_starts_synthesizing_before_it_starts_being_spoken() -> None:
@@ -214,9 +243,7 @@ async def test_the_first_sentence_does_not_wait_for_the_second() -> None:
             yield TextDelta(SENTENCES[1])
 
     tts = SlowTts()
-    session, socket = slow_session([], tts)
-    assert session.runtime._providers is not None
-    session.runtime._providers = replace(session.runtime._providers, llm=Dawdles([]))
+    session, socket = slow_session([], tts, llm=Dawdles([]))
 
     began = asyncio.get_running_loop().time()
     await speak_a_reply(session)
@@ -288,7 +315,7 @@ async def test_a_sentence_run_ahead_and_never_spoken_is_not_recorded() -> None:
     tts = SlowTts()
     session, socket = slow_session([" ".join(SENTENCES)], tts)
     spoken: list[str] = []
-    reply = asyncio.create_task(session.runtime._speak_reply("anything", spoken))
+    reply = asyncio.create_task(speak_a_reply(session, spoken))
     # Long enough for the first sentence to be playing and the second to
     # be in flight behind it, short enough that neither has finished.
     await asyncio.sleep(SYNTHESIS_LATENCY_S + SENTENCE_AUDIO_S / 2)
@@ -323,6 +350,10 @@ async def test_lookahead_stops_at_the_end_of_a_round() -> None:
         ran_at.append(asyncio.get_running_loop().time())
         return [], None
 
+    # White-box: what is being timed is where the tool round sits
+    # between two sentences' audio, and a real round would have its own
+    # duration inside that window. Standing in for it is what makes the
+    # instant it ran a fixed point rather than a range.
     session.runtime._run_tools = run_tools  # type: ignore[method-assign]
     await speak_a_reply(session)
 
@@ -350,7 +381,7 @@ async def test_a_failing_sentence_still_lets_the_earlier_ones_be_heard() -> None
     session, socket = slow_session([" ".join(SENTENCES)], tts)
     spoken: list[str] = []
     with pytest.raises(RuntimeError, match="the voice went away"):
-        await session.runtime._speak_reply("anything", spoken)
+        await speak_a_reply(session, spoken)
 
     assert spoken == [SENTENCES[0]]
     # The failing sentence produced no audio, and is recorded nowhere.
@@ -375,22 +406,17 @@ async def test_a_handover_speaks_the_new_agents_voice() -> None:
     # so a sentence spoken by the wrong one would be visible.
     config = base_config()
     first = SlowTts()
-    session, socket = slow_session(
-        [[SENTENCES[0], ToolCall("1", "switch_agent", {"agent": "tutor"})]],
-        first,
-        config=config,
-    )
-    fresh = build_agent_providers(config)
     second = SlowTts()
-    session.runtime._agent_providers = {
+    handover = ScriptedLlm([[SENTENCES[0], ToolCall("1", "switch_agent", {"agent": "tutor"})]])
+    voices = {
         name: replace(
             providers,
             tts=second if name == "tutor" else first,
-            llm=ScriptedLlm([SENTENCES[2]]),
+            llm=handover if name == "poet" else ScriptedLlm([SENTENCES[2]]),
         )
-        for name, providers in fresh.items()
+        for name, providers in build_agent_providers(config).items()
     }
-    session.runtime._agents = ["poet", "tutor"]
+    session, socket = slow_session([], first, config=config, mac=BOTH_MAC, providers=voices)
 
     await speak_a_reply(session)
 

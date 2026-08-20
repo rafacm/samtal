@@ -16,7 +16,6 @@ and pin suites say it by passing unmodified.
 import asyncio
 import logging
 from collections.abc import AsyncIterator, Sequence
-from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -33,7 +32,16 @@ from tests.support.configs import (
 from tests.support.device_tools import STATUS, FakeDevice
 from tests.support.providers import BrokenStreamingTts as BrokenTts
 from tests.support.providers import ScriptedLlm
-from tests.support.sessions import call, drive_reply, session_for, start_reply
+from tests.support.sessions import (
+    call,
+    drive_reply,
+    events_of,
+    session_for,
+    stamp_with,
+    start_reply,
+    wait_for_reply,
+    with_device,
+)
 from tests.support.sockets import QuietSocket
 from tests.support.stores import CONVERSATIONS_MANIFEST as MANIFEST
 from tests.support.stores import rows
@@ -100,16 +108,28 @@ class Speaking:
         self.spoke.set()
 
 
-def recording_session(
+def speaking_session(
+    conversations: Any,
     config: Config | None = None,
     mac: str = POET_MAC,
     scripts: dict[str, ScriptedLlm] | None = None,
     memory: MemoryStore | None = None,
     mcp_servers: McpServers | None = None,
-) -> tuple[DeviceSession, SpyStore, Speaking]:
-    """A session whose turns are recorded, built the way every other
-    session in these suites is."""
-    spy = SpyStore()
+    stages: dict[str, Any] | None = None,
+) -> tuple[DeviceSession, Speaking]:
+    """A session whose speaking is stubbed down to what these tests
+    need, on a known device, built the way every other session in these
+    suites is.
+
+    The stub is white-box and the only reach-in this file keeps besides
+    the two below it. What a recorded turn holds is decided sentence by
+    sentence as each one's synthesis finishes, and the public route to a
+    spoken sentence is the audio the device is paced: running it would
+    make every one of these tests wait out a real reply's playback to
+    read a field about how the reply was recorded. `Speaking` drains the
+    same synthesis a device would, so the measurements a record carries
+    are real ones off a real provider, and nothing is paced.
+    """
     session = session_for(
         config if config is not None else base_config(),
         mac,
@@ -117,11 +137,27 @@ def recording_session(
         memory=memory,
         websocket=cast(Any, QuietSocket()),
         mcp_servers=mcp_servers,
-        conversations=spy,
+        conversations=conversations,
+        stages=stages,
     )
-    session._mac = mac
+    with_device(session, mac)
     speaking = Speaking()
     session.runtime._speak = speaking  # type: ignore[method-assign]
+    return session, speaking
+
+
+def recording_session(
+    config: Config | None = None,
+    mac: str = POET_MAC,
+    scripts: dict[str, ScriptedLlm] | None = None,
+    memory: MemoryStore | None = None,
+    mcp_servers: McpServers | None = None,
+    stages: dict[str, Any] | None = None,
+) -> tuple[DeviceSession, SpyStore, Speaking]:
+    """A session whose turns are recorded, built the way every other
+    session in these suites is."""
+    spy = SpyStore()
+    session, speaking = speaking_session(spy, config, mac, scripts, memory, mcp_servers, stages)
     return session, spy, speaking
 
 
@@ -156,7 +192,7 @@ async def test_a_plain_turn_records_what_was_said_and_what_it_cost() -> None:
     await drive_reply(session, UTTERANCE)
 
     session_id, record = spy.records[0]
-    assert session_id == session._events.session_id
+    assert session_id == session.session_id
     assert (record.heard, record.reply) == ("how are you", "Hello there.")
     assert record.agent == "poet"
     assert record.heard_duration_s == 0.02
@@ -197,10 +233,12 @@ async def test_the_reused_transcription_carries_its_language_and_no_asr_elapsed(
     transcription's rather than the call's."""
     session, spy, _ = recording_session(scripts={"poet": ScriptedLlm(["Understood."])})
 
-    await session.runtime._reply(
+    start_reply(
+        session,
         UTTERANCE,
         AsrResult(text="turn the light on", language="en", language_confidence=0.876),
     )
+    await wait_for_reply(session)
 
     record = only_record(spy)
     assert record.heard == "turn the light on"
@@ -249,9 +287,9 @@ async def test_the_turn_lands_on_its_heard_events_instant(tmp_path: Path) -> Non
     tells that apart from a second reading taken beside the emit, which
     lands in another millisecond whenever the two straddle a boundary."""
     session, spy, _ = recording_session(scripts={"poet": ScriptedLlm(["Noted."])})
-    session._events._clock = Clock(step=0.4)
+    stamp_with(session, Clock(step=0.4))
     tap = SpyTap()
-    session._events.attach(tap)
+    events_of(session).attach(tap)
 
     await drive_reply(session, UTTERANCE)
 
@@ -303,12 +341,11 @@ async def test_the_transcription_this_turn_ran_is_timed() -> None:
     hard-coded zero, which is the one wrong answer worth ruling out for a
     latency column."""
     clock = Clock()
-    session, spy, _ = recording_session(scripts={"poet": ScriptedLlm(["Understood."])})
-    session._events._clock = clock
-    assert session.runtime._providers is not None
-    session.runtime._providers = replace(
-        session.runtime._providers, asr=cast(Any, ScriptedAsr(clock, ASR_ELAPSED_S))
+    session, spy, _ = recording_session(
+        scripts={"poet": ScriptedLlm(["Understood."])},
+        stages={"asr": cast(Any, ScriptedAsr(clock, ASR_ELAPSED_S))},
     )
+    stamp_with(session, clock)
 
     await drive_reply(session, UTTERANCE)
 
@@ -396,6 +433,11 @@ async def test_every_source_is_classified_and_positioned(tmp_path: Path) -> None
     session, spy, _ = recording_session(
         scripts={"poet": script}, memory=MemoryStore(tmp_path), mcp_servers=servers
     )
+    # White-box: a device's own tools arrive from a discovery run the
+    # edge starts over the wire after the hello, and this session has no
+    # socket to run one on. What the record has to show is that a call
+    # to one of them is attributed to the device, which needs the tools
+    # to be there at all.
     session._device_tools = device.client
     try:
         await drive_reply(session, UTTERANCE)
@@ -578,10 +620,8 @@ async def test_a_call_is_recorded_when_speech_fails_before_the_dispatch() -> Non
     sentence is awaited before anything is dispatched, so a synthesis
     that fails there used to take the whole round's calls with it."""
     script = ScriptedLlm([["Let me check.", call("ghost_tool")], "Never reached."])
-    session, spy, _ = recording_session(scripts={"poet": script})
-    assert session.runtime._providers is not None
-    session.runtime._providers = replace(
-        session.runtime._providers, tts=cast(Any, BrokenTts())
+    session, spy, _ = recording_session(
+        scripts={"poet": script}, stages={"tts": cast(Any, BrokenTts())}
     )
 
     await drive_reply(session, UTTERANCE)
@@ -629,11 +669,9 @@ async def test_the_first_synthesis_is_what_the_first_audio_times(
     whichever reported first fails the slow-then-quick case, and letting
     a later one overwrite fails the quick-then-slow one."""
     script = ScriptedLlm(["One here. Two here."])
-    session, spy, _ = recording_session(scripts={"poet": script})
-    assert session.runtime._providers is not None
-    session.runtime._providers = replace(
-        session.runtime._providers,
-        tts=cast(Any, SentenceTts({"One here.": first_s, "Two here.": second_s})),
+    session, spy, _ = recording_session(
+        scripts={"poet": script},
+        stages={"tts": cast(Any, SentenceTts({"One here.": first_s, "Two here.": second_s}))},
     )
 
     await drive_reply(session, UTTERANCE)
@@ -701,16 +739,7 @@ async def test_a_session_with_no_recorder_replies_exactly_as_before(
 
     async def one_reply(spy: SpyStore | None) -> tuple[list[str], list[tuple[str, Any]]]:
         script = ScriptedLlm([[call("ghost_tool")], "Nothing found."])
-        session = session_for(
-            base_config(),
-            POET_MAC,
-            {"poet": script},
-            websocket=cast(Any, QuietSocket()),
-            conversations=spy,
-        )
-        session._mac = POET_MAC
-        speaking = Speaking()
-        session.runtime._speak = speaking  # type: ignore[method-assign]
+        session, speaking = speaking_session(spy, scripts={"poet": script})
         caplog.clear()
         with caplog.at_level("INFO"):
             await drive_reply(session, UTTERANCE)
@@ -740,16 +769,9 @@ async def test_a_recorder_that_fails_does_not_break_the_reply(
         def record_turn(self, session_id: str, record: TurnRecord) -> None:
             raise RuntimeError("a far side said something unrepeatable")
 
-    session = session_for(
-        base_config(),
-        POET_MAC,
-        {"poet": ScriptedLlm(["All done."])},
-        websocket=cast(Any, QuietSocket()),
-        conversations=BrokenStore(),
+    session, speaking = speaking_session(
+        BrokenStore(), scripts={"poet": ScriptedLlm(["All done."])}
     )
-    session._mac = POET_MAC
-    speaking = Speaking()
-    session.runtime._speak = speaking  # type: ignore[method-assign]
 
     with caplog.at_level("WARNING"):
         await drive_reply(session, UTTERANCE)
