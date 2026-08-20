@@ -175,9 +175,15 @@ for the kinds that are live at that milestone and extended per
 milestone (a response model gaining a field is additive for
 clients, unlike #193's diff where the closed shape had to publish
 once; the OpenAPI byte pin makes each extension a reviewed diff).
-The MCP section keeps the four-outcome vocabulary with its
-documented meaning (a statement about the connection, not the
-entry's text). Other kinds get the vocabulary that is true for
+The MCP section is exactly the existing `McpReloadResult`, whole
+and unchanged, nested inside the new result (the review's finding
+6): not only the four outcome lists but the `servers` status
+document they are answered beside, because that pairing is the
+route's documented one-round-trip contract and the CLI renders it.
+The result is therefore not "names and closed tokens only": it
+carries the MCP status document, whose own no-leak properties
+(redacted reflected metadata, typed status tokens) are already
+pinned and whose suites migrate whole. Other kinds get the vocabulary that is true for
 them: prompts and fragments converge by re-assembly, so their
 section reports the agents whose assembled know-how inputs changed;
 fillers report agents re-synthesized and agents reusing clips;
@@ -466,10 +472,16 @@ session across a reload), and the drift-check pins.
   before the generation assignment, between the assignment and the
   MCP install, and after the install, each answering one world or
   the retryable 409, never a mixture.
-- **No-leak**: the reload result carries entry and agent names and
-  closed outcome tokens only; the sentinel pattern from #193's
-  route (plant, force the wrong-key refusal, assert absence in
-  body and logs) reruns against the generalized endpoint in M1.
+- **No-leak**: the new sections carry entry and agent names and
+  closed outcome tokens; the MCP section carries the status
+  document whose reflected-metadata sentinels migrate whole with
+  the route. The sentinel pattern from #193's route reruns against
+  the generalized endpoint in M1 with the #228 lesson's full
+  breadth: an invalid stored scalar (the stored-value case, not
+  only the wrong key), both running and stored ciphertexts and
+  fingerprints, an environment-reference name, asserted absent
+  from response bodies and log records, with empty exception
+  chains on the refusal paths.
 
 ## The standing review lenses, pre-answered
 
@@ -637,6 +649,12 @@ breaks the one-round-trip contract and the CLI rendering. The MCP
 section must be exactly the existing `McpReloadResult`, `servers`
 included, and the no-leak suite must keep the reflected-metadata
 sentinels and the #228-style stored-value cases.
+
+*Resolution.* Adopted. The result decision now nests the existing
+`McpReloadResult` whole, `servers` included, and withdraws the
+"names and closed tokens only" claim for the result as a whole;
+the no-leak bullet carries the full #228 breadth including the
+invalid-stored-scalar case.
 
 **7 (P2). Provider build refusals have no declared HTTP
 taxonomy.** `ProviderError` is not a `ConfigError` and only
