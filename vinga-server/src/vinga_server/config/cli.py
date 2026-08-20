@@ -82,6 +82,7 @@ from vinga_server.config.secrets import (
     MASK,
     SecretLocation,
     load_keys,
+    provider_identity,
 )
 from vinga_server.config.store import ConfigStore, check_transportable
 from vinga_server.config.writes import (
@@ -1128,7 +1129,7 @@ def _bodies(config: Mapping[str, object]) -> dict[tuple[str, str], Mapping[str, 
     """The masked body of every entity that can hold a stored secret,
     keyed the way a secret location names it."""
     bodies = {
-        ("provider", f"{stage}.{name}"): body
+        ("provider", provider_identity(stage, name)): body
         for stage, entries in config["providers"].items()
         for name, body in entries.items()
     }
@@ -1308,7 +1309,7 @@ def _summary(document: Mapping[str, object]) -> str:
         lines.append(f"  {stage}:")
         lines += [
             f"    {name}{_summarized('provider', body)}"
-            + _slots(stored, "provider", f"{stage}.{name}")
+            + _slots(stored, "provider", provider_identity(stage, name))
             for name, body in config["providers"].get(stage, {}).items()
         ] or ["    (none)"]
 

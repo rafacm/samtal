@@ -102,7 +102,7 @@ from vinga_server.config.responses import (
     SecretValue,
     StoredSecretLocation,
 )
-from vinga_server.config.secrets import MASK, SecretLocation, load_keys
+from vinga_server.config.secrets import MASK, SecretLocation, load_keys, provider_identity
 from vinga_server.config.store import ConfigStore
 from vinga_server.config.writes import (
     BINDING_NOTICE,
@@ -1440,7 +1440,7 @@ def _entity_writes(api: FastAPI) -> None:
         is the option name the credential fills, such as api_key; a
         stored secret takes precedence over an environment reference
         written for the same slot."""
-        location = _slot(_PROVIDER, f"{stage}.{name}", slot)
+        location = _slot(_PROVIDER, provider_identity(stage, name), slot)
         store.set_secret(location, _secret(body))
         return _acknowledge(wrote_secret(location.describe()), _PROVIDER.notice)
 
@@ -1453,7 +1453,7 @@ def _entity_writes(api: FastAPI) -> None:
         stage: str, name: str, slot: str, store: StoreDep
     ) -> dict[str, Any]:
         """Remove one stored credential. A slot holding none is a 404."""
-        location = _slot(_PROVIDER, f"{stage}.{name}", slot)
+        location = _slot(_PROVIDER, provider_identity(stage, name), slot)
         store.clear_secret(location)
         return _acknowledge(cleared_secret(location.describe()), _PROVIDER.notice)
 
