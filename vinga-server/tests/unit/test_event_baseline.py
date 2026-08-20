@@ -127,7 +127,12 @@ def test_every_catalog_variant_on_a_scoped_channel_is_produced(
 ) -> None:
     """The obligation that outlives the walk: every legal variant is
     constructible, and therefore drivable, so a declaration nothing can
-    produce is a permanent enlargement of what this server may say."""
+    produce is a permanent enlargement of what this server may say.
+
+    The recovery event is exempt, and by its declaration's own
+    `internal` flag rather than by its name: no ordinary emit site
+    produces it, which is what the flag says, and the emitter's two
+    refusal branches are driven by the guard's own suites instead."""
     driven: dict[str, list[dict[str, Any]]] = {}
     for records in capture.values():
         for record in records:
@@ -136,6 +141,7 @@ def test_every_catalog_variant_on_a_scoped_channel_is_produced(
     unproduced = [
         f"{name}: {variant.__name__}"
         for name, declaration in catalog().items()
+        if not declaration.internal
         for variant in declaration.variants
         if variant.CHANNEL in SCOPE
         and not any(matches(variant, one) for one in driven.get(name, []))

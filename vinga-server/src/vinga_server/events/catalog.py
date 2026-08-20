@@ -331,6 +331,10 @@ class Declaration:
     name: str
     variants: tuple[type[Variant], ...]
     note: str = ""
+    # True for the one event no ordinary emit site produces: the
+    # forgiving recovery's own. The obligations that hold a variant to
+    # being driven exempt it by this rather than by its name.
+    internal: bool = False
 
 
 @dataclass(frozen=True)
@@ -504,7 +508,11 @@ def _named(name: object) -> bool:
 
 
 def declare(
-    name: str, *, variants: tuple[type[Variant], ...], note: str = ""
+    name: str,
+    *,
+    variants: tuple[type[Variant], ...],
+    note: str = "",
+    internal: bool = False,
 ) -> Declaration:
     """Declare one event and the variants it may be emitted in.
 
@@ -524,7 +532,9 @@ def declare(
         raise CatalogError(f"{name} is declared twice")
     if not variants:
         raise CatalogError(f"{name} declares no variant")
-    declaration = Declaration(name=name, variants=variants, note=note)
+    declaration = Declaration(
+        name=name, variants=variants, note=note, internal=internal
+    )
     for variant in variants:
         if variant in _state.owner:
             raise CatalogError(f"{variant.__name__} belongs to two events")
@@ -678,6 +688,7 @@ def described() -> tuple[EventSpec, ...]:
         EventSpec(
             name=declaration.name,
             note=declaration.note,
+            internal=declaration.internal,
             variants=tuple(_variant_of(one) for one in declaration.variants),
         )
         for declaration in _state.declarations.values()
@@ -2813,6 +2824,71 @@ API_STORAGE_ERROR = declare(
 )
 
 
+# --- the one event no emit site produces ------------------------------
+#
+# The forgiving mode's recovery. An emission the guard could not build
+# becomes this one: the fixed token, the emitter's own trusted identity,
+# a fixed sentence and no arguments, so a hostile name, value, message
+# or argument in the original call reaches nothing.
+#
+# Declared here like any other event, because a tap fed a shape the
+# generated reference denies exists would make the reference a liar. It
+# has no ordinary emit site, which is what `internal` says: the
+# documentation prints it, and the obligations that hold a variant to
+# being driven exempt it by that flag rather than by name.
+#
+# One variant per channel, built rather than written out fourteen times.
+# They differ in exactly one class-level fact, and a variant is a
+# declaration rather than behavior, so fourteen hand-written classes
+# would be one fact restated fourteen times.
+
+SCHEMA_VIOLATION = "schema_violation"
+
+SCHEMA_VIOLATION_MESSAGE = (
+    "an event was refused by the event schema and replaced by this one; "
+    "reproduce it under VINGA_EVENTS_ENFORCEMENT=strict to see which"
+)
+
+
+def _violation_on(channel: str) -> type[Variant]:
+    """The recovery event's shape on one channel: its base fields, a
+    fixed sentence and nothing else."""
+    name = "SchemaViolationOn" + "".join(
+        part.title() for part in channel.removeprefix("vinga_server.").split(".")
+    )
+    return dataclass(frozen=True)(
+        type(
+            name,
+            (Variant,),
+            {
+                "CHANNEL": channel,
+                "LEVEL": logging.ERROR,
+                "TEMPLATE": SCHEMA_VIOLATION_MESSAGE,
+                "ARGS": (),
+                "__annotations__": {},
+                "__doc__": f"The recovery event, on `{channel}`.",
+            },
+        )
+    )
+
+
+VIOLATIONS: tuple[type[Variant], ...] = tuple(
+    _violation_on(channel) for channel in CHANNELS
+)
+
+SCHEMA_VIOLATION_DECLARATION = declare(
+    SCHEMA_VIOLATION,
+    internal=True,
+    note=(
+        "What the emitter emits in forgiving mode when an emission "
+        "cannot be built into a declared shape. Fixed at ERROR, because "
+        "`log_level` admits roots above WARNING and a complaint that "
+        "vanishes under one is no complaint."
+    ),
+    variants=VIOLATIONS,
+)
+
+
 __all__ = [
     "ACTIVATION_COMPLETE",
     "ACTIVATION_NOT_OFFERED",
@@ -2959,6 +3035,9 @@ __all__ = [
     "RejectedBadDeviceId",
     "RejectedNoAgent",
     "Replied",
+    "SCHEMA_VIOLATION",
+    "SCHEMA_VIOLATION_DECLARATION",
+    "SCHEMA_VIOLATION_MESSAGE",
     "SESSION_CLOSED",
     "SESSION_IDLE",
     "SESSION_LIMIT",
@@ -2972,6 +3051,7 @@ __all__ = [
     "SpeakingStarted",
     "TOOL_CALL",
     "UnnamedToolCall",
+    "VIOLATIONS",
     "Variant",
     "WS_CHANNEL",
     "WriteFailed",

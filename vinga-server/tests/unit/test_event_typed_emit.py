@@ -1,13 +1,9 @@
-"""What the typed emit path produces, and what its guard does.
+"""What the emit path produces, and what its guard does.
 
-Two claims. The first is that a typed emission IS the untyped one: same
-channel, same level, same unrendered template, same arguments, same
-payload keys and values, on the log tap and on every attached tap. It is
-asserted side by side in one process, on scratch declarations written
-into both sources, because the property belongs to the machinery rather
-than to any four events and because a claim resting on a committed file
-alone is a claim resting on that file having been generated correctly.
-What the store's own five paths produce is the record baseline's.
+Three claims. The first is what a constructed variant becomes: the
+record a deployment keeps and the emission every tap is handed, on both
+scopes, with the session emitter's own identity contributed inside the
+guard beside the variant's own values.
 
 The second is the construction guard's, and it needs its own pins
 because no caller can prove it: a site hands the emitter a thunk and
@@ -16,6 +12,16 @@ raised, a variant handed to an emitter on another channel) are driven
 in both modes, and both modes' behavior is asserted: strict refuses,
 forgiving says so once and dispatches the declared `schema_violation`
 in the emission's place.
+
+The third is what happens when saying so is itself what breaks. Every
+report this module makes is made from inside a guard, and a logging call
+is not the inert operation it looks like: a handler, a filter and a
+formatter are code somebody else installed, and the sharpest case is a
+failing LOG tap reported back onto the same broken channel.
+
+That the record a converted path produces is the record it produced
+before is the committed baseline's claim, not this file's: eighty-one
+paths, captured before the conversion and unmoved by it.
 
 What a refusal is allowed to SAY is the sentinel suite's, next door.
 """
@@ -29,7 +35,6 @@ from typing import ClassVar
 import pytest
 
 from tests.support.catalog import scratch_catalog
-from tests.support.schema import scratch_registry
 from vinga_server import events as events_module
 from vinga_server.events import (
     SESSION_LOGGER,
@@ -42,27 +47,15 @@ from vinga_server.events import (
     detach_server_tap,
 )
 from vinga_server.events.catalog import (
+    SCHEMA_VIOLATION,
+    SCHEMA_VIOLATION_MESSAGE,
     ConversationsDropped,
     ConversationsPruned,
     Variant,
     declare,
+    value,
 )
 from vinga_server.events.values import ConfiguredPath, Count, Identifier, SessionId
-from vinga_server.events_schema import (
-    SCHEMA_VIOLATION,
-    SCHEMA_VIOLATION_MESSAGE,
-    SESSION_ID,
-    EventSpec,
-    EventVariant,
-    arg_count,
-    arg_id,
-    arg_identifier,
-    arg_path,
-    count,
-    identifier,
-    server_payload,
-    session_payload,
-)
 
 CHANNEL = "vinga_server.conversations.store"
 
@@ -139,15 +132,12 @@ def shape(emission: Emission) -> tuple[object, ...]:
     )
 
 
-# --- the same record, either way --------------------------------------
+# --- what a constructed variant becomes -------------------------------
 #
-# One scratch event, declared twice: once as a typed variant and once as
-# the registry declaration an unconverted site emits against. Scratch
-# rather than one of the store's own, because the store's have finished
-# converting and only one source declares them now, and because what is
-# under test is the machinery rather than those four events. Two of
-# them, so the asymmetric value type is covered: `ConfiguredPath` is the
-# one whose payload field and sentence argument differ.
+# Two scratch declarations, so the asymmetric value type is covered:
+# `ConfiguredPath` is the one whose payload field and sentence argument
+# differ, the field carrying the path as text and the sentence rendering
+# the object.
 
 
 @dataclass(frozen=True)
@@ -157,8 +147,8 @@ class Measured(Variant):
     TEMPLATE: ClassVar[str] = "measured %s in %d ms"
     ARGS: ClassVar[tuple[str, ...]] = ("stage", "duration_ms")
 
-    stage: Identifier
-    duration_ms: Count
+    stage: Identifier = value()
+    duration_ms: Count = value()
 
 
 @dataclass(frozen=True)
@@ -168,79 +158,7 @@ class Recording(Variant):
     TEMPLATE: ClassVar[str] = "recording to %s"
     ARGS: ClassVar[tuple[str, ...]] = ("path",)
 
-    path: ConfiguredPath
-
-
-SPECS = (
-    EventSpec(
-        "measured",
-        variants=(
-            EventVariant(
-                channel=SCRATCH_CHANNEL,
-                level=logging.INFO,
-                message="measured %s in %d ms",
-                args=(arg_identifier(), arg_count()),
-                fields=server_payload(stage=identifier(), duration_ms=count()),
-            ),
-        ),
-    ),
-    EventSpec(
-        "recording",
-        variants=(
-            EventVariant(
-                channel=SCRATCH_CHANNEL,
-                level=logging.WARNING,
-                message="recording to %s",
-                args=(arg_path(),),
-                fields=server_payload(path=identifier()),
-            ),
-        ),
-    ),
-)
-
-PAIRS = (
-    (
-        "an identifier and a count",
-        lambda: Measured(stage=Identifier("asr"), duration_ms=Count(12)),
-        lambda one: one.info(
-            "measured %s in %d ms",
-            "asr",
-            12,
-            event="measured",
-            stage="asr",
-            duration_ms=12,
-        ),
-    ),
-    (
-        "a configured path",
-        lambda: Recording(path=ConfiguredPath(DIRECTORY)),
-        lambda one: one.warning(
-            "recording to %s",
-            DIRECTORY,
-            event="recording",
-            path=str(DIRECTORY),
-        ),
-    ),
-)
-
-
-@pytest.mark.parametrize(
-    "build, untyped", [(one, two) for _, one, two in PAIRS], ids=[one for one, _, _ in PAIRS]
-)
-def test_a_typed_emission_is_the_untyped_one(
-    build: object, untyped: object, tap: Tap
-) -> None:
-    """Side by side, in one process, through one emitter: what every
-    conversion has to preserve, proved on the machinery rather than
-    re-proved per event."""
-    with scratch_registry(SPECS):
-        emitter = ServerEvents(SCRATCH_CHANNEL)
-        emitter.emit(build)  # type: ignore[arg-type]
-        untyped(emitter)  # type: ignore[operator]
-
-    typed_emission, untyped_emission = tap.seen
-
-    assert shape(typed_emission) == shape(untyped_emission)
+    path: ConfiguredPath = value()
 
 
 def test_a_typed_emission_reaches_the_log_on_its_own_channel(
@@ -275,46 +193,25 @@ class Conversational(Variant):
     TEMPLATE: ClassVar[str] = "session %s: measured %s"
     ARGS: ClassVar[tuple[str, ...]] = ("session", "stage")
 
-    stage: Identifier
+    stage: Identifier = value()
 
 
-CONVERSATIONAL_SPEC = (
-    EventSpec(
-        "conversational",
-        variants=(
-            EventVariant(
-                channel=SESSION_LOGGER,
-                level=logging.INFO,
-                message="session %s: measured %s",
-                args=(arg_id(SESSION_ID), arg_identifier()),
-                fields=session_payload(stage=identifier()),
-            ),
-        ),
-    ),
-)
-
-
-def test_a_typed_session_emission_is_the_untyped_one(caplog: pytest.LogCaptureFixture) -> None:
-    """Side by side through one emitter, the way the server half is
-    proved: the identity the emitter contributes reaches the payload and
-    the sentence exactly as the spelled-out call put it there."""
+def test_a_session_emission_carries_the_identity_the_emitter_owns(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The identity is the emitter's to know rather than a value thirty
+    sites restate, and it reaches both halves of the record: the payload
+    under the base's own keys, and the sentence's first `%` position,
+    which every conversation sentence opens with."""
     events = SessionEvents("alpha", clock=lambda: 1.0)
     events.device = "aa:bb:cc:dd:ee:ff"
     consumer = Tap()
     events.attach(consumer)
 
-    with scratch_registry(CONVERSATIONAL_SPEC), caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.INFO):
         events.emit(lambda: Conversational(stage=Identifier("asr")))
-        events.info(
-            "session %s: measured %s",
-            "alpha",
-            "asr",
-            event="conversational",
-            stage="asr",
-        )
 
-    typed, untyped = consumer.seen
-    assert shape(typed) == shape(untyped)
+    typed = only(consumer)
     assert typed.payload == {
         "event": "conversational",
         "session": "alpha",
@@ -421,7 +318,7 @@ class Elsewhere(Variant):
     TEMPLATE: ClassVar[str] = "said %s"
     ARGS: ClassVar[tuple[str, ...]] = ("stage",)
 
-    stage: Identifier
+    stage: Identifier = value()
 
 
 def a_failing_thunk() -> Variant:
@@ -492,3 +389,85 @@ def test_the_forgiving_complaint_names_the_fault_and_nothing_else(
         if one.name == CHANNEL and getattr(one, "event", None) is None
     ]
     assert complaint.args == (UNBUILT_LABEL, "construction_failed")
+
+
+# --- when saying so is itself what breaks -----------------------------
+#
+# Every report this module makes is made from inside a guard, and a
+# logging call is not the inert operation it looks like: a filter and a
+# handler are code somebody else installed, `handle` and `filter` are
+# called unwrapped, and a formatter meets whatever the record carries.
+# The sharpest case is a failing LOG tap, since reporting its failure
+# back onto the same broken channel is the recursion the guard exists to
+# stop.
+
+
+class BrokenHandler(logging.Handler):
+    """A logging handler that raises where `logging` does not catch it.
+
+    `handleError` swallows a failure inside `emit`, so a realistic
+    broken handler has to fail in `handle`, which `callHandlers` calls
+    unwrapped."""
+
+    def handle(self, record: logging.LogRecord) -> bool:
+        raise RuntimeError("the log handler is broken")
+
+
+@pytest.fixture
+def broken_log() -> Iterator[None]:
+    channel = logging.getLogger(CHANNEL)
+    handler = BrokenHandler()
+    channel.addHandler(handler)
+    try:
+        yield
+    finally:
+        channel.removeHandler(handler)
+
+
+class BrokenTap:
+    """A consumer with a bug in it, which is the only kind the guards
+    exist for."""
+
+    def emit(self, emission: Emission) -> None:
+        raise RuntimeError("this consumer is broken")
+
+
+def test_a_broken_log_does_not_cost_the_reply_a_refusal_was_reported_on(
+    broken_log: None, emitter: ServerEvents, tap: Tap
+) -> None:
+    """Reporting a refusal is the last thing in the path, and it is on
+    the channel the emission was going to. If that channel throws, the
+    complaint is lost and the reply is not: the recovery event still
+    reaches the taps ahead of the log tap."""
+    events_module.set_enforcement(events_module.FORGIVING)
+
+    emitter.emit(a_failing_thunk)
+
+    assert only(tap).payload == {"event": SCHEMA_VIOLATION}
+
+
+def test_a_broken_tap_reported_on_a_broken_log_still_costs_nothing(
+    broken_log: None, emitter: ServerEvents, tap: Tap
+) -> None:
+    """The oldest guard in the module, hardened the same way. A tap that
+    raises is reported on the emitter's own channel, and that channel is
+    where the emission was going: if the log is what broke, the report
+    goes straight back onto it. The taps after the broken one still saw
+    the event."""
+    broken = BrokenTap()
+    attach_server_tap(broken)
+    try:
+        emitter.emit(lambda: ConversationsPruned(sessions=Count(2), days=Count(90)))
+    finally:
+        detach_server_tap(broken)
+
+    assert only(tap).payload["event"] == "conversations_pruned"
+
+
+def test_reporting_swallows_whatever_the_channel_does(broken_log: None) -> None:
+    """The helper itself, since everything above depends on it: what is
+    being protected is a reply, and what is being lost is one diagnostic
+    line about a diagnostic line."""
+    events_module._report(
+        logging.getLogger(CHANNEL), logging.ERROR, "anything %s", "at all"
+    )

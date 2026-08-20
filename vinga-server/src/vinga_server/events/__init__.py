@@ -83,7 +83,6 @@ committed record baseline proves rather than assumes.
 import asyncio
 import contextlib
 import logging
-import math
 import os
 import time
 from collections.abc import Callable, Mapping
@@ -91,30 +90,13 @@ from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
-from vinga_server.events.catalog import Variant, declaration_of
-from vinga_server.events.values import (
-    CLASS_NAME_PATTERN,
-    DeviceId,
-    EventValue,
-    SessionId,
-)
-from vinga_server.events_schema import (
-    REGISTRY as DECLARED_EVENTS,
-)
-from vinga_server.events_schema import (
+from vinga_server.events.catalog import (
     SCHEMA_VIOLATION,
     SCHEMA_VIOLATION_MESSAGE,
-    SOURCE_KEY_PATTERN,
-    ArgKind,
-    ArgSpec,
-    Bounds,
-    EventField,
-    EventSpec,
-    EventVariant,
-    Kind,
-    Syntax,
-    matcher,
+    Variant,
+    declaration_of,
 )
+from vinga_server.events.values import DeviceId, EventValue, SessionId
 
 # The session log channel, by name rather than by `__name__`.
 #
@@ -307,29 +289,11 @@ def _dispatch(
     _offer(log, emission, channel)
 
 
-# --- the schema, enforced ---------------------------------------------
-#
-# The registry declares what every event is allowed to be; this is where
-# an emission meets its declaration. Two ordered steps, and the order is
-# load-bearing:
-#
-# 1. What the caller passed is judged BEFORE the base fields are merged.
-#    A session emitter owns `event`, `session` and `device`, and a
-#    `**fields` spread built out of far-side data could otherwise carry
-#    a `session` key that replaced the emitter's own identity and still
-#    typechecked. On a server channel there is no identity to protect,
-#    so `session` and `device` are ordinary declarable fields there.
-# 2. The finished payload is matched WHOLE against the event's declared
-#    variants: the emitting channel, the level the method chose, the
-#    sentence compared byte for byte against the variant's own template,
-#    the argument tuple against its per-position kinds, and the fields
-#    against the variant's table. `Emission.args` reaches every tap and
-#    the formatter renders them, so a rule that read the payload alone
-#    would leave half the record unguarded.
+# --- the two modes ----------------------------------------------------
 #
 # Nothing here is an `assert`. `python -O` strips assertions, and an
-# optimized production process silently losing its enforcement is
-# exactly the quiet failure #155 exists to end.
+# optimized production process silently losing its guard is exactly the
+# quiet failure #155 exists to end.
 
 ENFORCEMENT_ENV = "VINGA_EVENTS_ENFORCEMENT"
 
@@ -343,15 +307,6 @@ ENFORCEMENT_MODES = (STRICT, FORGIVING)
 # where unset means forgiving, since a running server is a deployment
 # whatever artifact it runs from.
 _enforcement = STRICT
-
-# The registry, read through module state rather than through the import
-# directly. That is the seam the emitter-mechanics tests need: they emit
-# synthetic names on a synthetic channel on purpose, because what they
-# prove is dispatch, taps, copy semantics and ordering rather than the
-# production surface, and strict enforcement would otherwise refuse them
-# by design.
-_registry: dict[str, EventSpec] = DECLARED_EVENTS
-
 
 class EventSchemaError(Exception):
     """What strict mode raises when an emission is not what the registry
@@ -409,47 +364,14 @@ def resolve_enforcement(environ: Mapping[str, str] | None = None) -> str:
     return chosen
 
 
-def declared_events() -> dict[str, EventSpec]:
-    """The registry the emitters are validating against."""
-    return _registry
-
-
-def set_declared_events(registry: dict[str, EventSpec]) -> None:
-    """Install a registry. Production installs one, at import; the
-    mechanics suite installs a scratch one around itself."""
-    global _registry
-    _registry = registry
-
-
-# --- what a violation is allowed to say -------------------------------
+# --- what a refusal is allowed to say ---------------------------------
 #
-# Fixed codes, registry-owned names, and counts. Nothing else: a
-# complaint that quoted the value it rejected would put exactly the
-# bytes this machinery exists to keep out of the retained log into the
-# retained log, and a complaint that named an undeclared key would do it
-# through the key, since a dict built from far-side data carries far-side
-# bytes in its keys.
+# Fixed codes and registry-owned names. Nothing else: a complaint that
+# quoted what it rejected would put exactly the bytes this machinery
+# exists to keep out of the retained log into the retained log.
 
-UNDECLARED_EVENT = "undeclared_event"
-UNDECLARED_FIELDS = "undeclared_fields"
-BASE_KEY_COLLISION = "base_key_collision"
-WRONG_CHANNEL = "wrong_channel"
-WRONG_TEMPLATE = "wrong_template"
-WRONG_LEVEL = "wrong_level"
-WRONG_ARITY = "wrong_arity"
-MISSING_FIELD = "missing_field"
-WRONG_KIND = "wrong_kind"
-NOT_NULLABLE = "not_nullable"
-UNLISTED_TOKEN = "unlisted_token"
-BAD_SYNTAX = "bad_syntax"
-BAD_BOUNDS = "bad_bounds"
-BAD_ELEMENT = "bad_element"
-BAD_SOURCE_KEY = "bad_source_key"
-BAD_SOURCE_VALUE = "bad_source_value"
-AMBIGUOUS_VARIANT = "ambiguous_variant"
-
-# The typed path's own code: a construction thunk that raised, so no
-# variant exists to judge.
+# The one code a refusal carries beside the channel mismatch: a
+# construction thunk that raised, so no variant exists at all.
 #
 # It carries NO detail, and that is a decision rather than an omission.
 # The obvious detail would be the exception's class name, the way a
@@ -461,52 +383,18 @@ AMBIGUOUS_VARIANT = "ambiguous_variant"
 # the surface says nothing about it.
 CONSTRUCTION_FAILED = "construction_failed"
 
-# What an event that is not in the registry is called in a diagnostic,
-# since it cannot be called by the name the caller gave it.
-UNDECLARED_LABEL = "an undeclared event"
+# The other, and the only thing a variant cannot check for itself:
+# handed to an emitter on a channel it does not declare. Both halves of
+# that comparison are the catalog's own.
+WRONG_CHANNEL = "wrong_channel"
 
 # And what an event whose construction never finished is called, since
 # the thunk is opaque until it returns and a failed one names nothing.
 UNBUILT_LABEL = "an event that could not be built"
 
-# The one sentence a refusal renders, strict or forgiving: the event's
-# declared name (or the fixed label above) and the violation summary.
+# The one sentence a refusal renders, strict or forgiving: the fixed
+# label above and the violation summary.
 REFUSAL_MESSAGE = "the event schema refused an emission of %s: %s"
-
-# What the last-resort guard says. The whole enforcement path runs under
-# one `try` in forgiving mode, so a bug in this module degrades an
-# emission instead of raising on a reply path; the class name and
-# nothing else, the way a failed tap is reported.
-GUARD_MESSAGE = (
-    "the event schema failed while judging an emission (%s); "
-    "a schema_violation was emitted instead"
-)
-
-# What a recovered emission says instead of the sentence it was given.
-#
-# EVERY invalid emission loses its message AND its arguments, whatever
-# was wrong with it. Dropping a payload field cannot un-render the same
-# value from the arguments, and the two are not independent: one
-# credential can be an undeclared field key or value and a lawful
-# `IDENTIFIER` argument of the same call at once, so a recovery that
-# kept the sentence whenever the arguments happened to validate would
-# drop the value from the payload and print it anyway.
-#
-# Beside `SCHEMA_VIOLATION_MESSAGE` rather than reusing it: that one is
-# the registry's own declared template for the recovery EVENT, and this
-# is what a surviving event says when only its sentence had to go. Two
-# outcomes, two sentences, so a reader of the retained log can tell
-# which happened.
-SAFE_MESSAGE = (
-    "an event was refused by the event schema and its sentence replaced; "
-    "reproduce it under VINGA_EVENTS_ENFORCEMENT=strict to see which"
-)
-
-# How a group of class names renders when a site reports several at
-# once. The pattern one of them is held to lives beside the `ClassName`
-# value type in `values.py`, which is its one home; this is the joining
-# the untyped path still has to read.
-CLASS_NAME_SEPARATOR = ", "
 
 
 @dataclass(frozen=True)
@@ -528,486 +416,6 @@ def refusal_text(label: str, faults: tuple[Fault, ...]) -> str:
     return REFUSAL_MESSAGE % (label, "; ".join(fault.rendered() for fault in faults))
 
 
-# --- holding a value to its kind --------------------------------------
-
-
-def _whole_number(value: Any) -> bool:
-    """`bool` is checked first and rejected, because `True` is an `int`
-    to `isinstance` and a boolean in a duration field is a bug."""
-    return not isinstance(value, bool) and isinstance(value, int)
-
-
-def _identifier_fault(value: Any) -> str | None:
-    """A trusted configured name, held to the domain the configuration
-    actually promises and to nothing tighter (`IDENTIFIER_DOMAIN`).
-
-    `NonBlankStr` is `StringConstraints(strip_whitespace=True,
-    min_length=1)`, so an agent called `secondary"agent`, one carrying a
-    control character and one four thousand characters long are all
-    lawful configuration today. A length or a character class here would
-    turn such a deployment's every `session_open` into a violation, and
-    forgiving mode would then drop the field and replace the sentence:
-    lawful traffic mangled on account of a claim nobody made. Trusted is
-    about provenance, not about shape. Narrowing belongs at
-    configuration semantics (#168), where a refusal reaches the operator
-    who can fix it."""
-    if not isinstance(value, str):
-        return WRONG_KIND
-    if not value.strip():
-        return BAD_BOUNDS
-    return None
-
-
-def _class_name_fault(value: Any, joined: bool) -> str | None:
-    if not isinstance(value, str):
-        return WRONG_KIND
-    parts = value.split(CLASS_NAME_SEPARATOR) if joined else [value]
-    if all(matcher(CLASS_NAME_PATTERN).match(part) for part in parts):
-        return None
-    return BAD_SYNTAX
-
-
-def _syntax_fault(value: Any, syntax: Syntax | None) -> str | None:
-    if not isinstance(value, str):
-        return WRONG_KIND
-    if syntax is None:
-        return WRONG_KIND
-    if len(value) > syntax.max_length or not matcher(syntax.pattern).match(value):
-        return BAD_SYNTAX
-    return None
-
-
-def _bounds_fault(value: Any, bounds: Bounds | None) -> str | None:
-    if not isinstance(value, str):
-        return WRONG_KIND
-    if bounds is None:
-        return WRONG_KIND
-    if not value or len(value) > bounds.max_length:
-        return BAD_BOUNDS
-    if bounds.charset == "printable" and not value.isprintable():
-        return BAD_BOUNDS
-    return None
-
-
-def _sources_fault(value: Any) -> str | None:
-    """The one structured kind: prompt provenance to character counts.
-
-    The grammar is the know-how half only, so `memory` fails here like
-    any unknown prefix; `prompt_assembled` reports the cached half of
-    the prompt and excludes the per-round memory read deliberately."""
-    if not isinstance(value, dict):
-        return WRONG_KIND
-    for key, held in value.items():
-        if not isinstance(key, str) or not matcher(SOURCE_KEY_PATTERN).match(key):
-            return BAD_SOURCE_KEY
-        if not _whole_number(held) or held < 0:
-            return BAD_SOURCE_VALUE
-    return None
-
-
-def _shape_fault(
-    kind: Kind,
-    value: Any,
-    tokens: frozenset[str] | None,
-    syntax: Syntax | None,
-    bounds: Bounds | None,
-    joined: bool,
-) -> str | None:
-    """One value against one kind. Answers the violation code, or None
-    where the value is what the kind says it is."""
-    if kind is Kind.IDENTIFIER:
-        return _identifier_fault(value)
-    if kind is Kind.TOKEN:
-        if not isinstance(value, str):
-            return WRONG_KIND
-        return None if tokens is not None and value in tokens else UNLISTED_TOKEN
-    if kind is Kind.CLASS_NAME:
-        return _class_name_fault(value, joined)
-    if kind is Kind.ID:
-        return _syntax_fault(value, syntax)
-    if kind is Kind.DESCRIPTOR:
-        return _bounds_fault(value, bounds)
-    if kind is Kind.INT:
-        return None if _whole_number(value) else WRONG_KIND
-    if kind is Kind.FLOAT:
-        # An `int` satisfies `FLOAT`, since sites pass round numbers
-        # where a measure is integral. NaN and the infinities do not:
-        # they are not measurements, and JSON cannot carry them.
-        if _whole_number(value):
-            return None
-        if isinstance(value, float) and math.isfinite(value):
-            return None
-        return WRONG_KIND
-    if kind is Kind.BOOL:
-        return None if isinstance(value, bool) else WRONG_KIND
-    if kind is Kind.COUNT:
-        return None if _whole_number(value) and value >= 0 else WRONG_KIND
-    if kind is Kind.IDENTIFIER_LIST:
-        if not isinstance(value, (list, tuple)):
-            return WRONG_KIND
-        return BAD_ELEMENT if any(_identifier_fault(one) for one in value) else None
-    if kind is Kind.ID_LIST:
-        if not isinstance(value, (list, tuple)):
-            return WRONG_KIND
-        return BAD_ELEMENT if any(_syntax_fault(one, syntax) for one in value) else None
-    if kind is Kind.SOURCES:
-        return _sources_fault(value)
-    return WRONG_KIND
-
-
-def _field_fault(field: EventField, value: Any) -> str | None:
-    if value is None:
-        return None if field.nullable else NOT_NULLABLE
-    return _shape_fault(
-        field.kind, value, field.tokens, field.syntax, field.bounds, field.joined
-    )
-
-
-# The argument kinds a field kind already describes. `PATHLIKE` and
-# `COMPOSED` are the two the payload has no equivalent of, and they are
-# handled beside this rather than by widening a field kind: a configured
-# path is an object, and a formatted fragment is a grammar.
-_ARGUMENT_KINDS: dict[ArgKind, Kind] = {
-    ArgKind.IDENTIFIER: Kind.IDENTIFIER,
-    ArgKind.TOKEN: Kind.TOKEN,
-    ArgKind.CLASS_NAME: Kind.CLASS_NAME,
-    ArgKind.ID: Kind.ID,
-    ArgKind.DESCRIPTOR: Kind.DESCRIPTOR,
-    ArgKind.INT: Kind.INT,
-    ArgKind.FLOAT: Kind.FLOAT,
-    ArgKind.BOOL: Kind.BOOL,
-    ArgKind.COUNT: Kind.COUNT,
-}
-
-
-def _argument_fault(spec: ArgSpec, value: Any) -> str | None:
-    if value is None:
-        return None if spec.nullable else NOT_NULLABLE
-    if spec.kind is ArgKind.PATHLIKE:
-        # A configured directory, held to its object type and to
-        # non-emptiness. No character class, for the reason
-        # `_identifier_fault` gives: what an operator may call a
-        # directory is the filesystem's business and the configuration's,
-        # not this module's.
-        if not isinstance(value, (str, os.PathLike)):
-            return WRONG_KIND
-        rendered = os.fspath(value)
-        if not isinstance(rendered, str) or not rendered.strip():
-            return BAD_BOUNDS
-        return None
-    if spec.kind is ArgKind.COMPOSED:
-        if not isinstance(value, str):
-            return WRONG_KIND
-        if spec.grammar is None or not matcher(spec.grammar.pattern).match(value):
-            return BAD_SYNTAX
-        return None
-    return _shape_fault(
-        _ARGUMENT_KINDS[spec.kind],
-        value,
-        spec.tokens,
-        spec.syntax,
-        spec.bounds,
-        spec.joined,
-    )
-
-
-# --- holding an emission to a variant ---------------------------------
-
-
-def _argument_faults(
-    variant: EventVariant, args: tuple[Any, ...]
-) -> tuple[Fault, ...]:
-    """Everything wrong with one argument tuple against one variant, by
-    position."""
-    if len(args) != len(variant.args):
-        return (Fault(WRONG_ARITY, f"{len(variant.args)} declared"),)
-    faults: list[Fault] = []
-    for position, (spec, value) in enumerate(zip(variant.args, args, strict=True)):
-        code = _argument_fault(spec, value)
-        if code is not None:
-            faults.append(Fault(code, f"argument {position}"))
-    return tuple(faults)
-
-
-def _field_faults(
-    variant: EventVariant, payload: dict[str, Any]
-) -> tuple[Fault, ...]:
-    """Everything wrong with one payload against one variant: the
-    declared fields in declaration order, then the count of what was not
-    declared at all.
-
-    Separate from the arguments because the recovery's final gate is
-    about this half alone: a recovered emission has lost the caller's
-    sentence and arguments by then, so what is left to ask is whether
-    its FIELD shape is one the registry declares."""
-    faults: list[Fault] = []
-    for name, field in variant.fields.items():
-        if name not in payload:
-            if field.required:
-                faults.append(Fault(MISSING_FIELD, name))
-            continue
-        code = _field_fault(field, payload[name])
-        if code is not None:
-            faults.append(Fault(code, name))
-    undeclared = sum(1 for key in payload if key not in variant.fields)
-    if undeclared:
-        faults.append(Fault(UNDECLARED_FIELDS, str(undeclared)))
-    return tuple(faults)
-
-
-def _variant_faults(
-    variant: EventVariant,
-    args: tuple[Any, ...],
-    payload: dict[str, Any],
-) -> tuple[Fault, ...]:
-    """Everything wrong with one emission against one variant, in a
-    deterministic order: the arguments by position, then the fields.
-
-    Channel, template and level are not checked here: they are what
-    selected the variant in the first place."""
-    return _argument_faults(variant, args) + _field_faults(variant, payload)
-
-
-def _candidates(
-    spec: EventSpec, channel: str, level: int, message: str
-) -> tuple[tuple[EventVariant, ...], Fault | None]:
-    """The variants this emission could still be, selected by
-    registry-owned dimensions only and in one fixed order: the emitter's
-    channel, then the declared templates, then the level. Answers the
-    dimension that failed where nothing survives, which is what makes a
-    refusal name where it went wrong without naming anything the caller
-    supplied."""
-    on_channel = tuple(one for one in spec.variants if one.channel == channel)
-    if not on_channel:
-        return (), Fault(WRONG_CHANNEL)
-    said = tuple(one for one in on_channel if one.message == message)
-    if not said:
-        return (), Fault(WRONG_TEMPLATE)
-    at_level = tuple(one for one in said if one.level == level)
-    if not at_level:
-        return (), Fault(WRONG_LEVEL)
-    return at_level, None
-
-
-@dataclass(frozen=True)
-class Judgement:
-    """What the validator made of one emission: the faults, and the
-    variant a recovery would rebuild against.
-
-    `variant` is set only where the selection was unambiguous, since a
-    rebuild has to know exactly which shape it is rebuilding towards."""
-
-    faults: tuple[Fault, ...]
-    variant: EventVariant | None
-    declared: bool
-    event: str
-
-    @property
-    def label(self) -> str:
-        """What a diagnostic may call this event: its declared name, or
-        the fixed label, because an undeclared name is caller-supplied
-        bytes like any field value."""
-        return self.event if self.declared else UNDECLARED_LABEL
-
-
-def _judge(
-    registry: dict[str, EventSpec],
-    channel: str,
-    level: int,
-    message: str,
-    args: tuple[Any, ...],
-    event: str,
-    payload: dict[str, Any],
-    collisions: tuple[str, ...],
-) -> Judgement:
-    """The whole of the second step, and the pre-merge step's result
-    carried into it."""
-    faults: list[Fault] = []
-    if collisions:
-        faults.append(Fault(BASE_KEY_COLLISION, ", ".join(collisions)))
-    if not isinstance(event, str):
-        # Before the lookup, because the lookup is what would fail
-        # first and worst: an unhashable event raises `TypeError` out of
-        # `dict.get`, which is not an `EventSchemaError` and, in strict
-        # mode, not the error a caller is told to expect. The type is
-        # named through the base field's own name, never by rendering
-        # the value: a caller that passed a list passed its contents
-        # too.
-        faults.append(Fault(WRONG_KIND, "event"))
-        return Judgement(tuple(faults), None, False, "")
-    spec = registry.get(event)
-    if spec is None:
-        faults.append(Fault(UNDECLARED_EVENT))
-        return Judgement(tuple(faults), None, False, "")
-    candidates, dimension = _candidates(spec, channel, level, message)
-    if dimension is not None:
-        faults.append(dimension)
-        return Judgement(tuple(faults), None, True, event)
-    scored = [(_variant_faults(one, args, payload), one) for one in candidates]
-    matching = [one for found, one in scored if not found]
-    if len(matching) > 1:
-        # Two declarations this emission satisfies completely, which is
-        # a registry that cannot say what this event is. Accepting it by
-        # picking the first would make the surface depend on declaration
-        # order, and the generated reference would describe two shapes
-        # where one record exists. The conformance suite refuses the
-        # declaration; this refuses the emission, so a scratch registry
-        # or a future edit cannot get one through.
-        faults.append(Fault(AMBIGUOUS_VARIANT, str(len(matching))))
-        return Judgement(tuple(faults), None, True, event)
-    if matching and not faults:
-        return Judgement((), matching[0], True, event)
-    if not matching:
-        best, _ = min(scored, key=lambda pair: len(pair[0]))
-        faults.extend(best)
-    # What a rebuild would aim at: the one variant this emission already
-    # satisfies (a base-key collision leaves the payload itself lawful),
-    # or the only candidate there was.
-    target = matching[0] if matching else (candidates[0] if len(candidates) == 1 else None)
-    return Judgement(tuple(faults), target, True, event)
-
-
-@dataclass(frozen=True)
-class Checked:
-    """What the emitters dispatch: the payload, level, sentence and
-    arguments that survived enforcement. Identical to what the caller
-    passed wherever the emission was what the registry says it is."""
-
-    payload: dict[str, Any]
-    level: int
-    message: str
-    args: tuple[Any, ...]
-
-
-def _merged(base: dict[str, Any], fields: dict[str, Any]) -> dict[str, Any]:
-    """The finished payload. The emitter's base fields win, always: a
-    caller key that collides with one is a violation reported above, and
-    letting it through here would be the spoofing the pre-merge step
-    exists to refuse."""
-    return {**base, **{key: value for key, value in fields.items() if key not in base}}
-
-
-def _replacement(base: dict[str, Any]) -> Checked:
-    """The declared recovery event, built from whole cloth: the fixed
-    token, the emitter's own trusted identity, the fixed sentence and no
-    arguments, so a hostile event name, key, value, message or argument
-    in the original call reaches nothing.
-
-    `event` is written first rather than merged over whatever the base
-    held, so that the key order a record carries is the same whether the
-    base named the event (the untyped path, whose base always does) or
-    the declaration did (the typed path, whose base never does)."""
-    return Checked(
-        payload={
-            "event": SCHEMA_VIOLATION,
-            **{key: value for key, value in base.items() if key != "event"},
-        },
-        level=logging.ERROR,
-        message=SCHEMA_VIOLATION_MESSAGE,
-        args=(),
-    )
-
-
-def _recover(
-    log: logging.Logger,
-    channel: str,
-    base: dict[str, Any],
-    event: str,
-    level: int,
-    message: str,
-    args: tuple[Any, ...],
-    fields: dict[str, Any],
-) -> Checked:
-    """Forgiving mode, which is one algorithm rather than a list of
-    special cases, so simultaneous violations have one defined outcome
-    reached the same way every time.
-
-    Select the variant by registry-owned dimensions; drop the caller's
-    sentence and arguments, ALWAYS, because an invalid emission is one
-    this module has decided it cannot read and half of it is rendered
-    text; then rebuild the payload field by field against the variant,
-    keeping only what validates and dropping every offender rather than
-    failing at the first; then hold the rebuilt payload to that
-    variant's field table again. That last check is what stops a
-    recovery dispatching a shape the generated reference denies exists:
-    a rebuild that leaves a required field missing becomes the declared
-    `schema_violation` event outright instead, and so does an undeclared
-    event, an unknown template and an ambiguous selection.
-
-    Dropping the arguments unconditionally is the correction PR #169's
-    review forced, and the case that forced it is worth stating: one
-    credential can be BOTH an undeclared field key or value AND a
-    perfectly lawful `IDENTIFIER` or `PATHLIKE` argument of the same
-    call. Keeping the sentence because the arguments independently
-    validated would then drop the value from the payload and render the
-    same value into the log and every tap, which is the leak the whole
-    machinery exists to refuse. So there is no emission that is
-    partly recovered: either it was valid as given, or its sentence is
-    recovery's own.
-    """
-    collisions = tuple(sorted(key for key in fields if key in base))
-    payload = _merged(base, fields)
-    judged = _judge(_registry, channel, level, message, args, event, payload, collisions)
-    if not judged.faults:
-        return Checked(payload, level, message, args)
-    _report(
-        log,
-        logging.ERROR,
-        REFUSAL_MESSAGE,
-        judged.label,
-        "; ".join(fault.rendered() for fault in judged.faults),
-    )
-    if judged.variant is None:
-        return _replacement(base)
-    rebuilt = {
-        key: value
-        for key, value in payload.items()
-        if key in judged.variant.fields
-        and _field_fault(judged.variant.fields[key], value) is None
-    }
-    if _field_faults(judged.variant, rebuilt):
-        return _replacement(base)
-    return Checked(rebuilt, level, SAFE_MESSAGE, ())
-
-
-def _enforce(
-    log: logging.Logger,
-    channel: str,
-    base: dict[str, Any],
-    event: str,
-    level: int,
-    message: str,
-    args: tuple[Any, ...],
-    fields: dict[str, Any],
-) -> Checked:
-    """Every emission passes through here on its way to the taps.
-
-    Strict raises and is done. Forgiving runs the whole
-    enforcement-and-recovery path under one guard, candidate selection,
-    validation and rebuild alike, because a bug anywhere inside it must
-    degrade an emission rather than raise on a reply path. The guard
-    does not degrade the caller's payload, since the caller's payload is
-    precisely what could not be judged: it builds the replacement
-    fresh."""
-    if _enforcement == STRICT:
-        collisions = tuple(sorted(key for key in fields if key in base))
-        payload = _merged(base, fields)
-        judged = _judge(
-            _registry, channel, level, message, args, event, payload, collisions
-        )
-        if judged.faults:
-            raise EventSchemaError(refusal_text(judged.label, judged.faults))
-        return Checked(payload, level, message, args)
-    try:
-        return _recover(log, channel, base, event, level, message, args, fields)
-    except Exception as exc:  # noqa: BLE001 - telemetry never costs a reply
-        # Through `_report`, because this handler is the last one there
-        # is: a logging call that raised here would leave the guard with
-        # nothing behind it and cost the reply the guard exists for.
-        _report(log, logging.ERROR, GUARD_MESSAGE, type(exc).__name__)
-        return _replacement(base)
-
-
 # --- the typed path ---------------------------------------------------
 #
 # What a converted site does instead. It hands the emitter a THUNK
@@ -1025,6 +433,34 @@ def _enforce(
 # left to check at emit time is the one thing a variant cannot know,
 # which is whether it was handed to an emitter on the channel it
 # declares.
+
+
+@dataclass(frozen=True)
+class Checked:
+    """What the emitters dispatch: the payload, level, sentence and
+    arguments a variant produced, or the recovery event's where it could
+    not be built."""
+
+    payload: dict[str, Any]
+    level: int
+    message: str
+    args: tuple[Any, ...]
+
+
+def _replacement(base: dict[str, Any]) -> Checked:
+    """The declared recovery event, built from whole cloth: the fixed
+    token, the emitter's own trusted identity, the fixed sentence and no
+    arguments, so a hostile value, message or argument in the original
+    call reaches nothing.
+
+    `base` is what the identities that VALIDATED answered with, never
+    what the emitter was handed."""
+    return Checked(
+        payload={"event": SCHEMA_VIOLATION, **base},
+        level=logging.ERROR,
+        message=SCHEMA_VIOLATION_MESSAGE,
+        args=(),
+    )
 
 
 @dataclass(frozen=True)
@@ -1335,55 +771,6 @@ class SessionEvents:
             ),
         }
 
-    def debug(self, message: str, *args: Any, event: str, **fields: Any) -> float:
-        return self._emit(logging.DEBUG, message, args, event, fields)
-
-    def info(self, message: str, *args: Any, event: str, **fields: Any) -> float:
-        return self._emit(logging.INFO, message, args, event, fields)
-
-    def warning(self, message: str, *args: Any, event: str, **fields: Any) -> float:
-        return self._emit(logging.WARNING, message, args, event, fields)
-
-    def error(self, message: str, *args: Any, event: str, **fields: Any) -> float:
-        return self._emit(logging.ERROR, message, args, event, fields)
-
-    def _emit(
-        self,
-        level: int,
-        message: str,
-        args: tuple[Any, ...],
-        event: str,
-        fields: dict[str, Any],
-    ) -> float:
-        """The one path every conversation event takes: what every one
-        of them carries, then this event's own fields, then every
-        consumer in turn with the log last. Answers the reading the
-        emission was stamped with.
-
-        The base fields are built here and merged here, never taken from
-        the caller: `_enforce` is handed them separately, so a spread
-        carrying `session=` is judged as the identity spoofing it is
-        rather than merged over the emitter's own."""
-        checked = _enforce(
-            logger,
-            SESSION_LOGGER,
-            {"event": event, "session": self.session_id, "device": self.device},
-            event,
-            level,
-            message,
-            args,
-            fields,
-        )
-        emission = Emission(
-            payload=checked.payload,
-            at=self._clock(),
-            level=checked.level,
-            message=checked.message,
-            args=checked.args,
-        )
-        _dispatch(tuple(self._taps), self._log, emission, logger)
-        return emission.at
-
     # --- the capture's own tracks, which are not events ---------------
 
     def vad(self, speech_ms: float, listening: bool, replying: bool) -> None:
@@ -1434,18 +821,6 @@ class ServerEvents:
         self._clock = clock
         _hub.register(self)
 
-    def debug(self, message: str, *args: Any, event: str, **fields: Any) -> None:
-        self._emit(logging.DEBUG, message, args, event, fields)
-
-    def info(self, message: str, *args: Any, event: str, **fields: Any) -> None:
-        self._emit(logging.INFO, message, args, event, fields)
-
-    def warning(self, message: str, *args: Any, event: str, **fields: Any) -> None:
-        self._emit(logging.WARNING, message, args, event, fields)
-
-    def error(self, message: str, *args: Any, event: str, **fields: Any) -> None:
-        self._emit(logging.ERROR, message, args, event, fields)
-
     def emit(self, build: Callable[[], Variant]) -> None:
         """Say one typed event.
 
@@ -1463,36 +838,6 @@ class ServerEvents:
         stops having to restate correctly.
         """
         checked = _built(self._logger, self.channel, {}, build)
-        emission = Emission(
-            payload=checked.payload,
-            at=self._clock(),
-            level=checked.level,
-            message=checked.message,
-            args=checked.args,
-        )
-        _dispatch(tuple(_hub.taps), self._log, emission, self._logger)
-
-    def _emit(
-        self,
-        level: int,
-        message: str,
-        args: tuple[Any, ...],
-        event: str,
-        fields: dict[str, Any],
-    ) -> None:
-        # A server emitter has no identity to protect, so `session` and
-        # `device` are ordinary declarable fields here; `event` is the
-        # whole of its base.
-        checked = _enforce(
-            self._logger,
-            self.channel,
-            {"event": event},
-            event,
-            level,
-            message,
-            args,
-            fields,
-        )
         emission = Emission(
             payload=checked.payload,
             at=self._clock(),

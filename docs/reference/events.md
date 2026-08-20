@@ -3,8 +3,7 @@
 Generated from the declarations by `vinga-server events reference`. Do
 not edit this file by hand: CI regenerates it and fails on any difference,
 so an edit here is reverted by the next run. The declarations live in
-`vinga-server/src/vinga_server/events/catalog.py` and, for the events not
-yet converted to it, in `vinga-server/src/vinga_server/events_schema.py`.
+`vinga-server/src/vinga_server/events/catalog.py`.
 
 The structured events are this server's observability surface
 ([ADR](../adr/2026-08-04-json-logs-are-the-observability-surface.md)), and
@@ -15,11 +14,14 @@ them emitted from ordinary sites and 1 internal. What was said in a
 conversation is in the conversation store instead, keyed by the same `session`
 ([its reference](conversations-schema.md)).
 
-The emitters hold every emission to what is written here before any of it is
-dispatched, and `VINGA_EVENTS_ENFORCEMENT` decides what happens to one that
-does not match. `forgiving` recovers the emission into a declared shape, or
-replaces it with `schema_violation` where it cannot, and says so on the
-emitter's own channel; `strict` raises instead.
+A site does not describe an emission; it constructs one. Every variant below
+is a type, its values are types, and its sentence and argument order are
+derived from its own fields, so an emission that is not one of these shapes
+cannot be built at all. What is left at runtime is the construction itself,
+which happens inside the emitter's guard, and `VINGA_EVENTS_ENFORCEMENT`
+decides what a construction that refuses costs. `forgiving` says so once on
+the emitter's own channel and dispatches `schema_violation` in its place;
+`strict` raises instead.
 
 Which one a process gets when the variable is unset is a default rather than a
 rule about the process: a running server defaults to `forgiving`, because a
@@ -37,8 +39,8 @@ sentence it renders, the arguments that sentence takes, and the payload it
 carries. Events have more than one because the surface does:
 `session_rejected` is emitted with three arities across four templates on two
 channels, `mcp_reload`'s applied and refused answers carry mutually exclusive
-fields, and several events change level with shape. A runtime emission matches
-exactly one variant or it is a violation.
+fields, and several events change level with shape. A site constructs exactly
+one of them.
 
 The template is byte-exact, and the argument table's rows are its `%`
 positions in order. A message that is not one of the declared templates fails
@@ -47,8 +49,8 @@ same taps the payload does.
 
 A variant's field table is the WHOLE payload a tap receives, base fields
 included: `event` everywhere, and `session` and `device` on the session
-channel, where the emitter owns them and a caller supplying one is itself a
-violation. On a server channel `session` and `device` are ordinary fields,
+channel, where the emitter owns them and a variant declaring one is refused at
+import. On a server channel `session` and `device` are ordinary fields,
 declared where they are carried. Required says the field is always present in
 that variant; nullable says it may be present and null. An argument position
 carries the same nullability column, for the positions whose value the
@@ -83,12 +85,12 @@ another is a violation even when its fields are lawful.
 
 ## What a value may be
 
-There is no free-text kind, which is the property the whole registry exists to
-keep. Every string field is one of these, and a field that would need prose is
-a design error the taxonomy refuses to encode. A trusted identifier's domain
-is a non-empty string once stripped, as NonBlankStr defines it: what the
-configuration itself guarantees, since a registry claiming more would turn a
-lawful deployment's traffic into violations.
+There is no free-text kind, which is the property the whole vocabulary exists
+to keep. Every string field is one of these, and a field that would need prose
+is a design error the taxonomy refuses to encode. A trusted identifier's
+domain is a non-empty string once stripped, as NonBlankStr defines it: what
+the configuration itself guarantees, since a value type claiming more would
+refuse a lawful deployment's traffic.
 
 | Kind | What it is |
 | --- | --- |
@@ -2131,12 +2133,11 @@ the configuration API met unreadable stored state (%s)
 
 ### `schema_violation`
 
-**Internal.** No ordinary emit site produces this event, and the conformance
-walk exempts it by name for that reason; the emitter itself is its only
-producer.
+**Internal.** No ordinary emit site produces this event: the emitter itself is
+its only producer, which is what the declaration's own `internal` flag says.
 
-What the emitter emits in forgiving mode when an emission cannot be recovered
-into a declared shape. Fixed at ERROR, because `log_level` admits roots above
+What the emitter emits in forgiving mode when an emission cannot be built into
+a declared shape. Fixed at ERROR, because `log_level` admits roots above
 WARNING and a complaint that vanishes under one is no complaint.
 
 #### Variant 1: `vinga_server.session` at ERROR

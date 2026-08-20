@@ -23,6 +23,15 @@ Two deliberate limits, stated rather than discovered later:
   which is a different word with a different meaning.
 - The scan is of the production package. Tests build records by hand on
   purpose, which is how several of them plant the field sets they check.
+
+The two historical guards that used to sit beside this rule are gone
+(#210). `_echo_event` was a provider's own payload factory, invented
+because there was no server-scoped emitter to ask, and `device.events`
+was where the emitter used to live; both named a shape of code that
+milestone 1 of #138 removed, and a guard whose subject is what an old
+release looked like is a fact about that release rather than an
+invariant. The rule below is the invariant, and it is enforced against
+the tree as it is.
 """
 
 import ast
@@ -112,42 +121,3 @@ def test_the_rule_leaves_everything_that_is_not_a_logging_call_alone() -> None:
     )
 
     assert hand_built_events(planted) == []
-
-
-def test_the_private_provider_event_builder_is_gone() -> None:
-    """`_echo_event` was a provider's own payload factory, invented
-    because there was no server-scoped emitter to ask. There is one now,
-    and a second invention of it starts by taking this name back."""
-    holding = [
-        relative(path)
-        for path in sources()
-        if "_echo_event" in path.read_text(encoding="utf-8")
-    ]
-
-    assert holding == []
-
-
-def test_nothing_reaches_for_the_emitter_where_it_used_to_live() -> None:
-    """`device/events.py` was deleted rather than forwarded in milestone
-    1, so an import of it is a mistake that would fail loudly; the
-    assertion is here so that the whole of #138's move is one file's
-    worth of guard rather than a fact about the last release."""
-    importers = []
-    for path in sources():
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and (node.module or "").endswith(
-                "device.events"
-            ):
-                importers.append(relative(path))
-            elif isinstance(node, ast.Import) and any(
-                alias.name.endswith("device.events") for alias in node.names
-            ):
-                importers.append(relative(path))
-
-    assert importers == []
-    assert [
-        relative(path)
-        for path in sources()
-        if "device.events" in path.read_text(encoding="utf-8")
-    ] == []
