@@ -490,6 +490,11 @@ extension.** Response models forbid extra keys, so a client
 generated from M1's schema can reject M2's response. Publish the
 final schema exactly once.
 
+*Resolution.* Adopted through finding 2's recut: no interim schema
+ever exists. The response-shape decision now states that the models
+forbid extra keys and are published complete when milestone 2 lands
+the route, with the sketch showing the final shape.
+
 **7 (P2). The no-leak sentinel proves only plaintext absence.** One
 planted plaintext would not catch serialization of the ciphertext
 envelope, the fingerprint, or an environment-variable name, and the
