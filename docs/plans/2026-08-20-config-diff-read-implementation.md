@@ -171,3 +171,110 @@ Run from `vinga-server/`, at the last commit of the milestone.
 
 Not verified here, and not claimed: the container image and the smoke
 lane, which no part of this milestone touches.
+
+### PR review round (2026-08-20)
+
+External review of PR #227: codex exec, model gpt-5.6-sol, read-only
+against `main...9f1991e5`. Verdict: mergeable after fixes. Findings
+condensed but faithful; each carries its resolution and the commit that
+made it.
+
+**1 (P1). An entry's identity was taken through an operation that is
+not total over the models.** The connection half was asked for as JSON
+text, and `command`, `url`, an `args` element and an `env` value are
+plain strings, so an unpaired surrogate validates and then has no UTF-8
+encoding: `model_dump_json` raises `PydanticSerializationError`. An
+identity is taken for every configured entry at every boot, unreferenced
+entries included, and that exception is not one the startup path
+classifies, so an operator would meet a library traceback out of uvicorn
+rather than a refusal naming the entry.
+
+*Resolution.* Adopted (`066544aa`). The digest is built from a
+Python-mode dump through one canonical encoder that escapes every
+non-ASCII character, so an unpaired surrogate becomes its own escape and
+compares as itself. The regression is at the public read: an entry
+holding one is built and compared, which is where the old code raised.
+
+**2 (P1). The identity moved with mapping insertion order.** Two loads
+of one row can build the same `env` or `headers` pairs in a different
+order. The models are equal, which is what the reload's own comparison
+says of them when it decides a connection stands, but the digest walked
+the mapping as it was built, so the pending read could report a change
+nobody made.
+
+*Resolution.* Adopted (`4d80f61e`), folded into finding 1's encoder as
+the review suggested: the keys are sorted, which is the rule the stored
+secrets' own fingerprint already follows one module over. Reordered
+`env` on stdio and reordered `headers` on streamable HTTP each report
+unchanged, and the `env` case also asserts that a pair which really
+moved is still reported, so it cannot pass by comparing nothing.
+
+**3 (P1). The grants were compared over the wrong population.** The
+comparison walked whichever agents the current slice held, and that set
+is not the one the question is about: a restart is what loads an agent,
+so a reload can install grants for an agent no session can be built for
+and can drop an agent this server is still talking as. Both directions
+were wrong, and both need a reload to reach. Delete a boot-loaded agent,
+reload, write the identical agent back: genuinely pending, and no longer
+reported. Add an agent, reload, edit its grants: reported, though
+nothing this server can do would change before the restart.
+
+*Resolution.* Adopted (`977d0079`), with one difference from the shape
+the finding proposed. The agent names are not passed into `McpServers`
+from `build`'s configuration; they are read once in `__init__` off the
+slice it was constructed with, which for `build` is exactly
+`sorted(config.agents)` and for every other construction is the world
+that caller handed over. The property the finding asked for is the same
+and is now structural rather than arranged: there is no second parameter
+to forget, and `_install` cannot reach the field. `McpSlice.pending_against`
+takes the population as an argument, because neither slice holds the
+right answer. Both reload-history sequences are pinned at the public
+read.
+
+**4 (P2). The plan misclassified `inject_prompts` as prompt-only.**
+`transport.py` excludes exactly `instructions` and
+`use_server_instructions` from an entry's connection identity, because
+editing `inject_prompts` changes what a connect fetches and therefore
+restarts the connection.
+
+*Resolution.* Adopted (`533dce9a`). Verified rather than assumed, and
+the code needed no change: the derivation reads `_PROMPT_ONLY_FIELDS`
+instead of restating a list, so `inject_prompts` was already inside the
+connection half. What was missing was anywhere saying so. The plan is
+corrected in both places, the derivation's docstring names the
+distinction and why it reads the list, and the tests stop covering the
+question with one field: the prompt-only case is taken for both
+prompt-only fields, each asserting the reload keeps the live connection,
+and `inject_prompts` has a case of its own asserting the opposite, that
+it is pending just the same and that applying it makes the connection
+again.
+
+**5 (P3). `provider_identity` was not yet the single home this document
+claimed.** The secret write and delete routes, the CLI's masked-body
+index and its summary tree, and the whole-configuration view each still
+built `<stage>.<name>` by hand, so the new function was a fifth spelling
+rather than the only one.
+
+*Resolution.* Adopted (`012f11c7`). All four call it, and nothing about
+the strings changes, which is the point: the byte-pinned suites (the
+committed OpenAPI document, the CLI rendering, the whole-config read)
+pass unmodified. `store._identified` is deliberately left alone: it
+joins the addressing parameters of whichever descriptor it was handed,
+and a provider is only the kind that has two of them, so it is a generic
+join that happens to agree rather than this spelling written again.
+
+### Verification, after the review round
+
+Run from `vinga-server/`, at `012f11c7`.
+
+- `uv run ruff check .`: all checks passed.
+- `uv run mypy`: success, no issues found in 3 source files.
+- `uv run pytest tests/unit -q`: 2,674 passed, 16 skipped (2,667 at the
+  end of M1; the 7 new tests are this round's).
+- `uv run pytest tests/integration -q`: 60 passed.
+- The four documentation drift checks: all clean, and no file under
+  `docs/reference/` is touched by this round, which finding 5's fix had
+  to leave true and does.
+
+The image and the smoke lane remain unverified here, for the reason
+given above.
