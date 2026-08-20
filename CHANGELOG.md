@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-08-20
+
+### Changed
+
+- **Every event this server may emit is declared as a type, and the
+  machinery that reconciled a declaration with a call is gone** (#210).
+  The last forty-nine emit sites, across the OTA check-in and its
+  activation ceremony, the onboarding banner, the handshake gate, the
+  ASR echo guard, the MCP lifecycle, memory, filler, capture, the drain,
+  the live bindings view and the configuration API, construct a typed
+  variant instead of restating a template, an argument order, an event
+  name and a field set. With nothing left to reconcile, the seventeen
+  fault codes, the two-step judging, the variant matching and the
+  recovery rebuild go, and `events_schema.py` with them: its vocabulary
+  is the value types' now and its channels the catalog's. What operators
+  consume is unchanged, held by a record baseline of all eighty-one emit
+  paths captured before the conversion and byte-identical after it, and
+  by a golden inventory of every declared event's structure. The
+  generated event reference keeps its counts and its content; its
+  sections appear where the catalog declares them.
+
+### Fixed
+
+- **A failing event tap no longer names the exception it raised**
+  (#210). A tap is code this server does not own, and `type()` accepts
+  any string as a class name, so an exporter holding whatever a far side
+  answered it with could put those bytes into a retained log line
+  through the report about its own failure. The report names the tap and
+  stops there.
+
+### Removed
+
+- **The event surface's four reconciliation sidecars and their suite**
+  (#210). The pin map, the token-decision map, the spread inventory and
+  the call-alternatives table existed to hold a declaration, a call site
+  and a pin in agreement; a variant is its own declaration now, so the
+  structures that must agree per event fall from nine to two. The prose
+  pins that restated templates, argument tuples and field sets retire
+  with them; the no-leak sentinel suites are kept whole and rewritten
+  against the typed path.
+
 ## 2026-08-19
 
 ### Changed
