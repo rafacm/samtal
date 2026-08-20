@@ -377,6 +377,18 @@ drained, closes the current generation's providers and any retired
 generation still held, so the close a provider gained in this
 milestone runs at every end a provider can meet.
 
+Disposal also waits for work in flight (round 3's finding 1):
+cancelling a coroutine that awaits `asyncio.to_thread` does not
+stop the worker thread, so a session's removal can precede a
+transcription or synthesis worker that is about to read the
+engine. A provider call therefore holds an operation lease that
+is released when the underlying thread actually finishes,
+survival past caller cancellation included, and disposal awaits
+the outstanding leases before clearing resources; the
+blocking-engine test cancels the last session, retires its
+generation, and proves the engine stays reachable until the
+worker exits.
+
 Teardown never refuses (round 2's finding 7): a raising `close()`
 cannot fail an apply whose serving state already changed, strand
 the holder unstable, or put third-party prose anywhere. Disposal
@@ -1026,6 +1038,10 @@ is about to read. Provider calls need an operation lease held
 until the underlying thread actually finishes, disposal waits for
 the leases, and a blocking-engine test proves the engine stays
 reachable until the worker exits.
+
+*Resolution.* Adopted. The lifecycle decision now defines the
+operation lease held to actual thread completion, disposal
+awaiting outstanding leases, and the blocking-engine test.
 
 **2 (P1). The snapshot-mode resolution leaves M1 through M3
 unreleasable.** The refusals were promised "from milestone 1" but
