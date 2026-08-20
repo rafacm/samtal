@@ -37,6 +37,7 @@ from vinga_server.events.values import (
     Flag,
     Identifier,
     OriginProvenance,
+    OriginSource,
     OriginSourceToken,
 )
 
@@ -96,7 +97,7 @@ class Origin:
     """
 
     url: str
-    source: str
+    source: OriginSource
     guessed: bool = False
     note: str = ""
 
@@ -117,12 +118,12 @@ def public_origin(server: ServerConfig) -> Origin:
     traceback at startup.
     """
     if server.public_url:
-        return Origin(server.public_url, "server.public_url")
+        return Origin(server.public_url, OriginSource.PUBLIC_URL)
     unreadable = False
     if server.websocket_url:
         derived = _origin_of(server.websocket_url)
         if derived is not None:
-            return Origin(derived, "server.websocket_url")
+            return Origin(derived, OriginSource.WEBSOCKET_URL)
         unreadable = True
 
     reasons: list[str] = []
@@ -140,7 +141,7 @@ def public_origin(server: ServerConfig) -> Origin:
     reasons.append("set server.public_url to name this deployment exactly")
     return Origin(
         assemble("http", (server.host, server.port)),
-        "the listen address (server.host and server.port)",
+        OriginSource.LISTEN_ADDRESS,
         guessed=True,
         note=", " + "; ".join(reasons),
     )
