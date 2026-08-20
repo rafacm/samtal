@@ -482,8 +482,8 @@ in the same change as the prose that feeds them.
 
 - [ ] **M1: the generation seam and the generalized reload, with
   the prompt slice live.** `generation.py` holding config and
-  secrets; the holder's counter replaces `McpServers.generation`
-  in the diff guard; `config/reload.py` with the widened
+  secrets; the holder's mark, with its instability window,
+  replaces `McpServers.generation` in the diff guard; `config/reload.py` with the widened
   exclusion, prepare (the re-read, whole-snapshot validation, MCP
   candidate preparation) and apply (generation swap, MCP install);
   `POST /runtime/config/reload` replaces the MCP route, CLI
@@ -494,7 +494,12 @@ in the same change as the prose that feeds them.
   reload notice, the agent kind's diff comparison grows its
   reload-labeled prompt half, `models.py`'s `prompt_includes`
   description and the `docgen` contract prose rewritten, both
-  generated references regenerated, README sites swept. Design
+  generated references regenerated, README sites swept; the
+  snapshot-mode fact on `ApiRuntime`, both snapshot-mode refusals
+  (the diff and the reload) with their fixed typed 409 sentence,
+  the snapshot-mode device and default-agent write
+  acknowledgements, and the mounted snapshot-mode tests (round
+  3's finding 2). Design
   footprint: adds the generation seam; deepens the reload from an
   MCP verb into the configuration verb whose callers stop knowing
   which halves converge where. Branch `feature/config-reload`,
@@ -607,8 +612,8 @@ session across a reload), and the drift-check pins.
   (finding 4): a reload deletes the resolved agent between the
   binding read and the factory call, and the session either serves
   the generation it captured or is turned away cleanly, never an
-  index error; the snapshot-mode acknowledgement, diff refusal,
-  and reload refusal from the #195 section.
+  index error. The snapshot-mode surfaces landed in M1; M4
+  closes #195 with the `DeviceBindings` conversion.
 - **Concurrency, every milestone**: the widened exclusion refuses
   a second apply; the #193 barrier test moves onto the holder's
   mark and gains the three positions finding 2 names: the barrier
@@ -1050,6 +1055,11 @@ mode fact, both typed refusals, the snapshot-mode
 acknowledgements, the OpenAPI changes, and the mounted tests move
 into M1; M4 keeps the `DeviceBindings` conversion and the #195
 closure. A failed closure of round 2's finding 2.
+
+*Resolution.* Adopted. M1's checklist now carries the mode fact,
+both refusals, the snapshot-mode acknowledgements, and the mounted
+tests; M4 keeps only the `DeviceBindings` conversion and the #195
+closure.
 
 **3 (P1). The session-to-generation handoff has no implementable
 interface.** The factory returns only a `SessionInput`, the
