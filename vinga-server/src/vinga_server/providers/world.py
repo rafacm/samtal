@@ -144,14 +144,24 @@ async def build_entry(
     seconds to minutes of blocking work) and because the loop it would
     otherwise run on is the one every live conversation is on.
 
-    The one case that cannot be owned is a cancellation landing while
-    that thread is inside a third-party constructor: a thread cannot be
-    cancelled, so what it eventually returns has nobody to hand it to.
-    Said out loud rather than papered over; it costs one object, once,
-    on a path that ends the preparation anyway.
+    A cancellation landing while that thread is inside a third-party
+    constructor is owned too, and it is the case the shape below exists
+    for. A thread cannot be cancelled: the constructor runs to its end
+    whatever happened to whoever was awaiting it, and the object it
+    finally returns would have nobody to hand it to. So the construction
+    is a future this function keeps rather than an await it abandons, and
+    a cancelled caller waits out the thread it started, closes what came
+    back and then goes on being cancelled.
     """
     label = f"providers.{stage}.{name}"
-    provider = await asyncio.to_thread(construct_provider, stage, name, config, secrets)
+    constructing = asyncio.ensure_future(
+        asyncio.to_thread(construct_provider, stage, name, config, secrets)
+    )
+    try:
+        provider = await asyncio.shield(constructing)
+    except asyncio.CancelledError:
+        await _abandoned(constructing)
+        raise
     # Owned from this line. Everything below can refuse, and everything
     # below closes what it refuses.
     #
@@ -182,6 +192,30 @@ async def build_entry(
         model=provider.model,
     )
     return provider
+
+
+async def _abandoned(constructing: "asyncio.Future[Provider]") -> None:
+    """See out a construction nobody is going to own, and close what it
+    made.
+
+    The awaiting side has been cancelled and the worker thread has not,
+    so this waits for the thread rather than for the caller, absorbing
+    the cancellation as many times as it arrives. What comes back is
+    closed; a construction that refused instead has nothing to close and
+    its exception is the caller's own business, which is already on its
+    way out.
+
+    Bounded by the constructor rather than by a deadline, deliberately:
+    a model that takes two minutes to load takes two minutes to load,
+    and abandoning the wait would put the object back where this
+    function found it, which is nowhere.
+    """
+    while not constructing.done():
+        with contextlib.suppress(asyncio.CancelledError):
+            await asyncio.shield(constructing)
+    if constructing.cancelled() or constructing.exception() is not None:
+        return
+    await disposed([constructing.result()])
 
 
 async def build_world(
