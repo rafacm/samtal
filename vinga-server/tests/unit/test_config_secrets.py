@@ -432,10 +432,11 @@ def test_the_live_kinds_are_taken_from_the_candidate() -> None:
 
 
 def test_the_rest_is_carried_over_from_the_previous_world() -> None:
-    """A provider rotation stays pending: the provider holding the
-    credential was built at start and is still the one running, so a
-    composed world that carried the new mark would report an applied
-    change nothing had used."""
+    """A kind this apply does not rebuild keeps the credentials the
+    running world was built with, whichever kind that is: a composed
+    world that carried a mark nothing had used would report an applied
+    change that had not happened. The regime is the caller's, and
+    `config/reload.py` is where a server's own is declared."""
     running, stored, _ = two_loads()
 
     composed = stored.composed(running, {"mcp_server"})
@@ -462,8 +463,10 @@ def test_a_slot_the_store_no_longer_holds_goes_with_its_kind() -> None:
 
 
 def test_every_kind_live_is_the_candidate_store() -> None:
-    """What the composition retires into once nothing is start-bound:
-    naming both kinds answers exactly the candidate."""
+    """What the composition answers once nothing is start-bound, which
+    is where a server's own regime now is: naming both kinds answers
+    exactly the candidate, and the operation retires when there is no
+    third kind to carry over."""
     running, stored, _ = two_loads()
 
     composed = stored.composed(running, {"mcp_server", "provider"})
