@@ -43,13 +43,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import NamedTuple, Protocol
 
-from vinga_server.config.models import (
-    PROVIDER_STAGES,
-    AgentConfig,
-    AgentDefaults,
-    Config,
-    ProviderConfig,
-)
+from vinga_server.config.models import PROVIDER_STAGES, Config, ProviderConfig
 from vinga_server.config.responses import (
     AgentsDiff,
     Applies,
@@ -73,20 +67,21 @@ APPLIES: Mapping[str, Applies] = {
     "providers": Applies.RELOAD,
     "mcp_servers": Applies.RELOAD,
     "prompt_fragments": Applies.RELOAD,
-    "agent_defaults": Applies.RESTART,
-    "agents": Applies.RESTART,
+    "agent_defaults": Applies.RELOAD,
+    "agents": Applies.RELOAD,
     "devices": Applies.CHECK_IN,
     "default_agent": Applies.CHECK_IN,
 }
 
-# And the three regimes that are half of a kind rather than a kind. An
-# agent entry spans four: its `mcp` grants are what a reload derives its
-# tools from, its `prompt` and `prompt_includes` are what a reload has it
-# assemble its next activation from, its `filler` is what a reload
-# synthesizes its next session's filled pauses from, and everything else
-# about it, which is which provider entry serves each of its stages,
-# waits for a restart. None of them is in the map above, whose keys are
-# the domain's own.
+# And the three regimes that are half of a kind rather than a kind.
+# Every field of an agent entry is applied by a reload now, so these no
+# longer separate what converges from what waits: they separate three
+# moments a conversation meets a change at. The grants are snapshotted
+# per reply, the prompt fields are assembled per activation, and the
+# filler section is bound when a conversation opens, and an operator
+# who has just written one of the three is told which of the three
+# clocks their edit is on. None of them is in the map above, whose keys
+# are the domain's own.
 GRANTS_APPLY = Applies.RELOAD
 PROMPT_APPLY = Applies.RELOAD
 FILLER_APPLY = Applies.RELOAD
@@ -97,27 +92,6 @@ FILLER_APPLY = Applies.RELOAD
 # at its next activation and a clip at the next session.
 _PROMPT_FIELDS = ("prompt", "prompt_includes")
 _FILLER_FIELDS = ("filler",)
-
-# And every field of an agent entry a reload composes into the world it
-# installs, which is those two halves and not the grants: what an agent
-# may reach is derived from the whole candidate configuration and
-# answered by the MCP registry, while what its prompt says and what it
-# masks with are read straight off the entry. Read by the overlay in
-# `config/reload.py` as well as here, so that a field becoming live is
-# one line in one module rather than two that must agree.
-OVERLAID_AGENT_FIELDS = _PROMPT_FIELDS + _FILLER_FIELDS
-
-# Which fields of an agent entry the restart-bound comparison leaves
-# out, because a reload applies them, and what each is replaced by to
-# leave it out: the field's own default, so that what is compared is
-# still an agent entry rather than a model with a hole in it. Derived
-# from the declaration above and the grants beside it, so the three
-# cannot come to disagree about which fields a restart is still waiting
-# for.
-_RELOADED_AGENT_FIELDS: Mapping[str, object] = {
-    name: AgentConfig.model_fields[name].get_default()
-    for name in ("mcp", *OVERLAID_AGENT_FIELDS)
-}
 
 
 class Loaded(Protocol):
@@ -185,9 +159,7 @@ def config_diff(running: Loaded, stored: Loaded, mcp: McpPending) -> ConfigDiff:
         return running.config.prompt_fragments[name] == stored.config.prompt_fragments[name]
 
     def same_agent(name: str) -> bool:
-        return _restart_bound(running.config.agents[name]) == _restart_bound(
-            stored.config.agents[name]
-        )
+        return running.config.agents[name] == stored.config.agents[name]
 
     def same_fields(name: str, fields: tuple[str, ...]) -> bool:
         own, theirs = running.config.agents[name], stored.config.agents[name]
@@ -220,8 +192,7 @@ def config_diff(running: Loaded, stored: Loaded, mcp: McpPending) -> ConfigDiff:
         ),
         agent_defaults=SingletonDiff(
             applies=APPLIES["agent_defaults"],
-            changed=_without_grants(running.config.agent_defaults)
-            != _without_grants(stored.config.agent_defaults),
+            changed=running.config.agent_defaults != stored.config.agent_defaults,
         ),
         agents=AgentsDiff(
             applies=APPLIES["agents"],
@@ -312,33 +283,3 @@ def _providers(side: Loaded) -> dict[str, ProviderConfig]:
         for stage in PROVIDER_STAGES
         for name, entry in getattr(side.config.providers, stage).items()
     }
-
-
-def _without_grants(layer: AgentDefaults) -> AgentDefaults:
-    """One agent layer with its MCP grants taken out.
-
-    The exclusion is what keeps `agent_defaults` honest. Its `mcp` list
-    is applied by the reload, which derives every agent's grants from
-    the whole candidate configuration, while everything else about the
-    layer waits for a restart, its `prompt_includes` included: a
-    candidate generation keeps the previous `agent_defaults` whole,
-    precisely so that a change to what every agent inherits is not
-    applied through the back door. Comparing the whole layer would
-    therefore report a grants-only edit as pending-restart, which is a
-    change the reload has already applied or can apply without one. What
-    moved there is reported under the agents' grants instead.
-    """
-    return layer.model_copy(update={"mcp": None})
-
-
-def _restart_bound(agent: AgentConfig) -> AgentConfig:
-    """One agent entry with everything a reload applies taken out.
-
-    The same exclusion one layer down and wider, because an agent entry
-    holds the two prompt fields and the filler section as well as the
-    grants and a reload applies all four. What is left is what genuinely
-    waits for a restart: which provider entry serves each of this
-    agent's stages, which is composed when the server starts even though
-    the entries themselves are rebuilt by a reload.
-    """
-    return agent.model_copy(update=dict(_RELOADED_AGENT_FIELDS))

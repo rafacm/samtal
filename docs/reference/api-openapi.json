@@ -2935,7 +2935,7 @@
           "filler"
         ],
         "title": "AgentsDiff",
-        "description": "The agents, whose entries span four regimes: an agent's `mcp`\nlist is what a reload derives its tools from, its `prompt` and\n`prompt_includes` are what a reload assembles its next activation\nfrom, its `filler` is what a reload synthesizes its next session's\nfilled pauses from, and everything else about the entry waits for a\nrestart.\n\nSo a grants-only, prompt-only or filler-only edit is deliberately\nabsent from `changed` above and reported under `grants`, `prompt` or\n`filler` instead, and an answer that named it in both would be\nclaiming a restart that nothing is waiting for."
+        "description": "The agents. A reload applies the whole entry, so `changed` above\ncompares the whole entry, and the three entries below break that one\nanswer into the moments a conversation meets each part at: `grants`\nat its next utterance, `prompt` at its next activation, `filler` when\nthe next conversation opens.\n\nA breakdown and not an exception: an agent whose prompt alone moved\nis in `changed` and in `prompt`, which is one change reported at the\naltitude an operator asks about it. The three carry `reload` for the\nsame reason the kind does, and they exist because the clocks differ\nand a single label cannot say which one an edit is on."
       },
       "AgentsReload": {
         "properties": {
@@ -2969,7 +2969,7 @@
           "defaults_changed"
         ],
         "title": "AgentsReload",
-        "description": "What a reload did to the set of agents this server can serve.\n\nAnswered as null until the milestone that makes the agent set a\nreloaded kind, for the reason the two sections above are."
+        "description": "What a reload did to the set of agents this server can serve.\n\nThe set moves at the swap and nowhere else: an agent named under\n`added` is servable from the instant this answered, and one under\n`removed` cannot be reached by anything that starts after it, while\nevery conversation already talking as it finishes on the world it\nwas built from."
       },
       "Applies": {
         "type": "string",
@@ -2979,7 +2979,7 @@
           "check-in"
         ],
         "title": "Applies",
-        "description": "When a change of this kind reaches a conversation.\n\nThree boundaries and no fourth, because the server has three.\n`restart` is what this process reads once and serves until it is\nstarted again. `reload` is what `POST /runtime/config/reload`\napplies while the process runs, which is the MCP entries, the\nagents' grants, the shared prompt fragments, each agent's own prompt\ntext and each agent's own filled pauses. `check-in` is what a device\nis answered as it asks, the bindings and the default agent, which are\ntherefore in effect within seconds of a write and never pending at\nall."
+        "description": "When a change of this kind reaches a conversation.\n\nThree boundaries and no fourth, because the server has three.\n`restart` is what this process reads once and serves until it is\nstarted again, which is now the file half alone: the port, the\ndirectories, the limits and everything else `server` holds, none of\nwhich this API writes. `reload` is what `POST\n/runtime/config/reload` applies while the process runs, which is the\nwhole domain half: the provider entries, the MCP entries, the shared\nprompt fragments, the agents, and `agent_defaults`. `check-in` is\nwhat a device is answered as it asks, the bindings and the default\nagent, which are therefore in effect within seconds of a write and\nnever pending at all."
       },
       "AssembledPrompt": {
         "properties": {
@@ -3042,7 +3042,7 @@
           "default_agent"
         ],
         "title": "ConfigDiff",
-        "description": "What the database holds that the running server is not serving,\nkind by kind, in the order the domain declares them.\n\nTwo of the kinds are worth a word beyond their shapes. A provider is\naddressed as `<stage>.<name>`, the identity the store keeps its\ncredentials under and the one every refusal prints, and one whose\nstored credential was rotated is changed, since what it talks to\nmoved as surely as if a field of it had. The MCP entries are\ncompared against the entries running now rather than the ones this\nprocess booted with, because the reload swaps that world while the\nprocess runs: an entry no agent references is compared like any\nother, so is one whose only edit is to the prompt fields a\nconnection never sees, and a change a reload has already applied is\nnot reported as pending."
+        "description": "What the database holds that the running server is not serving,\nkind by kind, in the order the domain declares them.\n\nTwo of the kinds are worth a word beyond their shapes. A provider is\naddressed as `<stage>.<name>`, the identity the store keeps its\ncredentials under and the one every refusal prints, and one whose\nstored credential was rotated is changed, since what it talks to\nmoved as surely as if a field of it had. The MCP entries are\ncompared against the entries running now rather than the ones this\nprocess booted with, because the reload swaps that world while the\nprocess runs: an entry no agent references is compared like any\nother, so is one whose only edit is to the prompt fields a\nconnection never sees, and a change a reload has already applied is\nnot reported as pending. That last property is the whole of what\nthis read is for, and it now holds for every kind: an apply installs\nthe stored domain half whole, so a comparison taken after one is\nempty."
       },
       "ConfigDocument": {
         "properties": {
@@ -3116,7 +3116,7 @@
           "prompts"
         ],
         "title": "ConfigReloadResult",
-        "description": "What one reload applied to this running server, kind by kind, and\nwhat is running once it had been applied.\n\nOne request applies a stored change and says what the change was, so\nbelieving a write took effect when it did not takes a deliberate act\nof not reading the reply. Which kinds a reload can apply grows\nmilestone by milestone; the sections below that this server does not\napply yet answer null rather than an empty answer, because an empty\nthree-way answer would claim that every agent was considered and\nnothing needed doing."
+        "description": "What one reload applied to this running server, kind by kind, and\nwhat is running once it had been applied.\n\nOne request applies a stored change and says what the change was, so\nbelieving a write took effect when it did not takes a deliberate act\nof not reading the reply. Every section answers: a reload applies\nthe whole domain half, so there is no kind left whose section would\nhave to say that this build does not touch it. The four that are\ndeclared optional stay optional in the schema, because a client\ngenerated against an earlier one is holding a document that says\nthey may be null and narrowing that is a change to the contract for\nno gain."
       },
       "ConversationDetail": {
         "properties": {
@@ -3829,7 +3829,7 @@
             },
             "type": "array",
             "title": "Changed",
-            "description": "The agents whose stored `filler` section differs from what this server is serving, sorted. A reload synthesizes the new clips in each agent's own voice and the next session plays them; a conversation already open goes on masking with the clips it opened on. Only agents both sides hold are compared, for the reason the prompt half gives. What `agent_defaults.filler` holds is not compared here: it is inherited by every agent that configures none of its own and it waits for a restart, so an edit to it is reported against `agent_defaults` instead."
+            "description": "The agents whose stored `filler` section differs from what this server is serving, sorted. A reload synthesizes the new clips in each agent's own voice and the next session plays them; a conversation already open goes on masking with the clips it opened on. Only agents both sides hold are compared, for the reason the prompt half gives, and only each agent's own section: what `agent_defaults.filler` holds is inherited by every agent that configures none of its own, and an edit to it is reported against `agent_defaults` instead."
           }
         },
         "additionalProperties": false,
@@ -3839,7 +3839,7 @@
           "changed"
         ],
         "title": "FillerDiff",
-        "description": "The agents whose filled pauses the stored configuration would\nmove, which is the half of an agent entry a reload synthesizes again\nrather than the half a restart loads."
+        "description": "The agents whose filled pauses the stored configuration would\nmove, which is the half of an agent entry a reload synthesizes again\nand the next conversation opens on."
       },
       "FillersReload": {
         "properties": {
@@ -3889,7 +3889,7 @@
             },
             "type": "array",
             "title": "Changed",
-            "description": "The agents that would reach a different set of MCP tools once the stored configuration is applied, sorted. Compared through the same defaults-then-own rule the server derives an agent's grants by, so moving a grant between `agent_defaults` and an agent without changing what that agent reaches is not a change. An agent this server loaded and the database no longer holds is here while its grants are still live, since a reload would revoke them and a restart is what removes the agent itself."
+            "description": "The agents that would reach a different set of MCP tools once the stored configuration is applied, sorted. Compared through the same defaults-then-own rule the server derives an agent's grants by, so moving a grant between `agent_defaults` and an agent without changing what that agent reaches is not a change. Only the agents this server is serving are compared: one the database has added rides `added` above until a reload installs it, and one the database no longer holds is here while a reload would still revoke its tools."
           }
         },
         "additionalProperties": false,
@@ -3899,7 +3899,7 @@
           "changed"
         ],
         "title": "GrantsDiff",
-        "description": "The agents whose effective MCP grants the stored configuration\nwould move, which is the half of an agent entry that converges at\nthe reload rather than at a restart."
+        "description": "The agents whose effective MCP grants the stored configuration\nwould move, which is the half of an agent entry a conversation meets\nat its next utterance rather than at its next activation."
       },
       "LiveKind": {
         "properties": {
@@ -4141,7 +4141,7 @@
             },
             "type": "array",
             "title": "Changed",
-            "description": "The agents whose stored `prompt` or `prompt_includes` differs from what this server is serving, sorted. A reload applies both, and each agent that moved assembles the new text at its next activation. Only agents both sides hold are compared: a reload keeps the agents this server started with, so an agent the database has added or deleted rides the added or removed lists above and nothing about its prompt is pending here. The fragments the includes name are their own kind, and an edit to a fragment's text is reported there rather than against every agent that carries it."
+            "description": "The agents whose stored `prompt` or `prompt_includes` differs from what this server is serving, sorted. A reload applies both, and each agent that moved assembles the new text at its next activation. Only agents both sides hold are compared: an agent the database has added or deleted rides the added or removed lists above, which a reload applies whole, and nothing about its prompt is separately pending here. The fragments the includes name are their own kind, and an edit to a fragment's text is reported there rather than against every agent that carries it."
           }
         },
         "additionalProperties": false,
@@ -4151,7 +4151,7 @@
           "changed"
         ],
         "title": "PromptDiff",
-        "description": "The agents whose prompt text the stored configuration would move,\nwhich is the half of an agent entry a reload assembles again rather\nthan the half a restart loads."
+        "description": "The agents whose prompt text the stored configuration would move,\nwhich is the half of an agent entry a reload has assembled again at\nthe next activation."
       },
       "PromptsReload": {
         "properties": {
@@ -4161,7 +4161,7 @@
             },
             "type": "array",
             "title": "Changed",
-            "description": "The agents whose own prompt or whose resolved shared fragments now differ from what this server was serving, sorted. Each of them assembles the new text at its next activation, which is a new session or an agent switch; a conversation already in progress keeps the prompt it was activated with. The MCP guidance that also goes into an assembly is not counted here: what moved there is reported entry by entry under `mcp`, since that is where a connection is what changed. An agent the stored configuration added or removed is not here either, because the agents this server can serve are still what it started with."
+            "description": "The agents whose own prompt or whose resolved shared fragments now differ from what this server was serving, sorted. Each of them assembles the new text at its next activation, which is a new session or an agent switch; a conversation already in progress keeps the prompt it was activated with. The MCP guidance that also goes into an assembly is not counted here: what moved there is reported entry by entry under `mcp`, since that is where a connection is what changed. An agent this reload added or removed is not here either: it is named under `agents`, since an agent that has just arrived has no previous text to differ from and one that has just gone will not assemble again."
           }
         },
         "additionalProperties": false,
@@ -4207,7 +4207,7 @@
           "retired"
         ],
         "title": "ProvidersReload",
-        "description": "What a reload did to the built providers.\n\nAnswered as null until the milestone that makes providers a reloaded\nkind, for the reason the fillers section is."
+        "description": "What a reload did to the built providers."
       },
       "SecretSlot": {
         "properties": {
@@ -4250,7 +4250,7 @@
           "changed"
         ],
         "title": "SingletonDiff",
-        "description": "A kind there is exactly one of, which therefore has nothing to\nname: it moved or it did not.\n\nThe `mcp` grants are left out of the comparison for the reason they\nare left out of an agent's, since this is the layer under every\nagent: they are what a reload applies, and what they moved is\nreported under `agents.grants`."
+        "description": "A kind there is exactly one of, which therefore has nothing to\nname: it moved or it did not.\n\nCompared whole, grants included: a reload applies the whole layer,\nand what an edit to it reaches is every agent that inherits the\nfield that moved. Which agents those are is reported beside this,\nunder the agents' own three entries."
       },
       "StoredSecretLocation": {
         "properties": {

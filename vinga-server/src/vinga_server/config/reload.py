@@ -33,21 +33,18 @@ applies with no clip and runs with the mask off, exactly as a boot
 leaves it; a posture where a text-to-speech hiccup blocked a prompt fix
 would invert which of the two matters.
 
-The world a generation serves is an OVERLAY and never the stored
-snapshot whole, which is the part worth reading twice. Part of the
-domain half is still restart-bound: the agent set, `agent_defaults`, and
-each agent's own choice of which provider entry serves which stage. The
-effective-value helpers inherit through exactly those, so installing the
-stored snapshot would apply restart-bound changes by inheritance and let
-an activation index an agent the store has deleted.
-So the candidate generation is the previous one with only the slices
-this server can really apply replaced from the store, and the whole of
-it is validated again: an overlay that no longer composes (a fragment
-deleted from the store while a restart-bound `prompt_includes` still
-names it) is an apply that has to wait for the restart, and it is
-refused in those words rather than half applied. The overlay narrows as
-the milestones widen and retires when there is nothing restart-bound
-left in the domain half.
+The world a generation serves is the stored domain half WHOLE, which is
+the part worth reading twice, because it was not always so. Through the
+milestones that built this, the candidate was an overlay: the previous
+generation's configuration with only the slices this server could really
+apply replaced from the store, because the agent set, `agent_defaults`
+and each agent's choice of provider entry were start-bound and the
+effective-value helpers inherit through exactly those. Nothing in the
+domain half is start-bound now, so the overlay is gone and the candidate
+is what the store describes, composed onto this process's own server
+section by the read and validated whole by that same read. What is left
+of the old boundary is the file half, which a reload never re-reads: the
+port, the directories, the limits, and everything else `server` holds.
 
 The exception types a refusal raises ARE the contract with the API:
 `ReloadInProgressError` and `DatabaseBusyError` are the 409s, a
@@ -71,7 +68,7 @@ from collections.abc import Callable, Collection
 from dataclasses import dataclass, replace
 from typing import Any
 
-from vinga_server.config.diff import OVERLAID_AGENT_FIELDS, Loaded, unchanged_providers
+from vinga_server.config.diff import Loaded, unchanged_providers
 from vinga_server.config.loader import (
     ConfigError,
     DatabaseBusyError,
@@ -79,12 +76,9 @@ from vinga_server.config.loader import (
     ReloadInProgressError,
     StorageError,
 )
-from vinga_server.config.models import (
-    Config,
-    check_completeness,
-    check_references,
-)
+from vinga_server.config.models import Config
 from vinga_server.config.responses import (
+    AgentsReload,
     ConfigReloadResult,
     FillersReload,
     PromptsReload,
@@ -103,7 +97,7 @@ logger = logging.getLogger(__name__)
 # carries over. An MCP server's are read as its connection is made, and
 # a reload makes it again; a provider's are read as the provider is
 # built, which an apply now does too, so a rotation on either is applied
-# rather than left pending. Declared as data beside the overlay it
+# rather than left pending. Declared as data beside the apply it
 # governs, and widened one member at a time; with both kinds in it, the
 # derivation below composes nothing and the whole stored store is the
 # candidate's, which is what the last member arriving means.
@@ -164,6 +158,7 @@ class _Candidate:
     fillers: Fillers
     providers: Built
     retired: tuple[str, ...]
+    agents: AgentsReload
     mcp: mcp.McpCandidate
 
 
@@ -247,9 +242,9 @@ class ConfigReload:
         Preparation re-reads the stored half, composes and validates the
         world this server may serve, synthesizes its filled pauses and
         builds every MCP manager that world needs; any failure there (a
-        stored snapshot that will not compose, an overlay that no longer
-        does, an unset `$VAR`, a credential that will not decrypt, an
-        entry `server.local_only` forbids) refuses with the generation
+        stored snapshot that will not compose, an unset `$VAR`, a
+        credential that will not decrypt, an entry `server.local_only`
+        forbids) refuses with the generation
         and the managers exactly as they were. Application then swaps the
         generation and stops, starts and installs the MCP world, so what
         a new activation binds moves at one instant rather than across
@@ -353,8 +348,14 @@ class ConfigReload:
         try:
             stored = await self._stored()
             previous = self._generations.current()
+            # The stored half whole, which is the last thing the overlay
+            # had left to say (#191). Nothing in the domain half is
+            # start-bound any more, so the world to serve is the world
+            # the store describes, composed onto this process's own
+            # server section by the read itself and validated whole by
+            # the same checks a boot passes.
             composed = Generation(
-                _composed(previous.config, stored.config),
+                stored.config,
                 stored.secrets.composed(previous.secrets, LIVE_SECRETS),
             )
             # The engines first, because everything after them needs
@@ -377,11 +378,9 @@ class ConfigReload:
                 fillers = await build_agent_fillers(
                     composed.config, providers.world.agents, previous
                 )
-                # The MCP half is built from the stored world and not
-                # from the overlay, because the MCP half is not
-                # overlaid: entries and grants are what a reload has
-                # always applied whole, and the managers this builds are
-                # the ones the install puts in place.
+                # The MCP half, built from the same world: what a
+                # generation serves and what its managers were composed
+                # from are one snapshot now that nothing is held back.
                 candidate = await mcp.prepare(stored.config, stored.secrets)
             except BaseException:
                 # The engines above are this preparation's until
@@ -397,6 +396,7 @@ class ConfigReload:
                 fillers=fillers,
                 providers=providers,
                 retired=_retired(previous, providers),
+                agents=_agents(previous.config, composed.config),
                 mcp=candidate,
             )
         except asyncio.CancelledError:
@@ -519,9 +519,7 @@ class ConfigReload:
                 reused=list(candidate.providers.reused),
                 retired=list(candidate.retired),
             ),
-            # Null rather than empty until the milestone that fills it:
-            # see `ConfigReloadResult`.
-            agents=None,
+            agents=candidate.agents,
         )
 
     def _discard(self, preparing: "asyncio.Task[_Candidate] | None") -> None:
@@ -595,59 +593,28 @@ class ConfigReload:
                 finished.exception()
 
 
-def _composed(previous: Config, stored: Config) -> Config:
-    """The world this server may serve once the stored half has been
-    read: the previous configuration with the live slices replaced, and
-    nothing else.
+def _agents(previous: Config, applied: Config) -> AgentsReload:
+    """Which agents this server can serve now that it could not before,
+    which it can no longer be asked for, and whether the layer they all
+    inherit from moved.
 
-    The overlay, and its whole rule for this milestone: the provider
-    entries and the shared prompt fragments as the store holds them, and
-    each retained agent's own `prompt`, `prompt_includes` and `filler`.
-    The agent set does not move, so an agent the store has added is not
-    served and an agent it has deleted is still served; `agent_defaults`
-    does not move either, so an edit to the fragments, the filled pauses
-    or the provider every agent inherits stays pending until the restart
-    that reads it. That is not caution: the effective-value helpers
-    inherit through `agent_defaults`, so a candidate that took it would
-    apply a restart-bound change through the back door, and one that
-    took the agent set would let an activation index an entry that is
-    not there.
+    The last kind to become a reload's business, and the one that makes
+    the other four honest: an added agent is servable from the swap, so
+    a device bound to it reaches it at its next check-in, and a removed
+    one is unreachable to anything that starts after it while every
+    conversation already talking as it finishes on the world it was
+    built from.
 
-    The provider entries move whole and which entry an agent names does
-    not, which is the same split one level down: an entry's definition
-    is what a reload rebuilds, while an agent pointed at a different
-    entry is an agent whose pipeline is composed at a start. So an
-    operator who edits `providers.tts.voice` gets the new voice at the
-    next conversation, and one who repoints an agent from `voice` to
-    `other` waits for the restart, which is what both surfaces say.
-
-    Validated whole, by the same two checks every composition passes, so
-    a combination of live and restart-bound slices that does not add up
-    is refused rather than served. Deleting a fragment while a
-    restart-bound `prompt_includes` still names it is the case that
-    reaches this, and the sentence it refuses with is the one the boot
-    would print.
+    `agent_defaults` is a boolean because there is one of it and nothing
+    to name. Compared whole, grants included: everything on that layer
+    is applied now, and what it changes reaches whichever agents inherit
+    the field that moved.
     """
-    agents = {
-        name: agent
-        if (fresh := stored.agents.get(name)) is None
-        else agent.model_copy(update={name: getattr(fresh, name) for name in OVERLAID_AGENT_FIELDS})
-        for name, agent in previous.agents.items()
-    }
-    # `model_copy` rather than a re-validation of a dumped snapshot:
-    # every value here came out of a model that has already been
-    # validated field by field, so what is left to check is the whole,
-    # which `_validated` does with the very functions the model's own
-    # validator calls.
-    overlaid = previous.model_copy(
-        update={
-            "providers": stored.providers,
-            "prompt_fragments": dict(stored.prompt_fragments),
-            "agents": agents,
-        }
+    return AgentsReload(
+        added=sorted(set(applied.agents) - set(previous.agents)),
+        removed=sorted(set(previous.agents) - set(applied.agents)),
+        defaults_changed=previous.agent_defaults != applied.agent_defaults,
     )
-    _validated(overlaid)
-    return overlaid
 
 
 def _carried(previous: Generation, candidate: Loaded) -> dict[str, Provider]:
@@ -685,30 +652,15 @@ def _retired(previous: Generation, providers: Built) -> tuple[str, ...]:
     return tuple(sorted(set(previous.providers.instances) - set(providers.world.instances)))
 
 
-def _validated(candidate: Config) -> None:
-    """The whole-snapshot checks, run again on a world that was composed
-    rather than loaded.
-
-    The same two `Config`'s own validator runs, in the same order, so an
-    overlay is held to exactly what a boot is held to. Recorded and
-    raised outside the handler is not needed here because nothing is
-    caught: the problems are the checks' own sentences, which name
-    configuration locations.
-    """
-    problems = check_completeness(candidate) + check_references(candidate)
-    if problems:
-        raise ConfigError("\n".join([mcp.RELOAD_REFUSED, *problems]))
-
-
 def _reassembled(previous: Config, applied: Config) -> tuple[str, ...]:
     """The agents whose know-how would be assembled differently now.
 
-    The two inputs this milestone makes live, read through the same
-    effective-value helpers an activation reads them through, so an
-    agent is reported here exactly when its next activation would
-    produce different text. An agent only one side holds is not
-    compared: the agent set does not move at a reload, so a difference
-    there is not something this apply did.
+    The prompt inputs, read through the same effective-value helpers an
+    activation reads them through, so an agent is reported here exactly
+    when its next activation would produce different text. An agent only
+    one side holds is not compared: an agent this apply added has no
+    previous text to differ from and one it removed will not assemble
+    again, and both ride the `agents` section instead.
     """
     return tuple(
         sorted(
