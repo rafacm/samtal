@@ -207,15 +207,17 @@ API_DESCRIPTION = (
     "arguments rather than as entities: a device's `agents`, the default agent's "
     "`name`, and a credential's `secret`.\n\n"
     "A write is stored, and when it reaches a running server depends on the kind. "
-    "Most of the configuration is read once at start and served until the next one: "
-    "the providers, the agent set, `agent_defaults`, and the whole server section, "
-    "which is this process's own file and is never re-read. The rest converges at one "
+    "Part of the configuration is read once at start and served until the next one: "
+    "the agent set, `agent_defaults`, which provider entry serves each of an agent's "
+    "stages, and the whole server section, which is this process's own file and is "
+    "never re-read. The rest converges at one "
     "of two other boundaries. Device bindings and the default agent are read as a "
     "device asks for them, so binding or unbinding a device applies at that device's "
     "next OTA check or connection; that exception ends where the agent does, since a "
-    "server builds an agent's providers at start, so a binding naming an agent this "
-    "server has not loaded waits for the restart that loads it. The MCP entries with "
-    "the secrets stored on them, the agents' `mcp` grant lists, the shared prompt "
+    "server composes an agent's pipeline at start, so a binding naming an agent this "
+    "server has not loaded waits for the restart that loads it. The provider entries "
+    "and the MCP entries with the secrets stored on them, the agents' `mcp` grant "
+    "lists, the shared prompt "
     "fragments, each agent's own prompt text and each agent's own filled pauses are "
     "applied by "
     "`POST /runtime/config/reload`, without a restart and without dropping a "
@@ -247,7 +249,8 @@ API_DESCRIPTION = (
     "the entity names added, removed and changed, each kind carrying the boundary its "
     "changes converge at. `restart` is what this process read once and serves until it "
     "is started again; `reload` is what the apply below puts in place, which is the "
-    "MCP entries, the agents' grants, the shared prompt fragments, each agent's own "
+    "provider entries, the MCP entries, the agents' grants, the shared prompt "
+    "fragments, each agent's own "
     "prompt text and each agent's own filler section; `check-in` is the device "
     "bindings and the default agent, which a "
     "device is answered as it asks and which are therefore never pending, so they "
@@ -269,7 +272,8 @@ API_DESCRIPTION = (
     "`POST /runtime/config/reload` is the one action in that namespace, and unlike "
     "device bindings it is asked for rather than noticed. It re-reads the stored "
     "configuration and applies every kind it can apply while the process runs: the "
-    "`mcp_servers` entries with the secrets stored on them, the agents' `mcp` grant "
+    "`providers` entries and the `mcp_servers` entries with the secrets stored on "
+    "them, the agents' `mcp` grant "
     "lists, the shared prompt fragments, each agent's own prompt text and includes, "
     "and each agent's own filler section. "
     "Entries are started, restarted, stopped or left alone, and no "
@@ -289,11 +293,20 @@ API_DESCRIPTION = (
     "the voice that speaks it did, and its clips are carried over as they are "
     "otherwise: the whole section is the unit of comparison, so an edit to `delay_ms` "
     "alone is a round of text-to-speech work at the configured provider even though "
-    "the audio it produces is identical, while an edit anywhere else in the "
-    "configuration is none. An agent whose synthesis failed applies "
+    "the audio it produces is identical, and rewriting the provider entry an agent "
+    "speaks through is another, since that is the voice moving; an edit that reaches "
+    "neither, a prompt or a fragment, is none. An agent whose synthesis failed applies "
     "with no clip and runs unmasked rather than refusing the reload, which the "
-    "answer's `fillers` section reports. Everything else about an agent still waits "
-    "for a restart, which is why writes to those keep saying so.\n\n"
+    "answer's `fillers` section reports. The engines are the same clock and a "
+    "different cost: an entry whose definition and stored credential are unchanged is "
+    "carried into the new world as the object it already was, so an edit to a prompt "
+    "reloads no model at all, while a rewritten entry is built before anything is "
+    "swapped and the conversations that open after that speak through it. One that a "
+    "conversation is still speaking through is released when that conversation ends, "
+    "so an apply that changes a local model briefly holds two, and one whose engines "
+    "would not build refuses with nothing changed. Which entry serves each of an "
+    "agent's stages, the agent set and `agent_defaults` still wait for a restart, "
+    "which is why writes to those keep saying so.\n\n"
     "The `/conversations` namespace is not stored configuration either: it reads the "
     "conversation store, the record of what was said, which "
     "`server.conversations.enabled` switches on. Three reads: the session list "
@@ -574,15 +587,15 @@ def problem_response(
 # name is not quoted back: it arrived in the path, and what is worth
 # saying about it is where to look instead.
 UNLOADED_AGENT = (
-    "this server has not loaded an agent of that name. An agent's providers are built "
-    "at boot, so one written since this server started is served by the restart that "
-    "builds it, and one that never existed is a name nothing answers to. "
+    "this server has not loaded an agent of that name. The agents a server can serve "
+    "are the ones it started with, so one written since is served by the restart that "
+    "loads it, and one that never existed is a name nothing answers to. "
     "`vinga-server config list` shows the agents that are stored."
 )
 
 UNLOADED_AGENT_DESCRIPTION = (
     "No agent of that name was loaded when this server started. An agent written "
-    "since then waits for the restart that builds its providers."
+    "since then waits for the restart that loads it."
 )
 
 # Declared on the routes whose only 422 is the framework's own, so the
@@ -1706,7 +1719,9 @@ def _entity_writes(api: FastAPI) -> None:
         stage: str, name: str, body: RawBody, store: StoreDep
     ) -> dict[str, Any]:
         """Create or replace one provider from a fragment in the shape
-        the YAML section had."""
+        the YAML section had. The running server builds it again at the
+        next reload, and the conversations that open after that speak
+        through the new one."""
         store.set_provider(stage, name, body)
         return _acknowledge(wrote_provider(stage, name), _PROVIDER.notice)
 
@@ -1733,7 +1748,8 @@ def _entity_writes(api: FastAPI) -> None:
         """Store one of this provider's credentials, encrypted. The slot
         is the option name the credential fills, such as api_key; a
         stored secret takes precedence over an environment reference
-        written for the same slot."""
+        written for the same slot. A credential is read as the provider
+        is built, and the next reload builds it again."""
         location = _slot(_PROVIDER, provider_identity(stage, name), slot)
         store.set_secret(location, _secret(body))
         return _acknowledge(wrote_secret(location.describe()), _PROVIDER.notice)

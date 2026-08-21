@@ -866,7 +866,7 @@ Over the API it is `GET /api/runtime/agents/{name}/prompt`, and it is a
 read of the running server rather than of the database: the agents this
 server loaded, the MCP slice it is running, and the memory it writes.
 An agent this server has not loaded answers 404 naming the restart,
-since an agent's providers are built at boot.
+since the agents a server can serve are the ones it started with.
 
 ### What the MCP servers are doing
 
@@ -942,7 +942,10 @@ fillers:
   resynthesized: (none)
   reused: house, kids
   disabled: (none)
-providers: (this server does not apply this kind without a restart)
+providers:
+  built: (none)
+  reused: asr.ears, llm.local, tts.voice, vad.gate
+  retired: (none)
 agents: (this server does not apply this kind without a restart)
 
 home: connected since 2026-08-13T09:12:03.104213+00:00
@@ -953,7 +956,8 @@ weather: connected since 2026-08-13T11:02:44.118902+00:00
   agents: house
 ```
 
-**What it applies** is the `mcp_servers` entries with the secrets stored
+**What it applies** is the `providers` entries and the `mcp_servers`
+entries with the secrets stored
 on them, the agents' effective `mcp` grant lists (`agents.<name>.mcp`
 and `agent_defaults.mcp`), the shared `prompt_fragments`, each agent's
 own `prompt` and `prompt_includes`, and each agent's own `filler`
@@ -977,10 +981,12 @@ clip is a configured phrase spoken by a configured voice, and the unit
 of comparison is the whole effective `filler` section: an apply keeps
 every clip whose section and whose voice are what they were, and
 synthesizes the rest. So an edit to a prompt sends nothing to a
-text-to-speech engine, and neither does an edit to a provider, whose
-voice this server goes on speaking in until it is restarted; but an edit
-to any field of the section does, `delay_ms` included, even though the
-audio that comes back is identical to what it replaced. That is
+text-to-speech engine, and neither does an edit to a provider entry no
+masked agent speaks through; but an edit to any field of the section
+does, `delay_ms` included, even though the
+audio that comes back is identical to what it replaced, and so does
+rewriting the entry an agent's voice comes from, whose clips are spoken
+again in the engine the reload built. That is
 deliberate rather than an oversight: the section is one value, and a
 comparison that covered part of it would be a second rule about what a
 clip depends on. Synthesis is real work at the configured provider, and
@@ -991,14 +997,27 @@ agent whose synthesis failed is `disabled`: the reload applied, that
 agent runs with the mask off, and the next reload tries again. A
 text-to-speech hiccup never holds back a prompt fix.
 
-**What still needs a restart** is the rest: an agent's providers and its
-memory are built at start, so a new agent waits for the one that builds
-them, and a write to an agent says both halves, since its prompt fields,
-its grants and its filler section are applied and the rest of it is
-not.
-Providers, provider credentials, `agent_defaults` and the whole `server`
-section (including the configuration file itself) are start-time as they
-always were.
+**The engines are rebuilt, and only the ones that moved.** An entry
+whose definition and stored credential are what they were is carried
+into the new world as the object it already was, so an edit to a prompt
+reloads no local model and rotating one provider's key does not touch
+another's. A rewritten entry is built while the old one is still
+serving, and the conversations that open after the apply speak through
+the new one; one that a conversation is still speaking through is
+released when that conversation ends, so applying a change to a local
+model briefly holds two of it. The `providers` section names the entries
+built, reused and retired. An entry that will not build, or that
+`server.local_only` forbids, refuses the reload with nothing changed.
+
+**What still needs a restart** is the agent set, the agent defaults, and
+which provider entry serves each of an agent's stages: a pipeline is
+composed when the server starts, so a new agent waits for the next one,
+and repointing an agent from one voice to another does too. A write to
+an agent says both halves, since its prompt fields, its grants and its
+filler section are applied and that choice is not.
+The whole `server`
+section (including the configuration file itself) is start-time as it
+always was.
 
 **No session is dropped**, and when one meets the change depends on
 which half moved. The tools an agent may reach are snapshotted per
@@ -1208,15 +1227,18 @@ that is where the measured numbers and the field findings behind each
 provider option are kept. `config list` and `config show` read back what
 is stored, with every secret masked.
 
-**Most of a change applies at the next server start.** The providers,
-the agent set, the agent defaults and the `server` section are read once
+**Part of a change applies at the next server start.** The agent set,
+the agent defaults, which provider entry serves each of an agent's
+stages, and the `server` section are read once
 at boot, so an edit to any of them while the server runs is picked up
 when it is restarted, and every mutating command says so. The API says
 the same sentence in the answer to that write. There are two exceptions,
 below, and each write says which case it is in.
 
-**The reload is one, applied on request.** Writing an MCP entry,
-rotating a secret on it, changing which agents may reach it, editing a
+**The reload is one, applied on request.** Writing a provider entry or
+an MCP entry,
+rotating a secret on either, changing which agents may reach an MCP
+server, editing a
 prompt fragment or rewriting an agent's own prompt takes effect when a
 running server is asked to reload, with no restart and no session
 dropped: that is [Applying a change without a
@@ -1227,8 +1249,9 @@ the reload. A write to an agent names both, because an agent entry is
 the one kind whose fields fall on both sides of the line, and it gives
 each applied field the moment it converges at: its prompt and its
 includes at the next activation, its grants at the next utterance, its
-filler section at the next conversation, while its providers and memory
-are built at start.
+filler section at the next conversation, while which entry serves each
+of its stages, and its memory, wait for the start that composes its
+pipeline.
 
 **Device bindings are the other, applied by being noticed.** A running
 server reads the devices table and the default agent as a device asks
@@ -1408,13 +1431,14 @@ the default agent (`{"name": "..."}`), whose DELETE clears it.
 
 **A successful write says when it takes effect.** It answers
 `{"wrote": "...", "notice": "..."}`, and the notice is one of a handful
-of sentences. Most writes carry the start-time one: the providers, the
-agent set and the agent defaults are read once at boot, so the write
+of sentences. The agent set and the agent defaults carry the start-time
+one: they are read once at boot, so the write
 applies at the next server start. A device binding and the default agent
 carry the second, because a running server reads them: they apply at the
 device's next OTA check or connection, unless they name an agent this
-server has not loaded, which brings the first sentence back. An MCP
-server entry, the secret slots on it and a prompt fragment carry the
+server has not loaded, which brings the first sentence back. A provider
+entry, an MCP
+server entry, the secret slots on either and a prompt fragment carry the
 third, which names the reload above, since that is what applies them to
 a running server. An agent carries a fourth that says both, naming the
 moment each applied field converges at: its prompt fields, its grants
@@ -1479,8 +1503,10 @@ write through. It covers four commands, `show`, `delete`, `clear-secret`
 and `set-secret`, opens the database directly, and prints on stderr
 every time that it bypasses the API. When a change made this way is
 observed is then the write's own answer, in the same three cases as
-over the API: the next server start for most of it, the next `config
-reload` for an MCP entry, the secrets stored on it, a prompt fragment
+over the API: the next server start for the agent set and the defaults,
+the next `config
+reload` for a provider entry, an MCP entry, the secrets stored on
+either, a prompt fragment
 and an agent's prompt fields, and the device's next check-in for a
 binding. Every other command refuses the flag by
 naming the four. It does not check whether a server is running:
@@ -2328,19 +2354,22 @@ the variable names, so the file belongs on the data volume and in
 access-controlled backups, not in a repository.
 
 And the operational one, said again because it is the trap of a
-configuration most of which is read once at start: **an edit applies at
+configuration part of which is read once at start: **an edit applies at
 the next server start unless the reload applies it.** A `config set` of
-a provider or of the agent defaults against a running deployment is
+the agent defaults, or of an agent field naming which entry serves one
+of its stages, against a running deployment is
 accepted by that server and changes nothing it is doing until the
 process restarts, which both the command and the API's answer say every
 time they write. Two kinds of write answer otherwise, and each write
-says which case it is in: `config set mcp-server`, a secret stored on an
-MCP entry and `config set prompt-fragment` reach a running server when
+says which case it is in: `config set provider`, `config set
+mcp-server`, a secret stored on either and `config set prompt-fragment`
+reach a running server when
 it is asked to reload; a device binding reaches it at that device's next
 check-in. Writing an agent says both, because an agent entry is the one
 kind whose fields fall on either side: its `prompt`, its
 `prompt_includes`, its `mcp` grants and its `filler` section are applied
-by the reload, and its providers and memory are built at the next
+by the reload, and which entry serves each of its stages, along with its
+memory, waits for the next
 start. The one
 place the fragments are not live is `agent_defaults.prompt_includes`,
 which is the layer every agent's effective value is inherited through

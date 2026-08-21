@@ -387,7 +387,8 @@ class FillersReload(BaseModel):
     resynthesized: list[str] = Field(
         description=(
             "The agents whose filler clip was made again, sorted: a field of the "
-            "effective `filler` section moved, or the voice that speaks it did. The "
+            "effective `filler` section moved, or the voice that speaks it did, which "
+            "is now a thing a reload can move as well. The "
             "whole section is the unit, so an edit to `delay_ms` alone is here too, "
             "with audio identical to what it replaced; every agent named here cost a "
             "round of text-to-speech work at the configured provider."
@@ -397,8 +398,9 @@ class FillersReload(BaseModel):
         description=(
             "The agents whose filler clip was carried over unchanged, sorted. Reuse is "
             "the point of the comparison: an edit to a prompt never re-synthesizes a "
-            "clip, and neither does an edit to a provider, whose voice this server goes "
-            "on speaking in until it is restarted."
+            "clip, and neither does an edit to a provider entry no masked agent speaks "
+            "through. Rewriting the entry one does speak through is the voice moving, "
+            "and puts that agent under `resynthesized` instead."
         )
     )
     disabled: list[str] = Field(
