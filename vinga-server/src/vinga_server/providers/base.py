@@ -11,10 +11,11 @@ the pipeline rate of 16 kHz, ASR is told the rate per call, and TTS
 announces the rate it produces.
 """
 
+import asyncio
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Literal, Protocol, runtime_checkable
+from typing import Any, ClassVar, Literal, Protocol, TypeVar, runtime_checkable
 
 
 class ProviderError(Exception):
@@ -51,6 +52,78 @@ class ProviderCallTimeout(ProviderCallError, TimeoutError):
     `isinstance` covering this, `asyncio.TimeoutError`, and the
     session's own first-token watchdog, with no substring matching on
     class names anywhere."""
+
+
+T = TypeVar("T")
+
+
+class Operations:
+    """One provider's calls that are running off the event loop, and the
+    wait a teardown does for them.
+
+    Cancelling a coroutine that awaits `asyncio.to_thread` does not stop
+    the worker thread it is waiting on: the awaiting side gives up and
+    the thread runs on, holding whatever it was handed. A session's
+    removal can therefore land while a transcription is a microsecond
+    away from reading the engine, and a teardown that asked only whether
+    anybody was still awaiting would clear that engine underneath it
+    (#191).
+
+    So a call takes a lease here, and the lease is released from the
+    worker thread itself when the work has really finished, whatever
+    happened to whoever asked for it. `settled` is what a `close` waits
+    on before it lets go of anything, which is what makes disposal a
+    thing that follows the work rather than the caller.
+
+    One of these per provider that runs work off the loop, and none for
+    a provider that does not: a lease that is never taken is a wait that
+    always answers at once.
+    """
+
+    def __init__(self) -> None:
+        self._running = 0
+        # Set means nothing is in flight, so a teardown with no call
+        # under it waits for nothing at all.
+        self._idle = asyncio.Event()
+        self._idle.set()
+
+    async def run(self, work: Callable[[], T]) -> T:
+        """Run one blocking call off the loop, under a lease that
+        outlives its caller.
+
+        The release rides in the worker thread's own `finally`, handed
+        back to the loop rather than executed on it, so a cancelled
+        caller shortens the wait and never the lease.
+        """
+        loop = asyncio.get_running_loop()
+        self._took()
+
+        def leased() -> T:
+            try:
+                return work()
+            finally:
+                loop.call_soon_threadsafe(self._gave_back)
+
+        return await asyncio.to_thread(leased)
+
+    async def settled(self) -> None:
+        """Wait until nothing this provider started is still running.
+
+        Unbounded here on purpose: what bounds a teardown is the
+        teardown, which is the caller that knows how long a shutdown or
+        an apply may spend, and a second bound written here would be one
+        nobody could see from there.
+        """
+        await self._idle.wait()
+
+    def _took(self) -> None:
+        self._running += 1
+        self._idle.clear()
+
+    def _gave_back(self) -> None:
+        self._running -= 1
+        if self._running == 0:
+            self._idle.set()
 
 
 @dataclass(frozen=True)
@@ -116,7 +189,7 @@ class Provider:
     with nothing to name (the bundled VAD, a Piper voice, the mocks)
     leaves it None.
 
-    `identity` is None until `build_provider` stamps it, which is every
+    `identity` is None until the build stamps it, which is every
     provider a running server holds. A hand-built one (a test, a
     fixture) keeps None, and the events that describe it simply carry
     fewer fields rather than inventing any."""
@@ -125,6 +198,33 @@ class Provider:
     host: str | None = None
     model: str | None = None
     identity: ProviderIdentity | None = None
+
+    async def close(self) -> None:
+        """Let go of everything this provider holds. Nothing calls it
+        again afterwards.
+
+        A provider used to live exactly as long as the process, so
+        holding a connection pool or a loaded model for good was the
+        truth rather than a leak. A configuration that can be applied
+        without a restart makes a provider outlive its entry instead
+        (#191): an entry an apply rewrote is built again, and the object
+        the old world was speaking through has to be told that its world
+        is over, once every conversation holding it has ended.
+
+        Default no-op, because most providers hold nothing a garbage
+        collector would not: what overrides it is a type holding a real
+        resource, which is a client with a connection pool or an engine
+        with weights in memory. Release is best effort, and a library
+        that frees on its own schedule is documented as doing so rather
+        than fought with.
+
+        Never refuses, from the caller's side: disposal runs after the
+        world has already moved, so an exception here cannot fail
+        anything and is classified by class and dropped. Called at most
+        once per provider by everything in this codebase, and written to
+        be harmless twice anyway.
+        """
+        return None
 
 
 @dataclass(frozen=True)
