@@ -118,8 +118,9 @@ class ElevenLabsTts(TtsProvider):
         # One client per provider entry, so its connection pool is
         # reused across sentences and sessions: a fresh TLS handshake
         # per sentence would show up as latency in the gap the user
-        # hears. Providers are built at startup and live as long as the
-        # server, which is also this client's lifetime.
+        # hears. It lives exactly as long as this entry does, which is
+        # until an apply rewrites the entry or the process ends, and
+        # `close` below is where the pool goes.
         self._client = (
             client
             if client is not None
@@ -129,6 +130,13 @@ class ElevenLabsTts(TtsProvider):
                 headers={"xi-api-key": api_key},
             )
         )
+
+    async def close(self) -> None:
+        """Shut the connection pool. A client whose entry has been
+        rewritten holds sockets to a host nothing will ask again, and
+        the one thing a caller can be sure of at that point is that
+        nothing is going to use them."""
+        await self._client.aclose()
 
     def _body(self, text: str) -> dict[str, object]:
         body: dict[str, object] = {"text": text, "model_id": self.model}

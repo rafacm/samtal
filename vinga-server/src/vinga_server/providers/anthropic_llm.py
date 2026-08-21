@@ -129,6 +129,12 @@ class AnthropicLlm(LlmProvider):
         self.model = model
         self._max_tokens = max_tokens
 
+    async def close(self) -> None:
+        """Shut the SDK client's connection pool. An entry an apply has
+        rewritten is built again as a new object, and this one holds
+        sockets to a host nothing is going to ask anything of again."""
+        await self._client.close()
+
     async def stream(
         self,
         system: str,
@@ -197,10 +203,11 @@ class AnthropicLlm(LlmProvider):
 
 def build(label: str, config: ProviderConfig) -> AnthropicLlm:
     options = OptionsReader(label, config)
-    provider = AnthropicLlm(
-        model=options.required_string("model"),
-        max_tokens=options.integer("max_tokens", DEFAULT_MAX_TOKENS),
+    model = options.required_string("model")
+    max_tokens = options.integer("max_tokens", DEFAULT_MAX_TOKENS)
+    options.finish()
+    return AnthropicLlm(
+        model=model,
+        max_tokens=max_tokens,
         api_key=resolve_api_key(label, config.api_key_env),
     )
-    options.finish()
-    return provider

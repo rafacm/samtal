@@ -167,6 +167,12 @@ class OpenAiCompatibleLlm(LlmProvider):
         # compatible endpoint that does gets its counts anyway.
         self._ask_for_usage = self.host == OPENAI_HOST
 
+    async def close(self) -> None:
+        """Shut the SDK client's connection pool. An entry an apply has
+        rewritten is built again as a new object, and this one holds
+        sockets to a host nothing is going to ask anything of again."""
+        await self._client.close()
+
     async def stream(
         self,
         system: str,
@@ -252,11 +258,13 @@ class OpenAiCompatibleLlm(LlmProvider):
 
 def build(label: str, config: ProviderConfig) -> OpenAiCompatibleLlm:
     options = OptionsReader(label, config)
-    provider = OpenAiCompatibleLlm(
-        base_url=options.required_string("base_url"),
-        model=options.required_string("model"),
-        max_tokens=options.integer("max_tokens", DEFAULT_MAX_TOKENS),
+    base_url = options.required_string("base_url")
+    model = options.required_string("model")
+    max_tokens = options.integer("max_tokens", DEFAULT_MAX_TOKENS)
+    options.finish()
+    return OpenAiCompatibleLlm(
+        base_url=base_url,
+        model=model,
+        max_tokens=max_tokens,
         api_key=resolve_api_key(label, config.api_key_env),
     )
-    options.finish()
-    return provider

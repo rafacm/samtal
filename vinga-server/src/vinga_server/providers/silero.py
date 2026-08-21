@@ -81,6 +81,17 @@ class SileroEndpointer:
 
 
 class SileroVad(VadProvider):
+    """The tuning three numbers' worth of it, and an endpointer factory.
+
+    It keeps the default no-op `close`, and that is a fact about what it
+    holds rather than an omission (#191). The model lives inside
+    `SileroVoiceActivityDetector`, and one of those belongs to each
+    session's endpointer rather than to this: a session is gone, and its
+    detector with it, long before the world it bound can be disposed of.
+    What is left here is three numbers, which nothing has to be told
+    about.
+    """
+
     # Inference runs on the host; the model ships with the package.
     egress = False
 
@@ -101,10 +112,12 @@ class SileroVad(VadProvider):
 
 def build(label: str, config: ProviderConfig) -> SileroVad:
     options = OptionsReader(label, config)
-    provider = SileroVad(
-        threshold=options.number("threshold", 0.5),
-        trailing_silence_ms=options.number("trailing_silence_ms", 700.0),
-        max_utterance_ms=options.number("max_utterance_ms", 10_000.0),
-    )
+    threshold = options.number("threshold", 0.5)
+    trailing_silence_ms = options.number("trailing_silence_ms", 700.0)
+    max_utterance_ms = options.number("max_utterance_ms", 10_000.0)
     options.finish()
-    return provider
+    return SileroVad(
+        threshold=threshold,
+        trailing_silence_ms=trailing_silence_ms,
+        max_utterance_ms=max_utterance_ms,
+    )
