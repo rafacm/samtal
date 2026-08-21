@@ -864,9 +864,9 @@ text until it ends.
 
 Over the API it is `GET /api/runtime/agents/{name}/prompt`, and it is a
 read of the running server rather than of the database: the agents this
-server loaded, the MCP slice it is running, and the memory it writes.
-An agent this server has not loaded answers 404 naming the restart,
-since the agents a server can serve are the ones it started with.
+server is serving, the MCP slice it is running, and the memory it
+writes. An agent it is not serving answers 404 naming the reload, since
+that is what installs one.
 
 ### What the MCP servers are doing
 
@@ -920,9 +920,10 @@ operator has to be able to write one down.
 
 ### Applying a change without a restart
 
-Most of the configuration is read once at start, so writing an entry and
-granting it to an agent used to cost a restart and every conversation on
-the server. `vinga-server config reload` applies what it can instead:
+A running server serves one immutable snapshot of the domain half at a
+time, so writing an entry and granting it to an agent used to cost a
+restart and every conversation on the server. `vinga-server config
+reload` builds the next snapshot and swaps to it instead:
 
 ```console
 $ vinga-server config set mcp-server weather -f weather.yaml
@@ -946,7 +947,10 @@ providers:
   built: (none)
   reused: asr.ears, llm.local, tts.voice, vad.gate
   retired: (none)
-agents: (this server does not apply this kind without a restart)
+agents:
+  added: house
+  removed: (none)
+  defaults_changed: no
 
 home: connected since 2026-08-13T09:12:03.104213+00:00
   tools: home__turn_on_light, home__turn_off_light
@@ -956,12 +960,12 @@ weather: connected since 2026-08-13T11:02:44.118902+00:00
   agents: house
 ```
 
-**What it applies** is the `providers` entries and the `mcp_servers`
-entries with the secrets stored
-on them, the agents' effective `mcp` grant lists (`agents.<name>.mcp`
-and `agent_defaults.mcp`), the shared `prompt_fragments`, each agent's
-own `prompt` and `prompt_includes`, and each agent's own `filler`
-section, all re-read from the configuration database. An MCP entry that is new or newly referenced is
+**What it applies** is the whole domain half, re-read from the
+configuration database: the `providers` entries and the `mcp_servers`
+entries with the secrets stored on them, the agents' effective `mcp`
+grant lists (`agents.<name>.mcp` and `agent_defaults.mcp`), the shared
+`prompt_fragments`, the agents themselves and the `agent_defaults`
+layer under them. An MCP entry that is new or newly referenced is
 started, one whose fragment or whose stored secrets changed is stopped
 and rebuilt (so rotating a credential applies here too), one that is
 gone or no longer referenced is stopped, and an unchanged one keeps the
@@ -1009,13 +1013,16 @@ model briefly holds two of it. The `providers` section names the entries
 built, reused and retired. An entry that will not build, or that
 `server.local_only` forbids, refuses the reload with nothing changed.
 
-**What still needs a restart** is the agent set, the agent defaults, and
-which provider entry serves each of an agent's stages: a pipeline is
-composed when the server starts, so a new agent waits for the next one,
-and repointing an agent from one voice to another does too. A write to
-an agent says both halves, since its prompt fields, its grants and its
-filler section are applied and that choice is not.
-The whole `server`
+**The agent set moves with the rest.** An agent the store has added is
+built with everything else the apply builds and is servable the instant
+the request answers, so a device bound to it reaches it at its next
+check-in with no restart between the write and the board; an agent it
+has deleted is one no session can be opened as from that same instant,
+while a conversation already talking as it finishes on the world it was
+built from and is served that world's prompt to the end. The `agents`
+section names both, and says whether `agent_defaults` moved. The one
+thing an agent carries that a reload does not move is its memory, which
+is keyed by its name. The whole `server`
 section (including the configuration file itself) is start-time as it
 always was.
 
@@ -1227,40 +1234,46 @@ that is where the measured numbers and the field findings behind each
 provider option are kept. `config list` and `config show` read back what
 is stored, with every secret masked.
 
-**Part of a change applies at the next server start.** The agent set,
-the agent defaults, which provider entry serves each of an agent's
-stages, and the `server` section are read once
-at boot, so an edit to any of them while the server runs is picked up
-when it is restarted, and every mutating command says so. The API says
-the same sentence in the answer to that write. There are two exceptions,
-below, and each write says which case it is in.
+**The `server` section is what a start reads.** The port, the
+directories, the limits and the barge-in tuning come out of the file
+this process was launched with, and a change to any of them is picked up
+when it is restarted. Nothing in the database is in that half.
 
-**The reload is one, applied on request.** Writing a provider entry or
-an MCP entry,
-rotating a secret on either, changing which agents may reach an MCP
-server, editing a
-prompt fragment or rewriting an agent's own prompt takes effect when a
-running server is asked to reload, with no restart and no session
-dropped: that is [Applying a change without a
+**What a running server serves of the domain half is a generation:** an
+immutable snapshot, validated whole, built entirely before anything
+binds it. There is more than one of them over the life of a process, and
+applying a change installs the next one rather than editing the one in
+place, so a conversation goes on speaking the world it opened in while
+new work binds the world that is current. A change reaches it in one of
+two ways, and every mutating command says which.
+
+**The reload applies the domain half, on request.** Writing a provider
+entry or an MCP entry, rotating a secret on either, changing which
+agents may reach an MCP server, editing a prompt fragment, writing an
+agent, deleting one, or rewriting the `agent_defaults` layer under them
+all takes effect when a running server is asked to reload, with no
+restart and no session dropped: that is [Applying a change without a
 restart](#applying-a-change-without-a-restart). Those writes name
-`vinga-server config reload` instead of the restart. So does rewriting
-an agent's `filler` section, whose clips are synthesized again during
-the reload. A write to an agent names both, because an agent entry is
-the one kind whose fields fall on both sides of the line, and it gives
-each applied field the moment it converges at: its prompt and its
-includes at the next activation, its grants at the next utterance, its
-filler section at the next conversation, while which entry serves each
-of its stages, and its memory, wait for the start that composes its
-pipeline.
+`vinga-server config reload`, and say the three moments a conversation
+already in progress meets an applied change at: the tools an agent may
+reach at its next utterance, its prompt text at its next activation, and
+the voice it speaks in and the clips it masks with at the next
+conversation. An agent the reload added is one a device can be bound to
+and reach at its next check-in; one it deleted is one no session can be
+opened as from the moment the request answers, while a conversation
+already talking as it finishes on the world it was built from. The one
+thing an agent carries that a reload does not move is its memory, which
+is keyed by its name.
 
-**Device bindings are the other, applied by being noticed.** A running
-server reads the devices table and the default agent as a device asks
-for them, so
+**Device bindings are the other way, applied by being noticed.** A
+running server reads the devices table and the default agent as a device
+asks for them, so
 binding a board, unbinding it, or changing the default agent applies
-at that device's next OTA check or connection, with no restart. Those
-writes say so instead. The exception ends where the agent does: a
-binding naming an agent created since the server started resolves to
-nothing until the restart that builds that agent's providers, and the
+at that device's next OTA check or connection, with nothing asked of
+the server at all. Those
+writes say so instead. That ends where the agent does: a
+binding naming an agent this server is not serving resolves to
+nothing until the reload that installs it, and the
 acknowledgement says that rather than promising otherwise. A
 conversation already running is never touched by either.
 
@@ -1372,7 +1385,7 @@ model is actually sent](#what-the-model-is-actually-sent) describes and
 `vinga-server config prompt` prints. The second answers what the
 database holds that this server is not serving, kind by kind: the names
 added, removed and changed, and for each kind whether its changes reach
-a conversation at the next restart, at the next reload, or at a device's
+a conversation at the next reload or at a device's
 next check-in, which is what makes it possible to say whether a write is
 still waiting. It carries entity names and those labels and nothing
 else, so a rotated credential shows up as the provider that holds it
@@ -1431,23 +1444,20 @@ the default agent (`{"name": "..."}`), whose DELETE clears it.
 
 **A successful write says when it takes effect.** It answers
 `{"wrote": "...", "notice": "..."}`, and the notice is one of a handful
-of sentences. The agent set and the agent defaults carry the start-time
-one: they are read once at boot, so the write
-applies at the next server start. A device binding and the default agent
-carry the second, because a running server reads them: they apply at the
-device's next OTA check or connection, unless they name an agent this
-server has not loaded, which brings the first sentence back. A provider
-entry, an MCP
-server entry, the secret slots on either and a prompt fragment carry the
-third, which names the reload above, since that is what applies them to
-a running server. An agent carries a fourth that says both, naming the
-moment each applied field converges at: its prompt fields, its grants
-and its filler section are applied by the reload, at the next
-activation, the next utterance and the next conversation respectively,
-and the rest of it is not. Nothing about
-a running conversation changes when a write lands, in any of these
-cases; a reload is what makes the third and the applied half of the
-fourth take effect.
+of sentences. A device binding and the default agent carry the one about
+a device asking, because a running server reads them as it asks: they
+apply at that device's next OTA check or connection. Every other kind
+this API writes, which is the whole of the rest of the domain half,
+carries the one that names the reload above, and that sentence also
+names the three moments a conversation already in progress meets an
+applied change at: the tools an agent may reach at its next utterance,
+its prompt text at its next activation, and the voice it speaks in and
+the clips it masks with at the next conversation. A binding naming an
+agent this server is not serving yet carries a sentence of its own, and
+it is the one an operator is most likely to need, because both halves of
+it are true at once: the row is live, and the agent arrives at the
+reload that installs it. Nothing about a running conversation changes
+when a write lands, in any of these cases.
 
 **A refusal is an RFC 9457 problem document**, served as
 `application/problem+json`, and carries the sentence the CLI prints in
@@ -1502,12 +1512,11 @@ transport error.
 write through. It covers four commands, `show`, `delete`, `clear-secret`
 and `set-secret`, opens the database directly, and prints on stderr
 every time that it bypasses the API. When a change made this way is
-observed is then the write's own answer, in the same three cases as
-over the API: the next server start for the agent set and the defaults,
-the next `config
+observed is then the write's own answer, in the same two cases as
+over the API: the next `config
 reload` for a provider entry, an MCP entry, the secrets stored on
-either, a prompt fragment
-and an agent's prompt fields, and the device's next check-in for a
+either, a prompt fragment, an agent and the defaults under them, and the
+device's next check-in for a
 binding. Every other command refuses the flag by
 naming the four. It does not check whether a server is running:
 there is no reliable way to, and a wrong refusal would wedge the
@@ -2354,26 +2363,18 @@ the variable names, so the file belongs on the data volume and in
 access-controlled backups, not in a repository.
 
 And the operational one, said again because it is the trap of a
-configuration part of which is read once at start: **an edit applies at
-the next server start unless the reload applies it.** A `config set` of
-the agent defaults, or of an agent field naming which entry serves one
-of its stages, against a running deployment is
-accepted by that server and changes nothing it is doing until the
-process restarts, which both the command and the API's answer say every
-time they write. Two kinds of write answer otherwise, and each write
-says which case it is in: `config set provider`, `config set
-mcp-server`, a secret stored on either and `config set prompt-fragment`
-reach a running server when
-it is asked to reload; a device binding reaches it at that device's next
-check-in. Writing an agent says both, because an agent entry is the one
-kind whose fields fall on either side: its `prompt`, its
-`prompt_includes`, its `mcp` grants and its `filler` section are applied
-by the reload, and which entry serves each of its stages, along with its
-memory, waits for the next
-start. The one
-place the fragments are not live is `agent_defaults.prompt_includes`,
-which is the layer every agent's effective value is inherited through
-and which a reload deliberately does not move.
+configuration a running server is not re-reading on its own: **an edit
+is stored and changes nothing until something applies it.** A `config
+set` against a running deployment is accepted by that server and is not
+in effect when the command returns, which both the command and the API's
+answer say every time they write. There are two ways it becomes
+effective, and each write says which case it is in: everything in the
+domain half, from a provider entry to an agent to the defaults under
+them, reaches a running server when it is asked to reload; a device
+binding and the default agent reach it at that device's next check-in,
+with nothing asked of the server. The one thing an agent carries that a
+reload does not move is its memory, which is keyed by its name, so
+renaming an agent still orphans what it remembered.
 
 ### The configuration API in a deployment
 
@@ -2679,13 +2680,13 @@ away and never see a code, which is also why nothing changes for a
 deployment that upgraded into this. Turning `server.onboarding.enabled`
 off removes both the short URL and the code ceremony.
 
-**On a fresh deployment, configure first.** The domain half is read at
-boot, so an agent written into an empty database is not loaded by the
-server that is running: bind a board to it and the acknowledgement says
-a restart is needed rather than promising otherwise. The order that
-avoids it is the order the [Configuration](#configuration) section
-uses: write the providers and the agent, restart once, then onboard
-boards restart-free for as long as the deployment lives.
+**On a fresh deployment, write the agent and apply it.** A server
+serves the world it last installed, so an agent written into an empty
+database is not being served yet: bind a board to it and the
+acknowledgement says which reload installs it rather than promising
+otherwise. `vinga-server config reload` is that reload, and from there
+the board connects at its next check-in, seconds later; no step of a
+deployment's life needs a restart once the process is up.
 
 **Already-provisioned boards keep working.** A board carrying a full
 `ota_url` in NVS reaches `server.ota_path` exactly as before, and both

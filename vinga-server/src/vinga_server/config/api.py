@@ -208,23 +208,23 @@ API_DESCRIPTION = (
     "arguments rather than as entities: a device's `agents`, the default agent's "
     "`name`, and a credential's `secret`.\n\n"
     "A write is stored, and when it reaches a running server depends on the kind. "
-    "Part of the configuration is read once at start and served until the next one: "
-    "the agent set, `agent_defaults`, which provider entry serves each of an agent's "
-    "stages, and the whole server section, which is this process's own file and is "
-    "never re-read. The rest converges at one "
-    "of two other boundaries. Device bindings and the default agent are read as a "
-    "device asks for them, so binding or unbinding a device applies at that device's "
-    "next OTA check or connection; that exception ends where the agent does, since a "
-    "server composes an agent's pipeline at start, so a binding naming an agent this "
-    "server has not loaded waits for the restart that loads it. The provider entries "
-    "and the MCP entries with the secrets stored on them, the agents' `mcp` grant "
-    "lists, the shared prompt "
-    "fragments, each agent's own prompt text and each agent's own filled pauses are "
-    "applied by "
+    "What a server is serving of this half is a generation: an immutable snapshot, "
+    "validated whole, built entirely before anything binds it. There is more than one "
+    "over the life of a process, and applying a change installs the next one rather "
+    "than editing the one in place, so a conversation goes on speaking the world it "
+    "opened in and new work binds the world that is current. The one part of a "
+    "deployment's configuration that is genuinely read once is the server section, "
+    "which is this process's own file: the port, the directories, the limits. Nothing "
+    "this API writes is in it.\n\n"
+    "So a write converges at one of two boundaries. Device bindings and the default "
+    "agent are read as a device asks for them, so binding or unbinding a device "
+    "applies at that device's next OTA check or connection with nothing asked of the "
+    "server; that exception ends where the agent does, since a binding naming an "
+    "agent this server is not serving resolves to nothing until the reload that "
+    "installs it, which is what such a write's acknowledgement says. Everything else, "
+    "which is the whole of the rest of this half, is applied by "
     "`POST /runtime/config/reload`, without a restart and without dropping a "
-    "conversation. Every write says which of these happened, in its `notice`, and an "
-    "agent write says two things because an agent entry's fields fall on both sides "
-    "of that line, each applied field with the moment it converges at.\n\n"
+    "conversation. Every write says which of the two it is, in its `notice`.\n\n"
     "A device with no binding and no default agent to cover it is answered at its "
     "configuration check with a six-digit activation code, which it shows on its "
     "screen and speaks. `/devices/pending` lists the devices showing one, keyed by "
@@ -248,16 +248,16 @@ API_DESCRIPTION = (
     "`GET /runtime/config/diff` is the third read there, and the one that spans both "
     "sides: what the database holds that this server is not serving, kind by kind, as "
     "the entity names added, removed and changed, each kind carrying the boundary its "
-    "changes converge at. `restart` is what this process read once and serves until it "
-    "is started again; `reload` is what the apply below puts in place, which is the "
-    "provider entries, the MCP entries, the agents' grants, the shared prompt "
-    "fragments, each agent's own "
-    "prompt text and each agent's own filler section; `check-in` is the device "
-    "bindings and the default agent, which a "
+    "changes converge at. `reload` is what the apply below puts in place, which is "
+    "every kind of this half; `check-in` is the device bindings and the default agent, "
+    "which a "
     "device is answered as it asks and which are therefore never pending, so they "
-    "carry the label alone and no lists. The agents' entry spans all three, so their "
-    "kind carries three entries of its own beside the restart-bound lists: `grants`, "
-    "`prompt` and `filler`, each labelled `reload`. Changed means the stored state "
+    "carry the label alone and no lists. `restart` is declared and unused here, for "
+    "the server section this API does not write. An agent entry converges at three "
+    "different moments inside the one reload, so their kind carries three entries of "
+    "its own beside its own lists: `grants`, `prompt` and `filler`, each labelled "
+    "`reload`, and each a breakdown of `changed` rather than an exception to it. "
+    "Changed means the stored state "
     "differs from the "
     "comparison baseline rather than that something was written: an edit changed back "
     "before anyone looked produces no diff, and a rewritten stored secret counts as "
@@ -272,11 +272,11 @@ API_DESCRIPTION = (
     "those.\n\n"
     "`POST /runtime/config/reload` is the one action in that namespace, and unlike "
     "device bindings it is asked for rather than noticed. It re-reads the stored "
-    "configuration and applies every kind it can apply while the process runs: the "
+    "configuration and applies the whole domain half: the "
     "`providers` entries and the `mcp_servers` entries with the secrets stored on "
     "them, the agents' `mcp` grant "
-    "lists, the shared prompt fragments, each agent's own prompt text and includes, "
-    "and each agent's own filler section. "
+    "lists, the shared prompt fragments, the agents themselves and the "
+    "`agent_defaults` layer under them. "
     "Entries are started, restarted, stopped or left alone, and no "
     "conversation is dropped. Nothing is swapped, stopped or started until the whole "
     "new world has been composed, validated and built, so a refusal has changed "
@@ -305,9 +305,12 @@ API_DESCRIPTION = (
     "swapped and the conversations that open after that speak through it. One that a "
     "conversation is still speaking through is released when that conversation ends, "
     "so an apply that changes a local model briefly holds two, and one whose engines "
-    "would not build refuses with nothing changed. Which entry serves each of an "
-    "agent's stages, the agent set and `agent_defaults` still wait for a restart, "
-    "which is why writes to those keep saying so.\n\n"
+    "would not build refuses with nothing changed. The agent set moves with the rest: "
+    "an agent the store has added is one a device can be bound to and reach at its "
+    "next check-in, and one it has deleted is one no session can be opened as from the "
+    "moment this answers, while a conversation already talking as it finishes on the "
+    "world it was built from. The answer's `agents` section names both, and says "
+    "whether `agent_defaults` moved.\n\n"
     "The `/conversations` namespace is not stored configuration either: it reads the "
     "conversation store, the record of what was said, which "
     "`server.conversations.enabled` switches on. Three reads: the session list "
@@ -588,15 +591,16 @@ def problem_response(
 # name is not quoted back: it arrived in the path, and what is worth
 # saying about it is where to look instead.
 UNLOADED_AGENT = (
-    "this server has not loaded an agent of that name. The agents a server can serve "
-    "are the ones it started with, so one written since is served by the restart that "
-    "loads it, and one that never existed is a name nothing answers to. "
-    "`vinga-server config list` shows the agents that are stored."
+    "this server is not serving an agent of that name. The agents a server can serve "
+    "are the agents of the world it has installed, so one written since is served by "
+    "the reload that installs it (`vinga-server config reload`), and one that never "
+    "existed is a name nothing answers to. `vinga-server config list` shows the agents "
+    "that are stored."
 )
 
 UNLOADED_AGENT_DESCRIPTION = (
-    "No agent of that name was loaded when this server started. An agent written "
-    "since then waits for the restart that loads it."
+    "No agent of that name is being served. An agent written since this server last "
+    "installed a world waits for the reload that installs it."
 )
 
 # Declared on the routes whose only 422 is the framework's own, so the
@@ -626,8 +630,7 @@ NO_RUNTIME_PROMPT_DESCRIPTION = (
 # guarantee the endpoint makes about a refusal.
 RELOAD_REFUSED_DESCRIPTION = (
     "The stored configuration was refused: it does not compose into a valid snapshot, "
-    "it composes into one this server cannot serve yet (a prompt fragment deleted while "
-    "something still restart-bound names it), a credential stored in it will not open "
+    "a credential stored in it will not open "
     "under the configured keys, or an engine it names could not be built (an unknown "
     "provider type or option, a model that would not load, an environment "
     "reference nothing sets, an entry `server.local_only` forbids). Nothing was swapped, "
@@ -1532,8 +1535,8 @@ def _runtime(api: FastAPI) -> None:
         of one world and half of another. The memory read that follows
         is a file read and happens in a worker thread.
 
-        An agent this server did not load is a 404 naming the restart,
-        since an agent is built at boot; an application with no server
+        An agent this server is not serving is a 404 naming the reload,
+        since that is what installs one; an application with no server
         around it answers 503, like the reload.
         """
         if assemble is None:
@@ -1678,12 +1681,11 @@ def _runtime(api: FastAPI) -> None:
         The read the other two in this namespace cannot give: they say
         what is running, the entity reads say what is stored, and the
         question an operator actually has after a write is what stands
-        between the two. Most of the configuration is a boot-time
-        snapshot, so most of an answer here is waiting for a restart;
-        the MCP entries and the agents' grants are waiting for the
-        reload below; device bindings and the default agent are read as
-        a device asks and are therefore never pending, so they carry
-        their label and no lists.
+        between the two. Everything in an answer here is waiting for the
+        reload below, which is the whole of what applies this half;
+        device bindings and the default agent are read as a device asks
+        and are therefore never pending, so they carry their label and
+        no lists.
 
         Names and labels, and nothing else. No entity bodies, no values,
         no masks and no secret marks cross this surface: what a
@@ -2146,10 +2148,11 @@ def _writes(api: FastAPI) -> None:
 
 
 def _acknowledge(what: str, notice: str = RESTART_NOTICE) -> dict[str, str]:
-    """What a write answers with. The restart sentence is the default
-    because it is the contract for everything except the two the running
-    server re-reads, and a new write route should have to say that it is
-    one of them."""
+    """What a write answers with. The start sentence is the default
+    because it promises nothing: no kind this API writes carries it any
+    more, so a new write route that forgot to name its own boundary
+    reads as conservative rather than as a promise the server cannot
+    keep."""
     return {"wrote": what, "notice": notice}
 
 

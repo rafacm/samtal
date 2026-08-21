@@ -655,15 +655,19 @@ def test_an_application_without_a_server_has_no_prompt_to_assemble(
     assert "no running server" in response.json()["detail"]
 
 
-def test_an_agent_this_server_did_not_load_is_a_404_naming_the_restart(
+def test_an_agent_this_server_is_not_serving_is_a_404_naming_the_reload(
     directory: Path,
 ) -> None:
+    """The 404 follows the world being served, so what it sends an
+    operator to is the reload that installs an agent rather than the
+    restart that used to."""
     with serving(directory, None, agent_prompt=previewing(prompt.know_how("P"))) as client:
         response = client.get("/runtime/agents/stranger/prompt")
 
     assert response.status_code == 404
     detail = response.json()["detail"]
-    assert "restart" in detail
+    assert "config reload" in detail
+    assert "restart" not in detail
     # The name arrived in the path and is not quoted back.
     assert "stranger" not in detail
 

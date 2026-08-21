@@ -21,14 +21,16 @@ deployment answering exactly what it answered before.
 This endpoint is the token issuer, so it cannot itself require a token.
 What protects it instead is stinginess and a configurable path: a token
 is issued only to a device the configuration resolves to an agent this
-server has loaded, and an operator exposing the server publicly hides
+server is serving, and an operator exposing the server publicly hides
 the endpoint behind a long random path segment.
 
-Which agents a device resolves to is the one question here that is not
-answered from the boot snapshot. `DeviceBindings` reads it from the
-database at every check-in, so a board bound while the server runs is
-handed its token at the next one it makes, seconds later, rather than
-after a restart.
+Which agents a device is bound to is the one question here that is not
+answered out of the world being served. `DeviceBindings` reads it from
+the database at every check-in, so a board bound while the server runs
+is handed its token at the next one it makes, seconds later, with
+nothing asked of the server; whether the agent it names is one this
+server can serve is asked of the world current as the check-in is
+answered, which a reload can have moved since the last one.
 
 A file each, under this one:
 
