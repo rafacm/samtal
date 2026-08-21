@@ -1,6 +1,6 @@
 # Glossary
 
-**Date:** 2026-08-12
+**Date:** 2026-08-21
 
 The concepts, techniques, and technologies this project is built on:
 a short definition of each as vinga uses it, with pointers for going
@@ -72,7 +72,9 @@ configuration, first entry the default. See
 
 Per-session recording for field analysis: a stereo WAV
 (microphone on channel 0, the paced reply on channel 1), an event
-track (JSONL), and a manifest (JSON). Off by default; recording room
+track (JSONL), and a manifest (JSON). The reply channel is
+[wire-true](#wire-true-capture), which is what makes the echo
+measurement trustworthy. Off by default; recording room
 audio is a deliberate, temporary state. See
 [the regression suite page](conversational-quality-regression-suite.md).
 
@@ -277,6 +279,17 @@ identity; the reply carries the WebSocket URL and the device's auth
 token. The URL a board calls lives in its NVS flash, which is why a
 board follows a deployment until that entry is rewritten.
 
+### Output pacing
+
+Sending reply audio at playback speed, one
+60 ms Opus frame per 60 ms, instead of as fast as the network
+accepts. The pacing clock is owned by the device edge and reset per
+reply. Pacing keeps the device's small playback buffer from
+overflowing, keeps a barge-in cut close to immediate (little audio
+is in flight beyond what has played), and gives the capture its
+timeline: each frame is recorded at the moment the clock sends it
+(see [wire-true capture](#wire-true-capture)).
+
 ### PCM
 
 Raw uncompressed audio samples, the working format between
@@ -420,3 +433,33 @@ enabled, the default in current upstream sources, also send the
 buffered trigger audio as the conversation's first audio; whether our
 prebuilt images do is unchecked on the wire (issue #112).
 More: [ESP-SR](https://github.com/espressif/esp-sr).
+
+### Wire-true capture
+
+The property that makes a capture's reply
+channel trustworthy as a measurement reference: channel 1 is decoded
+from the very Opus packets paced out to the device, each placed at
+the moment it was sent, contiguously, on one clock. A reference with
+this property stands in for what the device actually played, which
+is what the echo-leakage analysis cross-correlates against; a
+recording made upstream of pacing, on its own timeline, can carry a
+constant offset or a drift the analysis would misread as acoustics.
+The property is proven, not assumed: the synthetic-echo control is
+its acceptance test, and the pipecat alignment spike showed a
+foreign pipeline reproduces it only with deliberate wiring
+([the spike record](plans/2026-08-11-pipecat-alignment-spike-implementation.md)).
+
+### World
+
+One complete configuration state a running server
+serves: a validated configuration snapshot, the stored credentials
+opened behind it, and everything built from the pair (provider
+engines, MCP installs, filler clips), frozen together. In code, a
+`Generation`. The server boots into its first world, and applying
+stored changes without a restart composes and builds the whole next
+world before anything swaps, so a refused apply has changed nothing.
+Live work then converges at its own boundary: tools per reply,
+prompt text per activation, filler clips and provider engines when a
+conversation opens. A world nothing serves and nothing holds retires
+and releases what it built. See
+[how a change reaches a conversation](concepts.md#configuration-changes-arrive-as-whole-worlds).

@@ -15,6 +15,12 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   its own boundaries (tools per reply, prompt per activation, engines
   and filler clips per conversation), never mid-turn.
 
+- **Three glossary entries: wire-true capture, output pacing, world.**
+  The first two are the properties the pipecat alignment spike
+  measured and issues #84 and #92 lean on with nowhere to link; the
+  third is the configuration state a running server serves (in code,
+  a `Generation`), introduced by the reload work.
+
 ## 2026-08-20
 
 ### Added
