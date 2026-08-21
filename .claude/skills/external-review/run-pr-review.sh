@@ -55,8 +55,14 @@ case "$BACKEND" in
     CLI_STAMP="codex CLI $(codex --version | sed 's/codex-cli //')"
     ;;
   claude)
+    # --allowedTools alone restricts nothing: it adds allow rules and
+    # every unlisted tool stays available. The deny list is the fence,
+    # and --setting-sources ""/--strict-mcp-config keep local settings
+    # and MCP servers from widening it back.
     claude -p --model "$MODEL" \
-      --allowedTools "Read,Glob,Grep,Bash(git log:*),Bash(git show:*),Bash(git diff:*)" \
+      --strict-mcp-config --setting-sources "" \
+      --allowedTools "Read,Glob,Grep" \
+      --disallowedTools "Bash,Write,Edit,NotebookEdit,WebFetch,WebSearch,Agent,Task,Workflow,Skill,SendMessage,CronCreate,CronDelete,RemoteTrigger,PushNotification,ScheduleWakeup,EnterWorktree,ExitWorktree,DesignSync,Monitor,LSP,ToolSearch" \
       < "$PROMPT" > "$OUT" 2> "$ERR"
     CLI_STAMP="claude CLI $(claude --version)"
     ;;
