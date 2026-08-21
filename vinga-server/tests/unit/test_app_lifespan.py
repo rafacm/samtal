@@ -46,6 +46,7 @@ from vinga_server.db import open_database
 from vinga_server.device.bindings import DeviceBindings
 from vinga_server.providers import ProviderError
 from vinga_server.providers import world as provider_world
+from vinga_server.providers.mock import MockTts
 from vinga_server.tools.mcp import McpServers
 
 SENTENCE = "the llm provider 'mock' could not be built"
@@ -232,6 +233,40 @@ def test_entering_and_leaving_releases_everything(
     # White-box, per the note in `engine_of` above.
     assert store._stopped
     assert not store._thread.is_alive()
+
+
+def test_the_engines_are_let_go_of_when_the_process_ends(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The last end a provider can meet, and the one an apply never
+    reaches: the process stops.
+
+    A retired world is released when nothing holds it and the world
+    being served is released here, behind the drain, which is what makes
+    the close a provider gained run at every end rather than at most of
+    them.
+    """
+    closed: list[str] = []
+
+    class Closing(MockTts):
+        egress = False
+
+        def __init__(self, **options: object) -> None:
+            super().__init__(sample_rate=24000, ms_per_char=1.0, min_ms=20.0)
+
+        async def close(self) -> None:
+            closed.append("tts")
+
+    monkeypatch.setattr(
+        "vinga_server.providers.mock.build_tts", lambda label, config: Closing()
+    )
+    migrated(tmp_path)
+    app = create_app(recording_config(tmp_path))
+
+    with TestClient(app):
+        assert closed == [], "the world being served let go of its voice"
+
+    assert closed == ["tts"]
 
 
 def test_a_build_that_fails_part_way_releases_what_it_took(

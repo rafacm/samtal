@@ -40,6 +40,7 @@ from vinga_server.config.responses import (
     FillersReload,
     McpReloadResult,
     PromptsReload,
+    ProvidersReload,
     flags,
     outcomes,
 )
@@ -452,6 +453,7 @@ def _applied(
     servers: McpServers,
     prompts: Sequence[str] = (),
     fillers: FillersReload | None = None,
+    providers: ProvidersReload | None = None,
     **outcome: object,
 ):
     """A server that answers a reload with what it applied and what is
@@ -471,6 +473,9 @@ def _applied(
             fillers=fillers
             if fillers is not None
             else FillersReload(resynthesized=[], reused=[], disabled=[]),
+            providers=providers
+            if providers is not None
+            else ProvidersReload(built=[], reused=[], retired=[]),
         )
 
     return reload
@@ -486,6 +491,9 @@ def test_reload_prints_what_it_did_and_what_is_running(
         servers,
         prompts=("sam",),
         fillers=FillersReload(resynthesized=["sam"], reused=["kid"], disabled=["mute"]),
+        providers=ProvidersReload(
+            built=["tts.voice"], reused=["llm.mock"], retired=["asr.old"]
+        ),
         started=("weather",),
         stopped=("gone",),
     )
@@ -508,11 +516,17 @@ def test_reload_prints_what_it_did_and_what_is_running(
     assert "  resynthesized: sam" in printed
     assert "  reused: kid" in printed
     assert "  disabled: mute" in printed
+    # And the engines, whose three outcomes an operator reads for the
+    # opposite reason: what was built is what a swap of a local model
+    # cost, and what was reused is what it did not.
+    assert "providers:" in printed
+    assert "  built: tts.voice" in printed
+    assert "  reused: llm.mock" in printed
+    assert "  retired: asr.old" in printed
     # And every section this server does not apply yet, named rather
     # than missing: a kind that vanished from the output would read as a
     # kind with nothing to report.
-    for section in ("providers", "agents"):
-        assert f"{section}: {cli.NOT_APPLIED}" in printed
+    assert f"agents: {cli.NOT_APPLIED}" in printed
     # And the status underneath, which is what says whether an entry
     # that started actually connected.
     assert "weather: down since " in printed

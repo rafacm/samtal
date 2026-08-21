@@ -6,15 +6,18 @@ device refused a slot reconnects on its next wake word while a
 conversation waiting in line would leave a user talking to nothing.
 """
 
+from collections.abc import Collection
 from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from tests.support.configs import config_with_agent
+from tests.support.configs import config_with, config_with_agent
 from tests.support.wire import connect, shake_hands
 from vinga_server.app import create_app
+from vinga_server.config.secrets import SecretStore
+from vinga_server.generation import Generation, Generations
 from vinga_server.registry import SessionRegistry
 
 
@@ -147,3 +150,88 @@ def test_the_cap_is_configurable() -> None:
                     with pytest.raises(WebSocketDisconnect):
                         with connect(client):
                             pass
+
+
+# Which world each conversation is holding
+#
+# The second thing this registry knows, and the reason it knows it: a
+# conversation speaks through the world it was built from, so a world an
+# apply replaced may not let go of its engines until the last session
+# holding it has ended. Admission is not holding: many admitted sessions
+# are turned away before a conversation is ever built.
+
+
+class Recording(Generations):
+    """A holder that records what it was asked to let go of, so a test
+    can see the trigger rather than the closing behind it."""
+
+    def __init__(self, first: Generation) -> None:
+        super().__init__(first)
+        self.asked: list[list[Generation]] = []
+
+    async def dispose(self, held: Collection[Generation] = ()) -> None:
+        self.asked.append(list(held))
+        await super().dispose(held)
+
+
+def one_world() -> Generation:
+    return Generation(config_with(agents={"assistant": {"prompt": "A"}}), SecretStore())
+
+
+def test_an_admitted_session_holds_no_world_until_it_binds() -> None:
+    """Two states, not one. A device whose id will not parse, or that is
+    bound to nothing, is admitted and removed without a conversation
+    ever being built for it, and it was never holding anything."""
+    registry = SessionRegistry(max_sessions=2, generations=Recording(one_world()))
+    admitted = fake_session()
+
+    assert registry.try_add(admitted)
+
+    assert registry.held() == []
+
+
+async def test_a_bound_session_is_holding_its_world_until_it_is_removed() -> None:
+    world = one_world()
+    holder = Recording(world)
+    registry = SessionRegistry(max_sessions=2, generations=holder)
+    session = fake_session()
+    registry.try_add(session)
+
+    registry.bound(session, world)
+    assert registry.held() == [world]
+
+    registry.remove(session)
+    assert registry.held() == []
+    # The letting-go it started is this registry's to see out, which the
+    # drain is what waits for.
+    await registry.drain(timeout_s=1.0)
+
+
+async def test_removing_a_bound_session_asks_the_holder_to_let_go() -> None:
+    """The trigger, which is what makes the end of the last conversation
+    on a retired world the moment its engines are released."""
+    world = one_world()
+    holder = Recording(world)
+    registry = SessionRegistry(max_sessions=2, generations=holder)
+    session = fake_session()
+    registry.try_add(session)
+    registry.bound(session, world)
+
+    registry.remove(session)
+    await registry.drain(timeout_s=1.0)
+
+    assert holder.asked == [[]]
+
+
+async def test_removing_a_session_that_never_bound_asks_nothing() -> None:
+    """A no-op on that axis, which is what keeps a rejected device from
+    triggering a disposal it had nothing to do with."""
+    holder = Recording(one_world())
+    registry = SessionRegistry(max_sessions=2, generations=holder)
+    session = fake_session()
+    registry.try_add(session)
+
+    registry.remove(session)
+    await registry.drain(timeout_s=1.0)
+
+    assert holder.asked == []
