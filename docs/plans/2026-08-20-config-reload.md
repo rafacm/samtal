@@ -543,7 +543,9 @@ in the same change as the prose that feeds them.
   reported in the result's fillers section; the fill-once assert
   retires with the lifespan seam. Branch `feature/config-reload-m2`
   stacked on M1, PR #230.
-- [ ] **M3: providers, the hard slice.** `Provider.close()` and
+- [x] **[M3: providers, the hard
+  slice](2026-08-20-config-reload-implementation.md#m3-providers-the-hard-slice).**
+  (PR TBD) `Provider.close()` and
   the concrete overrides; generational binding (the factory hands
   each runtime its generation; the registry counts sessions per
   generation and disposes a retired generation's unadopted
