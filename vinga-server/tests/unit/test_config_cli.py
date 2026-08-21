@@ -50,7 +50,11 @@ from vinga_server.config.entities import (
     NO_SUCH_PROVIDER,
 )
 from vinga_server.config.store import NOT_A_STAGE
-from vinga_server.config.writes import AGENT_NOTICE, BINDING_NOTICE, RELOAD_NOTICE
+from vinga_server.config.writes import (
+    BINDING_NOTICE,
+    BINDING_UNSERVED_NOTICE,
+    RELOAD_NOTICE,
+)
 from vinga_server.db import open_database, schema
 
 
@@ -129,36 +133,37 @@ def test_a_missing_fragment_file_is_named(run, capsys: pytest.CaptureFixture[str
 def test_every_mutating_command_says_when_the_write_applies(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Most of the configuration is read once at start, which makes a
-    write that quietly waits for a restart the one thing about that
-    design an operator can be caught by.
+    """A write is stored where the server reads it later, which makes a
+    write that quietly waits the one thing about that design an operator
+    can be caught by.
 
-    The agent is the kind whose fields fall on both sides of the line,
-    so its answer says both halves and is asserted whole: it is the one
-    sentence an operator can act on wrongly in either direction, by
-    restarting for a field a reload applies or by reloading for one it
-    does not."""
+    The agent's answer is asserted whole rather than by substring: it is
+    the sentence an operator acts on, and what it has to carry is the
+    three moments a live conversation meets an applied change at."""
     run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
     assert RELOAD_NOTICE in capsys.readouterr().err
 
     run("set", "agent", "sam", "-f", "-", stdin="llm: claude\n")
-    assert capsys.readouterr().err == f"{AGENT_NOTICE}\n"
+    assert capsys.readouterr().err == f"{RELOAD_NOTICE}\n"
 
     run("set-default-agent", "sam")
-    assert cli.RESTART_NOTICE in capsys.readouterr().err
+    # The application this fixture builds is told of no servable agents,
+    # so the default agent it just named is one this server is not
+    # serving, and the sentence says which reload would install it.
+    assert BINDING_UNSERVED_NOTICE in capsys.readouterr().err
 
     # A read is not a write, and says nothing.
     run("list")
-    assert cli.RESTART_NOTICE not in capsys.readouterr().err
+    assert BINDING_UNSERVED_NOTICE not in capsys.readouterr().err
 
 
 def test_a_device_write_says_the_device_meets_it_itself(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The exception to the boot-time snapshot, printed verbatim from
-    what the API answered: a running server reads the devices table, so
-    a delete reaches the device at its next check-in rather than at the
-    next start."""
+    """The one kind nothing has to be asked to apply, printed verbatim
+    from what the API answered: a running server reads the devices table
+    as a device asks, so a delete reaches the device at its next
+    check-in and needs neither a reload nor a start."""
     run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
     run("set", "agent", "sam", "-f", "-", stdin="llm: claude\n")
     run("bind-device", "aa:bb:cc:dd:ee:ff", "sam")
@@ -383,11 +388,12 @@ def test_add_device_binds_the_board_showing_the_code(
     # The operator never had to find the MAC; the acknowledgement names
     # the row that was written.
     assert captured.out == "wrote device aa:bb:cc:dd:ee:ff bound to sam\n"
-    # The restart sentence rather than the no-restart one, because the
-    # application this fixture builds is told of no loaded agents, which
-    # is the honest answer for one built without a server around it. The
-    # two notices are told apart in test_config_api_pending.py.
-    assert cli.RESTART_NOTICE in captured.err
+    # The sentence for a binding whose agent is not being served rather
+    # than the plain one, because the application this fixture builds is
+    # told of no servable agents, which is the honest answer for one
+    # built without a server around it. The two notices are told apart
+    # in test_config_api_pending.py.
+    assert BINDING_UNSERVED_NOTICE in captured.err
 
 
 def test_add_device_retires_the_code(run, capsys: pytest.CaptureFixture[str]) -> None:

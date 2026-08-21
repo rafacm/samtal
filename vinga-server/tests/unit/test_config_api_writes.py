@@ -47,8 +47,8 @@ from vinga_server.config.store import (
     ConfigStore,
 )
 from vinga_server.config.writes import (
-    AGENT_NOTICE,
     BINDING_NOTICE,
+    BINDING_UNSERVED_NOTICE,
     RELOAD_NOTICE,
     RESTART_NOTICE,
 )
@@ -163,14 +163,16 @@ def test_every_write_is_gated(
 def test_a_write_says_what_it_did_and_when_it_applies(
     client: TestClient, method: str, path: str, body: object
 ) -> None:
-    """Configuration is a boot-time snapshot, so a write that answered
-    only "ok" would leave the one operational trap of that design open.
+    """A write is stored where the server reads it later, so one that
+    answered only "ok" would leave the one operational trap of that
+    design open.
 
-    This application is built with no loaded agents, which is what an
-    API with no server around it honestly has, so every write here that
-    could have been live names an agent nothing loaded and carries the
-    restart sentence. What the two notices depend on is asserted below,
-    against an application told what its server loaded."""
+    This application can serve no agent at all, which is what an API
+    with no server around it honestly has, so every binding here names
+    an agent this server is not serving and carries the sentence that
+    says which reload would install it. What the notices depend on is
+    asserted below, against an application told what its server
+    serves."""
     _pipeline(client)
 
     response = client.request(method.upper(), path, json=body)
@@ -185,19 +187,17 @@ def test_a_write_says_what_it_did_and_when_it_applies(
 def _expected_notice(method: str, path: str) -> str:
     """Which of the sentences a write carries, by what it wrote.
 
-    The default is the boot-time snapshot one; the exceptions are the
-    default agent, which the running server re-reads, the provider
-    entries, the MCP entries and the prompt fragments, which a reload
-    applies whole, and the agents, whose fields fall on both sides of
-    that line.
+    Two answers and no third for the kinds this API writes: the device
+    bindings and the default agent are what the running server re-reads
+    as a device asks, and every other kind is one apply's business. The
+    start sentence is not among them any more, which is the whole of
+    what the last milestone did.
     """
-    if (method, path) == ("delete", "/default-agent"):
+    if method == "delete" and path.startswith(("/devices/", "/default-agent")):
         return BINDING_NOTICE
-    if path.startswith(("/providers/", "/mcp-servers/", "/prompt-fragments/")):
-        return RELOAD_NOTICE
-    if path.startswith("/agents/"):
-        return AGENT_NOTICE
-    return RESTART_NOTICE
+    if path.startswith(("/devices/", "/default-agent")):
+        return BINDING_UNSERVED_NOTICE
+    return RELOAD_NOTICE
 
 
 # Which of the two notices a write carries
@@ -212,7 +212,7 @@ def _expected_notice(method: str, path: str) -> str:
 def serving_client(directory: Path) -> Iterator[TestClient]:
     """A client of an API told which agents its server loaded, which is
     what the server passes at build."""
-    api = build_api(TOKEN, directory, {"sam"})
+    api = build_api(TOKEN, directory, lambda: frozenset({"sam"}))
     with TestClient(api, headers={"Authorization": f"Bearer {TOKEN}"}) as client:
         yield client
 
@@ -229,14 +229,18 @@ def test_a_binding_to_an_agent_the_server_has_not_loaded_names_the_restart(
     serving_client: TestClient,
 ) -> None:
     """The write lands, and the device cannot reach it until this server
-    builds that agent's providers, which happens at a start."""
+    installs that agent, which is what the reload does."""
     _pipeline(serving_client)
     serving_client.put("/agents/poet", json={"prompt": "You are a poet."})
 
     answer = serving_client.put("/devices/aa:bb:cc:dd:ee:ff", json={"agents": ["poet"]})
 
     assert answer.status_code == 200
-    assert answer.json()["notice"] == RESTART_NOTICE
+    assert answer.json()["notice"] == BINDING_UNSERVED_NOTICE
+    # And it sends the operator to the reload rather than to a restart,
+    # which is the whole of why this sentence is not the binding one.
+    assert "config reload" in BINDING_UNSERVED_NOTICE
+    assert "restart" not in BINDING_UNSERVED_NOTICE.replace("without a restart", "")
 
 
 def test_the_default_agent_follows_the_same_rule(serving_client: TestClient) -> None:
@@ -247,7 +251,7 @@ def test_the_default_agent_follows_the_same_rule(serving_client: TestClient) -> 
         BINDING_NOTICE
     )
     assert serving_client.put("/default-agent", json={"name": "poet"}).json()["notice"] == (
-        RESTART_NOTICE
+        BINDING_UNSERVED_NOTICE
     )
 
 
@@ -297,37 +301,30 @@ def test_the_default_agent_notice_is_about_the_row_too(
     assert store.read_default_agent() == "sam"
 
 
-def test_an_agent_write_names_every_field_a_reload_applies(
+def test_an_agent_write_carries_the_one_reload_sentence(
     serving_client: TestClient,
 ) -> None:
-    """The whole sentence, on the wire, because an operator acts on it
-    and every field it leaves out is one they will restart a server for
-    without needing to.
+    """The whole sentence, on the wire, because an operator acts on it.
 
-    Four of an agent's fields are what a reload applies: its `prompt`,
-    its `prompt_includes`, its `mcp` grants and its `filler` section.
-    The rest of it, which is which provider entry serves each of its
-    stages, is composed at the next start, and both halves are said
-    because a sentence right about one and silent about the other is the
-    trap this notice exists to close.
+    An agent entry used to fall on both sides of the line and carried a
+    sentence of its own that said which fields were which. A reload
+    applies the whole entry now, so the sentence is the one every
+    reloaded kind carries, and what it still has to say is the three
+    clocks: they differ, and a sentence that said "immediately" would be
+    wrong about all three.
     """
     _pipeline(serving_client)
 
     answer = serving_client.put("/agents/sam", json={"prompt": "You are Sam still."})
 
-    assert answer.json() == {"wrote": "agent sam", "notice": AGENT_NOTICE}
-    # Read off the constant rather than off the answer, so the fields
+    assert answer.json() == {"wrote": "agent sam", "notice": RELOAD_NOTICE}
+    # Read off the constant rather than off the answer, so the clocks
     # this claims are named are named in the string itself.
-    for field in ("`prompt`", "`prompt_includes`", "`mcp`", "`filler`"):
-        assert field in AGENT_NOTICE
-    # And the three clocks the applied half has, which all differ:
-    # prompt text is assembled once per activation, the tools an agent
-    # may reach are snapshotted per reply, and the clips it masks with
-    # are bound by a conversation when it opens.
-    assert "next activation" in AGENT_NOTICE
-    assert "next utterance" in AGENT_NOTICE
-    assert "next conversation" in AGENT_NOTICE
-    assert "next server start" in AGENT_NOTICE
+    assert "next activation" in RELOAD_NOTICE
+    assert "next utterance" in RELOAD_NOTICE
+    assert "next conversation" in RELOAD_NOTICE
+    # And nothing in it sends an operator to a start.
+    assert "next server start" not in RELOAD_NOTICE
 
 
 # The third sentence: what a reload applies
@@ -372,27 +369,30 @@ def test_every_mutation_a_reload_applies_names_the_reload(
     assert answer.json()["notice"] == RELOAD_NOTICE
 
 
-RESTART_MUTATIONS = [
+LAST_MUTATIONS = [
     ("put", "/agent-defaults", {"llm": "claude", "asr": "whisper"}),
+    ("put", "/agents/sam", {"prompt": "You are Sam still."}),
 ]
 
 
 @pytest.mark.usefixtures("store")
-@pytest.mark.parametrize(("method", "path", "body"), RESTART_MUTATIONS)
-def test_the_writes_a_reload_does_not_apply_still_name_the_restart(
+@pytest.mark.parametrize(("method", "path", "body"), LAST_MUTATIONS)
+def test_the_last_two_kinds_name_the_reload_as_well(
     serving_client: TestClient, method: str, path: str, body: object
 ) -> None:
     """`agent_defaults` is what the effective values every agent
-    inherits are read through, and a candidate generation keeps the
-    previous layer whole precisely so that a change there is not applied
-    through the back door. The one kind whose fields fall on both sides
-    of the line is the agent, and it says both, below."""
+    inherits are read through, and the agent set is what a server can be
+    asked for. Both were the reason a candidate generation used to keep
+    the previous world's copy, and both are one apply's business now, so
+    the sentence they carry is the same one every other kind carries and
+    the start sentence is on no kind at all."""
     _pipeline(serving_client)
 
     answer = serving_client.request(method.upper(), path, json=body)
 
     assert answer.status_code == 200, answer.text
-    assert answer.json()["notice"] == RESTART_NOTICE
+    assert answer.json()["notice"] == RELOAD_NOTICE
+    assert RESTART_NOTICE != RELOAD_NOTICE
 
 
 def test_an_empty_database_becomes_a_working_configuration(

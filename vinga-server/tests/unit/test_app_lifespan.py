@@ -413,7 +413,7 @@ def test_the_api_gets_its_live_pieces_before_the_first_request(tmp_path: Path) -
 
         assert mounted.pending is composition.pending
         assert mounted.mcp_servers is composition.mcp_servers
-        assert mounted.loaded_agents == frozenset({"assistant"})
+        assert mounted.loaded_agents() == frozenset({"assistant"})
 
 
 # --- the database this build brings into existence --------------------

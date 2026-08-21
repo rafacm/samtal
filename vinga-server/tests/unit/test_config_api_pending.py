@@ -33,7 +33,7 @@ from vinga_server.config.api import (
 from vinga_server.config.loader import DatabaseBusyError
 from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
 from vinga_server.config.store import ConfigStore
-from vinga_server.config.writes import BINDING_NOTICE, RESTART_NOTICE
+from vinga_server.config.writes import BINDING_NOTICE, BINDING_UNSERVED_NOTICE
 from vinga_server.db import open_database
 from vinga_server.onboarding import CODE_TTL_S, PendingDevices
 
@@ -66,7 +66,7 @@ def client(
     directory: Path, pending: PendingDevices, monkeypatch: pytest.MonkeyPatch
 ) -> Iterator[TestClient]:
     monkeypatch.setenv(MASTER_KEY_ENV, generate_key())
-    api = build_api(TOKEN, directory, ["assistant"], pending)
+    api = build_api(TOKEN, directory, lambda: frozenset({"assistant"}), pending)
     with TestClient(api, headers={"Authorization": f"Bearer {TOKEN}"}) as client:
         _agents(client)
         yield client
@@ -159,7 +159,7 @@ def test_the_listing_is_reachable_where_the_server_mounts_it(
     a client actually types."""
     _waiting(pending)
     served = FastAPI()
-    mount_api(served, build_api(TOKEN, directory, ["assistant"], pending))
+    mount_api(served, build_api(TOKEN, directory, lambda: frozenset({"assistant"}), pending))
     client = TestClient(served, headers={"Authorization": f"Bearer {TOKEN}"})
 
     response = client.get(f"{MOUNT_PATH}/devices/pending")
@@ -211,17 +211,18 @@ def test_a_claim_says_the_device_needs_no_restart(
     assert response.json()["notice"] == BINDING_NOTICE
 
 
-def test_a_claim_naming_an_agent_this_server_has_not_loaded_says_restart(
+def test_a_claim_naming_an_agent_this_server_is_not_serving_says_reload(
     client: TestClient, pending: PendingDevices
 ) -> None:
-    """A fresh deployment's ordinary case: the agent was written after
-    this server booted, so the binding is live and the agent is not.
-    Saying "no restart is needed" there would be a promise the device
-    cannot keep."""
+    """A fresh deployment's ordinary case: the agent was written since
+    this server last installed a world, so the binding is live and the
+    agent is not. Saying "no restart is needed" there would be a promise
+    the device cannot keep, and saying "restart" would send an operator
+    away for something a request applies."""
     response = _claim(client, _waiting(pending), "written-since-boot")
 
     assert response.status_code == 200, response.text
-    assert response.json()["notice"] == RESTART_NOTICE
+    assert response.json()["notice"] == BINDING_UNSERVED_NOTICE
 
 
 def test_a_claim_retires_the_code(client: TestClient, pending: PendingDevices) -> None:
