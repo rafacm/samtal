@@ -793,6 +793,13 @@ Run from `vinga-server/`, at the last commit of the milestone.
   and are absent from this milestone's commits, which is what says no
   event and no conversation column moved.
 
-Not verified here, and not claimed: the two local-engine teardowns,
-which skip without the `faster-whisper` and `piper` extras installed;
-the container image; the smoke lane; and anything against a real device.
+- The two local-engine teardowns, which the default lane skips: run once
+  in a lane with `uv sync --extra faster-whisper --extra piper`, where
+  `test_provider_lifecycle.py` is 14 passed and the whole of the
+  faster-whisper and Piper suites pass with it. The lane was restored to
+  the committed dependency set afterwards, which is what the two skips
+  in the count above are.
+
+Not verified here, and not claimed: the container image, the smoke lane,
+and anything against a real device, none of which this milestone
+touches.
