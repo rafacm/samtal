@@ -1,6 +1,6 @@
 ---
 name: external-review
-description: Run an adversarial external review (codex, sol or terra by stakes) of a committed plan or a PR diff, record the findings, and drive per-finding amendments. Use before implementing a plan and before merging any milestone PR.
+description: Run an adversarial external review (codex with sol or terra by stakes; claude CLI as the fallback when the codex quota is exhausted) of a committed plan or a PR diff, record the findings, and drive per-finding amendments. Use before implementing a plan and before merging any milestone PR.
 ---
 
 # External review
@@ -26,20 +26,35 @@ Two tiers, decided per round (maintainer decision, 2026-08-19):
 `run-pr-review.sh` reads the model from `REVIEW_MODEL` (default
 sol) and stamps whichever ran into the provenance header.
 
+### Fallback when the codex quota is exhausted
+
+When the ChatGPT plan behind codex runs out of weekly quota, set
+`REVIEW_BACKEND=claude` and the script runs the claude CLI instead
+(`claude -p`, default model `claude-opus-5`, tools restricted to
+reads). This is a same-vendor review, so the independence property
+is weaker: the reviewer still has fresh eyes and no session
+context, but shares training and blind spots with the model that
+wrote the code. Treat it as the interim tier, note the backend in
+the recorded round, and return to codex when the quota resets.
+
 ## Mechanics that are not obvious
 
 - Always `codex exec -m <model> --sandbox read-only -` with the
   prompt on stdin. Never `codex review` with a custom prompt: it
   ignores the prompt.
+- The claude equivalent, used for manual (plan-mode) runs on the
+  fallback backend:
+  `claude -p --model claude-opus-5 --allowedTools "Read,Glob,Grep,Bash(git log:*),Bash(git show:*),Bash(git diff:*)" < prompt.md > out.txt 2> err.txt`
 - Run it in the background from the worktree under review. Sol takes
   10 to 25 minutes and looks stuck; stderr shows file-reading
   activity, and only the final answer reaches stdout:
   `codex exec -m gpt-5.6-sol --sandbox read-only - < prompt.md > out.txt 2> err.txt`
-- codex has no network. Paste the GitHub issue body into the prompt
-  and name every repository file the reviewer should read; it can
-  only see what is on disk in the worktree.
-- Do not edit the worktree while a review runs: codex reads files
-  live, and a mid-run edit means it reviews a mixture.
+- The reviewer has no network (codex by sandbox, claude by its tool
+  allowlist). Paste the GitHub issue body into the prompt and name
+  every repository file the reviewer should read; it can only see
+  what is on disk in the worktree.
+- Do not edit the worktree while a review runs: the reviewer reads
+  files live, and a mid-run edit means it reviews a mixture.
 
 The recurring lenses the reviews of the 2026-08-14 batch applied
 (no-leak sentinels, pin-before-reshape, closed token sets at real
