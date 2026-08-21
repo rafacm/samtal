@@ -864,6 +864,10 @@ async def test_an_egress_refusal_leaves_the_running_engines_exactly_as_they_were
 
     assert generations.current() is serving_now
     assert generations.current().providers.instances == serving_now.providers.instances
+    # And the mark says so too, which is what a reader composing an
+    # answer across an await is holding: a refusal that built a model
+    # and threw it away is still a refusal that moved nothing.
+    assert generations.mark == 0
     # And the sentence says nothing about the entry, the type or the
     # option it refused on, all of which are stored values.
     assert str(caught.value) == PROVIDERS_REFUSED
@@ -1369,7 +1373,15 @@ def test_a_stored_domain_that_will_not_compose_refuses_the_same_way(
     row because no write this server offers can produce one. What the
     row holds is as likely to be a credential pasted into the wrong
     column as a name somebody mistyped, which is the whole reason the
-    sentence is fixed."""
+    sentence is fixed.
+
+    This is also where the stored half being validated in one place
+    shows: the apply used to compose a candidate out of the store and
+    the world it was keeping, and could refuse on the combination. It
+    installs what the store describes now, so a refusal here is the
+    store's own validation, and what it must still be is a refusal that
+    changed nothing.
+    """
     seeded(directory)
     booted = load_boot_config()
     engine = open_database(directory)
@@ -1380,7 +1392,16 @@ def test_a_stored_domain_that_will_not_compose_refuses_the_same_way(
         engine.dispose()
 
     with entered_client(booted.config, booted.secrets) as serving:
+        generations = serving.app.state.composition.generations
+        before = generations.current()
+
         refused = serving.post(RELOAD_PATH, headers=bearer())
+
+        # Nothing moved, which is what "and nothing was changed" in the
+        # sentence promises: the same world, and a mark that says so to
+        # anything composing an answer across an await.
+        assert generations.current() is before
+        assert generations.mark == 0
 
     assert refused.status_code == 422
     assert refused.json() == problem(422, app_module.RELOAD_REFUSED)

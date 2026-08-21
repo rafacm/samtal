@@ -258,11 +258,16 @@ Run from `vinga-server/`, at the last commit of the milestone.
   #193 left: the two cases this milestone changes were already there and
   were rewritten rather than added to.
 - The four documentation drift checks, regenerated and diffed against
-  `../docs/reference/`: all four clean. `api-openapi.json` and
-  `domain-config.md` change deliberately and are committed in this
-  milestone; `events.md` and `conversations-schema.md` are byte-untouched
-  and are absent from this milestone's commits, which is what says no
+  `../docs/reference/`: all four clean, and `git diff --name-only
+  origin/main..HEAD -- docs/reference/` lists `api-openapi.json` and
+  `domain-config.md` and nothing else. Those two change deliberately and
+  are committed in this milestone; `events.md` and
+  `conversations-schema.md` are byte-untouched, which is what says no
   event and no conversation column moved.
+- The extras lane was not rerun, and does not need to be: this milestone
+  touches neither `providers/` nor the two suites that lane exists for
+  (`git diff --name-only origin/main..HEAD` names no file under either),
+  so what the round ran there still stands.
 
 Not verified here, and not claimed: the container image, the smoke lane,
 and anything against a real device, none of which this milestone
@@ -1017,7 +1022,9 @@ generation it is asking about on the line above it.
 
 ### Deviations from the plan
 
-Ten, each recorded because it moved something the plan named.
+Eleven, each recorded because it moved something the plan named, and the
+last because rebasing onto PR #231's review round moved something this
+milestone says.
 
 **1. `_composed` disappeared rather than becoming the identity.** The
 plan allows either. It disappeared, along with `_validated`, because the
@@ -1113,6 +1120,32 @@ answers from the generation being served, which may not be the boot's.
 Worth an issue, and not worth moving a reference document this
 milestone promised not to touch.
 
+**11. The rebase onto PR #231's review round merged by itself, and one
+pin had to be re-hung rather than merged.** The round's five commits and
+this milestone's six touch the same five files and conflicted in none of
+them, which is worth saying out loud because the ownership rule they
+carry is exactly the kind of property a clean auto-merge can quietly
+break. It did not: the boot still registers `engines.close` on the exit
+stack the moment `build_world` returns and still transfers with
+`engines.installed()` in the statement that builds the first generation,
+with nothing unowned between them; the apply still calls
+`candidate.providers.installed()` inside the instability window; the
+teardown deadline is still one for the whole operation; and the
+provider refusal still travels through the route as itself. The bindings
+view's new position is after the transfer rather than inside it, so
+round 3's finding 3 window stays closed, and a failure at the open
+unwinds through the holder that already owns the engines.
+
+What did have to move is a pin this milestone's own rewrite dropped. The
+overlay-refusal case carried `generations.mark == 0`, the assertion that
+says a refusal moved nothing to anything composing an answer across an
+await, and that case became an ordinary apply here. The two refusals an
+apply can still end at carry it now: the egress refusal, which is the
+deepest one (it built a model and threw it away), and the stored-side
+validation refusal driven through the route, which is what the overlay
+refusal turned into. Both were proved to bite by making a refusal enter
+the holder's window once and watching exactly them fail.
+
 ### Discoveries
 
 **The overlay's one refusal became an ordinary apply.** Deleting a
@@ -1145,11 +1178,14 @@ Run from `vinga-server/`, at the last commit of the milestone.
 - `uv run ruff check .`: all checks passed.
 - `uv run mypy`: success, no issues found in 3 source files. Its scope is
   the events package, which this milestone does not touch.
-- `uv run pytest tests/unit -q`: 2,788 passed, 18 skipped. (2,777 passed
-  and 18 skipped at the end of M3; the eleven new cases are the two
-  barrier directions, the two check-in loops, five at the apply, the
-  agents section in the CLI rendering, and the second half of the write
-  parametrization that used to name a restart.)
+- `uv run pytest tests/unit -q`: 2,793 passed, 20 skipped. (2,782
+  passed and 20 skipped at the end of PR #231's review round, which this
+  milestone is rebased onto; the eleven new cases are the two barrier
+  directions, the two check-in loops, five at the apply, the agents
+  section in the CLI rendering, and the second half of the write
+  parametrization that used to name a restart. The two skips are the
+  round's, not this milestone's: the local engines' log lines, which
+  need their extras.)
 - `uv run pytest tests/integration -q`: 61 passed, the same count as M3
   left: the three cases this milestone changes were already there and
   were amended rather than added to.
