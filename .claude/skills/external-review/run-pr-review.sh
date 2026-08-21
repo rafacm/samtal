@@ -1,6 +1,6 @@
 #!/bin/sh
-# Self-posting PR review: runs codex against a PR's diff from inside
-# the PR's worktree, then posts the result to the PR as a comment with
+# Self-posting PR review: runs the review backend against a PR's diff
+# from inside the PR's worktree, then posts the result as a comment with
 # a provenance header, so the review lands even if the driving session
 # dies between the review finishing and the comment being posted.
 #
