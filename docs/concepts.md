@@ -1,6 +1,6 @@
 # Domain concepts
 
-**Date:** 2026-08-12
+**Date:** 2026-08-21
 
 The domain model of vinga from the user's point of view: the nouns,
 how they relate, and the semantics that were decided on purpose. The
@@ -175,6 +175,31 @@ Three decided semantics:
   still there to come back to. Today's handover behaves differently
   (the session transcript carries across); it adopts this rule when
   conversations become persistent entities.
+
+## Configuration changes arrive as whole worlds
+
+Editing the domain configuration (an agent, its prompt, a provider
+entry, an MCP server) neither restarts the server nor mutates it in
+place. The server serves immutable states called
+[worlds](glossary.md#world): a validated configuration, the stored
+secrets opened behind it, and everything built from the pair, frozen
+together. Applying stored changes composes and builds the complete
+next world first, so a refused apply has changed nothing, and then
+swaps it in at one point. This is implemented today (the config
+reload); what still waits for a restart is the server's own file
+(ports, auth), which holds nothing the configuration API writes.
+
+The user-visible semantic is when a live conversation meets a
+change, and the answer is: at the conversation's own natural
+boundaries, never mid-turn. The tools an agent may reach are read
+per reply, so a moved MCP entry is picked up on the next utterance.
+Prompt text is assembled at activation, so a rewritten persona
+reaches a conversation at its next session or agent switch. Filler
+clips and provider engines are bound by a conversation when it
+opens, so a conversation already speaking finishes on the world it
+was built from, served that world's prompt to the end, even if its
+agent was deleted from the store mid-sentence. A world nothing
+serves and nothing holds retires and releases what it built.
 
 ## The wake word wakes the device, not an agent
 

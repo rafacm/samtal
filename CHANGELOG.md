@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-08-21
+
+### Added
+
+- **The domain concepts explain worlds.** A `docs/concepts.md` section
+  on how configuration changes arrive: composed and built as a whole
+  next world before anything swaps, met by a live conversation only at
+  its own boundaries (tools per reply, prompt per activation, engines
+  and filler clips per conversation), never mid-turn.
+
 ## 2026-08-20
 
 ### Added
