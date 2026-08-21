@@ -339,16 +339,15 @@ async def test_a_deleted_agent_s_grants_stay_pending_until_a_reload() -> None:
         await servers.stop_all()
 
 
-async def test_a_deleted_agent_written_back_is_pending_again() -> None:
-    """The population is the agents this process can serve, and a reload
-    cannot move it.
+async def test_a_deleted_agent_written_back_rides_the_added_row() -> None:
+    """The population is the agents this server can serve, and it moves
+    with the world.
 
-    An agent deleted from storage and reloaded away is still one this
-    server would talk as, because loading an agent takes a restart. So
-    writing it back, identical to what this process booted with, is a
-    change a reload would apply, and a comparison over whichever agents
-    the current world happens to hold would have stopped seeing it the
-    moment the first reload landed.
+    An agent deleted from storage and applied away is one no session can
+    be opened as any more, so writing it back is a whole entry arriving
+    rather than a grant edit: it is reported where an arriving agent
+    belongs, which is the agents' own added row, and the grants stay
+    quiet about an agent neither world's running side knows.
     """
     booted = config_with(
         {"tools": entry_data()}, {"assistant": ["tools"], "helper": ["tools"]}
@@ -359,17 +358,16 @@ async def test_a_deleted_agent_written_back_is_pending_again() -> None:
         await Applying(servers, booted).apply(reading(deleted))
         assert servers.pending_against(deleted).grants == ()
 
-        assert servers.pending_against(booted).grants == ("helper",)
+        assert servers.pending_against(booted).grants == ()
     finally:
         await servers.stop_all()
 
 
-async def test_an_agent_a_reload_installed_is_still_not_a_grant_change() -> None:
-    """The other direction of the same rule. A reload can install grants
-    for an agent this process cannot build a session for, and editing
-    those grants afterwards changes nothing this server would do: the
-    agent arrives at the restart that loads it, with whatever the store
-    says then.
+async def test_an_agent_a_reload_installed_is_a_grant_change_afterwards() -> None:
+    """The other direction of the same rule, and the one that moved. An
+    apply installs an agent with its grants, so a session can be opened
+    as it from that instant; narrowing what it may reach is therefore a
+    change this server would apply, and the comparison says so.
     """
     booted = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
     added = config_with(
@@ -386,7 +384,8 @@ async def test_an_agent_a_reload_installed_is_still_not_a_grant_change() -> None
     try:
         await Applying(servers, booted).apply(reading(added))
 
-        assert servers.pending_against(narrowed).grants == ()
+        assert servers.pending_against(narrowed).grants == ("helper",)
+        assert servers.pending_against(added).grants == ()
     finally:
         await servers.stop_all()
 
