@@ -822,3 +822,115 @@ Run from `vinga-server/`, at the last commit of the milestone.
 Not verified here, and not claimed: the container image, the smoke lane,
 and anything against a real device, none of which this milestone
 touches.
+
+### PR review round (2026-08-21)
+
+External review of PR #231: codex exec, model gpt-5.6-sol, read-only
+against `main...abb3414e`. Verdict: mergeable after fixes. Five
+findings, three P1 and two P2, condensed but faithful; each carries its
+resolution and the commit that made it.
+
+**1 (P1). Rejected provider values reached the retained logs.** Both
+local engines wrote what they were loading as they loaded it: the model,
+the device and the compute type on one line, the voice and the download
+directory on the other. Under a reload those lines are written before
+the filler synthesis and the MCP preparation that can still refuse the
+apply, so a request answered with a fixed sentence had already put
+arbitrary stored scalars where an operator keeps them, and a credential
+pasted into `model` is exactly that shape of thing.
+
+*Resolution.* Adopted (`0c232641`). Both lines keep what they are for,
+which is telling an operator that something slow has started, and lose
+every value; which entry it is and what it holds are in the
+configuration the operator is already holding. Two cases, on the real
+classes and skipped without the extras, plant a credential-shaped value
+in an option and assert it reaches neither the rendered line nor the
+record's arguments, which is what a tap reads.
+
+**2 (P1). A cancellation left the provider under construction
+unowned.** Construction runs in a worker thread and a thread cannot be
+cancelled, so a caller that gave up left the constructor running and the
+object it eventually returned had nobody to hand it to: the one hole in
+a rule whose whole claim is that nothing is left to the garbage
+collector. The existing cancellation case asserted only about the
+provider already built.
+
+*Resolution.* Adopted (`e32e171b`). The construction is a future
+`build_entry` keeps rather than an await it abandons: a cancelled caller
+waits the thread out, closes what came back and then goes on being
+cancelled. Bounded by the constructor rather than by a deadline, since
+abandoning the wait would put the object back where it was, which is
+nowhere. The case now watches both objects and proves each closes
+exactly once; proved to bite by awaiting the construction directly
+again.
+
+**3 (P1). The boot dropped the owner before anything else took it.**
+`build_world` returned a `Built` that was read for its world and thrown
+away, and nothing owned the engines until the holder's shutdown callback
+was registered. Between the two lines are the conversation store's
+construction, its migration, its writer's start and the filler
+synthesis, so a boot that failed there leaked a loaded model per entry.
+
+*Resolution.* Adopted (`c50444c3`). `Built.installed()` is the transfer
+the ownership rule always claimed: the cleanup goes on the lifespan's
+exit stack the moment the build returns, and closing that owner becomes
+a no-op once the generation has taken the world on. The apply says the
+same thing inside its own window, so the discard path cannot close a
+world the server is serving. A boot case failing after the engines exist
+asserts each closes exactly once; proved to bite by dropping the
+registration again.
+
+**4 (P2). The teardown had no whole-operation bound.** The ten seconds
+were each provider's and were spent one after another, so a world of ten
+stuck clients was a hundred seconds of an apply that had already
+applied: what a caller waited through depended on how many entries the
+world it replaced happened to hold.
+
+*Resolution.* Adopted (`4152a743`). Closes are independent of one
+another, so they run together under one deadline; what did not finish is
+cancelled, counted and logged as what it was, and what raised is still
+classified by class with the prose dropped. Two cases: five closes that
+never finish stay inside one bound and are all really started, and an
+apply behind such a teardown answers, settles its mark and gives the
+exclusion back.
+
+**5 (P2). The provider refusal was not pinned through the boundary it
+answers on.** The route's refusal matrix did not name
+`ProviderRefusedError`, and the only case stopped at the exception the
+apply raised, so nothing held the status, the body or the no-leak
+property at the surface a client reads.
+
+*Resolution.* Adopted (`13418a02`). The matrix carries the type beside
+its four siblings, and a new case drives a real refusal the whole way: a
+stored voice every agent inherits, rewritten with an option the provider
+never asked about, applied through the mounted route. It asserts the
+422, the fixed sentence as the whole body, the serving generation and
+its engines identical objects afterwards, and neither the entry name nor
+the option name in the response or in anything this server wrote about
+it. The apply-level case gains the other half, that nothing is chained
+behind the refusal for a traceback to render. What the log check
+excludes, and says it excludes, is the records a client library wrote:
+an entry's name is how that entry is addressed, so a request line is the
+API's addressing rather than anything the refusal said.
+
+### Verification after the round
+
+Run from `vinga-server/`, at the last commit of the round.
+
+- `uv run ruff check .`: all checks passed.
+- `uv run mypy`: success, no issues found in 3 source files.
+- `uv run pytest tests/unit -q`: 2,782 passed, 20 skipped. The five new
+  passing cases are the boot failure, the two bounded teardowns, the
+  route refusal and the matrix's new row; the two new skips are the
+  local engines' log lines, which need their extras.
+- `uv run pytest tests/integration -q`: 61 passed, unchanged.
+- The four documentation drift checks: all clean, and `git diff
+  --name-only origin/main..HEAD -- docs/reference/` lists
+  `api-openapi.json` and `domain-config.md` and nothing else.
+- The extras lane, run once with `uv sync --extra faster-whisper --extra
+  piper`: `test_provider_lifecycle.py` is 17 passed, which is the two
+  log cases and the two teardown cases the default lane skips. The lane
+  was restored to the committed dependency set afterwards.
+
+The image and the smoke lane remain unverified here, for the reason
+given above.
