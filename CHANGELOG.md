@@ -21,6 +21,12 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   third is the configuration state a running server serves (in code,
   a `Generation`), introduced by the reload work.
 
+- **`docs/architecture/pipeline-ownership.md`.** The inventory behind
+  the #84 standing decision, moved from issue comments into the
+  repository: which pipeline parts any streaming framework provides,
+  which are vinga's own semantics, the spike's measured evidence, and
+  the three triggers that would reopen the adoption question.
+
 ## 2026-08-20
 
 ### Added
