@@ -545,7 +545,7 @@ in the same change as the prose that feeds them.
   stacked on M1, PR #230.
 - [x] **[M3: providers, the hard
   slice](2026-08-20-config-reload-implementation.md#m3-providers-the-hard-slice).**
-  (PR TBD) `Provider.close()` and
+  (PR #231) `Provider.close()` and
   the concrete overrides; generational binding (the factory hands
   each runtime its generation; the registry counts sessions per
   generation and disposes a retired generation's unadopted
