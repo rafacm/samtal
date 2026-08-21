@@ -596,3 +596,203 @@ committed references were regenerated with the prose.
 
 The image and the smoke lane remain unverified here, for the reason
 given above.
+
+## M3: providers, the hard slice
+
+### What was done
+
+**The lifecycle.** `Provider` gained `close()`, a default no-op with
+one paragraph saying why a provider now needs one at all: an entry an
+apply rewrote is built again, and the object the old world spoke
+through has to be told its world is over. The four SDK-backed types and
+the ElevenLabs client shut their pools; faster-whisper and Piper drop
+their held engine and voice. `SileroVad` keeps the no-op and its
+docstring says so: the model lives in each session's endpointer, which
+is gone with the session long before a world can be disposed of.
+
+**The lease.** `Operations` in `providers/base.py` is the answer to
+round 3's finding 1. A call that runs off the loop takes a lease and the
+lease is released from the worker thread's own `finally`, handed back to
+the loop rather than executed on it, so a cancelled caller shortens the
+wait and never the lease. `close()` on the two local engines waits on
+`settled()` before dropping anything. The two providers that use it are
+exactly the two that hold a resource a worker reads.
+
+**The builder.** `providers/world.py` is the new module and the owner.
+`build_entry` constructs one entry off the loop, transfers the object
+into this module, and only then runs the egress check, so an egress
+refusal closes what it just built; `build_world` walks the agents,
+dedups by entry identity, offers a carried-over object where the caller
+said one may be, and closes everything it constructed on any exit that
+is not a return. `registry.py` keeps `construct_provider`, which is
+construction and nothing else, which is what lets it run in a thread.
+Every factory now finishes its options before constructing, so a
+trailing unknown option refuses with nothing to let go of.
+
+**The generation.** `Generation` gained `providers: ProviderWorld` (the
+per-agent engines and the same objects keyed by entry identity) and
+became `eq=False`, because a world is an identity and two worlds built
+from one configuration are two worlds. `Generations` gained the other
+half of its own docstring: an install retires the world it replaced,
+`dispose(held)` lets go of every retired world nobody holds, closing
+only what nothing still around is speaking through, and `aclose()` is
+the end of the process, registered on the lifespan's exit stack behind
+the drain.
+
+**The binding.** `RuntimeFactory` takes the generation to build from.
+The session reads `current()` once, on the loop, after the awaited
+bindings lookup, and the three statements that follow have no await
+between them: the runtime is built from that object and the registry is
+told this connection holds it. `SessionRegistry` counts the bound
+sessions, answers `held()`, and asks the holder to let go when a bound
+session is removed, as a task it keeps and the drain waits on.
+`DeviceSession._provider_manifest` reads its own generation, so a
+record names the voice that actually served the conversation.
+
+**The apply.** The overlay takes `providers` whole from the store and
+`LIVE_SECRETS` gained `"provider"`, so an entry edit and a credential
+rotation are both applied; which entry an agent names stays
+restart-bound. `_carried` asks `config/diff.py` which entries are
+unchanged (the same function the comparison read answers with) and
+hands the survivors to the builder. A build that refuses becomes
+`ProviderRefusedError`, a 422 with a fixed sentence that interpolates
+nothing, the class in the log; the composition root passes it through
+as itself, beside the exclusion refusal. The apply installs, settles
+the mark, and only then disposes, so a teardown cannot turn an applied
+world into a refusal.
+
+**The filled pauses.** `_voiced_by` now reads each half from its own
+world, which is the one-line change M2's first deviation was written
+for: the previous generation's engines on one side and the candidate's
+on the other.
+
+**The prose.** The provider descriptor's notice and both provider-secret
+notices became the reload notice; `AGENT_NOTICE`'s restart half says
+what it is (which entry serves each stage) rather than "everything
+else, because that is when its providers are built", which would now
+send an operator to restart for an edit a request has applied. The
+API description, the route's own docstring, the docgen contract prose,
+both READMEs and the CHANGELOG entry moved with it, and both generated
+references were regenerated in the same change.
+
+### Deviations from the plan
+
+Seven, each recorded because it moved something the plan named.
+
+**1. The ownership rule lives in `providers/world.py`, and
+`build_provider` and `build_agent_providers` are gone.** The plan names
+the refactor without naming a module. A new module rather than a wider
+`registry.py`, because the two halves are separated by exactly the line
+the refactor is about: what can run in a worker thread and what cannot.
+The public names went with it: `build_entry` and `build_world` are
+coroutines that own what they build, and a synchronous
+`build_provider` that egress-checked would have been the shape the
+refactor exists to end. Sixty-odd test call sites moved with them.
+
+**2. `Generations` owns the disposal rule; `SessionRegistry` owns the
+count.** The plan says the registry "counts bound sessions per
+generation and disposes a generation that is neither current nor held".
+Split, because the two are different knowledge: which worlds are still
+held is the session set's, and which engines a retiring world was the
+last to hold is the holder's, whose docstring already claimed "when an
+old world may be disposed". So the registry answers `held()` and asks,
+and the holder decides and closes. It also keeps the shutdown close
+where the plan put it, on `Generations`, which would otherwise have had
+to reach into the registry for the retired worlds.
+
+**3. The apply is handed a `held` callable rather than the registry.**
+What an apply needs to know about the conversations in flight is one
+sentence, and a callable is what it takes; the default answers "nobody",
+which is the truth for an application with no sessions around it and
+what every apply-level test wants.
+
+**4. `retired` is structurally always empty until the agent set moves.**
+The section is filled and its third outcome is honest but unreachable:
+a world builds only the entries its agents reference, and neither the
+agent set nor an agent's choice of entry moves at an apply, so no entry
+can leave a world. Deleting one a retained agent still names does not
+compose at all, which is the case the overlay's own validation refuses.
+Said out loud in a test of its own rather than left as an outcome
+nobody can produce; M4 is where it starts naming entries.
+
+**5. The provider refusal passes through the composition root's
+rewrite.** The plan has the apply translate a build failure into a
+typed 422 with a fixed sentence. It does, and `config_reloader` then
+had to be told not to replace that sentence with the general one, which
+is what `except (ReloadInProgressError, ProviderRefusedError): raise`
+is. The sentence is a module constant interpolating nothing, so passing
+it through is provably safe in the way the general rewrite exists to
+guarantee.
+
+**6. The end-to-end "the old provider closes when the last bound
+session ends" is proven in two halves rather than one.** The registry's
+half (a bound session's removal asks the holder to let go, a
+never-bound one does not) is in `test_registry.py`, and the holder's
+half (what is closed and what is not) is in `test_generation.py` and at
+the apply. A single case driving a websocket through a reload would
+have been asserting on the socket to prove a lifecycle.
+
+**7. The test lane drives the real builder from a bridge.**
+`tests/support/providers.py::built_world` runs the coroutine to
+completion on a loop of its own, in a thread of its own, so the session
+helpers stay synchronous. The alternative was `await` in front of a
+hundred and sixty-five call sites whose subject is a conversation. The
+suites that are about the lifecycle itself call `build_world` directly,
+as a server does.
+
+### Discoveries
+
+**A subclass of a mock provider is refused by the egress rule.** The
+marking is read out of the concrete class's own namespace (#136), so a
+test double that inherits `MockTts` and declares nothing is refused at
+the build. That is the rule working: every provider class states its
+own answer. The fakes in this milestone declare `egress = False`, and
+the case that started as an accident became the egress-refusal test.
+
+**The reuse decision cannot be re-derived at the apply.** `_carried`
+asks `config/diff.py` because the comparison read and the apply have to
+agree by construction: an entry the read calls unchanged and the apply
+rebuilds is a rotation reported as pending forever, and the other way
+round is a credential nobody picks up. Extracting
+`unchanged_providers` out of the read's closure was the whole change.
+
+**A refused preparation must give the exclusion back at once.** The
+discard path was written as a task, which held the exclusion for a loop
+turn past a refusal and made a suite's second apply refuse. A refusal
+built nothing, so it releases synchronously; the task is for the two
+endings that have something to wait for, which are a preparation still
+running behind a caller that went away and one that finished with a
+world in its hands.
+
+**A substitution has to go into both halves of a world.** A scripted
+model put only into the per-agent mapping is dropped by the next apply,
+because the candidate's agents are built from the instances and reuse
+carries the instance. The support helper substitutes in both, which is
+also the honest description: what an entry resolves to and what an
+agent talks through are one object.
+
+### Verification
+
+Run from `vinga-server/`, at the last commit of the milestone.
+
+- `uv run ruff check .`: all checks passed.
+- `uv run mypy`: success, no issues found in 3 source files. Its scope is
+  the events package, which this milestone does not touch.
+- `uv run pytest tests/unit -q`: 2,777 passed, 18 skipped. (2,744 passed
+  and 16 skipped at the end of M2; the 33 new cases are the provider
+  lifecycle's 12, the holder's 6, the binding's 5, the registry's 4, the
+  apply's 6 minus one renamed, and the shutdown's 1. The two new skips
+  are the faster-whisper and Piper teardowns, which need their extras.)
+- `uv run pytest tests/integration -q`: 61 passed, the same count as M2
+  left: the three cases this milestone changes were already there and
+  were amended rather than added to.
+- The four documentation drift checks, regenerated and diffed against
+  `../docs/reference/`: all four clean. `api-openapi.json` and
+  `domain-config.md` change deliberately and are committed in this
+  milestone; `events.md` and `conversations-schema.md` are byte-untouched
+  and are absent from this milestone's commits, which is what says no
+  event and no conversation column moved.
+
+Not verified here, and not claimed: the two local-engine teardowns,
+which skip without the `faster-whisper` and `piper` extras installed;
+the container image; the smoke lane; and anything against a real device.
