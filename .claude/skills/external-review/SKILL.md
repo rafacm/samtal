@@ -30,8 +30,9 @@ sol) and stamps whichever ran into the provenance header.
 
 When the ChatGPT plan behind codex runs out of weekly quota, set
 `REVIEW_BACKEND=claude` and the script runs the claude CLI instead
-(`claude -p`, default model `claude-opus-5`, tools restricted to
-reads). This is a same-vendor review, so the independence property
+(`claude -p`, default model `claude-opus-5`, read-only tools
+enforced by an explicit deny list; an allowlist alone denies
+nothing). This is a same-vendor review, so the independence property
 is weaker: the reviewer still has fresh eyes and no session
 context, but shares training and blind spots with the model that
 wrote the code. Treat it as the interim tier, note the backend in
@@ -43,8 +44,11 @@ the recorded round, and return to codex when the quota resets.
   prompt on stdin. Never `codex review` with a custom prompt: it
   ignores the prompt.
 - The claude equivalent, used for manual (plan-mode) runs on the
-  fallback backend:
-  `claude -p --model claude-opus-5 --allowedTools "Read,Glob,Grep,Bash(git log:*),Bash(git show:*),Bash(git diff:*)" < prompt.md > out.txt 2> err.txt`
+  fallback backend, is the exact invocation in `run-pr-review.sh`'s
+  claude arm: copy it verbatim, including `--setting-sources ""`,
+  `--strict-mcp-config` and the `--disallowedTools` list. The deny
+  list is what makes the run read-only; `--allowedTools` alone
+  restricts nothing.
 - Run it in the background from the worktree under review. Sol takes
   10 to 25 minutes and looks stuck; stderr shows file-reading
   activity, and only the final answer reaches stdout:
