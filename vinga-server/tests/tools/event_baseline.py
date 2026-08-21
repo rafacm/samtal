@@ -166,7 +166,7 @@ from vinga_server.config.loader import StorageError
 from vinga_server.conversations import store as store_module
 from vinga_server.conversations.records import ToolInvocation, TurnRecord
 from vinga_server.conversations.store import ConversationStore
-from vinga_server.device.bindings import DeviceAgents, DeviceBindings
+from vinga_server.device.bindings import BoundNames, DeviceBindings
 from vinga_server.device.session import DeviceSession
 from vinga_server.events.catalog import CHANNELS
 from vinga_server.filler import build_agent_fillers
@@ -446,13 +446,18 @@ class TurnedAwaySocket:
 
 class ScriptedBindings:
     """A bindings view whose answer is written down, so the two no-agent
-    rejections are driven without a database behind them."""
+    rejections are driven without a database behind them.
 
-    def __init__(self, resolution: DeviceAgents) -> None:
-        self._resolution = resolution
+    The answer is the raw names, as the real view's is: which of them
+    this server can serve is the session's question, and a name no
+    configuration here defines is what drives the not-loaded rejection.
+    """
 
-    async def resolve(self, mac: str) -> DeviceAgents:
-        return self._resolution
+    def __init__(self, bound: BoundNames) -> None:
+        self._bound = bound
+
+    async def resolve(self, mac: str) -> BoundNames:
+        return self._bound
 
 
 class Failing:
@@ -474,7 +479,7 @@ class Failing:
 
 
 async def turned_away(
-    config: Config, device_id: str, resolution: DeviceAgents | None = None
+    config: Config, device_id: str, resolution: BoundNames | None = None
 ) -> None:
     """One connection that never becomes a session."""
     generations = world(config, providers=built_world(config))
@@ -587,13 +592,11 @@ async def drive_bad_device_id(_: Path) -> None:
 
 
 async def drive_agent_not_loaded(_: Path) -> None:
-    await turned_away(
-        config_with_agent(), DEVICE_MAC, DeviceAgents(agents=(), unloaded=("poet",))
-    )
+    await turned_away(config_with_agent(), DEVICE_MAC, BoundNames(names=("poet",)))
 
 
 async def drive_no_agent(_: Path) -> None:
-    await turned_away(config_with_agent(), DEVICE_MAC, DeviceAgents(agents=()))
+    await turned_away(config_with_agent(), DEVICE_MAC, BoundNames(names=()))
 
 
 def drive_session_open(directory: Path) -> None:
@@ -1061,15 +1064,15 @@ def drive_bindings_snapshot_only(directory: Path) -> None:
         agents={"assistant": dict(AGENT)},
         devices={BINDINGS_DEVICE_MAC: ["assistant"]},
     )
-    DeviceBindings.open(config).dispose()
+    DeviceBindings.open(world(config)).dispose()
 
 
 def drive_bindings_unreadable(directory: Path) -> None:
     config = booted(directory, devices={BINDINGS_DEVICE_MAC: ["assistant"]})
-    bindings = DeviceBindings.open(config)
+    bindings = DeviceBindings.open(world(config))
     try:
         (directory / "vinga.db").write_bytes(b"this is not a database")
-        bindings.agents_for(BINDINGS_DEVICE_MAC)
+        bindings.names_for(BINDINGS_DEVICE_MAC)
     finally:
         bindings.dispose()
 

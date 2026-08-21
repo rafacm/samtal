@@ -190,25 +190,6 @@ async def _build_composition(
     # read it once for exactly that refusal; this is the issuer itself,
     # which belongs to the composition that holds it.
     device_auth = build_device_auth(config)
-    # Which agents a device may talk to, and the only thing this server
-    # re-reads while it runs: an operator binds a board with the board
-    # in front of them, and its next check-in is seconds away. Opened
-    # here because boot has already migrated the database, so nothing on
-    # a device path ever has to, and registered for disposal in the same
-    # breath: it is the first pool this build acquires and therefore the
-    # last one released.
-    #
-    # It decides once, and for the life of the process, whether there is
-    # a database to read at all: a configuration whose domain half came
-    # from one is served live, and one composed without a database is
-    # served from itself, authoritatively (see `bindings.py`). Both
-    # production entry points compose from the database, `main()`
-    # through `load_boot_config` and the ASGI one through `create_app`,
-    # so a server always gets the live view; the other shape is the test
-    # lane's and an embedded caller's, and it is deliberately not
-    # changed by the open below happening later in this build.
-    bindings = DeviceBindings.open(config)
-    stack.callback(bindings.dispose)
     # The devices waiting to be claimed, and the codes they are showing.
     # Runtime state owned by this app and shared with the configuration
     # API below, which is where a code becomes a binding. Always built,
@@ -316,6 +297,24 @@ async def _build_composition(
     # meet, an apply that replaced it and a server that is stopping
     # alike.
     stack.push_async_callback(generations.aclose)
+    # Which agents a device is bound to, and the only thing this server
+    # re-reads from storage while it runs: an operator binds a board
+    # with the board in front of them, and its next check-in is seconds
+    # away. Opened after the holder because it asks the holder what
+    # world is being served, which is the fallback when the database
+    # cannot be read, and because boot has already migrated the
+    # database, so nothing on a device path ever has to.
+    #
+    # It decides once, and for the life of the process, whether there is
+    # a database to read at all: a configuration whose domain half came
+    # from one is served live, and one composed without a database is
+    # served from the generation being served, authoritatively (see
+    # `bindings.py`). Both production entry points compose from the
+    # database, `main()` through `load_boot_config` and the ASGI one
+    # through `create_app`, so a server always gets the live view; the
+    # other shape is the test lane's and an embedded caller's.
+    bindings = DeviceBindings.open(generations)
+    stack.callback(bindings.dispose)
     # One registry per app: what decides whether there is room for the
     # next conversation, what the drain reaches the live ones through,
     # and which world each of them is holding, which is what says when a

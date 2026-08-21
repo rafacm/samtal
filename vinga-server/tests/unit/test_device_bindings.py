@@ -20,7 +20,7 @@ from sqlalchemy import inspect, text, update
 from sqlalchemy.exc import OperationalError
 from starlette.websockets import WebSocketDisconnect
 
-from tests.support.configs import BOUND_MAC, DEVICE_UUID
+from tests.support.configs import BOUND_MAC, DEVICE_UUID, world
 from tests.support.registry import AGENT, STAGES, booted, check_in, store_at
 from tests.support.registry import BINDINGS_DEVICE_MAC as DEVICE_MAC
 from vinga_server import logs
@@ -222,8 +222,14 @@ def test_the_session_line_names_the_restart_too(
 
 
 def test_a_loaded_name_beside_an_unloaded_one_still_answers(tmp_path: Path) -> None:
-    """The filter drops names rather than the whole binding, so a device
-    bound to a loaded agent and a new one talks to the loaded one."""
+    """The split drops names rather than the whole binding, so a device
+    bound to a served agent and one this server is not serving talks to
+    the one it can.
+
+    The view answers both names, because which of them can be served is
+    not its question; the split against the world being served is what
+    separates them, and it is the same call the check-in above made.
+    """
     config = booted(tmp_path)
     with TestClient(create_app(config)) as client:
         with store_at(tmp_path) as store:
@@ -231,7 +237,12 @@ def test_a_loaded_name_beside_an_unloaded_one_still_answers(tmp_path: Path) -> N
             store.bind_device(DEVICE_MAC, ["assistant", "poet"])
 
         assert token_of(client) != ""
-        assert client.app.state.composition.bindings.agents_for(DEVICE_MAC).agents == ("assistant",)
+        composition = client.app.state.composition
+        bound = composition.bindings.names_for(DEVICE_MAC)
+        assert bound.names == ("assistant", "poet")
+
+        served = bound.against(composition.generations.current().config.agents)
+        assert (served.agents, served.unloaded) == (("assistant",), ("poet",))
 
 
 # When the database cannot be read
@@ -303,11 +314,11 @@ def test_a_failed_read_repeats_nothing_the_failure_carried(
         agents={"assistant": AGENT},
         devices={DEVICE_MAC: ["assistant"]},
     )
-    bindings = DeviceBindings(config, _FailingEngine())
+    bindings = DeviceBindings(world(config), _FailingEngine())
 
     with caplog.at_level(logging.WARNING):
         # The snapshot answered, which is the other half of the rule.
-        assert bindings.agents_for(DEVICE_MAC).agents == ("assistant",)
+        assert bindings.names_for(DEVICE_MAC).names == ("assistant",)
 
     text, objects = _rendered(caplog.records)
     assert objects, "the fallback went unlogged"
@@ -361,16 +372,16 @@ def test_a_row_no_write_could_have_made_falls_back_rather_than_refusing(
     reading it as "bound to nothing" would turn a device away over a
     fact nobody established."""
     config = booted(tmp_path, devices={DEVICE_MAC: ["assistant"]})
-    bindings = DeviceBindings.open(config)
+    bindings = DeviceBindings.open(world(config))
     try:
         _write_agents_column(tmp_path, DEVICE_MAC, stored)
 
         with caplog.at_level(logging.WARNING):
-            resolved = bindings.agents_for(DEVICE_MAC)
+            resolved = bindings.names_for(DEVICE_MAC)
     finally:
         bindings.dispose()
 
-    assert resolved.agents == ("assistant",)
+    assert resolved.names == ("assistant",)
     assert any(
         getattr(record, "event", None) == "device_bindings_unreadable"
         for record in caplog.records
@@ -384,7 +395,7 @@ def test_a_default_agent_that_is_not_a_name_falls_back_too(
     malformed default agent would have quietly turned every unbound
     device away."""
     config = booted(tmp_path, devices={BOUND_MAC: ["assistant"]}, default_agent="assistant")
-    bindings = DeviceBindings.open(config)
+    bindings = DeviceBindings.open(world(config))
     try:
         engine = open_database(tmp_path)
         try:
@@ -398,12 +409,12 @@ def test_a_default_agent_that_is_not_a_name_falls_back_too(
             engine.dispose()
 
         with caplog.at_level(logging.WARNING):
-            resolved = bindings.agents_for(DEVICE_MAC)
+            resolved = bindings.names_for(DEVICE_MAC)
     finally:
         bindings.dispose()
 
     # The snapshot's default agent, rather than silence.
-    assert resolved.agents == ("assistant",)
+    assert resolved.names == ("assistant",)
     assert any(
         getattr(record, "event", None) == "device_bindings_unreadable"
         for record in caplog.records
@@ -414,12 +425,12 @@ def test_the_fallback_is_the_snapshot_and_not_an_empty_answer(tmp_path: Path) ->
     """"Fall back" means the configuration this server booted with, so a
     device the snapshot does not bind is still refused."""
     config = booted(tmp_path, devices={DEVICE_MAC: ["assistant"]})
-    bindings = DeviceBindings.open(config)
+    bindings = DeviceBindings.open(world(config))
     try:
         (tmp_path / "vinga.db").write_bytes(b"this is not a database")
 
-        assert bindings.agents_for(DEVICE_MAC).agents == ("assistant",)
-        assert bindings.agents_for("11:22:33:44:55:66").agents == ()
+        assert bindings.names_for(DEVICE_MAC).names == ("assistant",)
+        assert bindings.names_for("11:22:33:44:55:66").names == ()
     finally:
         bindings.dispose()
 
@@ -435,10 +446,10 @@ def test_a_missing_database_is_the_snapshot_without_a_warning(
         agents={"assistant": AGENT},
         devices={DEVICE_MAC: ["assistant"]},
     )
-    bindings = DeviceBindings.open(config)
+    bindings = DeviceBindings.open(world(config))
     try:
         with caplog.at_level(logging.WARNING):
-            assert bindings.agents_for(DEVICE_MAC).agents == ("assistant",)
+            assert bindings.names_for(DEVICE_MAC).names == ("assistant",)
     finally:
         bindings.dispose()
 
@@ -454,18 +465,18 @@ def test_a_database_that_goes_away_is_not_created_again(
     database, which would answer every device "bound to nothing" for as
     long as nobody noticed."""
     config = booted(tmp_path, devices={DEVICE_MAC: ["assistant"]})
-    bindings = DeviceBindings.open(config)
+    bindings = DeviceBindings.open(world(config))
     try:
         for sidecar in tmp_path.glob("vinga.db*"):
             sidecar.unlink()
 
         with caplog.at_level(logging.WARNING):
-            resolved = bindings.agents_for(DEVICE_MAC)
+            resolved = bindings.names_for(DEVICE_MAC)
     finally:
         bindings.dispose()
 
     # The loud fallback, and no database where one was deleted.
-    assert resolved.agents == ("assistant",)
+    assert resolved.names == ("assistant",)
     assert any(
         getattr(record, "event", None) == "device_bindings_unreadable"
         for record in caplog.records
@@ -480,9 +491,9 @@ def test_the_read_path_never_migrates(tmp_path: Path) -> None:
     built the whole schema in it."""
     (tmp_path / "vinga.db").touch()
     config = Config(server={"database": {"dir": str(tmp_path)}})
-    bindings = DeviceBindings.open(config)
+    bindings = DeviceBindings.open(world(config))
     try:
-        assert bindings.agents_for(DEVICE_MAC).agents == ()
+        assert bindings.names_for(DEVICE_MAC).names == ()
     finally:
         bindings.dispose()
 
@@ -512,7 +523,7 @@ async def test_a_held_write_lock_stalls_neither_the_lookup_nor_the_loop(
     also stays live under the same lock is the integration lane's, where
     there is a device to have one with."""
     config = booted(tmp_path, devices={DEVICE_MAC: ["assistant"]})
-    bindings = DeviceBindings.open(config)
+    bindings = DeviceBindings.open(world(config))
     writer = open_database(tmp_path)
     ticks = 0
 
@@ -547,7 +558,7 @@ async def test_a_held_write_lock_stalls_neither_the_lookup_nor_the_loop(
         writer.dispose()
         bindings.dispose()
 
-    assert resolution.agents == ("assistant",)
+    assert resolution.names == ("assistant",)
     assert during > 0
     assert still_held
 
@@ -602,6 +613,6 @@ def test_a_view_with_no_database_answers_authoritatively(tmp_path: Path) -> None
     """A configuration composed in memory has no database to be stale
     against: the snapshot is the whole truth there is, which is what the
     unit lane and an embedded server have, and a code is minted there."""
-    snapshot_only = DeviceBindings.snapshot_only(Config())
+    snapshot_only = DeviceBindings.snapshot_only(world(Config()))
 
-    assert snapshot_only.agents_for(DEVICE_MAC).authoritative is True
+    assert snapshot_only.names_for(DEVICE_MAC).authoritative is True

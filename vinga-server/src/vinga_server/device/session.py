@@ -191,9 +191,7 @@ class DeviceSession:
         # path, rather than a live one and a fallback one that could
         # come to disagree about a rule they both implement.
         self._bindings = (
-            bindings
-            if bindings is not None
-            else DeviceBindings.snapshot_only(generations.current().config)
+            bindings if bindings is not None else DeviceBindings.snapshot_only(generations)
         )
         self._captures = captures
         # Where this connection reports which world it ended up talking
@@ -355,15 +353,23 @@ class DeviceSession:
             await self._close(POLICY_VIOLATION, "Device-Id must be the device MAC")
             return
 
-        # Read from the live view rather than from the boot snapshot, so
+        # Read from the live view rather than from a captured world, so
         # a device bound while this server runs connects on its next
         # attempt; awaited off the event loop, because every other
-        # conversation in this process is waiting on it. The view
-        # filters to the agents boot loaded, the filter this line used
-        # to apply itself: the registry builds exactly one entry per
-        # `agents` key, so a name outside that set has no conversation
-        # behind it.
-        resolution = await self._bindings.resolve(mac)
+        # conversation in this process is waiting on it. What comes back
+        # is the raw names.
+        bound = await self._bindings.resolve(mac)
+        # And here is the pin (#191). One generation, captured on the
+        # loop the instant that await returns, and everything that
+        # follows is about exactly this object: which of the bound names
+        # it can serve, the runtime built from it, and the lease
+        # registered for it. A reload landing a microsecond either side
+        # of this line therefore leaves this conversation wholly on the
+        # old world or wholly on the new one; asking the holder twice
+        # would be two questions about two worlds, and the answer to the
+        # first could name an agent the second has never heard of.
+        generation = self._generations.current()
+        resolution = bound.against(generation.config.agents)
         agents = list(resolution.agents)
         if not agents:
             if resolution.unloaded:
@@ -381,17 +387,13 @@ class DeviceSession:
             await self._close(POLICY_VIOLATION, "no agent is configured for this device")
             return
         self._agents = agents
-        # The world this conversation is, from here to its end. Read
-        # once, on the loop, after the awaited binding lookup, and the
-        # three statements below have no await between them on purpose
-        # (#191): the runtime is built from this object, the registry is
-        # told this connection is holding it, and only then may anything
-        # else run. An apply landing a microsecond either side of that
-        # step therefore finds a conversation wholly on the old world or
-        # wholly on the new one, and never a generation retired between
-        # the moment a conversation was built from it and the moment
+        # The world this conversation is, from here to its end: the one
+        # captured above, kept now that there is a conversation to keep
+        # it for. The three statements below have no await between them
+        # on purpose, so that a generation is never retired between the
+        # moment a conversation was built from it and the moment
         # anybody knew.
-        generation = self._generation = self._generations.current()
+        self._generation = generation
         # Where the first agent used to be activated by hand: the
         # runtime's constructor does that, and the MCP revive after it,
         # in that order, and spawns nothing.

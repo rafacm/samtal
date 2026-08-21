@@ -490,6 +490,7 @@ class PipelineRuntime:
         self,
         output: DeviceOutput,
         generations: Generations,
+        generation: Generation,
         events: SessionEvents,
         agent_providers: Mapping[str, AgentProviders],
         mcp_servers: McpServers,
@@ -507,6 +508,15 @@ class PipelineRuntime:
         # restart-only setting that every generation carries the same
         # value of.
         self._generations = generations
+        # And the world this conversation was built from, kept because
+        # an activation may have to fall back to it: an apply can delete
+        # an agent this device is bound to, and a handover to it has to
+        # read the prompt world it was last served with rather than
+        # index a current world that has never heard of it. Everything
+        # else this runtime speaks through came out of this object at
+        # construction, so keeping it costs nothing that was not already
+        # being held.
+        self._generation = generation
         # The file half, taken once because a generation never replaces
         # it: a reload composes the stored domain half onto this
         # process's own server section, so every generation carries the
@@ -926,12 +936,24 @@ class PipelineRuntime:
         callers, because the next caller is a tool whose argument a model
         chose: an agent that merely exists is not one this device may
         talk to. Nothing is swapped when the name is refused, so the
-        session keeps the agent it already had."""
+        session keeps the agent it already had.
+
+        Which world the prompt is read out of is the one decision here
+        that is not obvious (#191). The current one, because that is
+        what an activation converges at and the whole reason a reload
+        reaches a conversation at all; the session's own when the
+        current one has never heard of this agent, which is exactly the
+        state an apply that deleted it leaves behind. This device is
+        still bound to it and this conversation is still allowed to hand
+        over to it, so it goes on being served the prompt world it was
+        opened with rather than raising a KeyError inside a tool call.
+        """
         if name not in self._agents:
             raise _not_allowed(name, self._agents)
         self._agent = name
         self._providers = self._agent_providers[name]
-        config = self._generations.current().config
+        current = self._generations.current().config
+        config = current if name in current.agents else self._generation.config
         self._know_how = prompt.know_how(
             config.prompt_for_agent(name),
             config.fragments_for_agent(name),
@@ -1739,6 +1761,7 @@ def bespoke_runtime_factory(
         return PipelineRuntime(
             output,
             generations,
+            generation,
             events,
             generation.providers.agents,
             mcp_servers,

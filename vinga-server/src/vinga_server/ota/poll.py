@@ -74,7 +74,11 @@ async def activate(request: Request) -> Response:
 
     comp: Composition = request.app.state.composition
     bindings: DeviceBindings = comp.bindings
-    resolution = await bindings.resolve(mac)
+    # Split against the world this server is serving as it answers, for
+    # the reason the check-in splits it there: a device is told it is
+    # activated when a session could be opened for it now.
+    bound = await bindings.resolve(mac)
+    resolution = bound.against(comp.generations.current().config.agents)
     if resolution.agents:
         events.emit(
             lambda: ActivationComplete(

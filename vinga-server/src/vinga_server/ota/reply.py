@@ -153,13 +153,18 @@ async def check_version(request: Request) -> Response:
         # Deliberately not the validator's own sentence, which quotes
         # what it refused: see DEVICE_ID_PROBLEM.
         return _bad_request(DEVICE_ID_PROBLEM)
-    # The live view rather than the boot snapshot, and awaited off the
+    # The live view rather than a captured one, and awaited off the
     # event loop: a device bound a moment ago gets its token at this
-    # check-in rather than after a restart. What it resolves to is the
-    # allowlist this endpoint is stingy by, so the answer decides both
-    # the token below and what is said about the device here.
+    # check-in rather than after a restart. The names come back
+    # unclassified and are split against the world this server is
+    # serving as it answers, which is the honest generation for a
+    # check-in: nothing here is being built from it, so what matters is
+    # what a session opening a moment from now could be given. That
+    # split is the allowlist this endpoint is stingy by, so it decides
+    # both the token below and what is said about the device here.
     bindings: DeviceBindings = comp.bindings
-    resolution = await bindings.resolve(mac)
+    bound = await bindings.resolve(mac)
+    resolution = bound.against(comp.generations.current().config.agents)
     agents = list(resolution.agents)
 
     payload = await _read_json_object(request)
