@@ -926,11 +926,11 @@ class PipelineRuntime:
         This is also where the know-how half of the system prompt is
         assembled, which is the whole of when it happens: at session
         open and again at an agent switch, and never per reply. Nothing
-        is fetched here, because nothing needs to be: the persona is the
-        configuration this process booted on, and the guidance is what
-        the registry's slice holds, so a reload that landed since is
-        picked up by the next session or the next switch rather than by
-        a conversation in flight.
+        is fetched here, because nothing needs to be: the persona is
+        configuration this server is already holding and the guidance is
+        what the registry's slice holds, so a reload that landed since
+        is picked up by the next session or the next switch rather than
+        by a conversation in flight.
 
         The device's bound list is enforced here rather than left to
         callers, because the next caller is a tool whose argument a model

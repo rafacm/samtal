@@ -587,8 +587,8 @@ def problem_response(
         headers=dict(headers) if headers is not None else None,
     )
 
-# What a prompt read answers for an agent this server did not load. The
-# name is not quoted back: it arrived in the path, and what is worth
+# What a prompt read answers for an agent this server is not serving.
+# The name is not quoted back: it arrived in the path, and what is worth
 # saying about it is where to look instead.
 UNLOADED_AGENT = (
     "this server is not serving an agent of that name. The agents a server can serve "
@@ -1578,17 +1578,20 @@ def _runtime(api: FastAPI) -> None:
         """Apply the stored configuration to this running server.
 
         The one action in this namespace, and the one way a stored
-        change reaches a running server without a restart. What it
-        applies is every kind this server can apply while it runs, which
-        today is the provider entries and the MCP entries with the
+        change reaches a running server. What it applies is the whole
+        domain half: the provider entries and the MCP entries with the
         secrets stored on them, the
         agents' effective `mcp` grant lists, the shared prompt
-        fragments, each agent's own prompt text and includes, and each
-        agent's own filler section.
-        Everything else still waits for the start that reads it: the
-        agent set, `agent_defaults`, which entry serves each of an
-        agent's stages, and the whole server
-        section, which is this process's own file and is never re-read.
+        fragments, the agents themselves and the `agent_defaults` layer
+        under them, which carries the stage every agent that names none
+        of its own inherits. An agent this installs is one a device can
+        be bound to and reach at its next check-in; one it removes is
+        one no session can be opened as from the moment this answers,
+        while a conversation already talking as it finishes on the world
+        it was built from.
+        What is not here is the server section, which is this process's
+        own file and is never re-read: the port, the directories, the
+        limits. Nothing this API writes is in it.
 
         Nothing is swapped, stopped or started until the whole new world
         has been composed, validated and built, so a refusal (422) has
@@ -1868,11 +1871,10 @@ def _entity_writes(api: FastAPI) -> None:
         reload re-reads the whole `prompt_fragments` kind, and prompt
         text is assembled at an activation, so the new words reach every
         agent that includes this fragment at that agent's next
-        activation. Which agents those are depends on the layer that
-        names it: an agent's own `prompt_includes` is applied by the
-        same reload, while `agent_defaults.prompt_includes` is what
-        every agent's effective value is inherited through and waits for
-        the next server start."""
+        activation. Which agents those are is whichever layer names it,
+        and both layers are the same reload's: an agent's own
+        `prompt_includes`, and the `agent_defaults.prompt_includes` that
+        every agent naming no list of its own inherits."""
         store.set_prompt_fragment(name, body)
         return _acknowledge(wrote_prompt_fragment(name), _PROMPT_FRAGMENT.notice)
 

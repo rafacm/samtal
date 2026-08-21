@@ -267,7 +267,7 @@ class McpReloadResult(BaseModel):
         description=(
             "The entries whose fragment or whose stored secrets changed. Their "
             "connections were closed and made again, so a rotated credential applies "
-            "here rather than at the next server start."
+            "as this request answers rather than at some later boundary."
         )
     )
     stopped: list[str] = Field(
@@ -873,9 +873,10 @@ class ConfigDiff(BaseModel):
 
 
 # And what answers it: a callable, because what it closes over (the
-# configuration this process booted on, the credentials loaded with it,
-# and the registry whose world a reload replaces) is the composition
-# root's business and not this API's. It answers the whole comparison,
+# holder whose generation is what this server is serving, the
+# credentials loaded with that world, and the registry whose managers a
+# reload replaces) is the composition root's business and not this
+# API's. It answers the whole comparison,
 # composed where the two worlds are, so the handler awaits it and adds
 # nothing. None is the honest answer for an application without a
 # server, and the route refuses rather than reporting an empty diff,
@@ -989,20 +990,23 @@ class Acknowledgement(BaseModel):
     )
     notice: str = Field(
         description=(
-            "When the change takes effect, as one of a handful of sentences. Most of "
-            "the configuration is read once at start, so most writes apply at the next "
-            "server start. A device binding and the default agent are read by the "
-            "running server, so they apply at the device's next OTA check or "
-            "connection with no restart, unless they name an agent this server has not "
-            "loaded, which is the case that carries the restart sentence again. A "
-            "write to an MCP server entry, to one of its secret slots or to a prompt "
-            "fragment names the reload instead, since that is what applies it to a "
-            "running server. A write to an agent names both and gives each applied "
-            "field the moment it converges at: its prompt fields at the next "
-            "activation, its `mcp` grants at the next utterance and its filler section "
-            "at the next conversation, with the rest of it built at the next start. A "
+            "When the change takes effect, as one of a handful of sentences. A device "
+            "binding and the default agent are read by the running server as a device "
+            "asks for them, so they apply at that device's next OTA check or "
+            "connection with nothing asked of the server. Every other kind this API "
+            "writes, which is the whole of the rest of the domain half (the provider "
+            "entries, the MCP entries, the secret slots on either, the prompt "
+            "fragments, the agents and `agent_defaults`), names `POST "
+            "/runtime/config/reload`, which applies it without a restart; that "
+            "sentence also names the three moments a conversation already in progress "
+            "meets an applied change at, its tools at the next utterance, its prompt "
+            "text at the next activation, and the voice and filled pauses at the next "
+            "conversation. A binding naming an agent this server is not serving yet "
+            "carries a sentence of its own, because both halves are true at once: the "
+            "row is live, and the agent arrives at the reload that installs it. A "
             "server serving a configuration no store describes says that the write is "
-            "stored and takes effect when a server boots from that store."
+            "stored and takes effect when a server boots from that store. Nothing this "
+            "API writes waits for a server start."
         )
     )
 

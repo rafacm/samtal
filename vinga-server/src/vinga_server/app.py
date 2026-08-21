@@ -747,8 +747,8 @@ def _prompt_preview(
     session opening now would be sent rather than of what one opening at
     boot would have been.
 
-    An agent this server did not load answers None rather than raising,
-    so the route decides what a missing one means. The guidance is read
+    An agent this server is not serving answers None rather than
+    raising, so the route decides what a missing one means. The guidance is read
     on the loop that owns the managers, before any await; the memory
     read is filesystem I/O and goes to a worker thread, which is what
     keeps an inspection request off the loop every live conversation is
