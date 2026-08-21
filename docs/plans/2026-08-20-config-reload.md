@@ -561,7 +561,7 @@ in the same change as the prose that feeds them.
   on M2, PR #231.
 - [x] **[M4: the agent set and
   agent_defaults](2026-08-20-config-reload-implementation.md#m4-the-agent-set-and-agent_defaults).**
-  (PR TBD) The four agent-set
+  (PR #232) The four agent-set
   snapshots move to the generation (`ApiRuntime.loaded_agents`
   becomes a read-through, `McpServers`' servable set swaps with
   the world and its three "never replaced" prose sites are
@@ -574,7 +574,7 @@ in the same change as the prose that feeds them.
   claims for the domain half are gone, and the API description's
   boot-snapshot paragraph is rewritten into the generation
   paragraph. Branch `feature/config-reload-m4` stacked on M3,
-  PR TBD.
+  PR #232.
 
 ## Test strategy
 
