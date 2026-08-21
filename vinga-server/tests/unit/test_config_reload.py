@@ -27,8 +27,7 @@ voice" is not a thing a name list can say.
 import asyncio
 import json
 import threading
-from collections.abc import Mapping
-from dataclasses import replace
+from collections.abc import Callable, Collection, Mapping
 from pathlib import Path
 from typing import Any, cast
 
@@ -39,8 +38,8 @@ from sqlalchemy import text
 from tests.support.apps import entered_client
 from tests.support.configs import config_with, world
 from tests.support.problems import problem
-from tests.support.providers import BrokenTts, RecordingLlm
-from tests.support.sessions import run_reply, session_for
+from tests.support.providers import BrokenTts, RecordingLlm, built_world
+from tests.support.sessions import agent_providers, run_reply, session_for
 from tests.support.tools_mcp import reading
 from vinga_server import app as app_module
 from vinga_server.app import _prompt_preview, config_diff_reader, config_reloader
@@ -66,9 +65,9 @@ from vinga_server.config.secrets import (
 from vinga_server.config.store import ConfigStore
 from vinga_server.db import open_database
 from vinga_server.filler import FillerClips, build_agent_fillers
-from vinga_server.generation import Generations
+from vinga_server.generation import Generation, Generations
 from vinga_server.logs import JsonFormatter
-from vinga_server.providers import AgentProviders, build_agent_providers
+from vinga_server.providers import ProviderWorld
 from vinga_server.tools.mcp import McpServers
 
 DEVICE = "aa:bb:cc:dd:ee:ff"
@@ -84,27 +83,37 @@ def applying(
     running: Config,
     stored: Config,
     fillers: Mapping[str, FillerClips] | None = None,
-    providers: Mapping[str, AgentProviders] | None = None,
+    providers: ProviderWorld | None = None,
     running_secrets: SecretStore | None = None,
     stored_secrets: SecretStore | None = None,
+    held: Callable[[], Collection[Generation]] = tuple,
 ) -> tuple[Generations, ConfigReload]:
     """A running server and the apply that would put `stored` in front
     of it, with the holder the apply installs into handed back so a test
     can read what is being served.
 
-    The engines default to the running configuration's own, built once
-    and handed to the apply, which is what a server does: the voice a
-    filler is synthesized in is the one that is running, and a case that
-    wants a voice that will not speak hands its own in. `fillers` are the
-    clips that server already has, which is what a reuse assertion needs
-    a world to start from.
+    The world this server is serving is the running configuration with
+    its own engines built from it, which is what a boot leaves behind:
+    a case that wants a voice that will not speak, or an engine it can
+    watch being closed, hands its own world in. `fillers` are the clips
+    that server already has, which is what a reuse assertion needs a
+    world to start from.
+
+    `held` is who is still holding a world when the apply retires one,
+    and nobody is the default: a suite with no conversations open is a
+    server whose replaced engines may go at once.
     """
-    generations = world(running, running_secrets, fillers)
+    generations = world(
+        running,
+        running_secrets,
+        fillers,
+        built_world(running) if providers is None else providers,
+    )
     return generations, ConfigReload(
         generations,
         McpServers.build(running),
         reading(stored, stored_secrets),
-        build_agent_providers(running) if providers is None else providers,
+        held,
     )
 
 
@@ -184,7 +193,8 @@ async def test_an_agents_own_include_list_is_applied() -> None:
     assertion below would fail.
     """
     running, stored = including("quiet"), including("loud")
-    generations, reload = applying(running, stored)
+    llm = RecordingLlm()
+    generations, reload = applying(running, stored, providers=scripted(running, llm))
     diff = config_diff_reader(
         generations, McpServers.build(running), reading(stored)
     )
@@ -204,8 +214,7 @@ async def test_an_agents_own_include_list_is_applied() -> None:
     assert result.prompts.changed == ["assistant"]
 
     # And the next activation is what actually reaches the model.
-    llm = RecordingLlm()
-    await run_reply(talking_to(running, generations, llm), "hello")
+    await run_reply(talking_to(running, generations), "hello")
     assert LOUD in llm.systems[-1]
     assert QUIET not in llm.systems[-1]
 
@@ -286,10 +295,10 @@ async def test_a_provider_edit_stays_pending() -> None:
 # The filled pauses, and what a reload does to a clip
 #
 # A clip is a configured phrase spoken by a configured voice, and the two
-# together are what an apply decides by. The voice is read from the world
-# that is running on both sides, because that is the voice synthesis uses
-# until the milestone that rebuilds providers, so a provider edit cannot
-# invalidate a clip here however loudly the store disagrees.
+# together are what an apply decides by. Each half is read from the world
+# it belongs to, so a candidate that rebuilt the voice is a candidate
+# whose clips are made again in it, and one that carried the voice over
+# keeps the very objects it had.
 
 
 def masking(agent: str = "assistant", *phrases: str, **overrides: object) -> Config:
@@ -311,7 +320,7 @@ def masking(agent: str = "assistant", *phrases: str, **overrides: object) -> Con
 
 async def synthesized(
     running: Config,
-) -> tuple[dict[str, AgentProviders], dict[str, FillerClips]]:
+) -> tuple[ProviderWorld, dict[str, FillerClips]]:
     """The world a server is running: the engines it built and the clips
     it synthesized with them.
 
@@ -320,8 +329,8 @@ async def synthesized(
     it was carried over because the voice it was spoken by is the object
     it was.
     """
-    providers = build_agent_providers(running)
-    return providers, (await build_agent_fillers(running, providers)).clips
+    providers = built_world(running)
+    return providers, (await build_agent_fillers(running, providers.agents)).clips
 
 
 async def test_a_prompt_edit_carries_every_clip_over_untouched() -> None:
@@ -437,13 +446,15 @@ async def test_a_provider_edit_neither_invalidates_nor_replaces_a_clip() -> None
     assert (await diff()).agents.changed == ("assistant",)
 
 
-async def test_a_provider_secret_edit_neither_invalidates_nor_replaces_a_clip() -> None:
-    """The other half of the same finding. A rotated credential moves the
-    provider's identity on the stored side and nothing on the running
-    one, since the voice was built with the old value and is still
-    speaking with it."""
+async def test_a_provider_secret_rotation_is_applied_and_re_voices_the_clips() -> None:
+    """The other half of the same pair, and the half that moved with the
+    providers. A rotated credential is part of what a voice was built
+    with, so the entry is built again with the new one, the clips that
+    voice spoke are made again in the new object, and what was pending
+    in the comparison is not pending any more."""
     keys = MultiFernet([Fernet(generate_key())])
     location = SecretLocation.provider("tts", "mock", "api_key")
+    rotated = SecretStore({location: encrypt(location, ROTATED, keys)}, keys)
     running = masking()
     providers, clips = await synthesized(running)
     generations, reload = applying(
@@ -452,24 +463,28 @@ async def test_a_provider_secret_edit_neither_invalidates_nor_replaces_a_clip() 
         fillers=clips,
         providers=providers,
         running_secrets=SecretStore({location: encrypt(location, PLAINTEXT, keys)}, keys),
-        stored_secrets=SecretStore({location: encrypt(location, ROTATED, keys)}, keys),
+        stored_secrets=rotated,
     )
     diff = config_diff_reader(
-        generations,
-        McpServers.build(running),
-        reading(
-            running, SecretStore({location: encrypt(location, ROTATED, keys)}, keys)
-        ),
+        generations, McpServers.build(running), reading(running, rotated)
     )
+
+    assert (await diff()).providers.changed == ("tts.mock",)
 
     result = await reload.apply()
 
+    assert result.providers is not None
+    assert result.providers.built == ["tts.mock"]
     assert result.fillers is not None
-    assert result.fillers.reused == ["assistant"]
-    assert generations.current().fillers["assistant"] is clips["assistant"]
-    # Still pending, because the provider that would use it is still the
-    # one this server started with.
-    assert (await diff()).providers.changed == ("tts.mock",)
+    assert result.fillers.resynthesized == ["assistant"]
+    installed = generations.current()
+    assert installed.fillers["assistant"] is not clips["assistant"]
+    # Spoken by the object the rotation built, which is what makes this
+    # a re-voicing rather than a re-run of the same synthesis.
+    assert installed.providers.instances["tts.mock"] is not providers.instances["tts.mock"]
+    # And nothing is pending any more, which is the care point: what an
+    # apply has applied is not reported as waiting for a restart.
+    assert (await diff()).providers.changed == ()
 
 
 async def test_a_synthesis_failure_applies_the_world_with_no_clip() -> None:
@@ -479,10 +494,10 @@ async def test_a_synthesis_failure_applies_the_world_with_no_clip() -> None:
     means exactly that."""
     running = masking()
     stored = masking("assistant", "Let me think...")
-    providers = build_agent_providers(running)
-    providers["assistant"] = replace(providers["assistant"], tts=cast(Any, BrokenTts()))
 
-    generations, result = await applied(running, stored, providers=providers)
+    generations, result = await applied(
+        running, stored, providers=voiced_by(running, BrokenTts())
+    )
 
     assert result.fillers is not None
     assert result.fillers.disabled == ["assistant"]
@@ -502,9 +517,9 @@ async def test_a_synthesis_failure_reaches_the_response_body_and_the_rendering()
     beside its siblings rather than dropping a shape it has no rule for.
     """
     running = masking()
-    providers = build_agent_providers(running)
-    providers["assistant"] = replace(providers["assistant"], tts=cast(Any, BrokenTts()))
-    generations, reload = applying(running, masking(), providers=providers)
+    generations, reload = applying(
+        running, masking(), providers=voiced_by(running, BrokenTts())
+    )
 
     body = (await reload.apply()).model_dump(mode="json")
 
@@ -547,10 +562,10 @@ async def test_a_session_opened_before_an_apply_keeps_the_clips_it_bound() -> No
     generations, reload = applying(
         running, stored, fillers=clips, providers=providers
     )
-    before = talking_to(running, generations, RecordingLlm(["one", "two"]))
+    before = talking_to(running, generations)
 
     await reload.apply()
-    after = talking_to(running, generations, RecordingLlm())
+    after = talking_to(running, generations)
 
     # White-box, and the only way to say it: which clips a conversation
     # is masking with is not on the device boundary, deliberately, since
@@ -628,7 +643,9 @@ async def test_a_second_apply_while_one_is_running_is_refused() -> None:
     running = served(agents={"assistant": {"prompt": "A"}})
     held = _Held(running)
     reload = ConfigReload(
-        world(running), McpServers.build(running), held, build_agent_providers(running)
+        world(running, providers=built_world(running)),
+        McpServers.build(running),
+        held,
     )
 
     first = asyncio.create_task(reload.apply())
@@ -650,12 +667,29 @@ async def test_a_second_apply_while_one_is_running_is_refused() -> None:
 # What a live session reads across one
 
 
-def talking_to(config: Config, generations: Generations, llm: RecordingLlm):
+def voiced_by(config: Config, tts: object) -> ProviderWorld:
+    """The world a server would be running with this voice in it, in
+    both halves: what the agent speaks through and what the entry
+    resolves to."""
+    return agent_providers(config, stages={"tts": cast(Any, tts)})
+
+
+def scripted(config: Config, llm: RecordingLlm) -> ProviderWorld:
+    """The world a server would be running with a model that records
+    what it was sent.
+
+    The substitution goes into the world rather than into the session,
+    because a session speaks through its generation's engines now: a
+    script handed to a session directly would be replaced by whatever
+    the world holds the moment an apply installed one.
+    """
+    return agent_providers(config, {"assistant": llm})
+
+
+def talking_to(config: Config, generations: Generations):
     """One session built the way the server builds one, against the
-    holder an apply installs into."""
-    return session_for(
-        config, DEVICE, {"assistant": llm}, generations=generations
-    )
+    holder an apply installs into and speaking through its engines."""
+    return session_for(config, DEVICE, generations=generations)
 
 
 async def test_a_session_activated_before_an_apply_keeps_its_know_how() -> None:
@@ -665,9 +699,9 @@ async def test_a_session_activated_before_an_apply_keeps_its_know_how() -> None:
     activated in."""
     running = served(agents={"assistant": {"prompt": "BEFORE"}})
     stored = served(agents={"assistant": {"prompt": "AFTER"}})
-    generations, reload = applying(running, stored)
     llm = RecordingLlm(["one", "two"])
-    session = talking_to(running, generations, llm)
+    generations, reload = applying(running, stored, providers=scripted(running, llm))
+    session = talking_to(running, generations)
 
     await run_reply(session, "hello")
     await reload.apply()
@@ -681,11 +715,11 @@ async def test_a_session_opened_after_an_apply_assembles_the_new_text() -> None:
     so it is activated in the world the apply installed."""
     running = served(agents={"assistant": {"prompt": "BEFORE"}})
     stored = served(agents={"assistant": {"prompt": "AFTER"}})
-    generations, reload = applying(running, stored)
+    llm = RecordingLlm()
+    generations, reload = applying(running, stored, providers=scripted(running, llm))
 
     await reload.apply()
-    llm = RecordingLlm()
-    await run_reply(talking_to(running, generations, llm), "hello")
+    await run_reply(talking_to(running, generations), "hello")
 
     assert llm.systems[-1].startswith("AFTER")
 
@@ -699,11 +733,11 @@ async def test_an_applied_fragment_reaches_the_next_activation() -> None:
         prompt_fragments={"house": {"text": "The house is loud."}},
         agents={"assistant": {"prompt": "A", "prompt_includes": ["house"]}},
     )
-    generations, reload = applying(running, stored)
+    llm = RecordingLlm()
+    generations, reload = applying(running, stored, providers=scripted(running, llm))
 
     await reload.apply()
-    llm = RecordingLlm()
-    await run_reply(talking_to(running, generations, llm), "hello")
+    await run_reply(talking_to(running, generations), "hello")
 
     assert "The house is loud." in llm.systems[-1]
     assert "The house is quiet." not in llm.systems[-1]
@@ -723,11 +757,10 @@ async def test_the_preview_and_the_comparison_agree_with_an_activation() -> None
     """
     running = served(agents={"assistant": {"prompt": "BEFORE"}})
     stored = served(agents={"assistant": {"prompt": "AFTER"}})
-    generations = world(running)
+    llm = RecordingLlm()
+    generations = world(running, providers=scripted(running, llm))
     servers = McpServers.build(running)
-    reload = ConfigReload(
-        generations, servers, reading(stored), build_agent_providers(running)
-    )
+    reload = ConfigReload(generations, servers, reading(stored))
     preview = _prompt_preview(generations, servers, None)
     diff = config_diff_reader(generations, servers, reading(stored))
 
@@ -741,8 +774,7 @@ async def test_the_preview_and_the_comparison_agree_with_an_activation() -> None
     assert settled.agents.prompt.changed == ()
     assembled = await preview("assistant")
     assert assembled.text == "AFTER"
-    llm = RecordingLlm()
-    await run_reply(talking_to(running, generations, llm), "hello")
+    await run_reply(talking_to(running, generations), "hello")
     assert llm.systems[-1] == assembled.text
 
 
@@ -862,7 +894,9 @@ def reloader(exc: Exception):
     """The composition root's closure over a read that refuses."""
     running = served(agents={"assistant": {"prompt": "A"}})
     return config_reloader(
-        world(running), McpServers.build(running), failing(exc), build_agent_providers(running)
+        world(running, providers=built_world(running)),
+        McpServers.build(running),
+        failing(exc),
     )
 
 
@@ -953,7 +987,9 @@ async def test_the_exclusion_refusal_keeps_its_own_words() -> None:
     running = served(agents={"assistant": {"prompt": "A"}})
     held = _Held(running)
     apply = config_reloader(
-        world(running), McpServers.build(running), held, build_agent_providers(running)
+        world(running, providers=built_world(running)),
+        McpServers.build(running),
+        held,
     )
 
     first = asyncio.create_task(apply())

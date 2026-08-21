@@ -36,12 +36,12 @@ from mcp.server.fastmcp import FastMCP
 from sse_starlette.sse import AppStatus
 
 from tests.support.configs import STDIO_SERVER, world
+from tests.support.providers import built_world
 from vinga_server.config import Config, McpServerConfig
 from vinga_server.config.boot import BootConfig
 from vinga_server.config.reload import ConfigReload
 from vinga_server.config.responses import ConfigReloadResult
 from vinga_server.config.secrets import SecretStore
-from vinga_server.providers import build_agent_providers
 from vinga_server.tools.mcp import McpServerManager, McpServers
 
 # --- what a suite reads its own subject by ----------------------------
@@ -189,12 +189,11 @@ class Applying:
         self, servers: McpServers, running: Config, secrets: SecretStore | None = None
     ) -> None:
         self.stored = reading(running, secrets)
-        self.generations = world(running, secrets)
+        self.generations = world(running, secrets, providers=built_world(running))
         self._applying = ConfigReload(
             self.generations,
             servers,
             lambda: self.stored(),
-            build_agent_providers(running),
         )
 
     @property

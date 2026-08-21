@@ -915,8 +915,8 @@ async def test_a_filler_that_will_not_synthesize_refuses_carrying_nothing(
     from dataclasses import replace as replace_field
 
     from tests.support.configs import masked_config
+    from tests.support.providers import built_world
     from vinga_server.filler import build_agent_fillers
-    from vinga_server.providers import build_agent_providers
 
     class HostileTts:
         sample_rate = 24000
@@ -926,7 +926,7 @@ async def test_a_filler_that_will_not_synthesize_refuses_carrying_nothing(
 
     events.set_enforcement(events.STRICT)
     config = masked_config()
-    providers = build_agent_providers(config)
+    providers = dict(built_world(config).agents)
     providers["poet"] = replace_field(providers["poet"], tts=cast(Any, HostileTts()))
 
     with caplog.at_level("DEBUG"), pytest.raises(EventSchemaError) as raised:

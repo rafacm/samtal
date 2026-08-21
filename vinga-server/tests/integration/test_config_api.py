@@ -98,9 +98,10 @@ def test_an_empty_start_is_configured_over_http_and_serves_after_a_restart(
     # it is also the check the first application could not have passed.
     with TestClient(restarted) as serving:
         composition = restarted.state.composition
-        served = composition.generations.current().config
+        generation = composition.generations.current()
+        served = generation.config
         assert served.agents_for_device("aa:bb:cc:dd:ee:ff") == ["assistant"]
-        providers = composition.agent_providers["assistant"]
+        providers = generation.providers.agents["assistant"]
         assert served.prompt_for_agent("assistant") == "You are an assistant."
         assert providers.llm is not None
         assert providers.asr is not None
@@ -192,7 +193,9 @@ def test_the_reload_answers_over_a_real_socket(served_api, tmp_path: Path) -> No
         # filled pauses, and it considered every agent it has, which is
         # none.
         "fillers": {"resynthesized": [], "reused": [], "disabled": []},
-        "providers": None,
+        # Present and empty for the same reason: this server builds the
+        # engines its agents reference, and it has no agents.
+        "providers": {"built": [], "reused": [], "retired": []},
         "agents": None,
     }
 
@@ -225,9 +228,10 @@ def test_the_diff_reports_what_this_server_has_not_picked_up(
 
     Everything written here is written after the server booted, so the
     diff is the only surface that says so. The two boundaries are what
-    the case is about: the providers and the agent wait for a restart
-    and stay pending for the whole run, while the MCP entries are
-    applied by a request and stop being pending as soon as it is made.
+    the case is about: the agent and the defaults it inherits through
+    wait for a restart and stay pending for the whole run, while the
+    provider entries and the MCP entries are applied by a request and
+    stop being pending as soon as it is made.
     """
     with served_api(boot_directory) as api_url:
         client = httpx.Client(
@@ -238,7 +242,7 @@ def test_the_diff_reports_what_this_server_has_not_picked_up(
             # and every kind still says where its changes converge.
             settled = client.get(DIFF).json()
             assert settled["providers"] == {
-                "applies": "restart",
+                "applies": "reload",
                 "added": [],
                 "removed": [],
                 "changed": [],
@@ -278,9 +282,15 @@ def test_the_diff_reports_what_this_server_has_not_picked_up(
             assert client.post(RELOAD).status_code == 200
             applied = client.get(DIFF).json()
             assert applied["mcp_servers"]["added"] == []
+            # The provider entries went with them: their definitions are
+            # what a reload rebuilds, so what was pending is served.
+            assert applied["providers"]["added"] == []
             # And the restart-bound half is untouched by the reload,
-            # which is the whole reason the two carry different labels.
-            assert applied["providers"]["added"] == configured["providers"]["added"]
+            # which is the whole reason the labels differ: the agent set
+            # and the layer every agent inherits through are what an
+            # apply deliberately does not move.
+            assert applied["agents"]["added"] == configured["agents"]["added"]
+            assert applied["agent_defaults"]["changed"] is True
 
             # One edit to what a connection is made of, and one to text
             # that no connection ever sees. Both are stored changes the

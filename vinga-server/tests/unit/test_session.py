@@ -516,7 +516,7 @@ async def test_only_a_sentence_whose_audio_finished_counts_as_spoken() -> None:
     socket = RecordingSocket()
     providers = agent_providers(config)
     session = device_session(config, TUTOR_MAC, providers, websocket=socket)
-    tts = providers["tutor"].tts
+    tts = providers.agents["tutor"].tts
     resampler = Resampler(tts.sample_rate, session_module.OUTPUT_AUDIO.sample_rate)
 
     spoken: list[str] = []

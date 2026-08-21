@@ -42,14 +42,14 @@ import pytest
 import vinga_server.device.session as session_module
 from tests.support.configs import DEVICE_MAC, POET_MAC, base_config, world
 from tests.support.events import only
-from tests.support.providers import ScriptedLlm, Unreachable
+from tests.support.providers import ScriptedLlm, Unreachable, built_world
 from tests.support.sockets import LoopingSocket, RecordingSocket
 from vinga_server.config import Config
 from vinga_server.device.session import DeviceSession
 from vinga_server.events import SessionEvents
 from vinga_server.filler import build_agent_fillers
 from vinga_server.generation import Generations
-from vinga_server.providers import ToolCall, Turn, build_agent_providers
+from vinga_server.providers import ProviderWorld, ToolCall, Turn
 from vinga_server.runtime.pipeline import bespoke_runtime_factory
 from vinga_server.tools.mcp import McpServers
 from vinga_server.tools.memory import MemoryStore
@@ -61,18 +61,27 @@ def agent_providers(
     config: Config,
     scripts: dict[str, Any] | None = None,
     stages: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Every agent's engines, with substitutions applied before a
-    session is built rather than after.
+) -> ProviderWorld:
+    """The world's engines, with substitutions applied before a session
+    is built rather than after.
 
     `scripts` replaces the named agents' models; `stages` replaces one
     named stage (`asr`, `tts`, `vad`) for every agent. Both are what the
-    composition root's own parameter takes, so a test that wants a
-    scripted far side hands one in the way `create_app` hands the real
-    ones in, and no test has to reach into a live runtime to swap an
-    engine it could have built with.
+    composition root's own build produces, so a test that wants a
+    scripted far side hands one in the way a server hands the real ones
+    in, and no test has to reach into a live runtime to swap an engine
+    it could have built with.
+
+    A world rather than a mapping, because a world is what a generation
+    holds and a generation is what a session binds. A substitution
+    replaces what the entry resolved to, in both halves of the world:
+    what the agents talk through and what the entry itself answers, so
+    that an apply which carries an unchanged entry over carries the
+    stand-in with it, exactly as it would carry the engine it stands in
+    for.
     """
-    providers = build_agent_providers(config)
+    built = built_world(config)
+    providers = dict(built.agents)
     for agent, script in (scripts or {}).items():
         # The entry the script stands in for, so the events a session
         # emits about its LLM carry what a real one's would.
@@ -82,13 +91,26 @@ def agent_providers(
         providers = {
             agent: replace(entry, **stages) for agent, entry in providers.items()
         }
-    return providers
+    swapped = {
+        id(getattr(built.agents[agent], stage)): getattr(entry, stage)
+        for agent, entry in providers.items()
+        for stage in ("llm", "asr", "tts", "vad")
+        if getattr(built.agents[agent], stage) is not getattr(entry, stage)
+    }
+    return replace(
+        built,
+        agents=providers,
+        instances={
+            identity: swapped.get(id(engine), engine)
+            for identity, engine in built.instances.items()
+        },
+    )
 
 
 def device_session(
     config: Config,
     mac: str,
-    providers: dict[str, Any] | None = None,
+    providers: ProviderWorld | None = None,
     memory: Any = None,
     fillers: dict[str, Any] | None = None,
     websocket: Any = None,
@@ -122,28 +144,36 @@ def device_session(
     a masked session says which clips the world has, and a suite that
     hands its own holder in has already said."""
     if generations is None:
-        generations = world(config, fillers=fillers)
+        generations = world(
+            config,
+            fillers=fillers,
+            providers=providers if providers is not None else agent_providers(config),
+        )
     factory = bespoke_runtime_factory(
         generations,
-        providers if providers is not None else agent_providers(config),
         mcp_servers if mcp_servers is not None else McpServers({}),
         memory,
         conversations,
     )
     session = session_module.DeviceSession(cast(Any, websocket), generations, factory)
     # White-box, deliberately, and the only three sites in this file that
-    # are. These two lines are `run`'s own, transcribed: it resolves the
-    # binding, keeps the agents, and calls the factory with the session,
-    # the session's events object and those agents. Nothing public does
-    # that half, because the only caller that ever needs to is the edge
-    # itself, and reaching it through `run` means a socket, a hello and a
-    # live task, which is `open_session` below and a different test. What
-    # cannot be established any other way is that a session built here is
-    # wired exactly as a served one: the runtime holds the session as its
-    # device, and both sides attribute their events to the same object,
-    # which is what makes `_mac` and `_agent` one fact rather than two.
+    # are. These lines are `run`'s own, transcribed: it resolves the
+    # binding, keeps the agents, captures the world it is going to build
+    # from, and calls the factory with the session, the session's events
+    # object, those agents and that world. Nothing public does that half,
+    # because the only caller that ever needs to is the edge itself, and
+    # reaching it through `run` means a socket, a hello and a live task,
+    # which is `open_session` below and a different test. What cannot be
+    # established any other way is that a session built here is wired
+    # exactly as a served one: the runtime holds the session as its
+    # device, both sides attribute their events to the same object, and
+    # the world the runtime speaks through is the one the session says
+    # it is holding.
     session._agents = config.agents_for_device(mac)
-    session.runtime = factory(session, session._events, session._agents)
+    session._generation = generations.current()
+    session.runtime = factory(
+        session, session._events, session._agents, session._generation
+    )
     return session
 
 
@@ -260,9 +290,9 @@ def served(
     is the store, which reaches a session twice over: through the factory
     that binds its turn recorder, and as the collaborator the session
     opens and closes."""
-    generations = world(config)
+    generations = world(config, providers=built_world(config))
     factory = bespoke_runtime_factory(
-        generations, build_agent_providers(config), McpServers({}), None, conversations
+        generations, McpServers({}), None, conversations
     )
     return DeviceSession(
         cast(Any, websocket), generations, factory, conversations=conversations
@@ -321,7 +351,7 @@ async def masked_session(config: Config, mac: str, scripts: dict[str, Any] | Non
     """A session with its filler cache built the way boot builds it, on
     a recording socket, listening in realtime so the after-reply state
     is assertable."""
-    fillers = await build_agent_fillers(config, build_agent_providers(config))
+    fillers = await build_agent_fillers(config, built_world(config).agents)
     session = session_for(config, mac, scripts, fillers=fillers.clips)
     session.websocket = cast(Any, RecordingSocket())
     listening_in_realtime(session)

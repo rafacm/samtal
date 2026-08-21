@@ -22,6 +22,7 @@ import contextlib
 import json
 import time
 from collections.abc import AsyncIterator, Iterator, Sequence
+from dataclasses import replace
 from typing import Any, cast
 
 import pytest
@@ -30,6 +31,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from tests.support.boundary import FakeDevice, StubRuntime
 from tests.support.configs import DEVICE_MAC, config_with_agent, world
+from tests.support.providers import built_world
 from tests.support.sessions import device_session, listening_in
 from tests.support.wire import connect, send_pcm, shake_hands, speech_pcm
 from vinga_server import __version__
@@ -38,6 +40,7 @@ from vinga_server.audio.opus import OpusEncoder
 from vinga_server.config import Config
 from vinga_server.device.boundary import DeviceGone, DeviceOutput, PlayableAudio, SessionInput
 from vinga_server.events import SessionEvents
+from vinga_server.generation import Generation
 from vinga_server.providers import (
     LlmEvent,
     LlmProvider,
@@ -45,7 +48,6 @@ from vinga_server.providers import (
     ToolChoice,
     ToolDef,
     Turn,
-    build_agent_providers,
 )
 from vinga_server.runtime.pipeline import bespoke_runtime_factory
 from vinga_server.tools.device import DeviceToolClient
@@ -70,7 +72,10 @@ def client_with_a_stub(
     with TestClient(app) as client:
 
         def factory(
-            output: DeviceOutput, events: SessionEvents, agents: Sequence[str]
+            output: DeviceOutput,
+            events: SessionEvents,
+            agents: Sequence[str],
+            generation: Generation,
         ) -> SessionInput:
             runtime = StubRuntime(output, events, agents)
             built.append(runtime)
@@ -275,14 +280,26 @@ class SlowLlm(LlmProvider):
 
 
 def runtime_for(config: Config, device: FakeDevice, llm: Any = None) -> Any:
-    providers = build_agent_providers(config)
+    built = built_world(config)
     if llm is not None:
-        agent = providers["assistant"]
-        providers["assistant"] = type(agent)(
-            llm=llm, asr=agent.asr, tts=agent.tts, vad=agent.vad
+        agent = built.agents["assistant"]
+        built = replace(
+            built,
+            agents=dict(built.agents)
+            | {
+                "assistant": type(agent)(
+                    llm=llm, asr=agent.asr, tts=agent.tts, vad=agent.vad
+                )
+            },
         )
-    factory = bespoke_runtime_factory(world(config), providers, McpServers({}), None)
-    return factory(cast(DeviceOutput, device), SessionEvents("contract"), ["assistant"])
+    generations = world(config, providers=built)
+    factory = bespoke_runtime_factory(generations, McpServers({}), None)
+    return factory(
+        cast(DeviceOutput, device),
+        SessionEvents("contract"),
+        ["assistant"],
+        generations.current(),
+    )
 
 
 async def test_the_bespoke_runtime_holds_a_turn_against_a_fake_device() -> None:

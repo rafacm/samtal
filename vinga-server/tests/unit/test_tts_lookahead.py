@@ -27,10 +27,10 @@ import pytest
 
 import vinga_server.device.session as session_module
 from tests.support.configs import BOTH_MAC, base_config
-from tests.support.providers import ScriptedLlm
+from tests.support.providers import ScriptedLlm, built_world
 from tests.support.sessions import agent_providers, device_session
 from vinga_server.config import Config
-from vinga_server.providers import ToolCall, TtsProvider, build_agent_providers
+from vinga_server.providers import ToolCall, TtsProvider
 
 # One sentence's audio plays for longer than the next takes to start,
 # which is what makes a single sentence of lookahead enough. Both are
@@ -408,14 +408,18 @@ async def test_a_handover_speaks_the_new_agents_voice() -> None:
     first = SlowTts()
     second = SlowTts()
     handover = ScriptedLlm([[SENTENCES[0], ToolCall("1", "switch_agent", {"agent": "tutor"})]])
-    voices = {
-        name: replace(
-            providers,
-            tts=second if name == "tutor" else first,
-            llm=handover if name == "poet" else ScriptedLlm([SENTENCES[2]]),
-        )
-        for name, providers in build_agent_providers(config).items()
-    }
+    engines = built_world(config)
+    voices = replace(
+        engines,
+        agents={
+            name: replace(
+                providers,
+                tts=second if name == "tutor" else first,
+                llm=handover if name == "poet" else ScriptedLlm([SENTENCES[2]]),
+            )
+            for name, providers in engines.agents.items()
+        },
+    )
     session, socket = slow_session([], first, config=config, mac=BOTH_MAC, providers=voices)
 
     await speak_a_reply(session)

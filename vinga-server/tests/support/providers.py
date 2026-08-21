@@ -18,24 +18,56 @@ directly on `vinga_server` and the standard library.
 
 import asyncio
 from collections.abc import AsyncIterator, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
+from vinga_server.config import Config
+from vinga_server.config.secrets import SecretStore
 from vinga_server.providers import (
     AsrResult,
     LlmEvent,
     LlmProvider,
     ProviderIdentity,
+    ProviderWorld,
     TextDelta,
     ToolCall,
     ToolChoice,
     ToolDef,
     Turn,
     Usage,
+    build_world,
 )
 from vinga_server.providers.base import TtsProvider, VadProvider
 from vinga_server.providers.mock import MockAsr
 from vinga_server.runtime.prompt import GuidanceBlock
 from vinga_server.tools.mcp import McpServers
+
+
+def built_world(config: Config, secrets: SecretStore | None = None) -> ProviderWorld:
+    """Every engine a configuration's agents reference, built through
+    the server's own path, from a caller that is not a coroutine.
+
+    Building is a coroutine because owning is: a provider refused after
+    it exists has to be closed, and a close is one. Most of the helpers
+    in this lane are ordinary functions whose subject is a conversation
+    rather than a lifecycle, and `await`ing the world in front of every
+    one of them would put a hundred and sixty-five awaits in front of
+    tests that are about something else.
+
+    So the real builder runs to completion on a loop of its own, in a
+    thread of its own, which works whether or not the caller is already
+    on one. Nothing constructed here is bound to that loop: a provider
+    is built from options and holds no waiter until it is used. A suite
+    that is about the lifecycle itself calls `build_world` directly, as
+    a server does.
+    """
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, _built(config, secrets)).result()
+
+
+async def _built(config: Config, secrets: SecretStore | None) -> ProviderWorld:
+    return (await build_world(config, secrets)).world
+
 
 # --- the models -------------------------------------------------------
 
