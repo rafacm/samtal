@@ -2,13 +2,25 @@
 
 One registry per app, held by its composition. It exists for what a
 per-session object cannot do: refuse the next connection when the
-server is already at capacity, and (from the drain onwards) reach every
-live session at once when the process is asked to stop.
+server is already at capacity, reach every live session at once when the
+process is asked to stop, and say which worlds the conversations in
+flight are still holding.
 
 Capacity is a count, not a queue. A device that is refused reconnects on
 its next wake word, where a conversation waiting in line for a slot
 would be worse than one that never started: the user is standing in
 front of the device, talking.
+
+The worlds are the newer half (#191). A conversation is built from the
+generation that was current when it was built, and goes on speaking
+through that generation's engines however many applies land while it
+runs, so a world may not let go of what it holds until the last
+conversation holding it has ended. Two states, not one: a session is
+admitted before it has proved anything, and many admitted sessions are
+turned away before a conversation is ever built for them, so being here
+is not being a holder. `bound` is the second state, reported by the
+session in the same breath as the construction it describes, and
+`remove` gives back a slot and whatever world went with it.
 """
 
 import asyncio
@@ -17,6 +29,7 @@ from typing import TYPE_CHECKING
 from vinga_server.events import ServerEvents
 from vinga_server.events.catalog import DrainFinished, DrainIncomplete, DrainStarted
 from vinga_server.events.values import Count, Real
+from vinga_server.generation import Generation, Generations
 
 if TYPE_CHECKING:  # the session imports nothing from here
     from vinga_server.device.session import DeviceSession
@@ -33,12 +46,30 @@ CLOSE_MARGIN_FRACTION = 0.1
 
 
 class SessionRegistry:
-    """The live sessions, and whether there is room for another."""
+    """The live sessions, whether there is room for another, and which
+    worlds they are holding."""
 
-    def __init__(self, max_sessions: int) -> None:
+    def __init__(self, max_sessions: int, generations: Generations | None = None) -> None:
         self._max_sessions = max_sessions
         self._sessions: set[DeviceSession] = set()
         self._draining = False
+        # The world each session is talking through, for the sessions
+        # that got as far as having one. Not every admitted session
+        # does: a bad Device-Id, a device bound to nothing and a client
+        # that vanishes during the bindings lookup are all admitted and
+        # removed without a conversation ever being built.
+        self._bound: dict[DeviceSession, Generation] = {}
+        # Where a retired world goes to be let go of, and None for an
+        # application with no holder around it, which is a test with a
+        # session and no server. The disposal rule is that module's; the
+        # count it runs on is this one's.
+        self._generations = generations
+        # The disposals in flight. A session ends in a synchronous
+        # `finally` and letting go of a provider is a coroutine, so the
+        # work is a task; held rather than launched, because a task
+        # nobody keeps is a task the loop may collect mid-close, and
+        # because the shutdown below has to be able to wait for it.
+        self._disposals: set[asyncio.Task[None]] = set()
 
     def __len__(self) -> int:
         return len(self._sessions)
@@ -57,10 +88,56 @@ class SessionRegistry:
         self._sessions.add(session)
         return True
 
+    def bound(self, session: "DeviceSession", generation: Generation) -> None:
+        """This session is talking through this world, from now until it
+        ends.
+
+        Reported by the session in the same synchronous step as the
+        construction it describes, so that a world can never be retired
+        and disposed of between the moment a conversation was built from
+        it and the moment anybody knew (#191).
+        """
+        self._bound[session] = generation
+
+    def held(self) -> list[Generation]:
+        """The worlds live conversations are still speaking through.
+
+        What the disposal rule needs and cannot work out for itself:
+        this is the only object that knows the whole session set.
+        """
+        return list(self._bound.values())
+
     def remove(self, session: "DeviceSession") -> None:
-        """Give the slot back. Idempotent, because this runs in a
-        session's `finally` and nothing guarantees it ran only once."""
+        """Give the slot back, and the world with it.
+
+        Idempotent, because this runs in a session's `finally` and
+        nothing guarantees it ran only once, and a no-op on the world
+        for a session that never bound one.
+
+        A world nothing holds any more may be disposed of, which is what
+        makes the end of the last conversation on a retired generation
+        the moment its engines are released.
+        """
         self._sessions.discard(session)
+        if self._bound.pop(session, None) is None:
+            return
+        self._dispose()
+
+    def _dispose(self) -> None:
+        """Ask the holder to let go of whatever nobody holds, as a task
+        this object owns.
+
+        Tracked rather than fired and forgotten: a close that nothing
+        keeps a reference to can be collected part way through, and the
+        drain below is entitled to know that the closing has finished.
+        """
+        if self._generations is None:
+            return
+        disposal = asyncio.create_task(
+            self._generations.dispose(self.held()), name="generation-dispose"
+        )
+        self._disposals.add(disposal)
+        disposal.add_done_callback(self._disposals.discard)
 
     async def drain(self, timeout_s: float) -> None:
         """Stop admitting sessions, and let the ones in flight finish
@@ -75,6 +152,7 @@ class SessionRegistry:
         self._draining = True
         sessions = list(self._sessions)
         if not sessions:
+            await self._settled()
             return
 
         events.emit(
@@ -120,3 +198,16 @@ class SessionRegistry:
             )
         else:
             events.emit(lambda: DrainFinished(sessions=Count(len(sessions))))
+        await self._settled()
+
+    async def _settled(self) -> None:
+        """Wait for the letting-go the sessions that just ended started.
+
+        A session's removal is synchronous and the disposal it triggers
+        is not, so at the moment the drain's last conversation returns
+        there can be a world part way through closing. The process is
+        about to close everything anyway, and waiting here is what makes
+        that the same closing rather than a second one racing the first.
+        """
+        if self._disposals:
+            await asyncio.wait(set(self._disposals))
