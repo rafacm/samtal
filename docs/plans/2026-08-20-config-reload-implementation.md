@@ -677,7 +677,9 @@ references were regenerated in the same change.
 
 ### Deviations from the plan
 
-Seven, each recorded because it moved something the plan named.
+Eight, each recorded because it moved something the plan named, and the
+last because rebasing onto M2's review round moved something this
+milestone says.
 
 **1. The ownership rule lives in `providers/world.py`, and
 `build_provider` and `build_agent_providers` are gone.** The plan names
@@ -739,6 +741,23 @@ helpers stay synchronous. The alternative was `await` in front of a
 hundred and sixty-five call sites whose subject is a conversation. The
 suites that are about the lifecycle itself call `build_world` directly,
 as a server does.
+
+**8. The reuse rule's voice half was merged rather than replaced, and
+one description this milestone had missed came back with it.** M2's
+review round corrected every statement of the rule to "the effective
+filler section or the voice that speaks it", named the `delay_ms`-only
+re-synthesis and priced it as a round of work at the configured
+provider. This milestone makes the voice half a thing a reload moves, so
+the merged sentences keep the whole-section point and the cost and say
+the new truth beside it: rewriting the provider entry an agent speaks
+through is the voice moving, and an edit that reaches neither, a prompt
+or a fragment, is what costs nothing. That replaces the round's "an edit
+anywhere else in the configuration is none", which this milestone made
+false, in the API description, the docgen prose, the server README and
+the changelog. The rebase also surfaced `FillersReload.reused`, whose
+description still said an edit to a provider never re-synthesizes a clip
+because the voice was start-bound: it is corrected here, and it is the
+one operator-facing sentence this milestone had missed on its own.
 
 ### Discoveries
 
