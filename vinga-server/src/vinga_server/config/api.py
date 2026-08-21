@@ -73,6 +73,7 @@ from vinga_server.config.loader import (
     ConfigError,
     DatabaseBusyError,
     DeviceAlreadyBoundError,
+    ProviderRefusedError,
     ReloadInProgressError,
     RunningConfigMovedError,
     SnapshotOnlyError,
@@ -363,6 +364,13 @@ REFUSAL_STATUS: dict[type[ConfigError], int] = {
     SnapshotOnlyError: 409,
     StorageError: 500,
     NoRuntimeError: 503,
+    # The sixth is an ordinary 422 with a type of its own, which is what
+    # it is for: an apply that could not build the engines the stored
+    # world names is a stored half this server cannot serve, exactly
+    # like one that will not compose, and the separate type is what lets
+    # its own fixed sentence through the composition root's rewrite
+    # rather than being replaced by the general one.
+    ProviderRefusedError: 422,
     ConfigError: 422,
 }
 

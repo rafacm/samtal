@@ -167,6 +167,26 @@ class SnapshotOnlyError(ConfigError):
     """
 
 
+class ProviderRefusedError(ConfigError):
+    """An apply could not build the engines the stored configuration
+    names, so nothing was applied.
+
+    The provider layer's own refusal, translated. `ProviderError` is
+    that layer's contract and says which entry, which type and which
+    option it choked on, all of which are stored values that a refusal
+    over HTTP must not carry; and it is not a `ConfigError`, so nothing
+    on the API side would know what status it meant. This is the
+    configuration vocabulary's word for the same event: a stored world
+    this server cannot run, refused with nothing changed, under the
+    status every other unservable stored half answers with.
+
+    Here rather than beside its raiser for the reason the refusals above
+    are: what raises it is the apply, on the conversation side of the
+    process, and what has to answer it with a status code is the
+    configuration API, which deliberately loads no provider.
+    """
+
+
 class StorageError(ConfigError):
     """The stored state cannot be read as configuration, or the database
     could not be read or written at all. Not the caller's mistake."""

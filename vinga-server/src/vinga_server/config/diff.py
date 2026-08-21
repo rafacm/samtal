@@ -70,7 +70,7 @@ from vinga_server.config.secrets import SecretStore, provider_identity
 # silently out of the answer. That is the two-structures rule applied to
 # this map: what the domain is has one home, and this reads it.
 APPLIES: Mapping[str, Applies] = {
-    "providers": Applies.RESTART,
+    "providers": Applies.RELOAD,
     "mcp_servers": Applies.RELOAD,
     "prompt_fragments": Applies.RELOAD,
     "agent_defaults": Applies.RESTART,
@@ -175,16 +175,10 @@ def config_diff(running: Loaded, stored: Loaded, mcp: McpPending) -> ConfigDiff:
     """
     running_providers = _providers(running)
     stored_providers = _providers(stored)
+    unchanged = unchanged_providers(running, stored)
 
     def same_provider(identity: str) -> bool:
-        """Both halves of a provider: the entry as it is written, and
-        the credentials stored behind it, which an operator rotates
-        without touching a field of the entry."""
-        if running_providers[identity] != stored_providers[identity]:
-            return False
-        return running.secrets.fingerprint("provider", identity) == stored.secrets.fingerprint(
-            "provider", identity
-        )
+        return identity in unchanged
 
     def same_fragment(name: str) -> bool:
         return running.config.prompt_fragments[name] == stored.config.prompt_fragments[name]
@@ -278,6 +272,32 @@ def _names(
         changed=tuple(
             sorted(name for name in set(running) & set(stored) if not same(name))
         ),
+    )
+
+
+def unchanged_providers(running: Loaded, stored: Loaded) -> frozenset[str]:
+    """The provider entries both sides hold and hold identically: the
+    entry as it is written, and the credentials stored behind it, which
+    an operator rotates without touching a field of the entry.
+
+    Two callers, one question. This read reports the rest as changed;
+    the apply carries exactly these into the world it installs as the
+    objects they already are, and builds everything else. Written once
+    because the two must agree by construction: an entry this called
+    unchanged and the apply rebuilt would be a rotation reported as
+    pending forever, and the other way round is a credential an operator
+    rotated that nothing ever picked up.
+
+    An entry only one side holds is in neither answer: it is an addition
+    or a removal, which both callers handle as one.
+    """
+    running_entries, stored_entries = _providers(running), _providers(stored)
+    return frozenset(
+        identity
+        for identity in set(running_entries) & set(stored_entries)
+        if running_entries[identity] == stored_entries[identity]
+        and running.secrets.fingerprint("provider", identity)
+        == stored.secrets.fingerprint("provider", identity)
     )
 
 
