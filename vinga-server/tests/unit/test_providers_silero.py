@@ -3,7 +3,7 @@ detector for the timing bookkeeping (real speech detection is verified
 against hardware, not synthesizable in a unit test)."""
 
 from vinga_server.config.models import ProviderConfig
-from vinga_server.providers import build_provider
+from vinga_server.providers import build_entry
 from vinga_server.providers.silero import SileroEndpointer, SileroVad
 
 WINDOW_BYTES = 1024  # 512 samples at 16 kHz, Silero's fixed window
@@ -58,8 +58,8 @@ def feed_windows(endpointer: SileroEndpointer, count: int) -> list[bool]:
     return [endpointer.feed(b"\x00" * WINDOW_BYTES) for _ in range(count)]
 
 
-def test_the_registry_builds_silero_with_options() -> None:
-    provider = build_provider(
+async def test_the_registry_builds_silero_with_options() -> None:
+    provider = await build_entry(
         "vad", "ears", ProviderConfig.model_validate({"type": "silero", "threshold": 0.6})
     )
     assert isinstance(provider, SileroVad)

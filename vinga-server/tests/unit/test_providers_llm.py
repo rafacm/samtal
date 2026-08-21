@@ -14,7 +14,7 @@ from tests.support.llm_sdk import (
 )
 from tests.support.llm_sdk import Falsey as FalseyClient
 from vinga_server.config.models import ProviderConfig
-from vinga_server.providers import LlmProvider, ProviderError, TextDelta, Turn, build_provider
+from vinga_server.providers import LlmProvider, ProviderError, TextDelta, Turn, build_entry
 from vinga_server.providers.anthropic_llm import AnthropicLlm
 from vinga_server.providers.kit import DEFAULT_TIMEOUT_S, MAX_RETRIES
 from vinga_server.providers.openai_llm import OpenAiCompatibleLlm, chat_messages
@@ -24,12 +24,12 @@ def provider_config(**data: object) -> ProviderConfig:
     return ProviderConfig.model_validate(data)
 
 
-def test_anthropic_requires_a_model() -> None:
+async def test_anthropic_requires_a_model() -> None:
     with pytest.raises(ProviderError, match='"model" is required'):
-        build_provider("llm", "claude", provider_config(type="anthropic"))
+        await build_entry("llm", "claude", provider_config(type="anthropic"))
 
 
-def test_a_named_but_unset_api_key_env_fails_the_build(
+async def test_a_named_but_unset_api_key_env_fails_the_build(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("VINGA_TEST_KEY", raising=False)
@@ -37,37 +37,37 @@ def test_a_named_but_unset_api_key_env_fails_the_build(
         type="anthropic", model="claude-sonnet-5", api_key_env="VINGA_TEST_KEY"
     )
     with pytest.raises(ProviderError, match="references an unset environment variable") as failure:
-        build_provider("llm", "claude", config)
+        await build_entry("llm", "claude", config)
     # The entry, not the reference: what an operator wrote in that field
     # is not repeated back into a sentence main prints and the logs keep.
     assert "providers.llm.claude" in str(failure.value)
     assert "VINGA_TEST_KEY" not in str(failure.value)
 
 
-def test_a_set_api_key_env_builds(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_set_api_key_env_builds(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("VINGA_TEST_KEY", "sk-test")
     config = provider_config(
         type="anthropic", model="claude-sonnet-5", api_key_env="VINGA_TEST_KEY"
     )
-    assert isinstance(build_provider("llm", "claude", config), AnthropicLlm)
+    assert isinstance(await build_entry("llm", "claude", config), AnthropicLlm)
 
 
-def test_openai_compatible_requires_a_base_url() -> None:
+async def test_openai_compatible_requires_a_base_url() -> None:
     with pytest.raises(ProviderError, match='"base_url" is required'):
-        build_provider("llm", "local", provider_config(type="openai_compatible", model="qwen3"))
+        await build_entry("llm", "local", provider_config(type="openai_compatible", model="qwen3"))
 
 
-def test_openai_compatible_builds_keyless_for_local_endpoints() -> None:
+async def test_openai_compatible_builds_keyless_for_local_endpoints() -> None:
     config = provider_config(
         type="openai_compatible", base_url="http://localhost:11434/v1", model="qwen3:8b"
     )
-    assert isinstance(build_provider("llm", "local", config), OpenAiCompatibleLlm)
+    assert isinstance(await build_entry("llm", "local", config), OpenAiCompatibleLlm)
 
 
 # --- the client each entry builds ------------------------------------
 
 
-def test_the_anthropic_client_carries_the_timeout_and_sends_one_attempt(
+async def test_the_anthropic_client_carries_the_timeout_and_sends_one_attempt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Injecting a client proves nothing about the one a deployment gets:
@@ -76,7 +76,7 @@ def test_the_anthropic_client_carries_the_timeout_and_sends_one_attempt(
     timeout at all and the SDK's two retries, which would make any
     bound three attempts plus backoff inside one turn."""
     monkeypatch.setenv("VINGA_TEST_KEY", "sk-test")
-    built = build_provider(
+    built = await build_entry(
         "llm",
         "claude",
         provider_config(type="anthropic", model="claude-sonnet-5", api_key_env="VINGA_TEST_KEY"),
@@ -90,8 +90,8 @@ def test_the_anthropic_client_carries_the_timeout_and_sends_one_attempt(
     assert built._client.max_retries == MAX_RETRIES
 
 
-def test_the_openai_compatible_client_carries_the_timeout_and_sends_one_attempt() -> None:
-    built = build_provider(
+async def test_the_openai_compatible_client_carries_the_timeout_and_sends_one_attempt() -> None:
+    built = await build_entry(
         "llm",
         "local",
         provider_config(

@@ -1,30 +1,32 @@
-"""Building providers from their configuration entries.
+"""Constructing providers from their configuration entries.
 
 Each stage maps type names to factories. Heavyweight implementations
 import their engine inside the factory, so the core install only pays
 for what the configuration references, and a missing optional
 dependency becomes an error naming the extra to install rather than an
 ImportError from the middle of a request.
+
+Construction only. What owns the objects, checks them and lets go of
+them again is `providers/world.py`, which is the half that cannot run in
+a worker thread: refusing a provider that already exists means closing
+it (#191).
 """
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import cast
 
-from vinga_server.config import Config, ConfigError
-from vinga_server.config.models import PROVIDER_STAGES, ProviderConfig
+from vinga_server.config import ConfigError
+from vinga_server.config.models import ProviderConfig
 from vinga_server.config.secrets import (
     ProviderSecrets,
     SecretStore,
     provider_secrets_in_force,
 )
-from vinga_server.egress import EgressRefusal, check_provider
 from vinga_server.providers.base import (
     AsrProvider,
     LlmProvider,
     Provider,
     ProviderError,
-    ProviderIdentity,
     TtsProvider,
     VadProvider,
 )
@@ -111,6 +113,14 @@ class OptionsReader:
         return {str(name): item for name, item in value.items()}
 
     def finish(self) -> None:
+        """Refuse whatever the provider never asked about.
+
+        Called before the provider is constructed, in every factory, and
+        that order is the contract rather than a habit: an unknown
+        option refused after a model had loaded would be a refusal with
+        an object to let go of, on a path whose whole promise is that it
+        touched nothing (#191).
+        """
         if self._pending:
             unknown = ", ".join(sorted(self._pending))
             raise ProviderError(f"{self._label}: unknown option(s): {unknown}")
@@ -210,18 +220,24 @@ def _factories() -> dict[str, dict[str, Factory]]:
     }
 
 
-def build_provider(
+def construct_provider(
     stage: str,
     name: str,
     config: ProviderConfig,
-    local_only: bool = False,
     secrets: SecretStore | None = None,
-) -> object:
-    """Build the provider behind `providers.<stage>.<name>`, raising
-    ProviderError for unknown types, bad options, missing extras, an
-    egress-marked provider under `local_only`, a class carrying no
-    egress marking of its own, or anything the provider itself raises
-    while constructing. Every one of them names the entry.
+) -> Provider:
+    """Construct the provider behind `providers.<stage>.<name>`, raising
+    ProviderError for an unknown type, a bad option, a missing extra, or
+    anything the provider itself raises while constructing. Every one of
+    them names the entry.
+
+    Construction and nothing else, which is what lets this run in a
+    worker thread: the checks that come after an object exists are the
+    owner's (`providers/world.py`), because refusing one means closing
+    it and a close is a coroutine (#191). What a factory does before
+    returning is the mirror rule, and it is the provider modules': read
+    the options to the end and finish them, then construct, so that a
+    trailing unknown option is a refusal with nothing to let go of.
 
     `secrets` is the store a snapshot was loaded with, or None for a
     deployment whose credentials are all environment references. This is
@@ -280,25 +296,14 @@ def build_provider(
             f"library failing to start can quote the endpoint or the credential this "
             f"entry names; check this entry's options and the service it points at"
         ) from exc
-    # The egress rule itself lives in one module that this registry and
-    # the MCP build path both call (#30, #136); what stays here is the
-    # exception type, which is this surface's contract, wrapped around
-    # the module's own sentence.
-    try:
-        check_provider(label, config, provider, local_only)
-    except EgressRefusal as exc:
-        raise ProviderError(str(exc)) from exc
-    # Stamped here rather than in each factory: this is the one place
-    # that knows the stage, the entry name and the type at once, and a
-    # provider that failed to describe itself in an event would be a
-    # provider the operator cannot map back to their configuration.
-    if isinstance(provider, Provider):
-        provider.identity = ProviderIdentity(
-            stage=stage,
-            name=name,
-            type=config.type,
-            host=provider.host,
-            model=provider.model,
+    if not isinstance(provider, Provider):
+        # Unwritable from a factory in this package, and refused rather
+        # than assumed: everything downstream owns what it is handed,
+        # and a lifecycle cannot be promised for an object that is not
+        # one of these.
+        raise ProviderError(
+            f'{label}: type "{config.type}" built {type(provider).__name__}, which is '
+            f"not a provider; every factory answers one"
         )
     return provider
 
@@ -319,42 +324,3 @@ class AgentProviders:
     asr: AsrProvider
     tts: TtsProvider
     vad: VadProvider
-
-
-def build_agent_providers(
-    config: Config, secrets: SecretStore | None = None
-) -> dict[str, AgentProviders]:
-    """Build every provider the configured agents reference, sharing one
-    instance per named entry across agents. Agents are read through their
-    effective view, so a stage comes from the agent or from agent_defaults.
-    Runs at startup, so a bad provider configuration, a missing extra,
-    an egress-marked provider under server.local_only, or an agent
-    without a full pipeline fails the boot rather than the first
-    conversation."""
-    built: dict[tuple[str, str], object] = {}
-
-    def get(stage: str, agent_name: str) -> object:
-        provider_name, _ = config.provider_for_agent(agent_name, stage)
-        if provider_name is None:
-            raise ProviderError(
-                f"agents.{agent_name}: no {stage} provider is named, and "
-                f"agent_defaults.{stage} names none either; the conversation "
-                f"pipeline needs all of: {', '.join(PROVIDER_STAGES)}"
-            )
-        key = (stage, provider_name)
-        if key not in built:
-            provider_config = getattr(config.providers, stage)[provider_name]
-            built[key] = build_provider(
-                stage, provider_name, provider_config, config.server.local_only, secrets
-            )
-        return built[key]
-
-    return {
-        name: AgentProviders(
-            llm=cast(LlmProvider, get("llm", name)),
-            asr=cast(AsrProvider, get("asr", name)),
-            tts=cast(TtsProvider, get("tts", name)),
-            vad=cast(VadProvider, get("vad", name)),
-        )
-        for name in config.agents
-    }

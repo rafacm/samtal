@@ -13,7 +13,7 @@ import pytest
 
 from tests.support.llm_sdk import Falsey
 from vinga_server.config.models import ProviderConfig
-from vinga_server.providers import ProviderCallError, ProviderCallTimeout, build_provider
+from vinga_server.providers import ProviderCallError, ProviderCallTimeout, build_entry
 from vinga_server.providers.base import ProviderError
 from vinga_server.providers.elevenlabs_tts import ElevenLabsTts
 
@@ -54,8 +54,8 @@ async def collect(tts: ElevenLabsTts, text: str = "Hej") -> bytes:
     return b"".join([chunk async for chunk in tts.synthesize(text)])
 
 
-def build_tts(**options: object) -> object:
-    return build_provider("tts", "voice", ProviderConfig.model_validate(options))
+async def build_tts(**options: object) -> object:
+    return await build_entry("tts", "voice", ProviderConfig.model_validate(options))
 
 
 def chain(exc: BaseException) -> str:
@@ -74,33 +74,35 @@ def chain(exc: BaseException) -> str:
 # --- options ---------------------------------------------------------
 
 
-def test_a_missing_voice_id_fails_the_build() -> None:
+async def test_a_missing_voice_id_fails_the_build() -> None:
     with pytest.raises(ProviderError, match='"voice_id" is required'):
-        build_tts(type="elevenlabs", api_key_env="ELEVEN_KEY")
+        await build_tts(type="elevenlabs", api_key_env="ELEVEN_KEY")
 
 
-def test_a_missing_api_key_env_fails_the_build() -> None:
+async def test_a_missing_api_key_env_fails_the_build() -> None:
     with pytest.raises(ProviderError, match="needs an API key"):
-        build_tts(type="elevenlabs", voice_id="voice-1")
+        await build_tts(type="elevenlabs", voice_id="voice-1")
 
 
-def test_an_unset_api_key_variable_fails_the_build(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_an_unset_api_key_variable_fails_the_build(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("ELEVEN_KEY", raising=False)
     with pytest.raises(ProviderError, match="references an unset environment variable"):
-        build_tts(type="elevenlabs", voice_id="voice-1", api_key_env="ELEVEN_KEY")
+        await build_tts(type="elevenlabs", voice_id="voice-1", api_key_env="ELEVEN_KEY")
 
 
-def test_an_unknown_option_fails_the_build(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_an_unknown_option_fails_the_build(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ELEVEN_KEY", "secret")
     with pytest.raises(ProviderError, match="unknown option"):
-        build_tts(
+        await build_tts(
             type="elevenlabs", voice_id="voice-1", api_key_env="ELEVEN_KEY", voice="lessac"
         )
 
 
-def test_the_sample_rate_comes_from_the_output_format(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_the_sample_rate_comes_from_the_output_format(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("ELEVEN_KEY", "secret")
-    built = build_tts(
+    built = await build_tts(
         type="elevenlabs",
         voice_id="voice-1",
         api_key_env="ELEVEN_KEY",
@@ -110,19 +112,19 @@ def test_the_sample_rate_comes_from_the_output_format(monkeypatch: pytest.Monkey
     assert built.sample_rate == 16000
 
 
-def test_the_default_output_format_matches_the_device_rate(
+async def test_the_default_output_format_matches_the_device_rate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("ELEVEN_KEY", "secret")
-    built = build_tts(type="elevenlabs", voice_id="voice-1", api_key_env="ELEVEN_KEY")
+    built = await build_tts(type="elevenlabs", voice_id="voice-1", api_key_env="ELEVEN_KEY")
     assert isinstance(built, ElevenLabsTts)
     assert built.sample_rate == 24000
 
 
-def test_a_non_pcm_output_format_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_non_pcm_output_format_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ELEVEN_KEY", "secret")
     with pytest.raises(ProviderError, match="pcm_<rate>"):
-        build_tts(
+        await build_tts(
             type="elevenlabs",
             voice_id="voice-1",
             api_key_env="ELEVEN_KEY",
@@ -130,10 +132,10 @@ def test_a_non_pcm_output_format_is_refused(monkeypatch: pytest.MonkeyPatch) -> 
         )
 
 
-def test_an_unknown_voice_setting_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_an_unknown_voice_setting_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ELEVEN_KEY", "secret")
     with pytest.raises(ProviderError, match="unknown voice_settings key"):
-        build_tts(
+        await build_tts(
             type="elevenlabs",
             voice_id="voice-1",
             api_key_env="ELEVEN_KEY",
@@ -141,10 +143,12 @@ def test_an_unknown_voice_setting_is_refused(monkeypatch: pytest.MonkeyPatch) ->
         )
 
 
-def test_a_voice_setting_of_the_wrong_type_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_voice_setting_of_the_wrong_type_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("ELEVEN_KEY", "secret")
     with pytest.raises(ProviderError, match='voice_settings "stability" must be a number'):
-        build_tts(
+        await build_tts(
             type="elevenlabs",
             voice_id="voice-1",
             api_key_env="ELEVEN_KEY",
@@ -152,13 +156,13 @@ def test_a_voice_setting_of_the_wrong_type_is_refused(monkeypatch: pytest.Monkey
         )
 
 
-def test_the_type_marks_egress_and_rejects_a_declaration(
+async def test_the_type_marks_egress_and_rejects_a_declaration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("ELEVEN_KEY", "secret")
     assert ElevenLabsTts.egress is True
     with pytest.raises(ProviderError, match="decided by type"):
-        build_tts(
+        await build_tts(
             type="elevenlabs", voice_id="voice-1", api_key_env="ELEVEN_KEY", egress=False
         )
 

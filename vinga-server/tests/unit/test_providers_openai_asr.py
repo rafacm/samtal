@@ -27,7 +27,7 @@ from vinga_server.logs import TEXT_FORMAT, JsonFormatter
 from vinga_server.providers import (
     ProviderCallError,
     ProviderCallTimeout,
-    build_provider,
+    build_entry,
     openai_asr,
 )
 from vinga_server.providers.base import ProviderError
@@ -102,8 +102,8 @@ def transcript_handler(text: str = "Hej hej") -> object:
     return handler
 
 
-def build_asr(**options: object) -> object:
-    return build_provider("asr", "ears", ProviderConfig.model_validate(options))
+async def build_asr(**options: object) -> object:
+    return await build_entry("asr", "ears", ProviderConfig.model_validate(options))
 
 
 def chain(exc: BaseException) -> str:
@@ -200,35 +200,35 @@ def form_field(request: httpx.Request, name: str) -> str | None:
 # --- options ---------------------------------------------------------
 
 
-def test_a_missing_api_key_env_fails_the_build() -> None:
+async def test_a_missing_api_key_env_fails_the_build() -> None:
     with pytest.raises(ProviderError, match="needs an API key"):
-        build_asr(type="openai")
+        await build_asr(type="openai")
 
 
-def test_an_unset_api_key_variable_fails_the_build(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_an_unset_api_key_variable_fails_the_build(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OPENAI_KEY", raising=False)
     with pytest.raises(ProviderError, match="references an unset environment variable"):
-        build_asr(type="openai", api_key_env="OPENAI_KEY")
+        await build_asr(type="openai", api_key_env="OPENAI_KEY")
 
 
-def test_an_unknown_option_fails_the_build(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_an_unknown_option_fails_the_build(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENAI_KEY", "secret")
     with pytest.raises(ProviderError, match="unknown option"):
-        build_asr(type="openai", api_key_env="OPENAI_KEY", beam_size=1)
+        await build_asr(type="openai", api_key_env="OPENAI_KEY", beam_size=1)
 
 
-def test_the_defaults_build(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_the_defaults_build(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENAI_KEY", "secret")
-    built = build_asr(type="openai", api_key_env="OPENAI_KEY")
+    built = await build_asr(type="openai", api_key_env="OPENAI_KEY")
     assert isinstance(built, OpenAiAsr)
 
 
-def test_a_temperature_outside_the_api_range_is_refused(
+async def test_a_temperature_outside_the_api_range_is_refused(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("OPENAI_KEY", "secret")
     with pytest.raises(ProviderError, match='"temperature" must be between'):
-        build_asr(type="openai", api_key_env="OPENAI_KEY", temperature=2.0)
+        await build_asr(type="openai", api_key_env="OPENAI_KEY", temperature=2.0)
 
 
 @pytest.mark.parametrize(
@@ -240,22 +240,22 @@ def test_a_temperature_outside_the_api_range_is_refused(
         "https://api.openai.com:443/v1",
     ],
 )
-def test_every_spelling_of_openai_keeps_the_startup_guarantees(
+async def test_every_spelling_of_openai_keeps_the_startup_guarantees(
     base_url: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The host decides, not the spelling. A raw string comparison would
     let a trailing slash boot keyless and fail on the first utterance."""
     monkeypatch.delenv("OPENAI_KEY", raising=False)
     with pytest.raises(ProviderError, match="needs an API key"):
-        build_asr(type="openai", base_url=base_url)
+        await build_asr(type="openai", base_url=base_url)
 
     monkeypatch.setenv("OPENAI_KEY", "secret")
     with pytest.raises(ProviderError, match='"temperature" must be between'):
-        build_asr(type="openai", api_key_env="OPENAI_KEY", base_url=base_url, temperature=2.0)
+        await build_asr(type="openai", api_key_env="OPENAI_KEY", base_url=base_url, temperature=2.0)
 
 
 @pytest.mark.parametrize("base_url", ["not-a-url", "api.openai.com/v1", "https://"])
-def test_a_base_url_that_is_not_a_url_fails_the_build(
+async def test_a_base_url_that_is_not_a_url_fails_the_build(
     base_url: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Including the one that looks like OpenAI but has no scheme, which
@@ -263,27 +263,27 @@ def test_a_base_url_that_is_not_a_url_fails_the_build(
     keyless."""
     monkeypatch.setenv("OPENAI_KEY", "secret")
     with pytest.raises(ProviderError, match='"base_url" must be a URL'):
-        build_asr(type="openai", api_key_env="OPENAI_KEY", base_url=base_url)
+        await build_asr(type="openai", api_key_env="OPENAI_KEY", base_url=base_url)
 
 
-def test_a_compatible_endpoint_keeps_its_own_temperature_range() -> None:
+async def test_a_compatible_endpoint_keeps_its_own_temperature_range() -> None:
     """The range is a fact about OpenAI's models, not about the dialect,
     so guessing on a self-hosted server's behalf would reject a working
     configuration before the request is sent."""
-    built = build_asr(
+    built = await build_asr(
         type="openai", base_url="http://localhost:8000/v1", temperature=2.0, egress=False
     )
     assert isinstance(built, OpenAiAsr)
 
 
-def test_the_base_url_decides_egress_rather_than_the_type(
+async def test_the_base_url_decides_egress_rather_than_the_type(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A self-hosted transcription server keeps the audio on the host and
     api.openai.com does not, so the type cannot know its own egress."""
     monkeypatch.setenv("OPENAI_KEY", "secret")
     assert OpenAiAsr.egress is None
-    built = build_asr(
+    built = await build_asr(
         type="openai",
         api_key_env="OPENAI_KEY",
         base_url="http://localhost:8000/v1",
@@ -292,10 +292,10 @@ def test_the_base_url_decides_egress_rather_than_the_type(
     assert isinstance(built, OpenAiAsr)
 
 
-def test_local_only_refuses_the_default_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_local_only_refuses_the_default_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENAI_KEY", "secret")
     with pytest.raises(ProviderError, match="sends session data off this host"):
-        build_provider(
+        await build_entry(
             "asr",
             "ears",
             ProviderConfig.model_validate(
@@ -305,8 +305,8 @@ def test_local_only_refuses_the_default_endpoint(monkeypatch: pytest.MonkeyPatch
         )
 
 
-def test_local_only_admits_a_local_endpoint_that_declares_itself() -> None:
-    built = build_provider(
+async def test_local_only_admits_a_local_endpoint_that_declares_itself() -> None:
+    built = await build_entry(
         "asr",
         "ears",
         ProviderConfig.model_validate(
@@ -317,10 +317,10 @@ def test_local_only_admits_a_local_endpoint_that_declares_itself() -> None:
     assert isinstance(built, OpenAiAsr)
 
 
-def test_a_local_endpoint_needs_no_key(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_local_endpoint_needs_no_key(monkeypatch: pytest.MonkeyPatch) -> None:
     """The SDK insists on a key; a self-hosted server usually does not."""
     monkeypatch.delenv("OPENAI_KEY", raising=False)
-    built = build_asr(type="openai", base_url="http://localhost:8000/v1")
+    built = await build_asr(type="openai", base_url="http://localhost:8000/v1")
     assert isinstance(built, OpenAiAsr)
 
 
@@ -810,8 +810,8 @@ async def test_the_minimum_belongs_to_the_endpoint_not_the_type(
 
         return handler
 
-    openai = build_asr(type="openai", api_key_env="OPENAI_KEY")
-    compatible = build_asr(type="openai", base_url="http://localhost:8000/v1", egress=False)
+    openai = await build_asr(type="openai", api_key_env="OPENAI_KEY")
+    compatible = await build_asr(type="openai", base_url="http://localhost:8000/v1", egress=False)
     assert isinstance(openai, OpenAiAsr)
     assert isinstance(compatible, OpenAiAsr)
     transported(openai, watching(at_openai))
@@ -833,7 +833,7 @@ async def test_a_compatible_endpoint_receives_the_short_clip_openai_would_refuse
         seen.append(request.content)
         return httpx.Response(200, json={"text": "ja"})
 
-    built = build_asr(type="openai", base_url="http://localhost:8000/v1", egress=False)
+    built = await build_asr(type="openai", base_url="http://localhost:8000/v1", egress=False)
     assert isinstance(built, OpenAiAsr)
     transported(built, handler)
 
@@ -853,7 +853,7 @@ async def test_empty_audio_is_never_sent_anywhere() -> None:
         calls += 1
         return httpx.Response(200, json={"text": "should not be reached"})
 
-    built = build_asr(type="openai", base_url="http://localhost:8000/v1", egress=False)
+    built = await build_asr(type="openai", base_url="http://localhost:8000/v1", egress=False)
     assert isinstance(built, OpenAiAsr)
     transported(built, handler)
 
@@ -963,7 +963,7 @@ async def test_a_failing_utterance_is_attempted_once(monkeypatch: pytest.MonkeyP
         attempts += 1
         return httpx.Response(500, json={"error": {"message": "upstream boom"}})
 
-    built = build_asr(type="openai", api_key_env="OPENAI_KEY")
+    built = await build_asr(type="openai", api_key_env="OPENAI_KEY")
     assert isinstance(built, OpenAiAsr)
     transported(built, handler)
 
@@ -976,7 +976,7 @@ async def test_the_timeout_is_the_one_the_entry_asked_for(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("OPENAI_KEY", "secret")
-    built = build_asr(type="openai", api_key_env="OPENAI_KEY", timeout_s=7)
+    built = await build_asr(type="openai", api_key_env="OPENAI_KEY", timeout_s=7)
     assert isinstance(built, OpenAiAsr)
     # White-box, deliberately: a deployment's client is built inside the
     # provider and handed to nobody, so its timeout and its retry budget

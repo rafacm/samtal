@@ -26,7 +26,7 @@ from vinga_server.config.secrets import (
     encrypt,
     generate_key,
 )
-from vinga_server.providers import ProviderError, build_provider
+from vinga_server.providers import ProviderError, build_entry
 from vinga_server.providers.anthropic_llm import AnthropicLlm
 from vinga_server.providers.openai_llm import OpenAiCompatibleLlm
 from vinga_server.tools.mcp import McpServerManager
@@ -73,10 +73,10 @@ def key_of(provider: object) -> str | None:
     return provider._client.api_key  # type: ignore[attr-defined]
 
 
-def test_a_stored_credential_reaches_a_real_anthropic_client() -> None:
+async def test_a_stored_credential_reaches_a_real_anthropic_client() -> None:
     config = ProviderConfig.model_validate({"type": "anthropic", "model": "claude-sonnet-5"})
 
-    provider = build_provider("llm", "claude", config, secrets=_store(CLAUDE))
+    provider = await build_entry("llm", "claude", config, secrets=_store(CLAUDE))
 
     assert isinstance(provider, AnthropicLlm)
     assert key_of(provider) == SECRET
@@ -86,19 +86,19 @@ def test_a_stored_credential_reaches_a_real_anthropic_client() -> None:
     assert SECRET not in str(config.model_dump())
 
 
-def test_a_stored_credential_reaches_a_real_openai_compatible_client() -> None:
+async def test_a_stored_credential_reaches_a_real_openai_compatible_client() -> None:
     config = ProviderConfig.model_validate(
         {"type": "openai_compatible", "model": "qwen3", "base_url": "https://example.invalid/v1"}
     )
     stored = SecretLocation.provider("llm", "local", "api_key")
 
-    provider = build_provider("llm", "local", config, secrets=_store(stored))
+    provider = await build_entry("llm", "local", config, secrets=_store(stored))
 
     assert isinstance(provider, OpenAiCompatibleLlm)
     assert key_of(provider) == SECRET
 
 
-def test_ciphertext_wins_over_the_reference_written_for_the_same_slot(
+async def test_ciphertext_wins_over_the_reference_written_for_the_same_slot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """set-secret is the later and more deliberate act. The reference is
@@ -109,12 +109,12 @@ def test_ciphertext_wins_over_the_reference_written_for_the_same_slot(
         {"type": "anthropic", "model": "claude-sonnet-5", "api_key_env": "VINGA_TEST_KEY"}
     )
 
-    provider = build_provider("llm", "claude", config, secrets=_store(CLAUDE))
+    provider = await build_entry("llm", "claude", config, secrets=_store(CLAUDE))
 
     assert key_of(provider) == SECRET
 
 
-def test_without_a_store_the_behaviour_is_exactly_todays(
+async def test_without_a_store_the_behaviour_is_exactly_todays(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("VINGA_TEST_KEY", "sk-from-the-environment")
@@ -122,40 +122,40 @@ def test_without_a_store_the_behaviour_is_exactly_todays(
         {"type": "anthropic", "model": "claude-sonnet-5", "api_key_env": "VINGA_TEST_KEY"}
     )
 
-    assert key_of(build_provider("llm", "claude", config)) == "sk-from-the-environment"
+    assert key_of(await build_entry("llm", "claude", config)) == "sk-from-the-environment"
 
     # An empty store is not a store that answers: the environment
     # reference still resolves, and an unset one still fails the build.
     assert (
-        key_of(build_provider("llm", "claude", config, secrets=SecretStore()))
+        key_of(await build_entry("llm", "claude", config, secrets=SecretStore()))
         == "sk-from-the-environment"
     )
     monkeypatch.delenv("VINGA_TEST_KEY")
     with pytest.raises(ProviderError, match="references an unset environment variable"):
-        build_provider("llm", "claude", config, secrets=SecretStore())
+        await build_entry("llm", "claude", config, secrets=SecretStore())
 
 
-def test_a_secret_for_another_entry_is_not_reachable_from_this_one() -> None:
+async def test_a_secret_for_another_entry_is_not_reachable_from_this_one() -> None:
     """The credential is keyed by the entry being built, so a sibling's
     secret is not a fallback."""
     config = ProviderConfig.model_validate({"type": "anthropic", "model": "claude-sonnet-5"})
 
-    provider = build_provider("llm", "haiku", config, secrets=_store(CLAUDE))
+    provider = await build_entry("llm", "haiku", config, secrets=_store(CLAUDE))
 
     assert key_of(provider) is None
 
 
-def test_building_leaks_nothing_into_the_logs(caplog: pytest.LogCaptureFixture) -> None:
+async def test_building_leaks_nothing_into_the_logs(caplog: pytest.LogCaptureFixture) -> None:
     config = ProviderConfig.model_validate({"type": "anthropic", "model": "claude-sonnet-5"})
 
     with caplog.at_level(logging.DEBUG):
-        build_provider("llm", "claude", config, secrets=_store(CLAUDE))
+        await build_entry("llm", "claude", config, secrets=_store(CLAUDE))
 
     assert SECRET not in caplog.text
     assert all(SECRET not in str(record.__dict__) for record in caplog.records)
 
 
-def test_an_unset_reference_is_refused_without_repeating_what_was_written(
+async def test_an_unset_reference_is_refused_without_repeating_what_was_written(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """`api_key_env` takes the name of a variable, and the mistake that
@@ -175,7 +175,7 @@ def test_an_unset_reference_is_refused_without_repeating_what_was_written(
     )
 
     with pytest.raises(ProviderError) as caught:
-        build_provider("llm", "claude", config)
+        await build_entry("llm", "claude", config)
 
     assert "providers.llm.claude" in str(caught.value)
     assert written not in _chain(caught.value)
@@ -184,14 +184,14 @@ def test_an_unset_reference_is_refused_without_repeating_what_was_written(
     assert written not in capsys.readouterr().err
 
 
-def test_a_credential_that_cannot_be_opened_names_the_slot_and_not_the_value() -> None:
+async def test_a_credential_that_cannot_be_opened_names_the_slot_and_not_the_value() -> None:
     written = MultiFernet([Fernet(generate_key())])
     wrong = MultiFernet([Fernet(generate_key())])
     store = SecretStore({CLAUDE: encrypt(CLAUDE, SECRET, written)}, wrong)
     config = ProviderConfig.model_validate({"type": "anthropic", "model": "claude-sonnet-5"})
 
     with pytest.raises(ConfigError) as caught:
-        build_provider("llm", "claude", config, secrets=store)
+        await build_entry("llm", "claude", config, secrets=store)
 
     assert CLAUDE.describe() in str(caught.value)
     assert SECRET not in _chain(caught.value)

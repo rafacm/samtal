@@ -4,6 +4,7 @@ import struct
 
 import pytest
 
+from tests.support.providers import built_world
 from vinga_server.audio import rms
 from vinga_server.config import Config
 from vinga_server.config.models import ProviderConfig
@@ -11,8 +12,7 @@ from vinga_server.providers import (
     ProviderError,
     TextDelta,
     Turn,
-    build_agent_providers,
-    build_provider,
+    build_entry,
 )
 from vinga_server.providers.mock import MockAsr, MockLlm, MockTts, MockVad
 
@@ -21,28 +21,28 @@ def provider_config(**data: object) -> ProviderConfig:
     return ProviderConfig.model_validate(data)
 
 
-def test_an_unknown_provider_type_names_the_entry_and_the_known_types() -> None:
+async def test_an_unknown_provider_type_names_the_entry_and_the_known_types() -> None:
     with pytest.raises(ProviderError) as excinfo:
-        build_provider("tts", "voice", provider_config(type="espeak"))
+        await build_entry("tts", "voice", provider_config(type="espeak"))
     assert "providers.tts.voice" in str(excinfo.value)
     assert "espeak" in str(excinfo.value)
     assert "mock" in str(excinfo.value)
 
 
-def test_an_unknown_option_is_rejected_at_build_time() -> None:
+async def test_an_unknown_option_is_rejected_at_build_time() -> None:
     with pytest.raises(ProviderError) as excinfo:
-        build_provider("asr", "ears", provider_config(type="mock", txet="typo"))
+        await build_entry("asr", "ears", provider_config(type="mock", txet="typo"))
     assert "providers.asr.ears" in str(excinfo.value)
     assert "txet" in str(excinfo.value)
 
 
-def test_a_wrongly_typed_option_is_rejected_at_build_time() -> None:
+async def test_a_wrongly_typed_option_is_rejected_at_build_time() -> None:
     with pytest.raises(ProviderError) as excinfo:
-        build_provider("vad", "ears", provider_config(type="mock", threshold="loud"))
+        await build_entry("vad", "ears", provider_config(type="mock", threshold="loud"))
     assert '"threshold"' in str(excinfo.value)
 
 
-def test_a_provider_that_fails_to_construct_names_the_entry(
+async def test_a_provider_that_fails_to_construct_names_the_entry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A local engine fetching its weights fails on a blocked host, a
@@ -73,7 +73,7 @@ def test_a_provider_that_fails_to_construct_names_the_entry(
         registry, "_factories", lambda: {"asr": {"faster_whisper": explode}}
     )
     with pytest.raises(ProviderError) as excinfo:
-        build_provider("asr", "swedish", provider_config(type="faster_whisper"))
+        await build_entry("asr", "swedish", provider_config(type="faster_whisper"))
     message = str(excinfo.value)
     assert "providers.asr.swedish" in message
     assert "faster_whisper" in message
@@ -86,7 +86,7 @@ def test_a_provider_that_fails_to_construct_names_the_entry(
     assert isinstance(excinfo.value.__cause__, OSError)
 
 
-def test_a_provider_error_raised_by_a_factory_is_left_exactly_as_it_is(
+async def test_a_provider_error_raised_by_a_factory_is_left_exactly_as_it_is(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Every existing message is composed by a factory, and tests assert
@@ -100,12 +100,12 @@ def test_a_provider_error_raised_by_a_factory_is_left_exactly_as_it_is(
 
     monkeypatch.setattr(registry, "_factories", lambda: {"tts": {"piper": refuse}})
     with pytest.raises(ProviderError) as excinfo:
-        build_provider("tts", "voice", provider_config(type="piper"))
+        await build_entry("tts", "voice", provider_config(type="piper"))
     assert str(excinfo.value) == 'providers.tts.voice: type "piper" needs the piper extra'
     assert excinfo.value.__cause__ is None
 
 
-def test_the_failing_entry_is_named_among_several_of_one_type(
+async def test_the_failing_entry_is_named_among_several_of_one_type(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The configuration this is about: language-locked personas, three
@@ -123,9 +123,11 @@ def test_the_failing_entry_is_named_among_several_of_one_type(
         registry, "_factories", lambda: {"asr": {"faster_whisper": only_swedish_fails}}
     )
     for language in ("en", "es"):
-        build_provider("asr", language, provider_config(type="faster_whisper", language=language))
+        await build_entry(
+            "asr", language, provider_config(type="faster_whisper", language=language)
+        )
     with pytest.raises(ProviderError) as excinfo:
-        build_provider("asr", "sv", provider_config(type="faster_whisper", language="sv"))
+        await build_entry("asr", "sv", provider_config(type="faster_whisper", language="sv"))
     assert str(excinfo.value).startswith("providers.asr.sv:")
 
 
@@ -175,7 +177,7 @@ MODEL_BEARING = [
 
 
 @pytest.mark.parametrize(("stage", "type_", "options"), MODEL_BEARING)
-def test_a_provider_that_runs_a_model_names_it_on_its_identity(
+async def test_a_provider_that_runs_a_model_names_it_on_its_identity(
     monkeypatch: pytest.MonkeyPatch, stage: str, type_: str, options: dict[str, object]
 ) -> None:
     """The identity is what the events describe an entry with, so a
@@ -183,7 +185,7 @@ def test_a_provider_that_runs_a_model_names_it_on_its_identity(
     nobody can attribute to a model (#120). Every real type reports the
     identifier it was configured with, unchanged."""
     monkeypatch.setenv("VINGA_TEST_KEY", "sk-test")
-    provider = build_provider(
+    provider = await build_entry(
         stage,
         "entry",
         provider_config(type=type_, api_key_env="VINGA_TEST_KEY", **options),
@@ -194,31 +196,31 @@ def test_a_provider_that_runs_a_model_names_it_on_its_identity(
     assert (provider.identity.stage, provider.identity.name) == (stage, "entry")
 
 
-def test_a_provider_with_no_model_to_name_carries_none() -> None:
+async def test_a_provider_with_no_model_to_name_carries_none() -> None:
     """A bundled engine and the mocks run nothing an operator chose, so
     the field is absent rather than invented, and the events that
     describe them carry one field fewer."""
     for stage in ("llm", "asr", "tts", "vad"):
-        provider = build_provider(stage, "m", provider_config(type="mock"))
+        provider = await build_entry(stage, "m", provider_config(type="mock"))
         assert provider.identity is not None
         assert provider.identity.model is None
 
 
-def test_every_stage_builds_its_mock() -> None:
-    assert isinstance(build_provider("llm", "m", provider_config(type="mock")), MockLlm)
-    assert isinstance(build_provider("asr", "m", provider_config(type="mock")), MockAsr)
-    assert isinstance(build_provider("tts", "m", provider_config(type="mock")), MockTts)
-    assert isinstance(build_provider("vad", "m", provider_config(type="mock")), MockVad)
+async def test_every_stage_builds_its_mock() -> None:
+    assert isinstance(await build_entry("llm", "m", provider_config(type="mock")), MockLlm)
+    assert isinstance(await build_entry("asr", "m", provider_config(type="mock")), MockAsr)
+    assert isinstance(await build_entry("tts", "m", provider_config(type="mock")), MockTts)
+    assert isinstance(await build_entry("vad", "m", provider_config(type="mock")), MockVad)
 
 
 async def test_mock_asr_answers_the_configured_text_for_audio_and_nothing_for_none() -> None:
-    asr = build_provider("asr", "m", provider_config(type="mock", text="tea please"))
+    asr = await build_entry("asr", "m", provider_config(type="mock", text="tea please"))
     assert (await asr.transcribe(b"\x00\x01" * 320, 16000)).text == "tea please"
     assert (await asr.transcribe(b"", 16000)).text == ""
 
 
 async def test_mock_llm_formats_the_last_user_turn_into_the_reply() -> None:
-    llm = build_provider("llm", "m", provider_config(type="mock"))
+    llm = await build_entry("llm", "m", provider_config(type="mock"))
     turns = [
         Turn("user", "one"),
         Turn("assistant", "You said one."),
@@ -237,7 +239,7 @@ async def test_mock_llm_formats_the_last_user_turn_into_the_reply() -> None:
 
 
 async def test_mock_llm_can_quote_the_prompt_it_was_given() -> None:
-    llm = build_provider("llm", "m", provider_config(type="mock", reply="{system}: {text}."))
+    llm = await build_entry("llm", "m", provider_config(type="mock", reply="{system}: {text}."))
     reply = "".join(
         [
             event.text
@@ -250,7 +252,7 @@ async def test_mock_llm_can_quote_the_prompt_it_was_given() -> None:
 
 async def test_mock_tts_speaks_the_configured_tone() -> None:
     for tone_hz in (440.0, 880.0):
-        tts = build_provider("tts", "m", provider_config(type="mock", tone_hz=tone_hz))
+        tts = await build_entry("tts", "m", provider_config(type="mock", tone_hz=tone_hz))
         audio = b"".join([chunk async for chunk in tts.synthesize("A sentence to speak.")])
         assert abs(tone_of(audio, tts.sample_rate) - tone_hz) < 10
 
@@ -265,7 +267,7 @@ def tone_of(pcm: bytes, sample_rate: int) -> float:
 
 
 async def test_mock_tts_speaks_longer_for_longer_text() -> None:
-    tts = build_provider("tts", "m", provider_config(type="mock"))
+    tts = await build_entry("tts", "m", provider_config(type="mock"))
     assert tts.sample_rate == 24_000
 
     async def spoken(text: str) -> bytes:
@@ -286,7 +288,7 @@ def test_agents_share_one_instance_per_named_provider() -> None:
         },
         default_agent="assistant",
     )
-    providers = build_agent_providers(config)
+    providers = built_world(config).agents
     assert providers["assistant"].llm is providers["kitchen"].llm
     assert providers["assistant"].tts is providers["kitchen"].tts
 
@@ -298,7 +300,7 @@ def test_an_agent_without_a_full_pipeline_fails_the_boot() -> None:
         default_agent="assistant",
     )
     with pytest.raises(ProviderError) as excinfo:
-        build_agent_providers(config)
+        built_world(config)
     assert "agents.assistant" in str(excinfo.value)
     assert "asr" in str(excinfo.value)
     assert "agent_defaults.asr" in str(excinfo.value)
@@ -316,7 +318,7 @@ def test_agent_defaults_complete_a_pipeline_an_agent_only_half_names() -> None:
         agents={"poet": {"prompt": "POET", "tts": "tenor"}, "tutor": {"prompt": "TUTOR"}},
         default_agent="tutor",
     )
-    providers = build_agent_providers(config)
+    providers = built_world(config).agents
     # The inherited stages are literally one instance; the overridden one
     # is the agent's own.
     assert providers["poet"].llm is providers["tutor"].llm
@@ -339,11 +341,11 @@ def test_an_agent_default_naming_a_broken_provider_fails_the_boot() -> None:
         default_agent="assistant",
     )
     with pytest.raises(ProviderError, match="providers.llm.broken"):
-        build_agent_providers(config)
+        built_world(config)
 
 
-def test_mock_vad_hands_out_independent_endpointers() -> None:
-    vad = build_provider("vad", "m", provider_config(type="mock", max_utterance_ms=100.0))
+async def test_mock_vad_hands_out_independent_endpointers() -> None:
+    vad = await build_entry("vad", "m", provider_config(type="mock", max_utterance_ms=100.0))
     first, second = vad.new_endpointer(), vad.new_endpointer()
     assert first is not second
     loud = b"\x00\x7f" * 1600  # 100 ms of loud not-quite-noise at 16 kHz

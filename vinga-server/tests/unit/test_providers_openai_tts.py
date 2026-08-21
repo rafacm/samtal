@@ -18,7 +18,7 @@ from openai import AsyncOpenAI
 
 from tests.support.llm_sdk import Falsey
 from vinga_server.config.models import ProviderConfig
-from vinga_server.providers import ProviderCallError, ProviderCallTimeout, build_provider
+from vinga_server.providers import ProviderCallError, ProviderCallTimeout, build_entry
 from vinga_server.providers.base import ProviderError
 from vinga_server.providers.openai_tts import OpenAiTts
 
@@ -60,8 +60,8 @@ async def collect(tts: OpenAiTts, text: str = "Hej") -> bytes:
     return b"".join([chunk async for chunk in tts.synthesize(text)])
 
 
-def build_tts(**options: object) -> object:
-    return build_provider("tts", "voice", ProviderConfig.model_validate(options))
+async def build_tts(**options: object) -> object:
+    return await build_entry("tts", "voice", ProviderConfig.model_validate(options))
 
 
 def chain(exc: BaseException) -> str:
@@ -80,49 +80,49 @@ def chain(exc: BaseException) -> str:
 # --- options ---------------------------------------------------------
 
 
-def test_a_missing_voice_fails_the_build() -> None:
+async def test_a_missing_voice_fails_the_build() -> None:
     with pytest.raises(ProviderError, match='"voice" is required'):
-        build_tts(type="openai", api_key_env="OPENAI_KEY")
+        await build_tts(type="openai", api_key_env="OPENAI_KEY")
 
 
-def test_a_missing_api_key_env_fails_the_build() -> None:
+async def test_a_missing_api_key_env_fails_the_build() -> None:
     with pytest.raises(ProviderError, match="needs an API key"):
-        build_tts(type="openai", voice="alloy")
+        await build_tts(type="openai", voice="alloy")
 
 
-def test_an_unset_api_key_variable_fails_the_build(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_an_unset_api_key_variable_fails_the_build(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OPENAI_KEY", raising=False)
     with pytest.raises(ProviderError, match="references an unset environment variable"):
-        build_tts(type="openai", voice="alloy", api_key_env="OPENAI_KEY")
+        await build_tts(type="openai", voice="alloy", api_key_env="OPENAI_KEY")
 
 
-def test_an_unknown_option_fails_the_build(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_an_unknown_option_fails_the_build(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENAI_KEY", "secret")
     with pytest.raises(ProviderError, match="unknown option"):
-        build_tts(type="openai", voice="alloy", api_key_env="OPENAI_KEY", voice_id="alloy")
+        await build_tts(type="openai", voice="alloy", api_key_env="OPENAI_KEY", voice_id="alloy")
 
 
-def test_the_sample_rate_is_what_the_pcm_format_produces(
+async def test_the_sample_rate_is_what_the_pcm_format_produces(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("OPENAI_KEY", "secret")
-    built = build_tts(type="openai", voice="alloy", api_key_env="OPENAI_KEY")
+    built = await build_tts(type="openai", voice="alloy", api_key_env="OPENAI_KEY")
     assert isinstance(built, OpenAiTts)
     assert built.sample_rate == 24000
 
 
-def test_speed_is_refused_on_a_model_that_ignores_it(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_speed_is_refused_on_a_model_that_ignores_it(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENAI_KEY", "secret")
     with pytest.raises(ProviderError, match='ignores option "speed"'):
-        build_tts(type="openai", voice="alloy", api_key_env="OPENAI_KEY", speed=1.2)
+        await build_tts(type="openai", voice="alloy", api_key_env="OPENAI_KEY", speed=1.2)
 
 
-def test_instructions_are_refused_on_a_model_that_ignores_them(
+async def test_instructions_are_refused_on_a_model_that_ignores_them(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("OPENAI_KEY", "secret")
     with pytest.raises(ProviderError, match='ignores option "instructions"'):
-        build_tts(
+        await build_tts(
             type="openai",
             voice="alloy",
             api_key_env="OPENAI_KEY",
@@ -131,18 +131,20 @@ def test_instructions_are_refused_on_a_model_that_ignores_them(
         )
 
 
-def test_speed_is_accepted_on_the_model_that_takes_it(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_speed_is_accepted_on_the_model_that_takes_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("OPENAI_KEY", "secret")
-    built = build_tts(
+    built = await build_tts(
         type="openai", voice="alloy", api_key_env="OPENAI_KEY", model="tts-1", speed=1.2
     )
     assert isinstance(built, OpenAiTts)
 
 
-def test_a_speed_outside_the_api_range_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_speed_outside_the_api_range_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENAI_KEY", "secret")
     with pytest.raises(ProviderError, match='"speed" must be between'):
-        build_tts(
+        await build_tts(
             type="openai", voice="alloy", api_key_env="OPENAI_KEY", model="tts-1", speed=9.0
         )
 
@@ -156,7 +158,7 @@ def test_a_speed_outside_the_api_range_is_refused(monkeypatch: pytest.MonkeyPatc
         "https://api.openai.com:443/v1",
     ],
 )
-def test_every_spelling_of_openai_keeps_the_startup_guarantees(
+async def test_every_spelling_of_openai_keeps_the_startup_guarantees(
     base_url: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The host decides, not the spelling. A raw string comparison would
@@ -164,11 +166,11 @@ def test_every_spelling_of_openai_keeps_the_startup_guarantees(
     and would skip the model rules with it."""
     monkeypatch.delenv("OPENAI_KEY", raising=False)
     with pytest.raises(ProviderError, match="needs an API key"):
-        build_tts(type="openai", voice="alloy", base_url=base_url)
+        await build_tts(type="openai", voice="alloy", base_url=base_url)
 
     monkeypatch.setenv("OPENAI_KEY", "secret")
     with pytest.raises(ProviderError, match='ignores option "speed"'):
-        build_tts(
+        await build_tts(
             type="openai",
             voice="alloy",
             api_key_env="OPENAI_KEY",
@@ -178,7 +180,7 @@ def test_every_spelling_of_openai_keeps_the_startup_guarantees(
 
 
 @pytest.mark.parametrize("base_url", ["not-a-url", "api.openai.com/v1", "https://"])
-def test_a_base_url_that_is_not_a_url_fails_the_build(
+async def test_a_base_url_that_is_not_a_url_fails_the_build(
     base_url: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Including the one that looks like OpenAI but has no scheme, which
@@ -186,10 +188,10 @@ def test_a_base_url_that_is_not_a_url_fails_the_build(
     keyless."""
     monkeypatch.setenv("OPENAI_KEY", "secret")
     with pytest.raises(ProviderError, match='"base_url" must be a URL'):
-        build_tts(type="openai", voice="alloy", api_key_env="OPENAI_KEY", base_url=base_url)
+        await build_tts(type="openai", voice="alloy", api_key_env="OPENAI_KEY", base_url=base_url)
 
 
-def test_a_compatible_endpoint_keeps_its_own_model_rules(
+async def test_a_compatible_endpoint_keeps_its_own_model_rules(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Which knob a model reads is a fact about OpenAI's models, not
@@ -204,11 +206,11 @@ def test_a_compatible_endpoint_keeps_its_own_model_rules(
         {"model": "kokoro", "instructions": "Speak cheerfully"},
         {"model": "kokoro", "speed": 9.0},
     ):
-        built = build_tts(type="openai", voice="alloy", **local, **extra)
+        built = await build_tts(type="openai", voice="alloy", **local, **extra)
         assert isinstance(built, OpenAiTts)
 
 
-def test_the_base_url_decides_egress_rather_than_the_type(
+async def test_the_base_url_decides_egress_rather_than_the_type(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A self-hosted speech endpoint keeps the reply text on the host and
@@ -216,7 +218,7 @@ def test_the_base_url_decides_egress_rather_than_the_type(
     the entry declares it, exactly as openai_compatible does."""
     monkeypatch.setenv("OPENAI_KEY", "secret")
     assert OpenAiTts.egress is None
-    built = build_tts(
+    built = await build_tts(
         type="openai",
         voice="alloy",
         api_key_env="OPENAI_KEY",
@@ -226,10 +228,10 @@ def test_the_base_url_decides_egress_rather_than_the_type(
     assert isinstance(built, OpenAiTts)
 
 
-def test_local_only_refuses_the_default_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_local_only_refuses_the_default_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENAI_KEY", "secret")
     with pytest.raises(ProviderError, match="sends session data off this host"):
-        build_provider(
+        await build_entry(
             "tts",
             "voice",
             ProviderConfig.model_validate(
@@ -239,8 +241,8 @@ def test_local_only_refuses_the_default_endpoint(monkeypatch: pytest.MonkeyPatch
         )
 
 
-def test_local_only_admits_a_local_endpoint_that_declares_itself() -> None:
-    built = build_provider(
+async def test_local_only_admits_a_local_endpoint_that_declares_itself() -> None:
+    built = await build_entry(
         "tts",
         "voice",
         ProviderConfig.model_validate(
@@ -256,10 +258,10 @@ def test_local_only_admits_a_local_endpoint_that_declares_itself() -> None:
     assert isinstance(built, OpenAiTts)
 
 
-def test_a_local_endpoint_needs_no_key(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_local_endpoint_needs_no_key(monkeypatch: pytest.MonkeyPatch) -> None:
     """The SDK insists on a key; a self-hosted server usually does not."""
     monkeypatch.delenv("OPENAI_KEY", raising=False)
-    built = build_tts(type="openai", voice="alloy", base_url="http://localhost:8080/v1")
+    built = await build_tts(type="openai", voice="alloy", base_url="http://localhost:8080/v1")
     assert isinstance(built, OpenAiTts)
 
 
@@ -469,7 +471,7 @@ async def test_a_failing_sentence_is_attempted_once(monkeypatch: pytest.MonkeyPa
         attempts += 1
         return httpx.Response(500, json={"error": {"message": "upstream boom"}})
 
-    built = build_tts(type="openai", voice="alloy", api_key_env="OPENAI_KEY")
+    built = await build_tts(type="openai", voice="alloy", api_key_env="OPENAI_KEY")
     assert isinstance(built, OpenAiTts)
     # White-box, deliberately: the client a deployment gets is built
     # inside the provider and handed to nobody, so how many attempts it
@@ -488,7 +490,7 @@ async def test_the_timeout_is_the_one_the_entry_asked_for(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("OPENAI_KEY", "secret")
-    built = build_tts(type="openai", voice="alloy", api_key_env="OPENAI_KEY", timeout_s=7)
+    built = await build_tts(type="openai", voice="alloy", api_key_env="OPENAI_KEY", timeout_s=7)
     assert isinstance(built, OpenAiTts)
     # White-box, deliberately: a deployment's client is built inside the
     # provider and handed to nobody, so its timeout and its retry budget
