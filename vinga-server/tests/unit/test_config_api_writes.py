@@ -186,13 +186,14 @@ def _expected_notice(method: str, path: str) -> str:
     """Which of the sentences a write carries, by what it wrote.
 
     The default is the boot-time snapshot one; the exceptions are the
-    default agent, which the running server re-reads, the MCP entries
-    and the prompt fragments, which a reload applies whole, and the
-    agents, whose fields fall on both sides of that line.
+    default agent, which the running server re-reads, the provider
+    entries, the MCP entries and the prompt fragments, which a reload
+    applies whole, and the agents, whose fields fall on both sides of
+    that line.
     """
     if (method, path) == ("delete", "/default-agent"):
         return BINDING_NOTICE
-    if path.startswith(("/mcp-servers/", "/prompt-fragments/")):
+    if path.startswith(("/providers/", "/mcp-servers/", "/prompt-fragments/")):
         return RELOAD_NOTICE
     if path.startswith("/agents/"):
         return AGENT_NOTICE
@@ -305,9 +306,10 @@ def test_an_agent_write_names_every_field_a_reload_applies(
 
     Four of an agent's fields are what a reload applies: its `prompt`,
     its `prompt_includes`, its `mcp` grants and its `filler` section.
-    The rest of it (the provider overrides) is built at the next start,
-    and both halves are said because a sentence right about one and
-    silent about the other is the trap this notice exists to close.
+    The rest of it, which is which provider entry serves each of its
+    stages, is composed at the next start, and both halves are said
+    because a sentence right about one and silent about the other is the
+    trap this notice exists to close.
     """
     _pipeline(serving_client)
 
@@ -330,12 +332,13 @@ def test_an_agent_write_names_every_field_a_reload_applies(
 
 # The third sentence: what a reload applies
 #
-# Every mutation of an MCP entry, its stored secrets included, since
-# rotation is exactly what the ciphertext half of the reload's diff
-# applies, and every mutation of a prompt fragment, whose text a reload
-# puts in front of the next activation of every agent that includes it.
-# And nothing else whole: a provider is built at boot, and an agent
-# entry is the one kind whose fields fall on both sides of the line.
+# Every mutation of an MCP entry and of a provider entry, their stored
+# secrets included, since a credential is read as the thing that uses it
+# is made and a reload makes both again; and every mutation of a prompt
+# fragment, whose text a reload puts in front of the next activation of
+# every agent that includes it. What is left is the two kinds a reload
+# deliberately does not move, below, and the agent, whose fields fall on
+# both sides of the line.
 
 
 MCP_MUTATIONS = [
@@ -345,6 +348,8 @@ MCP_MUTATIONS = [
     ("delete", "/mcp-servers/weather", None),
     ("put", "/prompt-fragments/house", {"text": "The house is quiet."}),
     ("delete", "/prompt-fragments/house", None),
+    ("put", "/providers/llm/claude", {"type": "anthropic", "model": "m"}),
+    ("put", "/providers/llm/claude/secrets/api_key", {"secret": "a-key"}),
 ]
 
 
@@ -367,27 +372,22 @@ def test_every_mutation_a_reload_applies_names_the_reload(
     assert answer.json()["notice"] == RELOAD_NOTICE
 
 
-PROVIDER_MUTATIONS = [
-    ("put", "/providers/llm/claude", {"type": "anthropic", "model": "m"}),
-    ("put", "/providers/llm/claude/secrets/api_key", {"secret": "a-key"}),
-    ("delete", "/providers/llm/claude/secrets/api_key", None),
+RESTART_MUTATIONS = [
     ("put", "/agent-defaults", {"llm": "claude", "asr": "whisper"}),
 ]
 
 
 @pytest.mark.usefixtures("store")
-@pytest.mark.parametrize(("method", "path", "body"), PROVIDER_MUTATIONS)
+@pytest.mark.parametrize(("method", "path", "body"), RESTART_MUTATIONS)
 def test_the_writes_a_reload_does_not_apply_still_name_the_restart(
     serving_client: TestClient, method: str, path: str, body: object
 ) -> None:
-    """A provider is built at boot and a credential of one is read then,
-    so neither is reloadable, and `agent_defaults` is what the effective
-    values every agent inherits are read through, which a reload
-    deliberately does not move. The one kind whose fields fall on both
-    sides of the line is the agent, and it says both, below."""
+    """`agent_defaults` is what the effective values every agent
+    inherits are read through, and a candidate generation keeps the
+    previous layer whole precisely so that a change there is not applied
+    through the back door. The one kind whose fields fall on both sides
+    of the line is the agent, and it says both, below."""
     _pipeline(serving_client)
-    if method == "delete":
-        serving_client.put("/providers/llm/claude/secrets/api_key", json={"secret": "a-key"})
 
     answer = serving_client.request(method.upper(), path, json=body)
 

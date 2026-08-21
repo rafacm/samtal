@@ -139,7 +139,7 @@ def test_every_mutating_command_says_when_the_write_applies(
     restarting for a field a reload applies or by reloading for one it
     does not."""
     run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
-    assert cli.RESTART_NOTICE in capsys.readouterr().err
+    assert RELOAD_NOTICE in capsys.readouterr().err
 
     run("set", "agent", "sam", "-f", "-", stdin="llm: claude\n")
     assert capsys.readouterr().err == f"{AGENT_NOTICE}\n"

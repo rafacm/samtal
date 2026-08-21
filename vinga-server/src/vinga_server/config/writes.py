@@ -58,16 +58,19 @@ def binding_notice(unloaded: Sequence[str] = (), snapshot_only: bool = False) ->
 
 def secret_notice(kind: EntityKind) -> str:
     """When a stored credential takes effect, which follows the entity it
-    is stored on.
+    is stored on, and is now the same answer for both of them.
 
-    The reload rebuilds the MCP entries with their credentials, so a
-    secret written on one is applied by it; a provider reads its
-    credential as it is built at boot, so a secret written on one waits
-    for the restart. The API says the same by having four secret routes,
-    two per kind, each statically one of these sentences; one CLI
-    command covers both kinds, so it asks here.
+    The reload rebuilds the MCP entries with their credentials and the
+    provider entries with theirs, so a rotation on either is applied by
+    it: a credential is read as the thing that uses it is made, and a
+    reload makes both again (#191). Kept as a question rather than
+    collapsed into one sentence, because what decides it is still the
+    entity kind and a third kind would arrive with its own answer. The
+    API says the same by having four secret routes, two per kind, each
+    statically one of these sentences; one CLI command covers both
+    kinds, so it asks here.
     """
-    return RELOAD_NOTICE if kind == "mcp_server" else RESTART_NOTICE
+    return RELOAD_NOTICE if kind in ("mcp_server", "provider") else RESTART_NOTICE
 
 
 def wrote_provider(stage: str, name: str) -> str:
