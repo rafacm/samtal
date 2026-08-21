@@ -37,6 +37,8 @@ from vinga_server.events import ENFORCEMENT_ENV
 from vinga_server.events.catalog import (
     SESSION_CHANNEL,
     Declaration,
+    OtaCheckAgentNotLoaded,
+    RejectedAgentNotLoaded,
     carried_values,
     rendered_values,
     tokens_of,
@@ -268,6 +270,64 @@ def test_the_index_points_at_the_generated_reference() -> None:
     """The index makes no schema claim of its own, so it has to say
     where the schema claims are."""
     assert "(../docs/reference/events.md)" in logging_section()
+
+
+# --- what a record may tell an operator to do -------------------------
+#
+# The drift check below holds the committed document to the catalog, and
+# it is exactly as right as the catalog is: a template that names the
+# wrong remedy passes it byte for byte. These say what the records have
+# to MEAN, which is the one thing a diff cannot check, and they are
+# here because the sentence in a warning is what an operator acts on:
+# restarting a server for a change a request applies is a maintenance
+# window spent on nothing, and it is the exact mistake these two records
+# invited for as long as the agent set was start-bound (#191).
+#
+# The word itself is not banned. A reload restarts MCP entries, and the
+# count it reports is the honest word for what happened to them; what
+# may not appear is a record telling the person reading it to restart
+# this server.
+
+# The declarations whose templates may say "restart", and what they say
+# it about: entries a reload stopped and started again, which is a
+# lifecycle this server performed rather than an instruction to anyone.
+RESTARTS_SOMETHING_ELSE = frozenset({"mcp_reload"})
+
+
+def templates() -> list[tuple[str, str]]:
+    """Every declared template, with the event it belongs to."""
+    return [
+        (name, variant.TEMPLATE)
+        for name, spec in documented().items()
+        for variant in spec.variants
+    ]
+
+
+def test_no_record_sends_an_operator_to_a_restart() -> None:
+    """The general net, over every event there is, so a template written
+    tomorrow is held to this without anybody remembering to add it."""
+    sending = {
+        name for name, template in templates() if "restart" in template.lower()
+    }
+
+    assert sending <= RESTARTS_SOMETHING_ELSE, sorted(sending - RESTARTS_SOMETHING_ELSE)
+
+
+def test_a_device_bound_to_an_agent_this_server_is_not_serving_names_the_reload() -> None:
+    """And the two records that state the case, at both edges a device
+    reaches: the binding is live and the agent is one apply away, so the
+    action is the reload that installs it. Read out of the committed
+    document rather than off the catalog, because what is pinned is what
+    an operator is shipped."""
+    published = COMMITTED.read_text(encoding="utf-8")
+
+    for template in (
+        RejectedAgentNotLoaded.TEMPLATE,
+        OtaCheckAgentNotLoaded.TEMPLATE,
+    ):
+        assert template in published
+        assert "is not serving" in template
+        assert "vinga-server config reload" in template
 
 
 # --- the generated reference, held to the catalog for completeness ----

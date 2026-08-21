@@ -1949,8 +1949,8 @@ This index is the other half: what exists, and when it fires.
 | `drain_started` | a shutdown begins draining |
 | `drain_finished` | every reply finished speaking |
 | `drain_incomplete` | a reply was cut, or a session hung |
-| `device_bindings_snapshot_only` | there is no configuration database, so device bindings resolve from the boot snapshot |
-| `device_bindings_unreadable` | the configuration database could not be read, so the answer is the boot snapshot's and may be older |
+| `device_bindings_snapshot_only` | there is no configuration database, so device bindings resolve from the world this server is serving |
+| `device_bindings_unreadable` | the configuration database could not be read, so the answer is the served world's and may be older |
 | `api_error` | the configuration API failed to handle a request; the class name and nothing else |
 | `api_storage_error` | the configuration API met unreadable stored state |
 | `schema_violation` | internal: an emission the schema refused and the emitter could not recover into a declared shape, replaced by this one, which carries nothing but the channel's own identity |

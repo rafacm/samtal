@@ -176,7 +176,8 @@ def test_a_device_bound_to_an_agent_this_server_has_not_loaded_gets_no_code(
 
     assert "activation" not in body
     assert body["websocket"]["token"] == ""
-    assert "restart to load it" in caplog.text
+    assert "vinga-server config reload" in caplog.text
+    assert "restart" not in caplog.text
     assert "add-device" not in caplog.text
 
 

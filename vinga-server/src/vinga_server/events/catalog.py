@@ -840,13 +840,21 @@ class RejectedBadDeviceId(Variant):
 
 @dataclass(frozen=True)
 class RejectedAgentNotLoaded(Variant):
-    """A device bound to an agent this server booted without."""
+    """A device bound to an agent the world this server is serving does
+    not hold.
+
+    The binding is live and the agent is one apply away, which is what
+    the sentence has to say: a server serves the domain half it last
+    installed, so an agent written since then is reached by asking for
+    the stored configuration to be applied rather than by a restart
+    (#191).
+    """
 
     CHANNEL: ClassVar[str] = SESSION_CHANNEL
     LEVEL: ClassVar[int] = logging.WARNING
     TEMPLATE: ClassVar[str] = (
         "session %s rejected: device %s is bound to agent %s, which this "
-        "server has not loaded; restart to load it"
+        "server is not serving; install it with: vinga-server config reload"
     )
     ARGS: ClassVar[tuple[str, ...]] = ("session", "mac", "unloaded")
 
@@ -1636,10 +1644,10 @@ class OtaCheckActivating(Variant):
     agents: AgentNames = value()
     unloaded: AgentNames = value(
         note=(
-            "Agents this device is bound to that this process did not "
-            "load. Named on every record rather than only on the one that "
-            "complains, so a query for devices waiting on a restart is one "
-            "field."
+            "Agents this device is bound to that the world this server is "
+            "serving does not hold. Named on every record rather than only "
+            "on the one that complains, so a query for devices waiting on a "
+            "reload is one field."
         )
     )
     code: ActivationCode = value()
@@ -1650,13 +1658,15 @@ class OtaCheckActivating(Variant):
 
 @dataclass(frozen=True)
 class OtaCheckAgentNotLoaded(Variant):
-    """The binding is there; this process is what is behind."""
+    """The binding is there; the world this server is serving is what is
+    behind. Its sentence names the same one action the session-side
+    rejection does, for the same reason."""
 
     CHANNEL: ClassVar[str] = OTA_CHANNEL
     LEVEL: ClassVar[int] = logging.WARNING
     TEMPLATE: ClassVar[str] = (
         "device %s (%s, firmware %s) is bound to agent %s, which this server "
-        "has not loaded; restart to load it"
+        "is not serving; install it with: vinga-server config reload"
     )
     ARGS: ClassVar[tuple[str, ...]] = ("said_device", "board", "firmware", "named")
 
@@ -2786,14 +2796,14 @@ DEVICE_BINDINGS_SNAPSHOT_ONLY = declare(
     "device_bindings_snapshot_only",
     note=(
         "There is no configuration database, so bindings resolve from the "
-        "boot snapshot."
+        "world this server is serving."
     ),
     variants=(BindingsSnapshotOnly,),
 )
 
 DEVICE_BINDINGS_UNREADABLE = declare(
     "device_bindings_unreadable",
-    note="The database could not be read, so the answer is the boot snapshot's.",
+    note="The database could not be read, so the answer is the served world's.",
     variants=(BindingsUnreadable,),
 )
 

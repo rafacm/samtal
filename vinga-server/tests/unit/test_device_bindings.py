@@ -192,19 +192,28 @@ def test_the_ota_line_names_the_restart_rather_than_the_binding(
         with caplog.at_level(logging.WARNING):
             check_in(client)
 
-    assert "bound to agent poet, which this server has not loaded" in caplog.text
-    assert "restart to load it" in caplog.text
+    assert "bound to agent poet, which this server is not serving" in caplog.text
+    # The one action that puts the agent in front of the board, and no
+    # restart: the world this server serves is one apply away from the
+    # world the store describes.
+    assert "vinga-server config reload" in caplog.text
+    assert "restart" not in caplog.text
     assert "bind it under devices" not in caplog.text
     record = next(r for r in caplog.records if getattr(r, "event", None) == "ota_check")
     assert record.agents == []
     assert record.unloaded == ["poet"]
 
 
-def test_the_session_line_names_the_restart_too(
+def test_the_session_line_names_the_reload_too(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """A device that kept a token from before its agent was replaced
-    reaches the websocket, and is told the same thing there."""
+    reaches the websocket, and is told the same thing there.
+
+    The same thing including the action: two records about one state
+    that named two different remedies would be worse than either, since
+    an operator reads whichever one their query happened to reach.
+    """
     config = booted(tmp_path, devices={DEVICE_MAC: ["assistant"]})
     with TestClient(create_app(config)) as client:
         token = token_of(client)
@@ -217,10 +226,16 @@ def test_the_session_line_names_the_restart_too(
                 with pytest.raises(WebSocketDisconnect):
                     websocket.receive_text()
 
-    assert "bound to agent poet, which this server has not loaded" in caplog.text
+    assert "bound to agent poet, which this server is not serving" in caplog.text
+    assert "vinga-server config reload" in caplog.text
+    assert "restart" not in caplog.text
     rejection = next(
         r for r in caplog.records if getattr(r, "event", None) == "session_rejected"
     )
+    # The token is unchanged and deliberately so: it is the closed-set
+    # value a collector groups by, not a sentence, and moving it would
+    # break every query written against it to say the same thing the
+    # sentence beside it already says.
     assert rejection.reason == "agent_not_loaded"
 
 

@@ -115,7 +115,7 @@
     {
       "channel": "vinga_server.session",
       "level": 30,
-      "template": "session %s rejected: device %s is bound to agent %s, which this server has not loaded; restart to load it",
+      "template": "session %s rejected: device %s is bound to agent %s, which this server is not serving; install it with: vinga-server config reload",
       "argument_types": [
         "str",
         "str",
@@ -1148,7 +1148,7 @@
     {
       "channel": "vinga_server.ota",
       "level": 30,
-      "template": "device %s (%s, firmware %s) is bound to agent %s, which this server has not loaded; restart to load it",
+      "template": "device %s (%s, firmware %s) is bound to agent %s, which this server is not serving; install it with: vinga-server config reload",
       "argument_types": [
         "str",
         "str",
