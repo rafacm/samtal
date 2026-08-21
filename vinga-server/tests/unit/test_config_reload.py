@@ -28,6 +28,7 @@ things a name list can say.
 import asyncio
 import json
 import threading
+import time
 from collections.abc import Callable, Collection, Mapping
 from pathlib import Path
 from typing import Any, cast
@@ -74,6 +75,7 @@ from vinga_server.filler import FillerClips, build_agent_fillers
 from vinga_server.generation import Generation, Generations
 from vinga_server.logs import JsonFormatter
 from vinga_server.providers import ProviderWorld
+from vinga_server.providers import world as provider_world
 from vinga_server.providers.mock import MockTts
 from vinga_server.tools.mcp import McpServers
 
@@ -817,6 +819,36 @@ async def test_a_voice_that_will_not_close_still_leaves_an_applied_world(
     assert TEARDOWN_PLANTED not in caplog.text
     assert TEARDOWN_PLANTED not in json.dumps(result.model_dump(mode="json"))
     assert "RuntimeError" in caplog.text
+
+
+async def test_a_voice_that_will_not_finish_closing_still_settles_the_apply(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other half of the same posture, and the one an operator
+    waits through. A close that never finishes is bounded once for the
+    whole teardown, and the apply it runs behind answers, settles its
+    mark and gives the exclusion back whatever the bound found."""
+
+    class Hanging(Closing):
+        async def close(self) -> None:
+            await super().close()
+            await asyncio.Event().wait()
+
+    monkeypatch.setattr(provider_world, "DISPOSAL_TIMEOUT_S", 0.1)
+    running, stored = voices(tone_hz=440.0), voices(tone_hz=880.0)
+    generations, reload = applying(
+        running, stored, providers=voiced_by(running, Hanging())
+    )
+
+    started = time.monotonic()
+    result = await reload.apply()
+    elapsed = time.monotonic() - started
+
+    assert result.providers is not None
+    assert result.providers.built == ["tts.voice"]
+    assert elapsed < 1.0, elapsed
+    assert generations.mark == 1
+    assert reload.running is False
 
 
 # Planted, and shaped so that a substring check for it cannot match by

@@ -64,11 +64,18 @@ from vinga_server.providers.registry import AgentProviders, construct_provider
 
 logger = logging.getLogger(__name__)
 
-# How long one provider is given to let go of what it holds. A bound
+# How long one teardown is given, whatever it is letting go of. A bound
 # rather than a wait, because disposal runs after the swap: a client
 # whose pool will not shut, or an engine whose worker thread never
 # returns, is a resource this process keeps, and it is not a reason for
 # an operator's request to hang.
+#
+# One bound for the operation and not one per provider. What a caller
+# is waiting through is a teardown, and a per-provider bound would make
+# what they wait depend on how many entries a world happened to hold:
+# ten stuck clients would be a hundred seconds of an apply that had
+# already applied. Closes are independent of one another, so they run
+# together and the deadline covers the lot.
 DISPOSAL_TIMEOUT_S = 10.0
 
 
@@ -364,20 +371,44 @@ async def dispose(providers: Iterable[Provider]) -> None:
     What is left in that case is a resource this process keeps until it
     ends, which is what the situation already was before any of this
     existed.
+
+    Together rather than one after another, and under one deadline for
+    all of them. Closing one provider has nothing to do with closing
+    another, so a world of ten is a teardown of one bound rather than of
+    ten, and what a caller waits through stops depending on how many
+    entries the world it replaced happened to hold.
     """
-    for provider in providers:
-        problem: str | None = None
-        try:
-            async with asyncio.timeout(DISPOSAL_TIMEOUT_S):
-                await provider.close()
-        except Exception as exc:  # noqa: BLE001 - teardown never refuses
-            problem = type(exc).__name__
-        if problem is not None:
-            logger.warning(
-                "a provider would not let go of what it holds (%s); its resources stay "
-                "with this process until it ends",
-                problem,
-            )
+    closing = {
+        asyncio.ensure_future(provider.close()): provider for provider in providers
+    }
+    if not closing:
+        return
+    done, unfinished = await asyncio.wait(closing, timeout=DISPOSAL_TIMEOUT_S)
+    for task in unfinished:
+        # The bound expired. Cancelling is what makes the wait a bound
+        # rather than a suggestion; the resource stays with this process
+        # until it ends, which is where it already was.
+        task.cancel()
+    problems = [
+        type(failure).__name__
+        for task in done
+        if not task.cancelled() and (failure := task.exception()) is not None
+    ]
+    for problem in problems:
+        logger.warning(
+            "a provider would not let go of what it holds (%s); its resources stay "
+            "with this process until it ends",
+            problem,
+        )
+    if unfinished:
+        # Classified by what happened rather than by an exception class,
+        # because nothing was raised: the close simply did not finish.
+        logger.warning(
+            "%d provider(s) did not let go of what they hold within %.0f s; their "
+            "resources stay with this process until it ends",
+            len(unfinished),
+            DISPOSAL_TIMEOUT_S,
+        )
 
 
 async def disposed(providers: Iterable[Provider]) -> None:
