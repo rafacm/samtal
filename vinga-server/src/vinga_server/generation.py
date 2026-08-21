@@ -17,6 +17,14 @@ holding them apart is how two loads come to disagree. `Generations` is
 where the current one is found and where the next one is put, and it is
 the only place a swap happens.
 
+The second half of that second fact is the end of a world rather than
+its beginning, and it is here for the same reason: a swap is also a
+retirement, and something has to know when a world nobody serves and
+nobody holds may let go of the engines it was speaking through. That
+rule lives here, and the counting it needs does not: who still holds a
+world is the session registry's knowledge, so it is passed in and never
+kept.
+
 The mark beside it exists because reading two things across an await is
 not the same as reading one world. An apply changes serving state more
 than once (the generation, then the MCP install), so a counter advanced
@@ -33,15 +41,16 @@ one home, and this is it.
 """
 
 import contextlib
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from vinga_server.config import Config
 from vinga_server.config.secrets import SecretStore
 from vinga_server.filler import FillerClips
+from vinga_server.providers import Provider, ProviderWorld, disposed
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class Generation:
     """One world this server serves: a validated configuration snapshot,
     the stored credentials loaded beside it, and the filled pauses
@@ -63,6 +72,17 @@ class Generation:
     mid-turn. Empty is a deployment where no agent masks its latency,
     which is the default.
 
+    `providers` is here for the reason the clips are, one step further
+    again: the engines a conversation speaks through are what this
+    world's provider entries resolved to, and an entry an apply rewrote
+    is a different object. A session binds the world at its
+    construction, so a rebuilt engine reaches the next conversation and
+    never the middle of one. The objects are shared with the worlds that
+    still use them: an entry whose model and stored credentials did not
+    move is carried over rather than built again, so two generations can
+    hold the same provider and the last of them to be let go of is what
+    closes it.
+
     `config` carries the file half as well as the domain half, and that
     is not an accident of composition: a reload never re-reads the file,
     so `config.server` is the section this process started with and is
@@ -73,11 +93,17 @@ class Generation:
     Frozen, and the whole point: a generation is never edited. A change
     is a new one, built entirely before anything binds it, so a refusal
     has touched nothing that is running.
+
+    Compared by identity rather than by value, which is what a world is:
+    two generations built from the same configuration are two worlds,
+    holding two sets of engines, and telling them apart is the whole of
+    what the lifecycle below does.
     """
 
     config: Config
     secrets: SecretStore
     fillers: Mapping[str, FillerClips] = field(default_factory=dict)
+    providers: ProviderWorld = field(default_factory=ProviderWorld)
 
 
 # What one apply is handed to put its world in place with: the swap
@@ -112,6 +138,13 @@ class Generations:
         # And whether one is changing serving state right now, which is
         # the half a counter cannot carry. See `mark`.
         self._applying = False
+        # The worlds this server has stopped serving and has not
+        # finished with. A generation goes in here at the instant it
+        # stops being current and comes out when it is disposed of,
+        # which is as soon as nothing holds it: usually the same
+        # instant, since most applies land with no conversation open on
+        # a provider they replaced.
+        self._retired: list[Generation] = []
 
     def current(self) -> Generation:
         """The world a piece of work starting now should bind.
@@ -168,8 +201,94 @@ class Generations:
             self._applying = False
 
     def _install(self, generation: Generation) -> None:
-        """The swap: one assignment, no await."""
+        """The swap: one assignment, no await.
+
+        The world that was current is retired in the same statement,
+        which is what makes "a generation nothing is serving and nobody
+        holds" a state this class can see rather than a thing an apply
+        has to remember to say.
+        """
+        self._retired.append(self._current)
         self._current = generation
+
+    async def dispose(self, held: Collection[Generation] = ()) -> None:
+        """Let go of every retired world that nobody is using any more.
+
+        `held` is who still has one: the generations that live
+        conversations bound and have not let go of. It is passed in
+        rather than counted here because the whole session set is the
+        session registry's knowledge and duplicating it would be a
+        second count to keep in step; what is here is the rule, which is
+        the thing with exactly one home.
+
+        Called at both moments the answer can change, which is why it
+        takes no argument saying which: an apply, where a world has just
+        stopped being current, and the end of a session, where a world
+        may have just stopped being held. A world that is neither
+        current nor held goes now, and one that is held goes when its
+        last conversation ends.
+
+        A provider is closed only if no world that is still around holds
+        it. Reuse hands one object to several generations, so the
+        retiring one's engines are compared, by identity, against
+        everything the current world, the held worlds and the other
+        retired worlds are speaking through: what is left is what this
+        world was the last owner of.
+
+        Never refuses. It runs after the serving state has already
+        moved, so there is nothing left for a failure to refuse, and
+        what a teardown did is not a thing an apply's answer can depend
+        on.
+        """
+        # Taken out of the list before the first await, so that two
+        # disposals running at once cannot both take the same world, and
+        # let go of together rather than one at a time, so that an
+        # engine two retiring worlds share is closed once.
+        keeping = {id(generation) for generation in held}
+        letting_go = [
+            generation for generation in self._retired if id(generation) not in keeping
+        ]
+        self._retired = [
+            generation for generation in self._retired if id(generation) in keeping
+        ]
+        await disposed(self._last_held_by(letting_go))
+
+    async def aclose(self) -> None:
+        """The end of the process: let go of everything, held or not.
+
+        Registered on the lifespan's exit stack behind the drain, so
+        what it meets is a server whose conversations have been asked to
+        finish. Whatever is still holding a retired world at that point
+        has run out of time rather than earned an extension, and the
+        current world is nobody's to keep either: a close that ran at
+        every end but this one would be a lifecycle with a hole in it
+        exactly where every process eventually goes.
+        """
+        await self.dispose()
+        await disposed(self._current.providers.instances.values())
+
+    def _last_held_by(self, retiring: Sequence[Generation]) -> list[Provider]:
+        """The engines these worlds were the last to hold, once each.
+
+        Identity rather than equality throughout: two entries built from
+        the same options are two objects with two connection pools, and
+        an object carried over from one world to the next is one object
+        in two worlds. What survives is what nothing still around is
+        speaking through.
+        """
+        kept = {
+            id(provider)
+            for generation in (self._current, *self._retired)
+            for provider in generation.providers.instances.values()
+        }
+        return list(
+            {
+                id(provider): provider
+                for generation in retiring
+                for provider in generation.providers.instances.values()
+                if id(provider) not in kept
+            }.values()
+        )
 
 
 __all__ = ["Generation", "Generations", "Install"]
