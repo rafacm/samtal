@@ -379,7 +379,7 @@ session %s rejected: the Device-Id header is not a device MAC (six colon-separat
 #### Variant 2: `vinga_server.session` at WARNING
 
 ```text
-session %s rejected: device %s is bound to agent %s, which this server has not loaded; restart to load it
+session %s rejected: device %s is bound to agent %s, which this server is not serving; install it with: vinga-server config reload
 ```
 
 | # | Argument | Nullable | Constraint | Note |
@@ -1144,13 +1144,13 @@ device %s (%s, firmware %s) has no agent and is showing activation code %s; bind
 | `board` | `DESCRIPTOR` | yes | no | at most 64 characters, every one printable | What the device calls itself. `unknown` when it said nothing usable. |
 | `firmware` | `DESCRIPTOR` | yes | no | at most 32 characters, every one printable | The only moment a device ever states its firmware version: the websocket handshake does not carry it. |
 | `agents` | `IDENTIFIER_LIST` | yes | no |  |  |
-| `unloaded` | `IDENTIFIER_LIST` | yes | no |  | Agents this device is bound to that this process did not load. Named on every record rather than only on the one that complains, so a query for devices waiting on a restart is one field. |
+| `unloaded` | `IDENTIFIER_LIST` | yes | no |  | Agents this device is bound to that the world this server is serving does not hold. Named on every record rather than only on the one that complains, so a query for devices waiting on a reload is one field. |
 | `code` | `ID` | yes | no | the `activation_code` syntax |  |
 
 #### Variant 2: `vinga_server.ota` at WARNING
 
 ```text
-device %s (%s, firmware %s) is bound to agent %s, which this server has not loaded; restart to load it
+device %s (%s, firmware %s) is bound to agent %s, which this server is not serving; install it with: vinga-server config reload
 ```
 
 | # | Argument | Nullable | Constraint | Note |
@@ -2056,8 +2056,8 @@ drained with %d session(s) cut mid-reply and %d that did not finish
 
 ### `device_bindings_snapshot_only`
 
-There is no configuration database, so bindings resolve from the boot
-snapshot.
+There is no configuration database, so bindings resolve from the world this
+server is serving.
 
 #### Variant 1: `vinga_server.device.bindings` at DEBUG
 
@@ -2076,7 +2076,7 @@ no configuration database at %s: device bindings resolve from the configuration 
 
 ### `device_bindings_unreadable`
 
-The database could not be read, so the answer is the boot snapshot's.
+The database could not be read, so the answer is the served world's.
 
 #### Variant 1: `vinga_server.device.bindings` at WARNING
 
