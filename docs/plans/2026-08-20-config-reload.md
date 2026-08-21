@@ -559,7 +559,9 @@ in the same change as the prose that feeds them.
   reads (`device/session.py`'s provider lookups) bind the
   session's generation. Branch `feature/config-reload-m3` stacked
   on M2, PR #231.
-- [ ] **M4: the agent set and agent_defaults.** The four agent-set
+- [x] **[M4: the agent set and
+  agent_defaults](2026-08-20-config-reload-implementation.md#m4-the-agent-set-and-agent_defaults).**
+  (PR TBD) The four agent-set
   snapshots move to the generation (`ApiRuntime.loaded_agents`
   becomes a read-through, `McpServers`' servable set swaps with
   the world and its three "never replaced" prose sites are

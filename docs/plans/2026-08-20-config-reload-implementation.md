@@ -934,3 +934,232 @@ Run from `vinga-server/`, at the last commit of the round.
 
 The image and the smoke lane remain unverified here, for the reason
 given above.
+
+## M4: the agent set and agent_defaults
+
+### What was done
+
+**The overlay retired.** `_composed` is gone, and so is `_validated`
+beside it. The candidate generation's configuration is the stored half
+whole: `reload_domain_config` already composes it onto this process's
+own server section and validates it with the two checks a boot runs, so
+once nothing is held back there was nothing left for an identity
+function to do. `OVERLAID_AGENT_FIELDS` went with it, since the only
+caller outside `config/diff.py` was the overlay.
+
+**The comparison flipped.** `agents` and `agent_defaults` are `reload`
+in `APPLIES`, an agent entry is compared whole rather than with the
+applied fields cut out of it, and `agent_defaults` is compared whole
+with its grants. `_restart_bound`, `_without_grants` and
+`_RELOADED_AGENT_FIELDS` are gone. The three halves under the agents
+(`grants`, `prompt`, `filler`) stay, and their meaning changed: they
+were an exception to `changed` and they are a breakdown of it, saying
+which of three clocks an edit is on.
+
+**The four agent-set snapshots.** `ApiRuntime.loaded_agents` is a
+`ServableAgents` callable answered from `generations.current()`;
+`McpServers` no longer keeps a servable set at all, because the
+installed slice's own agents are that set once the two swap together;
+`DeviceBindings` answers raw names; and the prompt preview's 404 branch
+already read `current()` and needed nothing. The inventory below records
+the grep that says there is no fifth.
+
+**The pinned handoff.** `DeviceBindings.resolve` answers `BoundNames`,
+which is the names and whether the database or the served world
+answered. The session captures one generation on the loop the instant
+that await returns, calls `BoundNames.against` with exactly that
+object's agents, builds the runtime from it and registers the lease for
+it with no await in between. The OTA check-in and the activation poll
+split against the world current as they answer, which is the honest
+generation where nothing is being built.
+
+**The activation fallback became load bearing.** `PipelineRuntime` takes
+the generation the session bound as well as the holder, and
+`_activate_agent` reads the current world when it holds the agent and
+the session's own when it does not. A handover to an agent an apply
+deleted therefore keeps that agent's last-served prompt world instead of
+raising inside a tool call.
+
+**The result and the notices.** The `agents` section answers, naming
+what the apply added and removed and whether `agent_defaults` moved, and
+`providers.retired` starts naming entries, which it structurally could
+not while the agent set was fixed. `AGENT_NOTICE` is gone;
+`RELOAD_NOTICE` carries the three convergence clocks and is what every
+kind of the domain half answers with; `BINDING_UNSERVED_NOTICE` is new,
+for the one write whose two halves are true at once.
+
+**The prose.** The API description's boot-snapshot paragraph is the
+generation paragraph, the docgen contract prose and both
+`prompt_includes` descriptions moved with it, and the OTA, onboarding,
+registry and pipeline sites that still said "restart" or "at boot" were
+swept. Both READMEs and the changelog entry moved, and both generated
+references were regenerated in the same change.
+
+### The agent-set snapshot inventory
+
+The plan's lens asks for this by tooling before M4 merges. Taken by
+`git grep -n "config.agents\b\|\.agents)\|frozenset(config" -- src` at
+the end of the milestone, minus the reads that are about a provider
+world rather than a configuration. **Four snapshots, all converted, and
+no fifth.**
+
+| Site | Was | Is |
+| --- | --- | --- |
+| `ApiRuntime.loaded_agents` | `frozenset` captured at build | `ServableAgents`, a callable over `generations.current()` |
+| `McpServers._agents` | `tuple(self._configured.grants)`, read once at construction | deleted; `McpSlice.pending_against` uses its own agents, which the install swaps |
+| `DeviceBindings._loaded` | `frozenset(config.agents)` from the construction-time `Config` | deleted; the view answers raw names and the caller splits against one generation |
+| `_prompt_preview`'s 404 | already `generations.current().config` since M1 | unchanged, and that is the point: it was converted where it was written |
+
+The reads that remain are the comparison's (two composed worlds, by
+definition not a snapshot of this one), the apply's own `_agents`
+section, and the three classification sites, each of which names the
+generation it is asking about on the line above it.
+
+### Deviations from the plan
+
+Ten, each recorded because it moved something the plan named.
+
+**1. `_composed` disappeared rather than becoming the identity.** The
+plan allows either. It disappeared, along with `_validated`, because the
+stored read already does both halves of what they did: `compose_config`
+puts the stored domain half onto this process's server section, and
+`Config`'s own validator runs `check_completeness` and
+`check_references`. An identity function plus a re-validation of an
+already-validated snapshot would have been two names for nothing.
+
+**2. `ApiRuntime.loaded_agents` is a callable, not a field the holder
+writes.** The plan says "a read-through of the current generation". A
+callable, because that is the shape three of `ApiRuntime`'s other fields
+already have (`reload`, `agent_prompt`, `config_diff`) and for the same
+reason: what it closes over is the composition root's business, and
+`config/api.py` must not import `generation.py`, which reaches the
+provider layer that the document-rendering weight pin forbids.
+`ServableAgents` is declared in `responses.py` beside its siblings.
+
+**3. `pending_against` lost its `agents` parameter rather than gaining a
+generation.** The plan says the grants population "follows the current
+generation". It does, and the shortest honest way to say so was to
+delete the parameter: an installed slice's agents ARE the agents this
+server can be asked for once the slice and the world swap together, so
+passing a set in would have been a second answer to a question the slice
+already holds. Two `test_mcp_pending.py` cases changed meaning with it,
+each rewritten to the new truth rather than deleted.
+
+**4. `DeviceBindings` answers a new type, and the split has one
+home.** The plan says it "returns the RAW bound and default names,
+unclassified". `BoundNames` is that answer, and it carries `against`,
+which is the classification the OTA paths and the session both need. The
+alternative, two call sites each filtering a name list, would have been
+one rule written twice; what is per-caller is which generation to ask,
+not how to ask it. `DeviceAgents` survives unchanged as what `against`
+answers. `agents_for` became `names_for`, because it no longer answers
+agents.
+
+**5. `DeviceBindings` imports `Generations` under `TYPE_CHECKING`.**
+Not foreseen, and not optional: `generation.py` reaches the provider
+layer, `onboarding/unbound.py` imports `DeviceAgents` from here, and
+`test_onboarding_import_weight.py` holds the configuration CLI and the
+rendering of the committed API document to loading neither the MCP SDK
+nor the providers. Nothing in this module needs the class itself, only a
+holder to ask, so the name is a type and its annotations are strings.
+The pin caught it, which is what it is for.
+
+**6. The bindings view is opened later in the boot.** It has to be: it
+reads the holder for the fallback its unreadable-database path uses, and
+the holder is built after the engines. The comment that said it was the
+first pool acquired and therefore the last released says what is true
+now. One test moved with it:
+`test_a_build_that_fails_part_way_releases_what_it_took` used a provider
+refusal, which the view no longer outlives, so its refusing step is now
+the configuration store's own open, which is the first thing after the
+view that a real deployment can fail at.
+
+**7. `PipelineRuntime` takes the generation the session bound.** The
+plan does not say how `_activate_agent` reaches it. As a constructor
+argument beside the holder, which is also where the engines and the
+clips it already reads come from, so the object it falls back to is the
+object everything else about this conversation came out of.
+
+**8. A fifth notice, and the start sentence's last user.** The plan says
+`AGENT_NOTICE` collapses to the general reload notice. It does, and
+`RELOAD_NOTICE` grew the three convergence clocks in the same breath, so
+that the one sentence every reloaded kind carries says what an operator
+acts on. What the plan did not foresee is that `RESTART_NOTICE`'s other
+user became false at the same moment: `binding_notice` answered it for a
+binding naming an agent this server has not loaded, and the fix for that
+is a reload, not a restart. `BINDING_UNSERVED_NOTICE` says both halves,
+because both are true at once. `RESTART_NOTICE` stays as
+`_acknowledge`'s default and as `secret_notice`'s answer for a third
+entity kind, promising nothing on a route that forgot to name its own
+boundary.
+
+**9. The agents' three halves became a breakdown rather than an
+exception.** The published diff schema is unchanged, and would have been
+whichever way this went, but the meaning had to move: with the whole
+entry applied, `changed` covers every field, and an agent whose prompt
+alone moved is now in `changed` and in `prompt` both. Four
+`test_config_diff.py` cases assert the new shape, and the models'
+descriptions say it.
+
+**10. Two event notes still say "boot snapshot", deliberately.**
+`device_bindings_snapshot_only` and `device_bindings_unreadable` carry
+notes that are rendered into `docs/reference/events.md`, which this
+milestone must leave byte-identical, for M1's deviation 4's reason: the
+event surface is a committed reference and widening it is its own
+change. The first note is still true as written (in snapshot mode the
+boot snapshot is the only generation there will ever be, since the
+reload refuses there); the second is now narrow, since the fallback
+answers from the generation being served, which may not be the boot's.
+Worth an issue, and not worth moving a reference document this
+milestone promised not to touch.
+
+### Discoveries
+
+**The overlay's one refusal became an ordinary apply.** Deleting a
+fragment while a start-bound `agent_defaults.prompt_includes` still
+named it was the case the whole-snapshot re-validation existed for. With
+nothing held back, the stored world is what gets installed, and the
+store's own deletion of both the fragment and the layer that named it is
+exactly what an operator wrote. The test that proved the refusal now
+proves the apply, which is the same case read from the other side.
+
+**A barrier test cannot bind a device to an agent that does not
+exist.** `Config`'s validator refuses `devices` naming an undefined
+agent, so the world an apply installs after deleting an agent has to
+drop the binding with it. The stale name in both barrier cases therefore
+comes from the bindings view, which is where it comes from in
+production too: the lookup read the database a moment before the apply
+landed.
+
+**`retired` became reachable at exactly the point M3 predicted.** An
+entry leaves a world when the last agent that named it does, which is
+the one thing an apply could not do until the agent set moved. The two
+cases beside each other (an entry the last agent stopped naming, and a
+rewritten entry that is still named) are what keeps the word meaning
+what the field says it means.
+
+### Verification
+
+Run from `vinga-server/`, at the last commit of the milestone.
+
+- `uv run ruff check .`: all checks passed.
+- `uv run mypy`: success, no issues found in 3 source files. Its scope is
+  the events package, which this milestone does not touch.
+- `uv run pytest tests/unit -q`: 2,788 passed, 18 skipped. (2,777 passed
+  and 18 skipped at the end of M3; the eleven new cases are the two
+  barrier directions, the two check-in loops, five at the apply, the
+  agents section in the CLI rendering, and the second half of the write
+  parametrization that used to name a restart.)
+- `uv run pytest tests/integration -q`: 61 passed, the same count as M3
+  left: the three cases this milestone changes were already there and
+  were amended rather than added to.
+- The four documentation drift checks, regenerated and diffed against
+  `../docs/reference/`: all four clean. `api-openapi.json` and
+  `domain-config.md` change deliberately and are committed in this
+  milestone; `events.md` and `conversations-schema.md` are byte-untouched
+  and are absent from this milestone's commits, which is what says no
+  event and no conversation column moved.
+
+Not verified here, and not claimed: the container image, the smoke lane,
+and anything against a real device, none of which this milestone
+touches.
