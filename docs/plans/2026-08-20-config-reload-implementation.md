@@ -1108,17 +1108,19 @@ alone moved is now in `changed` and in `prompt` both. Four
 `test_config_diff.py` cases assert the new shape, and the models'
 descriptions say it.
 
-**10. Two event notes still say "boot snapshot", deliberately.**
+**10. Two event notes still said "boot snapshot", deliberately, until
+the review round lifted the rule that kept them.**
 `device_bindings_snapshot_only` and `device_bindings_unreadable` carry
-notes that are rendered into `docs/reference/events.md`, which this
-milestone must leave byte-identical, for M1's deviation 4's reason: the
-event surface is a committed reference and widening it is its own
-change. The first note is still true as written (in snapshot mode the
-boot snapshot is the only generation there will ever be, since the
-reload refuses there); the second is now narrow, since the fallback
-answers from the generation being served, which may not be the boot's.
-Worth an issue, and not worth moving a reference document this
-milestone promised not to touch.
+notes rendered into `docs/reference/events.md`, which this milestone set
+out to leave byte-identical for M1's deviation 4's reason: the event
+surface is a committed reference and widening it is its own change. The
+first note was still true as written (in snapshot mode the world being
+served is the only generation there will ever be, since the reload
+refuses there); the second was narrow, since the fallback answers from
+the generation being served, which may not be the boot's. It was left
+open here and closed in the round below, whose first finding moved two
+templates on the same document and therefore lifted the rule for this
+branch; both notes went with them.
 
 **11. The rebase onto PR #231's review round merged by itself, and one
 pin had to be re-hung rather than merged.** The round's five commits and
@@ -1199,3 +1201,87 @@ Run from `vinga-server/`, at the last commit of the milestone.
 Not verified here, and not claimed: the container image, the smoke lane,
 and anything against a real device, none of which this milestone
 touches.
+
+### PR review round (2026-08-21)
+
+External review of PR #232: codex exec, model gpt-5.6-sol, read-only
+against `main...85554e04`. Verdict: mergeable after fixes. Two findings,
+both P2, condensed but faithful; each carries its resolution and the
+commit that made it.
+
+**1 (P2). The runtime's own rejection logs still told an operator to
+restart.** Both records about a device bound to an agent this server
+does not hold said "which this server has not loaded; restart to load
+it", and the `unloaded` field's note described a query for devices
+waiting on a restart. The paths that reach them are the ones this
+milestone changed: the session classifies against the generation it
+captured, so the deletion barrier added here reaches the first of them
+with the agent set moving under a live connection, and the check-in
+classifies against the current world. The action that puts the agent in
+front of the board is the reload.
+
+*Resolution.* Adopted (`64bf0777`). Both templates name
+`vinga-server config reload` and say "is not serving"; the field note
+and both variant docstrings follow. Two semantic pins go with the
+regenerated document, in the spirit of the ones M1's round added over
+the other reference: no record anywhere may tell the person reading it
+to restart this server, with `mcp_reload`'s entry counts the one
+declaration allowed the word, and both of these records must name the
+command in the shipped document. Proved to bite by putting the old
+template back, which fails both pins and the drift check.
+
+Two things deliberately did not move. The rejection token stays
+`agent_not_loaded`: it is the closed-set value a collector groups by
+rather than a sentence, and moving it would break every query written
+against it to say what the sentence beside it now says. The field name
+`unloaded` stays for the same reason, being a payload key a consumer
+reads. This finding is also what lifted the byte-identical `events.md`
+rule for this branch, so deviation 10 above is resolved here rather than
+left for an issue.
+
+**2 (P2). The committed API contract still declared this milestone's
+configuration start-bound.** The reload route's description listed what
+an earlier release could apply and sent the agent set, `agent_defaults`
+and the stage bindings to the next start; the acknowledgement's `notice`
+description said most writes apply at a server start; the
+prompt-fragment write split the two include layers across a line that no
+longer exists. All three are rendered into `docs/reference/api-openapi.json`,
+so a generated client's reader would have been told to put a restart in
+front of an operator for a change one request applies.
+
+*Resolution.* Adopted (`2ecd5a15`). The route names the whole domain
+half and only the server section as start-bound, and says what an
+installed or a removed agent means for a device and for a conversation
+already talking as it; the `notice` description names the two boundaries
+there are and says out loud that nothing this API writes waits for a
+start. The sweep the finding asked for turned up three more sites (the
+generated reference's whole-configuration section, the activation's
+"booted on", the prompt preview's "did not load") and two bullets of the
+unreleased changelog section that still described an agent entry as
+falling on both sides of the line. A grep for the old vocabulary says
+those were the last: what still reads "booted on" is the comparison and
+the MCP registry contrasting a baseline with a boot, which is the
+sentence they exist to make. Two semantic pins were added over the
+committed document and proved to bite the same way.
+
+### Verification after the round
+
+Run from `vinga-server/`, at the last commit of the round.
+
+- `uv run ruff check .`: all checks passed.
+- `uv run mypy`: success, no issues found in 3 source files.
+- `uv run pytest tests/unit -q`: 2,797 passed, 20 skipped. The four new
+  cases are this round's pins, two over the event reference and two over
+  the API document.
+- `uv run pytest tests/integration -q`: 61 passed, unchanged.
+- The four documentation drift checks: all clean. Three of the four
+  documents change deliberately in this round and are committed with the
+  prose that feeds them: `api-openapi.json` and `domain-config.md` as
+  before, and `events.md`, which this milestone had promised to leave
+  alone until the first finding made that promise the wrong one. The
+  event record baseline moved with the two templates and the catalog
+  golden did not, which is the golden saying what it is for: it holds no
+  wording. `conversations-schema.md` is byte-untouched.
+
+The image and the smoke lane remain unverified here, for the reason
+given above.
