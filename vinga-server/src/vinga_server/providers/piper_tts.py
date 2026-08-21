@@ -9,7 +9,6 @@ rate (22.05 kHz for the medium voices) is announced through the
 provider and resampled by the session.
 """
 
-import asyncio
 import logging
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -18,7 +17,7 @@ from piper import PiperVoice
 from piper.download_voices import download_voice
 
 from vinga_server.config.models import ProviderConfig
-from vinga_server.providers.base import TtsProvider
+from vinga_server.providers.base import Operations, TtsProvider
 from vinga_server.providers.registry import OptionsReader
 
 logger = logging.getLogger(__name__)
@@ -42,15 +41,37 @@ class PiperTts(TtsProvider):
     egress = False
 
     def __init__(self, voice: str, download_dir: Path) -> None:
-        self._voice = PiperVoice.load(ensure_voice(voice, download_dir))
+        # The syntheses running off the loop right now, so that a
+        # teardown waits for the worker rather than for its caller.
+        self._operations = Operations()
+        self._voice: PiperVoice | None = PiperVoice.load(ensure_voice(voice, download_dir))
         self.sample_rate = self._voice.config.sample_rate
 
     async def synthesize(self, text: str) -> AsyncIterator[bytes]:
-        for chunk in await asyncio.to_thread(self._synthesize, text):
+        for chunk in await self._operations.run(lambda: self._synthesize(text)):
             yield chunk
 
+    async def close(self) -> None:
+        """Let go of the loaded voice, once every sentence that had
+        started being spoken has finished.
+
+        The wait is what makes it safe: synthesis runs in a worker
+        thread that a cancelled caller does not stop, so a reference
+        dropped on the strength of nobody awaiting would be dropped
+        under a thread still reading the voice (#191). What onnxruntime
+        then does with the session's memory is its own schedule, and
+        this claims only that nothing here holds it any more.
+        """
+        await self._operations.settled()
+        self._voice = None
+
     def _synthesize(self, text: str) -> list[bytes]:
-        return [chunk.audio_int16_bytes for chunk in self._voice.synthesize(text)]
+        voice = self._voice
+        if voice is None:
+            # Unreachable from a running server: a provider is disposed
+            # of only once no world holds it, so nothing is left to ask.
+            raise RuntimeError("this piper entry has been closed")
+        return [chunk.audio_int16_bytes for chunk in voice.synthesize(text)]
 
 
 def build(label: str, config: ProviderConfig) -> PiperTts:

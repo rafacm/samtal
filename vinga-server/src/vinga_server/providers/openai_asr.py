@@ -195,8 +195,9 @@ class OpenAiAsr(AsrProvider):
         # reused across turns and sessions: a fresh TLS handshake per
         # utterance would land squarely in the gap between the user
         # finishing their sentence and the assistant answering.
-        # Providers are built at startup and live as long as the server,
-        # which is also this client's lifetime.
+        # It lives exactly as long as this entry does, which is until an
+        # apply rewrites the entry or the process ends, and `close`
+        # below is where the pool goes.
         self._client = (
             client
             if client is not None
@@ -207,6 +208,12 @@ class OpenAiAsr(AsrProvider):
                 max_retries=MAX_RETRIES,
             )
         )
+
+    async def close(self) -> None:
+        """Shut the SDK client's connection pool. An entry an apply has
+        rewritten is built again as a new object, and this one holds
+        sockets to a host nothing is going to ask anything of again."""
+        await self._client.close()
 
     async def transcribe(
         self, pcm: bytes, sample_rate: int, language_hint: str | None = None

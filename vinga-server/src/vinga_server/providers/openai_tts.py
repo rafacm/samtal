@@ -98,8 +98,9 @@ class OpenAiTts(TtsProvider):
         # One client per provider entry, so its connection pool is
         # reused across sentences and sessions: a fresh TLS handshake
         # per sentence would show up as latency in the gap the user
-        # hears. Providers are built at startup and live as long as the
-        # server, which is also this client's lifetime.
+        # hears. It lives exactly as long as this entry does, which is
+        # until an apply rewrites the entry or the process ends, and
+        # `close` below is where the pool goes.
         self._client = (
             client
             if client is not None
@@ -110,6 +111,12 @@ class OpenAiTts(TtsProvider):
                 max_retries=MAX_RETRIES,
             )
         )
+
+    async def close(self) -> None:
+        """Shut the SDK client's connection pool. An entry an apply has
+        rewritten is built again as a new object, and this one holds
+        sockets to a host nothing is going to ask anything of again."""
+        await self._client.close()
 
     async def synthesize(self, text: str) -> AsyncIterator[bytes]:
         """Stream one sentence, yielding PCM as it arrives, sample-aligned

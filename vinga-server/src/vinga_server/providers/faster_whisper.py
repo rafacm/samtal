@@ -22,14 +22,13 @@ search buys little accuracy on short spoken commands and costs a
 multiple of the CPU time (#19).
 """
 
-import asyncio
 import logging
 
 import numpy as np
 from faster_whisper import WhisperModel
 
 from vinga_server.config.models import ProviderConfig
-from vinga_server.providers.base import AsrProvider, AsrResult, ProviderError
+from vinga_server.providers.base import AsrProvider, AsrResult, Operations, ProviderError
 from vinga_server.providers.registry import OptionsReader
 
 logger = logging.getLogger(__name__)
@@ -68,7 +67,10 @@ class FasterWhisperAsr(AsrProvider):
     ) -> None:
         logger.info("loading faster-whisper model %s (%s, %s)", model, device, compute_type)
         self.model = model
-        self._engine = WhisperModel(
+        # The transcriptions running off the loop right now, so that a
+        # teardown waits for the worker rather than for its caller.
+        self._operations = Operations()
+        self._engine: WhisperModel | None = WhisperModel(
             model,
             device=device,
             compute_type=compute_type,
@@ -96,14 +98,39 @@ class FasterWhisperAsr(AsrProvider):
     ) -> AsrResult:
         if sample_rate != EXPECTED_SAMPLE_RATE:
             raise ValueError(f"faster-whisper is fed {EXPECTED_SAMPLE_RATE} Hz, got {sample_rate}")
-        return await asyncio.to_thread(self._transcribe, pcm, language_hint)
+        return await self._operations.run(lambda: self._transcribe(pcm, language_hint))
+
+    async def close(self) -> None:
+        """Let go of the loaded model, once every transcription that had
+        started has finished with it.
+
+        The wait is the point. A decode runs in a worker thread and a
+        cancelled caller does not stop it, so dropping the reference on
+        the strength of nobody awaiting would drop it under a thread
+        that is still reading (#191).
+
+        What the release actually buys is the library's to decide.
+        CTranslate2 holds the weights in memory it manages itself and
+        frees on its own schedule, so this drops the last reference this
+        process holds and claims nothing about resident memory at the
+        instant it returns; what a swap of a local model costs is
+        briefly holding two, which is the price the reload was designed
+        to pay.
+        """
+        await self._operations.settled()
+        self._engine = None
 
     def _transcribe(self, pcm: bytes, language_hint: str | None) -> AsrResult:
+        engine = self._engine
+        if engine is None:
+            # Unreachable from a running server: a provider is disposed
+            # of only once no world holds it, so nothing is left to ask.
+            raise RuntimeError("this faster-whisper entry has been closed")
         audio = pcm_to_float(pcm)
         # A configured language always beats the hint: the hint is this
         # provider's own earlier detection coming back from the session.
         pinned = self._language or language_hint
-        segments, info = self._engine.transcribe(audio, language=pinned, **self._decode_options)
+        segments, info = engine.transcribe(audio, language=pinned, **self._decode_options)
         detected = getattr(info, "language", None)
         confidence = getattr(info, "language_probability", None) if pinned is None else None
 
@@ -125,7 +152,7 @@ class FasterWhisperAsr(AsrProvider):
                 self._language_fallback,
             )
             detected = self._language_fallback
-            segments, info = self._engine.transcribe(
+            segments, info = engine.transcribe(
                 audio, language=self._language_fallback, **self._decode_options
             )
 
@@ -157,21 +184,24 @@ def build(label: str, config: ProviderConfig) -> FasterWhisperAsr:
             f'{label}: option "language_detect" must be one of: '
             + ", ".join(LANGUAGE_DETECT_MODES)
         )
-    provider = FasterWhisperAsr(
-        model=options.string("model", "small") or "small",
-        language=options.string("language"),
-        device=options.string("device", "cpu") or "cpu",
-        compute_type=options.string("compute_type", "int8") or "int8",
-        beam_size=options.integer("beam_size", 1),
-        download_dir=options.string("download_dir"),
-        cpu_threads=options.integer("cpu_threads", 0),
-        vad_filter=options.boolean("vad_filter", False),
-        vad_parameters=options.mapping("vad_parameters"),
-        condition_on_previous_text=options.boolean("condition_on_previous_text", True),
-        temperature=options.numbers("temperature"),
-        language_detect=language_detect,
-        language_fallback=options.string("language_fallback"),
-        language_confidence_floor=options.number("language_confidence_floor", 0.6),
-    )
+    # Read to the end and finished before a single weight is loaded: an
+    # unknown option is a refusal that must not cost a model load, and
+    # after the load there would be an object to let go of again (#191).
+    settings = {
+        "model": options.string("model", "small") or "small",
+        "language": options.string("language"),
+        "device": options.string("device", "cpu") or "cpu",
+        "compute_type": options.string("compute_type", "int8") or "int8",
+        "beam_size": options.integer("beam_size", 1),
+        "download_dir": options.string("download_dir"),
+        "cpu_threads": options.integer("cpu_threads", 0),
+        "vad_filter": options.boolean("vad_filter", False),
+        "vad_parameters": options.mapping("vad_parameters"),
+        "condition_on_previous_text": options.boolean("condition_on_previous_text", True),
+        "temperature": options.numbers("temperature"),
+        "language_detect": language_detect,
+        "language_fallback": options.string("language_fallback"),
+        "language_confidence_floor": options.number("language_confidence_floor", 0.6),
+    }
     options.finish()
-    return provider
+    return FasterWhisperAsr(**settings)  # type: ignore[arg-type]

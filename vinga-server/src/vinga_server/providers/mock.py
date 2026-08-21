@@ -245,41 +245,49 @@ class MockTts(TtsProvider):
 
 def build_vad(label: str, config: ProviderConfig) -> MockVad:
     options = OptionsReader(label, config)
-    provider = MockVad(
-        threshold=options.number("threshold", 500.0),
-        trailing_silence_ms=options.number("trailing_silence_ms", 700.0),
-        max_utterance_ms=options.number("max_utterance_ms", 10_000.0),
-    )
+    threshold = options.number("threshold", 500.0)
+    trailing_silence_ms = options.number("trailing_silence_ms", 700.0)
+    max_utterance_ms = options.number("max_utterance_ms", 10_000.0)
     options.finish()
-    return provider
+    return MockVad(
+        threshold=threshold,
+        trailing_silence_ms=trailing_silence_ms,
+        max_utterance_ms=max_utterance_ms,
+    )
 
 
 def build_asr(label: str, config: ProviderConfig) -> MockAsr:
     options = OptionsReader(label, config)
-    provider = MockAsr(text=options.string("text", "hello") or "")
+    text = options.string("text", "hello") or ""
     options.finish()
-    return provider
+    return MockAsr(text=text)
 
 
 def build_llm(label: str, config: ProviderConfig) -> MockLlm:
     options = OptionsReader(label, config)
-    provider = MockLlm(
-        reply=options.string("reply", "You said {text}.") or "",
-        tool_when=options.string("tool_when"),
-        tool_name=options.string("tool_name", "") or "",
-        tool_arguments=options.mapping("tool_arguments"),
-    )
+    reply = options.string("reply", "You said {text}.") or ""
+    tool_when = options.string("tool_when")
+    tool_name = options.string("tool_name", "") or ""
+    tool_arguments = options.mapping("tool_arguments")
     options.finish()
-    return provider
+    return MockLlm(
+        reply=reply,
+        tool_when=tool_when,
+        tool_name=tool_name,
+        tool_arguments=tool_arguments,
+    )
 
 
 def build_tts(label: str, config: ProviderConfig) -> MockTts:
     options = OptionsReader(label, config)
-    provider = MockTts(
-        sample_rate=options.integer("sample_rate", 24_000),
-        ms_per_char=options.number("ms_per_char", 40.0),
-        min_ms=options.number("min_ms", 240.0),
-        tone_hz=options.number("tone_hz", TONE_HZ),
-    )
+    sample_rate = options.integer("sample_rate", 24_000)
+    ms_per_char = options.number("ms_per_char", 40.0)
+    min_ms = options.number("min_ms", 240.0)
+    tone_hz = options.number("tone_hz", TONE_HZ)
     options.finish()
-    return provider
+    return MockTts(
+        sample_rate=sample_rate,
+        ms_per_char=ms_per_char,
+        min_ms=min_ms,
+        tone_hz=tone_hz,
+    )
