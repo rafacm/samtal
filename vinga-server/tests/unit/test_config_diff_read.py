@@ -526,7 +526,7 @@ def test_a_running_server_hands_its_own_comparison_to_the_api(
         # pending and every kind still says where it converges.
         settled = served.get(DIFF_PATH, headers=headers()).json()
         assert settled["providers"] == {
-            "applies": "restart",
+            "applies": "reload",
             "added": [],
             "removed": [],
             "changed": [],
@@ -543,7 +543,7 @@ def test_a_running_server_hands_its_own_comparison_to_the_api(
         pending = served.get(DIFF_PATH, headers=headers()).json()
 
     assert pending["providers"]["added"] == ["tts.spare"]
-    assert pending["providers"]["applies"] == "restart"
+    assert pending["providers"]["applies"] == "reload"
     # And the write's own acknowledgement said the same thing in
     # sentence form, which is the pair an operator sees.
-    assert "next server start" in written.json()["notice"]
+    assert "asked to reload" in written.json()["notice"]

@@ -148,25 +148,35 @@ RELOAD_NOTICE = (
 # Four of them are what a reload applies: the prompt and the fragments
 # it includes are assembled at an activation, the `mcp` list is what the
 # reload derives this agent's tools from, and the `filler` section is
-# synthesized into clips a conversation binds when it opens. The
-# provider overrides are built at boot and wait for the next start.
-# Every part is stated, because a write that carried one sentence alone
-# would be exactly right about part of what was just written and exactly
-# wrong about the rest.
+# synthesized into clips a conversation binds when it opens. What is
+# left is which provider entry serves each of this agent's stages, and
+# that is composed when the server starts. Every part is stated, because
+# a write that carried one sentence alone would be exactly right about
+# part of what was just written and exactly wrong about the rest.
 #
 # The three applied halves converge at three different moments and the
 # sentence says so: prompt text is assembled once per activation and
 # cached for it, the tools an agent may reach are snapshotted per reply,
 # and the clips a conversation masks with are bound when it opens.
+#
+# The restart-bound half says what it is rather than what it is not,
+# which it has to now that the providers themselves reload (#191): an
+# operator who edits the entry a stage names gets the new engine at the
+# next conversation, and one who points the stage at a different entry
+# waits for the start. Saying "everything else, because that is when its
+# providers are built" would now send that first operator to restart a
+# server that has already applied their edit.
 AGENT_NOTICE = (
     "This applies in two parts. The `prompt`, `prompt_includes`, `mcp` and `filler` "
     "fields apply when the running server is asked to reload: run "
     "`vinga-server config reload`, and a conversation in progress meets the new prompt "
     "text at its next activation and the new tools at its next utterance, while the "
     "re-synthesized filled pauses reach the next conversation, since one already open "
-    "keeps the clips it opened with. Everything else about the agent, and the "
-    "agent itself if it is new, applies at the next server start, because that is when "
-    "its providers are built."
+    "keeps the clips it opened with. Which provider entry serves each of this agent's "
+    "stages, and the agent itself if it is new, applies at the next server start, "
+    "because that is when an agent's pipeline is composed; the entries themselves are "
+    "rebuilt by a reload, so editing the voice an agent already names does reach the "
+    "next conversation."
 )
 
 # The fourth, for a server that was handed its configuration rather than
@@ -402,7 +412,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         secret_slots="provider",
         secret_key=is_secret_option,
         missing=NO_SUCH_PROVIDER,
-        notice=RESTART_NOTICE,
+        notice=RELOAD_NOTICE,
     ),
     EntityDescriptor(
         name="mcp-server",
