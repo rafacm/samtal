@@ -30,7 +30,13 @@ def ensure_voice(voice: str, download_dir: Path) -> Path:
     missing. Piper names the config `<voice>.onnx.json`."""
     onnx = download_dir / f"{voice}.onnx"
     if not (onnx.exists() and Path(f"{onnx}.json").exists()):
-        logger.info("downloading piper voice %s to %s", voice, download_dir)
+        # Neither the voice nor the directory is named, for the reason
+        # the faster-whisper load says at length (#191): this runs
+        # before an apply can refuse, so it writes into the retained
+        # logs whatever the request goes on to answer, and both values
+        # are stored scalars. That something is being downloaded is the
+        # part an operator waiting on a first start needs.
+        logger.info("downloading the piper voice this entry configures")
         download_dir.mkdir(parents=True, exist_ok=True)
         download_voice(voice, download_dir)
     return onnx
