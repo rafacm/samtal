@@ -385,7 +385,8 @@ built up in the natural order without wedging.
 ## The whole domain configuration
 
 What one deployment's domain half holds, which is what `vinga-server
-config show` prints and what the server loads at boot.
+config show` prints and what a running server serves once it has been
+asked to apply it.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |

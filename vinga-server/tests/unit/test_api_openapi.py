@@ -242,8 +242,7 @@ def test_the_document_permits_no_body_the_api_refuses() -> None:
 
 def test_a_write_answers_with_what_it_did_and_when_it_applies() -> None:
     """Decision 5's contract, in the document: a write is acknowledged
-    rather than silent, and the acknowledgement carries the restart
-    sentence."""
+    rather than silent, and the acknowledgement says when it lands."""
     paths = json.loads(docgen.openapi())["paths"]
 
     for path, method in (("/agents/{name}", "put"), ("/agents/{name}", "delete")):
@@ -251,6 +250,49 @@ def test_a_write_answers_with_what_it_did_and_when_it_applies() -> None:
         assert ok["content"]["application/json"]["schema"] == {
             "$ref": "#/components/schemas/Acknowledgement"
         }, (path, method)
+
+
+# What the committed contract says a change is waiting for
+#
+# The drift check above holds the document to the routes and the models,
+# and it is exactly as right as they are: a description that says the
+# wrong boundary passes it byte for byte. These two say what the
+# document has to MEAN, and they are here because a generated client's
+# reader acts on it: a contract that declares the agent set start-bound
+# tells a UI to put a restart in front of an operator for a change one
+# request applies. The whole domain half is one apply's business (#191),
+# and this is the surface that has to say so.
+
+
+def test_the_reload_description_names_the_whole_domain_half() -> None:
+    """The route's own description, which is what a client generator
+    puts in front of whoever calls it."""
+    reload = json.loads(docgen.openapi())["paths"]["/runtime/config/reload"]["post"]
+    described = reload["description"]
+
+    assert "the whole\ndomain half" in described
+    # Every kind of the half, named rather than summarized: the two an
+    # earlier release could not apply are the two a stale sentence would
+    # still be excluding.
+    for kind in ("provider entries", "MCP entries", "prompt\nfragments",
+                 "the agents themselves", "`agent_defaults`"):
+        assert kind in described, kind
+    # And the one part that is genuinely start-bound, named as the only
+    # one: a description that still listed the agent set beside it is
+    # what this exists to fail.
+    assert "the server section, which is this process's\nown file" in described
+    assert "waits for the start" not in described
+
+
+def test_the_acknowledgement_notice_names_two_boundaries_and_no_start() -> None:
+    """And the schema a client reads a write's answer through. Two
+    boundaries, because there are two: a device asking, and a reload."""
+    schemas = json.loads(docgen.openapi())["components"]["schemas"]
+    notice = schemas["Acknowledgement"]["properties"]["notice"]["description"]
+
+    assert "/runtime/config/reload" in notice
+    assert "next OTA check or connection" in notice
+    assert "Nothing this API writes waits for a server start." in notice
 
 
 def test_every_refusal_a_read_can_answer_with_is_described() -> None:

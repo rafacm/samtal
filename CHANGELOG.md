@@ -142,16 +142,21 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   started from the same store refuses on the same state and names the
   location it refused on.
 
-- **A prompt fragment's write now names the reload** (#191), and an
-  agent's write names both boundaries, since an agent entry is the one
-  kind whose fields fall on either side of the line.
+- **Every write of the domain half now names the reload** (#191), and
+  says the three moments a conversation already in progress meets an
+  applied change at. The one write that says anything else is a device
+  binding, which a running server reads as the device asks; a binding
+  naming an agent this server is not serving yet says both, since the
+  row is live and the agent arrives at the reload that installs it.
 
-- **The comparison read reports the two halves of an agent entry
-  separately** (#191). `GET /api/runtime/config/diff` gains
-  `agents.prompt` beside `agents.grants`, both labelled `reload`, and
-  `prompt_fragments` now carries the `reload` label rather than
-  `restart`. A prompt-only edit therefore leaves the restart-bound agent
-  lists empty, exactly as a grants-only edit already did.
+- **The comparison read breaks an agent entry into the moments it
+  converges at** (#191). `GET /api/runtime/config/diff` gains
+  `agents.prompt` and `agents.filler` beside `agents.grants`, all three
+  labelled `reload`, and every kind of the domain half carries that
+  label now. The three are a breakdown of what changed rather than an
+  exception to it: an agent whose prompt alone moved is in `changed` and
+  in `prompt` both, which is one change reported at the altitude an
+  operator asks about it.
 
 - **A server serving a configuration it was handed rather than read**
   refuses both surfaces that span the two sides (#191, closing part of
