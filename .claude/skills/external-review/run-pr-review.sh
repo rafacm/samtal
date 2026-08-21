@@ -52,7 +52,7 @@ PY
 case "$BACKEND" in
   codex)
     codex exec -m "$MODEL" --sandbox read-only - < "$PROMPT" > "$OUT" 2> "$ERR"
-    CLI_STAMP="codex CLI $(codex --version | sed 's/codex-cli //')"
+    CLI_STAMP="codex CLI $(codex --version | sed 's/codex-cli //'), read-only sandbox"
     ;;
   claude)
     # --allowedTools alone restricts nothing: it adds allow rules and
@@ -64,14 +64,14 @@ case "$BACKEND" in
       --allowedTools "Read,Glob,Grep" \
       --disallowedTools "Bash,Write,Edit,NotebookEdit,WebFetch,WebSearch,Agent,Task,Workflow,Skill,SendMessage,CronCreate,CronDelete,RemoteTrigger,PushNotification,ScheduleWakeup,EnterWorktree,ExitWorktree,DesignSync,Monitor,LSP,ToolSearch" \
       < "$PROMPT" > "$OUT" 2> "$ERR"
-    CLI_STAMP="claude CLI $(claude --version)"
+    CLI_STAMP="claude CLI $(claude --version | sed 's/ (Claude Code)//'), read-only tool set"
     ;;
 esac
 
 HEAD_SHA="$(git rev-parse --short HEAD)"
 {
   printf '## External review round\n\n'
-  printf 'Automated external review of this PR'"'"'s diff (%s...%s): %s, model %s, read-only, %s. Posted verbatim by the review run itself; resolutions follow as replies.\n\n' \
+  printf 'Automated external review of this PR'"'"'s diff (%s...%s): %s, model %s, %s. Posted verbatim by the review run itself; resolutions follow as replies.\n\n' \
     "$BASE" "$HEAD_SHA" "$CLI_STAMP" "$MODEL" "$(date -u +%Y-%m-%d)"
   printf -- '---\n\n'
   cat "$OUT"
