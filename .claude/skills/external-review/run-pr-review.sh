@@ -24,6 +24,12 @@ case "$BACKEND" in
   claude) MODEL="${REVIEW_MODEL:-claude-opus-5}" ;;
   *) echo "unknown REVIEW_BACKEND: $BACKEND (codex or claude)" >&2; exit 2 ;;
 esac
+# A REVIEW_MODEL exported for one backend must not silently reach the
+# other (a stale tiering export plus REVIEW_BACKEND=claude would).
+case "$BACKEND:$MODEL" in
+  codex:claude-*|claude:gpt-*)
+    echo "model $MODEL does not belong to backend $BACKEND" >&2; exit 2 ;;
+esac
 SKILL_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORK="${TMPDIR:-/tmp}/external-review-pr-$PR"
 mkdir -p "$WORK"
@@ -66,6 +72,7 @@ case "$BACKEND" in
       < "$PROMPT" > "$OUT" 2> "$ERR"
     CLI_STAMP="claude CLI $(claude --version | sed 's/ (Claude Code)//'), read-only tool set"
     ;;
+  *) echo "unreachable backend: $BACKEND" >&2; exit 2 ;;
 esac
 
 HEAD_SHA="$(git rev-parse --short HEAD)"
