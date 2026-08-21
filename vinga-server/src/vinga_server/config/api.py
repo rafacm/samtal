@@ -627,7 +627,8 @@ RELOAD_REFUSED_DESCRIPTION = (
     "The stored configuration was refused: it does not compose into a valid snapshot, "
     "it composes into one this server cannot serve yet (a prompt fragment deleted while "
     "something still restart-bound names it), a credential stored in it will not open "
-    "under the configured keys, or a server it names could not be built (an environment "
+    "under the configured keys, or an engine it names could not be built (an unknown "
+    "provider type or option, a model that would not load, an environment "
     "reference nothing sets, an entry `server.local_only` forbids). Nothing was swapped, "
     "stopped or started, and the running server is exactly as it was. The `detail` is "
     "fixed and names no location, which this refusal shares with the comparison read "
@@ -1561,11 +1562,14 @@ def _runtime(api: FastAPI) -> None:
         The one action in this namespace, and the one way a stored
         change reaches a running server without a restart. What it
         applies is every kind this server can apply while it runs, which
-        today is the MCP entries with the secrets stored on them and the
+        today is the provider entries and the MCP entries with the
+        secrets stored on them, the
         agents' effective `mcp` grant lists, the shared prompt
-        fragments, and each agent's own prompt text and includes.
+        fragments, each agent's own prompt text and includes, and each
+        agent's own filler section.
         Everything else still waits for the start that reads it: the
-        providers, the agent set, `agent_defaults`, and the whole server
+        agent set, `agent_defaults`, which entry serves each of an
+        agent's stages, and the whole server
         section, which is this process's own file and is never re-read.
 
         Nothing is swapped, stopped or started until the whole new world
@@ -1587,6 +1591,16 @@ def _runtime(api: FastAPI) -> None:
         never a reply of one already running. Such an entry is reported `unchanged`
         under `mcp`, which is a statement about its connection: the
         connection is what did not change.
+
+        The engines are the third half and the one that costs
+        something. An entry whose definition and stored credential have
+        not moved is carried into the new world as the object it already
+        was, and is reported under `providers.reused`; one that was
+        rewritten is built while the old one is still serving, reported
+        under `providers.built`, and spoken through by the conversations
+        that open after this answered. An engine a conversation is still
+        speaking through is released when that conversation ends, so an
+        apply that changes a local model briefly holds two of it.
 
         The world arrives in two steps, which is what makes the sentence
         above per half rather than per apply: what a new activation
