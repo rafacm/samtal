@@ -30,23 +30,36 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   or an agent switch, and filler clips are bound by a conversation when
   it opens, so a re-synthesized one reaches the next conversation. An
   agent is synthesized again when any field of its effective `filler`
-  section moved or when the voice that speaks it did, so an edit to a
+  section moved or when the voice that speaks it did, which a reload now
+  moves too, so an edit to a
   prompt sends nothing to a text-to-speech engine while an edit to
-  `delay_ms` alone is a round of work at the configured provider, and an
+  `delay_ms` alone, or to the provider entry an agent speaks through, is
+  a round of work at the configured provider, and an
   agent whose synthesis fails applies with no clip and runs unmasked rather
   than making the reload refuse, which the answer's `fillers` section
-  reports under its own outcome. The answer carries one section per kind,
+  reports under its own outcome. The engines keep the same clock and
+  cost what they cost: an entry whose definition and stored credential
+  have not moved is carried into the new world as the object it already
+  was, so an edit to a prompt reloads no local model, while a rewritten
+  entry is built before anything is swapped and the conversations that
+  open after the apply speak through it. One a conversation is still
+  speaking through is released when that conversation ends, so applying
+  a change to a local model briefly holds two of it, and an entry that
+  will not build refuses the reload with nothing changed. The answer
+  carries one section per kind,
   with the sections a later release will fill declared now and answering
   null, so a client generated from this contract keeps reading later
   ones. Everything else still waits for the start that reads it: the
-  providers, the agent set, `agent_defaults`, and the server section.
+  agent set, `agent_defaults`, which entry serves each of an agent's
+  stages, and the server section.
 
 - **A running server says what it has not picked up yet** (#193).
   `GET /api/runtime/config/diff` answers what the database holds that
   the server is not serving, kind by kind: the entity names added,
   removed and changed, and for each kind the boundary its changes
   converge at, which is `restart` for the boot-time snapshot, `reload`
-  for the MCP entries, the agents' grants, the shared prompt fragments
+  for the provider entries, the MCP entries, the agents' grants, the
+  shared prompt fragments
   and each agent's own prompt and filler halves, and `check-in` for the
   device bindings and the default agent, which a device is answered as
   it asks and which are therefore never pending. Until now the only
