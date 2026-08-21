@@ -147,6 +147,7 @@ async def conversation(websocket: WebSocket) -> None:
         comp.device_facts,
         comp.bindings,
         comp.conversations,
+        comp.sessions,
     )
     # Capacity is checked after the token, so a full server still answers a
     # bad token with a refusal about the token.
