@@ -5,7 +5,7 @@ A running server holds one snapshot of the domain configuration and the
 database holds another, and the question between them is what an
 operator has written that is not in effect yet. Answering it needs two
 facts that live nowhere else, which is what this module is: the regime
-map, saying which kind converges at a restart, at an MCP reload, or at
+map, saying which kind converges at a restart, at a reload, or at
 the next device check-in, and the comparison that decides an entity of
 a kind has moved.
 
@@ -84,8 +84,9 @@ APPLIES: Mapping[str, Applies] = {
 # tools from, its `prompt` and `prompt_includes` are what a reload has it
 # assemble its next activation from, its `filler` is what a reload
 # synthesizes its next session's filled pauses from, and everything else
-# about it waits for a restart. None of them is in the map above, whose
-# keys are the domain's own.
+# about it, which is which provider entry serves each of its stages,
+# waits for a restart. None of them is in the map above, whose keys are
+# the domain's own.
 GRANTS_APPLY = Applies.RELOAD
 PROMPT_APPLY = Applies.RELOAD
 FILLER_APPLY = Applies.RELOAD
@@ -334,8 +335,10 @@ def _restart_bound(agent: AgentConfig) -> AgentConfig:
     """One agent entry with everything a reload applies taken out.
 
     The same exclusion one layer down and wider, because an agent entry
-    holds the two prompt fields as well as the grants and a reload
-    applies all three. What is left is what genuinely waits for a
-    restart: the provider overrides and the filler section.
+    holds the two prompt fields and the filler section as well as the
+    grants and a reload applies all four. What is left is what genuinely
+    waits for a restart: which provider entry serves each of this
+    agent's stages, which is composed when the server starts even though
+    the entries themselves are rebuilt by a reload.
     """
     return agent.model_copy(update=dict(_RELOADED_AGENT_FIELDS))
