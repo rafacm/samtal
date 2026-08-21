@@ -196,7 +196,10 @@ def test_the_reload_answers_over_a_real_socket(served_api, tmp_path: Path) -> No
         # Present and empty for the same reason: this server builds the
         # engines its agents reference, and it has no agents.
         "providers": {"built": [], "reused": [], "retired": []},
-        "agents": None,
+        # And the last section, present and empty for the same reason
+        # again: the agent set is what this apply installs, and the
+        # store and the world being served agree that there is none.
+        "agents": {"added": [], "removed": [], "defaults_changed": False},
     }
 
 
@@ -227,11 +230,11 @@ def test_the_diff_reports_what_this_server_has_not_picked_up(
     """One server lifetime, from an empty domain to a configured one.
 
     Everything written here is written after the server booted, so the
-    diff is the only surface that says so. The two boundaries are what
-    the case is about: the agent and the defaults it inherits through
-    wait for a restart and stay pending for the whole run, while the
-    provider entries and the MCP entries are applied by a request and
-    stop being pending as soon as it is made.
+    diff is the only surface that says so, and the care point is what
+    the case is about: everything stored is pending until a request
+    applies it, and nothing is pending afterwards. The one kind that is
+    never pending at all is the device binding, which the running server
+    reads as a device asks for it.
     """
     with served_api(boot_directory) as api_url:
         client = httpx.Client(
@@ -285,12 +288,13 @@ def test_the_diff_reports_what_this_server_has_not_picked_up(
             # The provider entries went with them: their definitions are
             # what a reload rebuilds, so what was pending is served.
             assert applied["providers"]["added"] == []
-            # And the restart-bound half is untouched by the reload,
-            # which is the whole reason the labels differ: the agent set
-            # and the layer every agent inherits through are what an
-            # apply deliberately does not move.
-            assert applied["agents"]["added"] == configured["agents"]["added"]
-            assert applied["agent_defaults"]["changed"] is True
+            # And so did the last two kinds, which is what the final
+            # milestone did: the agent this run wrote is one this server
+            # can be asked for now, and the layer it inherits through is
+            # the layer being served.
+            assert applied["agents"]["added"] == []
+            assert applied["agents"]["applies"] == "reload"
+            assert applied["agent_defaults"] == {"applies": "reload", "changed": False}
 
             # One edit to what a connection is made of, and one to text
             # that no connection ever sees. Both are stored changes the

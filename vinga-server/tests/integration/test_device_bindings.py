@@ -131,5 +131,5 @@ async def test_a_held_write_lock_stops_neither_a_lookup_nor_a_conversation(
         finally:
             holder.close()
 
-    assert resolved.agents == ("assistant",)
+    assert resolved.names == ("assistant",)
     assert spoken(events), "the conversation produced no reply"

@@ -39,6 +39,7 @@ from vinga_server.app import StartupFailed, create_app, startup_failure
 from vinga_server.composition import Composition
 from vinga_server.config import Config
 from vinga_server.config.api import UNEXPECTED, ApiRuntime
+from vinga_server.config.loader import DatabaseBusyError
 from vinga_server.config.models import API_MOUNT_PATH
 from vinga_server.config.writes import BINDING_NOTICE
 from vinga_server.conversations.store import DATABASE_FILENAME
@@ -121,8 +122,8 @@ def opened_bindings(
     pools: list[Pool] = []
     real = DeviceBindings.open.__func__  # type: ignore[attr-defined]
 
-    def spy(cls: type[DeviceBindings], config: Config) -> DeviceBindings:
-        view = real(cls, config)
+    def spy(cls: type[DeviceBindings], generations: Any) -> DeviceBindings:
+        view = real(cls, generations)
         opened.append(view)
         # White-box, per the note in `engine_of` above.
         if view._engine is not None:
@@ -315,13 +316,24 @@ def test_a_build_that_fails_part_way_releases_what_it_took(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The partial-startup case (the plan review's finding 6). The
-    bindings pool is opened before the providers are built, so a provider
-    failure has to unwind it: a boot that refused must not leave a
-    connection pool behind on the way out."""
+    bindings pool is opened part way through the build, so a step after
+    it that refuses has to unwind it: a boot that refused must not leave
+    a connection pool behind on the way out.
+
+    The refusing step is the configuration store's own open, which is
+    the first thing after the bindings view that a real deployment can
+    fail at: another process holding the write lock is exactly that.
+    The view is opened after the world it reads from is built, so a
+    provider failure never reaches it and would prove nothing here.
+    """
     migrated(tmp_path)
     opened, pools = opened_bindings(monkeypatch)
     disposed = disposed_bindings(monkeypatch)
-    refusing_providers(monkeypatch)
+
+    def refuse(directory: Path) -> Any:
+        raise DatabaseBusyError("another process holds the write lock")
+
+    monkeypatch.setattr(app_module, "open_store", refuse)
 
     app = create_app(recording_config(tmp_path))
     with pytest.raises(StartupFailed):
