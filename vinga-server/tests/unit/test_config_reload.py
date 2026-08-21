@@ -49,10 +49,15 @@ from vinga_server.config.boot import BootConfig, load_boot_config
 from vinga_server.config.loader import (
     ConfigError,
     DatabaseBusyError,
+    ProviderRefusedError,
     ReloadInProgressError,
     StorageError,
 )
-from vinga_server.config.reload import RELOAD_IN_PROGRESS, ConfigReload
+from vinga_server.config.reload import (
+    PROVIDERS_REFUSED,
+    RELOAD_IN_PROGRESS,
+    ConfigReload,
+)
 from vinga_server.config.responses import ConfigReloadResult
 from vinga_server.config.secrets import (
     MASTER_KEY_ENV,
@@ -68,6 +73,7 @@ from vinga_server.filler import FillerClips, build_agent_fillers
 from vinga_server.generation import Generation, Generations
 from vinga_server.logs import JsonFormatter
 from vinga_server.providers import ProviderWorld
+from vinga_server.providers.mock import MockTts
 from vinga_server.tools.mcp import McpServers
 
 DEVICE = "aa:bb:cc:dd:ee:ff"
@@ -573,6 +579,244 @@ async def test_a_session_opened_before_an_apply_keeps_the_clips_it_bound() -> No
     assert before.runtime._filler._fillers["assistant"] is clips["assistant"]
     assert after.runtime._filler._fillers["assistant"] is not clips["assistant"]
     assert after.runtime._filler._fillers["assistant"].phrases == ("Let me think...",)
+
+
+# The engines, and what an apply does to one
+#
+# The half a prompt edit must never pay for. An entry whose definition
+# and stored credential are what they were is carried into the new world
+# as the object it already was, and only what really moved is built
+# again; what nothing holds any more is let go of, and what a
+# conversation is still speaking through is not.
+
+
+class Closing(MockTts):
+    """A voice that remembers being closed, so a test can see a world
+    let go of one."""
+
+    egress = False
+
+    def __init__(self, **options: object) -> None:
+        super().__init__(sample_rate=24000, ms_per_char=1.0, min_ms=20.0)
+        self.closes = 0
+
+    async def close(self) -> None:
+        self.closes += 1
+
+
+def voices(**options: object) -> Config:
+    """One agent whose voice is an entry a case can rewrite."""
+    return served(
+        providers={
+            "llm": {"mock": {"type": "mock"}},
+            "asr": {"mock": {"type": "mock"}},
+            "tts": {"voice": {"type": "mock", **options}},
+            "vad": {"mock": {"type": "mock"}},
+        },
+        agent_defaults={"llm": "mock", "asr": "mock", "vad": "mock"},
+        agents={"assistant": {"prompt": "A", "tts": "voice"}},
+    )
+
+
+async def test_a_prompt_only_apply_reuses_every_engine() -> None:
+    """The point of the comparison, pinned by object identity: an edit
+    to a prompt sends nothing to a model loader, so every engine in the
+    new world is the very object the old one held."""
+    running = served(agents={"assistant": {"prompt": "A"}})
+    stored = served(agents={"assistant": {"prompt": "B"}})
+    generations, reload = applying(running, stored)
+    booted = generations.current().providers
+
+    result = await reload.apply()
+
+    assert result.providers is not None
+    assert result.providers.built == []
+    assert result.providers.reused == ["asr.mock", "llm.mock", "tts.mock", "vad.mock"]
+    assert result.providers.retired == []
+    # Identity, not equality, and every entry of it: two objects built
+    # from one entry are exactly what this milestone tells apart, so an
+    # apply that rebuilt them all would satisfy equality and fail here.
+    installed = generations.current().providers
+    assert [installed.instances[name] is booted.instances[name] for name in booted.instances] == [
+        True,
+        True,
+        True,
+        True,
+    ]
+    assert installed.agents["assistant"].tts is booted.agents["assistant"].tts
+    # And the prompt half really did move, so this is reuse across an
+    # apply that changed something.
+    assert result.prompts.changed == ["assistant"]
+
+
+async def test_a_rewritten_entry_is_built_again_and_the_old_one_is_let_go() -> None:
+    """The other side of the same decision. The entry moved, so the new
+    world has a new object, and the old one is closed once the world
+    holding it is nobody's."""
+    running, stored = voices(tone_hz=440.0), voices(tone_hz=880.0)
+    old = voiced_by(running, Closing())
+    generations, result = await applied(running, stored, providers=old)
+
+    assert result.providers is not None
+    assert result.providers.built == ["tts.voice"]
+    assert result.providers.reused == ["asr.mock", "llm.mock", "vad.mock"]
+    installed = generations.current().providers.instances
+    assert installed["tts.voice"] is not old.instances["tts.voice"]
+    assert cast(Closing, old.instances["tts.voice"]).closes == 1
+
+
+async def test_an_engine_a_live_conversation_holds_is_not_closed_under_it() -> None:
+    """The wait. A conversation speaks through the world it was built
+    from for the rest of its life, so an apply that replaced its voice
+    leaves that voice alone until the conversation ends."""
+    running, stored = voices(tone_hz=440.0), voices(tone_hz=880.0)
+    old = voiced_by(running, Closing())
+    holding: list[Generation] = []
+    generations, reload = applying(
+        running, stored, providers=old, held=lambda: list(holding)
+    )
+    holding.append(generations.current())
+    voice = cast(Closing, old.instances["tts.voice"])
+
+    await reload.apply()
+    assert voice.closes == 0
+
+    # The last conversation on it ends, and the world it was holding
+    # lets go of what nothing else is speaking through.
+    holding.clear()
+    await generations.dispose(holding)
+    assert voice.closes == 1
+
+
+async def test_nothing_retires_while_the_agent_set_is_kept() -> None:
+    """What `retired` can honestly say before the agent set moves, which
+    is nothing, and why.
+
+    A world builds the entries its agents reference and no others, and
+    neither the agent set nor an agent's choice of entry moves at an
+    apply. So the two ways an entry could leave a world are both closed
+    here: deleting one a retained agent names does not compose at all,
+    and deleting one nothing names retires nothing, because nothing was
+    ever built for it. The section is filled and the outcome is empty,
+    which is a true answer rather than a missing one; the milestone that
+    moves the agent set is where it starts naming entries.
+    """
+    stages = {"llm": "mock", "asr": "mock", "vad": "mock"}
+    running = served(
+        providers={
+            "llm": {"mock": {"type": "mock"}},
+            "asr": {"mock": {"type": "mock"}},
+            "tts": {"voice": {"type": "mock"}, "spare": {"type": "mock"}},
+            "vad": {"mock": {"type": "mock"}},
+        },
+        agent_defaults=stages,
+        agents={
+            "assistant": {"prompt": "A", "tts": "voice"},
+            "helper": {"prompt": "H", "tts": "spare"},
+        },
+        devices={DEVICE: ["assistant", "helper"]},
+    )
+    keeping_helper = served(
+        providers={
+            "llm": {"mock": {"type": "mock"}},
+            "asr": {"mock": {"type": "mock"}},
+            "tts": {"voice": {"type": "mock"}},
+            "vad": {"mock": {"type": "mock"}},
+        },
+        agent_defaults=stages,
+        agents={"assistant": {"prompt": "A", "tts": "voice"}},
+        devices={DEVICE: ["assistant"]},
+    )
+
+    # The agent the store deleted is still served, so the entry it names
+    # is still referenced, and an overlay that dropped the entry under it
+    # does not compose.
+    _, refusing = applying(running, keeping_helper)
+    with pytest.raises(ConfigError, match="unknown tts provider"):
+        await refusing.apply()
+
+    # And an entry no agent references was never built, so its deletion
+    # takes nothing with it.
+    spare = served(
+        providers={
+            "llm": {"mock": {"type": "mock"}},
+            "asr": {"mock": {"type": "mock"}},
+            "tts": {"voice": {"type": "mock"}, "spare": {"type": "mock"}},
+            "vad": {"mock": {"type": "mock"}},
+        },
+        agent_defaults=stages,
+        agents={"assistant": {"prompt": "A", "tts": "voice"}},
+    )
+    _, result = await applied(spare, voices())
+
+    assert result.providers is not None
+    assert result.providers.retired == []
+    assert result.providers.reused == ["asr.mock", "llm.mock", "tts.voice", "vad.mock"]
+
+
+async def test_an_egress_refusal_leaves_the_running_engines_exactly_as_they_were() -> None:
+    """The promise the double residency buys. The candidate's voice is
+    built, refused by the egress rule, and closed; what this server is
+    serving is the same object it was serving before the request."""
+    running = voices()
+    stored = served(
+        providers={
+            "llm": {"mock": {"type": "mock"}},
+            "asr": {"mock": {"type": "mock"}},
+            # A marking the type decides for itself, which is refused in
+            # any mode and only once the object exists to be asked.
+            "tts": {"voice": {"type": "mock", "egress": False}},
+            "vad": {"mock": {"type": "mock"}},
+        },
+        agent_defaults={"llm": "mock", "asr": "mock", "vad": "mock"},
+        agents={"assistant": {"prompt": "A", "tts": "voice"}},
+    )
+    generations, reload = applying(running, stored)
+    serving_now = generations.current()
+
+    with pytest.raises(ProviderRefusedError) as caught:
+        await reload.apply()
+
+    assert generations.current() is serving_now
+    assert generations.current().providers.instances == serving_now.providers.instances
+    # And the sentence says nothing about the entry, the type or the
+    # option it refused on, all of which are stored values.
+    assert str(caught.value) == PROVIDERS_REFUSED
+    assert "voice" not in PROVIDERS_REFUSED
+
+
+async def test_a_voice_that_will_not_close_still_leaves_an_applied_world(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Teardown never refuses. A close that raises runs after the world
+    has already moved, so the apply answers, the mark settles, and
+    neither the answer nor the log carries what the failure said."""
+
+    class Refusing(Closing):
+        async def close(self) -> None:
+            await super().close()
+            raise RuntimeError(TEARDOWN_PLANTED)
+
+    running, stored = voices(tone_hz=440.0), voices(tone_hz=880.0)
+    generations, reload = applying(
+        running, stored, providers=voiced_by(running, Refusing())
+    )
+
+    with caplog.at_level("WARNING"):
+        result = await reload.apply()
+
+    assert result.providers is not None
+    assert result.providers.built == ["tts.voice"]
+    assert generations.mark == 1
+    assert TEARDOWN_PLANTED not in caplog.text
+    assert TEARDOWN_PLANTED not in json.dumps(result.model_dump(mode="json"))
+    assert "RuntimeError" in caplog.text
+
+
+# Planted, and shaped so that a substring check for it cannot match by
+# accident: what a client says while failing to shut is exactly the
+# shape of thing that quotes an endpoint or a credential.
+TEARDOWN_PLANTED = "sk-apply-teardown-91f3c7-never-a-real-credential"
 
 
 # What an apply refuses
