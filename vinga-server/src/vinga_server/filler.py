@@ -34,7 +34,7 @@ from vinga_server.config import Config
 from vinga_server.events import ServerEvents
 from vinga_server.events.catalog import FillerDisabled
 from vinga_server.events.values import ClassName, Identifier
-from vinga_server.providers import AgentProviders
+from vinga_server.providers import AgentProviders, ProviderWorld
 
 logger = logging.getLogger(__name__)
 
@@ -57,14 +57,14 @@ class FillerClips:
 
 class Served(Protocol):
     """The world a new one may keep clips from: what it was configured
-    with, and the clips it holds.
+    with, the engines it was speaking through, and the clips it holds.
 
     A protocol rather than `generation.Generation`, which is the one
     thing that satisfies it: the generation is where a world's
-    configuration and its clips are one object, and this module is
-    imported by it. Declaring the two reads is also the whole of what
-    reuse needs, so a test supplies a configuration and a mapping and
-    not a generation.
+    configuration, its engines and its clips are one object, and this
+    module is imported by it. Declaring the three reads is also the
+    whole of what reuse needs, so a test supplies them without building
+    a world.
     """
 
     @property
@@ -72,6 +72,9 @@ class Served(Protocol):
 
     @property
     def fillers(self) -> Mapping[str, FillerClips]: ...
+
+    @property
+    def providers(self) -> ProviderWorld: ...
 
 
 @dataclass(frozen=True)
@@ -98,21 +101,26 @@ class Fillers:
 
 
 def _voiced_by(
-    config: Config, providers: AgentProviders, agent: str
+    config: Config, providers: AgentProviders | None, agent: str
 ) -> tuple[object, object]:
     """What one agent's clips depend on, and therefore what would make
     them stale: the filler section that chose the phrases and the
     timing, and the voice that speaks them.
 
-    Both halves are read from the world that is actually running where
-    the voice is concerned, because the voice is what synthesis uses.
-    Providers are built at a start, so the previous world's voice and a
-    candidate's are one object and a provider edit neither invalidates a
-    clip nor replaces it; that edit stays pending in the comparison
-    until the milestone that rebuilds providers, which is also where
-    this becomes the candidate world's voice (#191).
+    Each half is read from the world it belongs to, which is what makes
+    a comparison of two of these a comparison of two worlds. The voice
+    is the object rather than a description of the entry it was built
+    from, and deliberately: an apply carries an unchanged entry's engine
+    over as the object it already was and builds a changed one afresh,
+    so object identity says exactly "the same voice would speak this",
+    which a name or a model string cannot (#191). A candidate whose TTS
+    entry was rewritten, or whose stored credential was rotated, is
+    therefore a different voice and its clips are made again in it.
+
+    None is an agent the world has no engines for, which cannot happen
+    for an agent a world serves and is not a reason to keep a clip.
     """
-    return (config.filler_for_agent(agent), providers.tts)
+    return (config.filler_for_agent(agent), None if providers is None else providers.tts)
 
 
 def _kept(
@@ -131,7 +139,8 @@ def _kept(
     kept = previous.fillers.get(agent)
     if kept is None:
         return None
-    if _voiced_by(previous.config, providers, agent) != _voiced_by(config, providers, agent):
+    spoken_by = _voiced_by(previous.config, previous.providers.agents.get(agent), agent)
+    if spoken_by != _voiced_by(config, providers, agent):
         return None
     return kept
 
@@ -143,6 +152,10 @@ async def build_agent_fillers(
 ) -> Fillers:
     """The clips for every agent whose configuration enables one, made
     again only where they had to be.
+
+    `agent_providers` is the engines of the world being built, which is
+    what a clip is spoken in: an apply that rebuilt a voice synthesizes
+    in the new one.
 
     `previous` is the world these clips are composed from, and None is a
     boot, which has nothing to keep. An agent whose section and whose
