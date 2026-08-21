@@ -499,6 +499,11 @@ class ConfigReload:
         """
         with self._generations.applying() as install:
             install(candidate.generation)
+            # The transfer, said in the window that performs it: what
+            # the preparation built is the installed generation's now,
+            # so the discard path below cannot close a world this server
+            # is serving.
+            candidate.providers.installed()
             applied = await mcp.apply(self._servers, candidate.mcp, began)
         await self._generations.dispose(self._held())
         return ConfigReloadResult(

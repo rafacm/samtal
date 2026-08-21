@@ -92,7 +92,7 @@ class ProviderWorld:
     instances: Mapping[str, Provider] = field(default_factory=dict)
 
 
-@dataclass(frozen=True)
+@dataclass
 class Built:
     """One preparation's answer: the world it composed, and how each
     entry got into it.
@@ -108,17 +108,47 @@ class Built:
     world: ProviderWorld
     built: tuple[str, ...] = ()
     reused: tuple[str, ...] = ()
+    # Whether something else has taken this world on. Not an argument:
+    # a build always comes back owning what it made, and the transfer
+    # is an act the owner performs rather than a state a caller can
+    # declare at construction.
+    _installed: bool = field(default=False, init=False, repr=False)
+
+    def installed(self) -> ProviderWorld:
+        """Hand this world over: what it holds is somebody else's from
+        now on, and this owner will not close it.
+
+        The transfer the ownership rule turns on. Between a build
+        returning and a generation being installed there is a stretch
+        that can still fail, and until this is called that stretch is
+        covered: closing this owner closes what the build made. After
+        it, the generation is what closes them, at the end of the apply
+        that replaced it or at the end of the process.
+
+        Answers the world it is handing over, so that the transfer and
+        the read are one statement at the call site rather than two that
+        could come apart.
+        """
+        self._installed = True
+        return self.world
 
     async def close(self) -> None:
         """Let go of what this preparation constructed, and of nothing
         it carried over.
 
         What a caller reaches for when a built world is never installed:
-        a preparation whose caller had gone by the time it finished, or
-        an apply refused after it. The carried-over objects are the
-        running world's and stay exactly as they are, which is what
-        makes a refused apply a thing that touched nothing.
+        a preparation whose caller had gone by the time it finished, an
+        apply refused after it, or a boot that failed between this build
+        and the holder it was going to live in. The carried-over objects
+        are the running world's and stay exactly as they are, which is
+        what makes a refused apply a thing that touched nothing.
+
+        A no-op once the world has been handed over, so that registering
+        this on an exit stack in front of the transfer is safe: what a
+        generation owns is closed by the generation, once.
         """
+        if self._installed:
+            return
         await disposed(self.world.instances[identity] for identity in self.built)
 
 

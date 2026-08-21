@@ -269,6 +269,48 @@ def test_the_engines_are_let_go_of_when_the_process_ends(
     assert closed == ["tts"]
 
 
+def test_a_boot_that_fails_after_the_engines_are_built_lets_go_of_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The stretch between a build and the world it was built for.
+
+    Constructing the conversation store, migrating it, starting its
+    writer and synthesizing the filled pauses all happen after the
+    engines exist and before any holder owns them, and every one of them
+    can fail. A build whose objects nothing owned across that stretch
+    would leak a loaded model per entry on exactly the boots an operator
+    is already having a bad time on.
+    """
+    closed: list[str] = []
+
+    class Closing(MockTts):
+        egress = False
+
+        def __init__(self, **options: object) -> None:
+            super().__init__(sample_rate=24000, ms_per_char=1.0, min_ms=20.0)
+
+        async def close(self) -> None:
+            closed.append("tts")
+
+    async def refuse(*args: object, **kwargs: object) -> object:
+        raise ProviderError(SENTENCE)
+
+    monkeypatch.setattr(
+        "vinga_server.providers.mock.build_tts", lambda label, config: Closing()
+    )
+    # The next thing a boot does after the engines, and the first one
+    # that can fail on a deployment rather than in a test.
+    monkeypatch.setattr(app_module, "build_agent_fillers", refuse)
+    migrated(tmp_path)
+
+    app = create_app(recording_config(tmp_path))
+    with pytest.raises(StartupFailed):
+        with TestClient(app):
+            pass
+
+    assert closed == ["tts"], "the engines a failed boot had already built were leaked"
+
+
 def test_a_build_that_fails_part_way_releases_what_it_took(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

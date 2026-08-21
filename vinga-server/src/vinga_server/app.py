@@ -240,7 +240,14 @@ async def _build_composition(
     # rather than leaving it to a garbage collector this milestone has
     # just declared insufficient (#191). There is nothing to carry over
     # at a boot, which is the degenerate case of the same call.
-    providers = (await build_world(config, secrets)).world
+    engines = await build_world(config, secrets)
+    # Owned from the moment the build returns, and by this stack until
+    # the holder below takes them on. What is between the two lines is
+    # the conversation store's construction and migration, the writer's
+    # start and the filler synthesis, every one of which can fail; a
+    # build whose objects nothing owned across that stretch would leak
+    # every engine it had just loaded.
+    stack.push_async_callback(engines.close)
     # What was said, kept where it can be queried. Absent unless the
     # section exists and says so, which is what keeps recording a
     # conversation something an operator asks for.
@@ -283,7 +290,7 @@ async def _build_composition(
     # is: startup is still before the first conversation, which is what
     # "ahead of time" means. An agent whose synthesis fails runs with
     # the feature off rather than failing the boot.
-    fillers = await build_agent_fillers(config, providers.agents)
+    fillers = await build_agent_fillers(config, engines.world.agents)
     # The world new work binds, and the only place it is replaced. The
     # boot's configuration, the credentials loaded with it, the engines
     # built from the two and the clips those engines spoke are the first
@@ -296,7 +303,11 @@ async def _build_composition(
             config,
             secrets if secrets is not None else SecretStore(),
             fillers.clips,
-            providers,
+            # The transfer, in the statement that reads them: from here
+            # the holder is what closes these, at the end of an apply
+            # that replaced them or at the end of the process, and the
+            # cleanup registered above becomes the no-op it says it is.
+            engines.installed(),
         )
     )
     # And the close at the other end of the process, registered here so
