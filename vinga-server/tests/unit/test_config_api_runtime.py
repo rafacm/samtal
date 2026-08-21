@@ -45,11 +45,13 @@ from vinga_server.config.boot import BootConfig
 from vinga_server.config.loader import (
     ConfigError,
     DatabaseBusyError,
+    ProviderRefusedError,
     ReloadInProgressError,
     RunningConfigMovedError,
     StorageError,
 )
 from vinga_server.config.models import MemoryConfig
+from vinga_server.config.reload import PROVIDERS_REFUSED
 from vinga_server.config.responses import (
     AgentsDiff,
     Applies,
@@ -452,6 +454,11 @@ def test_the_mcp_section_is_what_the_retired_route_answered(directory: Path) -> 
         (ReloadInProgressError("already running"), 409),
         (DatabaseBusyError("the configuration database is busy"), 409),
         (ConfigError("the reload was refused and nothing was changed: mcp_servers.x"), 422),
+        # The provider layer's refusal in the configuration's own
+        # vocabulary: an ordinary 422 with a type of its own, which is
+        # what lets its fixed sentence through the composition root's
+        # rewrite rather than being replaced by the general one.
+        (ProviderRefusedError(PROVIDERS_REFUSED), 422),
         (StorageError("the stored configuration cannot be read"), 500),
     ],
 )
@@ -484,9 +491,7 @@ def test_a_read_that_fails_unexpectedly_answers_without_quoting_it(
         raise RuntimeError(f"could not connect using {sentinel}")
 
     running = config_with({}, [])
-    reload = config_reloader(
-        world(running), servers, read, built_world(running)
-    )
+    reload = config_reloader(world(running, providers=built_world(running)), servers, read)
 
     with caplog.at_level("INFO"):
         with serving(directory, servers, reload) as client:

@@ -791,6 +791,12 @@ async def test_an_egress_refusal_leaves_the_running_engines_exactly_as_they_were
     # option it refused on, all of which are stored values.
     assert str(caught.value) == PROVIDERS_REFUSED
     assert "voice" not in PROVIDERS_REFUSED
+    # Nor does anything behind it: the refusal is composed after the
+    # handler has closed, so neither what the provider layer raised nor
+    # anything it was holding travels with it, and a traceback rendered
+    # from this carries the fixed sentence and nothing else.
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 async def test_a_voice_that_will_not_close_still_leaves_an_applied_world(
@@ -1336,3 +1342,97 @@ def test_neither_an_answer_nor_a_refusal_carries_a_credential(
         assert sentinel not in answered.text
         assert sentinel not in refused.text
         assert sentinel not in logged(caplog)
+
+
+# What an entry that will not build says on the wire, and what it does
+# not
+#
+# The refusal this milestone added, driven the whole way: a real store, a
+# real re-read, a real build that refuses, and the mounted route in
+# front of it. Everything a provider refusal has to say about is stored
+# state (the entry, the option, the type, the credential), which is why
+# the sentence it answers with is fixed and interpolates nothing.
+
+# An entry name and an option name, both of them stored keys an operator
+# chose, and both shaped so a substring check for them cannot match by
+# accident.
+PLANTED_ENTRY = "voice-9c4a1f-never-a-real-entry"
+
+PLANTED_OPTION = "planted_option_3f9c_never_a_real_option"
+
+
+def served_by(caplog: pytest.LogCaptureFixture) -> str:
+    """What this server wrote about a request, in both shipped formats.
+
+    This server's own records and not every record the run produced: a
+    client library logs the URL it called, and an entry's name is how
+    that entry is addressed, so the request line an operator's proxy
+    keeps is the API's addressing rather than anything a refusal said.
+    What this asserts about is what the refusal wrote.
+    """
+    ours = [record for record in caplog.records if record.name.startswith("vinga_server")]
+    return "".join(record.getMessage() for record in ours) + "".join(
+        JsonFormatter().format(record) for record in ours
+    )
+
+
+def voiced(directory: Path, entry: dict[str, object]) -> None:
+    """The voice every agent inherits, under a name of this case's
+    choosing, so that the entry an apply refuses on is one this server
+    is really speaking through: a world builds the entries its agents
+    reference and no others."""
+    engine = open_database(directory)
+    try:
+        store = ConfigStore(engine, load_keys())
+        store.set_provider("tts", PLANTED_ENTRY, entry)
+        store.set_agent_defaults(dict.fromkeys(STAGES, "mock") | {"tts": PLANTED_ENTRY})
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.usefixtures("keys")
+def test_an_engine_that_will_not_build_refuses_the_route_and_names_none_of_it(
+    directory: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The whole path for a provider refusal: a stored entry this server
+    cannot build, applied through the route an operator calls.
+
+    What it must answer is the fixed sentence under 422, with the world
+    it is serving untouched, and none of what it refused on anywhere: not
+    the entry, not the option, not in the body and not in either shipped
+    log format.
+    """
+    seeded(directory)
+    voiced(directory, {"type": "mock"})
+    booted = load_boot_config()
+
+    with caplog.at_level("INFO"), entered_client(booted.config, booted.secrets) as serving:
+        composition = serving.app.state.composition
+        before = composition.generations.current()
+        # The voice this server is really speaking through, rewritten
+        # with an option the provider never asked about. The write is
+        # stored, as every write is, and the apply is where it refuses.
+        wrote = serving.put(
+            f"{MOUNT_PATH}/providers/tts/{PLANTED_ENTRY}",
+            json={"type": "mock", PLANTED_OPTION: 1},
+            headers=bearer(),
+        )
+        assert wrote.status_code == 200, wrote.text
+
+        refused = serving.post(RELOAD_PATH, headers=bearer())
+
+        # Nothing of the world it is serving moved: the same generation,
+        # holding the same engines, object for object.
+        after = composition.generations.current()
+        assert after is before
+        assert after.providers.instances == before.providers.instances
+
+    assert refused.status_code == 422
+    assert refused.json() == problem(422, PROVIDERS_REFUSED)
+    written = served_by(caplog)
+    for sentinel in (PLANTED_ENTRY, PLANTED_OPTION):
+        assert sentinel not in refused.text
+        assert sentinel not in written
+    # The class of it is what this server keeps, which is what an
+    # operator has instead of the sentence.
+    assert "ProviderError" in written
