@@ -35,6 +35,9 @@ mise.toml
 .mcp.json
 .claude/worktrees/
 .claude/settings.local.json
+# IDE project metadata (one .iml was committed before this line existed).
+.idea/
+.vscode/
 
 # ESP-IDF build artifacts
 build/
