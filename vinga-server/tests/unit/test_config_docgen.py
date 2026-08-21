@@ -105,15 +105,16 @@ def test_the_reference_says_where_provider_options_are_documented() -> None:
     assert "examples/llm-anthropic.yaml" in rendered
 
 
-# The two regimes the prompt half lives in
+# What the prompt half's two rows have to mean
 #
 # The drift check below holds the committed document to the models, and
 # it is exactly as right as the models are: a description that says the
 # wrong boundary passes it byte for byte. These two say what the
 # document has to mean rather than what it has to equal, which is the
 # one thing a diff cannot check, and each is the sentence an operator
-# acts on: restarting for a change a request applies, or reloading for
-# one it does not, is a wasted maintenance window either way.
+# acts on: restarting for a change a request applies is a wasted
+# maintenance window, and the two rows sat in two regimes for three
+# milestones, which is exactly when a stale sentence goes unnoticed.
 
 
 def _described(entity: str, field: str) -> str:
@@ -126,27 +127,26 @@ def _described(entity: str, field: str) -> str:
 
 
 def test_the_reference_says_an_agents_own_includes_are_applied_by_a_reload() -> None:
-    """An agent's own list is one of this milestone's live slices: the
-    candidate generation takes it from the store, so an edit reaches
-    that agent at its next activation."""
+    """An agent's own list is what the apply takes from the store, so an
+    edit reaches that agent at its next activation."""
     row = _described("Agent", "prompt_includes")
 
     assert "A reload applies this list" in row
     assert "next activation" in row
-    assert "next server start" in row.split("Inheriting instead")[1]
+    assert "next server start" not in row
 
 
-def test_the_reference_says_the_defaults_includes_wait_for_a_start() -> None:
-    """And the layer under it is not, deliberately: it is what every
-    agent's effective value is inherited through, so applying it would
-    apply a start-bound change to every agent that names nothing of its
-    own. The candidate generation keeps the previous one, which
-    `tests/unit/test_config_reload.py` proves at the apply."""
+def test_the_reference_says_the_defaults_includes_are_applied_too() -> None:
+    """And so is the layer under it, which is the change the last
+    milestone made: the apply installs the stored `agent_defaults`, so an
+    edit there reaches every agent that inherits it at the same moment
+    an agent's own edit would. A row still promising a start would send
+    an operator to restart for a change a request applies."""
     row = _described("Agent defaults", "prompt_includes")
 
-    assert "A reload does not apply this list" in row
-    assert "next server start" in row
-    assert "next activation" not in row
+    assert "A reload applies this list" in row
+    assert "next activation" in row
+    assert "next server start" not in row
 
 
 def test_the_committed_reference_matches_the_models() -> None:

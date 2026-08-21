@@ -390,14 +390,16 @@ def test_prompt_names_nothing_beside_a_block_that_has_no_name(
     assert "persona (4 characters)\n" in capsys.readouterr().out
 
 
-def test_prompt_says_what_the_server_answered_for_an_unloaded_agent(
+def test_prompt_says_what_the_server_answered_for_an_unserved_agent(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    """Printed verbatim from what the server answered, which sends an
+    operator to the reload that installs an agent."""
     run.runtime["agent_prompt"] = _previewing(_assembled())
 
     assert run("prompt", "stranger") == 1
 
-    assert "restart" in capsys.readouterr().err
+    assert "config reload" in capsys.readouterr().err
 
 
 def test_prompt_without_a_server_says_so(run, capsys: pytest.CaptureFixture[str]) -> None:

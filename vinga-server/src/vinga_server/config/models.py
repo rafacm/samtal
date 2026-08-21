@@ -1799,10 +1799,10 @@ class AgentDefaults(BaseModel):
             "extending it, so an empty list there opts that agent out of the fragments "
             "its siblings share. Every name has to be a fragment that exists, since the "
             "fragment is in this same database, and a name listed twice is refused. "
-            "A reload does not apply this list, unlike an agent's own: it is the layer "
-            "every agent's effective value is inherited through, so a change here "
-            "reaches a conversation at the next server start. What a reload does apply "
-            "is an agent's own list and the text of a fragment either layer names."
+            "A reload applies this list, along with an agent's own and the text of a "
+            "fragment either layer names, so a change here reaches every agent that "
+            "inherits it at that agent's next activation, which is a new session or an "
+            "agent switch."
         ),
     )
 
@@ -1833,9 +1833,12 @@ class AgentConfig(AgentDefaults):
 
     # Re-declared from `AgentDefaults` for its description and nothing
     # else: same type, same default, same validator (which is bound by
-    # field name and inherited), and a different regime, which is the
-    # whole reason it is written twice. See the comment on the layer's
-    # own declaration.
+    # field name and inherited). The two rows describe two different
+    # things, an agent's own list against the layer every agent that
+    # names none inherits, and each is read in its own section of the
+    # generated reference by somebody editing that entity. They used to
+    # describe two regimes as well; they no longer do, and the sentence
+    # each carries about when an edit lands says the same thing.
     prompt_includes: list[NonBlankStr] | None = Field(
         default=None,
         description=(
@@ -1847,9 +1850,9 @@ class AgentConfig(AgentDefaults):
             "siblings share. Every name has to be a fragment that exists, since the "
             "fragment is in this same database, and a name listed twice is refused. "
             "A reload applies this list, so an edit here reaches a conversation at its "
-            "next activation, which is a new session or an agent switch. Inheriting "
-            "instead, by leaving it unset, inherits the agent_defaults list's regime "
-            "with it: a change made there waits for the next server start."
+            "next activation, which is a new session or an agent switch. Leaving it "
+            "unset inherits the agent_defaults list, whose edits reach this agent at "
+            "the same moment."
         ),
     )
 

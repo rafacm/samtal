@@ -12,13 +12,15 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 - **The stored configuration can be applied to a running server**
   (#191). `POST /api/runtime/config/reload`, which
   `vinga-server config reload` calls, re-reads the stored configuration
-  and applies every kind this release can apply while the process runs:
-  the `mcp_servers` entries with the secrets stored on them, the agents'
-  effective `mcp` grant lists, the shared prompt fragments, each agent's
-  own `prompt` and `prompt_includes`, and each agent's own `filler`
-  section. Editing an agent's persona, a fragment it includes or the
-  phrases it masks a slow reply with no longer costs a restart and every
-  conversation on the server. Nothing is swapped, stopped or started
+  and applies the whole domain half while the process runs: the
+  `providers` entries and the `mcp_servers` entries with the secrets
+  stored on them, the agents' effective `mcp` grant lists, the shared
+  prompt fragments, the agents themselves and the `agent_defaults` layer
+  under them. Adding an agent, deleting one, editing a persona, a
+  fragment it includes, the voice it speaks in or the phrases it masks a
+  slow reply with no longer costs a restart and every conversation on
+  the server; a deployment's whole life after the process is up needs
+  none. Nothing is swapped, stopped or started
   until the whole new world has been composed, validated and built, so a
   refusal has changed nothing at all; one apply runs at a time, and a
   second is refused as retryable having changed nothing. When a live
@@ -45,24 +47,31 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   open after the apply speak through it. One a conversation is still
   speaking through is released when that conversation ends, so applying
   a change to a local model briefly holds two of it, and an entry that
-  will not build refuses the reload with nothing changed. The answer
-  carries one section per kind,
-  with the sections a later release will fill declared now and answering
-  null, so a client generated from this contract keeps reading later
-  ones. Everything else still waits for the start that reads it: the
-  agent set, `agent_defaults`, which entry serves each of an agent's
-  stages, and the server section.
+  will not build refuses the reload with nothing changed. The agent set
+  moves with the rest: an agent the store has added is built with
+  everything else the apply builds and is servable the instant the
+  request answers, so a device bound to it reaches it at its next
+  check-in, while an agent it has deleted is one no session can be
+  opened as from that same instant and a conversation already talking as
+  it finishes on the world it was built from, served that world's prompt
+  to the end. The answer carries one section per kind, the `agents`
+  section naming what was added and removed and whether `agent_defaults`
+  moved. What still waits for a start is the `server` section, which is
+  this process's own file and holds nothing this API writes; and an
+  agent's memory, which is keyed by its name and stays where its name
+  left it.
 
 - **A running server says what it has not picked up yet** (#193).
   `GET /api/runtime/config/diff` answers what the database holds that
   the server is not serving, kind by kind: the entity names added,
   removed and changed, and for each kind the boundary its changes
-  converge at, which is `restart` for the boot-time snapshot, `reload`
-  for the provider entries, the MCP entries, the agents' grants, the
-  shared prompt fragments
-  and each agent's own prompt and filler halves, and `check-in` for the
+  converge at, which is `reload` for every kind of the domain half and
+  `check-in` for the
   device bindings and the default agent, which a device is answered as
-  it asks and which are therefore never pending. Until now the only
+  it asks and which are therefore never pending. An agent entry converges
+  at three moments inside the one reload, so its kind carries `grants`,
+  `prompt` and `filler` beside its own lists, each a breakdown of what
+  changed rather than an exception to it. Until now the only
   trace of a pending change was the sentence in a write's
   acknowledgement, which is gone the moment the response is read.
   Changed means the stored state differs from what is running rather

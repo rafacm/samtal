@@ -63,9 +63,9 @@ class Unbound:
     outcome: Literal[
         # a code, new or re-displayed
         "offered",
-        # onboarding off, or the device bound or waiting on a restart
+        # onboarding off, or the device bound or waiting on a reload
         "not_applicable",
-        # the resolution is the boot snapshot's rather than the
+        # the resolution is the served world's rather than the
         # database's, so what it does not say cannot be trusted
         "unreadable",
         # the pending table said no
@@ -87,12 +87,12 @@ async def activation_for(
     """The `activation` section for this check-in, or the reason there
     is none.
 
-    The gate is database truth rather than the loaded-agent filter: the
-    two disagree exactly when a binding or a default agent was written
-    after boot naming an agent this server never loaded, and that state
-    must not mint a code for a device an operator has already added.
-    Such a device gets no code and no token, and the caller says which
-    restart will serve it. The other side of the same coin is upgrade
+    The gate is database truth rather than the servable-agent filter:
+    the two disagree exactly when a binding or a default agent names an
+    agent this server is not serving yet, and that state must not mint a
+    code for a device an operator has already added. Such a device gets
+    no code and no token, and the caller says which reload will serve
+    it. The other side of the same coin is upgrade
     compatibility: a deployment with a default agent covers every
     unknown MAC by design, so its devices keep receiving a token and no
     activation object, exactly as before.
@@ -102,9 +102,10 @@ async def activation_for(
     """
     if not server.onboarding.enabled:
         return Unbound(None, "not_applicable")
-    # `agents` are the names the boot snapshot loaded and `unloaded` the
-    # ones it did not, so the two being empty together is the database
-    # holding neither a binding row for this MAC nor a default agent.
+    # `agents` are the bound names the world being served can serve and
+    # `unloaded` the ones it cannot, so the two being empty together is
+    # the database holding neither a binding row for this MAC nor a
+    # default agent.
     if resolution.agents or resolution.unloaded:
         return Unbound(None, "not_applicable")
     if not resolution.authoritative:

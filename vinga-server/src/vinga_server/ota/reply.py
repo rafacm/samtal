@@ -217,7 +217,7 @@ async def check_version(request: Request) -> Response:
         "agents": AgentNames(tuple(agents)),
         # Named in every record rather than only in the one that
         # complains about it, so a query for devices waiting on a
-        # restart is one field rather than a log-message search.
+        # reload is one field rather than a log-message search.
         "unloaded": AgentNames(tuple(resolution.unloaded)),
         "said_device": ReportedMac(device_id),
     }

@@ -561,7 +561,8 @@ NESTED: tuple[NestedShape, ...] = (
             "Masking reply latency with a pre-synthesized filled pause. Nested inside "
             "an agent or the agent defaults rather than written on its own, and off "
             "unless it says otherwise. The phrases are synthesized in the agent's own "
-            "voice at boot and cached, so the clip costs nothing at the moment it "
+            "voice ahead of time, at a start and again at every reload that moves "
+            "them, and cached, so the clip costs nothing at the moment it "
             "masks and keeps working when the TTS provider is the thing being slow."
         ),
         # The phrase list is what the section is: an entry with none is

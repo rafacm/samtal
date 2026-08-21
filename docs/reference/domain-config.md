@@ -55,28 +55,30 @@ precedence over an environment reference for the same slot.
 a change reaches a running server depends on the kind, and every write
 says which of the cases below it is in.
 
-Part of the configuration is read once at start and served until the
-next one: the agent set, `agent_defaults`, which provider entry serves
-each of an agent's stages, and the
-server section, which is a file this process never re-reads. An edit to
-any of those applies when the server is restarted.
+One part of the configuration is read once at start and served until
+the next one, and it is the server section, which is a file this
+process never re-reads: the port, the directories, the limits, the
+barge-in tuning. Nothing in this database is in that part. What a
+running server is serving of the stored half is a generation, an
+immutable snapshot validated whole, and applying a change installs the
+next one rather than editing the one in place.
 
-Device bindings are the first exception. A running server re-reads the
-`devices` map and `default_agent` as a device asks for them, so binding
-a device, unbinding it, or changing the default agent applies at that
-device's next OTA check or connection, with no restart. The exception
-ends where the agent does: a binding naming an agent that was created
-after the server started resolves to nothing until the restart that
-loads that agent.
+Device bindings are the first way a change reaches it. A running
+server re-reads the `devices` map and `default_agent` as a device asks
+for them, so binding a device, unbinding it, or changing the default
+agent applies at that device's next OTA check or connection, with
+nothing asked of the server at all. The exception ends where the agent
+does: a binding naming an agent this server is not serving resolves to
+nothing until the reload that installs it.
 
 The reload is the second, and unlike the first it is asked for rather
 than noticed. `vinga-server config reload` has a running server re-read
-the stored configuration and apply every kind it can apply while it
-runs: the `providers` entries and the `mcp_servers` entries with the
+the stored configuration and apply the whole domain half: the
+`providers` entries and the `mcp_servers` entries with the
 secrets stored on them, the
-agents' effective `mcp` grant lists, the prompt fragments, each
-agent's own `prompt` and `prompt_includes`, and each agent's own
-`filler` section. Entries are started,
+agents' effective `mcp` grant lists, the prompt fragments, the agents
+themselves and the `agent_defaults` layer under them. Entries are
+started,
 restarted, stopped or left alone, and no conversation is dropped. When
 one meets the result depends on which half moved: the tools an agent
 may reach are snapshotted per reply, so an entry that moved is picked
@@ -107,12 +109,14 @@ is released when that conversation ends, so applying a change to a
 local model briefly holds two of it, and an entry that will not build
 refuses the reload with nothing changed.
 
-The agent is the one kind whose fields fall on several sides of that
-line, so a write to one says all of them: its prompt and its includes
-are applied by a reload at the next activation, its filler section by
-a reload at the next conversation, and which entry serves each of its
-stages, along with its memory, still waits for the start that composes
-its pipeline.
+The agent set moves with the rest. An agent the store has added is
+one a device can be bound to and reach at its next check-in, with no
+restart between the write and the board; an agent it has deleted is
+one no session can be opened as from the moment the apply answers,
+while a conversation already talking as it finishes on the world it
+was built from and is served that world's prompt to the end. The one
+thing an agent carries that a reload does not move is its memory,
+which is keyed by its name and stays where its name left it.
 
 `vinga-server config schema [entity]` prints the same field descriptions
 as JSON Schema, which is what a machine reads before writing a fragment.
@@ -249,7 +253,7 @@ vinga-server config set agent <name> -f fragment.yaml
 | `vad` | `str \| null` | `null` | The voice activity detector, by the name it is defined under in providers.vad. An agent that leaves it unset inherits the agent_defaults entry. |
 | `mcp` | `list[str \| McpGrant] \| null` | `null` | The MCP servers whose tools this layer offers the model. An entry is either the entry name on its own, which is the whole server, or an object naming the server and the tools of it this layer may reach ({server: home, tools: [turn_on_light]}), where a tool is named by its published name without the entry prefix. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the tools its siblings have. The builtin tools are outside this model: switch_agent and remember appear under a structural condition (a device bound to more than one agent, memory configured) and random_number under none at all, rather than by grant. |
 | `filler` | `FillerConfig \| null` | `null` | Latency masking with a pre-synthesized filled pause. Unset inherits the agent_defaults section; naming one replaces it wholly rather than merging with it, so `filler: {enabled: false}` opts an agent out. |
-| `prompt_includes` | `list[str] \| null` | `null` | The shared prompt fragments this agent's system prompt carries, each by the name it is defined under in prompt_fragments, injected in the order listed and directly after the agent's own prompt. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts this agent out of the fragments its siblings share. Every name has to be a fragment that exists, since the fragment is in this same database, and a name listed twice is refused. A reload applies this list, so an edit here reaches a conversation at its next activation, which is a new session or an agent switch. Inheriting instead, by leaving it unset, inherits the agent_defaults list's regime with it: a change made there waits for the next server start. |
+| `prompt_includes` | `list[str] \| null` | `null` | The shared prompt fragments this agent's system prompt carries, each by the name it is defined under in prompt_fragments, injected in the order listed and directly after the agent's own prompt. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts this agent out of the fragments its siblings share. Every name has to be a fragment that exists, since the fragment is in this same database, and a name listed twice is refused. A reload applies this list, so an edit here reaches a conversation at its next activation, which is a new session or an agent switch. Leaving it unset inherits the agent_defaults list, whose edits reach this agent at the same moment. |
 | `prompt` | `str` | `""` | The instruction this agent replies under, sent as the system prompt on every turn. State the reply language explicitly: a model otherwise picks one by its training bias. |
 
 An agent's name is also the key its remembered facts are stored under, so
@@ -282,7 +286,7 @@ vinga-server config set agent-defaults -f fragment.yaml
 | `vad` | `str \| null` | `null` | The voice activity detector, by the name it is defined under in providers.vad. An agent that leaves it unset inherits the agent_defaults entry. |
 | `mcp` | `list[str \| McpGrant] \| null` | `null` | The MCP servers whose tools this layer offers the model. An entry is either the entry name on its own, which is the whole server, or an object naming the server and the tools of it this layer may reach ({server: home, tools: [turn_on_light]}), where a tool is named by its published name without the entry prefix. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the tools its siblings have. The builtin tools are outside this model: switch_agent and remember appear under a structural condition (a device bound to more than one agent, memory configured) and random_number under none at all, rather than by grant. |
 | `filler` | `FillerConfig \| null` | `null` | Latency masking with a pre-synthesized filled pause. Unset inherits the agent_defaults section; naming one replaces it wholly rather than merging with it, so `filler: {enabled: false}` opts an agent out. |
-| `prompt_includes` | `list[str] \| null` | `null` | The shared prompt fragments every agent's system prompt carries unless the agent names a list of its own, each by the name it is defined under in prompt_fragments, injected in the order listed and directly after the agent's own prompt. An agent naming a list replaces this one rather than extending it, so an empty list there opts that agent out of the fragments its siblings share. Every name has to be a fragment that exists, since the fragment is in this same database, and a name listed twice is refused. A reload does not apply this list, unlike an agent's own: it is the layer every agent's effective value is inherited through, so a change here reaches a conversation at the next server start. What a reload does apply is an agent's own list and the text of a fragment either layer names. |
+| `prompt_includes` | `list[str] \| null` | `null` | The shared prompt fragments every agent's system prompt carries unless the agent names a list of its own, each by the name it is defined under in prompt_fragments, injected in the order listed and directly after the agent's own prompt. An agent naming a list replaces this one rather than extending it, so an empty list there opts that agent out of the fragments its siblings share. Every name has to be a fragment that exists, since the fragment is in this same database, and a name listed twice is refused. A reload applies this list, along with an agent's own and the text of a fragment either layer names, so a change here reaches every agent that inherits it at that agent's next activation, which is a new session or an agent switch. |
 
 This entry is a singleton. There is one of it, writing it replaces it whole,
 and it is not keyed by anything. Per-family defaults are a later change, and
@@ -330,9 +334,10 @@ published list, so the mismatch is answerable in one read.
 
 Masking reply latency with a pre-synthesized filled pause. Nested inside an
 agent or the agent defaults rather than written on its own, and off unless it
-says otherwise. The phrases are synthesized in the agent's own voice at boot
-and cached, so the clip costs nothing at the moment it masks and keeps working
-when the TTS provider is the thing being slow.
+says otherwise. The phrases are synthesized in the agent's own voice ahead of
+time, at a start and again at every reload that moves them, and cached, so the
+clip costs nothing at the moment it masks and keeps working when the TTS
+provider is the thing being slow.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |

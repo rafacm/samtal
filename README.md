@@ -93,7 +93,7 @@ docker run -d --name vinga -p 8003:8003 \
 
 Generating either one inline in the `docker run` would mint a new secret on every restart. For the device secret that is worse than inconvenient: each new one invalidates the token every device has stored, and a device that has one is then refused until its next OTA check, which it only makes on boot, so it sits there playing an error tone at you.
 
-This start is quick: with nothing configured there is no engine to build. Speech models download into the `/data` volume when the providers naming them are first built, which is the restart in step 4, so that one takes a few minutes and later ones take seconds.
+This start is quick: with nothing configured there is no engine to build. Speech models download into the `/data` volume when the providers naming them are first built, which is the apply in step 4, so that one takes a few minutes and later ones take seconds.
 
 **3. Say what the assistant is.** The other half of the configuration (which engines, which agents, which devices) lives in a database on the data volume, written with `vinga-server config`, the CLI the image ships. It writes through the configuration API on the running server, so run it inside the container, where the token and the loopback address are already in its environment. This assistant is fully local and needs no account anywhere: Silero, faster-whisper, [Ollama](https://ollama.com) and Piper.
 
@@ -148,10 +148,10 @@ The order matters: a write whose references do not resolve is refused, so the pr
 
 From outside the container instead, name the API with `--api-url` (or `VINGA_API_URL`) and carry the token yourself, over TLS or a tunnel that terminates it: the client refuses a plain `http://` connection to a host that is not a loopback address. [The configuration API](vinga-server/README.md#the-configuration-api) in the server README has the whole surface, and [`docs/reference/api-openapi.json`](docs/reference/api-openapi.json) is the contract for anything that writes this configuration without a person typing it.
 
-**4. Restart the server.** The agent set is read once at start, which is why the write above said it applies at the next one. This is that next one. Not every later change needs it: `vinga config reload` applies the provider entries, the MCP entries, the prompt fragments, an agent's own prompt and an agent's own filled pauses to a running server, and every write says which of the two it is waiting for.
+**4. Apply it.** A write is stored and is not in effect when the command returns, which is why the writes above each said what they were waiting for. This is that: the server re-reads the whole stored half, builds the engines it names and serves them, without a restart and without dropping a conversation. Every later change to this half is applied the same way; a device binding is the one thing that needs no step at all, since a running server reads those as a device asks.
 
 ```bash
-docker restart vinga
+vinga config reload
 ```
 
 **5. Flash** the prebuilt xiaozhi merged binary for your board at offset `0x0`.

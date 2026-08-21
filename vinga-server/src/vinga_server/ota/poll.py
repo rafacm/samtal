@@ -42,13 +42,13 @@ async def activate(request: Request) -> Response:
     """Where a waiting device polls, in bursts of ten three seconds
     apart, until it is claimed.
 
-    200 means the MAC resolves to an agent this server has loaded, so a
+    200 means the MAC resolves to an agent this server is serving, so a
     200 always means the next OTA check hands the device its real
     configuration. 202 is everything else, which is what upstream's own
     "keep waiting" is: a device still unbound, a device bound to an
-    agent this process has not loaded (which flips to 200 at the restart
-    that loads it), and a device this server has no pending entry for at
-    all, since a restart loses the table and the device's own loop
+    agent this server is not serving (which flips to 200 at the reload
+    that installs it), and a device this server has no pending entry for
+    at all, since a restart loses the table and the device's own loop
     fetches a fresh code within a couple of minutes.
 
     What a version-2 body claims cannot be authenticated. Its HMAC is

@@ -212,10 +212,10 @@ class McpServers:
 
         Asked by agent rather than handed a list of entries, because the
         list is part of what a reload replaces: a session was built on
-        the configuration that was loaded at boot, and the grants that
-        decide what it may reach are the ones swapped in with the
-        managers they name. A snapshot taken through here therefore sees
-        one world, and the next reply's snapshot sees the next one.
+        the world it opened in, and the grants that decide what it may
+        reach are the ones swapped in with the managers they name. A
+        snapshot taken through here therefore sees one world, and the
+        next reply's snapshot sees the next one.
         """
         return [
             tool

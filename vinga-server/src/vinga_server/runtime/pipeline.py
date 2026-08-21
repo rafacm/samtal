@@ -604,7 +604,7 @@ class PipelineRuntime:
         # Which entries those are is asked of the registry rather than
         # resolved from this session's configuration: a reload replaces
         # the grants along with the managers they name, and the
-        # configuration here is the one that was loaded at boot.
+        # configuration this session holds is the world it opened in.
         self._mcp_servers.revive_for_agents(self._agents)
 
     @property
