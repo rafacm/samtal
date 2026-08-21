@@ -38,7 +38,7 @@ from vinga_server.providers import (
 )
 from vinga_server.providers import world as provider_world
 from vinga_server.providers.base import Operations
-from vinga_server.providers.mock import MockTts
+from vinga_server.providers.mock import MockTts, MockVad
 
 # --- what a build owns -------------------------------------------------
 
@@ -108,6 +108,38 @@ def recording_types(monkeypatch: pytest.MonkeyPatch) -> list[Recording]:
         return voice
 
     monkeypatch.setattr("vinga_server.providers.mock.build_tts", build_tts)
+    return made
+
+
+class RecordingVad(MockVad):
+    """The same for the endpointer stage, which is the one a cancelled
+    build is left holding: it is constructed last, so it is what the
+    worker thread is inside when a caller gives up."""
+
+    egress = False
+
+    def __init__(self, **options: Any) -> None:
+        super().__init__(
+            **{"threshold": 500.0, "trailing_silence_ms": 700.0, "max_utterance_ms": 10_000.0}
+            | options
+        )
+        self.closes = 0
+
+    async def close(self) -> None:
+        self.closes += 1
+
+
+def recording_gates(monkeypatch: pytest.MonkeyPatch) -> list[RecordingVad]:
+    """Every VAD entry a build constructs from here on, recorded and
+    closeable."""
+    made: list[RecordingVad] = []
+
+    def build_vad(label: str, config: ProviderConfig) -> RecordingVad:
+        gate = RecordingVad()
+        made.append(gate)
+        return gate
+
+    monkeypatch.setattr("vinga_server.providers.mock.build_vad", build_vad)
     return made
 
 
@@ -206,16 +238,19 @@ async def test_a_trailing_unknown_option_refuses_before_anything_is_built(
 async def test_a_cancelled_preparation_closes_what_it_had_built(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A build whose caller goes away.
+    """A build whose caller goes away, and the two objects that costs.
 
     The cancellation lands while a later entry is being constructed,
     which is where a real one lands: construction runs in a worker
-    thread, so the caller gives up and the thread finishes anyway. What
-    the build had already taken ownership of is closed rather than
-    dropped, which is the whole of the ownership rule on the one exit
-    nobody chooses.
+    thread, so the caller gives up and the thread finishes anyway. Both
+    halves are owned. What the build had already taken is closed by the
+    exit it leaves through, and the one still being made is waited out
+    and closed as well, which is the case a thread makes unavoidable:
+    nothing can stop that constructor, so the only honest answer is to
+    be there when it returns.
     """
-    made = recording_types(monkeypatch)
+    voices = recording_types(monkeypatch)
+    gates = recording_gates(monkeypatch)
     reached = threading.Event()
     holding = threading.Event()
     real = provider_world.construct_provider
@@ -234,7 +269,10 @@ async def test_a_cancelled_preparation_closes_what_it_had_built(
     with pytest.raises(asyncio.CancelledError):
         await building
 
-    assert [one.closes for one in made] == [1]
+    # The voice this build had finished with, and the endpointer the
+    # thread went on making after nobody was waiting for it.
+    assert [one.closes for one in voices] == [1]
+    assert [one.closes for one in gates] == [1]
 
 
 # --- what a world lets go of ------------------------------------------
