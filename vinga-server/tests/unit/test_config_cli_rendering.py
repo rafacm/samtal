@@ -36,6 +36,7 @@ from vinga_server.config import Config, cli
 from vinga_server.config.loader import ConfigError
 from vinga_server.config.responses import (
     RELOAD_SECTIONS,
+    AgentsReload,
     ConfigReloadResult,
     FillersReload,
     McpReloadResult,
@@ -454,6 +455,7 @@ def _applied(
     prompts: Sequence[str] = (),
     fillers: FillersReload | None = None,
     providers: ProvidersReload | None = None,
+    agents: AgentsReload | None = None,
     **outcome: object,
 ):
     """A server that answers a reload with what it applied and what is
@@ -476,6 +478,9 @@ def _applied(
             providers=providers
             if providers is not None
             else ProvidersReload(built=[], reused=[], retired=[]),
+            agents=agents
+            if agents is not None
+            else AgentsReload(added=[], removed=[], defaults_changed=False),
         )
 
     return reload
@@ -494,6 +499,7 @@ def test_reload_prints_what_it_did_and_what_is_running(
         providers=ProvidersReload(
             built=["tts.voice"], reused=["llm.mock"], retired=["asr.old"]
         ),
+        agents=AgentsReload(added=["kid"], removed=["mute"], defaults_changed=True),
         started=("weather",),
         stopped=("gone",),
     )
@@ -523,13 +529,31 @@ def test_reload_prints_what_it_did_and_what_is_running(
     assert "  built: tts.voice" in printed
     assert "  reused: llm.mock" in printed
     assert "  retired: asr.old" in printed
-    # And every section this server does not apply yet, named rather
-    # than missing: a kind that vanished from the output would read as a
-    # kind with nothing to report.
-    assert f"agents: {cli.NOT_APPLIED}" in printed
+    # And the agent set, whose two lists say what a device can reach
+    # from now on and what it cannot, beside the one field of the whole
+    # answer that is a flag rather than a list: there is one
+    # `agent_defaults` and nothing to name.
+    assert "agents:" in printed
+    assert "  added: kid" in printed
+    assert "  removed: mute" in printed
+    assert "  defaults_changed: yes" in printed
     # And the status underneath, which is what says whether an entry
     # that started actually connected.
     assert "weather: down since " in printed
+
+
+def test_a_section_answered_null_is_named_rather_than_missing() -> None:
+    """The branch the published schema keeps alive. Four sections are
+    declared optional, because narrowing a contract a generated client
+    already holds buys nothing; this server fills all of them, so what
+    could still answer null is an older one. A section silently missing
+    from the output would read as a kind with nothing to report, so it
+    is named instead.
+    """
+    body = _reload_answer()
+    body["agents"] = None
+
+    assert f"agents: {cli.NOT_APPLIED}" in cli._reload_listing(body)
 
 
 def test_the_reload_listing_renders_every_field_of_every_section() -> None:
