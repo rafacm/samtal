@@ -105,6 +105,7 @@ from vinga_server.config.responses import (
     PromptBlock,
     SecretSlot,
     SecretValue,
+    ServableAgents,
     StoredSecretLocation,
 )
 from vinga_server.config.secrets import MASK, SecretLocation, load_keys, provider_identity
@@ -833,7 +834,7 @@ class ApiRuntime:
 
     store: StoreHandle | None
     conversations: Callable[[], Iterator[Connection]]
-    loaded_agents: frozenset[str]
+    loaded_agents: ServableAgents
     pending: PendingDevices
     mcp_servers: McpStatusSource | None
     reload: ConfigReloader | None
@@ -845,7 +846,7 @@ class ApiRuntime:
 def build_api(
     token: str,
     database_dir: Path,
-    loaded_agents: Collection[str] = (),
+    loaded_agents: ServableAgents | None = None,
     pending: PendingDevices | None = None,
     mcp_servers: McpStatusSource | None = None,
     reload: ConfigReloader | None = None,
@@ -860,12 +861,15 @@ def build_api(
     request, so a deployment that forgot the variable is refused at boot
     instead of at the first call.
 
-    `loaded_agents` are the agents the server around this application
-    built providers for at boot, which is what a device write's
+    `loaded_agents` answers which agents the server around this
+    application can be asked for, which is what a device write's
     acknowledgement needs in order to say whether the write is live: a
-    binding to an agent nothing loaded waits for a restart. Empty is the
+    binding to an agent this server is not serving waits for the reload
+    that installs it. Asked per request rather than captured, because an
+    apply moves the answer while the process runs (#191). None is the
     honest answer for an application built without a server around it,
-    and answers every write with the restart sentence.
+    which can serve no agent at all and answers every write with the
+    sentence that says so.
 
     `pending` is the serving app's table of devices showing activation
     codes, shared rather than copied: the OTA endpoint writes it and the
@@ -943,7 +947,7 @@ def build_api(
 
 def build_api_runtime(
     database_dir: Path,
-    loaded_agents: Collection[str] = (),
+    loaded_agents: ServableAgents | None = None,
     pending: PendingDevices | None = None,
     mcp_servers: McpStatusSource | None = None,
     reload: ConfigReloader | None = None,
@@ -977,7 +981,7 @@ def build_api_runtime(
         # a deployment that has switched recording off still serves what
         # it recorded.
         conversations=conversations.reader(database_dir),
-        loaded_agents=frozenset(loaded_agents),
+        loaded_agents=_nothing_servable if loaded_agents is None else loaded_agents,
         pending=pending if pending is not None else _empty_pending(),
         mcp_servers=mcp_servers,
         reload=reload,
@@ -990,6 +994,12 @@ def build_api_runtime(
 def _empty_pending() -> PendingDevices:
     """A table for an application built without a server around it."""
     return PendingDevices()
+
+
+def _nothing_servable() -> frozenset[str]:
+    """What an application with no server around it can be asked for,
+    which is no agent at all."""
+    return frozenset()
 
 
 def document() -> dict[str, Any]:
@@ -1072,14 +1082,19 @@ StoreDep = Annotated[ConfigStore, Depends(_store)]
 
 
 def _loaded_agents(request: Request) -> frozenset[str]:
-    """Which agents the server around this application loaded at boot.
+    """Which agents the server around this application can be asked for,
+    right now.
 
     Taken from the application for the reason the store is: the document
     is rendered from an application built without a server, and nothing
-    a route declares may depend on there being one.
+    a route declares may depend on there being one. Asked per request
+    rather than held, because an apply installs the stored agent set
+    while the process runs, and a write acknowledged against a set this
+    application captured at build would name a restart for an agent the
+    server is already serving.
     """
     runtime: ApiRuntime = request.app.state.api_runtime
-    return runtime.loaded_agents
+    return runtime.loaded_agents()
 
 
 LoadedAgentsDep = Annotated[frozenset[str], Depends(_loaded_agents)]

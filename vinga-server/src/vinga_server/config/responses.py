@@ -536,6 +536,18 @@ RELOAD_SECTIONS: dict[str, type[BaseModel]] = {
     for name, field in ConfigReloadResult.model_fields.items()
 }
 
+# Which agents the server around this application can be asked for, as
+# a question rather than a set. It used to be a set, because a restart
+# was what loaded an agent and the answer could not move while the
+# process ran; an apply installs the stored agent set now, so a snapshot
+# taken when this application was built would speak for a world that has
+# been replaced (#191). What it closes over is the generation holder,
+# which is the composition root's business and not this API's. The empty
+# answer is honest for an application with no server around it: it can
+# serve no agent at all.
+type ServableAgents = Callable[[], frozenset[str]]
+
+
 # And what applies a re-read of the stored configuration to this
 # running server: a callable, because what it closes over (the
 # generation holder, the MCP managers, and where the blocking re-read

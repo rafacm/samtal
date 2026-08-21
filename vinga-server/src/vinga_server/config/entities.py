@@ -113,11 +113,13 @@ NO_SUCH_DEVICE = "devices: no device with that MAC is bound"
 # something a kind cannot know, and both write paths print whichever
 # came back.
 
-# Printed after most mutating commands, and answered with most
-# successful writes over HTTP. Most of the configuration is read once at
-# start by design, and a write that quietly waits for a restart is the
-# one thing about that design an operator can be caught by, so the write
-# itself says when it takes effect.
+# The whole of what a running server still reads once and never again,
+# which is the file half: the port, the directories, the limits, the
+# barge-in tuning. No kind this API writes is in that half any more, so
+# no descriptor names this sentence; it stays because a write path
+# needs a default that promises nothing, and because a setting that
+# genuinely waits for a start should have one true sentence to be
+# answered with when it gets a write route.
 RESTART_NOTICE = (
     "This applies at the next server start: the configuration is read once at boot."
 )
@@ -132,51 +134,38 @@ BINDING_NOTICE = (
 )
 
 # The second, and unlike the first it is asked for rather than noticed:
-# a running server re-reads the stored configuration and applies what it
-# can apply while it runs when the reload asks it to. Written on the
-# kinds the reload applies whole and nowhere else, because a notice that
-# is right about one field of a fragment and wrong about the rest is
-# worse than the conservative sentence; the kind whose fields fall on
-# both sides of that line says so itself, below.
+# a running server re-reads the stored configuration and applies it when
+# the reload asks it to. Written on every kind of the domain half, which
+# is what it has come to be true of (#191): the providers, the MCP
+# servers, the shared fragments, the agents and the layer under them are
+# one apply's business now, and the sentence that used to be written
+# only on the kinds a reload applied whole is written on all of them.
+#
+# The tail is the part an operator acts on. A reload does not interrupt
+# anything, so what an edit reaches a live conversation at depends on
+# which part of it moved, and the three clocks are named rather than
+# summarized: a sentence that said "immediately" would be wrong about
+# all three.
 RELOAD_NOTICE = (
     "This applies when the running server is asked to reload: run "
     "`vinga-server config reload`, which re-reads the stored configuration and applies "
-    "it without a restart and without dropping a conversation."
+    "it without a restart and without dropping a conversation. A conversation already "
+    "in progress meets the tools an agent may reach at its next utterance and its "
+    "prompt text at its next activation, while the voice it speaks in and the filled "
+    "pauses it masks with reach the next conversation."
 )
 
-# The third, for the one kind whose fields are not all in one regime.
-# Four of them are what a reload applies: the prompt and the fragments
-# it includes are assembled at an activation, the `mcp` list is what the
-# reload derives this agent's tools from, and the `filler` section is
-# synthesized into clips a conversation binds when it opens. What is
-# left is which provider entry serves each of this agent's stages, and
-# that is composed when the server starts. Every part is stated, because
-# a write that carried one sentence alone would be exactly right about
-# part of what was just written and exactly wrong about the rest.
-#
-# The three applied halves converge at three different moments and the
-# sentence says so: prompt text is assembled once per activation and
-# cached for it, the tools an agent may reach are snapshotted per reply,
-# and the clips a conversation masks with are bound when it opens.
-#
-# The restart-bound half says what it is rather than what it is not,
-# which it has to now that the providers themselves reload (#191): an
-# operator who edits the entry a stage names gets the new engine at the
-# next conversation, and one who points the stage at a different entry
-# waits for the start. Saying "everything else, because that is when its
-# providers are built" would now send that first operator to restart a
-# server that has already applied their edit.
-AGENT_NOTICE = (
-    "This applies in two parts. The `prompt`, `prompt_includes`, `mcp` and `filler` "
-    "fields apply when the running server is asked to reload: run "
-    "`vinga-server config reload`, and a conversation in progress meets the new prompt "
-    "text at its next activation and the new tools at its next utterance, while the "
-    "re-synthesized filled pauses reach the next conversation, since one already open "
-    "keeps the clips it opened with. Which provider entry serves each of this agent's "
-    "stages, and the agent itself if it is new, applies at the next server start, "
-    "because that is when an agent's pipeline is composed; the entries themselves are "
-    "rebuilt by a reload, so editing the voice an agent already names does reach the "
-    "next conversation."
+# The third, for the binding whose agent this server is not serving
+# yet. Both halves are true at once, which is why neither of the two
+# above will do: the row itself is live, so the device meets it at its
+# next check-in, and the agent it names arrives at the reload that
+# installs it rather than at a restart, which is what an operator who
+# has just written both would otherwise be sent away to do.
+BINDING_UNSERVED_NOTICE = (
+    "The binding applies at the device's next OTA check or connection, but this server "
+    "is not serving the agent it names yet: run `vinga-server config reload`, which "
+    "installs the stored agents without a restart, and the device reaches it at the "
+    "check-in after that."
 )
 
 # The fourth, for a server that was handed its configuration rather than
@@ -501,7 +490,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         moved_key="agents",
         table="agents",
         missing=NO_SUCH_AGENT,
-        notice=AGENT_NOTICE,
+        notice=RELOAD_NOTICE,
     ),
     EntityDescriptor(
         name="agent-defaults",
@@ -531,7 +520,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         moved_key="agent_defaults",
         table="agent_defaults",
         has_delete=False,
-        notice=RESTART_NOTICE,
+        notice=RELOAD_NOTICE,
     ),
 )
 
@@ -674,9 +663,9 @@ def always_shown(model: type[BaseModel]) -> tuple[str, ...]:
 
 
 __all__ = [
-    "AGENT_NOTICE",
     "API_OPTIONS_NOTE",
     "BINDING_NOTICE",
+    "BINDING_UNSERVED_NOTICE",
     "CONFIG_FILE",
     "ENTITIES",
     "EXAMPLES",

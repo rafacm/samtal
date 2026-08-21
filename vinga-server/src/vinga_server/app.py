@@ -388,7 +388,11 @@ async def _build_composition(
     # half-attached API.
     api_runtime = build_api_runtime(
         database_dir,
-        config.agents,
+        # Which agents this server can be asked for, as a question: an
+        # apply installs the stored agent set, so a device write
+        # acknowledged against a set captured here would name a restart
+        # for an agent the reload before it had already installed.
+        lambda: frozenset(generations.current().config.agents),
         pending,
         mcp_servers,
         config_reloader(

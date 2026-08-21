@@ -18,8 +18,8 @@ act differently.
 from collections.abc import Sequence
 
 from vinga_server.config.entities import (
-    AGENT_NOTICE,
     BINDING_NOTICE,
+    BINDING_UNSERVED_NOTICE,
     RELOAD_NOTICE,
     RESTART_NOTICE,
     SNAPSHOT_NOTICE,
@@ -36,12 +36,15 @@ from vinga_server.config.secrets import EntityKind
 def binding_notice(unloaded: Sequence[str] = (), snapshot_only: bool = False) -> str:
     """When a device write takes effect, which depends on two things.
 
-    The binding itself is live. The agent it names is not: a server
-    builds an agent's providers at boot, so a binding to an agent
-    written since then resolves to nothing until a restart, and saying
-    "no restart is needed" there would be a promise the device cannot
-    keep. `unloaded` is the names this server has not loaded, empty when
-    every one of them is loaded and the write is live.
+    The binding itself is live. The agent it names may not be: a server
+    builds an agent's pipeline when it installs a world, so a binding to
+    an agent written since the last one resolves to nothing until the
+    reload that installs it, and saying "no restart is needed" there
+    would be a promise the device cannot keep for a reason an operator
+    could not guess. `unloaded` is the names this server is not serving,
+    asked of the generation that is current at the moment of the write
+    rather than of the world this process booted, and empty when every
+    one of them is being served and the write is live on its own.
 
     `snapshot_only` is the server that reads no store at all, and it
     answers before either of those: what is live about a binding is that
@@ -53,7 +56,7 @@ def binding_notice(unloaded: Sequence[str] = (), snapshot_only: bool = False) ->
     """
     if snapshot_only:
         return SNAPSHOT_NOTICE
-    return RESTART_NOTICE if unloaded else BINDING_NOTICE
+    return BINDING_UNSERVED_NOTICE if unloaded else BINDING_NOTICE
 
 
 def secret_notice(kind: EntityKind) -> str:
@@ -142,8 +145,8 @@ CLEARED_DEFAULT_AGENT = "default agent cleared; the devices map is now the allow
 
 
 __all__ = [
-    "AGENT_NOTICE",
     "BINDING_NOTICE",
+    "BINDING_UNSERVED_NOTICE",
     "CLEARED_DEFAULT_AGENT",
     "RELOAD_NOTICE",
     "RESTART_NOTICE",
