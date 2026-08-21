@@ -9,6 +9,16 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **The external review has a claude fallback backend.** The review
+  pipeline's codex quota is a weekly allowance and it can run out
+  mid-week; `run-pr-review.sh` now reads `REVIEW_BACKEND`, keeping
+  codex as the default and running the claude CLI (`claude-opus-5`,
+  read-only tool set enforced by a deny list) when asked. The
+  provenance header stamps the backend and its enforcement
+  mechanism. A claude round is same-vendor and therefore less
+  independent than codex; the skill documents it as the interim
+  tier for quota outages only.
+
 - **The domain concepts explain worlds.** A `docs/concepts.md` section
   on how configuration changes arrive: composed and built as a whole
   next world before anything swaps, met by a live conversation only at
