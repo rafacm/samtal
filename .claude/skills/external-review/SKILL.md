@@ -7,8 +7,9 @@ description: Run an adversarial external review (codex with sol or terra by stak
 
 An independent model reads what this session produced and tries to
 break it. Two modes: a plan review before any code exists, and a PR
-review of a milestone's diff before it merges. Both use the codex
-CLI with the prompts in this skill's directory.
+review of a milestone's diff before it merges. Both use an external
+reviewer CLI (codex by default, claude as the quota fallback) with
+the prompts in this skill's directory.
 
 ## Which model, by stakes
 
@@ -23,8 +24,10 @@ Two tiers, decided per round (maintainer decision, 2026-08-19):
   pin updates with no logic change), or a re-review of fixes whose
   original round was Sol's. When in doubt, it is not low-stakes.
 
-`run-pr-review.sh` reads the model from `REVIEW_MODEL` (default
-sol) and stamps whichever ran into the provenance header.
+`run-pr-review.sh` reads the backend from `REVIEW_BACKEND` (default
+codex) and the model from `REVIEW_MODEL` (default sol under codex,
+opus under claude), and stamps whichever ran, with its enforcement
+mechanism, into the provenance header.
 
 ### Fallback when the codex quota is exhausted
 
@@ -53,6 +56,11 @@ the recorded round, and return to codex when the quota resets.
   10 to 25 minutes and looks stuck; stderr shows file-reading
   activity, and only the final answer reaches stdout:
   `codex exec -m gpt-5.6-sol --sandbox read-only - < prompt.md > out.txt 2> err.txt`
+- The claude backend is silent on both streams until it exits, so an
+  empty stderr does not mean a dead run there. Watching progress
+  needs `--output-format stream-json --verbose`, at the cost of the
+  output no longer being the plain review body the self-posting
+  script expects; for script runs, just wait for the exit.
 - The reviewer has no network (codex by sandbox, claude by its tool
   allowlist). Paste the GitHub issue body into the prompt and name
   every repository file the reviewer should read; it can only see
@@ -76,10 +84,11 @@ the reviewer confirms rather than discovers.
    prior plans and implementation docs it builds on, the code it
    touches, AGENTS.md, `docs/architecture/principles.md`, the CI
    workflow, and the test assets it converts.
-3. Run codex in the background; read stdout when it completes.
+3. Run the reviewer in the background; read stdout when it
+   completes.
 4. Record the findings as received, condensed but faithful, in a
    "Plan review round" section of the plan (its own commit), noting
-   codex version, model, date, and the reviewed commit hash.
+   backend, CLI version, model, date, and the reviewed commit hash.
 5. Address each finding with its own amendment commit, appending a
    `*Resolution*` note under the recorded finding. A finding you
    reject gets a resolution note saying why, never silence.
