@@ -40,8 +40,8 @@ from sqlalchemy import text
 from tests.support.apps import entered_client
 from tests.support.configs import config_with, world
 from tests.support.problems import problem
-from tests.support.providers import BrokenTts, RecordingLlm, built_world
-from tests.support.sessions import agent_providers, run_reply, session_for
+from tests.support.providers import BrokenTts, RecordingLlm, ScriptedLlm, built_world
+from tests.support.sessions import agent_providers, call, run_reply, session_for
 from tests.support.tools_mcp import reading
 from vinga_server import app as app_module
 from vinga_server.app import _prompt_preview, config_diff_reader, config_reloader
@@ -290,6 +290,83 @@ async def test_an_agent_the_store_deleted_leaves_the_new_world() -> None:
     assert set(generations.current().config.agents) == {"assistant"}
     assert result.agents is not None
     assert (result.agents.added, result.agents.removed) == ([], ["helper"])
+
+
+async def test_the_whole_agent_layer_applies_and_the_comparison_clears() -> None:
+    """`agent_defaults` whole, which is the last thing an apply was
+    keeping back, and the care point over it.
+
+    Every field of the layer is exercised at once because they were held
+    back as one and are applied as one: the stage every agent inherits,
+    the grant list every agent inherits, the fragments and the filled
+    pauses. What proves it is the effective values an agent that
+    configures none of its own reads, since those are what an activation
+    and a session are actually built from, and the comparison going
+    quiet afterwards.
+    """
+    entries = {
+        "llm": {"mock": {"type": "mock"}},
+        "asr": {"mock": {"type": "mock"}},
+        "tts": {"mock": {"type": "mock"}, "other": {"type": "mock", "tone_hz": 300}},
+        "vad": {"mock": {"type": "mock"}},
+    }
+    stages = dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
+    running = served(
+        providers=entries,
+        prompt_fragments={"house": {"text": "Quiet."}},
+        agent_defaults=stages,
+        agents={"assistant": {"prompt": "A"}},
+    )
+    stored = served(
+        providers=entries,
+        prompt_fragments={"house": {"text": "Quiet."}},
+        agent_defaults=stages
+        | {
+            "tts": "other",
+            "prompt_includes": ["house"],
+            "filler": {"enabled": True, "phrases": ["Hmm..."]},
+        },
+        agents={"assistant": {"prompt": "A"}},
+    )
+    generations, reload = applying(running, stored)
+    diff = config_diff_reader(generations, McpServers.build(running), reading(stored))
+
+    assert (await diff()).agent_defaults.changed is True
+
+    result = await reload.apply()
+
+    served_now = generations.current().config
+    assert served_now.provider_for_agent("assistant", "tts")[0] == "other"
+    assert [fragment.name for fragment in served_now.fragments_for_agent("assistant")] == [
+        "house"
+    ]
+    section = served_now.filler_for_agent("assistant")
+    assert section is not None and section.phrases == ["Hmm..."]
+    assert result.agents is not None
+    assert result.agents.defaults_changed is True
+    assert (await diff()).agent_defaults.changed is False
+
+
+async def test_an_added_agent_stops_being_pending_once_it_is_applied() -> None:
+    """The care point for the last kind to move. An agent the store
+    holds and this server does not is pending; the apply installs it,
+    and an answer that went on reporting it would be telling an operator
+    to apply a change that is already being served."""
+    running = served(agents={"assistant": {"prompt": "A"}})
+    stored = served(
+        agents={"assistant": {"prompt": "A"}, "helper": {"prompt": "H"}},
+        devices={DEVICE: ["assistant", "helper"]},
+    )
+    generations, reload = applying(running, stored)
+    diff = config_diff_reader(generations, McpServers.build(running), reading(stored))
+
+    pending = await diff()
+    assert pending.agents.added == ("helper",)
+    assert pending.agents.applies.value == "reload"
+
+    await reload.apply()
+
+    assert (await diff()).agents.added == ()
 
 
 async def test_an_agent_repointed_at_another_entry_is_applied() -> None:
@@ -1028,6 +1105,80 @@ async def test_an_applied_fragment_reaches_the_next_activation() -> None:
 
     assert "The house is loud." in llm.systems[-1]
     assert "The house is quiet." not in llm.systems[-1]
+
+
+# The agent set, from a conversation's side
+#
+# An apply moves which agents this server can be asked for, and a
+# conversation is the one thing that cannot be asked to move with it: it
+# was built from a world, it is speaking through that world's engines,
+# and its device is bound to whatever the binding said when it opened.
+# So a deleted agent has two answers rather than one, and both are here.
+
+
+def two_agents(**agents: object) -> Config:
+    """One device bound to two agents, either of which the store may
+    then delete."""
+    return served(
+        agents=dict(agents), devices={DEVICE: sorted(agents)}
+    )
+
+
+async def test_a_deleted_agent_still_answers_the_session_that_was_serving_it() -> None:
+    """The rule that makes a deletion survivable, at the moment it
+    becomes reachable.
+
+    A conversation is bound to the world it opened in, and its device's
+    bound list is that world's. An apply removes the agent it is talking
+    as; the next activation reads the current world, does not find it
+    there, and falls back to the session's own rather than indexing an
+    entry that is gone. What the model is sent is the prompt this
+    conversation has been served all along.
+    """
+    running = two_agents(
+        assistant={"prompt": "ASSISTANT"}, helper={"prompt": "HELPER"}
+    )
+    stored = served(agents={"assistant": {"prompt": "ASSISTANT"}})
+    handover = ScriptedLlm([[call("switch_agent", agent="helper")]])
+    helper = RecordingLlm(["Helper here."])
+    generations, reload = applying(
+        running,
+        stored,
+        providers=agent_providers(running, {"assistant": handover, "helper": helper}),
+    )
+    session = talking_to(running, generations)
+
+    await reload.apply()
+    await run_reply(session, "hand me over")
+
+    assert "helper" not in generations.current().config.agents
+    assert helper.systems[-1].startswith("HELPER")
+
+
+async def test_a_retained_agent_reads_the_world_the_apply_installed() -> None:
+    """The other half of the same rule, which is what keeps the fallback
+    a fallback: an agent the current world does hold is read out of it,
+    so a handover mid-conversation meets the prompt the apply installed
+    rather than the one this session opened on."""
+    running = two_agents(
+        assistant={"prompt": "ASSISTANT"}, helper={"prompt": "BEFORE"}
+    )
+    stored = two_agents(
+        assistant={"prompt": "ASSISTANT"}, helper={"prompt": "AFTER"}
+    )
+    handover = ScriptedLlm([[call("switch_agent", agent="helper")]])
+    helper = RecordingLlm(["Helper here."])
+    generations, reload = applying(
+        running,
+        stored,
+        providers=agent_providers(running, {"assistant": handover, "helper": helper}),
+    )
+    session = talking_to(running, generations)
+
+    await reload.apply()
+    await run_reply(session, "hand me over")
+
+    assert helper.systems[-1].startswith("AFTER")
 
 
 async def test_the_preview_and_the_comparison_agree_with_an_activation() -> None:

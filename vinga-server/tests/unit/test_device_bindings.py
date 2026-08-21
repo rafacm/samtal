@@ -20,12 +20,15 @@ from sqlalchemy import inspect, text, update
 from sqlalchemy.exc import OperationalError
 from starlette.websockets import WebSocketDisconnect
 
+from tests.conftest import TEST_API_SECRET
 from tests.support.configs import BOUND_MAC, DEVICE_UUID, world
 from tests.support.registry import AGENT, STAGES, booted, check_in, store_at
 from tests.support.registry import BINDINGS_DEVICE_MAC as DEVICE_MAC
 from vinga_server import logs
 from vinga_server.app import create_app
 from vinga_server.config import Config
+from vinga_server.config.models import API_MOUNT_PATH
+from vinga_server.config.writes import BINDING_NOTICE, BINDING_UNSERVED_NOTICE
 from vinga_server.db import open_database, read_engine, schema
 from vinga_server.device.bindings import DeviceBindings
 from vinga_server.ws import WEBSOCKET_PATH
@@ -243,6 +246,93 @@ def test_a_loaded_name_beside_an_unloaded_one_still_answers(tmp_path: Path) -> N
 
         served = bound.against(composition.generations.current().config.agents)
         assert (served.agents, served.unloaded) == (("assistant",), ("poet",))
+
+
+# The agent at the other end of the binding
+#
+# Two things have to be true for a device to be served, and only one of
+# them was ever live: the binding, which this view reads on every
+# lookup, and the agent it names, which a server has to be serving. That
+# second half moves at a reload now, so the loop below is the whole of
+# what an operator does to put a new agent in front of a board, and none
+# of it involves stopping the server.
+
+
+RELOAD_PATH = f"{API_MOUNT_PATH}/runtime/config/reload"
+
+BEARER = {"Authorization": f"Bearer {TEST_API_SECRET}"}
+
+
+def test_an_agent_added_by_an_apply_is_served_at_the_next_check_in(tmp_path: Path) -> None:
+    """Write the agent, bind the board, ask the server to apply, and the
+    board's own next check-in hands it a token.
+
+    Every step goes through the surfaces an operator actually uses, and
+    the acknowledgements are asserted along the way, because what stands
+    between the operator and the board here is knowing which of them is
+    still pending: before the apply the binding is live and the agent is
+    not, and the sentence says exactly that and which command fixes it.
+    """
+    config = booted(tmp_path)
+    with TestClient(create_app(config)) as client:
+        assert (
+            client.put(
+                f"{API_MOUNT_PATH}/agents/poet", json=dict(AGENT), headers=BEARER
+            ).status_code
+            == 200
+        )
+        bound = client.put(
+            f"{API_MOUNT_PATH}/devices/{DEVICE_MAC}",
+            json={"agents": ["poet"]},
+            headers=BEARER,
+        )
+        assert bound.status_code == 200
+        assert bound.json()["notice"] == BINDING_UNSERVED_NOTICE
+        # The binding is live and the agent is not, so the board is
+        # still turned away.
+        assert token_of(client) == ""
+
+        applied = client.post(RELOAD_PATH, headers=BEARER)
+
+        assert applied.status_code == 200, applied.text
+        assert applied.json()["agents"]["added"] == ["poet"]
+        # And the board is served, with no restart between the write and
+        # this line.
+        assert token_of(client) != ""
+        # The same write acknowledged again says the live sentence now,
+        # which is the operator-visible half of the same fact.
+        again = client.put(
+            f"{API_MOUNT_PATH}/devices/{DEVICE_MAC}",
+            json={"agents": ["poet"]},
+            headers=BEARER,
+        )
+        assert again.json()["notice"] == BINDING_NOTICE
+
+
+def test_an_agent_removed_by_an_apply_is_out_of_reach_at_the_next_one(
+    tmp_path: Path,
+) -> None:
+    """The other direction, at the same edge. The store drops the agent
+    and the binding that named it, the apply installs that world, and
+    the board that was being served is turned away at its next check-in.
+
+    What a conversation already open does is not this edge's question
+    and is pinned where a conversation is: it finishes on the world it
+    was built from.
+    """
+    config = booted(tmp_path, devices={DEVICE_MAC: ["assistant"]})
+    with TestClient(create_app(config)) as client:
+        assert token_of(client) != ""
+
+        with store_at(tmp_path) as store:
+            store.delete_device(DEVICE_MAC)
+            store.delete_agent("assistant")
+
+        applied = client.post(RELOAD_PATH, headers=BEARER)
+
+        assert applied.status_code == 200, applied.text
+        assert applied.json()["agents"]["removed"] == ["assistant"]
+        assert token_of(client) == ""
 
 
 # When the database cannot be read
