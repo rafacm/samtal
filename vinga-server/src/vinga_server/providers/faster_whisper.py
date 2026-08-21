@@ -65,7 +65,17 @@ class FasterWhisperAsr(AsrProvider):
         language_fallback: str | None,
         language_confidence_floor: float,
     ) -> None:
-        logger.info("loading faster-whisper model %s (%s, %s)", model, device, compute_type)
+        # The values are deliberately not in this line (#191). A
+        # provider is built before an apply can refuse on anything after
+        # it, so a line written here is a line an operator's retained
+        # logs keep whatever the request answered, and what it would
+        # carry is arbitrary stored scalars: a credential pasted into
+        # `model` is exactly that shape of thing. What is worth saying
+        # is that something slow has started, which is the whole reason
+        # the line exists on a first start. Which entry it is, and what
+        # it is configured with, are in the configuration the operator
+        # is holding.
+        logger.info("loading the faster-whisper model this entry configures")
         self.model = model
         # The transcriptions running off the loop right now, so that a
         # teardown waits for the worker rather than for its caller.

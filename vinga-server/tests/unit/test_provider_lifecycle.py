@@ -405,6 +405,70 @@ HAS_FASTER_WHISPER = (
 HAS_PIPER = __import__("importlib.util", fromlist=["util"]).find_spec("piper") is not None
 
 
+# Planted where a build writes about itself, and shaped so a substring
+# check for it cannot match by accident: a credential pasted into an
+# option is exactly the shape of stored scalar these lines used to
+# carry.
+PLANTED_OPTION = "sk-model-4a7c1e-never-a-real-credential"
+
+
+@pytest.mark.skipif(not HAS_FASTER_WHISPER, reason="faster-whisper extra not installed")
+def test_loading_a_local_model_says_nothing_about_what_it_was_configured_with(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The line that says a slow start has started, with the values
+    taken out of it.
+
+    A provider is built before an apply can refuse on anything after it,
+    so what this line writes stays in the operator's retained logs
+    whatever the request went on to answer. The values it used to carry
+    were the entry's stored scalars, which is the one thing a refusal
+    over stored state must not leave behind.
+    """
+    from vinga_server.providers import faster_whisper
+
+    class FakeModel:
+        def __init__(self, model: str, **kwargs: object) -> None:
+            self.model = model
+
+    monkeypatch.setattr(faster_whisper, "WhisperModel", FakeModel)
+    with caplog.at_level("INFO"):
+        faster_whisper.build(
+            "providers.asr.ears",
+            ProviderConfig.model_validate(
+                {"type": "faster_whisper", "model": PLANTED_OPTION, "device": "cpu"}
+            ),
+        )
+
+    # Said, because an operator waiting on a first start is what it is
+    # for, and said without any of it.
+    assert any("faster-whisper" in record.getMessage() for record in caplog.records)
+    assert PLANTED_OPTION not in caplog.text
+    # And not as an argument either, which a tap reads before any
+    # formatting happens.
+    for record in caplog.records:
+        assert PLANTED_OPTION not in str(record.args)
+
+
+@pytest.mark.skipif(not HAS_PIPER, reason="piper extra not installed")
+def test_downloading_a_local_voice_says_nothing_about_what_it_names(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, tmp_path: Any
+) -> None:
+    """The same line one engine over, where the stored scalars were the
+    voice and a filesystem path."""
+    from vinga_server.providers import piper_tts
+
+    monkeypatch.setattr(piper_tts, "download_voice", lambda voice, directory: None)
+    with caplog.at_level("INFO"):
+        piper_tts.ensure_voice(PLANTED_OPTION, tmp_path)
+
+    assert any("piper" in record.getMessage() for record in caplog.records)
+    assert PLANTED_OPTION not in caplog.text
+    assert str(tmp_path) not in caplog.text
+    for record in caplog.records:
+        assert PLANTED_OPTION not in str(record.args)
+
+
 @pytest.mark.skipif(not HAS_FASTER_WHISPER, reason="faster-whisper extra not installed")
 async def test_faster_whisper_lets_go_of_its_engine(
     monkeypatch: pytest.MonkeyPatch,
