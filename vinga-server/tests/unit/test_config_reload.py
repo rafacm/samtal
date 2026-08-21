@@ -232,11 +232,11 @@ async def test_an_agents_own_include_list_is_applied() -> None:
     assert (await diff()).agents.prompt.changed == ()
 
 
-async def test_an_agent_defaults_include_does_not_reach_an_inheriting_agent() -> None:
-    """The inheritance path the overlay exists for. `agent_defaults` is
-    what every effective-value helper falls back through, so installing
-    the stored one would apply a start-bound change to every agent that
-    names nothing of its own."""
+async def test_an_agent_defaults_include_reaches_an_inheriting_agent() -> None:
+    """The inheritance path, now that the layer under every agent is a
+    reload's. `agent_defaults` is what every effective-value helper falls
+    back through, so an edit to it reaches every agent that names nothing
+    of its own, and the apply reports which agents those are."""
     running = served(
         prompt_fragments={"house": {"text": "Quiet."}},
         agent_defaults=dict.fromkeys(("llm", "asr", "tts", "vad"), "mock"),
@@ -251,45 +251,52 @@ async def test_an_agent_defaults_include_does_not_reach_an_inheriting_agent() ->
 
     generations, result = await applied(running, stored)
 
-    assert generations.current().config.fragments_for_agent("assistant") == []
-    assert result.prompts.changed == []
+    inherited = generations.current().config.fragments_for_agent("assistant")
+    assert [fragment.name for fragment in inherited] == ["house"]
+    assert result.prompts.changed == ["assistant"]
+    assert result.agents is not None
+    assert result.agents.defaults_changed is True
 
 
-async def test_an_agent_the_store_added_is_not_served() -> None:
-    """A start is what builds an agent's providers, so the agent set
-    does not move here. What the store added arrives at the restart that
-    can serve it."""
+async def test_an_agent_the_store_added_is_served_from_the_swap() -> None:
+    """The last kind to move. An apply builds the added agent's pipeline
+    with everything else it builds, so the agent is servable the instant
+    the request answers rather than at the next start."""
     generations, result = await applied(
         served(agents={"assistant": {"prompt": "A"}}),
         served(agents={"assistant": {"prompt": "A"}, "helper": {"prompt": "H"}}),
     )
 
-    assert set(generations.current().config.agents) == {"assistant"}
+    assert set(generations.current().config.agents) == {"assistant", "helper"}
+    assert generations.current().providers.agents["helper"].llm is not None
+    assert result.agents is not None
+    assert (result.agents.added, result.agents.removed) == (["helper"], [])
+    # Reported once, and under the section whose vocabulary fits: an
+    # agent that has just arrived has no previous text to differ from.
     assert result.prompts.changed == []
 
 
-async def test_an_agent_the_store_deleted_is_still_served() -> None:
-    """The other direction of the same rule, and the one that keeps a
-    live session survivable: an agent this server is talking as does not
-    disappear from under it."""
-    generations, _ = await applied(
-        served(
-            agents={"assistant": {"prompt": "A"}, "helper": {"prompt": "H"}},
-            devices={DEVICE: ["assistant", "helper"]},
-        ),
-        served(agents={"assistant": {"prompt": "A"}}),
+async def test_an_agent_the_store_deleted_leaves_the_new_world() -> None:
+    """The other direction. The world after the apply cannot be asked
+    for the deleted agent at all; what keeps a live session survivable is
+    that the session holds the world it was built from, which the
+    generation the apply retired still is."""
+    running = served(
+        agents={"assistant": {"prompt": "A"}, "helper": {"prompt": "H"}},
+        devices={DEVICE: ["assistant", "helper"]},
     )
+    generations, result = await applied(running, served(agents={"assistant": {"prompt": "A"}}))
 
-    assert set(generations.current().config.agents) == {"assistant", "helper"}
-    assert generations.current().config.prompt_for_agent("helper") == "H"
+    assert set(generations.current().config.agents) == {"assistant"}
+    assert result.agents is not None
+    assert (result.agents.added, result.agents.removed) == ([], ["helper"])
 
 
-async def test_an_agent_repointed_at_another_entry_stays_pending() -> None:
-    """The half of the provider slice a reload deliberately does not
-    move. The entries themselves are rebuilt, but which of them serves
-    which of an agent's stages is composed when the server starts, so an
-    agent pointed at a different model goes on talking through the one
-    it was built with."""
+async def test_an_agent_repointed_at_another_entry_is_applied() -> None:
+    """The last half of the provider slice to move. Which entry serves
+    which of an agent's stages used to be composed at a start; the whole
+    entry is a reload's now, so an agent pointed at another model speaks
+    through it from the next conversation."""
     running = served(agents={"assistant": {"prompt": "A"}})
     stored = served(
         providers={
@@ -301,9 +308,11 @@ async def test_an_agent_repointed_at_another_entry_stays_pending() -> None:
         agents={"assistant": {"prompt": "A", "llm": "other"}},
     )
 
-    generations, _ = await applied(running, stored)
+    generations, result = await applied(running, stored)
 
-    assert generations.current().config.provider_for_agent("assistant", "llm")[0] == "mock"
+    assert generations.current().config.provider_for_agent("assistant", "llm")[0] == "other"
+    assert result.providers is not None
+    assert "llm.other" in result.providers.built
 
 
 # The filled pauses, and what a reload does to a clip
@@ -420,12 +429,11 @@ async def test_a_phrase_edit_resynthesizes_only_that_agent() -> None:
     assert applied_clips["helper"] is clips["helper"]
 
 
-async def test_an_agent_repointed_at_another_voice_keeps_its_clips() -> None:
+async def test_an_agent_repointed_at_another_voice_is_spoken_again() -> None:
     """The same half, one level on. The store points the agent at a
-    different voice entry, which is start-bound, so the voice this
-    server speaks in is still the one it was built with and the clips
-    stay exactly as they are; what the store says stays pending in the
-    comparison instead of being reported applied."""
+    different voice entry, which a reload applies now, so the clip is a
+    different voice's and is made again; nothing is left pending in the
+    comparison."""
     voices = {
         "llm": {"mock": {"type": "mock"}},
         "asr": {"mock": {"type": "mock"}},
@@ -452,12 +460,12 @@ async def test_an_agent_repointed_at_another_voice_keeps_its_clips() -> None:
     result = await reload.apply()
 
     assert result.fillers is not None
-    assert result.fillers.reused == ["assistant"]
-    assert result.fillers.resynthesized == []
-    assert generations.current().fillers["assistant"] is clips["assistant"]
-    # And the edit is still pending, reported where a restart-bound
-    # change belongs rather than swallowed by an apply that kept a clip.
-    assert (await diff()).agents.changed == ("assistant",)
+    assert result.fillers.resynthesized == ["assistant"]
+    assert result.fillers.reused == []
+    assert generations.current().fillers["assistant"] is not clips["assistant"]
+    # And nothing is left pending: the entry the apply installed is the
+    # entry the store holds.
+    assert (await diff()).agents.changed == ()
 
 
 async def test_a_provider_secret_rotation_is_applied_and_re_voices_the_clips() -> None:
@@ -545,11 +553,10 @@ async def test_a_synthesis_failure_reaches_the_response_body_and_the_rendering()
     assert "  disabled: assistant" in cli._reload_listing(body)
 
 
-async def test_an_agent_defaults_filler_edit_does_not_reach_an_inheriting_agent() -> None:
-    """The inheritance path, for the slice this milestone made live. The
-    layer under every agent is start-bound, so an agent that configures
-    no filled pause of its own goes on masking with what it inherited,
-    and nothing is synthesized."""
+async def test_an_agent_defaults_filler_edit_reaches_an_inheriting_agent() -> None:
+    """The inheritance path for the clips. The layer under every agent is
+    a reload's now, so an agent that configures no filled pause of its
+    own is synthesized from what it inherits."""
     stages = dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
     running = served(agent_defaults=stages, agents={"assistant": {"prompt": "A"}})
     stored = served(
@@ -559,10 +566,11 @@ async def test_an_agent_defaults_filler_edit_does_not_reach_an_inheriting_agent(
 
     generations, result = await applied(running, stored)
 
-    assert generations.current().config.filler_for_agent("assistant") is None
+    section = generations.current().config.filler_for_agent("assistant")
+    assert section is not None and section.phrases == ["Hmm..."]
     assert result.fillers is not None
-    assert (result.fillers.resynthesized, result.fillers.reused) == ([], [])
-    assert generations.current().fillers == {}
+    assert (result.fillers.resynthesized, result.fillers.reused) == (["assistant"], [])
+    assert generations.current().fillers["assistant"].phrases == ("Hmm...",)
 
 
 async def test_a_session_opened_before_an_apply_keeps_the_clips_it_bound() -> None:
@@ -696,21 +704,19 @@ async def test_an_engine_a_live_conversation_holds_is_not_closed_under_it() -> N
     assert voice.closes == 1
 
 
-async def test_nothing_retires_while_the_agent_set_is_kept() -> None:
-    """What `retired` can honestly say before the agent set moves, which
-    is nothing, and why.
+async def test_an_entry_the_last_agent_stopped_naming_retires() -> None:
+    """What `retired` names, now that there is a way for an entry to
+    leave a world at all.
 
-    A world builds the entries its agents reference and no others, and
-    neither the agent set nor an agent's choice of entry moves at an
-    apply. So the two ways an entry could leave a world are both closed
-    here: deleting one a retained agent names does not compose at all,
-    and deleting one nothing names retires nothing, because nothing was
-    ever built for it. The section is filled and the outcome is empty,
-    which is a true answer rather than a missing one; the milestone that
-    moves the agent set is where it starts naming entries.
+    A world builds the entries its agents reference and no others, so an
+    entry can only leave one when the last agent that named it does. The
+    store deletes that agent, the apply installs a world with no reason
+    to build its voice, and the section says so. Retired is not closed:
+    when the engine is actually released depends on the conversations
+    still holding it, and the world here is holding none.
     """
     stages = {"llm": "mock", "asr": "mock", "vad": "mock"}
-    running = served(
+    both = served(
         providers={
             "llm": {"mock": {"type": "mock"}},
             "asr": {"mock": {"type": "mock"}},
@@ -724,7 +730,7 @@ async def test_nothing_retires_while_the_agent_set_is_kept() -> None:
         },
         devices={DEVICE: ["assistant", "helper"]},
     )
-    keeping_helper = served(
+    without_helper = served(
         providers={
             "llm": {"mock": {"type": "mock"}},
             "asr": {"mock": {"type": "mock"}},
@@ -736,30 +742,24 @@ async def test_nothing_retires_while_the_agent_set_is_kept() -> None:
         devices={DEVICE: ["assistant"]},
     )
 
-    # The agent the store deleted is still served, so the entry it names
-    # is still referenced, and an overlay that dropped the entry under it
-    # does not compose.
-    _, refusing = applying(running, keeping_helper)
-    with pytest.raises(ConfigError, match="unknown tts provider"):
-        await refusing.apply()
-
-    # And an entry no agent references was never built, so its deletion
-    # takes nothing with it.
-    spare = served(
-        providers={
-            "llm": {"mock": {"type": "mock"}},
-            "asr": {"mock": {"type": "mock"}},
-            "tts": {"voice": {"type": "mock"}, "spare": {"type": "mock"}},
-            "vad": {"mock": {"type": "mock"}},
-        },
-        agent_defaults=stages,
-        agents={"assistant": {"prompt": "A", "tts": "voice"}},
-    )
-    _, result = await applied(spare, voices())
+    generations, result = await applied(both, without_helper)
 
     assert result.providers is not None
-    assert result.providers.retired == []
+    assert result.providers.retired == ["tts.spare"]
     assert result.providers.reused == ["asr.mock", "llm.mock", "tts.voice", "vad.mock"]
+    assert "tts.spare" not in generations.current().providers.instances
+    assert result.agents is not None
+    assert result.agents.removed == ["helper"]
+
+
+async def test_an_entry_a_rewritten_world_still_names_is_not_retired() -> None:
+    """The other side of the same word. An entry whose definition moved
+    is built again and is under `built`; `retired` is for a name no
+    world after this apply serves at all."""
+    _, result = await applied(voices(tone_hz=440.0), voices(tone_hz=880.0))
+
+    assert result.providers is not None
+    assert (result.providers.built, result.providers.retired) == (["tts.voice"], [])
 
 
 async def test_an_egress_refusal_leaves_the_running_engines_exactly_as_they_were() -> None:
@@ -866,12 +866,15 @@ TEARDOWN_PLANTED = "sk-apply-teardown-91f3c7-never-a-real-credential"
 # What an apply refuses
 
 
-async def test_an_overlay_that_no_longer_composes_refuses_whole() -> None:
-    """The slice interaction the whole-snapshot re-validation is for. A
-    fragment deleted in the store is applied; the `agent_defaults` list
-    naming it is not, because it is start-bound. The two together
-    describe a world nothing can serve, so the apply refuses and says
-    which reference did not resolve rather than installing half of it.
+async def test_a_fragment_and_the_layer_naming_it_go_together() -> None:
+    """What used to be the overlay's one refusal, and is now an ordinary
+    apply.
+
+    A fragment deleted in the store while a layer this server was keeping
+    still named it described a world nothing could serve, so the apply
+    refused and said to restart. Nothing is kept back any more, so the
+    store's own world is what gets installed: the deletion and the layer
+    that named it arrive together, exactly as they were written.
     """
     defaults = dict.fromkeys(("llm", "asr", "tts", "vad"), "mock") | {
         "prompt_includes": ["house"]
@@ -882,19 +885,15 @@ async def test_an_overlay_that_no_longer_composes_refuses_whole() -> None:
         agents={"assistant": {"prompt": "A"}},
     )
     # The store deleted the fragment and the layer that names it in the
-    # same breath, which is a perfectly valid stored world.
+    # same breath, which was a perfectly valid stored world all along.
     stored = served(agents={"assistant": {"prompt": "A"}})
-    generations, reload = applying(running, stored)
-    before = generations.current()
+    generations, result = await applied(running, stored)
 
-    with pytest.raises(ConfigError) as caught:
-        await reload.apply()
-
-    assert "nothing was changed" in str(caught.value)
-    assert "prompt_includes" in str(caught.value)
-    # And nothing moved: the refusal is a refusal.
-    assert generations.current() is before
-    assert generations.mark == 0
+    applied_config = generations.current().config
+    assert applied_config.prompt_fragments == {}
+    assert applied_config.fragments_for_agent("assistant") == []
+    assert result.prompts.changed == ["assistant"]
+    assert generations.mark == 1
 
 
 class _Held:

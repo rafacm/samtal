@@ -190,19 +190,19 @@ def test_an_agent_that_arrives_or_goes_is_named() -> None:
 
 def test_an_edited_agent_prompt_is_pending_a_reload() -> None:
     """A prompt is assembled at an activation, so a reload puts the new
-    text in front of the next one. It is therefore reported under the
-    agent's prompt half rather than in the restart-bound lists, exactly
-    as a grants-only edit is reported under the grants."""
+    text in front of the next one. The whole entry is a reload's now, so
+    the edit is in `changed` as well, and the prompt half is what says
+    which of the three clocks it is on."""
     running = config_with(agents={"assistant": {"prompt": "A"}})
     stored = config_with(agents={"assistant": {"prompt": "Something else"}})
 
     answer = diff_of(running, stored)
 
-    assert answer.agents.changed == ()
+    assert answer.agents.changed == ("assistant",)
     assert answer.agents.prompt.changed == ("assistant",)
     assert answer.agents.prompt.applies is PROMPT_APPLY
     assert answer.agents.prompt.applies is Applies.RELOAD
-    assert answer.agents.applies is Applies.RESTART
+    assert answer.agents.applies is Applies.RELOAD
 
 
 def test_an_edited_include_list_rides_the_prompt_half_too() -> None:
@@ -220,7 +220,7 @@ def test_an_edited_include_list_rides_the_prompt_half_too() -> None:
 
     answer = diff_of(running, stored)
 
-    assert answer.agents.changed == ()
+    assert answer.agents.changed == ("assistant",)
     assert answer.agents.prompt.changed == ("assistant",)
 
 
@@ -248,22 +248,24 @@ def granting(*grants: object) -> Config:
     )
 
 
-def test_a_grants_only_edit_is_not_claimed_pending_restart() -> None:
-    """An agent's `mcp` list is what a reload derives its tools from, so
-    an edit to it is not waiting for a restart. What moved is reported
-    under the grants, by the registry that knows whether the running
-    world already has it."""
+def test_a_grants_only_edit_is_the_registry_s_to_report() -> None:
+    """An agent's `mcp` list is what a reload derives its tools from.
+    The entry moved, so the agent is in `changed`; whether what it may
+    reach moved is the registry's answer, and this comparison is handed
+    an empty one, so nothing is claimed about the tools."""
     answer = diff_of(granting("tools"), granting())
 
-    assert answer.agents.changed == ()
+    assert answer.agents.changed == ("assistant",)
+    assert answer.agents.grants.changed == ()
     assert answer.agents.added == ()
     assert answer.agents.removed == ()
 
 
-def test_an_edit_beside_the_reloaded_fields_is_still_pending_a_restart() -> None:
-    """The exclusion is a named list of fields and not a general
-    softening: the rest of the entry converges where it always did. A
-    provider override is the case, since it is what a start builds."""
+def test_an_edit_beside_the_three_halves_is_a_change_of_the_entry() -> None:
+    """The three halves are a breakdown and not the whole of what an
+    entry holds. Which provider entry serves a stage is on none of them,
+    and a reload applies it with the rest, so it is reported as the
+    entry changing and under none of the three."""
     running = granting("tools")
     stored = config_with(
         providers={
@@ -276,14 +278,18 @@ def test_an_edit_beside_the_reloaded_fields_is_still_pending_a_restart() -> None
         agents={"assistant": {"prompt": "A", "mcp": [], "llm": "other"}},
     )
 
-    assert diff_of(running, stored).agents.changed == ("assistant",)
+    answer = diff_of(running, stored)
+
+    assert answer.agents.changed == ("assistant",)
+    assert answer.agents.prompt.changed == ()
+    assert answer.agents.filler.changed == ()
 
 
 def test_a_filler_only_edit_rides_the_filler_half() -> None:
     """An agent's own `filler` section is what a reload synthesizes its
-    next session's clips from, so an edit to it is not waiting for a
-    restart and is reported under its own half rather than in the
-    restart-bound list."""
+    next session's clips from, so the half it is reported under is what
+    says when the edit reaches a conversation: the next one, rather than
+    the activation the prompt half converges at."""
     running = config_with(agents={"assistant": {"prompt": "A"}})
     stored = config_with(
         agents={
@@ -296,19 +302,19 @@ def test_a_filler_only_edit_rides_the_filler_half() -> None:
 
     answer = diff_of(running, stored)
 
-    assert answer.agents.changed == ()
+    assert answer.agents.changed == ("assistant",)
     assert answer.agents.filler.changed == ("assistant",)
     assert answer.agents.filler.applies is FILLER_APPLY
     assert answer.agents.filler.applies is Applies.RELOAD
-    assert answer.agents.applies is Applies.RESTART
+    assert answer.agents.applies is Applies.RELOAD
 
 
-def test_an_agent_defaults_filler_edit_stays_pending_a_restart() -> None:
+def test_an_agent_defaults_filler_edit_is_reported_against_the_layer() -> None:
     """The layer under every agent is not the agent's own half. What
     `agent_defaults.filler` holds is inherited by every agent that
-    configures none, and a candidate generation keeps the previous
-    layer whole, so the edit waits for the start that reads it and is
-    reported against `agent_defaults`."""
+    configures none, and a reload applies the layer whole, so the edit
+    is reported against `agent_defaults` and against no agent's own
+    filler section."""
     stages = dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
     running = config_with(agent_defaults=stages, agents={"assistant": {"prompt": "A"}})
     stored = config_with(
@@ -319,7 +325,7 @@ def test_an_agent_defaults_filler_edit_stays_pending_a_restart() -> None:
     answer = diff_of(running, stored)
 
     assert answer.agent_defaults.changed is True
-    assert answer.agent_defaults.applies is Applies.RESTART
+    assert answer.agent_defaults.applies is Applies.RELOAD
     assert answer.agents.filler.changed == ()
 
 

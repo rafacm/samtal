@@ -361,9 +361,10 @@ class PromptsReload(BaseModel):
             "conversation already in progress keeps the prompt it was activated with. "
             "The MCP guidance that also goes into an assembly is not counted here: what "
             "moved there is reported entry by entry under `mcp`, since that is where a "
-            "connection is what changed. An agent the stored configuration added or "
-            "removed is not here either, because the agents this server can serve are "
-            "still what it started with."
+            "connection is what changed. An agent this reload added or removed is not "
+            "here either: it is named under `agents`, since an agent that has just "
+            "arrived has no previous text to differ from and one that has just gone "
+            "will not assemble again."
         )
     )
 
@@ -414,11 +415,7 @@ class FillersReload(BaseModel):
 
 
 class ProvidersReload(BaseModel):
-    """What a reload did to the built providers.
-
-    Answered as null until the milestone that makes providers a reloaded
-    kind, for the reason the fillers section is.
-    """
+    """What a reload did to the built providers."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -448,8 +445,11 @@ class ProvidersReload(BaseModel):
 class AgentsReload(BaseModel):
     """What a reload did to the set of agents this server can serve.
 
-    Answered as null until the milestone that makes the agent set a
-    reloaded kind, for the reason the two sections above are.
+    The set moves at the swap and nowhere else: an agent named under
+    `added` is servable from the instant this answered, and one under
+    `removed` cannot be reached by anything that starts after it, while
+    every conversation already talking as it finishes on the world it
+    was built from.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -481,11 +481,13 @@ class ConfigReloadResult(BaseModel):
 
     One request applies a stored change and says what the change was, so
     believing a write took effect when it did not takes a deliberate act
-    of not reading the reply. Which kinds a reload can apply grows
-    milestone by milestone; the sections below that this server does not
-    apply yet answer null rather than an empty answer, because an empty
-    three-way answer would claim that every agent was considered and
-    nothing needed doing.
+    of not reading the reply. Every section answers: a reload applies
+    the whole domain half, so there is no kind left whose section would
+    have to say that this build does not touch it. The four that are
+    declared optional stay optional in the schema, because a client
+    generated against an earlier one is holding a document that says
+    they may be null and narrowing that is a change to the contract for
+    no gain.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -652,13 +654,15 @@ class Applies(StrEnum):
 
     Three boundaries and no fourth, because the server has three.
     `restart` is what this process reads once and serves until it is
-    started again. `reload` is what `POST /runtime/config/reload`
-    applies while the process runs, which is the MCP entries, the
-    agents' grants, the shared prompt fragments, each agent's own prompt
-    text and each agent's own filled pauses. `check-in` is what a device
-    is answered as it asks, the bindings and the default agent, which are
-    therefore in effect within seconds of a write and never pending at
-    all.
+    started again, which is now the file half alone: the port, the
+    directories, the limits and everything else `server` holds, none of
+    which this API writes. `reload` is what `POST
+    /runtime/config/reload` applies while the process runs, which is the
+    whole domain half: the provider entries, the MCP entries, the shared
+    prompt fragments, the agents, and `agent_defaults`. `check-in` is
+    what a device is answered as it asks, the bindings and the default
+    agent, which are therefore in effect within seconds of a write and
+    never pending at all.
     """
 
     RESTART = "restart"
@@ -703,8 +707,8 @@ class EntityDiff(BaseModel):
 
 class GrantsDiff(BaseModel):
     """The agents whose effective MCP grants the stored configuration
-    would move, which is the half of an agent entry that converges at
-    the reload rather than at a restart."""
+    would move, which is the half of an agent entry a conversation meets
+    at its next utterance rather than at its next activation."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -715,17 +719,18 @@ class GrantsDiff(BaseModel):
             "configuration is applied, sorted. Compared through the same "
             "defaults-then-own rule the server derives an agent's grants by, so moving "
             "a grant between `agent_defaults` and an agent without changing what that "
-            "agent reaches is not a change. An agent this server loaded and the "
-            "database no longer holds is here while its grants are still live, since a "
-            "reload would revoke them and a restart is what removes the agent itself."
+            "agent reaches is not a change. Only the agents this server is serving are "
+            "compared: one the database has added rides `added` above until a reload "
+            "installs it, and one the database no longer holds is here while a reload "
+            "would still revoke its tools."
         )
     )
 
 
 class PromptDiff(BaseModel):
     """The agents whose prompt text the stored configuration would move,
-    which is the half of an agent entry a reload assembles again rather
-    than the half a restart loads."""
+    which is the half of an agent entry a reload has assembled again at
+    the next activation."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -735,9 +740,9 @@ class PromptDiff(BaseModel):
             "The agents whose stored `prompt` or `prompt_includes` differs from what "
             "this server is serving, sorted. A reload applies both, and each agent that "
             "moved assembles the new text at its next activation. Only agents both "
-            "sides hold are compared: a reload keeps the agents this server started "
-            "with, so an agent the database has added or deleted rides the added or "
-            "removed lists above and nothing about its prompt is pending here. The "
+            "sides hold are compared: an agent the database has added or deleted rides "
+            "the added or removed lists above, which a reload applies whole, and "
+            "nothing about its prompt is separately pending here. The "
             "fragments the includes name are their own kind, and an edit to a "
             "fragment's text is reported there rather than against every agent that "
             "carries it."
@@ -748,7 +753,7 @@ class PromptDiff(BaseModel):
 class FillerDiff(BaseModel):
     """The agents whose filled pauses the stored configuration would
     move, which is the half of an agent entry a reload synthesizes again
-    rather than the half a restart loads."""
+    and the next conversation opens on."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -759,26 +764,26 @@ class FillerDiff(BaseModel):
             "serving, sorted. A reload synthesizes the new clips in each agent's own "
             "voice and the next session plays them; a conversation already open goes on "
             "masking with the clips it opened on. Only agents both sides hold are "
-            "compared, for the reason the prompt half gives. What `agent_defaults.filler` "
-            "holds is not compared here: it is inherited by every agent that configures "
-            "none of its own and it waits for a restart, so an edit to it is reported "
-            "against `agent_defaults` instead."
+            "compared, for the reason the prompt half gives, and only each agent's own "
+            "section: what `agent_defaults.filler` holds is inherited by every agent "
+            "that configures none of its own, and an edit to it is reported against "
+            "`agent_defaults` instead."
         )
     )
 
 
 class AgentsDiff(EntityDiff):
-    """The agents, whose entries span four regimes: an agent's `mcp`
-    list is what a reload derives its tools from, its `prompt` and
-    `prompt_includes` are what a reload assembles its next activation
-    from, its `filler` is what a reload synthesizes its next session's
-    filled pauses from, and everything else about the entry waits for a
-    restart.
+    """The agents. A reload applies the whole entry, so `changed` above
+    compares the whole entry, and the three entries below break that one
+    answer into the moments a conversation meets each part at: `grants`
+    at its next utterance, `prompt` at its next activation, `filler` when
+    the next conversation opens.
 
-    So a grants-only, prompt-only or filler-only edit is deliberately
-    absent from `changed` above and reported under `grants`, `prompt` or
-    `filler` instead, and an answer that named it in both would be
-    claiming a restart that nothing is waiting for.
+    A breakdown and not an exception: an agent whose prompt alone moved
+    is in `changed` and in `prompt`, which is one change reported at the
+    altitude an operator asks about it. The three carry `reload` for the
+    same reason the kind does, and they exist because the clocks differ
+    and a single label cannot say which one an edit is on.
     """
 
     grants: GrantsDiff
@@ -790,10 +795,10 @@ class SingletonDiff(BaseModel):
     """A kind there is exactly one of, which therefore has nothing to
     name: it moved or it did not.
 
-    The `mcp` grants are left out of the comparison for the reason they
-    are left out of an agent's, since this is the layer under every
-    agent: they are what a reload applies, and what they moved is
-    reported under `agents.grants`.
+    Compared whole, grants included: a reload applies the whole layer,
+    and what an edit to it reaches is every agent that inherits the
+    field that moved. Which agents those are is reported beside this,
+    under the agents' own three entries.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -838,7 +843,10 @@ class ConfigDiff(BaseModel):
     process runs: an entry no agent references is compared like any
     other, so is one whose only edit is to the prompt fields a
     connection never sees, and a change a reload has already applied is
-    not reported as pending.
+    not reported as pending. That last property is the whole of what
+    this read is for, and it now holds for every kind: an apply installs
+    the stored domain half whole, so a comparison taken after one is
+    empty.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
