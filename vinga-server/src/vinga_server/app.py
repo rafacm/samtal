@@ -1,6 +1,6 @@
 import asyncio
 import contextlib
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Collection
 from dataclasses import dataclass
 
 from fastapi import FastAPI
@@ -23,6 +23,7 @@ from vinga_server.config.boot import load_boot_config, reload_domain_config
 from vinga_server.config.diff import Loaded, config_diff
 from vinga_server.config.loader import (
     DatabaseBusyError,
+    ProviderRefusedError,
     ReloadInProgressError,
     RunningConfigMovedError,
     StorageError,
@@ -42,7 +43,7 @@ from vinga_server.events.catalog import CaptureDisabled, CaptureEnabled
 from vinga_server.events.values import ConfiguredPath
 from vinga_server.filler import build_agent_fillers
 from vinga_server.generation import Generation, Generations
-from vinga_server.providers import AgentProviders, ProviderError, build_agent_providers
+from vinga_server.providers import ProviderError, build_world
 from vinga_server.registry import SessionRegistry
 from vinga_server.runtime import prompt
 from vinga_server.runtime.pipeline import bespoke_runtime_factory
@@ -227,19 +228,19 @@ async def _build_composition(
     # be sent and memory is part of that.
     memory_section = config.memory
     memory = None if memory_section is None else MemoryStore(memory_section.dir)
-    # One registry per app: what decides whether there is room for the
-    # next conversation, and what the drain reaches the live ones through.
-    sessions = SessionRegistry(config.server.limits.max_sessions)
     # Built here so a bad provider configuration (unknown type, bad option,
     # missing extra, agent without a full pipeline) fails the boot rather
     # than the first conversation. The MCP servers are built above, for
     # the same reason and one of their own.
     #
-    # On a worker thread, because this is where a boot spends its time:
-    # an ASR or VAD provider loads a model, which is seconds to minutes
-    # of blocking work, and the loop this now runs on is the one uvicorn
-    # is waiting on.
-    agent_providers = await asyncio.to_thread(build_agent_providers, config, secrets)
+    # Through the one path an apply builds through, which is what makes
+    # the two agree about ownership: each engine is constructed off the
+    # loop, one at a time, because that is where a boot spends its time,
+    # and a failure part way through closes what got as far as existing
+    # rather than leaving it to a garbage collector this milestone has
+    # just declared insufficient (#191). There is nothing to carry over
+    # at a boot, which is the degenerate case of the same call.
+    providers = (await build_world(config, secrets)).world
     # What was said, kept where it can be queried. Absent unless the
     # section exists and says so, which is what keeps recording a
     # conversation something an operator asks for.
@@ -282,16 +283,33 @@ async def _build_composition(
     # is: startup is still before the first conversation, which is what
     # "ahead of time" means. An agent whose synthesis fails runs with
     # the feature off rather than failing the boot.
-    fillers = await build_agent_fillers(config, agent_providers)
+    fillers = await build_agent_fillers(config, providers.agents)
     # The world new work binds, and the only place it is replaced. The
-    # boot's configuration, the credentials loaded with it and the clips
-    # synthesized from the two are the first generation; a reload
-    # composes the next one and installs it here. An empty store rather
-    # than None for a deployment whose credentials are all environment
-    # references, so that a generation is one shape rather than two.
+    # boot's configuration, the credentials loaded with it, the engines
+    # built from the two and the clips those engines spoke are the first
+    # generation; a reload composes the next one and installs it here.
+    # An empty store rather than None for a deployment whose credentials
+    # are all environment references, so that a generation is one shape
+    # rather than two.
     generations = Generations(
-        Generation(config, secrets if secrets is not None else SecretStore(), fillers.clips)
+        Generation(
+            config,
+            secrets if secrets is not None else SecretStore(),
+            fillers.clips,
+            providers,
+        )
     )
+    # And the close at the other end of the process, registered here so
+    # that it unwinds after the drain below has asked every conversation
+    # to finish: what a world holds is let go of at every end a world can
+    # meet, an apply that replaced it and a server that is stopping
+    # alike.
+    stack.push_async_callback(generations.aclose)
+    # One registry per app: what decides whether there is room for the
+    # next conversation, what the drain reaches the live ones through,
+    # and which world each of them is holding, which is what says when a
+    # replaced one may let go of its engines.
+    sessions = SessionRegistry(config.server.limits.max_sessions, generations)
     # How one conversation is built for one connection, closed over
     # once here: the providers, the MCP servers and the memory store all
     # outlive any single websocket, and a device session should not have
@@ -303,7 +321,6 @@ async def _build_composition(
     # here.
     runtime_factory = bespoke_runtime_factory(
         generations,
-        agent_providers,
         mcp_servers,
         memory,
         conversations,
@@ -367,7 +384,7 @@ async def _build_composition(
             generations,
             mcp_servers,
             lambda: reload_domain_config(config),
-            agent_providers,
+            sessions.held,
         ),
         _prompt_preview(generations, mcp_servers, memory),
         config_diff_reader(
@@ -424,7 +441,6 @@ async def _build_composition(
         mcp_servers=mcp_servers,
         memory=memory,
         sessions=sessions,
-        agent_providers=agent_providers,
         conversations=conversations,
         runtime_factory=runtime_factory,
         device_facts=device_facts,
@@ -482,17 +498,17 @@ def config_reloader(
     generations: Generations,
     servers: McpServers,
     read: Callable[[], Loaded],
-    agent_providers: Mapping[str, AgentProviders],
+    held: Callable[[], Collection[Generation]] = tuple,
 ) -> ConfigReloader:
     """What the configuration API's reload route calls.
 
     Closed over here because this is where every piece is known: the
     holder whose generation a reload replaces, the managers that are
-    running, the engines whose voices a re-synthesized filler is spoken
-    in, and the re-read of the stored half, which goes to the apply as a
-    plain function rather than being done here so that the layers below
-    stay clear of the database and the apply decides where a blocking
-    read runs.
+    running, who is still holding a world this apply may retire, and the
+    re-read of the stored half, which goes to the apply as a plain
+    function rather than being done here so that the layers below stay
+    clear of the database and the apply decides where a blocking read
+    runs.
 
     What comes back is the endpoint's whole answer, composed where the
     phases live: this is the wiring between an application that must not
@@ -504,13 +520,17 @@ def config_reloader(
     comparison read below already has. The type is what the API turns
     into a status; the sentence is replaced by one of the three fixed
     ones above, because the apply composes its refusals over the stored
-    state it refused on. `ReloadInProgressError` is the one refusal that
-    passes through as itself: it is about this server's own exclusion
-    and was never composed over anything stored. A failure with no type
-    at all is a bug and is left alone, for the reason the comparison
-    leaves one alone.
+    state it refused on. Two refusals pass through as themselves, and
+    for one reason: their sentences are this server's own and were
+    composed over nothing at all. `ReloadInProgressError` is about this
+    server's exclusion, and `ProviderRefusedError` is the apply's own
+    fixed sentence about a world whose engines would not build, said
+    where the failure is (`config/reload.py`) because that is where the
+    class of it can be recorded in the log in the same breath. A failure
+    with no type at all is a bug and is left alone, for the reason the
+    comparison leaves one alone.
     """
-    applying = ConfigReload(generations, servers, read, agent_providers)
+    applying = ConfigReload(generations, servers, read, held)
 
     async def reload() -> ConfigReloadResult:
         """One apply, refused in this route's words rather than the
@@ -526,7 +546,7 @@ def config_reloader(
         refusal: ConfigError | None = None
         try:
             return await applying.apply()
-        except ReloadInProgressError:
+        except (ReloadInProgressError, ProviderRefusedError):
             raise
         except DatabaseBusyError:
             refusal = DatabaseBusyError(RELOAD_DATABASE_BUSY)
