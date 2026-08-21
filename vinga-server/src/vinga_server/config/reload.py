@@ -10,13 +10,22 @@ different moments say so in the answer rather than in the caller's head.
 Two phases and one exclusion.
 
 Preparation re-reads the stored domain half, composes the world this
-server may actually serve, validates it whole, synthesizes the filled
-pauses that world needs and builds every MCP manager it needs, with
-nothing running touched: a failure anywhere in it is a refusal that
-changed nothing. Application then puts the world in place, generation
-first and MCP install after it, inside one instability window, so a
-reader either sees the world before or the world after and never a
-mixture.
+server may actually serve, validates it whole, builds the engines that
+world speaks through, synthesizes the filled pauses it needs and builds
+every MCP manager it names, with nothing running touched: a failure
+anywhere in it is a refusal that changed nothing. Application then puts
+the world in place, generation first and MCP install after it, inside
+one instability window, so a reader either sees the world before or the
+world after and never a mixture.
+
+Building the engines is where a preparation spends its time and its
+memory, and it is deliberately paid before anything can refuse: the
+egress rule can only be checked on a built provider, so a refused apply
+has loaded a model to find out. That is the price of the promise that a
+refusal touched nothing running, and it is paid only for what actually
+moved: an entry whose definition and stored credential are what they
+were is carried into the new world as the object it already was, so an
+edit to a prompt reloads nothing at all.
 
 The one thing preparation does that cannot refuse is the synthesis. A
 filled pause is a latency mask, so an agent whose voice will not speak
@@ -25,11 +34,12 @@ leaves it; a posture where a text-to-speech hiccup blocked a prompt fix
 would invert which of the two matters.
 
 The world a generation serves is an OVERLAY and never the stored
-snapshot whole, which is the part worth reading twice. Most of the
-domain half is still restart-bound: the agent set, `agent_defaults`, the
-providers. The effective-value helpers inherit through exactly those, so
-installing the stored snapshot would apply restart-bound changes by
-inheritance and let an activation index an agent the store has deleted.
+snapshot whole, which is the part worth reading twice. Part of the
+domain half is still restart-bound: the agent set, `agent_defaults`, and
+each agent's own choice of which provider entry serves which stage. The
+effective-value helpers inherit through exactly those, so installing the
+stored snapshot would apply restart-bound changes by inheritance and let
+an activation index an agent the store has deleted.
 So the candidate generation is the previous one with only the slices
 this server can really apply replaced from the store, and the whole of
 it is validated again: an overlay that no longer composes (a fragment
@@ -55,15 +65,17 @@ beside wiring.
 
 import asyncio
 import contextlib
+import logging
 import time
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Collection
+from dataclasses import dataclass, replace
 from typing import Any
 
-from vinga_server.config.diff import OVERLAID_AGENT_FIELDS, Loaded
+from vinga_server.config.diff import OVERLAID_AGENT_FIELDS, Loaded, unchanged_providers
 from vinga_server.config.loader import (
     ConfigError,
     DatabaseBusyError,
+    ProviderRefusedError,
     ReloadInProgressError,
     StorageError,
 )
@@ -76,21 +88,46 @@ from vinga_server.config.responses import (
     ConfigReloadResult,
     FillersReload,
     PromptsReload,
+    ProvidersReload,
 )
 from vinga_server.config.secrets import EntityKind
 from vinga_server.filler import Fillers, build_agent_fillers
 from vinga_server.generation import Generation, Generations
-from vinga_server.providers import AgentProviders
+from vinga_server.providers import Built, Provider, ProviderError, build_world
 from vinga_server.tools.mcp import McpServers
 from vinga_server.tools.mcp import reload as mcp
+
+logger = logging.getLogger(__name__)
 
 # Which entity kinds' stored credentials this server applies rather than
 # carries over. An MCP server's are read as its connection is made, and
 # a reload makes it again; a provider's are read as the provider is
-# built, which is still the boot, so a rotation there stays pending in
-# the diff until the milestone that rebuilds providers. Declared as data
-# beside the overlay it governs, and widened one member at a time.
-LIVE_SECRETS: frozenset[EntityKind] = frozenset({"mcp_server"})
+# built, which an apply now does too, so a rotation on either is applied
+# rather than left pending. Declared as data beside the overlay it
+# governs, and widened one member at a time; with both kinds in it, the
+# derivation below composes nothing and the whole stored store is the
+# candidate's, which is what the last member arriving means.
+LIVE_SECRETS: frozenset[EntityKind] = frozenset({"mcp_server", "provider"})
+
+# What a reload says when it could not build the engines the stored
+# world names.
+#
+# Fixed, and interpolating nothing, for the reason the composition
+# root's refusals are: what a provider build refuses on is stored state,
+# and the sentences the provider layer composes name the entry, the type
+# and the option key it choked on. An operator who pasted a credential
+# into an option name would find it in this answer, so the diagnosis is
+# where a diagnosis belongs, which is a server started from this store,
+# and the class of the failure goes to this server's log.
+PROVIDERS_REFUSED = (
+    f"{mcp.RELOAD_REFUSED} the engines the stored configuration names could not all be "
+    "built: a provider type, one of its options, its stored credential or the egress "
+    "rule refused. Which one is deliberately not said here, because a sentence about a "
+    "stored value is the one thing a reload's answer never carries. A server started "
+    "from this store refuses on the same state and names the location it refused on, "
+    "and the failure's kind is recorded in this server's log. Nothing was changed: the "
+    "engines this server is running are the ones it was running before this request."
+)
 
 RELOAD_IN_PROGRESS = (
     "a reload of this server's configuration is already running. Nothing was changed by "
@@ -125,6 +162,8 @@ class _Candidate:
     generation: Generation
     prompts: tuple[str, ...]
     fillers: Fillers
+    providers: Built
+    retired: tuple[str, ...]
     mcp: mcp.McpCandidate
 
 
@@ -148,18 +187,18 @@ class ConfigReload:
         generations: Generations,
         servers: McpServers,
         read: Callable[[], Loaded],
-        agent_providers: Mapping[str, AgentProviders],
+        held: Callable[[], Collection[Generation]] = tuple,
     ) -> None:
         self._generations = generations
         self._servers = servers
-        # The engines this server is running, which the filler synthesis
-        # needs one of: the voice a clip is spoken in is the one that is
-        # actually running, because providers are built at a start and a
-        # reload does not replace them yet (#191). Handed in for the
-        # reason the read is, and required rather than optional because
-        # every server has them; the milestone that makes providers
-        # generational is where this stops being a field.
-        self._agent_providers = agent_providers
+        # Who is still holding a world, asked at the one moment the
+        # answer decides something: after the swap, when the world this
+        # apply replaced may or may not be lettable-go-of. A callable
+        # rather than the session registry itself, because what an apply
+        # needs to know about the conversations in flight is exactly
+        # this one sentence, and the default is the true answer for an
+        # application with no sessions around it.
+        self._held = held
         # The stored half, handed in rather than read here: opening a
         # database belongs to the layer that owns one, and what this
         # class owns is where that read runs and what is done with what
@@ -184,6 +223,11 @@ class ConfigReload:
         # still holding the lock, and answers a caller who did nothing
         # wrong that the database is busy.
         self._preparing: asyncio.Task[_Candidate] | None = None
+        # And the letting-go of a preparation nobody installed, held for
+        # the same reason both of those are: it outlives the request
+        # that started it, and it is what the exclusion waits on when
+        # there was never an apply.
+        self._discarding: asyncio.Task[None] | None = None
 
     @property
     def running(self) -> bool:
@@ -270,8 +314,14 @@ class ConfigReload:
         finally:
             # The apply exists only once the preparation returned, so
             # the later of the two is the one still capable of running,
-            # and it is the one the exclusion waits on.
-            self._hold_until(applying if applying is not None else preparing)
+            # and it is the one the exclusion waits on. Leaving without
+            # one is leaving with a preparation that may still be
+            # building a world nothing will install, which is the one
+            # exit that has something to let go of.
+            if applying is not None:
+                self._hold_until(applying)
+            else:
+                self._discard(preparing)
 
     async def _prepare(self) -> _Candidate:
         """The first phase, whole: the re-read, the world it composes,
@@ -303,31 +353,51 @@ class ConfigReload:
         try:
             stored = await self._stored()
             previous = self._generations.current()
-            overlaid = _composed(previous.config, stored.config)
-            # Synthesized here, in the phase that can only refuse, and
-            # deliberately not able to refuse: an agent whose voice would
-            # not speak applies with no clip and runs with the mask off,
-            # because a filler is a latency mask and a posture where a
-            # text-to-speech hiccup blocked a prompt fix would invert
-            # what matters. Every clip whose effective section and whose
-            # voice are what they were is the object it already was.
-            fillers = await build_agent_fillers(
-                overlaid, self._agent_providers, previous
+            composed = Generation(
+                _composed(previous.config, stored.config),
+                stored.secrets.composed(previous.secrets, LIVE_SECRETS),
             )
-            # The MCP half is built from the stored world and not from
-            # the overlay, because the MCP half is not overlaid: entries
-            # and grants are what a reload has always applied whole, and
-            # the managers this builds are the ones the install puts in
-            # place.
+            # The engines first, because everything after them needs
+            # them: a clip is spoken by this world's voice. Every entry
+            # whose definition and stored credential are what they were
+            # is the object it already was, which is what keeps an edit
+            # to a prompt from reloading a local model.
+            providers = await self._built(previous, composed)
+            try:
+                # Synthesized here, in the phase that can only refuse,
+                # and deliberately not able to refuse: an agent whose
+                # voice would not speak applies with no clip and runs
+                # with the mask off, because a filler is a latency mask
+                # and a posture where a text-to-speech hiccup blocked a
+                # prompt fix would invert what matters. Every clip whose
+                # effective section and whose voice are what they were is
+                # the object it already was, and the voice is this
+                # candidate's now: an entry the build above made again is
+                # a different one, so its agents are spoken again in it.
+                fillers = await build_agent_fillers(
+                    composed.config, providers.world.agents, previous
+                )
+                # The MCP half is built from the stored world and not
+                # from the overlay, because the MCP half is not
+                # overlaid: entries and grants are what a reload has
+                # always applied whole, and the managers this builds are
+                # the ones the install puts in place.
+                candidate = await mcp.prepare(stored.config, stored.secrets)
+            except BaseException:
+                # The engines above are this preparation's until
+                # something installs them, and a refusal from either
+                # half below is an exit that is not an install.
+                await providers.close()
+                raise
             return _Candidate(
-                generation=Generation(
-                    overlaid,
-                    stored.secrets.composed(previous.secrets, LIVE_SECRETS),
-                    fillers.clips,
+                generation=replace(
+                    composed, fillers=fillers.clips, providers=providers.world
                 ),
-                prompts=_reassembled(previous.config, overlaid),
+                prompts=_reassembled(previous.config, composed.config),
                 fillers=fillers,
-                mcp=await mcp.prepare(stored.config, stored.secrets),
+                providers=providers,
+                retired=_retired(previous, providers),
+                mcp=candidate,
             )
         except asyncio.CancelledError:
             raise
@@ -342,6 +412,36 @@ class ConfigReload:
             mcp.refused(exc)
             problem = RELOAD_UNREADABLE
         raise StorageError(problem)
+
+    async def _built(self, previous: Generation, candidate: Generation) -> Built:
+        """The engines the candidate world would speak through, in the
+        vocabulary this endpoint refuses in.
+
+        Two jobs, and the second is why it is a method rather than a
+        call. `ProviderError` is the provider layer's contract and is
+        not a `ConfigError`, so nothing above would know what status it
+        meant; here it becomes the one typed refusal an apply answers a
+        failed build with, carrying a sentence that names nothing
+        stored. The class goes to the log, which is where a diagnosis
+        that cannot be safely said belongs, and the sentence is composed
+        after the handler has closed so that neither the original nor
+        anything it was holding travels with it.
+        """
+        problem: str | None = None
+        try:
+            return await build_world(
+                candidate.config, candidate.secrets, _carried(previous, candidate)
+            )
+        except ProviderError as exc:
+            # The class and never the message: what the provider layer
+            # composes names the entry, the type and the option it
+            # refused on, all of them stored.
+            logger.warning(
+                "a reload could not build the stored world's providers (%s)",
+                type(exc).__name__,
+            )
+            problem = PROVIDERS_REFUSED
+        raise ProviderRefusedError(problem)
 
     async def _stored(self) -> Loaded:
         """The stored configuration, read off this loop, refusing in the
@@ -386,10 +486,21 @@ class ConfigReload:
         MCP install stops and starts managers around its own swap, and
         putting the assignment after that work would widen the window
         the other way round for nothing.
+
+        The teardown comes after the window rather than inside it, and
+        after everything that decides the answer. A world that has just
+        stopped being current lets go of the engines nothing else holds,
+        which is usually the same instant, and a conversation still
+        speaking through one of them holds it until it ends. Whatever
+        that teardown does, this apply has already installed, the mark
+        has already settled and the answer below is already decided: a
+        client whose connection pool will not shut cannot turn an
+        applied world into a refusal.
         """
         with self._generations.applying() as install:
             install(candidate.generation)
             applied = await mcp.apply(self._servers, candidate.mcp, began)
+        await self._generations.dispose(self._held())
         return ConfigReloadResult(
             mcp=applied,
             prompts=PromptsReload(changed=list(candidate.prompts)),
@@ -398,11 +509,57 @@ class ConfigReload:
                 reused=list(candidate.fillers.reused),
                 disabled=list(candidate.fillers.disabled),
             ),
-            # Null rather than empty until the milestones that fill
-            # them: see `ConfigReloadResult`.
-            providers=None,
+            providers=ProvidersReload(
+                built=list(candidate.providers.built),
+                reused=list(candidate.providers.reused),
+                retired=list(candidate.retired),
+            ),
+            # Null rather than empty until the milestone that fills it:
+            # see `ConfigReloadResult`.
             agents=None,
         )
+
+    def _discard(self, preparing: "asyncio.Task[_Candidate] | None") -> None:
+        """Give the exclusion back once a preparation nobody is going to
+        install has finished, and let go of anything it built.
+
+        The ordinary ending here is a refusal, which built nothing and
+        gives the exclusion back at once: a caller told that its apply
+        was refused may make the next one immediately. What needs
+        waiting for is the other two: a preparation still running behind
+        a caller that went away, and one that finished with a world in
+        its hands.
+        """
+        if preparing is None:
+            self._release(None)
+        elif preparing.done() and (preparing.cancelled() or preparing.exception()):
+            self._release(preparing)
+        else:
+            self._discarding = asyncio.create_task(
+                self._discarded(preparing), name="config-reload-discard"
+            )
+
+    async def _discarded(self, preparing: "asyncio.Task[_Candidate]") -> None:
+        """See out a preparation nobody is going to install, and let go
+        of what it built.
+
+        The exit the ownership rule exists for. A preparation is
+        shielded from its caller, so a client that disconnects mid-read
+        leaves it running, and what it eventually answers with is a
+        world with engines in it that no generation will ever hold. The
+        exclusion is held until it has finished either way, which it
+        already was; what is new is that the engines go with it.
+
+        Every ending is the same ending here. A preparation that refused
+        has nothing to close, one that was cancelled closed its own as
+        it went, and one that succeeded is closed here.
+        """
+        candidate: _Candidate | None = None
+        with contextlib.suppress(Exception, asyncio.CancelledError):
+            candidate = await preparing
+        if candidate is not None:
+            await candidate.providers.close()
+        self._release(preparing)
 
     def _hold_until(self, running: "asyncio.Task[Any] | None") -> None:
         """Keep the exclusion until this half of the apply has really
@@ -427,6 +584,7 @@ class ConfigReload:
         self._running = False
         self._applying = None
         self._preparing = None
+        self._discarding = None
         if finished is not None and finished.done():
             with contextlib.suppress(Exception, asyncio.CancelledError):
                 finished.exception()
@@ -437,17 +595,26 @@ def _composed(previous: Config, stored: Config) -> Config:
     read: the previous configuration with the live slices replaced, and
     nothing else.
 
-    The overlay, and its whole rule for this milestone: the shared
-    prompt fragments as the store holds them, and each retained agent's
-    own `prompt`, `prompt_includes` and `filler`. The agent set does not
-    move, so an agent the store has added is not served and an agent it
-    has deleted is still served; `agent_defaults` does not move either,
-    so an edit to the fragments or the filled pauses every agent
-    inherits stays pending until the restart that reads it. That is not
-    caution: the effective-value helpers inherit through
-    `agent_defaults`, so a candidate that took it would apply a
-    restart-bound change through the back door, and one that took the
-    agent set would let an activation index an entry that is not there.
+    The overlay, and its whole rule for this milestone: the provider
+    entries and the shared prompt fragments as the store holds them, and
+    each retained agent's own `prompt`, `prompt_includes` and `filler`.
+    The agent set does not move, so an agent the store has added is not
+    served and an agent it has deleted is still served; `agent_defaults`
+    does not move either, so an edit to the fragments, the filled pauses
+    or the provider every agent inherits stays pending until the restart
+    that reads it. That is not caution: the effective-value helpers
+    inherit through `agent_defaults`, so a candidate that took it would
+    apply a restart-bound change through the back door, and one that
+    took the agent set would let an activation index an entry that is
+    not there.
+
+    The provider entries move whole and which entry an agent names does
+    not, which is the same split one level down: an entry's definition
+    is what a reload rebuilds, while an agent pointed at a different
+    entry is an agent whose pipeline is composed at a start. So an
+    operator who edits `providers.tts.voice` gets the new voice at the
+    next conversation, and one who repoints an agent from `voice` to
+    `other` waits for the restart, which is what both surfaces say.
 
     Validated whole, by the same two checks every composition passes, so
     a combination of live and restart-bound slices that does not add up
@@ -468,10 +635,49 @@ def _composed(previous: Config, stored: Config) -> Config:
     # which `_validated` does with the very functions the model's own
     # validator calls.
     overlaid = previous.model_copy(
-        update={"prompt_fragments": dict(stored.prompt_fragments), "agents": agents}
+        update={
+            "providers": stored.providers,
+            "prompt_fragments": dict(stored.prompt_fragments),
+            "agents": agents,
+        }
     )
     _validated(overlaid)
     return overlaid
+
+
+def _carried(previous: Generation, candidate: Loaded) -> dict[str, Provider]:
+    """The engines the candidate world may go on using: every entry the
+    two worlds define identically, credentials included.
+
+    The comparison is the one the stored-versus-running read answers
+    with, read from the module that owns it rather than written again
+    here, because "is this the same provider" is one question and two
+    answers to it would eventually disagree about a rotated credential.
+
+    What comes back is offered to the builder, which uses it rather than
+    constructing. Everything else about the candidate world is built,
+    which is what makes a rewritten entry a new object and an untouched
+    one the object a conversation may still be speaking through.
+    """
+    unchanged = unchanged_providers(previous, candidate)
+    return {
+        identity: provider
+        for identity, provider in previous.providers.instances.items()
+        if identity in unchanged
+    }
+
+
+def _retired(previous: Generation, providers: Built) -> tuple[str, ...]:
+    """The entries the world before this one was running and this one
+    does not name at all.
+
+    Not the same as what is closed, and deliberately reported rather
+    than the closing: an entry named here is one no world after this
+    apply uses, while when its engine is actually released depends on
+    the conversations still holding it. A rewritten entry is not here,
+    because the name is still served; it is under `built`.
+    """
+    return tuple(sorted(set(previous.providers.instances) - set(providers.world.instances)))
 
 
 def _validated(candidate: Config) -> None:
@@ -512,4 +718,10 @@ def _reassembled(previous: Config, applied: Config) -> tuple[str, ...]:
     )
 
 
-__all__ = ["LIVE_SECRETS", "RELOAD_IN_PROGRESS", "RELOAD_UNREADABLE", "ConfigReload"]
+__all__ = [
+    "LIVE_SECRETS",
+    "PROVIDERS_REFUSED",
+    "RELOAD_IN_PROGRESS",
+    "RELOAD_UNREADABLE",
+    "ConfigReload",
+]
