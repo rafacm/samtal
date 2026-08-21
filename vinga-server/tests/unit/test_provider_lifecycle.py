@@ -21,6 +21,7 @@ every concrete provider inheriting the no-op.
 
 import asyncio
 import threading
+import time
 from typing import Any, cast
 
 import httpx
@@ -293,6 +294,41 @@ async def test_disposal_never_refuses_and_never_repeats_the_prose(
     assert (refusing.closes, after.closes) == (1, 1)
     assert "RuntimeError" in caplog.text
     assert PLANTED not in caplog.text
+
+
+class Hanging(Recording):
+    """A voice whose close never finishes, which is what a connection
+    pool that will not settle looks like from here."""
+
+    async def close(self) -> None:
+        await super().close()
+        await asyncio.Event().wait()
+
+
+async def test_a_world_of_stuck_providers_is_bounded_once_and_not_per_provider(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The bound is the teardown's, not each provider's.
+
+    Five closes that never finish used to be five bounds one after
+    another, so what an operator waited through depended on how many
+    entries the world they replaced happened to hold. The closes are
+    independent, so they run together and the deadline covers the lot.
+    """
+    monkeypatch.setattr(provider_world, "DISPOSAL_TIMEOUT_S", 0.1)
+    stuck = [Hanging() for _ in range(5)]
+
+    started = time.monotonic()
+    with caplog.at_level("WARNING"):
+        await dispose(stuck)
+    elapsed = time.monotonic() - started
+
+    # Well inside what five bounds in a row would have cost, and outside
+    # what returning early would: every close was really started and
+    # really waited on.
+    assert 0.1 <= elapsed < 0.3, elapsed
+    assert [one.closes for one in stuck] == [1, 1, 1, 1, 1]
+    assert "5 provider(s) did not let go" in caplog.text
 
 
 async def test_a_close_waits_for_the_worker_that_is_still_running() -> None:
