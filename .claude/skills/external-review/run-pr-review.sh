@@ -7,15 +7,23 @@
 # Usage:
 #   run-pr-review.sh <worktree> <base-ref> <pr-number> "<pr-title>" "<context sentence>"
 #
-# REVIEW_MODEL selects the codex model (default gpt-5.6-sol). The
-# tiering rule lives in SKILL.md: sol for plans and behavior-changing
-# milestone PRs, terra for low-stakes rounds.
+# REVIEW_BACKEND selects the reviewer CLI: codex (default) or claude,
+# the fallback for when the codex quota is exhausted. REVIEW_MODEL
+# selects the model within the backend (default gpt-5.6-sol for codex,
+# claude-opus-5 for claude). The tiering rule lives in SKILL.md: sol
+# for plans and behavior-changing milestone PRs, terra for low-stakes
+# rounds.
 #
 # Writes its working files (diff, prompt, output, posted comment) next
 # to nothing in the repository: they go to $TMPDIR (or /tmp).
 set -eu
 WORKTREE="$1"; BASE="$2"; PR="$3"; TITLE="$4"; CONTEXT="$5"
-MODEL="${REVIEW_MODEL:-gpt-5.6-sol}"
+BACKEND="${REVIEW_BACKEND:-codex}"
+case "$BACKEND" in
+  codex)  MODEL="${REVIEW_MODEL:-gpt-5.6-sol}" ;;
+  claude) MODEL="${REVIEW_MODEL:-claude-opus-5}" ;;
+  *) echo "unknown REVIEW_BACKEND: $BACKEND (codex or claude)" >&2; exit 2 ;;
+esac
 SKILL_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORK="${TMPDIR:-/tmp}/external-review-pr-$PR"
 mkdir -p "$WORK"
@@ -41,13 +49,24 @@ for key, value in [("__PR_NUMBER__", pr), ("__PR_TITLE__", title),
 open(out, "w").write(text)
 PY
 
-codex exec -m "$MODEL" --sandbox read-only - < "$PROMPT" > "$OUT" 2> "$ERR"
+case "$BACKEND" in
+  codex)
+    codex exec -m "$MODEL" --sandbox read-only - < "$PROMPT" > "$OUT" 2> "$ERR"
+    CLI_STAMP="codex CLI $(codex --version | sed 's/codex-cli //')"
+    ;;
+  claude)
+    claude -p --model "$MODEL" \
+      --allowedTools "Read,Glob,Grep,Bash(git log:*),Bash(git show:*),Bash(git diff:*)" \
+      < "$PROMPT" > "$OUT" 2> "$ERR"
+    CLI_STAMP="claude CLI $(claude --version)"
+    ;;
+esac
 
 HEAD_SHA="$(git rev-parse --short HEAD)"
 {
   printf '## External review round\n\n'
-  printf 'Automated external review of this PR'"'"'s diff (%s...%s): codex CLI %s, model %s, read-only, %s. Posted verbatim by the review run itself; resolutions follow as replies.\n\n' \
-    "$BASE" "$HEAD_SHA" "$(codex --version | sed 's/codex-cli //')" "$MODEL" "$(date -u +%Y-%m-%d)"
+  printf 'Automated external review of this PR'"'"'s diff (%s...%s): %s, model %s, read-only, %s. Posted verbatim by the review run itself; resolutions follow as replies.\n\n' \
+    "$BASE" "$HEAD_SHA" "$CLI_STAMP" "$MODEL" "$(date -u +%Y-%m-%d)"
   printf -- '---\n\n'
   cat "$OUT"
 } > "$WORK/comment.md"
