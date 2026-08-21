@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import pytest
 
 from vinga_server.config.models import ProviderConfig
-from vinga_server.providers import ProviderError, build_provider
+from vinga_server.providers import ProviderError, build_entry
 
 HAS_FASTER_WHISPER = importlib.util.find_spec("faster_whisper") is not None
 
@@ -243,7 +243,7 @@ def test_an_unknown_language_detect_mode_names_the_choices(
 
 
 @pytest.mark.skipif(HAS_FASTER_WHISPER, reason="faster-whisper extra is installed")
-def test_without_the_extra_the_error_names_it() -> None:
+async def test_without_the_extra_the_error_names_it() -> None:
     with pytest.raises(ProviderError) as excinfo:
-        build_provider("asr", "ears", ProviderConfig.model_validate({"type": "faster_whisper"}))
+        await build_entry("asr", "ears", ProviderConfig.model_validate({"type": "faster_whisper"}))
     assert "uv sync --extra faster-whisper" in str(excinfo.value)

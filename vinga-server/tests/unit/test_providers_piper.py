@@ -11,15 +11,15 @@ from pathlib import Path
 import pytest
 
 from vinga_server.config.models import ProviderConfig
-from vinga_server.providers import ProviderError, build_provider
+from vinga_server.providers import ProviderError, build_entry
 
 HAS_PIPER = importlib.util.find_spec("piper") is not None
 
 
 @pytest.mark.skipif(not HAS_PIPER, reason="piper extra not installed")
-def test_a_missing_voice_option_fails_before_any_download() -> None:
+async def test_a_missing_voice_option_fails_before_any_download() -> None:
     with pytest.raises(ProviderError, match='"voice" is required'):
-        build_provider("tts", "voice", ProviderConfig.model_validate({"type": "piper"}))
+        await build_entry("tts", "voice", ProviderConfig.model_validate({"type": "piper"}))
 
 
 @pytest.mark.skipif(not HAS_PIPER, reason="piper extra not installed")
@@ -42,9 +42,9 @@ def test_a_present_voice_is_not_downloaded_again(
 
 
 @pytest.mark.skipif(HAS_PIPER, reason="piper extra is installed")
-def test_without_the_extra_the_error_names_it() -> None:
+async def test_without_the_extra_the_error_names_it() -> None:
     with pytest.raises(ProviderError) as excinfo:
-        build_provider(
+        await build_entry(
             "tts", "voice", ProviderConfig.model_validate({"type": "piper", "voice": "x"})
         )
     assert "uv sync --extra piper" in str(excinfo.value)

@@ -1,0 +1,345 @@
+"""The engines one world runs on: built, owned, and let go of.
+
+Building a provider used to be a thing a server did once. The object
+that came back lived as long as the process, so nobody owned it after
+the boot and nothing was ever released; a failure part way through the
+boot simply took the process with it. Applying stored configuration
+without a restart ends both of those (#191): an entry an apply rewrote
+is built again, the object the old world spoke through has to be told
+its world is over, and a build that refuses happens while a server is
+serving conversations and must leave them exactly as they were.
+
+So ownership is total here, and it begins the instant an allocation
+succeeds rather than when a finished world is handed over. Three rules
+carry it:
+
+- Options are read and finished before anything is constructed, in the
+  provider modules themselves, so a trailing unknown option refuses
+  without a model having been loaded.
+- One provider is constructed at a time, off the loop, and the object it
+  returns transfers into this module before anything can refuse it. The
+  egress check therefore runs here, on the loop, inside the owner that
+  is already holding the object, so a refusal closes what it just built
+  instead of dropping it.
+- Every exit that is not an install closes what this build constructed,
+  exactly once, and nothing is left to the garbage collector. A later
+  entry's failure, a preparation whose caller went away, a boot that
+  refuses: all one path.
+
+What is deliberately not owned here is a carried-over provider. An entry
+whose model and stored credentials are unchanged is the object it
+already was, and the world that built it goes on holding it: reuse
+transfers a share of ownership rather than making a second one, which is
+why a failed build closes what it constructed and never what it kept.
+
+Disposal is the other half and is written to be unrefusable. It runs
+after the world has already moved, so a `close` that raises cannot fail
+anything: it is bounded, classified by exception class with the prose
+dropped, and the caller carries on. The only thing it waits for is work:
+a provider's own `close` waits out the worker threads still inside it,
+which is what keeps an engine reachable until the transcription that was
+already running has finished with it.
+"""
+
+import asyncio
+import contextlib
+import logging
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field
+from typing import cast
+
+from vinga_server.config.models import PROVIDER_STAGES, Config, ProviderConfig
+from vinga_server.config.secrets import SecretStore, provider_identity
+from vinga_server.egress import EgressRefusal, check_provider
+from vinga_server.providers.base import (
+    AsrProvider,
+    LlmProvider,
+    Provider,
+    ProviderError,
+    ProviderIdentity,
+    TtsProvider,
+    VadProvider,
+)
+from vinga_server.providers.registry import AgentProviders, construct_provider
+
+logger = logging.getLogger(__name__)
+
+# How long one provider is given to let go of what it holds. A bound
+# rather than a wait, because disposal runs after the swap: a client
+# whose pool will not shut, or an engine whose worker thread never
+# returns, is a resource this process keeps, and it is not a reason for
+# an operator's request to hang.
+DISPOSAL_TIMEOUT_S = 10.0
+
+
+@dataclass(frozen=True)
+class ProviderWorld:
+    """The engines one generation serves with: what each agent talks
+    through, and the unique objects behind them.
+
+    Two views of one set, and both are needed. `agents` is what a
+    conversation is built from, per agent and stage; `instances` is the
+    same objects keyed by the entry each was built from
+    (`<stage>.<name>`), which is the view a lifecycle needs: one entry
+    shared by four agents is one object to build, one to report, and one
+    to close.
+
+    Empty is the honest answer for a world with no agents, which is what
+    a test that never opens a conversation composes.
+    """
+
+    agents: Mapping[str, AgentProviders] = field(default_factory=dict)
+    instances: Mapping[str, Provider] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class Built:
+    """One preparation's answer: the world it composed, and how each
+    entry got into it.
+
+    The two name lists are the closed outcomes of the one decision this
+    module makes per entry, recorded where it is made rather than
+    reconstructed by a caller comparing two mappings. What is not here
+    is what was retired, which is not this build's decision: it is what
+    the world before this one held and this one does not, and only
+    something holding both can say it.
+    """
+
+    world: ProviderWorld
+    built: tuple[str, ...] = ()
+    reused: tuple[str, ...] = ()
+
+    async def close(self) -> None:
+        """Let go of what this preparation constructed, and of nothing
+        it carried over.
+
+        What a caller reaches for when a built world is never installed:
+        a preparation whose caller had gone by the time it finished, or
+        an apply refused after it. The carried-over objects are the
+        running world's and stay exactly as they are, which is what
+        makes a refused apply a thing that touched nothing.
+        """
+        await disposed(self.world.instances[identity] for identity in self.built)
+
+
+async def build_entry(
+    stage: str,
+    name: str,
+    config: ProviderConfig,
+    local_only: bool = False,
+    secrets: SecretStore | None = None,
+) -> Provider:
+    """Build the provider behind `providers.<stage>.<name>`, owned from
+    the moment it exists.
+
+    Raises `ProviderError` for an unknown type, a bad option, a missing
+    extra, an egress-marked provider under `local_only`, a class
+    carrying no egress marking of its own, or anything the provider
+    itself raises while constructing. Every one of them names the entry,
+    and none of them leaves an object behind: a refusal after the
+    construction closes what it is refusing.
+
+    The construction runs off the loop because that is where a boot
+    spends its time (an ASR or VAD provider loads a model, which is
+    seconds to minutes of blocking work) and because the loop it would
+    otherwise run on is the one every live conversation is on.
+
+    The one case that cannot be owned is a cancellation landing while
+    that thread is inside a third-party constructor: a thread cannot be
+    cancelled, so what it eventually returns has nobody to hand it to.
+    Said out loud rather than papered over; it costs one object, once,
+    on a path that ends the preparation anyway.
+    """
+    label = f"providers.{stage}.{name}"
+    provider = await asyncio.to_thread(construct_provider, stage, name, config, secrets)
+    # Owned from this line. Everything below can refuse, and everything
+    # below closes what it refuses.
+    #
+    # The egress rule itself lives in one module that this builder and
+    # the MCP build path both call (#30, #136); what stays here is the
+    # exception type, which is this surface's contract, wrapped around
+    # the module's own sentence. Recorded and raised outside the
+    # handler, this codebase's rule, and load bearing here for a second
+    # reason: the close is an await, and an await inside an `except` arm
+    # would leave the refusal carrying whatever the disposal did.
+    refusal: str | None = None
+    try:
+        check_provider(label, config, provider, local_only)
+    except EgressRefusal as exc:
+        refusal = str(exc)
+    if refusal is not None:
+        await disposed([provider])
+        raise ProviderError(refusal)
+    # Stamped here rather than in each factory: this is the one place
+    # that knows the stage, the entry name and the type at once, and a
+    # provider that failed to describe itself in an event would be a
+    # provider the operator cannot map back to their configuration.
+    provider.identity = ProviderIdentity(
+        stage=stage,
+        name=name,
+        type=config.type,
+        host=provider.host,
+        model=provider.model,
+    )
+    return provider
+
+
+async def build_world(
+    config: Config,
+    secrets: SecretStore | None = None,
+    carried: Mapping[str, Provider] | None = None,
+) -> Built:
+    """Every provider the configured agents reference, built or carried
+    over, with the whole of it owned until a caller installs it.
+
+    Agents are read through their effective view, so a stage comes from
+    the agent or from `agent_defaults`, and one entry named by several
+    agents is one object: the dedup is by entry identity within this
+    build, exactly as it has always been.
+
+    `carried` is what a previous world offers this one, keyed by entry
+    identity. Which of its entries may be carried is not decided here,
+    because "the same provider" is a question about two configurations
+    and their stored credentials rather than about an object: the caller
+    that holds both worlds decides it and hands over what survived. What
+    this promises about them is only that they are used rather than
+    built, and never closed by a failure of this build.
+
+    The one path for a boot and for an apply alike, which is what makes
+    the two agree about ownership rather than about a comment.
+    """
+    kept = dict(carried or {})
+    instances: dict[str, Provider] = {}
+    built: list[str] = []
+    reused: list[str] = []
+    agents: dict[str, AgentProviders] = {}
+    try:
+        for agent in config.agents:
+            engines = {
+                stage: await _stage_engine(
+                    config, secrets, kept, instances, built, reused, agent, stage
+                )
+                for stage in PROVIDER_STAGES
+            }
+            agents[agent] = AgentProviders(
+                llm=cast(LlmProvider, engines["llm"]),
+                asr=cast(AsrProvider, engines["asr"]),
+                tts=cast(TtsProvider, engines["tts"]),
+                vad=cast(VadProvider, engines["vad"]),
+            )
+    except BaseException:
+        # Every exit that is not a return: a later entry that would not
+        # build, an egress refusal, a caller that went away. What this
+        # build constructed goes, exactly once; what it carried over is
+        # the running world's and stays.
+        await disposed(instances[identity] for identity in built)
+        raise
+    return Built(
+        world=ProviderWorld(agents=agents, instances=instances),
+        # Sorted, because these are read by a person and by a client
+        # comparing two answers, and neither should see an order that
+        # depends on how the agents were walked.
+        built=tuple(sorted(built)),
+        reused=tuple(sorted(reused)),
+    )
+
+
+async def _stage_engine(
+    config: Config,
+    secrets: SecretStore | None,
+    kept: Mapping[str, Provider],
+    instances: dict[str, Provider],
+    built: list[str],
+    reused: list[str],
+    agent: str,
+    stage: str,
+) -> Provider:
+    """The object one agent's stage resolves to, built once per entry.
+
+    The decision site for the reuse outcome, which is why the two lists
+    are written here: an entry is carried over, or it is constructed,
+    and there is no third answer for an entry a world needs.
+    """
+    name, _ = config.provider_for_agent(agent, stage)
+    if name is None:
+        raise ProviderError(
+            f"agents.{agent}: no {stage} provider is named, and "
+            f"agent_defaults.{stage} names none either; the conversation "
+            f"pipeline needs all of: {', '.join(PROVIDER_STAGES)}"
+        )
+    identity = provider_identity(stage, name)
+    if identity in instances:
+        return instances[identity]
+    carried_over = kept.get(identity)
+    if carried_over is not None:
+        instances[identity] = carried_over
+        reused.append(identity)
+        return carried_over
+    entry = getattr(config.providers, stage)[name]
+    provider = await build_entry(stage, name, entry, config.server.local_only, secrets)
+    # Recorded as built the moment it exists, so that a failure of the
+    # next entry closes this one.
+    instances[identity] = provider
+    built.append(identity)
+    return provider
+
+
+async def dispose(providers: Iterable[Provider]) -> None:
+    """Close these providers, and answer whatever they did.
+
+    Bounded and non-refusing, because of when it runs: after the world
+    has already moved. A `close` that raises at that point cannot be
+    turned into a refusal (there is nothing left to refuse), so it is
+    classified by its exception class, the class alone is logged, and
+    the next provider is closed. What a third-party client says while
+    failing to shut is exactly the sort of sentence that quotes an
+    endpoint or a credential, and this is not the place to find out.
+
+    A close that hangs is bounded for the same reason: an operator's
+    apply is not held open by a connection pool that will not settle.
+    What is left in that case is a resource this process keeps until it
+    ends, which is what the situation already was before any of this
+    existed.
+    """
+    for provider in providers:
+        problem: str | None = None
+        try:
+            async with asyncio.timeout(DISPOSAL_TIMEOUT_S):
+                await provider.close()
+        except Exception as exc:  # noqa: BLE001 - teardown never refuses
+            problem = type(exc).__name__
+        if problem is not None:
+            logger.warning(
+                "a provider would not let go of what it holds (%s); its resources stay "
+                "with this process until it ends",
+                problem,
+            )
+
+
+async def disposed(providers: Iterable[Provider]) -> None:
+    """`dispose`, run to its end even if whoever asked for it is
+    cancelled.
+
+    The shape a teardown on a failure path needs. The failure being
+    handled is often a cancellation, and a disposal awaited plainly
+    inside one would be abandoned at its first await, leaving exactly
+    the resources the failure path exists to release. So the work is a
+    task of its own, the cancellation is absorbed as many times as it
+    arrives, and the caller's own exception carries on afterwards, which
+    it can only do because the work below is bounded.
+    """
+    closing = asyncio.ensure_future(dispose(list(providers)))
+    while not closing.done():
+        with contextlib.suppress(asyncio.CancelledError):
+            await asyncio.shield(closing)
+
+
+__all__ = [
+    "DISPOSAL_TIMEOUT_S",
+    "Built",
+    "ProviderWorld",
+    "build_entry",
+    "build_world",
+    "dispose",
+    "disposed",
+]

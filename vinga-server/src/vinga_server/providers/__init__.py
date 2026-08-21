@@ -22,16 +22,21 @@ from vinga_server.providers.base import (
     Usage,
     VadProvider,
 )
-from vinga_server.providers.registry import (
-    AgentProviders,
-    build_agent_providers,
-    build_provider,
+from vinga_server.providers.registry import AgentProviders
+from vinga_server.providers.world import (
+    Built,
+    ProviderWorld,
+    build_entry,
+    build_world,
+    dispose,
+    disposed,
 )
 
 __all__ = [
     "AgentProviders",
     "AsrProvider",
     "AsrResult",
+    "Built",
     "Endpointer",
     "LlmEvent",
     "LlmProvider",
@@ -40,6 +45,7 @@ __all__ = [
     "ProviderCallTimeout",
     "ProviderError",
     "ProviderIdentity",
+    "ProviderWorld",
     "StreamStarted",
     "TextDelta",
     "ToolCall",
@@ -50,6 +56,8 @@ __all__ = [
     "Turn",
     "Usage",
     "VadProvider",
-    "build_agent_providers",
-    "build_provider",
+    "build_entry",
+    "build_world",
+    "dispose",
+    "disposed",
 ]

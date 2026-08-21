@@ -14,6 +14,7 @@ from collections.abc import Callable
 
 import pytest
 
+from tests.support.providers import built_world
 from vinga_server.config import Config
 from vinga_server.config.models import ProviderConfig
 from vinga_server.providers import (
@@ -23,8 +24,7 @@ from vinga_server.providers import (
     ProviderError,
     TtsProvider,
     VadProvider,
-    build_agent_providers,
-    build_provider,
+    build_entry,
     registry,
 )
 from vinga_server.providers.anthropic_llm import AnthropicLlm
@@ -59,7 +59,7 @@ def config_with_llm(llm_entry: dict[str, object], local_only: bool) -> Config:
     )
 
 
-def build_a_throwaway_llm(
+async def build_a_throwaway_llm(
     monkeypatch: pytest.MonkeyPatch, make: Callable[[], object]
 ) -> object:
     """Build a throwaway provider class through `build_provider`, with
@@ -75,7 +75,7 @@ def build_a_throwaway_llm(
         "_factories",
         lambda: {"llm": {"throwaway": lambda label, config: make()}},
     )
-    return build_provider("llm", "brain", provider_config(type="throwaway"))
+    return await build_entry("llm", "brain", provider_config(type="throwaway"))
 
 
 def test_local_engines_and_mocks_are_marked_local() -> None:
@@ -103,14 +103,14 @@ def test_the_cloud_and_configurable_types_carry_their_marking() -> None:
     assert OpenAiCompatibleLlm.egress is None
 
 
-def test_a_type_that_forgot_to_declare_is_refused_at_construction(
+async def test_a_type_that_forgot_to_declare_is_refused_at_construction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class Forgetful(Provider):
         pass
 
     with pytest.raises(ProviderError) as excinfo:
-        build_a_throwaway_llm(monkeypatch, Forgetful)
+        await build_a_throwaway_llm(monkeypatch, Forgetful)
     message = str(excinfo.value)
     assert "providers.llm.brain" in message
     assert "Forgetful" in message
@@ -123,26 +123,26 @@ def test_the_provider_bases_declare_no_egress_at_runtime() -> None:
         assert not hasattr(base, "egress")
 
 
-def test_an_unmarked_subclass_does_not_ride_its_parents_marking(
+async def test_an_unmarked_subclass_does_not_ride_its_parents_marking(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class Quiet(MockLlm):
         pass
 
     with pytest.raises(ProviderError) as excinfo:
-        build_a_throwaway_llm(monkeypatch, lambda: Quiet("hello"))
+        await build_a_throwaway_llm(monkeypatch, lambda: Quiet("hello"))
     message = str(excinfo.value)
     assert "Quiet" in message
 
 
-def test_a_marking_that_is_not_one_of_the_three_is_refused(
+async def test_a_marking_that_is_not_one_of_the_three_is_refused(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class Sloppy(Provider):
         egress = 0
 
     with pytest.raises(ProviderError) as excinfo:
-        build_a_throwaway_llm(monkeypatch, Sloppy)
+        await build_a_throwaway_llm(monkeypatch, Sloppy)
     message = str(excinfo.value)
     assert "Sloppy" in message
     # Value-free like every other refusal: what was read never reaches
@@ -160,7 +160,7 @@ def test_local_only_refuses_an_egress_provider_naming_stage_and_provider(
         local_only=True,
     )
     with pytest.raises(ProviderError) as excinfo:
-        build_agent_providers(config)
+        built_world(config)
     message = str(excinfo.value)
     assert "providers.llm.brain" in message
     assert '"anthropic"' in message
@@ -177,7 +177,7 @@ def test_local_only_boots_a_pipeline_of_declared_local_providers() -> None:
         },
         local_only=True,
     )
-    providers = build_agent_providers(config)
+    providers = built_world(config).agents
     assert isinstance(providers["assistant"].llm, OpenAiCompatibleLlm)
 
 
@@ -187,13 +187,13 @@ def test_openai_compatible_without_a_declaration_is_refused_under_local_only() -
         local_only=True,
     )
     with pytest.raises(ProviderError) as excinfo:
-        build_agent_providers(config)
+        built_world(config)
     message = str(excinfo.value)
     assert "providers.llm.brain" in message
     assert '"egress: false"' in message
 
 
-def test_openai_compatible_declared_egress_is_refused_under_local_only() -> None:
+async def test_openai_compatible_declared_egress_is_refused_under_local_only() -> None:
     entry = provider_config(
         type="openai_compatible",
         base_url="https://api.openai.com/v1",
@@ -201,19 +201,19 @@ def test_openai_compatible_declared_egress_is_refused_under_local_only() -> None
         egress=True,
     )
     with pytest.raises(ProviderError, match="sends session data off this host"):
-        build_provider("llm", "brain", entry, local_only=True)
+        await build_entry("llm", "brain", entry, local_only=True)
 
 
-def test_an_egress_declaration_on_a_type_that_knows_its_own_is_rejected() -> None:
+async def test_an_egress_declaration_on_a_type_that_knows_its_own_is_rejected() -> None:
     with pytest.raises(ProviderError) as excinfo:
-        build_provider("asr", "ears", provider_config(type="mock", egress=False))
+        await build_entry("asr", "ears", provider_config(type="mock", egress=False))
     message = str(excinfo.value)
     assert "providers.asr.ears" in message
     assert 'decided by type "mock"' in message
 
 
-def test_without_local_only_an_undeclared_openai_compatible_still_builds() -> None:
-    provider = build_provider(
+async def test_without_local_only_an_undeclared_openai_compatible_still_builds() -> None:
+    provider = await build_entry(
         "llm",
         "brain",
         provider_config(type="openai_compatible", base_url=LOCAL_BASE_URL, model="qwen3:8b"),
