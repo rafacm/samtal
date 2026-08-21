@@ -28,6 +28,7 @@ from vinga_server.config.models import DOMAIN_KEYS
 from vinga_server.config.secrets import SecretStore
 from vinga_server.filler import FillerClips
 from vinga_server.generation import Generation, Generations
+from vinga_server.providers import ProviderWorld
 
 # --- the device the handshake presents -------------------------------
 
@@ -340,6 +341,7 @@ def world(
     config: Config,
     secrets: SecretStore | None = None,
     fillers: Mapping[str, FillerClips] | None = None,
+    providers: ProviderWorld | None = None,
 ) -> Generations:
     """One server's generation holder, holding `config` as the world it
     serves.
@@ -351,16 +353,23 @@ def world(
     suite about anything other than reloading wants and what it used to
     have.
 
-    `secrets` and `fillers` default to empty rather than None for the
-    reason the composition root's do: a deployment whose credentials are
-    all environment references has no stored secret, one where no agent
-    masks its latency has no clip, and one shape of generation is easier
-    to reason about than two.
+    `secrets`, `fillers` and `providers` default to empty rather than
+    None for the reason the composition root's do: a deployment whose
+    credentials are all environment references has no stored secret, one
+    where no agent masks its latency has no clip, and one shape of
+    generation is easier to reason about than two. An empty set of
+    engines is the honest default here rather than a built one: a
+    holder is what most suites want a configuration read out of, and
+    building four providers per test to be read by nothing would be a
+    cost every one of them paid for the few that hold a conversation.
+    Those few build the world and hand it in, which is what
+    `sessions.py` does.
     """
     return Generations(
         Generation(
             config,
             secrets if secrets is not None else SecretStore(),
             fillers if fillers is not None else {},
+            providers if providers is not None else ProviderWorld(),
         )
     )

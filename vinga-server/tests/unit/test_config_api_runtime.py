@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient
 from tests.support.apps import entered_client
 from tests.support.configs import world
 from tests.support.problems import PROBLEM_KEYS, problem
+from tests.support.providers import built_world
 from vinga_server import app as app_module
 from vinga_server.app import config_reloader
 from vinga_server.config import Config
@@ -67,7 +68,6 @@ from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
 from vinga_server.config.store import ConfigStore
 from vinga_server.db import open_database
 from vinga_server.logs import JsonFormatter
-from vinga_server.providers import build_agent_providers
 from vinga_server.runtime import prompt
 from vinga_server.runtime.prompt import Guidance
 from vinga_server.tools.mcp import (
@@ -485,7 +485,7 @@ def test_a_read_that_fails_unexpectedly_answers_without_quoting_it(
 
     running = config_with({}, [])
     reload = config_reloader(
-        world(running), servers, read, build_agent_providers(running)
+        world(running), servers, read, built_world(running)
     )
 
     with caplog.at_level("INFO"):

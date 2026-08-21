@@ -23,7 +23,7 @@ import pytest
 
 from tests.support.configs import BOTH_MAC, DELAY_MS, POET_MAC, SPEECH, base_config, masked_config
 from tests.support.events import events, only
-from tests.support.providers import BrokenTts, ScriptedLlm, StallingLlm
+from tests.support.providers import BrokenTts, ScriptedLlm, StallingLlm, built_world
 from tests.support.sessions import (
     call,
     drive_reply,
@@ -36,7 +36,6 @@ from tests.support.sessions import (
 from tests.support.sockets import RecordingSocket, spoken
 from vinga_server.config import Config
 from vinga_server.filler import build_agent_fillers
-from vinga_server.providers import build_agent_providers
 from vinga_server.providers.base import TtsProvider
 
 STALL_S = 0.5
@@ -121,7 +120,7 @@ async def test_the_filler_speaks_in_the_active_agents_voice_after_a_handover(
     chosen from the agent active at fire time, so the turn after a
     handover masks in the new agent's voice."""
     config = masked_config()
-    fillers = (await build_agent_fillers(config, build_agent_providers(config))).clips
+    fillers = (await build_agent_fillers(config, built_world(config).agents)).clips
     # Two voices, two clips: what "in its own voice" means in PCM.
     assert fillers["poet"].clips != fillers["tutor"].clips
     scripts = {
@@ -292,7 +291,7 @@ async def test_a_fire_during_a_barge_in_confirmation_is_skipped(
 async def test_the_feature_is_off_by_default(caplog: pytest.LogCaptureFixture) -> None:
     """A config with no filler section builds no clips, and a session
     without any masks nothing however slow the reply."""
-    off = await build_agent_fillers(base_config(), build_agent_providers(base_config()))
+    off = await build_agent_fillers(base_config(), built_world(base_config()).agents)
     assert off.clips == {}
     # And in none of the three outcome lists: an agent that masks
     # nothing is not a decision a reload made.
@@ -325,7 +324,7 @@ async def test_a_synthesis_failure_disables_the_agent_with_a_warning(
     their agent, each with a filler_disabled warning, and the build
     returns rather than raising: the boot never fails over a mask."""
     config = masked_config()
-    providers = build_agent_providers(config)
+    providers = dict(built_world(config).agents)
     providers["poet"] = replace(providers["poet"], tts=cast(Any, BrokenTts()))
     providers["tutor"] = replace(providers["tutor"], tts=cast(Any, SilentTts()))
     with caplog.at_level("WARNING"):

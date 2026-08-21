@@ -45,7 +45,7 @@ from vinga_server.conversations.store import DATABASE_FILENAME
 from vinga_server.db import open_database
 from vinga_server.device.bindings import DeviceBindings
 from vinga_server.providers import ProviderError
-from vinga_server.providers import registry as provider_registry
+from vinga_server.providers import world as provider_world
 from vinga_server.tools.mcp import McpServers
 
 SENTENCE = "the llm provider 'mock' could not be built"
@@ -146,27 +146,29 @@ def disposed_bindings(monkeypatch: pytest.MonkeyPatch) -> list[DeviceBindings]:
 
 
 def built_providers(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """Every provider this run constructs, as `stage.name`. Patched at
-    the registry's own builder rather than at the boot entry point, so
-    what it records is construction rather than a call."""
+    """Every provider this run constructs, as `stage.name`.
+
+    Patched where the construction is actually called from rather than
+    at the boot entry point, so what it records is a provider coming
+    into existence rather than somebody asking for one."""
     built: list[str] = []
-    real = provider_registry.build_provider
+    real = provider_world.construct_provider
 
     def spy(stage: str, name: str, *args: Any, **kwargs: Any) -> object:
         built.append(f"{stage}.{name}")
         return real(stage, name, *args, **kwargs)
 
-    monkeypatch.setattr(provider_registry, "build_provider", spy)
+    monkeypatch.setattr(provider_world, "construct_provider", spy)
     return built
 
 
 def refusing_providers(monkeypatch: pytest.MonkeyPatch) -> None:
     """A provider build that refuses the way a misconfigured one does."""
 
-    def refuse(*args: object, **kwargs: object) -> dict[str, Any]:
+    async def refuse(*args: object, **kwargs: object) -> object:
         raise ProviderError(SENTENCE)
 
-    monkeypatch.setattr(app_module, "build_agent_providers", refuse)
+    monkeypatch.setattr(app_module, "build_world", refuse)
 
 
 def test_a_described_app_acquires_nothing(
@@ -287,10 +289,10 @@ def test_a_failure_outside_the_taxonomy_is_raised_as_itself(
     cause are turned into a sentence; anything else keeps its type and
     its traceback, because somebody has to fix it."""
 
-    def explode(*args: object, **kwargs: object) -> dict[str, Any]:
+    async def explode(*args: object, **kwargs: object) -> object:
         raise ZeroDivisionError("a bug, not a deployment problem")
 
-    monkeypatch.setattr(app_module, "build_agent_providers", explode)
+    monkeypatch.setattr(app_module, "build_world", explode)
 
     app = create_app(recording_config(tmp_path))
     with pytest.raises(ZeroDivisionError):

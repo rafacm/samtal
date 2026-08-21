@@ -107,6 +107,7 @@ from tests.support.providers import (
     ScriptedLlm,
     StallingLlm,
     Unreachable,
+    built_world,
 )
 from tests.support.registry import (
     AGENT,
@@ -171,7 +172,7 @@ from vinga_server.events.catalog import CHANNELS
 from vinga_server.filler import build_agent_fillers
 from vinga_server.logs import _STANDARD_ATTRIBUTES
 from vinga_server.ota import ACTIVATE_SEGMENT, OTA_PATH
-from vinga_server.providers import AsrResult, Usage, build_agent_providers
+from vinga_server.providers import AsrResult, Usage
 from vinga_server.providers.openai_asr import OpenAiAsr
 from vinga_server.runtime.pipeline import bespoke_runtime_factory
 from vinga_server.tools.mcp import McpServers
@@ -476,10 +477,8 @@ async def turned_away(
     config: Config, device_id: str, resolution: DeviceAgents | None = None
 ) -> None:
     """One connection that never becomes a session."""
-    generations = world(config)
-    factory = bespoke_runtime_factory(
-        generations, build_agent_providers(config), McpServers({}), None
-    )
+    generations = world(config, providers=built_world(config))
+    factory = bespoke_runtime_factory(generations, McpServers({}), None)
     session = DeviceSession(
         cast(Any, TurnedAwaySocket(device_id)),
         generations,
@@ -523,10 +522,11 @@ def unregistered(llm: Any, agent: str = "poet", mac: str = POET_MAC) -> Any:
     events it emits name no configured entry: the variant beside every
     provider event that says less rather than guessing."""
     config = base_config()
-    providers = build_agent_providers(config)
-    built = providers[agent]
-    providers[agent] = type(built)(llm=llm, asr=built.asr, tts=built.tts, vad=built.vad)
-    session = device_session(config, mac, providers)
+    engines = built_world(config)
+    built = engines.agents[agent]
+    agents = dict(engines.agents)
+    agents[agent] = type(built)(llm=llm, asr=built.asr, tts=built.tts, vad=built.vad)
+    session = device_session(config, mac, dataclass_replace(engines, agents=agents))
     session.websocket = cast(Any, RecordingSocket())
     return session
 
@@ -1076,7 +1076,7 @@ def drive_bindings_unreadable(directory: Path) -> None:
 
 async def drive_filler_disabled(_: Path) -> None:
     config = masked_config()
-    providers = build_agent_providers(config)
+    providers = dict(built_world(config).agents)
     providers["poet"] = dataclass_replace(providers["poet"], tts=cast(Any, BrokenTts()))
     await build_agent_fillers(config, providers)
 

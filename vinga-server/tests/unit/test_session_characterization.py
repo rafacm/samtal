@@ -35,7 +35,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from tests.support.configs import BOTH_MAC, POET_MAC, POET_TONE, base_config, config_with_agent
 from tests.support.events import events, only
-from tests.support.providers import ScriptedLlm, StallingLlm
+from tests.support.providers import ScriptedLlm, StallingLlm, built_world
 from tests.support.sessions import call, drive_reply, session_for, start_reply
 from tests.support.sockets import spoken
 from tests.support.wire import connect, send_pcm, shake_hands, speech_pcm
@@ -50,7 +50,6 @@ from vinga_server.providers import (
     ToolChoice,
     ToolDef,
     Turn,
-    build_agent_providers,
 )
 
 # The session log channel, by name. `logs.py` emits `record.name` as the
@@ -217,7 +216,7 @@ async def masked_session(
 ) -> Any:
     """A session with its filler clips built the way boot builds them,
     speaking to a socket that records what it hears."""
-    fillers = (await build_agent_fillers(config, build_agent_providers(config))).clips
+    fillers = (await build_agent_fillers(config, built_world(config).agents)).clips
     assert fillers, "the config under test is supposed to have filler clips"
     session = session_for(config, mac, scripts, fillers=fillers)
     session.websocket = cast(Any, ProbingSocket(probe, log))
@@ -511,7 +510,7 @@ async def test_a_filler_ends_quietly_when_the_send_path_raises(
     as a failure of the pipeline."""
     fillers = (
         await build_agent_fillers(
-            stuttering_config(), build_agent_providers(stuttering_config())
+            stuttering_config(), built_world(stuttering_config()).agents
         )
     ).clips
     session = session_for(

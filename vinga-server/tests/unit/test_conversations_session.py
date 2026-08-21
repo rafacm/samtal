@@ -31,6 +31,7 @@ from sqlalchemy import text
 from starlette.websockets import WebSocketDisconnect
 
 from tests.support.configs import DEVICE_MAC, DEVICE_UUID, recording_config, world
+from tests.support.providers import built_world
 from tests.support.sessions import WRITER_TIMEOUT_S as TIMEOUT_S
 from tests.support.sessions import Gate, attached_taps, drive_reply, open_session, until
 from tests.support.sockets import LoopingSocket
@@ -51,7 +52,6 @@ from vinga_server.device import session as session_module
 from vinga_server.device.session import DeviceSession
 from vinga_server.events import Emission
 from vinga_server.events.catalog import carried_values, catalog
-from vinga_server.providers import build_agent_providers
 from vinga_server.runtime.pipeline import bespoke_runtime_factory
 from vinga_server.tools.mcp import McpServers
 
@@ -541,10 +541,8 @@ def _guarded(tmp_path: Path, store: ConversationStore) -> tuple[Any, Any]:
     """
     config = recording_config(tmp_path)
     captures = CaptureStore(tmp_path / "captures", 900.0, 2000.0, 0.0)
-    generations = world(config)
-    factory = bespoke_runtime_factory(
-        generations, build_agent_providers(config), McpServers({}), None, store
-    )
+    generations = world(config, providers=built_world(config))
+    factory = bespoke_runtime_factory(generations, McpServers({}), None, store)
     websocket = LoopingSocket()
     session = DeviceSession(
         cast(Any, websocket), generations, factory, captures, conversations=store

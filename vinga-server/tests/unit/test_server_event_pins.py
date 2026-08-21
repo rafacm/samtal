@@ -57,6 +57,7 @@ from tests.support.configs import (
     masked_config,
 )
 from tests.support.events import only
+from tests.support.providers import built_world
 from tests.support.stores import CAPTURE_MANIFEST as MANIFEST
 from tests.support.stores import store
 from tests.support.wire import device_headers, handshake
@@ -68,7 +69,6 @@ from vinga_server.events import Emission, attach_server_tap, detach_server_tap
 from vinga_server.events.values import CaptureWrite
 from vinga_server.filler import build_agent_fillers
 from vinga_server.logs import _STANDARD_ATTRIBUTES, JsonFormatter
-from vinga_server.providers import build_agent_providers
 
 # Not a real credential, and shaped so a substring check for it cannot
 # match by accident. It stands in for whatever a value a pin blesses
@@ -484,7 +484,7 @@ async def test_a_broken_voices_own_words_reach_no_record_or_consumer(
             raise planted()
 
     config = masked_config()
-    providers = build_agent_providers(config)
+    providers = dict(built_world(config).agents)
     providers["poet"] = replace(providers["poet"], tts=cast(Any, PlantedTts()))
 
     with caplog.at_level("DEBUG"):
