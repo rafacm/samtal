@@ -18,10 +18,11 @@ through the back door.
 
 The filled pauses are the second half of the file and are the same shape
 one step on: what an apply decides about a clip follows the two things a
-clip is made of, and one of them is read from the world that is running
-rather than the one that is stored. So the assertions there are about
-object identity as much as about names, because "nothing was sent to a
-voice" is not a thing a name list can say.
+clip is made of, each read from the world it belongs to. The engines are
+the third and the same shape again, one entry at a time. So the
+assertions in both are about object identity as much as about names,
+because "nothing was sent to a voice" and "no model was loaded" are not
+things a name list can say.
 """
 
 import asyncio
@@ -281,7 +282,12 @@ async def test_an_agent_the_store_deleted_is_still_served() -> None:
     assert generations.current().config.prompt_for_agent("helper") == "H"
 
 
-async def test_a_provider_edit_stays_pending() -> None:
+async def test_an_agent_repointed_at_another_entry_stays_pending() -> None:
+    """The half of the provider slice a reload deliberately does not
+    move. The entries themselves are rebuilt, but which of them serves
+    which of an agent's stages is composed when the server starts, so an
+    agent pointed at a different model goes on talking through the one
+    it was built with."""
     running = served(agents={"assistant": {"prompt": "A"}})
     stored = served(
         providers={
@@ -412,12 +418,12 @@ async def test_a_phrase_edit_resynthesizes_only_that_agent() -> None:
     assert applied_clips["helper"] is clips["helper"]
 
 
-async def test_a_provider_edit_neither_invalidates_nor_replaces_a_clip() -> None:
-    """The finding the reuse key exists for. The store names a different
-    voice, and the voice this server speaks in is still the one it
-    started with, so the clips are the running voice's and stay exactly
-    as they are; what the store says stays pending in the comparison
-    instead of being reported applied."""
+async def test_an_agent_repointed_at_another_voice_keeps_its_clips() -> None:
+    """The same half, one level on. The store points the agent at a
+    different voice entry, which is start-bound, so the voice this
+    server speaks in is still the one it was built with and the clips
+    stay exactly as they are; what the store says stays pending in the
+    comparison instead of being reported applied."""
     voices = {
         "llm": {"mock": {"type": "mock"}},
         "asr": {"mock": {"type": "mock"}},
