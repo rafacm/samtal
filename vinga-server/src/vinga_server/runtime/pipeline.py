@@ -38,7 +38,7 @@ emitted it, and so that every consumer of the events sees it.
 import asyncio
 import contextlib
 import functools
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -98,7 +98,7 @@ from vinga_server.events.values import (
     UnnamedToolSource,
     Whole,
 )
-from vinga_server.generation import Generations
+from vinga_server.generation import Generation, Generations
 from vinga_server.providers import (
     AgentProviders,
     AsrResult,
@@ -491,7 +491,7 @@ class PipelineRuntime:
         output: DeviceOutput,
         generations: Generations,
         events: SessionEvents,
-        agent_providers: dict[str, AgentProviders],
+        agent_providers: Mapping[str, AgentProviders],
         mcp_servers: McpServers,
         memory: MemoryStore | None,
         fillers: FillerCache,
@@ -1692,7 +1692,6 @@ class PipelineRuntime:
 
 def bespoke_runtime_factory(
     generations: Generations,
-    agent_providers: dict[str, AgentProviders],
     mcp_servers: McpServers,
     memory: MemoryStore | None,
     conversations: TurnStore | None = None,
@@ -1701,16 +1700,24 @@ def bespoke_runtime_factory(
     needs that outlives one connection, closed over once at startup.
 
     The device edge calls what comes back with a device to speak
-    through, the session's observability, and the agents the device is
-    bound to, and never learns what an LLM is.
+    through, the session's observability, the agents the device is bound
+    to and the world to build all of that from, and never learns what an
+    LLM is.
 
-    The clip cache is not closed over, and that is the one thing here
-    worth reading twice. It belongs to a world rather than to a process,
-    so it is read off the generation at the moment a runtime is built
-    and handed to that runtime as a value (#191). What that decides is
-    where a re-synthesized clip converges: a conversation goes on
-    masking with the clips it opened on, and the next session gets the
-    ones the reload made, which is the same clock the providers keep.
+    Neither the engines nor the clips are closed over, and that is the
+    one thing here worth reading twice. Both belong to a world rather
+    than to a process, so both are read off the generation the edge
+    hands in, which is the generation the edge is telling the registry
+    this conversation holds (#191). What that decides is where a change
+    converges: a conversation goes on speaking through the engines and
+    masking with the clips it opened on, and the next session gets what
+    the reload built.
+
+    `mcp_servers` is closed over rather than read off the world, and
+    that difference is the tool half's own convergence point: the
+    registry is one object whose contents an apply replaces, so an
+    utterance is answered with the tools that are running rather than
+    with the ones that were running when the conversation began.
 
     `conversations` is closed over, and is the reason the recorder
     reaches a runtime without the `RuntimeFactory` type moving: the
@@ -1724,16 +1731,19 @@ def bespoke_runtime_factory(
     into."""
 
     def build(
-        output: DeviceOutput, events: SessionEvents, agents: Sequence[str]
+        output: DeviceOutput,
+        events: SessionEvents,
+        agents: Sequence[str],
+        generation: Generation,
     ) -> SessionInput:
         return PipelineRuntime(
             output,
             generations,
             events,
-            agent_providers,
+            generation.providers.agents,
             mcp_servers,
             memory,
-            generations.current().fillers,
+            generation.fillers,
             agents,
             None if conversations is None else SessionTurns(conversations, events.session_id),
         )

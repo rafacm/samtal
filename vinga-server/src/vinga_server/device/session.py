@@ -44,7 +44,7 @@ import contextlib
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import av
 from starlette.websockets import WebSocket, WebSocketDisconnect
@@ -97,11 +97,14 @@ from vinga_server.events.values import (
     Real,
     Whole,
 )
-from vinga_server.generation import Generations
+from vinga_server.generation import Generation, Generations
 from vinga_server.protocol import framing, messages
 from vinga_server.protocol import mcp as mcp_protocol
 from vinga_server.providers.base import ToolDef
 from vinga_server.tools.device import DeviceToolClient
+
+if TYPE_CHECKING:  # the registry names this class the same way
+    from vinga_server.registry import SessionRegistry
 
 # How long to wait for the device hello; the firmware gives the server
 # hello the same ten seconds.
@@ -166,6 +169,7 @@ class DeviceSession:
         device_facts: DeviceFacts | None = None,
         bindings: DeviceBindings | None = None,
         conversations: ConversationStore | None = None,
+        sessions: "SessionRegistry | None" = None,
     ) -> None:
         self.websocket = websocket
         # The world this server is serving, asked rather than kept: a
@@ -192,6 +196,17 @@ class DeviceSession:
             else DeviceBindings.snapshot_only(generations.current().config)
         )
         self._captures = captures
+        # Where this connection reports which world it ended up talking
+        # through, and where the slot it took goes back. Optional for
+        # the caller with no server around it, which is a test driving a
+        # session directly: a conversation nothing is counting holds
+        # nothing anybody has to be told about.
+        self._sessions = sessions
+        # And the world itself, once there is one. None until the
+        # binding below, which is every rejection this class can answer
+        # with: a connection turned away for its Device-Id never built a
+        # conversation and never held a generation.
+        self._generation: Generation | None = None
         # The conversation record, an optional collaborator exactly like
         # the captures above: absent unless the deployment asked for one,
         # compared `is not None`, and never something this class reaches
@@ -366,10 +381,23 @@ class DeviceSession:
             await self._close(POLICY_VIOLATION, "no agent is configured for this device")
             return
         self._agents = agents
+        # The world this conversation is, from here to its end. Read
+        # once, on the loop, after the awaited binding lookup, and the
+        # three statements below have no await between them on purpose
+        # (#191): the runtime is built from this object, the registry is
+        # told this connection is holding it, and only then may anything
+        # else run. An apply landing a microsecond either side of that
+        # step therefore finds a conversation wholly on the old world or
+        # wholly on the new one, and never a generation retired between
+        # the moment a conversation was built from it and the moment
+        # anybody knew.
+        generation = self._generation = self._generations.current()
         # Where the first agent used to be activated by hand: the
         # runtime's constructor does that, and the MCP revive after it,
         # in that order, and spawns nothing.
-        self.runtime = self._runtime_factory(self, self._events, agents)
+        self.runtime = self._runtime_factory(self, self._events, agents, generation)
+        if self._sessions is not None:
+            self._sessions.bound(self, generation)
 
         hello = await self._receive_hello()
         if hello is None:
@@ -711,16 +739,16 @@ class DeviceSession:
         refuses such a URL, and this is the half of that rule that does
         not depend on every row having passed through it.
         """
-        if self._agent is None:
+        if self._agent is None or self._generation is None:
             return {}
         described: dict[str, Any] = {}
-        # The world as it is now rather than as it was at connect. What
-        # a manifest records is what served this session, and until
-        # providers become part of a generation the entries a reload can
-        # move are not the ones a session was built with; reading the
-        # current world is the same answer with one door to change when
-        # they are.
-        config = self._generations.current().config
+        # The world this session bound rather than the one being served
+        # now. What a manifest records is what served this conversation,
+        # and a reload can have replaced the entries since: the engines
+        # this session is speaking through are its own generation's, so
+        # the entries it names have to be too, or the record would name
+        # a voice the conversation never used (#191).
+        config = self._generation.config
         for stage in ("llm", "asr", "tts", "vad"):
             name, _ = config.provider_for_agent(self._agent, stage)
             if name is None:

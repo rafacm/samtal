@@ -41,6 +41,12 @@ if TYPE_CHECKING:
     # `WEBSOCKET_PATH` from here and is imported by `vinga-server
     # config`, which renders its reference and its OpenAPI document
     # with no provider loaded (issue #143).
+    #
+    # The generation is deferred for exactly the same reason and one
+    # more: `generation.py` holds the engines a world was built with, so
+    # importing it here would put the provider layer back in the path
+    # this deferral exists to keep clear.
+    from vinga_server.generation import Generation
     from vinga_server.providers.base import ToolDef
 
 # The rate the input side of the pipeline runs at: what devices send,
@@ -248,11 +254,22 @@ class DeviceOutput(Protocol):
 
 
 # How one conversation runtime is built for one connection: the device
-# to speak through, the session's observability, and the agent names the
-# device is bound to.
+# to speak through, the session's observability, the agent names the
+# device is bound to, and the world to build it from.
+#
+# The world is the fourth argument rather than something the factory
+# looks up, and that is the whole of the generational binding (#191): a
+# conversation is built from one generation, speaks through that
+# generation's engines for the rest of its life, and is reported to the
+# registry as holding it. A factory that read the current world for
+# itself would leave the edge unable to say which one it got, and "which
+# world is this conversation holding" is exactly what decides when the
+# engines of a replaced one may be released.
 #
 # Deliberately not a config-selectable registry: one runtime exists, and
 # a selection mechanism with one option is surface without a reader.
 # This is the seam a second runtime plugs into, and what selection needs
 # to express is decided when there is a second one.
-RuntimeFactory = Callable[[DeviceOutput, SessionEvents, Sequence[str]], SessionInput]
+RuntimeFactory = Callable[
+    [DeviceOutput, SessionEvents, Sequence[str], "Generation"], SessionInput
+]
