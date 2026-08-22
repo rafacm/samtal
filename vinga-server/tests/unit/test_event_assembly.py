@@ -7,18 +7,26 @@ calling an exported name, and every builder is checked against the
 variant written out by hand, which is the comparison that would catch a
 field landing in the wrong one.
 
-The one structural claim is the entry quartet's. Since the collapse
-each of the three events declares `provider`, `type`, `host` and
-`model` as absent-able, so the variant itself would accept an entry
-name with no type beside it; what refuses that is the frozen type
-inside this module, whose `provider` and `type` are required, and the
-single crossing from it to the fields. Neither is exported, and the
-export list is pinned below for exactly that reason: the builders are
-the only way to make the four, so "whole or not at all" is a fact about
-the module rather than a habit at its call sites. The emission-level
-half of the same claim is in `test_event_surface_pins.py`, where a
-record from a provider the registry never built is checked for the
-absence of the key.
+The one structural claim is the entry quartet's, and it is made by two
+tests that answer different halves of it. Since the collapse each of
+the three events declares `provider`, `type`, `host` and `model` as
+absent-able, so the variant itself would accept an entry name with no
+type beside it; what refuses that is the frozen type inside this
+module, whose `provider` and `type` are required, and the single
+crossing from it to the fields.
+
+That the crossing keeps its promise is what the builder test says: it
+asks every builder that carries the quartet, over every shape an
+identity has, and a crossing that answered a half quartet fails it.
+That nothing ELSE can make the four is what the namespace test says: it
+reads the module's public names rather than its `__all__`, since
+`__all__` governs `import *` alone and a public helper added beside it
+would pass a check on the list while being importable by anybody.
+Together they are what makes "whole or not at all" a fact about the
+module rather than a habit at its call sites. The emission-level half
+of the same claim is in `test_event_surface_pins.py`, where a record
+from a provider the registry never built is checked for the absence of
+the key.
 
 A declaration-time entanglement check, which would let the catalog say
 this itself, is deliberately out of scope (#240); this file plus that
@@ -26,6 +34,7 @@ one is the pin standing in for it.
 """
 
 from dataclasses import dataclass
+from types import ModuleType
 
 import pytest
 
@@ -94,19 +103,46 @@ IN_PROCESS = Stamped(
 UNREGISTERED = Stamped()
 
 
-def test_the_module_exports_its_builders_and_nothing_that_makes_an_entry() -> None:
-    """The interface is the builders and the fragment. The quartet type
-    and the reader that fills it are not in it, which is what makes the
-    builders the only producers of the four entry values."""
-    assert sorted(assembly.__all__) == [
-        "builtin_tool_called",
-        "llm_retried",
-        "llm_rounded",
-        "mcp_tool_called",
-        "provider_failure",
-        "tool_fragment",
-        "unnamed_tool_called",
-    ]
+INTERFACE = [
+    "builtin_tool_called",
+    "llm_retried",
+    "llm_rounded",
+    "mcp_tool_called",
+    "provider_failure",
+    "tool_fragment",
+    "unnamed_tool_called",
+]
+
+
+def defined_here(module: ModuleType) -> list[str]:
+    """Every public name a module DEFINES, its imports excluded.
+
+    `vars()` holds what a module imported as well as what it wrote, and
+    what `assembly.py` imports is the catalog and the value vocabulary,
+    which say nothing about its own interface. What is left is what a
+    caller can reach and this module is answerable for.
+    """
+    return sorted(
+        name
+        for name, held in vars(module).items()
+        if not name.startswith("_")
+        and getattr(held, "__module__", None) == module.__name__
+    )
+
+
+def test_the_module_defines_its_builders_and_nothing_that_makes_an_entry() -> None:
+    """The interface is the six builders and the fragment. The quartet
+    type and the crossing that fills it are private, which is what makes
+    the builders the only producers of the four entry values.
+
+    Asked of the module's namespace rather than of `__all__`, because
+    `__all__` governs `import *` and nothing else: a public
+    `entry_fields` added beside it would be importable by name while a
+    check on the list stayed green. The list is then held to the
+    namespace, so the two cannot drift.
+    """
+    assert defined_here(assembly) == INTERFACE
+    assert sorted(assembly.__all__) == INTERFACE
 
 
 # --- the entry quartet, whole or not at all ---------------------------
