@@ -72,14 +72,33 @@ Reasons, against the smaller-enum alternative:
 - mypy checks a `Literal` of enum members statically, which is the
   whole point of the issue: passing `ToolSource.BUILTIN` where the
   annotation says `UnnamedToolSource` is an error at the site.
-- The members remain members of the parent enum, so the three
-  decision sites that classify into the narrowed set
-  (`_down_reason` in `tools/mcp/manager.py`, the tool-call
-  classifier feeding `runtime/pipeline.py`, the pending-table
-  refusal feeding `ota/reply.py`) retype their own returns and
-  fields with the same alias and hand the member straight through,
-  no conversion and no second construction. That puts the narrowing
-  at the decision site, where the closed-set lens wants it.
+- The members remain members of the parent enum, so nothing about
+  the enumerations themselves moves.
+
+The three classifiers feeding the narrowed fields hold plain
+strings, deliberately: `runtime/turns.py` spells its source
+constants locally so classifying a call does not import the event
+vocabulary (and holds them equal to the `tool_invocations.source`
+column), `onboarding/pending.py` builds its two refusal sentences
+as f-strings over configured bounds, and
+`tools/mcp/transport.py`'s `_down_reason(...)` returns its own six
+constants. Those modules are NOT migrated by this plan: retyping
+them would drag the store column, the bound interpolation, and the
+manager's phase plumbing into an issue about deleting wrapper
+classes. Instead the emit site converts explicitly, as the adapter
+where the classifier's local vocabulary crosses into the event
+vocabulary: `ToolSource(classified.source)` in
+`runtime/pipeline.py`, `NotOffered(unbound.refusal)` in
+`ota/reply.py`, `McpDown(_down_reason(...))` at the construction
+in `tools/mcp/manager.py`. The narrowing is therefore declared in
+the catalog annotation and held by `verify()` at emit time, not
+statically at these sites; a lookup of a string outside the
+enumeration raises `ValueError` inside the emit guard's builder,
+which `_construct`'s blanket catch turns into the same
+`construction_failed` refusal today's `EventValueError` becomes.
+The cross-module agreement between each classifier's constants and
+its enum is pinned by the drift-guard tests kept under the Tests
+section.
 
 ## Design decisions this plan makes
 
@@ -265,6 +284,15 @@ findings 4 to 8 amendable in place. Findings condensed but faithful:
    bound interpolation) into scope; either scope them in or convert
    at the emit site and withdraw the narrowing-at-the-decision-site
    claim.
+   *Resolution* (amendment `F1`): resolved by conversion at the
+   emit site, not by migrating the classifiers. The open-questions
+   section now states which modules stay untouched and why, spells
+   the three conversions, withdraws the narrowing-at-the-site
+   claim (the narrowing is declared in the catalog and held by
+   `verify()`), and notes that an out-of-set lookup becomes the
+   same `construction_failed` refusal inside `_construct`'s
+   blanket catch that the wrapper's `EventValueError` is today.
+
 2. **P1: the emit-site list is wrong in one entry and short by
    two.** `_down_reason` lives in `tools/mcp/transport.py`, not
    `manager.py`; `device/session.py:585` (`_closed_reason() ->
