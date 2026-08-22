@@ -35,8 +35,10 @@ Four assertions, all through surfaces a caller reaches:
 - Exactly two rounds were asked of the model (`len(script.seen) == 2`),
   so nothing phantom survived to defeat the loop's `if not calls:
   break`.
-- The tool calls on the turns the model was handed are exactly
-  `["ghost_tool"]`, so neither event reached the record as a call.
+- The turns the model was handed carry exactly `["ghost_tool"]` as
+  tool calls (`script.seen` is the model-facing surface; a phantom in
+  a final round would force a third round and trip the
+  `len(script.seen) == 2` assertion first).
 - The `llm_round` event of the whitespace-and-call round carries no
   `first_token_ms`, while the speaking round's is present, so no first
   token was timed from whitespace.
