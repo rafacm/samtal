@@ -6,19 +6,25 @@ parsing a sentence: the three production taps read structured payloads,
 and the reference and the README index are rendered from declarations.
 So the surface's pins stop restating templates and argument tuples, and
 what replaces them is this: one committed file holding, for every
-declared event, its name, its variants' channels and levels, and the
-names, declared types, requiredness and nullability of everything they
-carry, asserted against the catalog in BOTH directions.
+declared event, its name, its variants' channels and levels, the names,
+declared types, requiredness and nullability of everything they carry,
+and the closed set of every field that declares one, asserted against
+the catalog in BOTH directions.
 
 Both directions matter separately. Containment one way misses a
 declaration nobody wrote down; containment the other misses a line for
 an event that no longer exists, which is a contract describing a
 surface this server does not have.
 
-There is no wording in it. Not a template, not a note, not a sentence:
-those are free to improve, which is the whole point of moving the pins
-here. What is pinned is structure, and a rename, a retype, a reordering
-or a presence change is a loud diff on a file a reviewer reads.
+There is no wording ABOUT a declaration in it. Not a template, not a
+note, not a sentence: those are free to improve, which is the whole
+point of moving the pins here. A declared token set is the exception
+that proves the rule rather than a hole in it, and it is recorded
+verbatim, worded members included, because those members ARE the
+declaration: what a field admits is exactly as much a fact about the
+surface as its type. What is pinned is structure, and a rename, a
+retype, a reordering, a presence change or a widened set is a loud diff
+on a file a reviewer reads.
 
 Regenerate it deliberately, never by hand:
 
@@ -112,7 +118,8 @@ def test_every_recorded_event_is_still_declared() -> None:
 
 def test_the_committed_inventory_is_the_catalogs_shape() -> None:
     """Names, channels, levels, argument order and types, field order,
-    types, requiredness and nullability. Nothing else, and no wording."""
+    types, requiredness, nullability and declared token sets. Nothing
+    else, and no wording about any of them."""
     assert committed() == inventory(), REGENERATE
 
 
