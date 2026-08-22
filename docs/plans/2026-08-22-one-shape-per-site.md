@@ -246,46 +246,82 @@ faithful:
    a widened `QUOTED_PROVIDER` grammar, which is a documented
    constraint genuinely loosening, so "the docgen needs no change"
    and "no new surface" are false as written.
+   *Resolution* (`b549ae78`): the measurement paragraph and
+   decision 6 rewritten; `QuotedProvider.of(str | None)`, the
+   widened grammar, and the stated loosening.
+
 2. **P2: the baseline is byte-still for unstated reasons and cannot
    see what could move.** It records sorted key sets and argument
    type names of rendered strs, so a fragment retype or a
    misplaced quartet is invisible to it; the golden's ordered lists
    are the pin for both. The quartet's placement must reproduce
    `LlmRoundOfEntry`'s carried order.
+   *Resolution* (`bbbd8d26`): quartet placement stated, and the
+   proof divided honestly between the baseline (sets, templates)
+   and the golden (ordering, retypes).
+
 3. **P2: the adapter justification contradicts the plain-value
    signature rule** (one vocabulary in, not two), the post-collapse
    builders are single constructor calls, and decision 4 moves out
    `_tool_called`, which the plan's own lens calls a real decision
    site. Justify by what the caller stops knowing, or design
    around the selection.
+   *Resolution* (`cf0d9bb9`, with finding 8): the module is
+   justified by what the caller stops knowing, the quartet type
+   moves in whole as the structural depth, and the thin builders
+   say they are thin.
+
 4. **P2: no stated answer for the classifier constants.** Moving
    the source selection into `events/` forces an upward import, a
    second home for `TOOL_SOURCES`, or an untested equality; the
    cheapest honest answer is that the selection stays in
    `pipeline.py` and only construction moves.
+   *Resolution* (`d86871a1`): the source selection stays beside
+   its classifier; only construction moves.
+
 5. **P2: `_reported` and the `Usage` type are unnamed work.** Under
    the plain-value rule the assembly cannot take `Usage`;
    `_reported` stays or the call site unpacks. `BaseException` is a
    builtin and may cross.
+   *Resolution* (`bacaabc6`): `_reported` stays; the round builder
+   takes plain token counts; `BaseException` crosses lawfully.
+
 6. **P2: `_tool_fragment` has a second caller that is not an emit
    thunk** (the malformed-arguments warning line), which the merged
    signature erases and which already falsifies the
    thunk-only rule the lens claims moves intact.
+   *Resolution* (`b67f1449`): the fragment is its own exported
+   function serving both callers, with the beside-a-log-line rule
+   stated.
+
 7. **P2: #235's `match` is a different region.** Its four arms call
    no assembly helper; the five real call sites are
    `_watchdog_stream`, `_llm_round_done`, `_provider_failed`,
    `_run_one`, and `_dispatch`.
+   *Resolution* (`8ef6f222`): the five real call sites named; the
+   goal's overlap claim corrected.
+
 8. **P2: the atomicity pin does not pin the variant, and the plan
    contradicts itself on `_Entry`.** After the collapse the variant
    admits a half-quartet; keep the frozen quartet type inside
    `assembly.py` with required `provider`/`type` so atomicity stays
    structural, re-home the NOTE onto the survivor, and name
    `test_event_surface_pins.py`'s emission-level half as surviving.
+   *Resolution* (`cf0d9bb9`): the quartet type keeps atomicity
+   structural inside `assembly.py`; the surface-pin half is named
+   as surviving.
+
 9. **P3: the note merge is undercounted and misnamed.** The
    no-entry note is a variant-level NOTE, five field notes need
    reconciling across the `llm_round` pair, and the survivors'
    docstrings stop being true.
+   *Resolution* (`a0bbdc95`): the prose reconciliation itemized
+   per note and docstring.
+
 10. **P3: the plan assigns machinery to #241 that #241 is not
     scoped to carry.** State the loss and the pin; a
     declaration-time entanglement check is out of scope and worth
     its own issue if wanted.
+    *Resolution* (`187d1f5c`): the entanglement check is out of
+    scope here and for #241; the accepted looseness and its pin are
+    stated.
