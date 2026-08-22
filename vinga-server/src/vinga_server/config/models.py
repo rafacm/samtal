@@ -2398,11 +2398,18 @@ class Config(BaseModel):
 
 
 def _check_binding(mac: str, bound: object) -> None:
-    """The two rules one device's binding has to satisfy that its type
-    cannot state: at least one agent, and no agent named twice. A
-    binding written as anything but a list is left for pydantic to
-    report against the field's own type, which is where the shape a
-    binding has to have is declared."""
+    """The two rules a binding written as a list has to satisfy that its
+    type cannot state: at least one agent, and no agent named twice.
+
+    Anything not written as a list is left alone here and reported by
+    pydantic against the field's own type, which is where the shape a
+    binding has to have is declared. That leaves a sequence pydantic's
+    lax mode would coerce to a list, a tuple or a set, passing these two
+    rules unchecked; no transport can deliver one (JSON has no tuple,
+    YAML no set, and the database stores a JSON array), so the gap is
+    reachable only by constructing the model in-process and is left as
+    it was rather than closed with a refusal path this milestone did not
+    come to add."""
     if not isinstance(bound, list):
         return
     if not bound:
