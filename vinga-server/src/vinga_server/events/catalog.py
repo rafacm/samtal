@@ -55,7 +55,6 @@ from vinga_server.events.values import (
     Absent,
     ActivationCode,
     ActivationRefusal,
-    ActivationRefusalToken,
     AgentList,
     AgentNames,
     AlsoBoundTo,
@@ -63,7 +62,6 @@ from vinga_server.events.values import (
     AuthRejectionToken,
     BoardName,
     CaptureDeclined,
-    CaptureDeclinedToken,
     CaptureWriteToken,
     ClassName,
     ClassNames,
@@ -74,12 +72,10 @@ from vinga_server.events.values import (
     DeviceId,
     DeviceOrUnidentified,
     EchoOutcome,
-    EchoOutcomeToken,
     EventName,
     EventValue,
     EventValueError,
     FillerSkip,
-    FillerSkipToken,
     FirmwareVersion,
     Flag,
     FromEntry,
@@ -89,14 +85,11 @@ from vinga_server.events.values import (
     LanguageTag,
     McpConnectFailure,
     McpDown,
-    McpDownToken,
     McpRefusalToken,
     McpReloadOutcome,
-    McpReloadOutcomeToken,
     McpTransportToken,
     Nothing,
     NotOffered,
-    NotOfferedToken,
     OriginProvenance,
     OriginSourceToken,
     OtaRefusalToken,
@@ -108,16 +101,13 @@ from vinga_server.events.values import (
     ReachingHost,
     Real,
     Rejection,
-    RejectionToken,
     ReportedMac,
     SessionId,
     SessionIds,
     SessionList,
     Suppression,
-    SuppressionToken,
     ToolOutcomeToken,
     ToolSource,
-    ToolSourceToken,
     UnnamedToolSource,
     Whole,
 )
@@ -945,7 +935,7 @@ class RejectedBadDeviceId(Variant):
     )
     ARGS: ClassVar[tuple[str, ...]] = ("session",)
 
-    reason: RejectionToken = value(fixed=RejectionToken(Rejection.BAD_DEVICE_ID))
+    reason: Rejection = value(fixed=Rejection.BAD_DEVICE_ID)
 
 
 @dataclass(frozen=True)
@@ -968,7 +958,7 @@ class RejectedAgentNotLoaded(Variant):
     )
     ARGS: ClassVar[tuple[str, ...]] = ("session", "mac", "unloaded")
 
-    reason: RejectionToken = value(fixed=RejectionToken(Rejection.AGENT_NOT_LOADED))
+    reason: Rejection = value(fixed=Rejection.AGENT_NOT_LOADED)
     # Said and not stored: the base already carries the device this
     # session is with, and a second copy under another name would be the
     # same fact twice on one record.
@@ -988,7 +978,7 @@ class RejectedNoAgent(Variant):
     )
     ARGS: ClassVar[tuple[str, ...]] = ("session", "mac")
 
-    reason: RejectionToken = value(fixed=RejectionToken(Rejection.NO_AGENT))
+    reason: Rejection = value(fixed=Rejection.NO_AGENT)
     mac: DeviceId = value(carried=False)
 
 
@@ -1010,7 +1000,7 @@ class RejectedAtCapacity(Variant):
 
     device: DeviceId | None
     session: SessionId
-    reason: RejectionToken = value(fixed=RejectionToken(Rejection.CAPACITY))
+    reason: Rejection = value(fixed=Rejection.CAPACITY)
     shown: DeviceOrUnidentified = value(carried=False)
 
 
@@ -1403,7 +1393,7 @@ class BuiltinToolCall(Variant):
     )
 
     agent: Identifier = value()
-    source: ToolSourceToken = value(fixed=ToolSourceToken(ToolSource.BUILTIN))
+    source: ToolSource = value(fixed=ToolSource.BUILTIN)
     tool: Identifier = value(note="The only tool names this server authors.")
     duration_ms: Whole = value()
     is_error: Flag = value()
@@ -1428,7 +1418,7 @@ class McpToolCall(Variant):
     )
 
     agent: Identifier = value()
-    source: ToolSourceToken = value(fixed=ToolSourceToken(ToolSource.MCP))
+    source: ToolSource = value(fixed=ToolSource.MCP)
     entry: Identifier = value(
         note="The configured entry, never the far side's tool name."
     )
@@ -1500,7 +1490,7 @@ class BargeInUnderFloor(Variant):
     )
     ARGS: ClassVar[tuple[str, ...]] = ("session", "speech_ms", "floor_ms")
 
-    reason: SuppressionToken = value(fixed=SuppressionToken(Suppression.MIN_SPEECH))
+    reason: Suppression = value(fixed=Suppression.MIN_SPEECH)
     speech_ms: Whole = value()
     floor_ms: Real = value(carried=False)
 
@@ -1514,7 +1504,7 @@ class BargeInInRefractory(Variant):
     TEMPLATE: ClassVar[str] = "session %s: barge-in suppressed inside the refractory window"
     ARGS: ClassVar[tuple[str, ...]] = ("session",)
 
-    reason: SuppressionToken = value(fixed=SuppressionToken(Suppression.REFRACTORY))
+    reason: Suppression = value(fixed=Suppression.REFRACTORY)
     speech_ms: Whole = value()
 
 
@@ -1527,7 +1517,7 @@ class BargeInWithoutTranscript(Variant):
     TEMPLATE: ClassVar[str] = "session %s: barge-in suppressed, nothing transcribed"
     ARGS: ClassVar[tuple[str, ...]] = ("session",)
 
-    reason: SuppressionToken = value(fixed=SuppressionToken(Suppression.NO_TRANSCRIPT))
+    reason: Suppression = value(fixed=Suppression.NO_TRANSCRIPT)
     speech_ms: Whole = value()
 
 
@@ -1561,7 +1551,7 @@ class FillerSkippedForSpeech(Variant):
     ARGS: ClassVar[tuple[str, ...]] = ("session", "speech_ms")
 
     agent: Identifier = value()
-    reason: FillerSkipToken = value(fixed=FillerSkipToken(FillerSkip.USER_SPEAKING))
+    reason: FillerSkip = value(fixed=FillerSkip.USER_SPEAKING)
     speech_ms: Whole = value()
 
 
@@ -1576,7 +1566,7 @@ class FillerSkippedForBargeIn(Variant):
     ARGS: ClassVar[tuple[str, ...]] = ("session",)
 
     agent: Identifier = value()
-    reason: FillerSkipToken = value(fixed=FillerSkipToken(FillerSkip.BARGE_IN_PENDING))
+    reason: FillerSkip = value(fixed=FillerSkip.BARGE_IN_PENDING)
 
 
 @dataclass(frozen=True)
@@ -1853,7 +1843,7 @@ class ActivationNotOfferedUnreadable(Variant):
     ARGS: ClassVar[tuple[str, ...]] = ("device",)
 
     device: DeviceId = value()
-    reason: NotOfferedToken = value(fixed=NotOfferedToken(NotOffered.UNREADABLE))
+    reason: NotOffered = value(fixed=NotOffered.UNREADABLE)
 
 
 @dataclass(frozen=True)
@@ -1920,9 +1910,7 @@ class ActivationRefusedUnreadableBody(Variant):
 
     device: DeviceId = value()
     code: ActivationCode = value()
-    reason: ActivationRefusalToken = value(
-        fixed=ActivationRefusalToken(ActivationRefusal.UNREADABLE_BODY)
-    )
+    reason: ActivationRefusal = value(fixed=ActivationRefusal.UNREADABLE_BODY)
 
 
 @dataclass(frozen=True)
@@ -1940,9 +1928,7 @@ class ActivationRefusedUnknownAlgorithm(Variant):
 
     device: DeviceId = value()
     code: ActivationCode = value()
-    reason: ActivationRefusalToken = value(
-        fixed=ActivationRefusalToken(ActivationRefusal.UNKNOWN_ALGORITHM)
-    )
+    reason: ActivationRefusal = value(fixed=ActivationRefusal.UNKNOWN_ALGORITHM)
 
 
 @dataclass(frozen=True)
@@ -1959,9 +1945,7 @@ class ActivationRefusedChallengeMismatch(Variant):
 
     device: DeviceId = value()
     code: ActivationCode = value()
-    reason: ActivationRefusalToken = value(
-        fixed=ActivationRefusalToken(ActivationRefusal.CHALLENGE_MISMATCH)
-    )
+    reason: ActivationRefusal = value(fixed=ActivationRefusal.CHALLENGE_MISMATCH)
 
 
 @dataclass(frozen=True)
@@ -2097,8 +2081,8 @@ class EchoSkipped(Variant):
     )
     ARGS: ClassVar[tuple[str, ...]] = ("remaining_s", "duration_s")
 
-    outcome: EchoOutcomeToken = value(
-        fixed=EchoOutcomeToken(EchoOutcome.SKIPPED),
+    outcome: EchoOutcome = value(
+        fixed=EchoOutcome.SKIPPED,
         note="Under a second of budget remained, so no retry was sent.",
     )
     duration_s: Real = value()
@@ -2118,8 +2102,8 @@ class EchoRetryTimedOut(Variant):
     )
     ARGS: ClassVar[tuple[str, ...]] = ("remaining_s", "duration_s")
 
-    outcome: EchoOutcomeToken = value(
-        fixed=EchoOutcomeToken(EchoOutcome.TIMED_OUT),
+    outcome: EchoOutcome = value(
+        fixed=EchoOutcome.TIMED_OUT,
         note="The retry outran what the first request left of the budget.",
     )
     duration_s: Real = value()
@@ -2140,8 +2124,8 @@ class EchoConfirmed(Variant):
     )
     ARGS: ClassVar[tuple[str, ...]] = ("duration_s",)
 
-    outcome: EchoOutcomeToken = value(
-        fixed=EchoOutcomeToken(EchoOutcome.CONFIRMED_ECHO),
+    outcome: EchoOutcome = value(
+        fixed=EchoOutcome.CONFIRMED_ECHO,
         note="The retry came back as the configured prompt again.",
     )
     duration_s: Real = value()
@@ -2161,8 +2145,8 @@ class EchoConfirmedEmpty(Variant):
     )
     ARGS: ClassVar[tuple[str, ...]] = ("duration_s",)
 
-    outcome: EchoOutcomeToken = value(
-        fixed=EchoOutcomeToken(EchoOutcome.CONFIRMED_EMPTY),
+    outcome: EchoOutcome = value(
+        fixed=EchoOutcome.CONFIRMED_EMPTY,
         note="The retry heard nothing.",
     )
     duration_s: Real = value()
@@ -2182,8 +2166,8 @@ class EchoRecovered(Variant):
     )
     ARGS: ClassVar[tuple[str, ...]] = ("duration_s",)
 
-    outcome: EchoOutcomeToken = value(
-        fixed=EchoOutcomeToken(EchoOutcome.RECOVERED),
+    outcome: EchoOutcome = value(
+        fixed=EchoOutcome.RECOVERED,
         note=(
             "The retry's transcript is heard. What was recovered is not in "
             "the sentence: conversation-derived text is banned on the events "
@@ -2246,7 +2230,7 @@ class McpStopped(Variant):
     )
 
     entry: Identifier = value()
-    reason: McpDownToken = value(fixed=McpDownToken(McpDown.STOPPED))
+    reason: McpDown = value(fixed=McpDown.STOPPED)
 
 
 @dataclass(frozen=True)
@@ -2262,7 +2246,7 @@ class McpDropped(Variant):
     NOTE: ClassVar[str] = "Always beside an `mcp_call_dropped`, in that order."
 
     entry: Identifier = value()
-    reason: McpDownToken = value(fixed=McpDownToken(McpDown.CALL_FAILED))
+    reason: McpDown = value(fixed=McpDown.CALL_FAILED)
 
 
 @dataclass(frozen=True)
@@ -2321,9 +2305,7 @@ class McpReloadRefused(Variant):
     )
     ARGS: ClassVar[tuple[str, ...]] = ("reason",)
 
-    outcome: McpReloadOutcomeToken = value(
-        fixed=McpReloadOutcomeToken(McpReloadOutcome.REFUSED)
-    )
+    outcome: McpReloadOutcome = value(fixed=McpReloadOutcome.REFUSED)
     reason: McpRefusalToken = value(
         note=(
             "Chosen where the exception is classified and never built out "
@@ -2343,9 +2325,7 @@ class McpReloadApplied(Variant):
     )
     ARGS: ClassVar[tuple[str, ...]] = ("started", "restarted", "stopped", "unchanged")
 
-    outcome: McpReloadOutcomeToken = value(
-        fixed=McpReloadOutcomeToken(McpReloadOutcome.APPLIED)
-    )
+    outcome: McpReloadOutcome = value(fixed=McpReloadOutcome.APPLIED)
     started: Count = value()
     restarted: Count = value()
     stopped: Count = value()
@@ -2424,9 +2404,7 @@ class CaptureDirectoryUnusable(Variant):
     ARGS: ClassVar[tuple[str, ...]] = ("session", "directory", "failure")
 
     session: SessionId = value()
-    reason: CaptureDeclinedToken = value(
-        fixed=CaptureDeclinedToken(CaptureDeclined.UNUSABLE)
-    )
+    reason: CaptureDeclined = value(fixed=CaptureDeclined.UNUSABLE)
     failure: ClassName = value()
     directory: ConfiguredPath = value(carried=False)
 
@@ -2443,9 +2421,7 @@ class CaptureBelowFloor(Variant):
     ARGS: ClassVar[tuple[str, ...]] = ("session", "free", "floor_mb")
 
     session: SessionId = value()
-    reason: CaptureDeclinedToken = value(
-        fixed=CaptureDeclinedToken(CaptureDeclined.MIN_FREE_MB)
-    )
+    reason: CaptureDeclined = value(fixed=CaptureDeclined.MIN_FREE_MB)
     free_mb: Count = value()
     # The measure the sentence renders, beside the rounded count the
     # field keeps, and the floor it was compared against.
@@ -2465,9 +2441,7 @@ class CaptureFilesUnopenable(Variant):
     ARGS: ClassVar[tuple[str, ...]] = ("session", "failure")
 
     session: SessionId = value()
-    reason: CaptureDeclinedToken = value(
-        fixed=CaptureDeclinedToken(CaptureDeclined.OPEN)
-    )
+    reason: CaptureDeclined = value(fixed=CaptureDeclined.OPEN)
     failure: ClassName = value()
 
 

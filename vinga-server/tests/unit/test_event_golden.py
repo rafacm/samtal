@@ -29,7 +29,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from vinga_server.events.catalog import catalog, payload_shape
+from vinga_server.events.catalog import Declared, catalog, payload_shape, tokens_of
 
 COMMITTED = Path(__file__).resolve().parent / "data" / "event-catalog-golden.json"
 
@@ -54,21 +54,33 @@ def inventory() -> dict[str, Any]:
                 "arguments": [
                     {"name": one, "type": _typed(variant, one)} for one in variant.ARGS
                 ],
-                "fields": [
-                    {
-                        "name": one.name,
-                        "type": one.type.__name__,
-                        "required": one.required,
-                        "nullable": one.nullable,
-                    }
-                    for one in payload_shape(variant)
-                    if one.carried
-                ],
+                "fields": [_field(one) for one in payload_shape(variant) if one.carried],
             }
             for variant in declaration.variants
         ]
         for name, declaration in catalog().items()
     }
+
+
+def _field(one: Declared) -> dict[str, Any]:
+    """One carried field, with the closed set where it declares one.
+
+    A token field records its set because its type name no longer
+    carries it: a field narrowed to fewer members than its enumeration
+    holds records that enumeration's name, so without this the
+    reference's token column would be the only committed pin on the
+    narrowing (#238).
+    """
+    recorded: dict[str, Any] = {
+        "name": one.name,
+        "type": one.type.__name__,
+        "required": one.required,
+        "nullable": one.nullable,
+    }
+    tokens = tokens_of(one)
+    if tokens is not None:
+        recorded["tokens"] = sorted(tokens)
+    return recorded
 
 
 def _typed(variant: Any, name: str) -> str:
@@ -111,12 +123,21 @@ def test_the_committed_file_is_what_the_generator_writes() -> None:
 
 
 def strings(held: Any) -> list[str]:
-    """Every key and every string value in the file, however nested."""
+    """Every key and every string value in the file, however nested,
+    apart from the declared token sets.
+
+    Those are left out because several closed sets have members that are
+    worded: the two bounds the pending table refuses a code at are the
+    sentences their warning renders, and the banner's origin token names
+    a pair of configuration keys in a phrase. They are declarations
+    rather than prose about declarations, and pinning them is what the
+    `tokens` key is for, so the check below reads everything else.
+    """
     if isinstance(held, dict):
         return [
             one
             for key, value in held.items()
-            for one in [key, *strings(value)]
+            for one in [key, *(() if key == "tokens" else strings(value))]
             if isinstance(one, str)
         ]
     if isinstance(held, list):
@@ -130,9 +151,9 @@ def test_the_inventory_carries_no_wording() -> None:
 
     Asserted on the words themselves rather than on a substring hunt
     through the text, which a field called `sentences` defeats: every
-    string in here is a name, a type or a channel, so none of them holds
-    a space or a `%`, and no key is one of the four that would carry
-    prose."""
+    string in here outside a declared token set is a name, a type or a
+    channel, so none of them holds a space or a `%`, and no key is one
+    of the four that would carry prose."""
     recorded = COMMITTED.read_text(encoding="utf-8")
     held = strings(json.loads(recorded))
 

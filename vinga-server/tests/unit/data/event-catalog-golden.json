@@ -162,9 +162,12 @@
         },
         {
           "name": "reason",
-          "type": "RejectionToken",
+          "type": "Rejection",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "bad_device_id"
+          ]
         }
       ]
     },
@@ -206,9 +209,12 @@
         },
         {
           "name": "reason",
-          "type": "RejectionToken",
+          "type": "Rejection",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "agent_not_loaded"
+          ]
         }
       ]
     },
@@ -246,9 +252,12 @@
         },
         {
           "name": "reason",
-          "type": "RejectionToken",
+          "type": "Rejection",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "no_agent"
+          ]
         }
       ]
     },
@@ -282,9 +291,12 @@
         },
         {
           "name": "reason",
-          "type": "RejectionToken",
+          "type": "Rejection",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "capacity"
+          ]
         }
       ]
     }
@@ -512,7 +524,14 @@
           "name": "reason",
           "type": "CloseReasonToken",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "client",
+            "drain",
+            "error",
+            "idle",
+            "limit"
+          ]
         }
       ]
     }
@@ -1386,7 +1405,7 @@
         },
         {
           "name": "source",
-          "type": "ToolSourceToken"
+          "type": "ToolSource"
         },
         {
           "name": "named",
@@ -1428,9 +1447,12 @@
         },
         {
           "name": "source",
-          "type": "ToolSourceToken",
+          "type": "ToolSource",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "builtin"
+          ]
         },
         {
           "name": "tool",
@@ -1462,7 +1484,7 @@
         },
         {
           "name": "source",
-          "type": "ToolSourceToken"
+          "type": "ToolSource"
         },
         {
           "name": "named",
@@ -1504,9 +1526,12 @@
         },
         {
           "name": "source",
-          "type": "ToolSourceToken",
+          "type": "ToolSource",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "mcp"
+          ]
         },
         {
           "name": "entry",
@@ -1582,7 +1607,11 @@
           "name": "source",
           "type": "UnnamedToolSource",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "device",
+            "unknown"
+          ]
         },
         {
           "name": "duration_ms",
@@ -1682,9 +1711,12 @@
         },
         {
           "name": "reason",
-          "type": "SuppressionToken",
+          "type": "Suppression",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "min_speech"
+          ]
         },
         {
           "name": "speech_ms",
@@ -1724,9 +1756,12 @@
         },
         {
           "name": "reason",
-          "type": "SuppressionToken",
+          "type": "Suppression",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "refractory"
+          ]
         },
         {
           "name": "speech_ms",
@@ -1766,9 +1801,12 @@
         },
         {
           "name": "reason",
-          "type": "SuppressionToken",
+          "type": "Suppression",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "no_transcript"
+          ]
         },
         {
           "name": "speech_ms",
@@ -1858,9 +1896,12 @@
         },
         {
           "name": "reason",
-          "type": "FillerSkipToken",
+          "type": "FillerSkip",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "user_speaking"
+          ]
         },
         {
           "name": "speech_ms",
@@ -1906,9 +1947,12 @@
         },
         {
           "name": "reason",
-          "type": "FillerSkipToken",
+          "type": "FillerSkip",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "barge_in_pending"
+          ]
         }
       ]
     }
@@ -2272,9 +2316,12 @@
         },
         {
           "name": "reason",
-          "type": "NotOfferedToken",
+          "type": "NotOffered",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "unreadable"
+          ]
         }
       ]
     },
@@ -2312,7 +2359,11 @@
           "name": "reason",
           "type": "PendingRefusal",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "128 devices are already waiting to be claimed, which is the cap",
+            "30 activation codes have been issued in the last 10 minutes, which is the limit"
+          ]
         }
       ]
     }
@@ -2418,9 +2469,12 @@
         },
         {
           "name": "reason",
-          "type": "ActivationRefusalToken",
+          "type": "ActivationRefusal",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "unreadable_body"
+          ]
         }
       ]
     },
@@ -2454,9 +2508,12 @@
         },
         {
           "name": "reason",
-          "type": "ActivationRefusalToken",
+          "type": "ActivationRefusal",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "unknown_algorithm"
+          ]
         }
       ]
     },
@@ -2490,9 +2547,12 @@
         },
         {
           "name": "reason",
-          "type": "ActivationRefusalToken",
+          "type": "ActivationRefusal",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "challenge_mismatch"
+          ]
         }
       ]
     }
@@ -2548,7 +2608,12 @@
           "name": "origin_source",
           "type": "OriginSourceToken",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "server.public_url",
+            "server.websocket_url",
+            "the listen address (server.host and server.port)"
+          ]
         },
         {
           "name": "onboarding",
@@ -2588,7 +2653,12 @@
           "name": "origin_source",
           "type": "OriginSourceToken",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "server.public_url",
+            "server.websocket_url",
+            "the listen address (server.host and server.port)"
+          ]
         },
         {
           "name": "onboarding",
@@ -2684,7 +2754,11 @@
           "name": "reason",
           "type": "AuthRejectionToken",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "bad_token",
+            "no_token"
+          ]
         }
       ]
     }
@@ -2712,9 +2786,12 @@
         },
         {
           "name": "outcome",
-          "type": "EchoOutcomeToken",
+          "type": "EchoOutcome",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "skipped"
+          ]
         },
         {
           "name": "duration_s",
@@ -2752,9 +2829,12 @@
         },
         {
           "name": "outcome",
-          "type": "EchoOutcomeToken",
+          "type": "EchoOutcome",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "timed_out"
+          ]
         },
         {
           "name": "duration_s",
@@ -2794,9 +2874,12 @@
         },
         {
           "name": "outcome",
-          "type": "EchoOutcomeToken",
+          "type": "EchoOutcome",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "confirmed_echo"
+          ]
         },
         {
           "name": "duration_s",
@@ -2836,9 +2919,12 @@
         },
         {
           "name": "outcome",
-          "type": "EchoOutcomeToken",
+          "type": "EchoOutcome",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "confirmed_empty"
+          ]
         },
         {
           "name": "duration_s",
@@ -2878,9 +2964,12 @@
         },
         {
           "name": "outcome",
-          "type": "EchoOutcomeToken",
+          "type": "EchoOutcome",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "recovered"
+          ]
         },
         {
           "name": "duration_s",
@@ -2934,7 +3023,11 @@
           "name": "transport",
           "type": "McpTransportToken",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "stdio",
+            "streamable_http"
+          ]
         },
         {
           "name": "tools",
@@ -2982,7 +3075,13 @@
           "name": "reason",
           "type": "McpConnectFailure",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "connect_timeout",
+            "discovery_failed",
+            "initialize_failed",
+            "transport_failed"
+          ]
         },
         {
           "name": "duration_ms",
@@ -3016,9 +3115,12 @@
         },
         {
           "name": "reason",
-          "type": "McpDownToken",
+          "type": "McpDown",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "stopped"
+          ]
         }
       ]
     },
@@ -3046,9 +3148,12 @@
         },
         {
           "name": "reason",
-          "type": "McpDownToken",
+          "type": "McpDown",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "call_failed"
+          ]
         }
       ]
     }
@@ -3164,15 +3269,25 @@
         },
         {
           "name": "outcome",
-          "type": "McpReloadOutcomeToken",
+          "type": "McpReloadOutcome",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "refused"
+          ]
         },
         {
           "name": "reason",
           "type": "McpRefusalToken",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "database_busy",
+            "in_progress",
+            "invalid",
+            "unexpected",
+            "unreadable"
+          ]
         }
       ]
     },
@@ -3206,9 +3321,12 @@
         },
         {
           "name": "outcome",
-          "type": "McpReloadOutcomeToken",
+          "type": "McpReloadOutcome",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "applied"
+          ]
         },
         {
           "name": "started",
@@ -3384,9 +3502,12 @@
         },
         {
           "name": "reason",
-          "type": "CaptureDeclinedToken",
+          "type": "CaptureDeclined",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "unusable"
+          ]
         },
         {
           "name": "failure",
@@ -3428,9 +3549,12 @@
         },
         {
           "name": "reason",
-          "type": "CaptureDeclinedToken",
+          "type": "CaptureDeclined",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "min_free_mb"
+          ]
         },
         {
           "name": "free_mb",
@@ -3468,9 +3592,12 @@
         },
         {
           "name": "reason",
-          "type": "CaptureDeclinedToken",
+          "type": "CaptureDeclined",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "open"
+          ]
         },
         {
           "name": "failure",
@@ -3546,7 +3673,11 @@
           "name": "reason",
           "type": "CaptureWriteToken",
           "required": true,
-          "nullable": false
+          "nullable": false,
+          "tokens": [
+            "write an event",
+            "write audio"
+          ]
         },
         {
           "name": "failure",
