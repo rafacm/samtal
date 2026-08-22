@@ -27,6 +27,7 @@ import os
 import re
 import subprocess
 import sys
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -39,9 +40,7 @@ from vinga_server.events.catalog import (
     Declaration,
     OtaCheckAgentNotLoaded,
     RejectedAgentNotLoaded,
-    arg_kind_of,
     carried_values,
-    kind_of,
     rendered_values,
     tokens_of,
 )
@@ -180,6 +179,25 @@ def token(value: str) -> str:
     if value and value == flat(value):
         return f"`{value}`"
     return f"`'{value}'`"
+
+
+def kind_named(declared: Any) -> str:
+    """What one declaration says its field kind is.
+
+    Read off the declaration here rather than through the catalog's
+    accessor, for the reason the constraint check below gives: the
+    generator calls that accessor, so an assertion built on it would be
+    the same string computed twice and an accessor answering the wrong
+    kind would move the document and this file together.
+    """
+    held = declared.type
+    return Kind.TOKEN.name if issubclass(held, StrEnum) else held.KIND.name
+
+
+def arg_kind_named(declared: Any) -> str:
+    """And what it says its argument kind is."""
+    held = declared.type
+    return ArgKind.TOKEN.name if issubclass(held, StrEnum) else held.ARG_KIND.name
 
 
 def check_constraint(rendered: str, declared: Any, kind: str, where: str) -> None:
@@ -414,7 +432,7 @@ def test_every_argument_row_matches_its_declaration() -> None:
             ):
                 index, kind, nullable, constraint, note = row
                 assert index == str(position), where
-                kind_name = arg_kind_of(arg).name
+                kind_name = arg_kind_named(arg)
                 assert kind == f"`{kind_name}`", f"{where} argument {position}"
                 assert nullable == yes(arg.nullable), f"{where} argument {position}"
                 assert note == cell(arg.rendered_note), f"{where} argument {position}"
@@ -437,7 +455,7 @@ def test_every_field_row_matches_its_declaration() -> None:
             for row, declared in zip(rows, carried, strict=True):
                 field = declared.name
                 _, kind, required, nullable, constraint, note = row
-                kind_name = kind_of(declared).name
+                kind_name = kind_named(declared)
                 assert kind == f"`{kind_name}`", f"{where} {field}"
                 assert required == yes(declared.required), f"{where} {field}"
                 assert nullable == yes(declared.nullable), f"{where} {field}"
