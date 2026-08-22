@@ -116,7 +116,16 @@ section.
    non-token value types keep their attribute-based path unchanged.
    This deepens the catalog: a variant author's interface shrinks
    from "find or create the wrapper for this enum" to "annotate the
-   field with the enum".
+   field with the enum". Two concrete edits this implies, named so
+   they are not discovered mid-milestone: `Declared.type` widens
+   from `type[EventValue]` to `type[EventValue] | type[StrEnum]`
+   (and mypy strict ripples that union through `verify()`,
+   `_check`, and everything else reading `Declared.type`), and the
+   docgen's `_variant_section` and `_arg_constraint` read
+   `declared.type.ARG_KIND`, `.KIND`, and `.GRAMMAR` eagerly
+   before any branch, so an enum-typed field would raise
+   `AttributeError` regardless of a token branch added later; both
+   routes go through the `Declared` accessors first.
 2. **Rendering converts the member to a builtin `str` in exactly one
    place each.** `Variant.payload()` and `Variant.logged()` branch on
    `isinstance(held, StrEnum)` and carry `str(held)`. The reason is
@@ -437,6 +446,13 @@ findings 4 to 8 amendable in place. Findings condensed but faithful:
    `_base`); `_arg_constraint` reads `declared.type.ARG_KIND` and
    `.GRAMMAR` eagerly before branching, so an enum-typed argument
    raises `AttributeError` regardless of the token branch.
+   *Resolution* (amendment `F9`): design decision 1 now names the
+   `Declared.type` widening (with its mypy-strict ripple through
+   `verify()` and `_check`) and the eager `ARG_KIND`/`KIND`/
+   `GRAMMAR` reads in `_variant_section` and `_arg_constraint`
+   that must route through the `Declared` accessors before any
+   branch.
+
 10. **P3: after the change no committed structural pin records the
     narrowing.** The golden writes `one.type.__name__`, so the
     three narrowed fields record their parent enums; the
