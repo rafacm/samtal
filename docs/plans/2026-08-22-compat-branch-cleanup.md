@@ -474,6 +474,9 @@ overclaims.** A directly constructed provider with an injected
 client still gets `self.host = None` for a hostless URL; scope the
 sentence to the factory path.
 
+*Resolution*: accepted; the sentence is scoped to the factory path
+(rewritten in the finding-8 amendment) and no docstring changes.
+
 **10 (P3). The diff module's governing implementation doc still
 states the opposite comparison rule** ("with the `mcp` field
 excluded"), which could steer the implementer into exclusion,
