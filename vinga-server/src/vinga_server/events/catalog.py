@@ -36,7 +36,11 @@ payload builder drops it, while a nullable one keeps its key.
 a value type carries, the syntaxes and the bounds are declared here and
 on the value types, never introspected from prose, and there is no
 second description of a declaration for a generator to read: the
-reference reads the declarations themselves.
+reference reads the declarations themselves. A closed set is the one
+constraint the annotation itself may state: a field annotated with its
+enumeration admits every member, one annotated with a `Literal` over
+some of them admits those, and `Declared` carries the answer either
+way, so nothing downstream reads it off a type.
 
 The module imports the value vocabulary and the standard library, and
 imports no subsystem: the arrows keep pointing downward.
@@ -489,15 +493,16 @@ def _read(variant: type[Variant]) -> tuple[Declared, ...]:
 
 
 def _declared_type(
-    variant: type["Variant"], name: str, annotation: Any
+    variant: type[Variant], name: str, annotation: Any
 ) -> tuple[type[EventValue] | type[StrEnum], frozenset[str] | None]:
     """What one field carries, and the closed set it admits.
 
-    Three annotations say a closed set: the enumeration itself, which
+    Two annotations state a set themselves: the enumeration, which
     admits every member, and a `Literal` over some of one enumeration's
     members, which admits those. A `Literal` mixing two enumerations
-    names no set at all, so it is refused here rather than answering an
-    arbitrary one of them.
+    names no set at all, so it is refused rather than answered with an
+    arbitrary one of them. Everything else is a value type, and the set
+    is its own `TOKENS` where it has one.
     """
     if isinstance(annotation, type) and issubclass(annotation, StrEnum):
         return annotation, frozenset(str(one) for one in annotation)
