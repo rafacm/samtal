@@ -86,10 +86,16 @@ comparison beside it, which holds the same field) compares entries
 with their `mcp` lists mapped through `as_mcp_grant`, so a form-only
 rewrite compares equal everywhere and a real grant change still shows
 in both the agents list and the registry-derived grants list. The
-normalization is applied inside `config/diff.py` at the comparison,
-not by mutating either snapshot: the diff's inputs stay the composed
-worlds as loaded, and locality is kept because the spelling rule
-still has exactly one home in `models.py`.
+mapping preserves the `None`-vs-`[]` distinction the field's own
+semantics carry (`None` inherits `agent_defaults`, `[]` opts out,
+and `mcp_for_agent` turns on exactly that): it is `None if
+entry.mcp is None else [as_mcp_grant(item) for item in entry.mcp]`,
+never `entry.mcp or []`, which would report nothing pending for an
+edit from `null` to `[]` while a reload revokes every inherited
+tool. The normalization is applied inside `config/diff.py` at the
+comparison, not by mutating either snapshot: the diff's inputs stay
+the composed worlds as loaded, and locality is kept because the
+spelling rule still has exactly one home in `models.py`.
 
 **What does `openai_compatible` do with a malformed `base_url`?**
 Exactly what its siblings do: `build` in `providers/openai_llm.py`
@@ -193,9 +199,14 @@ and stock xiaozhi firmware is the compatibility floor promised in
 - **Pin before reshaping.** The diff fix adds the failing-then-green
   characterization first: a form-only rewrite (string to equivalent
   object) currently reports the agent under `agents.changed` with an
-  empty grants list; the fix flips that pin to "no diff anywhere",
-  and a second pin holds a real grant edit reporting in both lists,
-  byte-unchanged before and after.
+  empty grants list; the fix flips that pin to "no diff anywhere".
+  The pin holding a real grant edit in `agents.changed` is the
+  existing `test_a_grants_only_edit_is_the_registry_s_to_report`
+  (`test_config_diff.py:251`), byte-unchanged before and after (the
+  grants-list half of any new pin proves nothing, since `McpPending`
+  is carried through verbatim from the test's own input). A third
+  pin holds the `None`-vs-`[]` case: an agent edited from `mcp:
+  null` to `mcp: []` still reports under `agents.changed`.
 - **Closed sets.** No reason token, event field, or `Applies` value
   is added or removed anywhere in this plan. The version-1 pin
   asserts existing events only.
@@ -388,6 +399,12 @@ revokes every tool. The mapping is `None if entry.mcp is None else
 [as_mcp_grant(item) for item in entry.mcp]`, identically in
 `same_agent` and the `agent_defaults` comparison, and the pin set
 gains the `None`-vs-`[]` case.
+
+*Resolution*: accepted; the open-question answer now spells the
+mapping with the `None` preservation and the reason, and the pin
+lens gains the `None`-vs-`[]` case, noting on the review's own
+observation that the real grants-list pin is the existing
+grants-only-edit test.
 
 **6 (P2). The pre-release stance is load-bearing for both deletions
 but recorded only in an issue comment, and the ADR's Context argues
