@@ -303,3 +303,179 @@ with its own commit before merge.
    not enforce for a tuple or set** (pre-existing, in-process only).
    Fixed in `6577162b`: the docstring narrowed; the hole measured
    and recorded under discoveries rather than widened away.
+
+## M2: fix the audit's four defects
+
+### What was done
+
+Five commits: the four defects in the plan's order, each with its
+changelog entry where one is owed, and this document.
+
+**The diff reads a grant, not its spelling.**
+`vinga-server/src/vinga_server/config/diff.py` gains `_same_layer`, the
+comparison both `same_agent` and the `agent_defaults` singleton now go
+through, and `_grants`, which is the mapping the plan spells:
+`None if layer.mcp is None else [as_mcp_grant(item) for item in
+layer.mcp]`. `AgentConfig` subclasses `AgentDefaults`, so one function
+covers both layers and the two comparisons cannot come apart. Nothing
+is normalized into either snapshot: the diff's inputs stay the composed
+worlds as they were loaded, and the spelling rule keeps its one home in
+`models.py`, which this reads. The module docstring gains the paragraph
+saying that an agent layer is where model equality read literally is
+not the question, since the file's opening claim was that equality is
+model inequality plus a fingerprint.
+
+Three pins in `tests/unit/test_config_diff.py`: a form-only rewrite of
+an agent's own grant reports nothing anywhere, the same rewrite in
+`agent_defaults` reports nothing, and an agent edited from no `mcp`
+list to an empty one is still reported under `agents.changed`.
+`test_a_grants_only_edit_is_the_registry_s_to_report` is byte-unchanged,
+which is what holds the other direction.
+
+`docs/plans/2026-08-20-config-diff-read-implementation.md` gains a
+`## Corrections` section dated 2026-08-22 saying its "with the `mcp`
+field excluded" line describes a superseded rule, why reading it as a
+specification would be worse than reading nothing, and that
+`config/diff.py`'s own docstring and comments are current. The history
+above it is left as written.
+
+**The `openai_compatible` factory refuses a malformed `base_url`.**
+`build` in `providers/openai_llm.py` calls `parse_base_url(label,
+base_url)` before constructing, with the seven-line comment saying the
+boolean is discarded deliberately: the constructor derives the host it
+needs for the failure event from the same URL, `_ask_for_usage` derives
+from that host, and threading the answer through would encode one
+predicate twice. The refusal in `providers/openai_endpoint.py` loses
+its `; got "{base_url}"` clause in the same commit, and its docstring
+gains the reason (a key pasted where the URL goes has no netloc, which
+is this refusal's own case and the one shape `url_credential` cannot
+mask).
+
+Three bites in `tests/unit/test_providers_llm.py`: the scheme-less,
+hostless and host-without-scheme URLs refused at build with the shared
+sentence and the entry's own name; a credential-shaped `base_url`
+whose value is asserted absent from the refusal; and a round driven
+through an injected client for both a local endpoint and OpenAI's own,
+asserting `stream_options` is on one request and not the other.
+
+**The events strip is described as what it is.** Three sentences
+corrected, in `conversations/store.py` (the module docstring and the
+comment over `EVENT_CONTENT`) and `conversations/docgen.py`. Each
+claimed the strip is "the rule that reads a database written before the
+narrowing"; it runs in `_event_row` at write time and no read applies
+it. The corrected claim is write-time-only defense in depth, with the
+two supporting facts stated where they are load-bearing: the strip is
+applied where a row is built, and the API counts a session's events and
+never returns their fields. `docs/reference/conversations-schema.md` is
+regenerated in the same commit, which is the only generated surface
+this milestone moves.
+
+**The version-1 activation poll's consequence is asserted.**
+`test_a_version_one_body_is_accepted_as_it_is` keeps its request and
+gains the two assertions: `activation_pending` carries the code the
+board is showing its owner, and no `activation_refused` record was
+written. Read through `tests/support/events.py`, the suite's shared
+capture idiom, imported with the `emitted` alias the modules that
+called it that already use. No behavior change and no changelog entry.
+
+### The inventories, by tooling
+
+Run from `vinga-server/`, at commit time.
+
+- **The refusal's other callers.** `grep -rn "parse_base_url" src
+  tests`: three factories call it (`openai_tts.py:194`,
+  `openai_asr.py:425`, and now `openai_llm.py:276`) and no test names
+  it. `grep -rn 'must be a URL' src tests ../docs`: the one source
+  sentence and the two sibling pins
+  (`test_providers_openai_tts.py:190`, `test_providers_openai_asr.py:265`),
+  both matching `'"base_url" must be a URL'` alone, so dropping the
+  echo moved neither. No committed document quotes the sentence.
+- **The strip's claim.** `grep -rn "narrowing" src`: six hits, three of
+  them the claim (store's docstring, store's `EVENT_CONTENT` comment,
+  docgen) and three ordinary uses of the word. `grep -rn
+  "EVENT_CONTENT" src tests`: the definition, one use in `_event_row`,
+  the two prose sites, and one test reference, which is the whole of
+  the surface and confirms there is no read-side arm to correct.
+- **Generated surfaces.** All four regenerated and diffed:
+  `conversations schema` moved with the docgen fix and is committed
+  with it; `config reference`, `events reference` and `config openapi`
+  are identical.
+
+### Deviations from the plan
+
+Four, all additions inside what the plan delegates rather than
+departures from it.
+
+1. **A fourth diff pin.** The plan names three; the second comparison
+   the fix changes is `agent_defaults`, and a change to a comparison
+   with no case of its own is a change nothing holds. The added pin is
+   the same form-only rewrite one layer down.
+2. **A `stream_options` pin that did not exist.** The plan asks for the
+   keyless build to be pinned through public behavior rather than
+   attribute reach-in. Nothing in the suite asserted the request shape
+   at all (`grep -rn "stream_options\|_ask_for_usage" tests` found
+   nothing before this commit), so the bite drives a round against both
+   a local endpoint and OpenAI's own: absence alone would pass for a
+   provider that never asks anybody.
+3. **Two docstrings in `openai_endpoint.py`.** The plan allows
+   "docstring truth only, if at all". The module docstring said the LLM
+   stage takes only the host from the shared module, which stopped
+   being true, and `endpoint_host`'s said a built provider never has a
+   hostless URL, which review finding 9 scoped to the factory path. Both
+   now say what holds.
+4. **A third site for the strip's claim.** The plan names
+   `conversations/store.py` around lines 120-140 and
+   `conversations/docgen.py`. The store's module docstring carries the
+   same claim at line 55 ("what keeps it correct for a database written
+   by an older server") and is corrected with the other two.
+
+### Discoveries
+
+- **The characterization test earns its name.** Against the unfixed
+  comparison, both form-only pins fail (the agent one reporting the
+  agent under `agents.changed`, the layer one reporting
+  `agent_defaults.changed` true) and the `None`-against-`[]` pin passes,
+  which is exactly what it is for: it holds the wrong fix rather than
+  the current behavior. The check was run by copying the file aside,
+  writing `HEAD`'s version over it, running, and copying back, which is
+  the restore procedure AGENTS.md gives, `touch` included.
+- **The provider bites fail the same way.** Against the unfixed factory
+  all four items fail, the credential one because nothing is raised at
+  all: a hostless `base_url` built a provider, and only its first
+  request would have found out.
+- **Three refusal variants, one event name.** The version-2 refusals
+  are one declared event (`activation_refused`) with a reason token
+  distinguishing them, so "none of the three fired" is a single
+  assertion on an empty record list rather than three. `ActivationPending`
+  is a DEBUG event on the `vinga_server.ota` channel, so the capture
+  names both the level and the logger.
+- **`model_copy(update=...)` is the cheap way to compare two models
+  under one substituted field.** It keeps the class, so pydantic's own
+  equality does the rest, and no field of the entry has to be
+  enumerated here: a field added to an agent layer tomorrow is compared
+  without this module hearing about it.
+
+### Verification
+
+Run from `vinga-server/`, at the last code commit of the milestone.
+
+- `uv run ruff check .`: all checks passed.
+- `uv run mypy`: success, no issues found in 3 source files. Its scope
+  is the events package, which this milestone does not touch.
+- `uv run pytest tests/unit -q`: 2,805 passed, 20 skipped, in 5:38.
+  Eight more items than M1's 2,797: three diff pins, three parametrized
+  URL refusals, the credential sentinel and the request-shape bite. The
+  activation and conversation commits add no items.
+- `uv run pytest tests/integration -q`: 61 passed, in 3:11.
+- The four documentation drift checks, regenerated and diffed against
+  `../docs/reference/`: `config reference`, `events reference` and
+  `config openapi` identical; `conversations schema` identical after
+  the regeneration committed with the docgen fix.
+
+Not verified here, and not claimed: the container image and the smoke
+lane, which no part of this milestone touches; and the
+`openai_compatible` refusal against a real deployment carrying a
+malformed `base_url`, which is a boot this repository cannot stand up.
+What it does there is fail the boot instead of every conversation,
+which is the plan's stated intent and the changelog entry's stated
+consequence.
