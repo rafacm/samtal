@@ -1973,9 +1973,9 @@ with closed sets for the fields that hold a reason token. The reference
 this index points at is those declarations rendered, and CI regenerates
 it and refuses any difference. The emitters build each emission inside a
 guard, so an emission that could not be built costs one line on the
-emitter's own channel saying what was refused, and nothing else: it is
-dropped rather than written in some other shape, because a telemetry bug
-must never cost a reply.
+emitter's own channel, naming a fixed label and a fixed code and nothing
+about the emission itself; it is dropped rather than written in some
+other shape, because a telemetry bug must never cost a reply.
 
 These events are metadata, and metadata only. What was said is in the
 conversation store, keyed by the same `session`: query `turns` there for
