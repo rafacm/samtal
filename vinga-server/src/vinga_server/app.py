@@ -38,7 +38,7 @@ from vinga_server.config.responses import (
 from vinga_server.config.secrets import SecretStore
 from vinga_server.conversations import ConversationStore, migrate_existing
 from vinga_server.device.bindings import DeviceBindings
-from vinga_server.events import EventEnforcementError, ServerEvents, resolve_enforcement
+from vinga_server.events import ServerEvents
 from vinga_server.events.catalog import CaptureDisabled, CaptureEnabled
 from vinga_server.events.values import ConfiguredPath
 from vinga_server.filler import build_agent_fillers
@@ -54,7 +54,7 @@ events = ServerEvents(__name__)
 
 # What a boot that refused looks like from the outside, and the whole of
 # what may be said about it. `DatabaseBusyError` is a `ConfigError`, so
-# the four names below are the boot failure taxonomy in full: every one
+# the three names below are the boot failure taxonomy in full: every one
 # of them carries a message written to be printed as it is, which is what
 # lets the bridge below hand one sentence to an operator and nothing
 # else.
@@ -68,7 +68,7 @@ events = ServerEvents(__name__)
 # the reload path catches it beside `ConfigError` by name and re-parenting
 # it would change what a `ValueError` means to every caller of the MCP
 # layer; naming it here is the smaller and more honest change.
-BOOT_FAILURES = (ConfigError, EventEnforcementError, McpConfigError, ProviderError)
+BOOT_FAILURES = (ConfigError, McpConfigError, ProviderError)
 
 
 class StartupFailed(RuntimeError):
@@ -809,15 +809,6 @@ def create_app(
     # applies it again with that level once it has it, and the call is
     # idempotent.
     logs.quiet_vendor_libraries()
-    # How strictly this process holds its events to their declarations
-    # (#155), resolved here rather than at import because a running
-    # server is a deployment whatever launched it: a production process
-    # may import this function and serve the app under an ASGI runner
-    # without ever reaching `main()`, and it must get the forgiving mode
-    # a deployment needs rather than the strict default a lane wants.
-    # First, before anything that could emit, and it refuses an
-    # unusable value here rather than at the first live violation.
-    resolve_enforcement()
     # No interactive docs, no schema. A device needs two paths and a
     # healthcheck needs a third; publishing an API description of them to
     # anyone who asks is surface with no reader, and the security default

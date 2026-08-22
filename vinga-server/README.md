@@ -1957,7 +1957,6 @@ This index is the other half: what exists, and when it fires.
 | `device_bindings_unreadable` | the configuration database could not be read, so the answer is the served world's and may be older |
 | `api_error` | the configuration API failed to handle a request; the class name and nothing else |
 | `api_storage_error` | the configuration API met unreadable stored state |
-| `schema_violation` | internal: an emission the schema refused and the emitter could not recover into a declared shape, replaced by this one, which carries nothing but the channel's own identity |
 
 No MCP event names a tool, and none of them can. Half of a published
 tool name is whatever the far side called it, sanitizing replaces only
@@ -1972,18 +1971,11 @@ Every event above is declared: its channel, its level, the sentence it
 renders, the arguments that sentence takes and every field it may carry,
 with closed sets for the fields that hold a reason token. The reference
 this index points at is those declarations rendered, and CI regenerates
-it and refuses any difference. The emitters
-hold each emission to that declaration before any of it is written, and
-`VINGA_EVENTS_ENFORCEMENT` decides what happens to one that does not
-match. A running server defaults to `forgiving`: the emission is
-recovered into a declared shape, or replaced by a `schema_violation`
-event carrying nothing but the session's own identity, and one line on
-the emitter's channel says what was refused, because a telemetry bug
-must never cost a reply. Everything that is not a running server (the
-test lanes, an import, a REPL) defaults to `strict`, where a violation
-raises instead. Set it to `strict` if you want a local server that
-refuses loudly while you are working on it; anything other than those
-two words refuses to start.
+it and refuses any difference. The emitters build each emission inside a
+guard, so an emission that could not be built costs one line on the
+emitter's own channel saying what was refused, and nothing else: it is
+dropped rather than written in some other shape, because a telemetry bug
+must never cost a reply.
 
 These events are metadata, and metadata only. What was said is in the
 conversation store, keyed by the same `session`: query `turns` there for

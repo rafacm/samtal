@@ -26,7 +26,6 @@ from vinga_server.composition import Composition
 from vinga_server.config import Config, ConfigError
 from vinga_server.config.boot import load_boot_config
 from vinga_server.config.loader import CONFIG_ENV_VAR
-from vinga_server.events import EventEnforcementError, resolve_enforcement
 from vinga_server.providers import ProviderError
 from vinga_server.registry import CLOSE_MARGIN_S
 
@@ -347,11 +346,11 @@ def main() -> None:
         raise SystemExit(conversations_cli.main(sys.argv[2:]))
 
     if sys.argv[1:2] == [EVENTS_COMMAND]:
-        # The third group, and the one that reaches least: it prints the
-        # event registry and opens nothing at all. Dispatched here, above
-        # the mode resolution below, so that an unusable
-        # VINGA_EVENTS_ENFORCEMENT cannot stand between a reader and the
-        # document that says what the events are.
+        # The third group, and the one that reaches least: it prints
+        # the event registry and opens nothing at all. Dispatched here,
+        # above the boot below, for the reason the two groups above are:
+        # a document that says what the events are must not need a
+        # server that starts.
         from vinga_server import events_cli
 
         raise SystemExit(events_cli.main(sys.argv[2:]))
@@ -365,16 +364,6 @@ def main() -> None:
     args = parser.parse_args()
 
     try:
-        # How strictly this process holds its events to their
-        # declarations (#155). Here rather than at import, because
-        # `.env` is what a deployment sets it in and this module imports
-        # the app, and therefore the emitters, long before this line
-        # runs. After the three subcommand exits above, too: an invalid
-        # value of a server-only variable must not block a recovery
-        # command or the generated reference.
-        # `create_app` resolves it again for a server nothing launched
-        # through here.
-        resolve_enforcement()
         # Both halves: the file named by --config or VINGA_CONFIG, and the
         # domain half from the database that file points at.
         booted = load_boot_config(args.config)
@@ -397,7 +386,7 @@ def main() -> None:
         app = create_app(
             config, booted.secrets, on_started=lambda: onboarding.log_banner(config.server)
         )
-    except (ConfigError, EventEnforcementError, ProviderError) as exc:
+    except (ConfigError, ProviderError) as exc:
         print(exc, file=sys.stderr)
         raise SystemExit(1) from None
 

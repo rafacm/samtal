@@ -1675,9 +1675,9 @@ def committed() -> dict[str, list[dict[str, Any]]]:
 
 if __name__ == "__main__":  # pragma: no cover - the regeneration path
     # The run's environment, set the way a lane sets it: an app refuses
-    # to boot without its two secrets, the emitters have to stay strict,
-    # and a database needs somewhere writable. `conftest.py` is where all
-    # of that is decided, so it is imported rather than restated.
+    # to boot without its two secrets, and a database needs somewhere
+    # writable. `conftest.py` is where all of that is decided, so it is
+    # imported rather than restated.
     import tests.conftest  # noqa: F401
 
     COMMITTED.parent.mkdir(parents=True, exist_ok=True)

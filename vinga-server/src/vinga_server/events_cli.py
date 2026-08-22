@@ -3,10 +3,9 @@
 One command, and it reaches nothing. No database, no configuration file,
 no key, and no server: the catalog is a Python module, and printing it
 is reading that module. That is why the entrypoint dispatches this group
-before it resolves `VINGA_EVENTS_ENFORCEMENT` or parses a server's
-arguments, the way it dispatches `config` and `conversations`: a
-server-only variable somebody misspelled must not stand between a reader
-and the document that says what the events are.
+before it parses a server's arguments, the way it dispatches `config`
+and `conversations`: a document that says what the events are must not
+need a server that starts.
 
 Usage errors leave as a sentence of this module's own, for the reason
 the conversations group gives: several of argparse's quote what was
