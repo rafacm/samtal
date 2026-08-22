@@ -23,9 +23,15 @@ not re-litigated here:
 
 1. **The yardstick is the 2026-08-20 compatibility-floor ADR read
    under the pre-release stance**: no third-party installations need
-   honoring, our own boards are resettable, and the ADR itself does
-   not change (databases stay supported best-effort from revision
-   0001, so the migration-era column branches stay).
+   honoring, and our own boards are resettable. The ADR's decisions
+   do not change (databases stay supported best-effort from revision
+   0001, so the migration-era column branches stay), but the stance
+   itself lands in the repository: M1 adds a dated addendum to the
+   ADR's Context recording the 2026-08-22 decision and that it is
+   what licenses removing pre-release tolerance from refusal paths,
+   so the checkout carries the deletions' justification instead of a
+   Context that argues the other way while the record lives only in
+   an issue comment.
 2. **Two branches are deleted**: the single-redirect follow in
    `config doctor` (`config/cli.py`) and the bare-string device
    binding (`_binding_as_list` in `config/models.py`). Each deletion
@@ -292,14 +298,16 @@ Reuse the existing assets; the new bites are:
 
 ## Milestones
 
-- [ ] **M1: Delete the obsolete tolerances.** Two commits plus
-  changelog: the doctor redirect-follow deletion and the bare-string
-  binding deletion, each with its test bite and regenerated
-  reference surfaces. Design footprint: deepens `config/cli.py`'s
-  probe (its contract shrinks to one GET, no redirects) and
-  `config/models.py`'s binding normalization (one accepted shape);
-  callers stop having to know that a redirect might be followed or
-  that a binding might be a string. No new modules, no new seams.
+- [ ] **M1: Delete the obsolete tolerances.** Three commits plus
+  changelog: the ADR Context addendum recording the pre-release
+  stance, then the doctor redirect-follow deletion and the
+  bare-string binding deletion, each deletion with its test bite and
+  regenerated reference surfaces. Design footprint: deepens
+  `config/cli.py`'s probe (its contract shrinks to one GET, no
+  redirects) and `config/models.py`'s binding normalization (one
+  accepted shape); callers stop having to know that a redirect might
+  be followed or that a binding might be a string. No new modules,
+  no new seams.
 - [ ] **M2: Fix the audit's four defects.** Four commits, one per
   finding, in the order: diff normalization, `openai_compatible`
   build validation, conversation-store comment correction with
@@ -413,6 +421,10 @@ record of their justification and a future session reading the ADR
 finds the opposite reasoning. A short dated amendment to the ADR's
 Context (migration decisions unchanged) lands in M1 beside the
 deletions.
+
+*Resolution*: accepted; M1 gains the ADR addendum as its first
+commit, and decision 1 now states what changes in the ADR and what
+does not.
 
 **7 (P2). Two doctor tests break or die and the plan's grep finds
 only one; a second stale comment is unnamed.**
