@@ -9,6 +9,15 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **The credits say what was actually taken from the upstream
+  server.** vinga-server was written against the firmware's protocol
+  docs (now hyperlinked where mentioned), not started from the
+  xinnan-tech codebase; what carried over is the device-token scheme,
+  kept wire-compatible so stock firmware connects unchanged. The
+  README credits, the "What is vinga?" story, and the vinga-server
+  README opening now say exactly that instead of "starts from" and
+  "based on".
+
 - **The tagline and repository description speak of agents, on your
   own terms.** The README header line becomes "Come on, speak, on
   your own terms": the old "with your own hardware" implied a

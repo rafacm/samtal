@@ -1,6 +1,10 @@
 # vinga-server
 
-The Vinga conversation server (Python), based on
+The Vinga conversation server (Python): a wire-compatible backend for
+[78/xiaozhi-esp32](https://github.com/78/xiaozhi-esp32) devices, written
+against the firmware's
+[protocol docs](https://github.com/78/xiaozhi-esp32/blob/main/docs/websocket.md);
+the device-token scheme follows
 [xinnan-tech/xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server).
 
 It implements the two endpoints a device needs:
