@@ -191,8 +191,11 @@ and stock xiaozhi firmware is the compatibility floor promised in
   the follow gone.
 - **Changelog**: the two deletions are `### Removed` entries; the
   diff fix and the `openai_compatible` refusal are `### Fixed`; the
-  comment correction and the version-1 pin need no changelog entry
-  (no observable behavior moves).
+  conversation-store comment correction gets a one-line `### Fixed`
+  too, because the regenerated `conversations-schema.md` is a
+  published reference making a different claim and the changelog's
+  own practice records documentation corrections. Only the version-1
+  pin needs no entry (a test addition, nothing published moves).
 - **Generated surfaces move with their source**: if the `devices`
   write schema published in `docs/reference/api-openapi.json` or the
   domain reference carries the string binding form, it is regenerated
@@ -500,6 +503,9 @@ the plan waives a changelog entry.** The regenerated
 `conversations-schema.md` makes a different claim; the changelog's
 own practice records documentation corrections. Add a one-line
 `### Fixed`.
+
+*Resolution*: accepted; the changelog decision now carries the entry
+and scopes the waiver to the version-1 pin alone.
 
 **12 (P3). The `openai_compatible` refusal moves to boot but the
 write path still accepts the value.** The asymmetry is shared with
