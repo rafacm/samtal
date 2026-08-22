@@ -73,12 +73,15 @@ and discoveries; no deviations says so explicitly.
    carries only fixed vocabulary. `main.py` and `app.py` lose the
    resolve calls and the `EventEnforcementError` handling around
    boot.
-4. **`VINGA_EVENTS_ENFORCEMENT` disappears from the surface.** The
-   env var is no longer read anywhere; a deployment that still sets
-   it gets an inert variable, which is harmless and stated in the
-   CHANGELOG entry. The infra deployment that may set it is a
-   separate repository's cleanup and is recorded as a follow-up
-   note in the implementation doc, not touched here.
+4. **`VINGA_EVENTS_ENFORCEMENT` disappears from the surface,
+   including this repository's own image.** `vinga-server/
+   Dockerfile` sets `ENV VINGA_EVENTS_ENFORCEMENT=forgiving` under
+   a nine-line posture comment; both are deleted in this milestone,
+   named in the module layout beside the wiring. Elsewhere a
+   deployment that still sets the variable gets an inert one, which
+   is harmless; only the infra repository's ConfigMap remains a
+   separate cleanup, recorded as a follow-up note in the
+   implementation doc.
 5. **The pins move deliberately, all four.**
    `docs/reference/events.md` loses the `schema_violation` section,
    its per-channel variants, its index row, the header prose that
@@ -142,6 +145,8 @@ and discoveries; no deviations says so explicitly.
   material, the counting sentence rewritten, and the `internal`
   branches out of `_index_row` and `_event_section`.
 - `app.py`, `main.py`: the resolve calls and error handling out.
+- `Dockerfile`: the `ENV VINGA_EVENTS_ENFORCEMENT=forgiving` line
+  and its posture comment out.
 - Tests per decision 6.
 
 ## Milestones
