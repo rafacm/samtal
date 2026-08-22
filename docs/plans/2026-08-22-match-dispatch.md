@@ -118,8 +118,10 @@ decision here is the issue's "judgment call" answered.
 
 ## Module layout
 
-Unchanged. One file touched in `src` (`runtime/pipeline.py`), one
-test file gains the pin the review found missing.
+Unchanged. One file touched in `src` (`runtime/pipeline.py`); one
+test file gains the pin the review found missing, and the shared LLM
+fake (`tests/support/providers.py`) gains `StreamStarted` in its
+script union so the pin can yield one without lying about the type.
 
 ## Tests
 

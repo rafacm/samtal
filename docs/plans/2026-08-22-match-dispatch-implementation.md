@@ -90,12 +90,18 @@ introduced.
 
 ### Deviations from the plan
 
-None. The pin was committed green against the chain before the
-conversion touched the loop; the arms are spelled as the plan's
-decisions section specifies; the comments moved unchanged; the
-annotation landed in the conversion commit; the changelog entry is
-under `### Changed`; and the six session suites named in the plan's pin
-lens are byte-unchanged apart from the one file the pin was added to.
+One, of bookkeeping size: the plan's module layout named one test
+file, and the pin also required extending the shared LLM fake
+(`tests/support/providers.py`), whose `Step` union could not script
+a `StreamStarted` without lying about the type. The PR review's
+finding 2 caught the omission and the plan's module layout now names
+the fake. Otherwise none: the pin was committed green against the
+chain before the conversion touched the loop; the arms are spelled
+as the plan's decisions section specifies; the comments moved
+unchanged; the annotation landed in the conversion commit; the
+changelog entry is under `### Changed`; and the six session suites
+named in the plan's pin lens are byte-unchanged apart from the one
+file the pin was added to.
 
 ### Discoveries
 
