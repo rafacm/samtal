@@ -159,8 +159,6 @@ def reference() -> str:
     """The whole reference document, rendered from the declarations."""
     events = documented()
     variants = sum(len(spec.variants) for spec in events.values())
-    production = [name for name, spec in events.items() if not spec.internal]
-    internal = [name for name, spec in events.items() if spec.internal]
     lines = [
         "# Event schema reference",
         "",
@@ -173,9 +171,8 @@ def reference() -> str:
             f"The structured events are this server's observability surface "
             f"([ADR]({OBSERVABILITY_ADR})), and they carry metadata and nothing "
             f"else ([ADR]({CONTENT_ADR})). This document is that surface written "
-            f"down: {len(events)} events in {variants} variants, "
-            f"{len(production)} of them emitted from ordinary sites and "
-            f"{len(internal)} internal. What was said in a conversation is "
+            f"down: {len(events)} events in {variants} variants. What was said "
+            f"in a conversation is "
             f"in the conversation store instead, keyed by the same `session` "
             f"([its reference]({CONVERSATIONS_REFERENCE}))."
         ),
@@ -186,20 +183,13 @@ def reference() -> str:
             "and argument order are derived from its own fields, so an "
             "emission that is not one of these shapes cannot be built at all. "
             "What is left at runtime is the construction itself, which happens "
-            "inside the emitter's guard, and `VINGA_EVENTS_ENFORCEMENT` "
-            "decides what a construction that refuses costs. `forgiving` says "
-            "so once on the emitter's own channel and dispatches "
-            "`schema_violation` in its place; `strict` raises instead."
+            "inside the emitter's guard: a construction that refuses is said "
+            "once on the emitter's own channel and dropped, because a "
+            "telemetry bug must never cost a reply."
         ),
         "",
         *_paragraph(
-            f"Which one a process gets when the variable is unset is a default "
-            f"rather than a rule about the process: a running server defaults to "
-            f"`forgiving`, because a telemetry bug must never cost a reply, and "
-            f"everything that is not a running server (a test lane, an import, a "
-            f"REPL) defaults to `strict`. Either mode can be asked for in either "
-            f"place, and a developer who wants a loud local server sets `strict` "
-            f"exactly that way. The [README's Logging section]({LOGGING_SECTION}) "
+            f"The [README's Logging section]({LOGGING_SECTION}) "
             f"is the human overview, with one line per event saying when it "
             f"fires."
         ),
@@ -373,7 +363,7 @@ def reference() -> str:
 
 
 def _index_row(spec: Declaration) -> str:
-    name = f"`{spec.name}`" + (" (internal)" if spec.internal else "")
+    name = f"`{spec.name}`"
     channels = channels_of(spec)
     if channels == frozenset(CHANNELS):
         rides = f"every channel ({len(CHANNELS)})"
@@ -387,15 +377,6 @@ def _index_row(spec: Declaration) -> str:
 
 def _event_section(spec: Declaration) -> list[str]:
     lines = [f"### `{spec.name}`", ""]
-    if spec.internal:
-        lines += [
-            *_paragraph(
-                "**Internal.** No ordinary emit site produces this event: the "
-                "emitter itself is its only producer, which is what the "
-                "declaration's own `internal` flag says."
-            ),
-            "",
-        ]
     if spec.note:
         lines += [*_paragraph(spec.note), ""]
     for position, variant in enumerate(spec.variants, start=1):
