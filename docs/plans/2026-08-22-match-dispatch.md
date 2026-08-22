@@ -246,4 +246,8 @@ AGENTS.md requires.** The implementation-doc section and the ticked
 checklist entry are milestone work in the same change; the plan
 references the doc but never lists the work.
 
+*Resolution*: accepted; folded into the milestone rewrite the
+finding-1 amendment made, which now lists the implementation-doc
+section and the ticked checklist entry as the milestone's own work.
+
 Verdict: ready after the P1/P2 amendments.
