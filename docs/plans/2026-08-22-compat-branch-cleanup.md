@@ -330,7 +330,7 @@ Reuse the existing assets; the new bites are:
 ## Milestones
 
 - [x] **[M1: Delete the obsolete tolerances](2026-08-22-compat-branch-cleanup-implementation.md#m1-delete-the-obsolete-tolerances).**
-  (PR TBD) Three commits plus changelog: the ADR Context addendum
+  (PR [#237](https://github.com/rafacm/vinga/pull/237)) Three commits plus changelog: the ADR Context addendum
   recording the pre-release stance, then the doctor redirect-follow
   deletion and the
   bare-string binding deletion, each deletion with its test bite and
