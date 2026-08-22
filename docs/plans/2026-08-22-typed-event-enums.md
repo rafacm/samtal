@@ -324,7 +324,7 @@ section.
   lawful while the stack is open, and `main` stays releasable.
 - [x] **[M2: migrate the caller-passed fields, retype the decision
   sites, delete the wrappers](2026-08-22-typed-event-enums-implementation.md#m2-migrate-the-caller-passed-fields-retype-the-decision-sites-delete-the-wrappers).**
-  (PR TBD) Every remaining token field and its
+  (PR #253) Every remaining token field and its
   emit sites move to members; the three narrowed aliases replace
   their classes and the decision sites adopt them; `TokenValue` and
   all subclasses are deleted with their tests; `__all__`, the golden
