@@ -591,6 +591,12 @@ def _check(variant: type[Variant], declared: tuple[Declared, ...]) -> None:
             raise CatalogError(f"{where} renders {name}, which it does not declare")
         if not names[name].required:
             raise CatalogError(f"{where} renders {name}, which it may not carry at all")
+        # And a rendered value has to have an argument kind, which is
+        # what a reference prints for the position: two payload kinds
+        # have no argument twin, and a sentence rendering one of those
+        # would print a cell with nothing in it.
+        if arg_kind_of(names[name]) is None:
+            raise CatalogError(f"{where} renders {name}, which has no argument kind")
     conversions = sum(
         1 for found in _CONVERSION.findall(variant.TEMPLATE) if found != "%%"
     )
