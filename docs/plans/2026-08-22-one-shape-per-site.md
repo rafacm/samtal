@@ -73,23 +73,29 @@ providers.
    #241's thinning would then carry; the entanglement is pinned by
    a unit test on the assembly function instead).
 3. **The assembly helpers move to a new `events/assembly.py`, with
-   plain-value signatures.** The module owns: the entry quartet
-   builder (today's `_Entry`/`_entry_of`, taking the provider's
-   `identity` attributes as plain optionals, not the provider
-   object), the tool-call selector (today's `_tool_called` and
-   `_tool_fragment`, taking `source: str`, `name: str | None`,
-   `entry: str | None`, agent, duration, error flag), and the LLM
-   round/retry/failure builders (today's `_llm_retried`,
-   `_llm_rounded`, `_provider_failure`, minus the twin selection
-   they existed for). Plain values keep the events package's
-   arrows pointing downward: `assembly.py` imports the catalog and
-   values, never `runtime/` types; `pipeline.py` unpacks its
-   `ToolInvocation` and provider objects at the call. The module
-   passes the deletion test because it is a real adapter: one side
-   speaks runtime vocabulary (provider objects, classifier
-   constants), the other the catalog's, and the orchestrator
-   stops knowing how an event is put together. Module docstring
-   states that contract.
+   plain-value signatures, and the module is justified by what its
+   caller stops knowing.** One responsibility: one provider's
+   identity and one call's classification, as the variant that
+   describes it. The orchestrator stops naming variant classes,
+   ordering field lists, or knowing which value type wraps which
+   argument; that, not a vocabulary crossing, is the depth claim,
+   because with plain values the signatures speak builtins in and
+   `Variant` out. What makes the module more than forwarding is
+   the frozen entry quartet type: today's `_Entry` moves INTO
+   `assembly.py` intact, `provider` and `type` required, so
+   atomicity stays a type fact at the only place the four values
+   are built (this supersedes the draft's decision 2 framing; the
+   assembly-level unit test pins the builder, and
+   `test_event_surface_pins.py`'s emission-level
+   `assert not hasattr(failed, "provider")`-style half survives
+   unchanged). The builders (`llm_retried`, `llm_rounded`,
+   `provider_failure`, the three tool-call constructors, the
+   shared name fragment) are thin single-constructor functions and
+   say so; the quartet type and the fragment logic are what earn
+   the module its name. `assembly.py` imports the catalog and
+   values, never `runtime/` or `providers/` types; `pipeline.py`
+   unpacks its objects at the call. Module docstring states the
+   contract.
 4. **`pipeline.py` keeps only decision sites.** What remains in the
    orchestrator is the `match` dispatch (#235's) calling assembly
    functions inside emit thunks; the `_Entry` dataclass, the twin
