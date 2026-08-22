@@ -29,11 +29,18 @@ and discoveries; no deviations says so explicitly.
 
 ## The measurement this plan stands on
 
-The twins differ ONLY in their carried payload fields. Each pair
-shares a byte-identical `TEMPLATE` and `ARGS` tuple (verified by
-reading `events/catalog.py` around lines 1195 to 1360); the OfEntry
-half carries the entry quartet (`provider`, `type`, and already
-absent-able `host` and `model`) and the entry-less half does not.
+Each pair shares a byte-identical `TEMPLATE` and `ARGS` tuple
+(verified by reading `events/catalog.py` around lines 1195 to
+1360). The `llm_round` and `llm_retry` pairs differ only in their
+carried payload fields (the OfEntry half carries the entry quartet:
+`provider`, `type`, and already absent-able `host` and `model`).
+The `provider_failed` pair ALSO differs in two required rendered
+fields: `named` is `Nothing` on one side and `QuotedProvider` on
+the other, `where` is `Nothing` versus `ReachingHost`. That second
+difference is what the collapse must engineer around, because a
+union of two value types is refused at `_read`, a rendered field
+cannot default to `ABSENT`, and `QuotedProvider("")` refuses at
+construction.
 The entry-less twin fires only for a provider the registry never
 built, which in practice is test fixtures; production emits one
 shape. No test file references any OfEntry name directly; the
@@ -95,9 +102,19 @@ providers.
    every driven path), and that expectation is verified rather
    than assumed; if it moves, the milestone stops and records why
    before proceeding. Regenerations run twice, second run clean.
-6. **The docgen needs no change.** Variants with absent-able fields
-   already render (the `Absent` union is an existing shape); only
-   the generated content moves.
+6. **`provider_failed`'s fragments become optional the way
+   `ReachingHost` already is, and one documented grammar loosens.**
+   The survivor declares `named: QuotedProvider` and
+   `where: ReachingHost`; `QuotedProvider.of` takes `str | None`
+   and answers the empty rendering for `None`, exactly as
+   `ReachingHost.of` does, and the `QUOTED_PROVIDER` grammar widens
+   to its optional form with its description amended. This is the
+   one place in the milestone where a documented constraint
+   genuinely loosens: the reference's grammar table shows the
+   widened pattern, and the surviving variant's argument rows move
+   from `empty_fragment` to `quoted_provider`/`reaching_host`. The
+   docgen code needs no change; its content moves in exactly these
+   ways.
 
 ## The standing review lenses, pre-answered
 
