@@ -51,8 +51,11 @@ Half of that strip is now defense in depth and half of it is still live,
 which is worth saying precisely. The narrowing took `text` off `heard`,
 `replied` and `agent_said`, so those three keys never arrive; the strip
 was written to be correct either way, which is what let the store behave
-identically on both sides of that change and what keeps it correct for a
-database written by an older server. `tool` still arrives, on the one
+identically on both sides of that change and what meets a payload that
+regains the key. It is a write-time rule and only that: it runs where a
+row is built and no read applies it, so it says what lands in this
+database and nothing about what an older one holds. `tool` still
+arrives, on the one
 branch the narrowing kept it for: a builtin's name is this application's
 own. The strip removes it from the row anyway, so that every name a call
 carries lives in `tool_invocations` under the text switch rather than in
@@ -127,9 +130,12 @@ STOP_TIMEOUT_S = BUSY_TIMEOUT_MS / 1000 + 5.0
 #
 # `text` was the transcript half of three events and the narrowing
 # (#120) has taken it off all three, so those entries are defense in
-# depth: a payload that regains the key meets it here rather than in a
-# review, and the same rule reads a database written by a server from
-# before the narrowing.
+# depth at the one moment there is: a payload that regains the key meets
+# this table on its way into a row rather than meeting a review. The
+# strip runs in `_event_row` and nowhere else, so it is a rule about
+# what this server writes and not about what it reads. Rows an older
+# server wrote are not reached by it, and nothing serves their fields
+# either: the API counts the events of a session and never returns them.
 #
 # `tool` is different, and still live. The narrowing took the called
 # tool's name off every branch but one, because a device's name is its

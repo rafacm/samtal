@@ -58,6 +58,14 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   an operator sees changed: the same events with the same fields, and
   the same speech.
 
+- **The conversation store's event strip is described as what it is**
+  (#225). Its comments and the generated
+  `docs/reference/conversations-schema.md` said the rule that takes
+  content keys off an events row also "reads a database written before
+  the narrowing". It does not: it runs where a row is written and no
+  read applies it. The strip is unchanged, its write-time guarantee is
+  unchanged, and what is said about it is now true.
+
 - **An `openai_compatible` LLM refuses a malformed `base_url` at the
   boot that reads it** (#225). The `openai` ASR and TTS types have
   refused a `base_url` with no scheme or no host since the option
