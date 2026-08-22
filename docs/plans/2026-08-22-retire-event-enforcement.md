@@ -47,7 +47,17 @@ and discoveries; no deviations says so explicitly.
    on `None` before building an `Emission`, `SessionEvents.emit`
    reads `self._clock()` before the drop decision so it returns its
    timestamp either way, and `Checked`'s docstring drops its "or
-   the recovery event's" clause.
+   the recovery event's" clause. One stated, accepted loss: the
+   report record carries no `session` or `device` field, where
+   today the recovery event that followed it carried the validated
+   identity. The reason is the same one that built the `unstated`
+   machinery: the identity may itself be what refused, and only a
+   validated one may be echoed; keeping the validated half alive
+   solely to decorate one error line would preserve most of the
+   recovery's machinery for a fraction of its value. A refusal
+   remains diagnosable because it is deterministic: the lane guard
+   of decision 6 makes it a failing test in development, which is
+   where a schema bug is fixed.
 2. **What existed only to feed the recovery payload goes with it.**
    `_replacement`, `SCHEMA_VIOLATION`, `SCHEMA_VIOLATION_MESSAGE`,
    the 14 generated `_violation_on` variants and their `internal`
