@@ -9,7 +9,7 @@ The structured events are this server's observability surface
 ([ADR](../adr/2026-08-04-json-logs-are-the-observability-surface.md)), and
 they carry metadata and nothing else
 ([ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)).
-This document is that surface written down: 57 events in 85 variants. What was
+This document is that surface written down: 57 events in 82 variants. What was
 said in a conversation is in the conversation store instead, keyed by the same
 `session` ([its reference](conversations-schema.md)).
 
@@ -155,7 +155,7 @@ never what an operator may have called something.
 | `session_list` | `'[0-9A-Za-z_-]{1,64}(?:, [0-9A-Za-z_-]{1,64})*'` | `vinga_server.events.values:SessionList.of` | The session ids a prune removed, comma-joined. |
 | `quoted_tool_name` | `' "[\s\S]+"'` | `vinga_server.events.values:QuotedToolName.of` | A builtin's name, which is this server's own word, bounded here by the quoting alone. A device tool's name is the board's vocabulary and an unknown one is whatever the model invented, so neither is ever rendered here. |
 | `from_entry` | `' from entry "[\s\S]+"'` | `vinga_server.events.values:FromEntry.of` | The configured MCP entry a call reached, never the far side's own tool name. Entry names are separately held to `[A-Za-z0-9_-]+` by the configuration, which makes this grammar a floor rather than the whole truth; the floor is what this surface may claim, since the tighter rule is configuration's to keep and to change. |
-| `quoted_provider` | `' "[\s\S]+"'` | `vinga_server.events.values:QuotedProvider.of` | The configuration entry the failing provider is, bounded by the quoting alone. |
+| `quoted_provider` | `'(?: "[\s\S]+")?'` | `vinga_server.events.values:QuotedProvider.of` | The configuration entry the failing provider is, bounded by the quoting alone, and empty for a provider the registry never built. Optional for the reason the host tail below is: one variant says both, and a rendered position cannot be absent. |
 | `reaching_host` | `'(?: reaching [\s\S]+)?'` | `vinga_server.events.values:ReachingHost.of` | Where the call was going, empty for an engine that runs in this process. |
 | `origin_provenance` | `'(?:from\|guessed from) [\s\S]+'` | `vinga_server.onboarding.origin:Origin.provenance`, `vinga_server.events.values:OriginProvenance` | Which configuration key the banner's origin came out of, and whether it was read or inferred. |
 | `device_or_unidentified` | `'[0-9a-f]{2}(?::[0-9a-f]{2}){5}\|an unidentified device'` | `vinga_server.events.values:DeviceOrUnidentified.of` | The MAC behind a Device-Id header this server recognizes, or the fixed phrase. Nothing else: with device auth off nothing has verified that header, so an unrecognized one names no device at all. |
@@ -204,9 +204,9 @@ meets them, from a device's check-in to the server's own lifecycle surfaces.
 | `agent_said` | `vinga_server.session` | INFO | 1 |
 | `handover` | `vinga_server.session` | INFO | 1 |
 | `prompt_assembled` | `vinga_server.session` | INFO | 1 |
-| `llm_retry` | `vinga_server.session` | WARNING | 2 |
-| `llm_round` | `vinga_server.session` | INFO | 2 |
-| `provider_failed` | `vinga_server.session` | WARNING | 2 |
+| `llm_retry` | `vinga_server.session` | WARNING | 1 |
+| `llm_round` | `vinga_server.session` | INFO | 1 |
+| `provider_failed` | `vinga_server.session` | WARNING | 1 |
 | `tool_call` | `vinga_server.session` | INFO | 3 |
 | `barge_in` | `vinga_server.session` | INFO | 1 |
 | `barge_in_suppressed` | `vinga_server.session` | INFO | 3 |
@@ -674,7 +674,9 @@ once.
 
 #### Variant 1: `vinga_server.session` at WARNING
 
-A provider the registry did not build names no entry.
+`provider` and `type` are atomic: a provider with an identity carries both,
+and one the registry never built carries neither. `host` is absent for an
+engine that runs in this process and `model` for a type that has none to name.
 
 ```text
 session %s: no first token after %.1f s, retrying round %d
@@ -695,34 +697,8 @@ session %s: no first token after %.1f s, retrying round %d
 | `round` | `INT` | yes | no |  |  |
 | `duration_ms` | `INT` | yes | no |  |  |
 | `stage` | `IDENTIFIER` | yes | no |  |  |
-
-#### Variant 2: `vinga_server.session` at WARNING
-
-`provider` and `type` are atomic: a provider with an identity carries both.
-`host` is absent for an engine that runs in this process and `model` for a
-type that has none to name.
-
-```text
-session %s: no first token after %.1f s, retrying round %d
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-| 2 | `FLOAT` | no |  |  |
-| 3 | `INT` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `agent` | `IDENTIFIER` | yes | no |  |  |
-| `round` | `INT` | yes | no |  |  |
-| `duration_ms` | `INT` | yes | no |  |  |
-| `stage` | `IDENTIFIER` | yes | no |  |  |
-| `provider` | `IDENTIFIER` | yes | no |  |  |
-| `type` | `IDENTIFIER` | yes | no |  |  |
+| `provider` | `IDENTIFIER` | no | no |  |  |
+| `type` | `IDENTIFIER` | no | no |  |  |
 | `host` | `IDENTIFIER` | no | no |  |  |
 | `model` | `IDENTIFIER` | no | no |  | The GenAI conventions' `gen_ai.request.model`. |
 
@@ -754,41 +730,13 @@ session %s: %s round %d took %.2f s over %d turns
 | `turns` | `COUNT` | yes | no |  | The cheap proxy for payload size. |
 | `duration_ms` | `INT` | yes | no |  |  |
 | `stage` | `IDENTIFIER` | yes | no |  |  |
-| `input_tokens` | `COUNT` | no | no |  |  |
-| `output_tokens` | `COUNT` | no | no |  |  |
-| `first_token_ms` | `INT` | no | no |  | Times the first spoken token, so a round that only asked for a tool carries none. |
-
-#### Variant 2: `vinga_server.session` at INFO
-
-```text
-session %s: %s round %d took %.2f s over %d turns
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-| 2 | `IDENTIFIER` | no |  |  |
-| 3 | `INT` | no |  |  |
-| 4 | `FLOAT` | no |  |  |
-| 5 | `COUNT` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `agent` | `IDENTIFIER` | yes | no |  |  |
-| `round` | `INT` | yes | no |  |  |
-| `turns` | `COUNT` | yes | no |  |  |
-| `duration_ms` | `INT` | yes | no |  |  |
-| `stage` | `IDENTIFIER` | yes | no |  |  |
-| `provider` | `IDENTIFIER` | yes | no |  |  |
-| `type` | `IDENTIFIER` | yes | no |  |  |
+| `provider` | `IDENTIFIER` | no | no |  |  |
+| `type` | `IDENTIFIER` | no | no |  |  |
 | `host` | `IDENTIFIER` | no | no |  |  |
 | `model` | `IDENTIFIER` | no | no |  | Present where the configured entry names one. The GenAI conventions' `gen_ai.request.model`. |
 | `input_tokens` | `COUNT` | no | no |  | Present where the provider reported usage; their absence is a fact about the endpoint. |
 | `output_tokens` | `COUNT` | no | no |  |  |
-| `first_token_ms` | `INT` | no | no |  |  |
+| `first_token_ms` | `INT` | no | no |  | Times the first spoken token, so a round that only asked for a tool carries none. |
 
 ### `provider_failed`
 
@@ -798,33 +746,10 @@ stranger wrote.
 
 #### Variant 1: `vinga_server.session` at WARNING
 
-A provider the registry did not build names no entry and no host.
-
-```text
-session %s: %s provider%s %s after %.2f s%s: %s
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-| 2 | `IDENTIFIER` | no |  |  |
-| 3 | `COMPOSED` | no | the `empty_fragment` grammar |  |
-| 4 | `TOKEN` | no | one of: `failed`, `timed out` |  |
-| 5 | `FLOAT` | no |  |  |
-| 6 | `COMPOSED` | no | the `empty_fragment` grammar |  |
-| 7 | `CLASS_NAME` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `agent` | `IDENTIFIER` | yes | no |  |  |
-| `error` | `CLASS_NAME` | yes | no |  |  |
-| `duration_ms` | `INT` | yes | no |  |  |
-| `stage` | `IDENTIFIER` | yes | no |  |  |
-
-#### Variant 2: `vinga_server.session` at WARNING
+`provider` and `type` are atomic: a provider with an identity carries both,
+and one the registry never built carries neither and names no entry and no
+host in the sentence either. `host` is absent for an engine that runs in this
+process and `model` for a type that has none to name.
 
 ```text
 session %s: %s provider%s %s after %.2f s%s: %s
@@ -849,8 +774,8 @@ session %s: %s provider%s %s after %.2f s%s: %s
 | `error` | `CLASS_NAME` | yes | no |  | A round whose retry also stalled carries `FirstTokenTimeout`. |
 | `duration_ms` | `INT` | yes | no |  |  |
 | `stage` | `IDENTIFIER` | yes | no |  |  |
-| `provider` | `IDENTIFIER` | yes | no |  |  |
-| `type` | `IDENTIFIER` | yes | no |  |  |
+| `provider` | `IDENTIFIER` | no | no |  |  |
+| `type` | `IDENTIFIER` | no | no |  |  |
 | `host` | `IDENTIFIER` | no | no |  |  |
 | `model` | `IDENTIFIER` | no | no |  |  |
 

@@ -908,79 +908,17 @@
           "type": "Identifier",
           "required": true,
           "nullable": false
-        }
-      ]
-    },
-    {
-      "channel": "vinga_server.session",
-      "level": 30,
-      "arguments": [
-        {
-          "name": "session",
-          "type": "SessionId"
-        },
-        {
-          "name": "duration_s",
-          "type": "Real"
-        },
-        {
-          "name": "round",
-          "type": "Whole"
-        }
-      ],
-      "fields": [
-        {
-          "name": "event",
-          "type": "EventName",
-          "required": true,
-          "nullable": false
-        },
-        {
-          "name": "session",
-          "type": "SessionId",
-          "required": true,
-          "nullable": false
-        },
-        {
-          "name": "device",
-          "type": "DeviceId",
-          "required": true,
-          "nullable": true
-        },
-        {
-          "name": "agent",
-          "type": "Identifier",
-          "required": true,
-          "nullable": false
-        },
-        {
-          "name": "round",
-          "type": "Whole",
-          "required": true,
-          "nullable": false
-        },
-        {
-          "name": "duration_ms",
-          "type": "Whole",
-          "required": true,
-          "nullable": false
-        },
-        {
-          "name": "stage",
-          "type": "Identifier",
-          "required": true,
-          "nullable": false
         },
         {
           "name": "provider",
           "type": "Identifier",
-          "required": true,
+          "required": false,
           "nullable": false
         },
         {
           "name": "type",
           "type": "Identifier",
-          "required": true,
+          "required": false,
           "nullable": false
         },
         {
@@ -1074,109 +1012,15 @@
           "nullable": false
         },
         {
-          "name": "input_tokens",
-          "type": "Count",
-          "required": false,
-          "nullable": false
-        },
-        {
-          "name": "output_tokens",
-          "type": "Count",
-          "required": false,
-          "nullable": false
-        },
-        {
-          "name": "first_token_ms",
-          "type": "Whole",
-          "required": false,
-          "nullable": false
-        }
-      ]
-    },
-    {
-      "channel": "vinga_server.session",
-      "level": 20,
-      "arguments": [
-        {
-          "name": "session",
-          "type": "SessionId"
-        },
-        {
-          "name": "agent",
-          "type": "Identifier"
-        },
-        {
-          "name": "round",
-          "type": "Whole"
-        },
-        {
-          "name": "duration_s",
-          "type": "Real"
-        },
-        {
-          "name": "turns",
-          "type": "Count"
-        }
-      ],
-      "fields": [
-        {
-          "name": "event",
-          "type": "EventName",
-          "required": true,
-          "nullable": false
-        },
-        {
-          "name": "session",
-          "type": "SessionId",
-          "required": true,
-          "nullable": false
-        },
-        {
-          "name": "device",
-          "type": "DeviceId",
-          "required": true,
-          "nullable": true
-        },
-        {
-          "name": "agent",
-          "type": "Identifier",
-          "required": true,
-          "nullable": false
-        },
-        {
-          "name": "round",
-          "type": "Whole",
-          "required": true,
-          "nullable": false
-        },
-        {
-          "name": "turns",
-          "type": "Count",
-          "required": true,
-          "nullable": false
-        },
-        {
-          "name": "duration_ms",
-          "type": "Whole",
-          "required": true,
-          "nullable": false
-        },
-        {
-          "name": "stage",
-          "type": "Identifier",
-          "required": true,
-          "nullable": false
-        },
-        {
           "name": "provider",
           "type": "Identifier",
-          "required": true,
+          "required": false,
           "nullable": false
         },
         {
           "name": "type",
           "type": "Identifier",
-          "required": true,
+          "required": false,
           "nullable": false
         },
         {
@@ -1213,88 +1057,6 @@
     }
   ],
   "provider_failed": [
-    {
-      "channel": "vinga_server.session",
-      "level": 30,
-      "arguments": [
-        {
-          "name": "session",
-          "type": "SessionId"
-        },
-        {
-          "name": "stage",
-          "type": "Identifier"
-        },
-        {
-          "name": "named",
-          "type": "Nothing"
-        },
-        {
-          "name": "outcome",
-          "type": "ProviderOutcome",
-          "tokens": [
-            "failed",
-            "timed out"
-          ]
-        },
-        {
-          "name": "duration_s",
-          "type": "Real"
-        },
-        {
-          "name": "where",
-          "type": "Nothing"
-        },
-        {
-          "name": "error",
-          "type": "ClassName"
-        }
-      ],
-      "fields": [
-        {
-          "name": "event",
-          "type": "EventName",
-          "required": true,
-          "nullable": false
-        },
-        {
-          "name": "session",
-          "type": "SessionId",
-          "required": true,
-          "nullable": false
-        },
-        {
-          "name": "device",
-          "type": "DeviceId",
-          "required": true,
-          "nullable": true
-        },
-        {
-          "name": "agent",
-          "type": "Identifier",
-          "required": true,
-          "nullable": false
-        },
-        {
-          "name": "error",
-          "type": "ClassName",
-          "required": true,
-          "nullable": false
-        },
-        {
-          "name": "duration_ms",
-          "type": "Whole",
-          "required": true,
-          "nullable": false
-        },
-        {
-          "name": "stage",
-          "type": "Identifier",
-          "required": true,
-          "nullable": false
-        }
-      ]
-    },
     {
       "channel": "vinga_server.session",
       "level": 30,
@@ -1378,13 +1140,13 @@
         {
           "name": "provider",
           "type": "Identifier",
-          "required": true,
+          "required": false,
           "nullable": false
         },
         {
           "name": "type",
           "type": "Identifier",
-          "required": true,
+          "required": false,
           "nullable": false
         },
         {
