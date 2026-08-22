@@ -255,3 +255,96 @@ the one surviving variant.
 
 Nothing here needs hardware, so no verification step was left
 unverifiable.
+
+## PR review round (PR #259)
+
+External review of the PR diff: claude CLI backend, model
+`claude-opus-5`, read-only tool set, 2026-08-22, posted on the PR.
+Verdict: mergeable after findings 1 and 2 are fixed; two P2 and two P3,
+all four folded in before merge.
+
+The round is worth recording for what it did before it found anything.
+It verified the milestone's mechanical claims itself rather than taking
+them: that the carried field order reproduces the three OfEntry twins
+on all three events, so the byte-still baseline is real and not merely
+asserted; that `_reported`'s retype is value-for-value equivalent on
+both the event and the `round_done` path; that the `tool_fragment` call
+site is behaviourally equivalent to the deleted `_tool_fragment`; that
+the `def _` inventory is 30 in 1,530 lines exactly as recorded; that
+the widened `QUOTED_PROVIDER` still refuses an unquoted entry. All four
+findings are what was left after that, and all four are about what the
+code SAYS rather than what it does.
+
+1. **P2: the merged fragment signature moved the naming rule into the
+   reply path while three docstrings claimed it lived in `events/`.**
+   `tool_fragment(tool, entry)` quotes whatever arrives as `tool` and
+   knows nothing about a call's source, so the structural property the
+   deleted `_tool_fragment(classified)` had, that a device tool's name
+   could not be printed by it whatever the caller did, was gone. No
+   live leak, since `_dispatch` is the only caller and it guards, but a
+   weakened contract described as an intact one, and the new test could
+   not have failed if the rule had broken.
+   *Resolution* (`27db5ebc`): the reviewer's option (b). `pipeline.py`
+   gets `_tool_fragment(classified)` back as the one named home of the
+   decision, beside the classifier's constants; `assembly.tool_fragment`
+   keeps the two-argument signature and its docstring says it renders
+   whatever it is handed and refuses nothing; the module docstring and
+   the builders' comment stop claiming the rule; the fragment test is
+   renamed to what it pins and points at `test_session_tools.py`, which
+   pins the decision at the sentence. Deviation 2 above is rewritten to
+   record the split rather than the claim.
+
+2. **P2: two more twin-era docstrings survived, and the doc said the
+   sweep was complete.** `test_event_surface_pins.py`'s entry-less
+   provider test called its subject "the other shape of the same event"
+   with "two empty fragments", wrong twice over after the collapse, and
+   in the file the plan itself names as the emission-level half of the
+   atomicity pin; the baseline harness's `unregistered` helper called
+   its record "the variant beside every provider event", eleven lines
+   from a comment the milestone had already corrected.
+   *Resolution* (`2f93e169`): both reworded to the post-collapse fact,
+   and the Discoveries paragraph names four docstrings and how the
+   first sweep missed these two.
+
+3. **P3: `llm_round` was the one survivor whose newly optional
+   `provider` and `type` carried no explanation.** Plan-conformant, since
+   the note was re-homed only where an of-entry twin had one, and a gap
+   the collapse itself created: the reference now states three optional
+   fields with nothing saying two of them are one answer, which invites
+   a query grouping rounds by `type` with `provider` missing.
+   *Resolution* (`bba52723`): the same `NOTE` its two siblings carry.
+   The reference gains three lines; the golden does not move, because it
+   holds no wording by design; the baseline is byte-still.
+
+4. **P3: the export pin asserted the `__all__` literal while claiming a
+   namespace property.** `__all__` governs `import *` alone, so a public
+   `entry_fields` added beside it would pass the check while being
+   importable by anybody. The real pin, the builder test, does hold.
+   *Resolution* (`f3028b42`): the test reads the module's public names,
+   imports excluded, and holds `__all__` to the same list so the two
+   cannot drift. Checked by mutation, restored by copy and `touch`.
+
+### Verification after the review round
+
+From `vinga-server/`, on the amended branch.
+
+- `uv run ruff check .`: **All checks passed!**
+- `uv run mypy`: **Success: no issues found in 4 source files.**
+- `uv run pytest tests/unit -q`: **2803 passed, 20 skipped** in 262 s.
+- `uv run pytest tests/integration -q`: **61 passed** in 193 s.
+- `uv run python -m tests.unit.test_event_golden`, twice: unchanged by
+  finding 3 and byte-identical between runs
+  (`2854923c8fa61204dd6859d6f5c22d48bb1d314b1b47fb3dba168256bceea8f4`,
+  the same file the milestone committed).
+- `uv run vinga-server events reference > ../docs/reference/events.md`,
+  twice: byte-identical between runs
+  (`600507d06bbf5afe5eb5210787b79dfde287183f01b77eb6fec829c63aea40f4`),
+  three lines longer than the milestone's for finding 3's note.
+- The committed record baseline, SHA-256 before and after:
+  `a7f750859c3a1da7ae2193080022260768d916aa5d1a2f3927e5b74339990f5f`,
+  unchanged, as it has been through the whole milestone.
+- `grep -rn "OfEntry" src tests`: nothing.
+
+The `def _` inventory moved by one with finding 1: 31 definitions in
+1,547 lines, `_tool_fragment` restored. The Inventory section above
+records the amended figures rather than the reviewed ones.
