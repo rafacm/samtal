@@ -39,7 +39,9 @@ from vinga_server.events.catalog import (
     Declaration,
     OtaCheckAgentNotLoaded,
     RejectedAgentNotLoaded,
+    arg_kind_of,
     carried_values,
+    kind_of,
     rendered_values,
     tokens_of,
 )
@@ -412,7 +414,7 @@ def test_every_argument_row_matches_its_declaration() -> None:
             ):
                 index, kind, nullable, constraint, note = row
                 assert index == str(position), where
-                kind_name = arg.type.ARG_KIND.name
+                kind_name = arg_kind_of(arg).name
                 assert kind == f"`{kind_name}`", f"{where} argument {position}"
                 assert nullable == yes(arg.nullable), f"{where} argument {position}"
                 assert note == cell(arg.rendered_note), f"{where} argument {position}"
@@ -435,13 +437,12 @@ def test_every_field_row_matches_its_declaration() -> None:
             for row, declared in zip(rows, carried, strict=True):
                 field = declared.name
                 _, kind, required, nullable, constraint, note = row
-                assert kind == f"`{declared.type.KIND.name}`", f"{where} {field}"
+                kind_name = kind_of(declared).name
+                assert kind == f"`{kind_name}`", f"{where} {field}"
                 assert required == yes(declared.required), f"{where} {field}"
                 assert nullable == yes(declared.nullable), f"{where} {field}"
                 assert note == cell(declared.note), f"{where} {field}"
-                check_constraint(
-                    constraint, declared, declared.type.KIND.name, f"{where} {field}"
-                )
+                check_constraint(constraint, declared, kind_name, f"{where} {field}")
 
 
 def test_the_reference_renders_every_declared_prose_note() -> None:
