@@ -62,8 +62,18 @@ providers.
    present, which IS today's of-entry record. Templates and ARGS
    are unchanged, so rendered sentences and `record.msg` are
    unchanged everywhere.
-   The two field notes (the GenAI model note, the no-entry note)
-   merge onto the surviving fields.
+   The prose reconciliation is itemized, since it is the surviving
+   sections' visible diff in the reference: the no-entry sentence
+   is a variant-level `NOTE` on `LlmRetry` and `ProviderFailed`
+   and is replaced on each survivor by the atomicity sentence
+   re-homed from the OfEntry side (the quartet is answered whole
+   or not at all; absent means the registry never built the
+   provider); the `llm_round` pair's five field notes (`round`,
+   `turns`, `first_token_ms` on one side; `model` with its GenAI
+   sentence and `input_tokens` on the other) each land on the
+   surviving field unchanged; and the survivors' class docstrings
+   drop "on a provider with no configured identity", which stops
+   being true.
 2. **Provider and type stay atomic as a pair, enforced where the
    value is built.** Today "answered whole or not at all" is a type
    fact (`_Entry` has required `provider`/`type`). After the
