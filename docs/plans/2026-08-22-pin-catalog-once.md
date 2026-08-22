@@ -129,8 +129,7 @@ and discoveries; no deviations says so explicitly.
 
 ## Plan review round
 
-External review of commit HEAD~0 (`git log` records it), 2026-08-22
-late. Backend: claude CLI 2.1.239, model `claude-opus-5`, read-only
+External review of commit `2583f98a`, 2026-08-22 late. Backend: claude CLI 2.1.239, model `claude-opus-5`, read-only
 tool set (interim fallback tier). Verdict as received: ready after
 the P1 and P2 amendments; the deletions are sound and the issue's
 decisions respected, but two of the plan's three load-bearing
