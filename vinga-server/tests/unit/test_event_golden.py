@@ -57,9 +57,7 @@ def inventory() -> dict[str, Any]:
             {
                 "channel": variant.CHANNEL,
                 "level": variant.LEVEL,
-                "arguments": [
-                    {"name": one, "type": _typed(variant, one)} for one in variant.ARGS
-                ],
+                "arguments": [_argument(variant, one) for one in variant.ARGS],
                 "fields": [_field(one) for one in payload_shape(variant) if one.carried],
             }
             for variant in declaration.variants
@@ -77,20 +75,35 @@ def _field(one: Declared) -> dict[str, Any]:
     reference's token column would be the only committed pin on the
     narrowing (#238).
     """
-    recorded: dict[str, Any] = {
-        "name": one.name,
-        "type": one.type.__name__,
-        "required": one.required,
-        "nullable": one.nullable,
-    }
+    return _with_tokens(
+        one,
+        {
+            "name": one.name,
+            "type": one.type.__name__,
+            "required": one.required,
+            "nullable": one.nullable,
+        },
+    )
+
+
+def _argument(variant: Any, name: str) -> dict[str, Any]:
+    """One rendered position, with the closed set where it declares one.
+
+    The set for the reason `_field` records it, and here as well because
+    the two lists do not hold the same values: a value the sentence
+    renders and the payload does not keep appears in this one alone, so
+    a narrowed field declared `carried=False` would otherwise have no
+    committed structural pin at all.
+    """
+    one = {held.name: held for held in payload_shape(variant)}[name]
+    return _with_tokens(one, {"name": one.name, "type": one.type.__name__})
+
+
+def _with_tokens(one: Declared, recorded: dict[str, Any]) -> dict[str, Any]:
+    """One record, with the declared set added where there is one. Both
+    lists record it the same way, from one reading of the declaration."""
     tokens = tokens_of(one)
-    if tokens is not None:
-        recorded["tokens"] = sorted(tokens)
-    return recorded
-
-
-def _typed(variant: Any, name: str) -> str:
-    return {one.name: one.type.__name__ for one in payload_shape(variant)}[name]
+    return recorded if tokens is None else recorded | {"tokens": sorted(tokens)}
 
 
 def committed() -> dict[str, Any]:
