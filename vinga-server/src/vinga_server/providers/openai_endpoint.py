@@ -13,7 +13,10 @@ The LLM stage joined late and shares less. `openai_compatible` requires
 `base_url` rather than defaulting to OpenAI and resolves its own key,
 so of the three answers it takes only the host: which host it reaches,
 for the event a failed call emits, and whether that host is OpenAI's,
-which decides whether the request may ask for token counts (#55).
+which decides whether the request may ask for token counts (#55). It
+takes the rule with it: its factory refuses a `base_url` that is not a
+URL here, like the other two, so all three stages fail a malformed
+endpoint at the boot or apply that reads it.
 """
 
 from urllib.parse import urlsplit
@@ -45,12 +48,20 @@ def parse_base_url(label: str, base_url: str) -> bool:
     answers for itself.
 
     A base_url that is not a URL fails here rather than at the first
-    request, for the same reason everything else in a factory does."""
+    request, for the same reason everything else in a factory does.
+
+    The refusal names the option, the rule and an example, and never
+    what was written. `base_url` is this repository's credential-bearing
+    option under an innocuous name: an operator who pastes an API key
+    where the URL goes produces a value with no host, which is exactly
+    the case this refusal is about and exactly the case `url_credential`
+    cannot mask. Echoing it would put the key on stderr, in the API's
+    422 body and in the boot log."""
     parts = urlsplit(base_url)
     if not parts.scheme or not parts.hostname:
         raise ProviderError(
             f'{label}: option "base_url" must be a URL with a scheme and a host, '
-            f'such as "{DEFAULT_BASE_URL}"; got "{base_url}"'
+            f'such as "{DEFAULT_BASE_URL}"'
         )
     return parts.hostname == OPENAI_HOST
 
@@ -58,7 +69,10 @@ def parse_base_url(label: str, base_url: str) -> bool:
 def endpoint_host(base_url: str) -> str | None:
     """The host an entry's `base_url` names, for the identity a
     provider is stamped with. None only for a URL that has none, which
-    a built provider does not have: `parse_base_url` refuses those."""
+    a provider a factory built does not have: every factory calls
+    `parse_base_url` first, and it refuses those. A provider constructed
+    directly with its own client can still hold None here, which is that
+    seam's own contract."""
     return urlsplit(base_url).hostname
 
 

@@ -64,6 +64,40 @@ async def test_openai_compatible_builds_keyless_for_local_endpoints() -> None:
     assert isinstance(await build_entry("llm", "local", config), OpenAiCompatibleLlm)
 
 
+@pytest.mark.parametrize("base_url", ["not-a-url", "api.openai.com/v1", "https://"])
+async def test_an_openai_compatible_base_url_that_is_not_a_url_fails_the_build(
+    base_url: str,
+) -> None:
+    """The rule the `openai` ASR and TTS types already hold, in the
+    stage that joined the dialect late. A `base_url` with no host used
+    to build a provider that failed every request instead of the boot
+    that read it, and one that looks like OpenAI without a scheme is
+    the case that costs most: no host to compare, so it would have been
+    treated as a compatible endpoint and booted keyless."""
+    config = provider_config(type="openai_compatible", base_url=base_url, model="qwen3:8b")
+    with pytest.raises(ProviderError, match='"base_url" must be a URL') as failure:
+        await build_entry("llm", "local", config)
+    assert "providers.llm.local" in str(failure.value)
+
+
+async def test_a_credential_pasted_where_the_base_url_goes_is_not_echoed() -> None:
+    """`base_url` is the credential-bearing option under an innocuous
+    name: an operator pasting a key into it writes a value with no host,
+    which is this refusal's own case and the one shape `url_credential`
+    cannot mask. The sentence would otherwise reach stderr, the API's
+    422 body and the boot log with the key in it."""
+    # Not a real credential, and shaped so a substring check for it
+    # cannot match by accident.
+    secret = "sk-proj-9c4e17ab-never-a-real-credential"
+    config = provider_config(type="openai_compatible", base_url=secret, model="qwen3:8b")
+
+    with pytest.raises(ProviderError) as failure:
+        await build_entry("llm", "local", config)
+
+    assert secret not in str(failure.value)
+    assert "9c4e17ab" not in str(failure.value)
+
+
 # --- the client each entry builds ------------------------------------
 
 
@@ -152,6 +186,31 @@ async def test_an_injected_openai_compatible_client_is_used_as_given() -> None:
 
     assert await spoken(llm) == ["Said."]
     assert completions.request["model"] == "qwen3:8b"
+
+
+async def test_a_compatible_endpoint_is_not_asked_for_token_counts() -> None:
+    """`stream_options` is an OpenAI field a compatible server is free
+    not to know, so asking a self-hosted endpoint for usage could fail a
+    conversation to enrich a log line. The host decides, which is why
+    the same round against OpenAI's own asks: a refusal added at the
+    factory must not have moved that answer for either of them."""
+    local = FakeCompletions([FakeChunk([FakeChoice(FakeDelta(content="Said."))])])
+    openai = FakeCompletions([FakeChunk([FakeChoice(FakeDelta(content="Said."))])])
+
+    def llm(base_url: str, completions: FakeCompletions) -> OpenAiCompatibleLlm:
+        return OpenAiCompatibleLlm(
+            base_url=base_url,
+            model="qwen3:8b",
+            max_tokens=64,
+            api_key=None,
+            client=openai_client(completions),  # type: ignore[arg-type]
+        )
+
+    assert await spoken(llm("http://localhost:11434/v1", local)) == ["Said."]
+    assert await spoken(llm("https://api.openai.com/v1", openai)) == ["Said."]
+
+    assert "stream_options" not in local.request
+    assert openai.request["stream_options"] == {"include_usage": True}
 
 
 async def test_a_falsey_anthropic_client_is_still_the_one_used() -> None:
