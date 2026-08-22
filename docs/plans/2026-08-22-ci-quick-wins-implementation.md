@@ -290,6 +290,14 @@ finding 9's resolution describe them.
   run mypy`: no issues in 3 source files.
 - **The integration suite is green.** `uv run pytest tests/integration
   -q`: 61 passed in 193.67 s.
+- **Issue #233's verification box was corrected as it was checked.** The
+  plan's finding-3 resolution makes this part of M2's landing: the box
+  asked for `capture()` setup "in single digits", which the ~16 s tail
+  over the other 77 drivers puts out of reach. It is now checked with
+  the wording the measurements support, the harness going from about
+  87 s to about 18 s, and says the remaining tail is left to #254. The
+  driving session made that edit on the issue; nothing in this checkout
+  can show it, which is why it is recorded here rather than asserted.
 - **Not verified here: that the shrunk waits hold on a CI runner.** The
   margins are the plan's decision 4 (8x for the filler drivers, 600x
   for the retry driver, no value under 50 ms), but only a CI run shows
