@@ -364,7 +364,8 @@ unverifiable.
 
 External review of the PR diff: claude backend (the codex quota is
 exhausted), claude CLI, model `claude-opus-5`, read-only tool set,
-2026-08-22, posted on the PR. Verdict: mergeable after finding 1 is
+2026-08-22, [posted on the
+PR](https://github.com/rafacm/vinga/pull/253#issuecomment-5381394055). Verdict: mergeable after finding 1 is
 fixed, no P1. Seven findings, all fixed before merge, each in a commit
 of its own. Findings condensed but faithful:
 
