@@ -230,9 +230,9 @@ Run from `vinga-server/`, at the last code commit of the milestone.
 - `uv run mypy`: success, no issues found in 3 source files. Its scope
   is the events package, which this milestone does not touch.
 - `uv run pytest tests/unit -q`: 2,797 passed, 20 skipped, in 5:41.
-  (At the milestone's first code commit, before the two new binding
-  bites: 2,795 passed, 20 skipped. The doctor commit is net zero:
-  three tests deleted, one added.)
+  (At the doctor commit, before the two new binding bites: 2,795
+  passed, 20 skipped. That commit is two fewer than the milestone
+  started with: three tests deleted and one added.)
 - `uv run pytest tests/integration -q`: 61 passed, in 3:10.
 - The four documentation drift checks, regenerated and diffed against
   `../docs/reference/`: `config reference`, `conversations schema`,
