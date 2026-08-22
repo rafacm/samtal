@@ -55,11 +55,10 @@ identically on both sides of that change and what meets a payload that
 regains the key. It is a write-time rule and only that: it runs where a
 row is built and no read applies it, so it says what lands in this
 database and nothing about what an older one holds. `tool` still
-arrives, on the one
-branch the narrowing kept it for: a builtin's name is this application's
-own. The strip removes it from the row anyway, so that every name a call
-carries lives in `tool_invocations` under the text switch rather than in
-two tables under two different rules.
+arrives, on the one branch the narrowing kept it for: a builtin's name
+is this application's own. The strip removes it from the row anyway, so
+that every name a call carries lives in `tool_invocations` under the
+text switch rather than in two tables under two different rules.
 """
 
 import datetime as dt
