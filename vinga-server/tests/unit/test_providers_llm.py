@@ -17,7 +17,7 @@ from vinga_server.config.models import ProviderConfig
 from vinga_server.providers import LlmProvider, ProviderError, TextDelta, Turn, build_entry
 from vinga_server.providers.anthropic_llm import AnthropicLlm
 from vinga_server.providers.kit import DEFAULT_TIMEOUT_S, MAX_RETRIES
-from vinga_server.providers.openai_endpoint import OPENAI_HOST
+from vinga_server.providers.openai_endpoint import DEFAULT_BASE_URL, OPENAI_HOST
 from vinga_server.providers.openai_llm import OpenAiCompatibleLlm, chat_messages
 
 
@@ -86,7 +86,12 @@ async def test_a_credential_pasted_where_the_base_url_goes_is_not_echoed() -> No
     name: an operator pasting a key into it writes a value with no host,
     which is this refusal's own case and the one shape `url_credential`
     cannot mask. The sentence would otherwise reach stderr, the API's
-    422 body and the boot log with the key in it."""
+    422 body and the boot log with the key in it.
+
+    What is left is asserted beside what is gone, because a refusal that
+    said nothing would pass the absence half and leave an operator with
+    no way to find the entry: the entry's own name, the rule it broke,
+    and an example of a URL that keeps it."""
     # Not a real credential, and shaped so a substring check for it
     # cannot match by accident.
     secret = "sk-proj-9c4e17ab-never-a-real-credential"
@@ -95,8 +100,12 @@ async def test_a_credential_pasted_where_the_base_url_goes_is_not_echoed() -> No
     with pytest.raises(ProviderError) as failure:
         await build_entry("llm", "local", config)
 
-    assert secret not in str(failure.value)
-    assert "9c4e17ab" not in str(failure.value)
+    refusal = str(failure.value)
+    assert secret not in refusal
+    assert "9c4e17ab" not in refusal
+    assert "providers.llm.local" in refusal
+    assert "must be a URL with a scheme and a host" in refusal
+    assert DEFAULT_BASE_URL in refusal
 
 
 # --- the client each entry builds ------------------------------------
