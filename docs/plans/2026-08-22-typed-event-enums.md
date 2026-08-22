@@ -222,9 +222,18 @@ section.
   constraint cell as an equivalent wrapper field did, and `verify()`
   refuses a wrong type, an out-of-narrowing member, and a bare
   string, each with a refusal naming no held value.
-- `tests/unit/test_event_values.py`: the `TokenValue` construction,
-  narrowing, and refusal tests are deleted with the classes they
-  test; the narrowing behavior now lives at catalog level above.
+- `tests/unit/test_event_values.py`: the `TokenValue` construction
+  and refusal tests are deleted with the classes they test; the
+  narrowing behavior moves to the catalog-level tests above. Two of
+  the tests being touched are not narrowing tests but live
+  cross-module drift guards, and both are kept, rewritten against
+  the enums and aliases: the pending-refusal guard (the values of
+  `get_args(PendingRefusal)` are exactly
+  `onboarding/pending.py`'s `CAPACITY_REACHED` and `BUDGET_SPENT`,
+  so a reworded bound fails rather than degrades) and the MCP-down
+  guard (`McpDown`'s six values are exactly the transport module's
+  six constants, and the `McpConnectFailure` subset is exactly the
+  four connect-phase ones).
   Existing suites that construct wrappers
   (`test_event_catalog.py`, `test_ota_tokens.py`,
   `test_session_watchdog.py`, `test_session_filler.py`,
@@ -332,6 +341,10 @@ findings 4 to 8 amendable in place. Findings condensed but faithful:
    transport's six constants and `McpDown` agree. Scratch-catalog
    tests cannot carry either claim; say they are rewritten against
    the enums and the decision sites' constants.
+   *Resolution* (amendment `F3`): both guards are kept and
+   rewritten against the enums and aliases; the Tests section now
+   names them and what each holds equal to.
+
 4. **P2: the mypy scope contradicts the plan's own reason for
    choosing `Literal`.** All three decision sites are outside
    `files = ["src/vinga_server/events"]`, so "a mypy error at the
