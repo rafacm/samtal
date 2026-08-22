@@ -188,7 +188,7 @@ lint/mypy/doc-drift/wheel seconds; critical path 12m45s.
   two lanes.
 - [x] **[M2: shrink the four slow drivers' waits in the baseline
   harness](2026-08-22-ci-quick-wins-implementation.md#m2-shrink-the-four-slow-drivers-waits-in-the-baseline-harness).**
-  (PR TBD) Harness-local stall values and the
+  (PR #257) Harness-local stall values and the
   `unregistered()` config parameter per decisions 2 and 4;
   committed baseline byte-still; the four drivers each under one
   second and capture() setup around 17 seconds.
