@@ -252,3 +252,124 @@ Reuse the existing assets; the new bites are:
 
 M2 stacks on M1's branch; each milestone is a PR, and every merge
 leaves `main` releasable.
+
+## Plan review round
+
+External review: claude backend (codex quota exhausted), claude CLI,
+model claude-opus-5, read-only tool set, 2026-08-22, of commit
+91f580b. Findings condensed but faithful; resolutions follow each.
+
+**1 (P1). The binding deletion's test bite names a write path that
+does not exist and would not exercise the deletion.** There is no
+`set device` verb; every write path is closed upstream of the
+validator (`config/api.py:2207` `_agents` refuses a non-list before
+`bind_device`; the CLI builds a list from argparse; `store._binding`
+wraps in a list; YAML `devices:` is refused by `_check_moved_keys`;
+the DB read path refuses a string in `_list`). The only route to the
+string arm is composing a config from a raw mapping
+(`loader._composed`, in tests `load_config_from_data`). The pin is
+`load_config_from_data` with `devices: {mac: "assistant"}` refusing,
+rendered by `_format_validation_error` (`loader.py:355`), and the
+plan must state the API and CLI paths do not change; the no-leak
+pre-answer named the wrong rendering path.
+
+**2 (P2). The string-binding inventory is off by roughly twenty
+sites, including a fixture M2's own commit depends on.** The form is
+in `tests/support/checkin.py:74` (which the activation suite M2
+builds on drives), seven sites in `tests/unit/test_config.py`, seven
+integration tests, and `test_event_descriptor_sanitization.py:355`.
+Four are pins the plan promised untouched and will start failing
+with a `list_type` error instead of the refusal they are about. M1's
+binding commit rewrites them to the list form; the commit is roughly
+fifteen files, not one.
+
+**3 (P2). Reusing `parse_base_url`'s refusal extends a credential
+echo to a third provider type, and the plan defers rather than
+decides.** The refusal ends `got "{base_url}"`. `base_url` is this
+repository's known credential-bearing option; an operator pasting a
+key where the URL goes (`base_url: sk-proj-...`) has no hostname, so
+the new refusal would print the key to stderr, the API's 422 body,
+and the boot log, and `url_credential` cannot mask a value with no
+netloc. Drop the echo clause from `parse_base_url` in the same
+commit (the sibling pins match on the static half only) and add a
+sentinel bite planting a credential-shaped `base_url`. Deferring to
+review is not available: the plan is what makes the surface newly
+reachable.
+
+**4 (P2). The version-1 activation pin already exists, and the shape
+the plan proposes pinning is not one a board sends.**
+`test_a_version_one_body_is_accepted_as_it_is`
+(`test_onboarding_activation.py:360`) already sends `version="1"`
+and asserts 202; the integration onboarding test polls with
+`Activation-Version: 1`; the absent-header case is exercised at
+`:342-347`; and per `docs/xiaozhi-notes.md:214-215` a board sends
+the header with value 1, so present-and-1 is the floor, not absent.
+What is missing is the event assertion: extend the existing test to
+assert `ActivationPending` carries the code and no version-2 refusal
+event fires. Drop "no test naming the header".
+
+**5 (P2). The diff normalization must preserve `None` against `[]`,
+or it masks a real change.** `mcp: None` inherits defaults and
+`mcp: []` opts out (`mcp_for_agent`); the naive
+`entry.mcp or []` spelling collapses them, so an agent edited from
+`null` to `[]` would vanish from `agents.changed` while a reload
+revokes every tool. The mapping is `None if entry.mcp is None else
+[as_mcp_grant(item) for item in entry.mcp]`, identically in
+`same_agent` and the `agent_defaults` comparison, and the pin set
+gains the `None`-vs-`[]` case.
+
+**6 (P2). The pre-release stance is load-bearing for both deletions
+but recorded only in an issue comment, and the ADR's Context argues
+the other way.** After the deletions land, the checkout contains no
+record of their justification and a future session reading the ADR
+finds the opposite reasoning. A short dated amendment to the ADR's
+Context (migration decisions unchanged) lands in M1 beside the
+deletions.
+
+**7 (P2). Two doctor tests break or die and the plan's grep finds
+only one; a second stale comment is unnamed.**
+`test_a_second_redirect_is_one_too_many` (`:847`) asserts two
+requests and has no inverted form; `test_a_location_that_cannot_be_
+read_is_not_a_canonical_slash` (`:828`) reaches `_canonical_slash`
+directly and dies with it;
+`test_the_canonical_trailing_slash_redirect_is_followed` is the
+inversion. `_doctor`'s own comment (`cli.py:409-412`, "answered by
+wherever it ended up") is also stale. Sweep the `redirecting`
+fixture's users, not the two symbol names.
+
+**8 (P3). `build` would call `parse_base_url` and throw away the
+answer `__init__` recomputes.** Two structures that must agree in
+the module being deepened. Say the answer is deliberately discarded
+because `self.host` is needed anyway for the failure event and the
+two derivations are the same expression on purpose, or thread it.
+
+**9 (P3). "Makes its docstring's claim true for all its callers"
+overclaims.** A directly constructed provider with an injected
+client still gets `self.host = None` for a hostless URL; scope the
+sentence to the factory path.
+
+**10 (P3). The diff module's governing implementation doc still
+states the opposite comparison rule** ("with the `mcp` field
+excluded"), which could steer the implementer into exclusion,
+removing real grant edits from `agents.changed`. Note the staleness
+and whether the diff commit corrects it.
+
+**11 (P3). The comment correction changes a published reference but
+the plan waives a changelog entry.** The regenerated
+`conversations-schema.md` makes a different claim; the changelog's
+own practice records documentation corrections. Add a one-line
+`### Fixed`.
+
+**12 (P3). The `openai_compatible` refusal moves to boot but the
+write path still accepts the value.** The asymmetry is shared with
+the sibling types and not this plan's to fix; say in the risks
+section that the write path is knowingly left as it is.
+
+On the pre-answered lenses the review confirms: no-leak (1) holds,
+(2) held in conclusion but named the wrong path, (3) did not hold;
+pin-before-reshape holds except the `None`/`[]` case, noting the
+real grants-list pin is `test_a_grants_only_edit_is_the_registry_s_
+to_report`; closed sets, honest seams, and the deletion test hold;
+the inventory intent holds and its scope did not.
+
+Verdict: ready after the P1 and P2 amendments.
