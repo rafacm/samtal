@@ -58,9 +58,11 @@ decision here is the issue's "judgment call" answered.
 - **The `StreamStarted` arm keeps its skip semantics** (`continue`
   under the chain) whatever the `match` arm's spelling is; the arm
   exists to state indifference, and its comment stays.
-- **No changelog entry.** The changelog records notable changes;
-  a refactor with no observable behavior is not one, and saying so
-  here is the record.
+- **A changelog entry under `### Changed`**, in the house form the
+  existing refactor entries use: what moved, and that nothing an
+  operator sees changed. The repository's convention records
+  behavior-preserving refactors as a matter of course, and this plan
+  follows it rather than inventing an exemption.
 
 ## The standing review lenses, pre-answered
 
@@ -183,6 +185,11 @@ behavior-preserving refactors under `### Changed` as a matter of
 course, with "nothing an operator sees changed" as the entry's own
 point; AGENTS.md exempts nothing. Add the entry or argue a real
 premise.
+
+*Resolution*: accepted; the entry is added. The false premise is
+dropped rather than replaced: the repository's own convention
+answers the question, and arguing a size bar against five recorded
+counterexamples would be the same mistake with more words.
 
 **4 (P3). The "closed sets" lens claims a type-level property the
 code does not have.** `_watchdog_stream` is typed
