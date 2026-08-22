@@ -39,7 +39,24 @@ env:
   PYTHONDONTWRITEBYTECODE: "1"
 
 jobs:
-  test:
+  # The suite runs as two lanes that start at the same time rather than
+  # one that runs everything in a row: the unit tests are by far the
+  # longest single item, and the integration tests fit entirely inside
+  # them, so the critical path becomes the longer lane instead of the sum
+  # of both. Nothing moved between lanes for any reason but duration, and
+  # nothing was dropped: every step that ran in the old `test` job runs in
+  # one of these two.
+  #
+  # The first three steps (checkout, setup-uv, `uv sync --frozen`) are
+  # duplicated by design. A job is its own runner with its own empty
+  # workspace, so each lane has to fetch and install for itself; the uv
+  # cache both lanes share is what keeps the second install cheap.
+  #
+  # `--durations=25` on both pytest invocations so a lane's log keeps
+  # naming its slow tail. Splitting the job hides a regression that a
+  # single wall-clock number used to make obvious, and the durations
+  # table is what replaces it.
+  unit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -64,10 +81,26 @@ jobs:
         run: uv run mypy
 
       - name: Unit tests
-        run: uv run pytest tests/unit -v
+        run: uv run pytest tests/unit -v --durations=25
+
+  # The shorter lane: the integration tests, the four generated-document
+  # drift checks, and the wheel migration. The checks ride here because
+  # they cost seconds and this lane finishes well before the other one.
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "vinga-server/uv.lock"
+
+      - name: Install dependencies
+        run: uv sync --frozen
 
       - name: Integration tests
-        run: uv run pytest tests/integration -v
+        run: uv run pytest tests/integration -v --durations=25
 
       # The reference is generated from the models, so the committed
       # copy is a cache: it exists to be read on GitHub and in an
@@ -228,8 +261,11 @@ jobs:
 
   # The image is built and smoke-tested on every push to main and on
   # every manual dispatch, and published only on a push to main.
-  # `needs: test` is what makes publishing conditional on the suite:
-  # nothing reaches the registry that did not pass it.
+  # `needs: [unit, integration]` is what makes publishing conditional on
+  # the suite: nothing reaches the registry that did not pass it. Both
+  # lanes are named, and both have to be, since between them they hold
+  # every check the suite is made of; naming one would publish on half a
+  # green suite.
   #
   # Skipped on pull requests, deliberately and temporarily: while the
   # pre-release simplification milestones and the rename land, PRs come
@@ -247,7 +283,7 @@ jobs:
   # Both run the whole smoke conversation, which is what makes them
   # provably the same server rather than two that merely build.
   image:
-    needs: test
+    needs: [unit, integration]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
