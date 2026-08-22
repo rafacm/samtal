@@ -1,0 +1,362 @@
+"""How an event about a provider or a tool call is put together.
+
+The reply path used to hold this. A third of `runtime/pipeline.py`'s
+executable code chose between event shapes, ordered field lists, and
+knew which value type wrapped which argument, which is telemetry shape
+logic living in the middle of the code that answers a person. What a
+caller passes now is the thing that happened, in plain values, and what
+it gets back is the variant that describes it: it names no variant
+class, orders no field list, and learns nothing about which value type
+wraps which argument.
+
+The depth is not a vocabulary crossing, because there is none: the
+signatures below take builtins and answer a `Variant`. It is two facts
+that would otherwise be the caller's. The entry quartet is one type
+whose `provider` and `type` are required, so the four values a
+configured provider contributes are built in exactly one place and are
+answered whole or not at all. And the fragment naming a tool is a
+function here, so the one sentence about a call that is not an event
+states the rule about which names this application may print beside the
+declarations that hold the three that are to the same rule.
+
+Plain values in, one variant out, and nothing injectable. The module
+imports the catalog and the value vocabulary and no subsystem, which is
+what lets it be called from anywhere an event is emitted.
+"""
+
+from dataclasses import dataclass
+from typing import cast
+
+from vinga_server.events.catalog import (
+    BuiltinToolCall,
+    LlmRetry,
+    LlmRetryOfEntry,
+    LlmRound,
+    LlmRoundOfEntry,
+    McpToolCall,
+    ProviderFailed,
+    ProviderOfEntryFailed,
+    UnnamedToolCall,
+    Variant,
+)
+from vinga_server.events.values import (
+    ABSENT,
+    Absent,
+    ClassName,
+    Count,
+    Flag,
+    Fragment,
+    FromEntry,
+    Identifier,
+    Nothing,
+    ProviderOutcome,
+    QuotedProvider,
+    QuotedToolName,
+    ReachingHost,
+    Real,
+    ToolOutcome,
+    ToolSource,
+    UnnamedToolSource,
+    Whole,
+)
+
+__all__ = [
+    "builtin_tool_called",
+    "llm_retried",
+    "llm_rounded",
+    "mcp_tool_called",
+    "provider_failure",
+    "tool_fragment",
+    "unnamed_tool_called",
+]
+
+
+@dataclass(frozen=True)
+class _Entry:
+    """Which configuration entry a provider is, as the events that name
+    one carry it: the entry an operator wrote in the YAML, its type, the
+    host it reaches and the model it runs.
+
+    Answered whole or not at all, which is what makes `provider` and
+    `type` atomic: a provider the registry did not build (a test's, a
+    fixture's) has no identity, and an event that cannot name the entry
+    says less rather than guessing. Required here rather than checked
+    anywhere, and not exported, so this is the only place the four
+    values are built and a half quartet has nowhere to come from.
+
+    `host` is absent for an engine that runs in this process and `model`
+    for a type that has none to name. `model` is the GenAI conventions'
+    `gen_ai.request.model` (#120), which is what makes a round
+    attributable to the model that ran it rather than only to the entry
+    that pointed at one: two entries of a type can name different
+    models, and a turn's token totals blend the rounds of everything
+    that answered it.
+    """
+
+    provider: Identifier
+    type: Identifier
+    host: Identifier | Absent
+    model: Identifier | Absent
+
+
+def _entry_of(provider: object) -> _Entry | None:
+    """The configured entry behind one provider, or None where the
+    registry never built it.
+
+    Called inside a construction thunk, never beside one: every value it
+    builds is validated at construction, and a value that refuses has to
+    refuse where the emitter's guard is holding it.
+    """
+    identity = getattr(provider, "identity", None)
+    if identity is None:
+        return None
+    return _Entry(
+        provider=Identifier(identity.name),
+        type=Identifier(identity.type),
+        host=Identifier(identity.host) if identity.host is not None else ABSENT,
+        model=Identifier(identity.model) if identity.model is not None else ABSENT,
+    )
+
+
+def tool_fragment(tool: str | None, entry: str | None) -> Fragment:
+    """The fragment a sentence about one call renders where its name
+    would go: a builtin's own name, the configured MCP entry a call
+    reached, or nothing at all for the two namespaces this surface may
+    not name.
+
+    For the sentence that is not an event. The three `tool_call`
+    variants each declare which fragment type they carry, so for them
+    the rule is a field's type and cannot be got wrong; the warning line
+    about unparseable arguments has no variant to declare it, and its
+    rule would otherwise be written in the reply path, next to nothing
+    that says why. It lives here instead, beside the declarations it has
+    to agree with.
+
+    The one construction in this module built beside a log call rather
+    than inside an emit thunk. A refusal here lands in the tool-error
+    path instead of in the emitter's guard, and what bounds it is the
+    fragment's own grammar, which admits any configured name.
+    """
+    if tool is not None:
+        return QuotedToolName.of(tool)
+    if entry is not None:
+        return FromEntry.of(entry)
+    return Nothing("")
+
+
+# The builders below are thin, and each is one constructor call with its
+# arguments wrapped. That is what they should be, and it is not what
+# earns the module its name: the quartet type is, since it is the only
+# place the four entry values are built, and the fragment above is,
+# since it is where the naming rule is written for the one sentence no
+# variant declares it for.
+
+
+def builtin_tool_called(
+    agent: str, tool: str, duration_s: float, is_error: bool
+) -> Variant:
+    """The `tool_call` shape for a builtin: the one branch that names
+    its tool, because a builtin's name is this server's own word."""
+    return BuiltinToolCall(
+        agent=Identifier(agent),
+        tool=Identifier(tool),
+        duration_ms=Whole(round(duration_s * 1000)),
+        is_error=Flag(is_error),
+        named=QuotedToolName.of(tool),
+        duration_s=Real(duration_s),
+        outcome=_tool_outcome(is_error),
+    )
+
+
+def mcp_tool_called(
+    agent: str, entry: str, duration_s: float, is_error: bool
+) -> Variant:
+    """The `tool_call` shape for a server tool, which names the entry an
+    operator wrote in their YAML and never the far side's own name."""
+    return McpToolCall(
+        agent=Identifier(agent),
+        entry=Identifier(entry),
+        duration_ms=Whole(round(duration_s * 1000)),
+        is_error=Flag(is_error),
+        named=FromEntry.of(entry),
+        duration_s=Real(duration_s),
+        outcome=_tool_outcome(is_error),
+    )
+
+
+def unnamed_tool_called(
+    agent: str, source: str, duration_s: float, is_error: bool
+) -> Variant:
+    """The `tool_call` shape that names nothing.
+
+    A device tool's name is the board's vocabulary and an unknown name
+    is whatever the model invented, and the retained surface admits no
+    far-side bytes whichever peer sent them (#154, the
+    content-and-telemetry ADR). So `source` says which namespace was
+    reached into, and the full name is on the store's `tool_invocations`
+    row, where the text switch decides whether it is kept.
+    """
+    return UnnamedToolCall(
+        agent=Identifier(agent),
+        # The classifier answers `runtime/turns.py`'s own constants,
+        # which are held equal to the store's column rather than to this
+        # vocabulary, so the crossing is spelled here.
+        source=_namespace(source),
+        duration_ms=Whole(round(duration_s * 1000)),
+        is_error=Flag(is_error),
+        named=Nothing(""),
+        duration_s=Real(duration_s),
+        outcome=_tool_outcome(is_error),
+    )
+
+
+def _tool_outcome(is_error: bool) -> ToolOutcome:
+    """How a call ended, in the one word the sentence renders."""
+    return ToolOutcome.FAILED if is_error else ToolOutcome.ANSWERED
+
+
+def _namespace(source: str) -> UnnamedToolSource:
+    """The namespace word a call that names nothing carries.
+
+    Two refusals stand behind this and neither is here, which is what
+    the cast says. `ToolSource` refuses a word that is not one of the
+    four, and the variant declares the two of them this shape may say,
+    which `verify()` checks inside the emitter's guard before anything
+    is rendered. Checking it a third time here would move a refusal out
+    of the guard that holds it, for a narrowing the annotation cannot
+    carry across a string.
+    """
+    return cast(UnnamedToolSource, ToolSource(source))
+
+
+def llm_retried(
+    agent: str, stage: str, provider: object, round_: int, elapsed: float
+) -> Variant:
+    """Which `llm_retry` shape describes this stall."""
+    entry = _entry_of(provider)
+    if entry is None:
+        return LlmRetry(
+            agent=Identifier(agent),
+            round=Whole(round_),
+            duration_ms=Whole(round(elapsed * 1000)),
+            stage=Identifier(stage),
+            duration_s=Real(elapsed),
+        )
+    return LlmRetryOfEntry(
+        agent=Identifier(agent),
+        round=Whole(round_),
+        duration_ms=Whole(round(elapsed * 1000)),
+        stage=Identifier(stage),
+        provider=entry.provider,
+        type=entry.type,
+        duration_s=Real(elapsed),
+        host=entry.host,
+        model=entry.model,
+    )
+
+
+def llm_rounded(
+    agent: str,
+    stage: str,
+    provider: object,
+    round_: int,
+    turns: int,
+    elapsed: float,
+    input_tokens: int | None,
+    output_tokens: int | None,
+    first_token_ms: int | None,
+) -> Variant:
+    """Which `llm_round` shape describes this generation.
+
+    The token counts and the time to first token arrive as the plain
+    numbers a provider reported, or as None where it reported none:
+    their absence is a fact about the endpoint rather than a zero, and
+    a round that only asked for a tool timed no spoken token.
+    """
+    inputs = Count(input_tokens) if input_tokens is not None else ABSENT
+    outputs = Count(output_tokens) if output_tokens is not None else ABSENT
+    first = Whole(first_token_ms) if first_token_ms is not None else ABSENT
+    entry = _entry_of(provider)
+    if entry is None:
+        return LlmRound(
+            agent=Identifier(agent),
+            round=Whole(round_),
+            turns=Count(turns),
+            duration_ms=Whole(round(elapsed * 1000)),
+            stage=Identifier(stage),
+            duration_s=Real(elapsed),
+            input_tokens=inputs,
+            output_tokens=outputs,
+            first_token_ms=first,
+        )
+    return LlmRoundOfEntry(
+        agent=Identifier(agent),
+        round=Whole(round_),
+        turns=Count(turns),
+        duration_ms=Whole(round(elapsed * 1000)),
+        stage=Identifier(stage),
+        provider=entry.provider,
+        type=entry.type,
+        duration_s=Real(elapsed),
+        host=entry.host,
+        model=entry.model,
+        input_tokens=inputs,
+        output_tokens=outputs,
+        first_token_ms=first,
+    )
+
+
+def provider_failure(
+    agent: str, stage: str, provider: object, failure: BaseException, elapsed: float
+) -> Variant:
+    """Which `provider_failed` shape describes this failure.
+
+    The class name is reported and the exception's message is not, which
+    the value types make structural rather than careful: `ClassName` is
+    built from the exception itself, and there is no value in this
+    vocabulary a message could be constructed as. The exception crosses
+    as itself because it is a builtin, so nothing about a provider's own
+    types reaches this module.
+
+    Which failure is a wait is a question of type. Every provider raises
+    `ProviderCallTimeout` for its SDK's timeouts and that is a
+    `TimeoutError`, as are `asyncio.TimeoutError` and the watchdog's own
+    `FirstTokenTimeout`, so one `isinstance` covers the lot (#137). It
+    used to be decided by looking for "Timeout" in the class name,
+    because the SDKs' own classes agreed on nothing:
+    `openai.APITimeoutError` is an `APIConnectionError` and
+    `httpx.TimeoutException` inherits from neither.
+    """
+    outcome = (
+        ProviderOutcome.TIMED_OUT
+        if isinstance(failure, TimeoutError)
+        else ProviderOutcome.FAILED
+    )
+    entry = _entry_of(provider)
+    if entry is None:
+        return ProviderFailed(
+            agent=Identifier(agent),
+            error=ClassName.of(failure),
+            duration_ms=Whole(round(elapsed * 1000)),
+            stage=Identifier(stage),
+            named=Nothing(""),
+            outcome=outcome,
+            duration_s=Real(elapsed),
+            where=Nothing(""),
+        )
+    return ProviderOfEntryFailed(
+        agent=Identifier(agent),
+        error=ClassName.of(failure),
+        duration_ms=Whole(round(elapsed * 1000)),
+        stage=Identifier(stage),
+        provider=entry.provider,
+        type=entry.type,
+        named=QuotedProvider.of(entry.provider.carried()),
+        outcome=outcome,
+        duration_s=Real(elapsed),
+        where=ReachingHost.of(
+            None if isinstance(entry.host, Absent) else entry.host.carried()
+        ),
+        host=entry.host,
+        model=entry.model,
+    )
