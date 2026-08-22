@@ -65,8 +65,9 @@ lane's setup-uv step), since two jobs writing identical bytes under
 one key on the same run is a race whose loser reports a failed
 reserve. Every other step appears in exactly one lane,
 and every step that existed still exists: the parse check below lists
-the two lanes' steps in full, and the two lists concatenated are the
-old job's list.
+the two lanes' steps in full, and those two lists, with the three
+duplicated setup steps counted once, are exactly the old job's twelve
+steps.
 
 The moved steps kept their bodies and their comments byte for byte.
 The whole workflow diff is 55 insertions and 6 deletions, and the six
