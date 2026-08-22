@@ -9,28 +9,20 @@ The structured events are this server's observability surface
 ([ADR](../adr/2026-08-04-json-logs-are-the-observability-surface.md)), and
 they carry metadata and nothing else
 ([ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)).
-This document is that surface written down: 58 events in 99 variants, 57 of
-them emitted from ordinary sites and 1 internal. What was said in a
-conversation is in the conversation store instead, keyed by the same `session`
-([its reference](conversations-schema.md)).
+This document is that surface written down: 57 events in 85 variants. What was
+said in a conversation is in the conversation store instead, keyed by the same
+`session` ([its reference](conversations-schema.md)).
 
 A site does not describe an emission; it constructs one. Every variant below
 is a type, its values are types, and its sentence and argument order are
 derived from its own fields, so an emission that is not one of these shapes
 cannot be built at all. What is left at runtime is the construction itself,
-which happens inside the emitter's guard, and `VINGA_EVENTS_ENFORCEMENT`
-decides what a construction that refuses costs. `forgiving` says so once on
-the emitter's own channel and dispatches `schema_violation` in its place;
-`strict` raises instead.
+which happens inside the emitter's guard: a construction that refuses is said
+once on the emitter's own channel and dropped, because a telemetry bug must
+never cost a reply.
 
-Which one a process gets when the variable is unset is a default rather than a
-rule about the process: a running server defaults to `forgiving`, because a
-telemetry bug must never cost a reply, and everything that is not a running
-server (a test lane, an import, a REPL) defaults to `strict`. Either mode can
-be asked for in either place, and a developer who wants a loud local server
-sets `strict` exactly that way. The [README's Logging
-section](../../vinga-server/README.md#logging) is the human overview, with one
-line per event saying when it fires.
+The [README's Logging section](../../vinga-server/README.md#logging) is the
+human overview, with one line per event saying when it fires.
 
 ## How to read it
 
@@ -254,7 +246,6 @@ meets them, from a device's check-in to the server's own lifecycle surfaces.
 | `device_bindings_unreadable` | `vinga_server.device.bindings` | WARNING | 1 |
 | `api_error` | `vinga_server.config.api` | ERROR | 1 |
 | `api_storage_error` | `vinga_server.config.api` | ERROR | 1 |
-| `schema_violation` (internal) | every channel (14) | ERROR | 14 |
 
 ### `conversations_enabled`
 
@@ -2126,185 +2117,6 @@ the configuration API met unreadable stored state (%s)
 | # | Argument | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- |
 | 1 | `CLASS_NAME` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-
-### `schema_violation`
-
-**Internal.** No ordinary emit site produces this event: the emitter itself is
-its only producer, which is what the declaration's own `internal` flag says.
-
-What the emitter emits in forgiving mode when an emission cannot be built into
-a declared shape. Fixed at ERROR, because `log_level` admits roots above
-WARNING and a complaint that vanishes under one is no complaint.
-
-#### Variant 1: `vinga_server.session` at ERROR
-
-```text
-an event was refused by the event schema and replaced by this one; reproduce it under VINGA_EVENTS_ENFORCEMENT=strict to see which
-```
-
-No arguments: the sentence is fixed.
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-
-#### Variant 2: `vinga_server.app` at ERROR
-
-```text
-an event was refused by the event schema and replaced by this one; reproduce it under VINGA_EVENTS_ENFORCEMENT=strict to see which
-```
-
-No arguments: the sentence is fixed.
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-
-#### Variant 3: `vinga_server.capture` at ERROR
-
-```text
-an event was refused by the event schema and replaced by this one; reproduce it under VINGA_EVENTS_ENFORCEMENT=strict to see which
-```
-
-No arguments: the sentence is fixed.
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-
-#### Variant 4: `vinga_server.config.api` at ERROR
-
-```text
-an event was refused by the event schema and replaced by this one; reproduce it under VINGA_EVENTS_ENFORCEMENT=strict to see which
-```
-
-No arguments: the sentence is fixed.
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-
-#### Variant 5: `vinga_server.conversations.store` at ERROR
-
-```text
-an event was refused by the event schema and replaced by this one; reproduce it under VINGA_EVENTS_ENFORCEMENT=strict to see which
-```
-
-No arguments: the sentence is fixed.
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-
-#### Variant 6: `vinga_server.device.bindings` at ERROR
-
-```text
-an event was refused by the event schema and replaced by this one; reproduce it under VINGA_EVENTS_ENFORCEMENT=strict to see which
-```
-
-No arguments: the sentence is fixed.
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-
-#### Variant 7: `vinga_server.filler` at ERROR
-
-```text
-an event was refused by the event schema and replaced by this one; reproduce it under VINGA_EVENTS_ENFORCEMENT=strict to see which
-```
-
-No arguments: the sentence is fixed.
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-
-#### Variant 8: `vinga_server.onboarding` at ERROR
-
-```text
-an event was refused by the event schema and replaced by this one; reproduce it under VINGA_EVENTS_ENFORCEMENT=strict to see which
-```
-
-No arguments: the sentence is fixed.
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-
-#### Variant 9: `vinga_server.ota` at ERROR
-
-```text
-an event was refused by the event schema and replaced by this one; reproduce it under VINGA_EVENTS_ENFORCEMENT=strict to see which
-```
-
-No arguments: the sentence is fixed.
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-
-#### Variant 10: `vinga_server.providers.openai_asr` at ERROR
-
-```text
-an event was refused by the event schema and replaced by this one; reproduce it under VINGA_EVENTS_ENFORCEMENT=strict to see which
-```
-
-No arguments: the sentence is fixed.
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-
-#### Variant 11: `vinga_server.registry` at ERROR
-
-```text
-an event was refused by the event schema and replaced by this one; reproduce it under VINGA_EVENTS_ENFORCEMENT=strict to see which
-```
-
-No arguments: the sentence is fixed.
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-
-#### Variant 12: `vinga_server.tools.mcp` at ERROR
-
-```text
-an event was refused by the event schema and replaced by this one; reproduce it under VINGA_EVENTS_ENFORCEMENT=strict to see which
-```
-
-No arguments: the sentence is fixed.
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-
-#### Variant 13: `vinga_server.tools.memory` at ERROR
-
-```text
-an event was refused by the event schema and replaced by this one; reproduce it under VINGA_EVENTS_ENFORCEMENT=strict to see which
-```
-
-No arguments: the sentence is fixed.
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-
-#### Variant 14: `vinga_server.ws` at ERROR
-
-```text
-an event was refused by the event schema and replaced by this one; reproduce it under VINGA_EVENTS_ENFORCEMENT=strict to see which
-```
-
-No arguments: the sentence is fixed.
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
