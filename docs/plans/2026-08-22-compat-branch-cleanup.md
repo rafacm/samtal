@@ -58,15 +58,25 @@ stricter and simpler contract: every hop past the first was already
 
 **What refuses a bare-string binding once `_binding_as_list` stops
 converting it?** Pydantic, through the `devices` field's own type,
-which declares a list. The refusal must name the field and must not
-echo arbitrary input beyond what the existing config-write refusal
-rendering already permits; the test bite pins the refusal's shape on
-the write path (a `set device` body carrying `agents: sam`), not just
-direct model construction. `normalize_device_bindings` keeps its MAC
-canonicalization and its duplicate-MAC refusal; the empty-list and
-duplicate-agent refusals stay, in whatever home the deletion leaves
-natural (the function may collapse into its caller if the deletion
-test says it no longer earns its name).
+which declares a list, and only on the one route that can still
+carry the string form: composing a `Config`/`DomainConfig` from a
+raw domain mapping (`loader._composed`; in the suite,
+`load_config_from_data`). Every write path is already closed
+upstream of the validator and does not change: the API's `_agents`
+(`config/api.py:2207`) refuses a non-list body before `bind_device`
+is called, the CLI builds a list from argparse, `store._binding`
+wraps its arguments in a list, YAML `devices:` is refused whole by
+`_check_moved_keys`, and the DB read path refuses a string in
+`_list`. The test bite is therefore `load_config_from_data` with
+`devices: {mac: "assistant"}` refusing, rendered by
+`_format_validation_error` (`loader.py:355`), which reads pydantic's
+`msg` only (`Input should be a valid list` against the `devices.
+<mac>` location); no write-path bite is available or needed, and the
+plan says so rather than promising one. `normalize_device_bindings`
+keeps its MAC canonicalization and its duplicate-MAC refusal; the
+empty-list and duplicate-agent refusals stay, in whatever home the
+deletion leaves natural (the function may collapse into its caller
+if the deletion test says it no longer earns its name).
 
 **How does the diff stop being form-sensitive without a second
 normalization?** By reusing the one that exists: `as_mcp_grant` in
@@ -153,11 +163,12 @@ changes.
   sentinel test plants a redirect whose target carries a
   credential-shaped string and asserts the refusal renders neither
   the target nor the supplied URL. (2) The bare-string binding
-  refusal is pydantic's, rendered through the existing config-write
-  refusal path; the test bite asserts the refusal names
-  `devices`/the MAC's field and does not echo a planted
-  credential-shaped binding value beyond that path's existing
-  contract. (3) `parse_base_url`'s refusal is reused unchanged; its
+  refusal is pydantic's, rendered by `_format_validation_error`
+  (`loader.py:355`), which reads pydantic's `msg` and the field
+  location only, never the input; the test bite asserts the refusal
+  names `devices.<mac>` and that a planted credential-shaped binding
+  value does not appear in the rendered message. (3)
+  `parse_base_url`'s refusal is reused unchanged; its
   echo is pre-existing, shared with two sibling types, and named to
   the review as an open question rather than silently extended or
   silently fixed.
@@ -199,10 +210,14 @@ Reuse the existing assets; the new bites are:
   tests in `tests/unit/test_config_cli_onboarding.py` invert from
   followed to refused rather than being deleted); the no-leak
   sentinel above.
-- Binding: a `set device` write carrying `agents: sam` is refused
-  naming the field; the two-personas integration test binds with
-  lists in both places; MAC canonicalization, duplicate-MAC,
-  duplicate-agent, and empty-list refusals keep their existing pins.
+- Binding: `load_config_from_data` with a string binding is refused
+  naming `devices.<mac>` (the deletion's pin, the one route that
+  reaches the arm); the API and CLI write paths are asserted
+  unchanged by their existing refusal pins; the string-form test
+  sites across the suite (the finding-2 inventory) rewrite to the
+  list form; MAC canonicalization, duplicate-MAC, duplicate-agent,
+  and empty-list refusals keep their existing behavior, with their
+  test text updated to the list spelling where it carried a string.
 - Diff: the two characterization pins above, in
   `tests/unit/test_config_diff.py`.
 - Provider: `openai_compatible` refuses a scheme-less `base_url` at
@@ -272,6 +287,12 @@ string arm is composing a config from a raw mapping
 rendered by `_format_validation_error` (`loader.py:355`), and the
 plan must state the API and CLI paths do not change; the no-leak
 pre-answer named the wrong rendering path.
+
+*Resolution*: accepted in full. The open-question answer now names
+the one reachable route and every closed write path, the test bite
+is the `load_config_from_data` refusal rendered by
+`_format_validation_error`, and the no-leak pre-answer names that
+path and what it reads.
 
 **2 (P2). The string-binding inventory is off by roughly twenty
 sites, including a fixture M2's own commit depends on.** The form is
