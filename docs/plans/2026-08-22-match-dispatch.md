@@ -92,9 +92,17 @@ decision here is the issue's "judgment call" answered.
   time is taken from whitespace. The existing suites stay
   byte-unchanged through the conversion; the new pin is the one test
   change.
-- **Closed sets.** The event union is the closed set, declared where
-  the events are; the `match` restates the same arms over the same
-  types with the same catch-all, adding and removing none.
+- **Closed sets.** The event union (`LlmEvent`) is the closed set,
+  declared where the events are; the `match` restates the same arms
+  over the same types with the same catch-all, adding and removing
+  none. Honestly stated: with `_watchdog_stream` typed
+  `AsyncIterator[Any]`, neither spelling gets exhaustiveness help
+  and the explicit `case _:` is a reading gain, not a checked one.
+  The conversion commit therefore also annotates `_watchdog_stream`
+  (its parameter and return) as `AsyncIterator[LlmEvent]`, which is
+  what its docstring and single caller already say it is; no checker
+  in CI enforces it today, and the annotation is the seam stated
+  truthfully for the one that will.
 - **Honest seams.** No seam changes; the loop consumes the same
   `LlmEvent` stream from the same watchdog wrapper.
 - **Inventories by tooling.** One site converts; the inventory is
@@ -197,6 +205,11 @@ code does not have.** `_watchdog_stream` is typed
 exhaustiveness help and `case _:` accepts a fifth `LlmEvent` member
 into `calls` silently. Say the catch-all gain is a reading gain, or
 take the cheap win and annotate the stream `AsyncIterator[LlmEvent]`.
+
+*Resolution*: accepted, both halves. The lens now states the
+reading-gain honestly, and the conversion commit annotates
+`_watchdog_stream` with `AsyncIterator[LlmEvent]`, verified truthful
+against its docstring and its single caller at `pipeline.py:1266`.
 
 **5 (P3). Both listed risks are impossible; the two real ones are
 absent.** The four event types are unrelated frozen dataclasses with
