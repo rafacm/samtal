@@ -52,7 +52,7 @@ document is byte-identical.
 
 **The pilot migration** (`events/catalog.py`). All 27
 `value(fixed=SomethingToken(Enum.MEMBER))` fields become
-`field: Enum = value(fixed=Enum.MEMBER)`; eleven wrapper imports go
+`field: Enum = value(fixed=Enum.MEMBER)`; ten wrapper imports go
 with them. Eight declarations that were wrapped over three lines only
 because of the wrapper's length are one line again. No emit site
 changed, by construction: a fixed field is `init=False`.
