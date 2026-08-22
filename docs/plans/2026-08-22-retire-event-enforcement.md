@@ -83,9 +83,14 @@ and discoveries; no deviations says so explicitly.
    `ENFORCEMENT_MODES`/`ENFORCEMENT_ENV`/`_enforcement`,
    `enforcement()`, `set_enforcement`, `resolve_enforcement`. The
    no-leak property `_refuse` protected (nothing this module raises
-   carries what it was handed) becomes vacuous: the module no longer
-   raises at all on the emit path, and the report line already
-   carries only fixed vocabulary. `main.py` and `app.py` lose the
+   carries what it was handed) becomes vacuous in the guarded
+   region: construction, identity building, the report, and each
+   tap offer retain their blanket catches and contain no `raise` at
+   all once `_refuse` goes. The claim is deliberately not broader:
+   `deepcopy`, `replace`, `Emission(...)` and the clock run outside
+   the guards, as they do today, and payload values are builtins by
+   construction, so their failure modes are unchanged by this
+   milestone. `main.py` and `app.py` lose the
    resolve calls and the `EventEnforcementError` handling around
    boot.
 4. **`VINGA_EVENTS_ENFORCEMENT` disappears from the surface,
@@ -161,10 +166,11 @@ and discoveries; no deviations says so explicitly.
 - **No-leak.** The surviving surface is the report line and the tap
   report, both already fixed-vocabulary; the sentinel tests that
   prove it survive, rewritten, and are named in decision 6. The
-  scrubbed-raise machinery is deleted because nothing raises, not
-  because the property stopped mattering; the plan states this so a
-  reviewer checks the emit path really cannot raise (the guard's
-  blanket catches remain).
+  scrubbed-raise machinery is deleted because nothing in the
+  guarded region raises any more, not because the property stopped
+  mattering; the reviewer's check is that the guarded region
+  (construction, identities, report, per-tap offer) contains no
+  `raise` after the milestone.
 - **Pin before reshaping.** The three catalog pins move by design
   this time and each moves by regeneration script with a reviewed
   diff; the baseline is expected byte-still (internal exemption)
