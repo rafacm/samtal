@@ -1,28 +1,30 @@
-"""What every emit path produces, recorded so a change to it is loud.
+"""Every emit path, and what makes it fire.
 
-The #143 wire baseline, applied to log records. A conversion milestone's
-whole claim is that the surface did not move, and the honest way to make
-that claim is to record what every path produces, convert, record again,
-and show the two are the same file. So this drives each of the
-eighty-one paths and captures the five dimensions a consumer sees: the
-channel, the numeric level, the unrendered template, the TYPES of the
-arguments behind it, and the payload's keys.
+A driver inventory, and nothing more than that. "Baseline" was once a
+committed capture of what these paths produced, kept so a conversion
+could show the file did not move; that file is gone (#241), and with it
+the regeneration command and the byte comparison it fed. What is left is
+the machinery: eighty-one drivers, one per emit path, and the two
+functions that run them and reduce what they produced to the dimensions
+a consumer sees (`driven()` and `captured()`). Nothing here is written
+to disk, and there is nothing to regenerate.
 
-Types rather than values for the arguments, and keys rather than values
-for the payload, because a baseline is about shape: a temporary
-directory and a class name move between runs, and a file that changed
-every run would be a file nobody reads. What the values are is the
-golden inventory's question and the behavioral suites'.
+What the drivers are held to is `tests/unit/test_event_baseline.py`,
+live and against the declarations rather than against a file: every
+produced record conforms to the variant its event declares, every driver
+carries the fields its path is supposed to carry, and the payload values
+are builtins. `docs/reference/events.md` is the committed artifact where
+a catalog change is a reviewed diff.
 
 **The completeness claim comes from the catalog, not from this file.** A
 runtime harness proves only what it executes, so on its own a set of
 drivers proves whatever it happens to run. Every variant the catalog
-declares is constructible, and therefore directly drivable, so
-`tests/unit/test_event_baseline.py` holds all eighty-five of them to
-being produced by some driver's run, and a declaration nothing can
-produce fails the lane. Beside it, the smaller claim these drivers can
-give themselves: one driver per identity, eighty-one of them, and every
-record a driver keeps is the event that driver names.
+declares is constructible, and therefore directly drivable, so the suite
+holds every one of them to being produced by some driver's run, and a
+declaration nothing can produce fails the lane. Beside it, the smaller
+claim these drivers can give themselves: one driver per identity,
+eighty-one of them, and every record a driver keeps is the event that
+driver names.
 
 There used to be a static walk here instead, reading the scoped modules
 for emit sites and holding the drivers equal to what it found. It
@@ -35,9 +37,7 @@ planted sources it was proved on.
 `identity` is where a path is, and `event` is what it emits, which is
 what its capture is filtered to: a session driver reaches its decision
 by holding a whole conversation, so its run emits every neighbouring
-path's records too. Regenerate the committed file deliberately:
-
-    uv run python -m tests.tools.event_baseline
+path's records too.
 
 The drivers reach into the store and the capture the way the pin suites
 they came from do: a writer parked on its gate, an engine that raises, a
@@ -49,7 +49,6 @@ they are the same ones `test_conversations_store.py` pays.
 import asyncio
 import datetime as dt
 import inspect
-import json
 import logging
 import os
 import sys
@@ -68,7 +67,6 @@ from fastapi.testclient import TestClient
 from openai import AsyncOpenAI
 from starlette.websockets import WebSocketDisconnect
 
-import vinga_server
 from tests.support.apps import entered_client
 from tests.support.checkin import (
     MOCK_AGENT,
@@ -179,58 +177,9 @@ from vinga_server.tools.mcp import McpServers
 from vinga_server.tools.mcp.reload import ReloadInProgressError
 from vinga_server.tools.memory import MemoryStore
 
-# The channels this baseline covers: what a record has to ride to be
+# The channels this harness covers: what a record has to ride to be
 # captured at all.
 SCOPE: tuple[str, ...] = CHANNELS
-
-# And the modules whose statically known emit sites it must claim, which
-# is a different list because a channel is not a file: four modules emit
-# on the one session channel, which is the whole reason that channel is
-# named rather than derived from `__name__`.
-#
-# M3 widened both to the whole surface: every channel this server
-# speaks on, and every module that emits on one.
-MODULES: tuple[str, ...] = (
-    "vinga_server.conversations.store",
-    "vinga_server.device.session",
-    "vinga_server.runtime.pipeline",
-    "vinga_server.runtime.turntaking",
-    "vinga_server.runtime.filler_runner",
-    "vinga_server.app",
-    "vinga_server.capture",
-    "vinga_server.config.api",
-    "vinga_server.device.bindings",
-    "vinga_server.filler",
-    "vinga_server.onboarding.keys",
-    "vinga_server.onboarding.origin",
-    "vinga_server.ota.poll",
-    "vinga_server.ota.reply",
-    "vinga_server.providers.openai_asr",
-    "vinga_server.registry",
-    "vinga_server.tools.mcp.manager",
-    "vinga_server.tools.mcp.registry",
-    "vinga_server.tools.mcp.reload",
-    "vinga_server.tools.memory",
-    "vinga_server.ws",
-)
-
-COMMITTED = (
-    Path(__file__).resolve().parent.parent / "unit" / "data" / "event-baseline.json"
-)
-
-PACKAGE = Path(vinga_server.__file__).parent
-
-# The four emitter methods an untyped site calls, which is how that
-# shape is recognized; the typed shape is `emit` and is recognized by
-# name alone.
-LEVEL_METHODS = frozenset({"debug", "info", "warning", "error"})
-
-TYPED_METHOD = "emit"
-
-# How a session-scoped emitter is reached, spelled as the conformance
-# walk spells it. Nothing in scope uses it yet; M2 is where it starts
-# to.
-SESSION_RECEIVER = "self._events"
 
 # The clock these stores keep, so "recorded two hundred days ago" is a
 # number the harness chose rather than a sleep.
@@ -408,11 +357,10 @@ STORE_DRIVERS: tuple[Driver, ...] = (
 
 # --- the session channel's drivers ------------------------------------
 #
-# Ported from the prose pin suite this milestone retires: those tests
-# drove every one of these paths onto its own decision, and driving is
-# exactly what a baseline needs. What they asserted about the record
-# moves to the golden inventory and to the capture below; how they
-# reached the record is here.
+# Ported from the prose pin suite #210 retired: those tests drove every
+# one of these paths onto its own decision, and driving is exactly what
+# these checks need. What they asserted about the record is the
+# declarations' now; how they reached the record is here.
 #
 # Some drivers run more than one scenario, because a site can emit more
 # than one record shape: `llm_round` names the configured entry behind
@@ -551,9 +499,9 @@ async def failing_reply(stage: str, provider: Any, watch: Any = None) -> Any:
     in.
 
     `watch` attaches a consumer before the reply starts, which is what
-    the privacy suite next door needs and what a baseline driver has no
-    use for: a claim about what reaches a tap has to be asserted at the
-    tap rather than inferred from the log.
+    the privacy suite next door needs and what a driver here has no use
+    for: a claim about what reaches a tap has to be asserted at the tap
+    rather than inferred from the log.
     """
 
     class TextSink:
@@ -959,12 +907,12 @@ SESSION_DRIVERS: tuple[Driver, ...] = (
 # --- the server channels ----------------------------------------------
 #
 # Ported from `test_server_event_pins.py`, which drove every one of these
-# paths onto its own decision. Driving is exactly what a baseline needs,
-# so the drivers come from there rather than being invented beside it.
+# paths onto its own decision. Driving is exactly what these checks
+# need, so the drivers come from there rather than being invented beside
+# it.
 #
 # The monkeypatching those tests do with a fixture is done by hand here,
-# saved and restored, because a driver runs outside pytest when the
-# baseline is regenerated.
+# saved and restored, for the reason `patched()` gives.
 
 # What a value that has to move between runs is planted as: an API token
 # long enough for the configuration API to accept, and the prompt the
@@ -986,8 +934,9 @@ PINNED_KEY = "ABCDEFGH"
 def patched(owner: object, name: str, replacement: object) -> Iterator[None]:
     """One attribute swapped for the length of a block.
 
-    `monkeypatch` is a fixture, and half of these drivers run outside
-    pytest when the file is regenerated.
+    `monkeypatch` is a fixture, and a driver is an ordinary function
+    that anything may call: `tests/tools/driver_times.py` runs the whole
+    inventory outside pytest.
     """
     original = getattr(owner, name)
     setattr(owner, name, replacement)
@@ -1621,12 +1570,20 @@ def payload(record: logging.LogRecord) -> dict[str, Any]:
 
 
 def shape(record: logging.LogRecord) -> dict[str, Any]:
-    """One record in the dimensions a consumer sees."""
+    """One record in the dimensions a consumer sees.
+
+    Values are deliberately absent: the drivers work with real material,
+    a planted API token among it, and what these dimensions are for is
+    holding a record to its declaration. Argument types went with the
+    committed capture (#241): the suite compares the template itself,
+    which the declaration derives its argument order from, so arity is
+    subsumed, and which field each position renders is
+    `docs/reference/events.md`'s pin now.
+    """
     return {
         "channel": record.name,
         "level": record.levelno,
         "template": record.msg,
-        "argument_types": [type(one).__name__ for one in (record.args or ())],
         "fields": sorted(payload(record)),
         "event": getattr(record, "event", None),
     }
@@ -1638,13 +1595,13 @@ def driven() -> dict[str, list[logging.LogRecord]]:
 
     Filtered to the event each driver says its path emits, for the
     reason `Driver` gives. Whole records rather than shapes, because a
-    claim about what a payload HOLDS cannot be made from the keys the
-    baseline records; `captured()` takes a run already made, so a suite
+    claim about what a payload HOLDS cannot be made from the keys
+    `shape()` keeps; `captured()` takes a run already made, so a suite
     wanting both pays for one.
     """
     produced: dict[str, list[logging.LogRecord]] = {}
     for driver in DRIVERS:
-        with tempfile.TemporaryDirectory(prefix="vinga-baseline-") as directory:
+        with tempfile.TemporaryDirectory(prefix="vinga-drivers-") as directory:
             with listening() as collector:
                 answer = driver.drive(Path(directory))
                 if inspect.isawaitable(answer):
@@ -1658,29 +1615,11 @@ def driven() -> dict[str, list[logging.LogRecord]]:
 
 
 def captured(
-    produced: dict[str, list[logging.LogRecord]] | None = None,
+    produced: dict[str, list[logging.LogRecord]],
 ) -> dict[str, list[dict[str, Any]]]:
-    """What every path produced, in the dimensions the committed
-    baseline records."""
-    runs = driven() if produced is None else produced
-    return {key: [shape(one) for one in records] for key, records in runs.items()}
+    """What every path produced, in the dimensions `shape()` keeps.
 
-
-def rendered(baseline: dict[str, list[dict[str, Any]]]) -> str:
-    return json.dumps(baseline, indent=2) + "\n"
-
-
-def committed() -> dict[str, list[dict[str, Any]]]:
-    return json.loads(COMMITTED.read_text(encoding="utf-8"))  # type: ignore[no-any-return]
-
-
-if __name__ == "__main__":  # pragma: no cover - the regeneration path
-    # The run's environment, set the way a lane sets it: an app refuses
-    # to boot without its two secrets, and a database needs somewhere
-    # writable. `conftest.py` is where all of that is decided, so it is
-    # imported rather than restated.
-    import tests.conftest  # noqa: F401
-
-    COMMITTED.parent.mkdir(parents=True, exist_ok=True)
-    COMMITTED.write_text(rendered(captured()), encoding="utf-8")
-    print(f"wrote {COMMITTED}")
+    Takes a run rather than making one: a suite that also wants the
+    whole records pays for a single drive and reduces it here.
+    """
+    return {key: [shape(one) for one in records] for key, records in produced.items()}
