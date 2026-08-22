@@ -146,8 +146,8 @@ two arms; the real risks are the two the review named:
 
 ## Milestones
 
-- [ ] **M1: Pin the unpinned arms, then convert the loop to
-  `match`.** Two code commits (the pin, then the conversion with its
+- [x] **[M1: Pin the unpinned arms, then convert the loop to
+  `match`](2026-08-22-match-dispatch-implementation.md#m1-pin-the-unpinned-arms-then-convert-the-loop-to-match).** (PR TBD) Two code commits (the pin, then the conversion with its
   changelog entry), plus the implementation-doc section and the
   ticked checklist entry in the change that completes the milestone,
   as AGENTS.md requires. Design footprint: no interface changes
