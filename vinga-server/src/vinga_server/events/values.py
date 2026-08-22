@@ -455,16 +455,16 @@ class EventValue:
 
     `KIND` and `ARG_KIND` are the documentation facts: what this value
     is called in the generated reference as a payload field and as a
-    `%` position. `SYNTAX`, `BOUNDS` and `TOKENS` are the constraint a
-    reference prints beside the kind, and they are `None` where the kind
-    carries no further claim.
+    `%` position. `SYNTAX` and `BOUNDS` are the constraint a reference
+    prints beside the kind, and they are `None` where the kind carries
+    no further claim. A closed set is not among them: a set is an
+    enumeration, and a field declares one by naming it.
     """
 
     KIND: ClassVar[Kind]
     ARG_KIND: ClassVar[ArgKind]
     SYNTAX: ClassVar[Syntax | None] = None
     BOUNDS: ClassVar[Bounds | None] = None
-    TOKENS: ClassVar[frozenset[str] | None] = None
     # `CLASS_NAME` only: whether this value may carry the ", "-joined
     # form a group of exceptions renders as. A documentation fact like
     # the three above, and a constraint the type enforces.
