@@ -64,18 +64,26 @@ lint/mypy/doc-drift/wheel seconds; critical path 12m45s.
    whole suite. Nothing pins the old job name: the repository has no
    branch protection requiring a check named `test` (verified via the
    API), and the workflow itself is the only reader.
-2. **The waits shrink by configuration, in the harness only.** The
-   three filler drivers and the watchdog driver get harness-local
-   values: a sub-second stall and a proportionally shrunk cut-off
-   bound, keeping the ordering ratios that make each scenario reach
-   its decision site (the filler delay stays well under the stall,
-   the stall well under the bound). `STALL_S` itself is shared by
-   other suites, so the harness takes its own smaller constant
-   rather than moving the shared one; production code does not
-   change. If the 20s bound turns out to be a production default
-   with no config seam, the driver overrides it through whatever
-   config surface exists, and a bound with no seam at all is a
-   finding to record, not something to hack around.
+2. **The waits shrink by configuration, in the harness only, the
+   way the sibling suite already does it.**
+   `tests/unit/test_session_filler.py` drives these same three
+   scenarios with a local `STALL_S = 0.5` and, where it needs the
+   bound, `masked_config(delay_ms=..., server=
+   {"llm_first_token_timeout_s": ...})`; the seam exists and no new
+   parameter on `tests/support/configs.py` is needed. The three
+   filler drivers take a harness-local 0.5s stall and leave the
+   bound alone: their kept records are filtered to `filler_*`, so
+   the only ordering that matters there is filler delay (60ms) well
+   under the stall, and with a 0.5s stall the reply simply succeeds
+   instead of being given up. `drive_llm_retry` is the opposite
+   case: the watchdog only fires when the stall EXCEEDS the bound,
+   so that driver keeps a stall above the shrunk 0.05s bound it
+   gets by passing `watchdog_config()` through the `unregistered()`
+   parameter of measurement-paragraph fame. The invariants are
+   stated per driver, never globally, because the global form
+   ("stall well under the bound") would stop `drive_llm_retry`
+   firing at all. The shared `STALL_S` and production code do not
+   change.
 3. **The committed baseline cannot move, by construction and by
    check.** `shape()` records channel, level, template, argument
    TYPES, sorted field KEYS, and the event name; no timing value is
