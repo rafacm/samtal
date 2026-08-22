@@ -91,7 +91,7 @@ from vinga_server.events.values import (
     AgentNames,
     AlsoBoundTo,
     ClientId,
-    CloseReasonToken,
+    CloseReason,
     DeviceId,
     Identifier,
     Real,
@@ -514,7 +514,10 @@ class DeviceSession:
             self._events.emit(
                 lambda: SessionClosed(
                     duration_s=Real(self._open_duration_s()),
-                    reason=CloseReasonToken(self._closed_reason()),
+                    # The latch holds a plain string, so the crossing into
+                    # the event vocabulary is spelled here rather than in
+                    # what each close path decides.
+                    reason=CloseReason(self._closed_reason()),
                     mac=DeviceId(mac),
                 )
             )

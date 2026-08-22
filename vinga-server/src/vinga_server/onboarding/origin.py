@@ -37,7 +37,6 @@ from vinga_server.events.values import (
     Identifier,
     OriginProvenance,
     OriginSource,
-    OriginSourceToken,
 )
 
 from . import events
@@ -210,7 +209,7 @@ def log_banner(server: ServerConfig) -> None:
         events.emit(
             lambda: OnboardingOff(
                 origin=Identifier(origin.url),
-                origin_source=OriginSourceToken(origin.source),
+                origin_source=origin.source,
                 provenance=OriginProvenance(origin.provenance),
             )
         )
@@ -218,7 +217,7 @@ def log_banner(server: ServerConfig) -> None:
     events.emit(
         lambda: OnboardingOn(
             origin=Identifier(origin.url),
-            origin_source=OriginSourceToken(origin.source),
+            origin_source=origin.source,
             # Whether anything stands in front of the short route at
             # all. With device auth off there is no secret to derive a
             # key from and it mounts keyless, which is a fact about the
