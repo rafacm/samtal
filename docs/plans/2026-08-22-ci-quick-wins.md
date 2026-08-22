@@ -115,10 +115,12 @@ lint/mypy/doc-drift/wheel seconds; critical path 12m45s.
 - `.github/workflows/vinga-server.yml`: the `test` job becomes
   `unit` and `integration`; `image.needs` updates; `--durations=25`
   on both pytest invocations. No other file in M1.
-- `tests/tools/event_baseline.py` (and, only if the bound requires
-  it, `tests/support/configs.py` gaining a parameter with its
-  current default): harness-local stall and bound values for the
-  four slow drivers. No production module changes.
+- `tests/tools/event_baseline.py`: the harness-local 0.5s stall
+  for the three filler drivers, and `unregistered()` gaining a
+  config parameter so `drive_llm_retry` passes
+  `watchdog_config()`. No production module changes, and no change
+  to `tests/support/configs.py`: the `masked_config(server=...)`
+  seam already exists.
 
 ## Tests
 
