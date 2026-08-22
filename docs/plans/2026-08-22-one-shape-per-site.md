@@ -11,8 +11,9 @@ entry" and "of entry" twins of the same events. The three twin pairs
 each, and the assembly helpers that remain move out of the
 orchestrator into `events/`, so telemetry shape logic stops living
 in the reply path. The coordination note in the issue is settled by
-history: #235 landed first (PR #236), so this restructures the
-already-converted dispatch.
+history: #235 landed first (PR #236) and its `match` over the
+provider stream is untouched here; the two changes are adjacent in
+the file and disjoint in what they touch.
 
 The companion implementation doc,
 [`2026-08-22-one-shape-per-site-implementation.md`](2026-08-22-one-shape-per-site-implementation.md),
@@ -188,8 +189,12 @@ providers.
 - `events/catalog.py`: the three OfEntry variants deleted; the
   three survivors gain the absent-able quartet with merged notes;
   `__all__` updated.
-- `runtime/pipeline.py`: the assembly region deleted; call sites
-  hand plain values to `events/assembly.py` inside their thunks.
+- `runtime/pipeline.py`: the assembly region deleted; the five
+  call sites that change are `_watchdog_stream`, `_llm_round_done`,
+  `_provider_failed`, `_run_one`, and `_dispatch`, each handing
+  plain values to `events/assembly.py` inside its thunk (or, for
+  `_dispatch`'s warning line, beside it); #235's `match` arms call
+  no assembly helper and do not change.
 - Tests: a new unit suite for `events/assembly.py` (the quartet
   entanglement pin of decision 2, the tool-call selection, the
   builders' output compared against directly-constructed
