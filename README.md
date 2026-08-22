@@ -39,11 +39,11 @@ That is the whole picture at a glance; one conversation turn in full detail, fro
 
 The design premise is a **thin device and a smart server**: the firmware's only tie to a backend is a single config URL, and everything else (endpoints, credentials, even firmware updates) is delivered by *your* server at runtime. Customization lives server-side, in Python, not in C++ you have to reflash.
 
-- **Self-hosted end to end.** The device speaks Opus over a WebSocket to your server and nothing else. Run it on a laptop or ship the published multi-arch container image to your own infrastructure. WebSocket is the only transport for v1; upstream's MQTT+UDP alternative may follow.
+- **Self-hosted end to end.** The device speaks Opus over a WebSocket to your server. Run it on a laptop or ship the published multi-arch container image to your own infrastructure. WebSocket is the only transport for v1; upstream's MQTT+UDP alternative may follow.
 - **No account, no activation, no phone app.** Point the device at your server once; it connects and talks.
 - **Configurable agents.** Define several, each with its own prompt, providers, and tools; bind devices to them, and switch mid-conversation by asking. One device can be a whole cast.
 - **Pluggable LLM.** Fully local via [Ollama](https://ollama.com), or Anthropic and any OpenAI-compatible endpoint.
-- **Pluggable voice.** Speech recognition and synthesis are swappable providers; a zero-API-key local pipeline (Silero VAD + faster-whisper + Piper) works today, and the cloud is there for either half when you would rather have the better voice, or the ear that copes with a noisy room in your own language, than the private one.
+- **Pluggable voice.** Speech recognition and synthesis are swappable providers; a zero-API-key local pipeline (Silero VAD + faster-whisper + Piper) works today. Swap in a cloud engine for either half when a better voice, or an ear that copes with a noisy room, is worth more to you than a fully private one.
 - **Tools via MCP, on both sides.** Attach any MCP server as assistant tools; the device itself exposes its controls (volume, brightness, screen) as MCP tools over the same channel.
 - **Compiler-grade upstream, thin fork.** Device support, audio pipeline, and echo cancellation come from the actively maintained [xiaozhi-esp32](https://github.com/78/xiaozhi-esp32) project; vinga changes as little as possible on the device. 🚧
 - **Speech in, speech out, everything visible.** Recognized text and responses render on the device display as the conversation happens.
