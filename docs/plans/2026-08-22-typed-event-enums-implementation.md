@@ -84,9 +84,11 @@ have known).
    opinion of a cell from `declared.type.KIND` and `.ARG_KIND`, which
    an enum-typed field does not carry. The plan's module layout named
    `events_docgen.py` alone; the same routing was needed one file
-   over, in its own commit. Nothing about what those tests claim
-   changed: they still state the cell independently of the generator's
-   own helpers.
+   over, in its own commit. Routing them through the catalog's
+   accessors turned each assertion into the generator's own answer
+   restated, which the review round's finding 1 caught: the two tests
+   derive the kind from the declaration themselves now (`48c904a6`),
+   so what they claim is what they claimed before the milestone.
 2. **The baseline harness grew two names.**
    `tests/tools/event_baseline.py` gains `driven()` (the same run,
    kept as records rather than shapes) and `payload()` (a record's own
