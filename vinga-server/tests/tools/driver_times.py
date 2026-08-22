@@ -3,10 +3,11 @@
 The event baseline's eighty-one drivers all run inside one module-scoped
 `capture()` fixture, so `pytest --durations` reports a single setup line
 for the whole harness and nothing per driver. A driver that waits out a
-real provider timeout is therefore invisible: the lane knows it spent
-eighty-seven seconds and cannot say where. This runs the same loop
-`driven()` runs, one tempdir and one `listening()` per driver, and
-prints what each one cost:
+real provider timeout is therefore invisible: whatever the harness
+costs, the lane cannot say where it went, which is how four drivers
+came to be seventy of its eighty-seven seconds unnoticed. This runs the
+same loop `driven()` runs, one tempdir and one `listening()` per
+driver, and prints what each one cost:
 
     uv run python -m tests.tools.driver_times
 
