@@ -18,10 +18,10 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   where a variant admits fewer than the enumeration holds, and the
   catalog derives the kind and the declared set from the annotation.
   Every token field has moved, and `TokenValue` and its twenty-two
-  subclasses are deleted with about twenty-five names they added to the
+  subclasses are deleted with the twenty names they added to the
   vocabulary. The three variants that admit fewer members than their
-  enumeration keep their narrowing as a `Literal` alias of the same
-  name. Nothing an operator sees changed: the generated reference and
+  enumeration keep their narrowing, and their name, as a `Literal`
+  alias. Nothing an operator sees changed: the generated reference and
   the committed record baseline are byte-identical, and a record still
   carries a plain string. The golden inventory now records each token
   field's declared set, so a narrowing stays pinned by something other
