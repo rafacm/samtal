@@ -171,7 +171,10 @@ and stock xiaozhi firmware is the compatibility floor promised in
   state the new contract (one GET, no redirects, ever) and why
   (every device-facing route answers both spellings directly; a
   redirect from that endpoint is by definition somebody else
-  answering).
+  answering). The stale prose the same commit rewrites includes
+  `_doctor`'s own comment at `cli.py:409-412` ("answered by wherever
+  it ended up"), whose `response.url` scheme read simplifies with
+  the follow gone.
 - **Changelog**: the two deletions are `### Removed` entries; the
   diff fix and the `openai_compatible` refusal are `### Fixed`; the
   comment correction and the version-1 pin need no changelog entry
@@ -255,10 +258,17 @@ reference docs.
 Reuse the existing assets; the new bites are:
 
 - Doctor: every redirect is refused, including the trailing-slash
-  shape a pre-2026-08-13 server sent (the existing "older server"
-  tests in `tests/unit/test_config_cli_onboarding.py` invert from
-  followed to refused rather than being deleted); the no-leak
-  sentinel above.
+  shape a pre-2026-08-13 server sent. In
+  `tests/unit/test_config_cli_onboarding.py`, swept via the
+  `redirecting` fixture's users:
+  `test_the_canonical_trailing_slash_redirect_is_followed` inverts
+  to refusal; `test_a_second_redirect_is_one_too_many` is deleted
+  (with no follow there is no second hop, and its two-request
+  assertion has no inverted form);
+  `test_a_location_that_cannot_be_read_is_not_a_canonical_slash` is
+  deleted with `_canonical_slash` itself (it reaches the function
+  directly because the public route cannot). The no-leak sentinel
+  above stays.
 - Binding: `load_config_from_data` with a string binding is refused
   naming `devices.<mac>` (the deletion's pin, the one route that
   reaches the arm); the API and CLI write paths are asserted
@@ -436,6 +446,11 @@ directly and dies with it;
 inversion. `_doctor`'s own comment (`cli.py:409-412`, "answered by
 wherever it ended up") is also stale. Sweep the `redirecting`
 fixture's users, not the two symbol names.
+
+*Resolution*: accepted; the tests section names the two deletions
+and the one inversion, the doctor commit's rewrite list includes
+`_doctor`'s comment, and the inventory lens (finding 2's amendment)
+already swapped the symbol sweep for the fixture sweep.
 
 **8 (P3). `build` would call `parse_base_url` and throw away the
 answer `__init__` recomputes.** Two structures that must agree in
