@@ -207,6 +207,10 @@ issue owner. Findings condensed but faithful:
    the production default `llm_first_token_timeout_s = 10.0`. The
    fix is to let `unregistered()` take a config and have the driver
    pass `watchdog_config()`, matching the scenario's first half.
+   *Resolution* (`47604408`): the measurements paragraph now names
+   the production default reached through `unregistered()` and the
+   fix (a config parameter, `watchdog_config()` passed).
+
 2. **P1: the filler drivers' 20s is two consecutive
    `llm_first_token_timeout_s` windows (10s, one retry), the same
    mechanism as finding 1, and the plan's global ordering invariant
@@ -214,33 +218,65 @@ issue owner. Findings condensed but faithful:
    firing at all.** The invariant must be stated per driver: for
    `drive_llm_retry` the stall stays above the shrunk bound; for the
    three filler drivers only filler delay < stall matters.
+   *Resolution* (`a20d0cee`): decision 2 states the invariants per
+   driver; the filler drivers keep the bound and shrink only the
+   stall, `drive_llm_retry` keeps its stall above the shrunk bound.
+
 3. **P1: "capture() setup in single digits" is unreachable from the
    four named drivers.** 86.4s minus 70.1s leaves a ~16s tail over
    77 drivers, so the floor after M2 is ~17s and the saving ~70s,
    not 80. Either restate the acceptance or extend scope.
+   *Resolution* (`58e439f7`): the ~17s floor is accepted; M2's
+   acceptance restated (four drivers under 1s, capture around 17s,
+   ~70s saved) and the issue's verification box gets corrected when
+   M2 lands. The tail is left to #254's distribution.
+
 4. **P2: the "no config seam" contingency is already answered.**
    `masked_config(server=...)` forwards a server section and
    `test_session_filler.py` already drives the same scenarios with a
    local 0.5s stall and `llm_first_token_timeout_s` overrides; the
    plan's shrunk-bound design is also the slower alternative (about
    9s across the filler drivers versus about 1.5s).
+   *Resolution* (`4c852952`): the sibling suite's approach is
+   adopted, the `configs.py` contingency and no-seam branch dropped.
+
 5. **P2: decision 3's byte-stillness claim is self-defeating.** If
    the bytes cannot move by construction, the byte comparison proves
    nothing; what the file actually pins is shape and per-path record
    counts, which catches a driver that stops firing but not one that
    reaches its event by a different route. State per driver what
    must still be true of the scenario, checked by reading.
+   *Resolution* (`b93d0d1a`): decision 3 now says what the file
+   pins (shapes, per-path counts) and adds the per-driver scenario
+   truths checked by reading.
+
 6. **P2: the M1 step inventory drops `Install dependencies`** (and
    checkout and setup-uv); the control for "silently drops a step"
    was itself incomplete.
+   *Resolution* (`8aba2ab0`): the inventory now lists all ten
+   steps with the first three duplicated by design.
+
 7. **P2: no CHANGELOG entry is named**, and the repository has
    precedent for CI-only and test-only entries.
+   *Resolution* (`90afac7f`): per-milestone dated Changed entries
+   named in the module layout.
+
 8. **P3: the `image` job's `needs: test` comment would go stale**,
    and `AGENTS.md`'s workflow description deserves the same check.
+   *Resolution* (`f9e4f26a`): the image comment and AGENTS.md are
+   updated in the same commit as the `needs:` change.
+
 9. **P3: M2's verification rests on an uncommitted timing script**
    that `--durations` cannot replace (it cannot see inside the
    module-scoped fixture). Commit it or record the exact command and
    tables.
+   *Resolution* (`e560662e`): the script lands as
+   `tests/tools/driver_times.py` in M2 with the second
+   responsibility stated.
+
 10. **P3: `image.needs` can be exercised before merge** via the
     `workflow_dispatch` path the workflow's own comment prescribes,
     not only by reading the first push-to-main run.
+    *Resolution* (`9e194acf`): the workflow_dispatch run happens on
+    the branch before merge, with the post-merge read kept as
+    confirmation.
