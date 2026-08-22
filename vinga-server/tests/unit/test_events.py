@@ -28,7 +28,8 @@ shapes the production surface does not have: a handful of synthetic
 events whose whole purpose is to be dispatched, copied, and refused by a
 broken consumer. They are declared through the public declaration
 interface into a catalog of this file's own, which is what keeps them
-out of the generated reference and the golden inventory. The
+out of the generated reference and out of the driver suite's
+obligations. The
 declarations are therefore a second reading of this file: an emission
 this suite adds and does not declare fails at import rather than passing
 quietly.
@@ -158,7 +159,8 @@ class SaidAtError(Variant):
 def _scratch() -> Iterator[None]:
     """Every declaration this file makes is its own. A scratch event
     that reached the production catalog would reach the generated
-    reference and the golden inventory with it.
+    reference with it, and would be a declaration no driver
+    produces.
 
     Declared inside the fixture rather than at import, because
     `declare()` registers into whichever catalog is installed and the

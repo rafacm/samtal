@@ -18,9 +18,10 @@ is not the inert operation it looks like: a handler, a filter and a
 formatter are code somebody else installed, and the sharpest case is a
 failing LOG tap reported back onto the same broken channel.
 
-That the record a converted path produces is the record it produced
-before is the committed baseline's claim, not this file's: eighty-one
-paths, captured before the conversion and unmoved by it.
+That every converted path still produces a record its declaration
+describes is `test_event_baseline.py`'s claim, not this file's:
+eighty-one paths driven, and each record matched against the variants of
+its event.
 
 What a refusal is allowed to SAY is the sentinel suite's, next door.
 """

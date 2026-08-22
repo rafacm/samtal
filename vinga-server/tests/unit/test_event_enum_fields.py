@@ -10,8 +10,8 @@ everything the wrapper said.
 
 The claims are the ones the wrapper made and one it could not. What a
 record carries is a plain `str` and never the member, because a member
-is a `str` subclass and a record holding one would put the subclass into
-a baseline's argument types. The declared set is whole for a field
+is a `str` subclass and a record holding one would hand the subclass to
+every tap that reads the payload. The declared set is whole for a field
 annotated with the enumeration and narrowed for one annotated with a
 `Literal` over some of its members. `verify()` refuses at emit what the
 wrapper's constructor refused at construction, and `_check` refuses at
@@ -20,7 +20,7 @@ member cannot check for itself: it is inert data until something looks
 at it.
 
 Everything here declares into a catalog of its own, so no scratch event
-reaches the generated reference or the golden inventory.
+reaches the generated reference or the driver suite.
 """
 
 import logging
@@ -143,9 +143,9 @@ def declared(variant: type[Variant], name: str) -> Declared:
 
 
 def test_a_carried_member_rides_the_payload_as_a_plain_string() -> None:
-    """A member is a `str` subclass, so a payload holding one would put
-    the subclass's name into a baseline's argument types and its `repr`
-    into anything that renders it."""
+    """A member is a `str` subclass, so a payload holding one would hand
+    the subclass to every tap that reads the payload and its `repr` to
+    anything that renders it."""
     declare("scratch_called", variants=(Called,))
 
     carried = Called(source=ToolSource.MCP).payload()

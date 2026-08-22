@@ -4,8 +4,8 @@ The sibling of `test_event_surface_pins.py`, which does this for the
 session scope, and what is left of both after #210: the prose pins that
 restated a template, an argument tuple and a field set are gone, because
 a variant IS its declaration now and nothing is left for a call to
-disagree with. What a record holds is the golden inventory's; that it
-still holds it is the record baseline's.
+disagree with. What a record holds is `docs/reference/events.md`'s; that a
+record really holds it is the driver suite's.
 
 What no file but this one holds is the negative claim. A pin says the
 sentence is what it is; it does not say the sentence is SAFE. Each case

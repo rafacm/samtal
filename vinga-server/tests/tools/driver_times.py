@@ -1,6 +1,6 @@
-"""How long each baseline driver takes, which no durations report says.
+"""How long each emit-path driver takes, which no durations report says.
 
-The event baseline's eighty-one drivers all run inside one module-scoped
+The harness's eighty-one drivers all run inside one module-scoped
 `capture()` fixture, so `pytest --durations` reports a single setup line
 for the whole harness and nothing per driver. A driver that waits out a
 real provider timeout is therefore invisible: whatever the harness

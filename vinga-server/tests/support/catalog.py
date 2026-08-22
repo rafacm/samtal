@@ -4,8 +4,8 @@ The catalog is a global by design: a variant type names its event by
 belonging to a declaration, and that belonging has to be readable from
 anywhere the type is. The cost is that a suite about the declaration
 machinery itself cannot declare anything without adding it to the
-production surface, where the generated reference and the golden
-inventory would both find it.
+production surface, where the generated reference would print it and
+the driver suite would demand a driver for it.
 
 So the catalog reads its state through one installed object, and this
 is what swaps in a copy and puts the original back. A copy rather than
