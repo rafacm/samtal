@@ -44,6 +44,7 @@ from vinga_server.events.catalog import (
 from vinga_server.events.values import (
     ABSENT,
     Absent,
+    AgentNames,
     ClassName,
     CloseReason,
     CloseReasonToken,
@@ -191,6 +192,11 @@ REFUSED = (
         "a carried value with no field kind",
         {"__annotations__": {"stage": Nothing}, "ARGS": ()},
         "no field kind",
+    ),
+    (
+        "a rendered value with no argument kind",
+        {"__annotations__": {"stage": AgentNames}},
+        "no argument kind",
     ),
 )
 
