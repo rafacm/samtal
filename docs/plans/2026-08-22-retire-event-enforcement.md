@@ -111,7 +111,11 @@ and discoveries; no deviations says so explicitly.
    deployment that still sets the variable gets an inert one, which
    is harmless; only the infra repository's ConfigMap remains a
    separate cleanup, recorded as a follow-up note in the
-   implementation doc.
+   implementation doc. The CHANGELOG carries this as a `### Removed`
+   entry naming all three surfaces an upgrader can notice: the
+   `schema_violation` event a collector may filter on, the
+   `VINGA_EVENTS_ENFORCEMENT` variable, and the boot-time refusal
+   of a misspelled value.
 5. **The pins move deliberately, all five.**
    `docs/reference/events.md` loses the `schema_violation` section,
    its per-channel variants, its index row, the header prose that
