@@ -67,10 +67,8 @@ read the finished payload back and judged it against a registry, and it
 went with the duplication it existed to reconcile.
 
 What survives at runtime is the guard, because construction can still
-fail on a value, and `VINGA_EVENTS_ENFORCEMENT` decides what that costs:
-`strict` raises, so a lane, an import or a REPL refuses outright, and
-`forgiving` says so once on the emitter's own channel and dispatches the
-declared `schema_violation` instead, so a telemetry bug can never cost a
+fail on a value. A refusal costs one plain sentence on the emitter's own
+channel and the emission is dropped, so a telemetry bug can never cost a
 reply. The thunk is what makes that possible: building, validating,
 rendering and serializing all happen inside the guard, where
 `emit(SomeVariant(...))` would have evaluated the constructor on
@@ -80,19 +78,13 @@ whatever path was emitting.
 import asyncio
 import contextlib
 import logging
-import os
 import time
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, replace
-from typing import Any, NoReturn, Protocol
+from typing import Any, Protocol
 
-from vinga_server.events.catalog import (
-    SCHEMA_VIOLATION,
-    SCHEMA_VIOLATION_MESSAGE,
-    Variant,
-    declaration_of,
-)
+from vinga_server.events.catalog import Variant, declaration_of
 from vinga_server.events.values import DeviceId, EventValue, SessionId
 
 # The session log channel, by name rather than by `__name__`.
@@ -217,8 +209,8 @@ def _report(
     fail while saying it.
 
     Every report this module makes is made from inside a guard: a tap
-    raised, or an emission was refused, or the enforcement itself broke.
-    A logging call is not the inert operation it looks like, though. A
+    raised, or an emission was refused. A logging call is not the inert
+    operation it looks like, though. A
     filter or a handler is code somebody else installed, `handle` and
     `filter` are called unwrapped, and a formatter meets whatever the
     record carries, so the report can raise exactly where the guard has
@@ -299,82 +291,6 @@ def _dispatch(
     _offer(log, emission, channel)
 
 
-# --- the two modes ----------------------------------------------------
-#
-# Nothing here is an `assert`. `python -O` strips assertions, and an
-# optimized production process silently losing its guard is exactly the
-# quiet failure #155 exists to end.
-
-ENFORCEMENT_ENV = "VINGA_EVENTS_ENFORCEMENT"
-
-STRICT = "strict"
-FORGIVING = "forgiving"
-ENFORCEMENT_MODES = (STRICT, FORGIVING)
-
-# Strict by default, because the default is what every context that
-# never runs the entrypoint gets: the pytest lanes, CI, an import, a
-# REPL. A server process resolves the variable at construction instead,
-# where unset means forgiving, since a running server is a deployment
-# whatever artifact it runs from.
-_enforcement = STRICT
-
-class EventSchemaError(Exception):
-    """What strict mode raises when an emission could not be built.
-
-    Its text names catalog-owned identifiers only: a fixed label and a
-    fixed code. What a thunk was holding when it refused is
-    caller-supplied bytes under this module's own model, and so is the
-    name of the class it raised, so neither is said at all.
-
-    Raised through `_refuse` below, which is what keeps that true of the
-    exception as an object and not only of its text."""
-
-
-class EventEnforcementError(Exception):
-    """An unusable `VINGA_EVENTS_ENFORCEMENT` value, refused at
-    construction. A misspelled relaxation has to fail at boot rather
-    than at the first live violation."""
-
-
-def enforcement() -> str:
-    """Which mode the emitters are in."""
-    return _enforcement
-
-
-def set_enforcement(mode: str) -> None:
-    """Choose the mode explicitly. The entrypoints go through
-    `resolve_enforcement`; this is what a test and that resolver both
-    call underneath."""
-    global _enforcement
-    if mode not in ENFORCEMENT_MODES:
-        raise EventEnforcementError(
-            f"{ENFORCEMENT_ENV} has to be '{STRICT}' or '{FORGIVING}'"
-        )
-    _enforcement = mode
-
-
-def resolve_enforcement(environ: Mapping[str, str] | None = None) -> str:
-    """Read the mode out of the environment and apply it.
-
-    Called by `create_app` before anything that emits is built, and by
-    `main()` after it has loaded `.env`, because an import-time read
-    could honor neither: `main.py` imports the app, and therefore this
-    module, before `main()` runs.
-
-    Unset means forgiving. A running server is a deployment however it
-    was launched, and a wheel, source or ASGI-runner deployment must not
-    be one telemetry bug away from losing a reply just because it is not
-    the container. Anything else refuses, naming the variable and the
-    two values it takes; the rejected spelling is deliberately not
-    echoed."""
-    chosen = (os.environ if environ is None else environ).get(ENFORCEMENT_ENV)
-    if chosen is None:
-        set_enforcement(FORGIVING)
-        return FORGIVING
-    set_enforcement(chosen)
-    return chosen
-
-
 # --- what a refusal is allowed to say ---------------------------------
 #
 # Fixed codes and registry-owned names. Nothing else: a complaint that
@@ -403,31 +319,16 @@ WRONG_CHANNEL = "wrong_channel"
 # the thunk is opaque until it returns and a failed one names nothing.
 UNBUILT_LABEL = "an event that could not be built"
 
-# The one sentence a refusal renders, strict or forgiving: the fixed
-# label above and the violation summary.
+# The one sentence a refusal renders: the fixed label above and the code
+# that says which of the two things went wrong.
 REFUSAL_MESSAGE = "the event schema refused an emission of %s: %s"
 
 
-@dataclass(frozen=True)
-class Fault:
-    """One thing wrong with an emission: a fixed code, and a detail that
-    is a registry-owned name, a count or an argument position."""
-
-    code: str
-    detail: str = ""
-
-    def rendered(self) -> str:
-        return f"{self.code} ({self.detail})" if self.detail else self.code
-
-
-def refusal_text(label: str, faults: tuple[Fault, ...]) -> str:
-    """The sentence a refusal renders, whole. The strict exception
-    carries exactly this string and the forgiving complaint logs its two
-    halves unrendered, so both surfaces say the same thing."""
-    return REFUSAL_MESSAGE % (label, "; ".join(fault.rendered() for fault in faults))
-
-
 # --- the typed path ---------------------------------------------------
+#
+# Nothing in the guard below is an `assert`. `python -O` strips
+# assertions, and an optimized production process silently losing its
+# guard is exactly the quiet failure #155 exists to end.
 #
 # What a converted site does instead. It hands the emitter a THUNK
 # rather than a constructed variant, and the difference is the whole
@@ -437,7 +338,7 @@ def refusal_text(label: str, faults: tuple[Fault, ...]) -> str:
 # problem and never the reply's. `emit(SomeVariant(...))` would have
 # evaluated the constructor at the call site, outside anything.
 #
-# There is no second enforcement step here. The declaration IS the
+# There is no second validation step here. The declaration IS the
 # check: a variant that exists has already proved its channel, its
 # level, its template, its argument order and every one of its values,
 # because none of them could have been constructed otherwise. What is
@@ -449,8 +350,7 @@ def refusal_text(label: str, faults: tuple[Fault, ...]) -> str:
 @dataclass(frozen=True)
 class Checked:
     """What the emitters dispatch: the payload, level, sentence and
-    arguments a variant produced, or the recovery event's where it could
-    not be built."""
+    arguments a variant produced."""
 
     payload: dict[str, Any]
     level: int
@@ -458,87 +358,38 @@ class Checked:
     args: tuple[Any, ...]
 
 
-def _replacement(base: dict[str, Any]) -> Checked:
-    """The declared recovery event, built from whole cloth: the fixed
-    token, the emitter's own trusted identity, the fixed sentence and no
-    arguments, so a hostile value, message or argument in the original
-    call reaches nothing.
-
-    `base` is what the identities that VALIDATED answered with, never
-    what the emitter was handed."""
-    return Checked(
-        payload={"event": SCHEMA_VIOLATION, **base},
-        level=logging.ERROR,
-        message=SCHEMA_VIOLATION_MESSAGE,
-        args=(),
-    )
-
-
 @dataclass(frozen=True)
 class _Refusal:
     """What the construction guard made of an emission it could not
-    build: the name a diagnostic may call it, and the one fault."""
+    build: the name a diagnostic may call it, and the code for what was
+    wrong."""
 
     label: str
-    fault: Fault
-
-
-@dataclass(frozen=True)
-class Identity:
-    """One value the emitter contributes to every event it emits, and
-    what a recovery calls it where the value itself could not be
-    stated.
-
-    Two halves because a recovery must never be built from what the
-    emitter was HANDED. A session id is a value type like any other, so
-    a caller that opened a session under a name no `SessionId` admits
-    has handed this module a string of its own choosing, and echoing it
-    into the declared recovery event would put exactly that string on
-    the retained surface under the emitter's own key. `unstated` is the
-    registry-owned answer instead: a fixed word for the session, and
-    nothing at all for the device, which is the same "none was
-    understood" the surface already says with a null.
-    """
-
-    build: Callable[[], EventValue | None]
-    unstated: Any
-
-
-# What a recovery calls a session whose own id this server could not
-# state. This module's own word, and one the `session_id` syntax admits,
-# so the recovery event is the shape its declaration says it is. The
-# rejected spelling is deliberately not echoed, for the reason
-# `resolve_enforcement` does not echo a rejected mode.
-UNSTATED_SESSION = "unidentified"
+    code: str
 
 
 def _identities(
-    declared: Mapping[str, Identity],
-) -> tuple[dict[str, EventValue | None], dict[str, Any], bool]:
-    """Build the emitter's own values, one guard each.
+    declared: Mapping[str, Callable[[], EventValue | None]],
+) -> tuple[dict[str, EventValue | None], bool]:
+    """Build the emitter's own values, under one guard.
 
-    Answers what was built, what a recovery may say, and whether all of
-    them were built at all. One guard each rather than one around the
-    lot, because a device id that refuses must not take a lawful session
-    id down with it: the recovery is a record an operator reads, and the
-    identity it can still state is the half that makes it readable.
+    Answers what was built and whether all of it was. One guard around
+    the loop rather than one per identity, because any identity failure
+    refuses the emission whole: a conversation record missing the
+    session it belongs to is a shape the declaration denies exists, and
+    nothing is dispatched in its place for a half-built identity to
+    decorate.
 
     Nothing raises. What a failed build was holding is never looked at,
     so there is nothing of it to leak by accident later.
     """
     held: dict[str, EventValue | None] = {}
-    safe: dict[str, Any] = {}
-    whole = True
-    for name, identity in declared.items():
-        try:
-            value = identity.build()
-        except Exception:  # noqa: BLE001 - telemetry never costs a reply
-            whole = False
-            safe[name] = identity.unstated
-            continue
-        held[name] = value
-        safe[name] = None if value is None else value.carried()
-    return held, safe, whole
+    try:
+        for name, build in declared.items():
+            held[name] = build()
+    except Exception:  # noqa: BLE001 - telemetry never costs a reply
+        return held, False
+    return held, True
 
 
 def _construct(
@@ -549,10 +400,7 @@ def _construct(
     """Build one variant and turn it into an emission, or answer what
     was wrong with it.
 
-    Nothing here raises, which is what lets the caller decide between
-    the two modes AFTER the handler has ended, so a lane's stderr cannot
-    receive what the exception was holding through `__cause__` or
-    `__context__` either. Nothing about the exception leaves this
+    Nothing here raises. Nothing about the exception leaves this
     function at all, its class name included: a class name is an
     ordinary string that `type()` accepts without validating, so an
     exception built from far-side bytes carries them in its name.
@@ -570,7 +418,7 @@ def _construct(
             # only check left at emit time: both halves are
             # registry-owned, the declaration's channel and the
             # emitter's own.
-            return _Refusal(declaration.name, Fault(WRONG_CHANNEL))
+            return _Refusal(declaration.name, WRONG_CHANNEL)
         logged = variant.logged(held)
         return Checked(
             payload={
@@ -589,87 +437,43 @@ def _construct(
         # Deliberately unbound: the exception is not looked at, so there
         # is nothing of it to leak by accident later.
         pass
-    return _Refusal(UNBUILT_LABEL, Fault(CONSTRUCTION_FAILED))
-
-
-def _refuse(text: str) -> NoReturn:
-    """Raise the refusal, carrying nothing but its own sentence.
-
-    The one place strict mode lets anything out of this module, and the
-    place a leak hides if it is not closed here. Half the converted
-    sites emit from inside an `except` arm, because that is where a
-    failure is known: a capture that could not open its files, a
-    provider that raised, an API handler sanitizing what it caught.
-    Python attaches whatever exception is being handled anywhere up the
-    stack to any exception raised while it is, so the refusal this
-    module raises about a thunk it deliberately never looked at would
-    arrive at a lane's stderr with the original bolted to it under
-    `__context__`, message and chain and all.
-
-    `raise ... from None` does NOT fix that. It sets `__cause__` to None
-    and `__suppress_context__` to True, which stops the default
-    traceback printing the context; the object is still attached and
-    still reachable from anything that walks the chain, which is exactly
-    the distinction between hiding a value and not having it. So the
-    refusal is raised, caught here, scrubbed, and re-raised bare: a bare
-    `raise` re-raises the exception that is already being handled and
-    does not re-attach a context, so what leaves this frame holds
-    neither a cause nor a context.
-
-    Closed here rather than at the call sites, and that is the decision
-    worth stating. Twenty-nine sites in this package can reach an emit
-    while an exception is being handled, eleven of them lexically inside
-    the arm and eighteen through one call from it, and every future one
-    would have to remember. This is a property of the emitter: nothing
-    it raises carries anything it was handed.
-    """
-    refusal = EventSchemaError(text)
-    try:
-        raise refusal
-    except EventSchemaError as escaping:
-        escaping.__cause__ = None
-        escaping.__context__ = None
-        escaping.__suppress_context__ = True
-        raise
+    return _Refusal(UNBUILT_LABEL, CONSTRUCTION_FAILED)
 
 
 def _built(
     log: logging.Logger,
     channel: str,
-    identities: Mapping[str, Identity],
+    identities: Mapping[str, Callable[[], EventValue | None]],
     build: Callable[[], Variant],
-) -> Checked:
+) -> Checked | None:
     """One typed emission, its identity and its variant both constructed
-    under the guard.
+    under the guard, or nothing at all where either refused.
 
-    Strict refuses, the way it refuses an untyped violation and with a
-    sentence of the same shape. Forgiving says so once on the emitter's
-    own channel and dispatches the declared `schema_violation` instead.
-    Both sentences are built from registry-owned identifiers only: no
+    A refusal costs one sentence on the emitter's own channel and the
+    emission is dropped: there is nothing to substitute for it, because
+    what a site meant to say is exactly what could not be built. The
+    sentence is built from registry-owned identifiers only: no
     caller-supplied name, no field value, no exception message, no
     exception CLASS name, and no partially rendered text, because a
     thunk that raised may have raised holding exactly the bytes this
-    surface exists to keep out.
+    surface exists to keep out. The record it makes therefore names no
+    session and no device either: an identity may itself be what
+    refused, and only a validated one could have been echoed.
 
-    So is the recovery event's payload. It is built from the identities
-    that VALIDATED, never from what the emitter was handed, and where
-    one did not validate the `Identity` says what to put there instead.
-    An emission whose identity could not be built is refused whole: a
-    conversation record missing the session it belongs to is a shape the
-    declaration denies exists.
+    A refusal is a schema bug rather than a runtime condition, and it is
+    deterministic, so where it is found is development: the lanes fail
+    any test whose run produced one of these reports.
     """
-    held, safe, whole = _identities(identities)
+    held, whole = _identities(identities)
     outcome = (
         _construct(channel, held, build)
         if whole
-        else _Refusal(UNBUILT_LABEL, Fault(CONSTRUCTION_FAILED))
+        else _Refusal(UNBUILT_LABEL, CONSTRUCTION_FAILED)
     )
     if isinstance(outcome, Checked):
         return outcome
-    if _enforcement == STRICT:
-        _refuse(refusal_text(outcome.label, (outcome.fault,)))
-    _report(log, logging.ERROR, REFUSAL_MESSAGE, outcome.label, outcome.fault.rendered())
-    return _replacement(safe)
+    _report(log, logging.ERROR, REFUSAL_MESSAGE, outcome.label, outcome.code)
+    return None
 
 
 class SessionEvents:
@@ -792,11 +596,22 @@ class SessionEvents:
         device, the event's name, its channel, its level, its sentence
         and the order of that sentence's arguments all come off the
         emitter and the declaration.
+
+        The clock is read before the guard runs, so a refused emission
+        still answers the instant it was made at: the one caller that
+        reads the answer has a record to place whether or not the event
+        it was placed beside survived.
         """
+        at = self._clock()
         checked = _built(logger, SESSION_LOGGER, self._identities(), build)
+        if checked is None:
+            # A refusal was reported, and there is nothing to dispatch
+            # in the emission's place: what the site meant to say is
+            # exactly what could not be built.
+            return at
         emission = Emission(
             payload=checked.payload,
-            at=self._clock(),
+            at=at,
             level=checked.level,
             message=checked.message,
             args=checked.args,
@@ -804,9 +619,8 @@ class SessionEvents:
         _dispatch(tuple(self._taps), self._log, emission, logger)
         return emission.at
 
-    def _identities(self) -> dict[str, Identity]:
-        """Whose conversation this is, as values, and what a recovery
-        calls each where the value could not be stated.
+    def _identities(self) -> dict[str, Callable[[], EventValue | None]]:
+        """Whose conversation this is, as values.
 
         Thunks rather than values, because building one is what has to
         happen inside the guard; read at emit time rather than kept,
@@ -815,12 +629,8 @@ class SessionEvents:
         event before that names none.
         """
         return {
-            "session": Identity(
-                lambda: SessionId(self.session_id), UNSTATED_SESSION
-            ),
-            "device": Identity(
-                lambda: None if self.device is None else DeviceId(self.device), None
-            ),
+            "session": lambda: SessionId(self.session_id),
+            "device": lambda: None if self.device is None else DeviceId(self.device),
         }
 
     # --- the capture's own tracks, which are not events ---------------
@@ -890,6 +700,10 @@ class ServerEvents:
         stops having to restate correctly.
         """
         checked = _built(self._logger, self.channel, {}, build)
+        if checked is None:
+            # A refusal was reported, and there is nothing to dispatch
+            # in the emission's place.
+            return
         emission = Emission(
             payload=checked.payload,
             at=self._clock(),
