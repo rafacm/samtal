@@ -23,6 +23,21 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   one job's wall time used to make a slow test obvious, and with two
   lanes the durations table is what says so instead.
 
+- **The event baseline harness stops waiting out real provider
+  timeouts** (#233). Four of its eighty-one drivers were seventy of its
+  eighty-seven seconds, all four for the same reason: the production
+  default first-token timeout of ten seconds, waited out in full
+  because nothing in those drivers shrank it. The three filler drivers
+  now stall the model for half a second rather than thirty, which is
+  still eight times the sixty milliseconds their filler timer needs,
+  and the retry driver runs both of its halves under the same shrunk
+  bound instead of one at the production default. The committed record
+  baseline is byte-identical, the four drivers went from 70.1 s to
+  1.3 s, and the unit lane is about a minute shorter. A companion
+  script, `tests/tools/driver_times.py`, times each driver on its own,
+  which `pytest --durations` cannot: the drivers all run inside one
+  module-scoped fixture, reported as a single setup line.
+
 - **An event field is declared as the closed set it carries** (#238).
   A variant that says one of a fixed set of words used to name the
   `TokenValue` subclass built for that enumeration, so the set existed
