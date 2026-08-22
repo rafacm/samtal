@@ -15,10 +15,10 @@ while an untyped emit site was invisible to anything but a reading of
 the source. The walk retired with the last conversion.
 
 A variant is identified by its event, channel, level and template AND by
-its payload's keys, because several events say one sentence about two
-shapes: `llm_round` reports a provider the registry built out of a
-configured entry and one it never built with the same words, and the
-four dimensions alone would let either stand in for both.
+its payload's keys, because an event can say one sentence about
+several shapes: `tool_call` reports a builtin, a server tool and a call
+it may not name at all with the same words, and the four dimensions
+alone would let any of the three stand in for the others.
 
 Beside it, the smaller claim the drivers can give themselves: each one
 produces the event it says it does, so a driver whose path stopped
@@ -100,9 +100,10 @@ def matches(variant: type[Variant], record: dict[str, Any]) -> bool:
 
     The four dimensions, and then the payload's keys: everything the
     variant always carries is there, and nothing it never declares is.
-    That second half is what tells apart the pairs of variants that say
-    one sentence about two shapes, since a record naming a configured
-    provider entry cannot be the variant that declares no such field.
+    That second half is what tells apart the variants of an event that
+    say one sentence about several shapes, since a record naming the
+    MCP entry a call reached cannot be the variant that declares no
+    such field.
     """
     shape = payload_shape(variant)
     required = {one.name for one in shape if one.carried and one.required}

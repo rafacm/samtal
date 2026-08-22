@@ -415,11 +415,11 @@ STORE_DRIVERS: tuple[Driver, ...] = (
 # reached the record is here.
 #
 # Some drivers run more than one scenario, because a site can emit more
-# than one variant: `llm_round` says one thing about a provider the
-# registry built out of a configured entry and another about a provider
-# it never built, from the same call. One driver per PATH is the
-# harness's identity rule; how many shapes that path can produce is the
-# path's business.
+# than one record shape: `llm_round` names the configured entry behind
+# a provider the registry built, and says nothing about a provider it
+# never built, from the same call and in one variant. One driver per
+# PATH is the harness's identity rule; how many shapes that path can
+# produce is the path's business.
 
 # What the direct drivers hand a reply: 20 ms of silence, which the mock
 # ASR answers whatever it holds.
