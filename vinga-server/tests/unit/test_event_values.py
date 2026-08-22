@@ -517,11 +517,21 @@ def test_the_mcp_down_reasons_are_the_ones_the_transport_classifies_into() -> No
 
 
 def test_the_mcp_reload_words_are_the_ones_the_reload_answers_with() -> None:
+    """Both sets held against the reload's own constants rather than
+    restated beside them. The refusals are what the emit site looks up,
+    so a reworded constant that only this file agreed with would leave a
+    refused reload saying nothing at all."""
     from vinga_server.tools.mcp import reload
 
     assert frozenset(McpReloadOutcome) == frozenset({reload.APPLIED, reload.REFUSED})
     assert frozenset(McpRefusal) == frozenset(
-        {"in_progress", "database_busy", "unreadable", "invalid", "unexpected"}
+        {
+            reload.REFUSED_IN_PROGRESS,
+            reload.REFUSED_BUSY,
+            reload.REFUSED_UNREADABLE,
+            reload.REFUSED_INVALID,
+            reload.REFUSED_UNEXPECTED,
+        }
     )
 
 
