@@ -43,7 +43,7 @@ import re
 from dataclasses import dataclass
 from enum import Enum, StrEnum
 from functools import cache
-from typing import Any, ClassVar, Final
+from typing import ClassVar, Final, Literal
 
 from vinga_server.config.models import BOARD_LIMIT, CLIENT_ID_LIMIT, FIRMWARE_LIMIT
 
@@ -936,6 +936,15 @@ class PromptSources(EventValue):
 # conformance walk's token check went. The descriptor bounds are the one
 # exception and ARE imported, because `config/models.py` reaches nothing
 # in this package.
+#
+# Three variants admit fewer members than their enumeration does, and
+# each declares the narrowing as a `Literal` alias beside the set it
+# narrows. A `Literal` names the parent's members rather than restating
+# their values, so there is nothing for the two to drift apart on. They
+# are spelled as plain assignments rather than PEP 695 `type`
+# statements, because the catalog reads annotations with
+# `get_type_hints`, which resolves a plain alias to the `Literal` itself
+# and would hand a `type` statement's alias back wrapped.
 
 
 class CloseReason(StrEnum):
@@ -979,6 +988,12 @@ class ToolSource(StrEnum):
     DEVICE = "device"
     MCP = "mcp"
     UNKNOWN = "unknown"
+
+
+# The two sources a `tool_call` may not name: a board's own vocabulary
+# and whatever a model invented. A builtin is neither, so the variant
+# that names nothing cannot say one.
+UnnamedToolSource = Literal[ToolSource.DEVICE, ToolSource.UNKNOWN]
 
 
 class ProviderOutcome(StrEnum):
@@ -1047,6 +1062,12 @@ class NotOffered(StrEnum):
         "30 activation codes have been issued in the last 10 minutes, "
         "which is the limit"
     )
+
+
+# The two bounds the pending table refuses a code at, and only those.
+# The view's own failure says so in a sentence of its own, so the
+# variant that reports a bound cannot say it.
+PendingRefusal = Literal[NotOffered.PENDING_FULL, NotOffered.MINT_SPENT]
 
 
 class OtaRefusal(StrEnum):
@@ -1118,6 +1139,18 @@ class McpDown(StrEnum):
     CALL_FAILED = "call_failed"
 
 
+# The four a failed connect is classified into. A stop and a drop after
+# a failed call are the other two ways down and each says so in a
+# sentence of its own, so neither can be said by the sentence that
+# reports an entry that never came up.
+McpConnectFailure = Literal[
+    McpDown.TRANSPORT_FAILED,
+    McpDown.INITIALIZE_FAILED,
+    McpDown.DISCOVERY_FAILED,
+    McpDown.CONNECT_TIMEOUT,
+]
+
+
 class McpReloadOutcome(StrEnum):
     """Whether a reload changed anything."""
 
@@ -1134,183 +1167,6 @@ class McpRefusal(StrEnum):
     UNREADABLE = "unreadable"
     INVALID = "invalid"
     UNEXPECTED = "unexpected"
-
-
-@dataclass(frozen=True)
-class TokenValue(TextValue):
-    """One member of a closed set, held to it at construction.
-
-    `ENUM` is the set and `MEMBERS` narrows it where one variant admits
-    fewer than the enumeration does (a `tool_call` that names nothing is
-    a device call or an invented one, never a builtin). The declared set
-    a reference prints is derived from whichever applies, so the
-    narrowing is stated once and read everywhere.
-    """
-
-    KIND: ClassVar[Kind] = Kind.TOKEN
-    ARG_KIND: ClassVar[ArgKind] = ArgKind.TOKEN
-    ENUM: ClassVar[type[StrEnum]]
-    MEMBERS: ClassVar[frozenset[str] | None] = None
-
-    def __init_subclass__(cls, **kw: Any) -> None:
-        super().__init_subclass__(**kw)
-        enum = cls.__dict__.get("ENUM") or getattr(cls, "ENUM", None)
-        if enum is None:  # pragma: no cover - a subclass declared later
-            return
-        narrowed = cls.__dict__.get("MEMBERS")
-        cls.TOKENS = (
-            frozenset(narrowed)
-            if narrowed is not None
-            else frozenset(str(one) for one in enum)
-        )
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.value, str):
-            raise EventValueError(f"a {type(self).__name__} is one of its declared tokens")
-        if str(self.value) not in (self.TOKENS or frozenset()):
-            raise EventValueError(f"a {type(self).__name__} is one of its declared tokens")
-
-    def carried(self) -> str:
-        # `str()` rather than the member itself: an enumeration member is
-        # a `str` subclass, and a record carrying one would put the
-        # subclass's name into a baseline's argument types and its
-        # `repr` into anything that renders it.
-        return str(self.value)
-
-
-@dataclass(frozen=True)
-class CloseReasonToken(TokenValue):
-    ENUM: ClassVar[type[StrEnum]] = CloseReason
-
-
-@dataclass(frozen=True)
-class RejectionToken(TokenValue):
-    ENUM: ClassVar[type[StrEnum]] = Rejection
-
-
-@dataclass(frozen=True)
-class SuppressionToken(TokenValue):
-    ENUM: ClassVar[type[StrEnum]] = Suppression
-
-
-@dataclass(frozen=True)
-class FillerSkipToken(TokenValue):
-    ENUM: ClassVar[type[StrEnum]] = FillerSkip
-
-
-@dataclass(frozen=True)
-class ToolSourceToken(TokenValue):
-    ENUM: ClassVar[type[StrEnum]] = ToolSource
-
-
-@dataclass(frozen=True)
-class UnnamedToolSource(ToolSourceToken):
-    """The two sources a `tool_call` may not name: a board's own
-    vocabulary and whatever a model invented. Narrowed at construction,
-    so the variant that names nothing cannot be built for a builtin."""
-
-    MEMBERS: ClassVar[frozenset[str] | None] = frozenset(
-        {ToolSource.DEVICE, ToolSource.UNKNOWN}
-    )
-
-
-@dataclass(frozen=True)
-class ProviderOutcomeToken(TokenValue):
-    ENUM: ClassVar[type[StrEnum]] = ProviderOutcome
-
-
-@dataclass(frozen=True)
-class ToolOutcomeToken(TokenValue):
-    ENUM: ClassVar[type[StrEnum]] = ToolOutcome
-
-
-@dataclass(frozen=True)
-class AuthRejectionToken(TokenValue):
-    ENUM: ClassVar[type[StrEnum]] = AuthRejection
-
-
-@dataclass(frozen=True)
-class OriginSourceToken(TokenValue):
-    ENUM: ClassVar[type[StrEnum]] = OriginSource
-
-
-@dataclass(frozen=True)
-class ActivationRefusalToken(TokenValue):
-    ENUM: ClassVar[type[StrEnum]] = ActivationRefusal
-
-
-@dataclass(frozen=True)
-class NotOfferedToken(TokenValue):
-    ENUM: ClassVar[type[StrEnum]] = NotOffered
-
-
-@dataclass(frozen=True)
-class PendingRefusal(NotOfferedToken):
-    """The two bounds the pending table refuses a code at, and only
-    those. The view's own failure says so in a sentence of its own and
-    cannot be built here, which is the narrowing the untyped registry
-    spelled out variant by variant."""
-
-    MEMBERS: ClassVar[frozenset[str] | None] = frozenset(
-        {NotOffered.PENDING_FULL, NotOffered.MINT_SPENT}
-    )
-
-
-@dataclass(frozen=True)
-class OtaRefusalToken(TokenValue):
-    ENUM: ClassVar[type[StrEnum]] = OtaRefusal
-
-
-@dataclass(frozen=True)
-class CaptureDeclinedToken(TokenValue):
-    ENUM: ClassVar[type[StrEnum]] = CaptureDeclined
-
-
-@dataclass(frozen=True)
-class CaptureWriteToken(TokenValue):
-    ENUM: ClassVar[type[StrEnum]] = CaptureWrite
-
-
-@dataclass(frozen=True)
-class EchoOutcomeToken(TokenValue):
-    ENUM: ClassVar[type[StrEnum]] = EchoOutcome
-
-
-@dataclass(frozen=True)
-class McpTransportToken(TokenValue):
-    ENUM: ClassVar[type[StrEnum]] = McpTransport
-
-
-@dataclass(frozen=True)
-class McpDownToken(TokenValue):
-    ENUM: ClassVar[type[StrEnum]] = McpDown
-
-
-@dataclass(frozen=True)
-class McpConnectFailure(McpDownToken):
-    """The four a failed connect is classified into. A stop and a drop
-    after a failed call are the other two ways down and each says so in
-    a sentence of its own, so neither can be built for the sentence that
-    reports an entry that never came up."""
-
-    MEMBERS: ClassVar[frozenset[str] | None] = frozenset(
-        {
-            McpDown.TRANSPORT_FAILED,
-            McpDown.INITIALIZE_FAILED,
-            McpDown.DISCOVERY_FAILED,
-            McpDown.CONNECT_TIMEOUT,
-        }
-    )
-
-
-@dataclass(frozen=True)
-class McpReloadOutcomeToken(TokenValue):
-    ENUM: ClassVar[type[StrEnum]] = McpReloadOutcome
-
-
-@dataclass(frozen=True)
-class McpRefusalToken(TokenValue):
-    ENUM: ClassVar[type[StrEnum]] = McpRefusal
 
 
 # --- the formatted fragments ------------------------------------------
@@ -1473,36 +1329,29 @@ __all__ = [
     "Absent",
     "ActivationCode",
     "ActivationRefusal",
-    "ActivationRefusalToken",
     "AgentList",
     "AgentNames",
     "AlsoBoundTo",
     "AuthRejection",
-    "AuthRejectionToken",
     "BoardName",
     "CLASS_NAME_PATTERN",
     "CLASS_NAME_SEPARATOR",
     "CaptureDeclined",
-    "CaptureDeclinedToken",
     "CaptureWrite",
-    "CaptureWriteToken",
     "ClassName",
     "ClassNames",
     "ClientId",
     "CloseReason",
-    "CloseReasonToken",
     "ConfiguredPath",
     "Count",
     "Descriptor",
     "DeviceId",
     "DeviceOrUnidentified",
     "EchoOutcome",
-    "EchoOutcomeToken",
     "EventName",
     "EventValue",
     "EventValueError",
     "FillerSkip",
-    "FillerSkipToken",
     "FirmwareVersion",
     "Flag",
     "Fragment",
@@ -1512,43 +1361,30 @@ __all__ = [
     "MachineId",
     "McpConnectFailure",
     "McpDown",
-    "McpDownToken",
     "McpRefusal",
-    "McpRefusalToken",
     "McpReloadOutcome",
-    "McpReloadOutcomeToken",
     "McpTransport",
-    "McpTransportToken",
     "NotOffered",
-    "NotOfferedToken",
     "Nothing",
     "OriginProvenance",
     "OriginSource",
-    "OriginSourceToken",
     "OtaRefusal",
-    "OtaRefusalToken",
     "PendingRefusal",
     "PromptSources",
     "ProviderOutcome",
-    "ProviderOutcomeToken",
     "QuotedProvider",
     "QuotedToolName",
     "ReachingHost",
     "Real",
     "Rejection",
-    "RejectionToken",
     "ReportedMac",
     "SessionId",
     "SessionIds",
     "SessionList",
     "Suppression",
-    "SuppressionToken",
     "TextValue",
-    "TokenValue",
     "ToolOutcome",
-    "ToolOutcomeToken",
     "ToolSource",
-    "ToolSourceToken",
     "UNIDENTIFIED_DEVICE",
     "UnnamedToolSource",
     "Whole",

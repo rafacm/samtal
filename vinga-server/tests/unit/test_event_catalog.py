@@ -21,7 +21,7 @@ import logging
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, get_args
 
 import pytest
 
@@ -47,7 +47,6 @@ from vinga_server.events.values import (
     AgentNames,
     ClassName,
     CloseReason,
-    CloseReasonToken,
     ConfiguredPath,
     Count,
     DeviceId,
@@ -56,7 +55,6 @@ from vinga_server.events.values import (
     Nothing,
     SessionId,
     ToolSource,
-    ToolSourceToken,
     UnnamedToolSource,
 )
 
@@ -410,7 +408,7 @@ class Latched(Variant):
     LEVEL: ClassVar[int] = logging.INFO
     TEMPLATE: ClassVar[str] = "closed"
 
-    reason: CloseReasonToken = value(fixed=CloseReasonToken(CloseReason.DRAIN))
+    reason: CloseReason = value(fixed=CloseReason.DRAIN)
 
 
 def test_a_fixed_value_is_carried_and_cannot_be_passed() -> None:
@@ -420,7 +418,7 @@ def test_a_fixed_value_is_carried_and_cannot_be_passed() -> None:
 
     assert Latched().payload() == {"reason": "drain"}
     with pytest.raises(TypeError):
-        Latched(reason=CloseReasonToken(CloseReason.IDLE))  # type: ignore[call-arg]
+        Latched(reason=CloseReason.IDLE)  # type: ignore[call-arg]
 
 
 def test_a_fixed_token_narrows_the_declared_set_to_the_one_it_says() -> None:
@@ -435,8 +433,7 @@ def test_a_fixed_token_narrows_the_declared_set_to_the_one_it_says() -> None:
     (reason,) = [one for one in carried_values(Latched) if one.name == "reason"]
 
     assert tokens_of(reason) == frozenset({"drain"})
-    assert CloseReasonToken.TOKENS is not None
-    assert len(CloseReasonToken.TOKENS) > 1
+    assert len(frozenset(CloseReason)) > 1
 
 
 # --- and every value is the type its field declares -------------------
@@ -518,17 +515,19 @@ class Sourced(Variant):
     TEMPLATE: ClassVar[str] = "called %s"
     ARGS: ClassVar[tuple[str, ...]] = ("source",)
 
-    source: ToolSourceToken
+    source: ToolSource
 
 
-def test_a_narrowed_value_type_still_satisfies_the_field_it_narrows() -> None:
-    """Subclasses pass, which is the point of narrowing: a field
-    declaring the wider type takes the narrower one, and the narrower
-    type refuses the members its own variant may not say."""
+def test_a_narrowed_member_still_satisfies_the_field_it_narrows() -> None:
+    """A narrowing names the parent's own members rather than restating
+    their values, so a field declaring the whole enumeration takes every
+    member the narrowed annotation admits, and the narrowing is what
+    refuses the members its own variant may not say."""
     declare("scratch_sourced", variants=(Sourced,))
 
-    Sourced(source=UnnamedToolSource(ToolSource.DEVICE)).verify()
-    Sourced(source=ToolSourceToken(ToolSource.BUILTIN)).verify()
+    for member in get_args(UnnamedToolSource):
+        Sourced(source=member).verify()
+    Sourced(source=ToolSource.BUILTIN).verify()
 
 
 # --- the declaration is what names the event --------------------------

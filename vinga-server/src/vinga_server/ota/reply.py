@@ -53,8 +53,8 @@ from vinga_server.events.values import (
     DeviceId,
     FirmwareVersion,
     Identifier,
+    NotOffered,
     OtaRefusal,
-    PendingRefusal,
     ReportedMac,
 )
 from vinga_server.onboarding.origin import portal_url_line, websocket_url_for
@@ -333,7 +333,12 @@ async def _activation(
         case "refused":
             events.emit(
                 lambda: ActivationNotOfferedRefused(
-                    device=DeviceId(mac), reason=PendingRefusal(unbound.refusal)
+                    device=DeviceId(mac),
+                    # The pending table words its two bounds as
+                    # sentences over the configured limits, so the
+                    # lookup that crosses one into the event vocabulary
+                    # happens here.
+                    reason=NotOffered(unbound.refusal),
                 )
             )
         case "offered" | "not_applicable":

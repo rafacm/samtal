@@ -1,12 +1,12 @@
 """A field declared as the closed set it carries.
 
-A variant used to say "one of these tokens" by naming the `TokenValue`
-subclass built for that enumeration, so a set that already existed was
+A variant used to say "one of these tokens" by naming the wrapper class
+built for that enumeration, so a set that already existed was
 represented twice: once as the members, once as a class holding a string
 checked against them. A field annotated with the enumeration itself says
 the same thing with the vocabulary a reader already has, and #238 is
-that change. This suite is what holds the two shapes to being the same
-declaration.
+that change. This suite is what holds the annotation to saying
+everything the wrapper said.
 
 The claims are the ones the wrapper made and one it could not. What a
 record carries is a plain `str` and never the member, because a member
@@ -48,7 +48,6 @@ from vinga_server.events.values import (
     Identifier,
     Rejection,
     ToolSource,
-    ToolSourceToken,
 )
 
 CHANNEL = "vinga_server.ota"
@@ -79,19 +78,6 @@ class Called(Variant):
     ARGS: ClassVar[tuple[str, ...]] = ("source",)
 
     source: ToolSource = value(note="Which namespace the call reached into.")
-
-
-@dataclass(frozen=True)
-class CalledThroughTheWrapper(Variant):
-    """The same field, declared the way it was before: the wrapper for
-    that enumeration, holding a string it checks at construction."""
-
-    CHANNEL: ClassVar[str] = CHANNEL
-    LEVEL: ClassVar[int] = logging.INFO
-    TEMPLATE: ClassVar[str] = "called a %s tool"
-    ARGS: ClassVar[tuple[str, ...]] = ("source",)
-
-    source: ToolSourceToken = value(note="Which namespace the call reached into.")
 
 
 @dataclass(frozen=True)
@@ -246,26 +232,21 @@ def test_a_fixed_member_narrows_the_declared_set_to_the_one_it_says() -> None:
     assert tokens_of(declared(Rejected, "reason")) == frozenset({"no_agent"})
 
 
-def test_the_reference_renders_an_enum_field_as_it_rendered_the_wrapper() -> None:
-    """The reader-facing claim of the whole change: the two shapes are
-    one declaration, so the document cannot tell them apart.
+def test_the_reference_renders_an_enum_field_as_a_token_field() -> None:
+    """The reader-facing claim of the whole change: the document says
+    what it said when the field named a wrapper.
 
-    Whole sections rather than one cell, since a kind, a constraint, a
-    requiredness and an argument row all come from the type a field
-    names. A scratch declaration is the last the catalog holds, so its
-    section runs to the end of the document, where the generator strips
-    the blank line every other section ends with.
+    Held against the wrapper's own rendering while both shapes existed;
+    the wrapper is gone, so the enum's cells are stated here and the
+    byte-identity of `docs/reference/events.md` across the migration is
+    what carries the equivalence over the real catalog.
     """
-    declare("scratch_two_shapes", variants=(Called, CalledThroughTheWrapper))
+    declare("scratch_one_shape", variants=(Called,))
 
-    _, section = events_docgen.reference().split("### `scratch_two_shapes`\n", 1)
-    enum_typed, wrapped = section.split("#### Variant ")[1:]
+    _, section = events_docgen.reference().split("### `scratch_one_shape`\n", 1)
 
-    assert "`TOKEN`" in enum_typed
-    assert "one of: `builtin`, `device`, `mcp`, `unknown`" in enum_typed
-    assert enum_typed.split("\n", 1)[1].rstrip("\n") == (
-        wrapped.split("\n", 1)[1].rstrip("\n")
-    )
+    assert "`TOKEN`" in section
+    assert "one of: `builtin`, `device`, `mcp`, `unknown`" in section
 
 
 # --- and what it refuses -----------------------------------------------

@@ -93,8 +93,13 @@ from vinga_server.events.values import (
     ReachingHost,
     Real,
     ToolOutcome,
-    UnnamedToolSource,
     Whole,
+)
+from vinga_server.events.values import (
+    # Aliased because `tools/source.py`'s `ToolSource` below is the
+    # protocol the three tool origins answer; this one is the payload's
+    # word for which of them a call reached into.
+    ToolSource as ToolNamespace,
 )
 from vinga_server.generation import Generation, Generations
 from vinga_server.providers import (
@@ -265,7 +270,10 @@ def _tool_called(
         )
     return UnnamedToolCall(
         agent=Identifier(agent),
-        source=UnnamedToolSource(classified.source),
+        # The classifier answers `runtime/turns.py`'s own constants,
+        # which are held equal to the store's column rather than to
+        # this vocabulary, so the crossing is spelled here.
+        source=ToolNamespace(classified.source),
         duration_ms=duration_ms,
         is_error=Flag(is_error),
         named=Nothing(""),

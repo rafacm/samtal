@@ -42,7 +42,6 @@ from vinga_server.events.values import (
     ClassNames,
     ClientId,
     CloseReason,
-    CloseReasonToken,
     ConfiguredPath,
     Count,
     DeviceId,
@@ -57,7 +56,6 @@ from vinga_server.events.values import (
     LanguageTag,
     McpConnectFailure,
     McpDown,
-    McpDownToken,
     McpRefusal,
     McpReloadOutcome,
     McpTransport,
@@ -69,20 +67,16 @@ from vinga_server.events.values import (
     PendingRefusal,
     PromptSources,
     ProviderOutcome,
-    ProviderOutcomeToken,
     QuotedProvider,
     QuotedToolName,
     ReachingHost,
     Real,
-    RejectionToken,
     ReportedMac,
     SessionId,
     SessionIds,
     SessionList,
     ToolOutcome,
     ToolSource,
-    ToolSourceToken,
-    UnnamedToolSource,
     Whole,
 )
 from vinga_server.runtime.turns import TOOL_SOURCES as CLASSIFIED_AS
@@ -295,36 +289,9 @@ def test_the_tool_sources_are_the_ones_the_classifier_can_answer() -> None:
     assert frozenset(ToolSource) == frozenset(STORED_TOOL_SOURCES)
 
 
-def test_a_token_admits_its_set_and_refuses_everything_else() -> None:
-    assert CloseReasonToken(CloseReason.DRAIN).carried() == "drain"
-    assert RejectionToken("no_agent").carried() == "no_agent"
-    with pytest.raises(EventValueError):
-        CloseReasonToken("hung_up")
-
-
-def test_a_token_carries_a_plain_string_rather_than_its_member() -> None:
-    """An enumeration member is a `str` subclass, so a record carrying
-    one would put the subclass's name into a baseline's argument types
-    and its `repr` into anything that renders it."""
-    carried = CloseReasonToken(CloseReason.CLIENT).carried()
-
-    assert type(carried) is str
-
-
-def test_a_narrowed_token_refuses_the_members_its_variant_may_not_say() -> None:
-    """A `tool_call` that names nothing is a device call or an invented
-    one. A builtin is neither, and the type is where that is refused
-    rather than at review."""
-    assert UnnamedToolSource(ToolSource.DEVICE).carried() == "device"
-    assert UnnamedToolSource.TOKENS == frozenset({"device", "unknown"})
-    assert ToolSourceToken.TOKENS == frozenset({"builtin", "device", "mcp", "unknown"})
-    with pytest.raises(EventValueError):
-        UnnamedToolSource(ToolSource.BUILTIN)
-
-
 def test_the_outcome_tokens_are_the_words_their_sentences_use() -> None:
     """Short or long, a set is closed or it is not."""
-    assert ProviderOutcomeToken(ProviderOutcome.TIMED_OUT).carried() == "timed out"
+    assert ProviderOutcome.TIMED_OUT == "timed out"
     assert frozenset(ToolOutcome) == frozenset({"", " and failed"})
 
 
@@ -388,8 +355,6 @@ REFUSING = (
     ("client id", lambda: ClientId(SENTINEL * 4)),
     ("agent names", lambda: AgentNames((SENTINEL, "  "))),
     ("prompt sources", lambda: PromptSources({SENTINEL: 1})),
-    ("close reason", lambda: CloseReasonToken(SENTINEL)),
-    ("narrowed tool source", lambda: UnnamedToolSource(SENTINEL)),
     ("fragment", lambda: FromEntry(SENTINEL)),
 )
 
@@ -511,11 +476,11 @@ def test_the_pending_refusals_are_the_two_bounds_the_table_refuses_at() -> None:
     a reworded bound fails rather than degrades."""
     from vinga_server.onboarding.pending import BUDGET_SPENT, CAPACITY_REACHED
 
-    assert PendingRefusal.TOKENS == frozenset({CAPACITY_REACHED, BUDGET_SPENT})
+    assert frozenset(get_args(PendingRefusal)) == frozenset(
+        {CAPACITY_REACHED, BUDGET_SPENT}
+    )
     assert NotOffered.PENDING_FULL == CAPACITY_REACHED
     assert NotOffered.MINT_SPENT == BUDGET_SPENT
-    with pytest.raises(EventValueError):
-        PendingRefusal(NotOffered.UNREADABLE)
 
 
 def test_the_origin_sources_are_the_three_the_banner_can_name() -> None:
@@ -532,22 +497,23 @@ def test_the_origin_sources_are_the_three_the_banner_can_name() -> None:
 
 
 def test_the_mcp_down_reasons_are_the_ones_the_transport_classifies_into() -> None:
+    """The enumeration and the narrowing its connect sentence declares,
+    both held equal to the transport's own constants, so a seventh way
+    down classified there and not declared here fails rather than
+    degrades."""
     from vinga_server.tools.mcp import transport
 
-    assert McpConnectFailure.TOKENS == frozenset(
-        {
-            transport.TRANSPORT_FAILED,
-            transport.INITIALIZE_FAILED,
-            transport.DISCOVERY_FAILED,
-            transport.CONNECT_TIMEOUT,
-        }
-    )
-    assert McpDownToken.TOKENS == frozenset(McpConnectFailure.TOKENS) | {
-        transport.STOPPED,
-        transport.CALL_FAILED,
+    connect = {
+        transport.TRANSPORT_FAILED,
+        transport.INITIALIZE_FAILED,
+        transport.DISCOVERY_FAILED,
+        transport.CONNECT_TIMEOUT,
     }
-    with pytest.raises(EventValueError):
-        McpConnectFailure(McpDown.STOPPED)
+
+    assert frozenset(McpDown) == frozenset(
+        connect | {transport.STOPPED, transport.CALL_FAILED}
+    )
+    assert frozenset(get_args(McpConnectFailure)) == frozenset(connect)
 
 
 def test_the_mcp_reload_words_are_the_ones_the_reload_answers_with() -> None:
