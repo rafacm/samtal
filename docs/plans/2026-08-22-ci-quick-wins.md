@@ -141,3 +141,57 @@ lint/mypy/doc-drift/wheel seconds; critical path 12m45s.
   harness.** (PR TBD) Harness-local stall and bound values with the
   ratios and floors of decision 4; committed baseline byte-still;
   capture() setup to single digits.
+
+## Plan review round
+
+External review of commit `dc3910e1`, 2026-08-22. Backend: claude
+CLI 2.1.239, model `claude-opus-5`, read-only tool set (the interim
+fallback tier while the codex quota is exhausted). Verdict as
+received: ready after the P1 and P2 amendments; findings 1, 2 and 4
+collapse into one correction, and finding 3 is a scope call for the
+issue owner. Findings condensed but faithful:
+
+1. **P1: the watchdog driver's 10s does not come from
+   `watchdog_config`.** That config already sets 0.05s; the 10s is
+   `drive_llm_retry`'s second scenario running against
+   `unregistered(...)`, which hardcodes `base_config()` and so takes
+   the production default `llm_first_token_timeout_s = 10.0`. The
+   fix is to let `unregistered()` take a config and have the driver
+   pass `watchdog_config()`, matching the scenario's first half.
+2. **P1: the filler drivers' 20s is two consecutive
+   `llm_first_token_timeout_s` windows (10s, one retry), the same
+   mechanism as finding 1, and the plan's global ordering invariant
+   ("the stall well under the bound") would stop `drive_llm_retry`
+   firing at all.** The invariant must be stated per driver: for
+   `drive_llm_retry` the stall stays above the shrunk bound; for the
+   three filler drivers only filler delay < stall matters.
+3. **P1: "capture() setup in single digits" is unreachable from the
+   four named drivers.** 86.4s minus 70.1s leaves a ~16s tail over
+   77 drivers, so the floor after M2 is ~17s and the saving ~70s,
+   not 80. Either restate the acceptance or extend scope.
+4. **P2: the "no config seam" contingency is already answered.**
+   `masked_config(server=...)` forwards a server section and
+   `test_session_filler.py` already drives the same scenarios with a
+   local 0.5s stall and `llm_first_token_timeout_s` overrides; the
+   plan's shrunk-bound design is also the slower alternative (about
+   9s across the filler drivers versus about 1.5s).
+5. **P2: decision 3's byte-stillness claim is self-defeating.** If
+   the bytes cannot move by construction, the byte comparison proves
+   nothing; what the file actually pins is shape and per-path record
+   counts, which catches a driver that stops firing but not one that
+   reaches its event by a different route. State per driver what
+   must still be true of the scenario, checked by reading.
+6. **P2: the M1 step inventory drops `Install dependencies`** (and
+   checkout and setup-uv); the control for "silently drops a step"
+   was itself incomplete.
+7. **P2: no CHANGELOG entry is named**, and the repository has
+   precedent for CI-only and test-only entries.
+8. **P3: the `image` job's `needs: test` comment would go stale**,
+   and `AGENTS.md`'s workflow description deserves the same check.
+9. **P3: M2's verification rests on an uncommitted timing script**
+   that `--durations` cannot replace (it cannot see inside the
+   module-scoped fixture). Commit it or record the exact command and
+   tables.
+10. **P3: `image.needs` can be exercised before merge** via the
+    `workflow_dispatch` path the workflow's own comment prescribes,
+    not only by reading the first push-to-main run.
