@@ -217,7 +217,7 @@ providers.
 
 ## Milestones
 
-- [x] **[M1: collapse the twins and move assembly out.](2026-08-22-one-shape-per-site-implementation.md#m1-collapse-the-twins-and-move-assembly-out)** (PR TBD)
+- [x] **[M1: collapse the twins and move assembly out.](2026-08-22-one-shape-per-site-implementation.md#m1-collapse-the-twins-and-move-assembly-out)** (PR #259)
   One milestone: the collapse and the move touch the same lines,
   and a PR that collapsed without moving would rewrite the same
   helpers twice. Deepens `events/`: the orchestrator's interface
