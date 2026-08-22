@@ -173,7 +173,9 @@ lint/mypy/doc-drift/wheel seconds; critical path 12m45s.
   and the two job logs are checked against that list before the
   review round.
 - **`image` publishes with half the suite green.** Prevented by
-  `needs: [unit, integration]`, and checked by reading the first
+  `needs: [unit, integration]`, exercised BEFORE merge with the
+  `workflow_dispatch` run the workflow's own header prescribes for
+  exactly this kind of edit, and confirmed by reading the first
   push-to-main run after merge.
 
 ## Milestones
