@@ -9,6 +9,20 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **The CI suite runs as two parallel lanes instead of one queue**
+  (#233). The single `test` job paid for everything in a row: the unit
+  tests, then the integration tests, then lint, typing, the four
+  generated-document drift checks and the wheel migration, a 12m45s
+  critical path of which the unit tests alone were 7m46s. It is now a
+  `unit` job (lint, the events type check, the unit tests) and an
+  `integration` job (the integration tests, the drift checks, the wheel
+  migration) that start together, so the path is roughly the longer
+  lane. Nothing changed about what runs or when the workflow runs it,
+  and the image job now needs both lanes, so publishing is still gated
+  on the whole suite. Both pytest invocations gained `--durations=25`:
+  one job's wall time used to make a slow test obvious, and with two
+  lanes the durations table is what says so instead.
+
 - **An event field is declared as the closed set it carries** (#238).
   A variant that says one of a fixed set of words used to name the
   `TokenValue` subclass built for that enumeration, so the set existed
