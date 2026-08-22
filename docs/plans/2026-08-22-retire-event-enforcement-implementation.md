@@ -113,10 +113,15 @@ either way), and the broken-log test is re-pinned on the emission after
 the refusal, since a refused emission has no observable of its own left.
 
 `tests/conftest.py` drops the `VINGA_EVENTS_ENFORCEMENT` block and gains
-the lane guard: an autouse fixture that attaches a handler to the
-`vinga_server` channel tree, collects any record whose `msg` is
-`REFUSAL_MESSAGE`, and fails the test unless it requested the
-`refusals_are_expected` fixture. That fixture, and not a mode, is what
+the lane guard. It was written as an autouse fixture that installed a
+handler on the `vinga_server` channel tree for the length of one test;
+the PR review round found the scope hole in that and it is now installed
+once from `pytest_configure`, filling a session-long ledger, with the
+autouse fixture reading a per-test delta off it and the residual
+reported against the run. The section below records the round. Either
+way the check is the same: a record whose `msg` is `REFUSAL_MESSAGE`
+fails the test that produced it unless it requested the
+`refusals_are_expected` fixture, and that guard, not a mode, is what
 keeps the lanes loud. `tests/support/apps.py` drops "an unusable
 enforcement mode" from its list of refusals that stay in the describe
 phase. `test_event_values.py` and `test_event_docs.py` migrate their
@@ -168,9 +173,17 @@ Two, both small.
   unrendered `REFUSAL_MESSAGE` instead, which is a stronger claim about
   the record that matters and no claim at all about a neighbour's.
 
-- **The lane guard found nothing.** Both lanes are green with it armed,
-  so no existing test was quietly driving a refusal, and the fixture is
-  in place before there is anything for it to catch.
+- **The lane guard found nothing, and the second time it was looking
+  at more.** As first written it was function-scoped, so what it
+  actually checked was the window between one test's setup and its
+  teardown: both lanes were green, but the module-scoped baseline
+  fixture that drives all eighty-one emit paths and the integration
+  lane's module-scoped uvicorn boot were built outside it. Widened per
+  the review round, so that it is armed from `pytest_configure` and
+  every fixture scope and every teardown is inside it, both lanes are
+  green again and the residual bucket is empty. That is the claim worth
+  keeping: no test, no fixture at any scope, and no teardown in either
+  lane drives a refusal.
 
 ### Follow-up
 
