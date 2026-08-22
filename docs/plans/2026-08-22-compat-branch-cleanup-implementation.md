@@ -268,3 +268,38 @@ behavior against a real proxy that canonicalizes a missing trailing
 slash, which no test in this repository can stand up. What the change
 does there is refuse rather than hop, which is the plan's stated
 intent and the changelog entry's stated consequence.
+
+## PR review round, M1 (PR #237)
+
+External review of the PR diff: claude backend (codex quota
+exhausted), claude CLI, model claude-opus-5, read-only tool set,
+2026-08-22, posted on the PR by the self-posting script. Verdict:
+mergeable after the listed fixes; three P2s and four P3s, each fixed
+with its own commit before merge.
+
+1. **The `Config.devices` field comment still advertised the deleted
+   tolerance** (models.py:2278). Fixed in `a002c2e1`: the comment
+   states the list-only contract.
+2. **The 2026-08-12 onboarding implementation doc claimed in the
+   present tense that doctor follows a redirect**, and the milestone
+   never ran the doctor's repo-wide symbol sweep. Fixed in
+   `bb63e807`: a dated correction note appended, pointing at
+   `_probed`'s docstring and this PR; the 2026-08-19 audit table was
+   judged a dated measurement, not a standing claim, and left as
+   received, with the tense-not-topic criterion recorded under
+   discoveries alongside the sweep result.
+3. **The credential sentinel pinned the message but not the
+   exception chain.** Fixed in `825e32af`: `__cause__` and
+   `__context__` are asserted `None`, matching the suite's chain
+   pins.
+4. **A two-personas comment described the deleted form.** Fixed in
+   `4f04562d`.
+5. **The doctor commit's test arithmetic said net zero for a net
+   minus two.** Fixed in `7f438546`.
+6. **The changelog overclaimed the refusal's silence** (the derived
+   short URL is printed deliberately in the no-argument form). Fixed
+   in `d5dea79d`: the clause scoped to a URL an operator supplied.
+7. **`_check_binding`'s docstring promised rules its list guard does
+   not enforce for a tuple or set** (pre-existing, in-process only).
+   Fixed in `6577162b`: the docstring narrowed; the hole measured
+   and recorded under discoveries rather than widened away.
