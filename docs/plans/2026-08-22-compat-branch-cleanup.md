@@ -119,10 +119,17 @@ pins (`test_providers_openai_tts.py:190` and the ASR mirror) match
 on the static half of the sentence only, so nothing else moves. A
 sentinel bite plants a credential-shaped `base_url`
 (`sk-`-prefixed, no scheme) and asserts the refusal renders the
-label, the rule, and the example, never the value. After the
+label, the rule, and the example, never the value. `build` discards
+`parse_base_url`'s boolean deliberately, unlike the sibling
+factories that bind it: the constructor needs `self.host` anyway for
+the failure event, `_ask_for_usage` derives from that same host, and
+threading the boolean in would be a second encoding of the one
+predicate; a one-line comment at the call site says so. After the
 `parse_base_url` call, `endpoint_host` cannot return None on the
-factory path. The host equality that drives `_ask_for_usage` is
-unchanged.
+factory path, though a directly constructed provider with an
+injected client still can hold `host = None`, which is that seam's
+existing contract and stays. The host equality that drives
+`_ask_for_usage` is unchanged.
 
 **Is the conversation store's pre-narrowing claim a comment fix or a
 missing read-side strip?** A comment fix. The `EVENT_CONTENT` strip
@@ -457,6 +464,10 @@ answer `__init__` recomputes.** Two structures that must agree in
 the module being deepened. Say the answer is deliberately discarded
 because `self.host` is needed anyway for the failure event and the
 two derivations are the same expression on purpose, or thread it.
+
+*Resolution*: accepted with the deliberate-discard arm; the
+open-question answer states it and puts a comment at the call site
+so the next reader does not re-ask.
 
 **9 (P3). "Makes its docstring's claim true for all its callers"
 overclaims.** A directly constructed provider with an injected
