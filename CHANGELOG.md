@@ -58,28 +58,6 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   an operator sees changed: the same events with the same fields, and
   the same speech.
 
-- **The conversation store's event strip is described as what it is**
-  (#225). Its comments and the generated
-  `docs/reference/conversations-schema.md` said the rule that takes
-  content keys off an events row also "reads a database written before
-  the narrowing". It does not: it runs where a row is written and no
-  read applies it. The strip is unchanged, its write-time guarantee is
-  unchanged, and what is said about it is now true.
-
-- **An `openai_compatible` LLM refuses a malformed `base_url` at the
-  boot that reads it** (#225). The `openai` ASR and TTS types have
-  refused a `base_url` with no scheme or no host since the option
-  existed; the LLM type, which joined the dialect later, built a
-  provider anyway and failed on its first request instead, with the
-  round's token counts silently gone. It now meets the same refusal at
-  boot or apply. A deployment carrying a malformed URL that has been
-  failing every conversation will fail its next boot instead, which is
-  where the problem is. The refusal itself stops echoing the value it
-  rejected, for all three types: a key pasted where the URL goes is
-  exactly the shape that has no host, so the sentence that names the
-  problem would otherwise carry the key to stderr, to the API's 422
-  body and to the log.
-
 ### Removed
 
 - **`config doctor` follows no redirect at all** (#225). It used to
@@ -121,6 +99,26 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   means. Unset stays distinct from empty: an agent edited from no `mcp`
   list to an empty one is still reported, because that edit revokes
   every tool it inherited.
+
+- **An `openai_compatible` LLM refuses a malformed `base_url` at the
+  boot that reads it** (#225). The `openai` ASR and TTS types have
+  refused a `base_url` with no scheme or no host since the option
+  existed; the LLM type, which joined the dialect later, built a
+  provider anyway and failed on its first request instead, with the
+  round's token counts silently gone. It now meets the same refusal at
+  boot or apply. A deployment carrying a malformed URL that has been
+  failing every conversation will fail its next boot instead, which is
+  where the problem is. The refusal itself stops echoing the value it
+  rejected, for all three types: a key pasted where the URL goes is
+  exactly the shape that has no host, so the sentence that names the
+  problem would otherwise carry the key to stderr, to the API's 422
+  body and to the log.
+
+- **The conversation store's event strip is documented as write-time
+  only** (#225). Its comments and the generated
+  `docs/reference/conversations-schema.md` also claimed it reads a
+  database written before the narrowing; no read applies it. Nothing
+  about the strip changed.
 
 ## 2026-08-21
 
