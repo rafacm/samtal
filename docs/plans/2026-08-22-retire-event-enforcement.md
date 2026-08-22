@@ -117,9 +117,20 @@ and discoveries; no deviations says so explicitly.
    guard leak nothing (plant a credential-shaped value in a failing
    thunk, a hostile exception class name in a tap; assert absence
    from the report's sentence and args in both log formats) SURVIVE,
-   rewritten against the drop-and-report path; tests that pin
-   strict raising, forgiving substitution, mode resolution, or the
-   recovery event's shape are deleted with the machinery.
+   rewritten against the drop-and-report path. The rest is
+   classified by PROPERTY, not by mode, because three surviving
+   behaviors have coverage only inside mode-shaped tests today.
+   The properties that survive the deletion, each re-pinned
+   against drop-and-report (one report record with
+   `args == (label, code)`, nothing reaching taps or capture,
+   `emit` returning normally): a wrong-channel emission, a failed
+   construction thunk, a misplaced value (`verify()`'s wrong-field
+   check), a descriptor past its declared bound at emit, an
+   identity that fails building refusing the emission whole, and a
+   broken log channel during the report costing nothing. Only
+   tests whose whole claim is strict raising, forgiving
+   substitution, mode resolution, or the recovery event's shape
+   are deleted with the machinery.
    `tests/conftest.py` and `tests/support/apps.py` drop their
    enforcement-mode setup, and the lanes get a replacement for the
    loudness strict mode provided: an autouse fixture in
