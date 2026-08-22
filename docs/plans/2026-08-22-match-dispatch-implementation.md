@@ -169,3 +169,27 @@ clears the caches it finds.
 
 Nothing here needs hardware, so no verification step was left
 unverifiable.
+
+## PR review round (PR #236)
+
+External review of the PR diff: claude backend (codex quota
+exhausted), claude CLI, model claude-opus-5, read-only tool set,
+2026-08-22, posted on the PR by the self-posting script. Verdict:
+mergeable as is; four P3 findings, all documentation accuracy, all
+folded in before merge.
+
+1. **Stale plan line references** (the conversion's import shifted
+   the file by one). Fixed in `c7a87c0`: the plan's live sections
+   say 816 and 1267; the recorded review round keeps its numbers as
+   received.
+2. **The shared fake's edit was missing from the module layout and
+   denied by the deviations section.** Fixed in `fd8867d`: both now
+   name `tests/support/providers.py`.
+3. **The third assertion's sentence claimed a surface the test does
+   not read.** Fixed in `0d21ae3`: the claim is scoped to
+   `script.seen`, with the reason a phantom still cannot slip past.
+4. **A sibling dispatch the audit's sweep could not see**
+   (`conversations/store.py:497-535`, sequential guards the
+   `elif`-shaped grep never matches). Fixed in `1df068c`: the plan's
+   rejected list names it as out of scope here, and the follow-up
+   decision is recorded on issue #235.
