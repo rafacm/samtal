@@ -96,12 +96,19 @@ providers.
    values, never `runtime/` or `providers/` types; `pipeline.py`
    unpacks its objects at the call. Module docstring states the
    contract.
-4. **`pipeline.py` keeps only decision sites.** What remains in the
-   orchestrator is the `match` dispatch (#235's) calling assembly
-   functions inside emit thunks; the `_Entry` dataclass, the twin
-   selectors, and the fragment logic leave the module. The
-   `DEVICE_ABORT_REASONS` constant and anything else in the region
-   that is not event assembly stays.
+4. **The tool-call SOURCE selection stays in `pipeline.py`, beside
+   the classifier that produces the token; only construction
+   moves.** `runtime/turns.py` spells its source constants locally
+   on purpose and `TOOL_SOURCES` stays one structure: moving the
+   `== BUILTIN` / `== MCP` branches into `events/` would force an
+   upward import, a second home for the set, or an untested
+   equality. So the orchestrator's branch picks which of the three
+   assembly constructors to call (that is the decision site the
+   closed-set lens names), and each constructor builds its variant.
+   Otherwise `pipeline.py` keeps only decision sites: the entry
+   quartet construction, the field ordering, and the fragment
+   logic leave the module; `DEVICE_ABORT_REASONS` and anything
+   else in the region that is not event assembly stays.
 5. **The pins move deliberately, and the baseline is expected
    byte-still.** The golden loses three variants (each affected
    event goes from two variants to one; the survivor's field list
