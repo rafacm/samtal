@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-08-23
+
+### Removed
+
+- **The event catalog is pinned by one committed artifact instead of
+  three** (#241). Two of them are gone: the golden inventory
+  (`tests/unit/test_event_golden.py` and
+  `tests/unit/data/event-catalog-golden.json`) and the record baseline
+  (`tests/unit/data/event-baseline.json`), with the two regeneration
+  commands that fed them. Every event change used to cost three
+  regenerations and three review surfaces, and no second party consumed
+  either JSON file. `docs/reference/events.md` stays the single
+  committed pin, regenerated and byte-diffed in CI as before, and it
+  gained the one structural fact it did not carry: each argument
+  position now names the declared field it renders, so an `ARGS` tuple
+  reordered between two same-kinded positions is a diff on a reviewed
+  file. Everything the record baseline uniquely proved is a live
+  assertion in `tests/unit/test_event_baseline.py` now, needing nothing
+  on disk: every produced record conforms to a variant its event
+  declares, and a per-driver table of the fields each of the
+  eighty-one paths actually carries holds the optional fields that
+  `required <= keys <= declared` cannot. The harness of drivers stays
+  where it was; what it no longer does is write a file. Behavior is
+  untouched: no production code moved, and the reference is
+  byte-identical apart from the argument tables.
+
 ## 2026-08-22
 
 ### Changed
