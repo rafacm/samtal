@@ -706,7 +706,12 @@ def test_a_binding_written_as_one_name_is_refused() -> None:
 def test_a_binding_that_is_a_pasted_credential_is_not_repeated() -> None:
     """The same refusal over the value an operator can most expensively
     write there. What is rendered is the location and pydantic's own
-    sentence about the type, and the input is not part of either."""
+    sentence about the type, and the input is not part of either.
+
+    The chain as well as the message: pydantic's ValidationError holds
+    every rejected input in its `errors()`, so leaving it as the
+    refusal's cause or context would hand the value to anything walking
+    behind the sentence."""
     data = {
         "agents": {"assistant": {}},
         "devices": {"aa:bb:cc:dd:ee:ff": PARSER_SENTINEL},
@@ -717,6 +722,8 @@ def test_a_binding_that_is_a_pasted_credential_is_not_repeated() -> None:
     message = str(excinfo.value)
     assert "devices.aa:bb:cc:dd:ee:ff" in message
     assert PARSER_SENTINEL not in message
+    assert excinfo.value.__cause__ is None
+    assert excinfo.value.__context__ is None
 
 
 def test_a_device_resolves_to_nothing_when_no_agent_is_configured() -> None:
