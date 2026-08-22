@@ -130,7 +130,13 @@ and discoveries; no deviations says so explicitly.
    broken log channel during the report costing nothing. Only
    tests whose whole claim is strict raising, forgiving
    substitution, mode resolution, or the recovery event's shape
-   are deleted with the machinery.
+   are deleted with the machinery. The `-O` subprocess pin in the
+   mode suite is the suite's only guard of #155's no-assert rule
+   and outlives the modes: it is rewritten against the drop path
+   (under `python -O`, a refused construction still reports and
+   dispatches nothing) and rehomed in the surviving sentinel
+   suite; the no-assert comment at the top of the mode section
+   moves to the guard region that keeps the rule.
    `tests/conftest.py` and `tests/support/apps.py` drop their
    enforcement-mode setup, and the lanes get a replacement for the
    loudness strict mode provided: an autouse fixture in
