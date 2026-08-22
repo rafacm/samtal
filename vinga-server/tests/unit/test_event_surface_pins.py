@@ -404,10 +404,13 @@ async def test_a_failing_providers_own_words_reach_no_record(
 async def test_a_failing_provider_the_registry_never_built_says_even_less(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """The other shape of the same event, and the one whose sentence has
-    two empty fragments where the entry and the host would be. It names
-    no configured entry at all, so there is even less for a message to
-    ride out on, and the class name is still what the record keeps."""
+    """The same variant saying less: one event shape since #240, and
+    this is the record it makes for a provider the registry never built.
+    The four entry fields are absent rather than empty, and the two
+    positions the sentence renders them at are the empty forms of the
+    quoted entry and the host tail. It names no configured entry at all,
+    so there is even less for a message to ride out on, and the class
+    name is still what the record keeps."""
     _session, consumer = await a_failing_reply(
         "asr", Failing(ConnectionRefusedError(SENTINEL)), caplog, wrapped=False
     )

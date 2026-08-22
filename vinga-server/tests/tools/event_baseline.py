@@ -526,8 +526,9 @@ def unregistered(
     llm: Any, agent: str = "poet", mac: str = POET_MAC, config: Config | None = None
 ) -> Any:
     """A session whose LLM the provider registry never built, so the
-    events it emits name no configured entry: the variant beside every
-    provider event that says less rather than guessing.
+    events it emits name no configured entry: the same variant every
+    provider event has, with the four fields it cannot fill left absent
+    rather than guessed at.
 
     `config` defaults to the two-agent base, which is what every caller
     but one wants. The one is the watchdog driver: a bound is a server
