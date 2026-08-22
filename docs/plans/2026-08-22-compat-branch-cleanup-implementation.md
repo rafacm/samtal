@@ -199,6 +199,20 @@ Three, all inside the plan's own delegations rather than against it.
   No source, no test, no reference document. The lesson is that the
   fixture sweep and the symbol sweep answer different questions: one
   finds what exercises the behavior, the other finds what claims it.
+- **The binding's two rules have always had an in-process-only hole.**
+  `_check_binding` looks at a `list` and returns for anything else, so
+  a sequence pydantic's lax mode coerces to one, a tuple or a set,
+  reaches the field having satisfied neither rule. Measured rather
+  than reasoned: `devices={mac: ("a", "a")}` composes to
+  `["a", "a"]` and `devices={mac: ()}` to `[]`, both of which the
+  rules exist to refuse. It predates this milestone and no transport
+  can deliver either shape (JSON has no tuple, YAML no set, the
+  database stores a JSON array), so it is reachable only by
+  constructing the model in-process. Left as it was: widening the
+  guard is a new refusal path, which is a decision of its own and not
+  one a deletion milestone should slip in. The docstring is narrowed
+  to what the code does and names the gap, so the next reader meets it
+  as a known one.
 - **A standing claim gets a correction note; a dated measurement does
   not.** The two prose hits above are different kinds of record, and
   the criterion that separates them is tense, not topic. The
