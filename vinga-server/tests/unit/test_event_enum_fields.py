@@ -34,6 +34,7 @@ from tests.support.catalog import scratch_catalog
 from vinga_server import events_docgen
 from vinga_server.events.catalog import (
     CatalogError,
+    Declared,
     Variant,
     carried_values,
     declare,
@@ -41,6 +42,8 @@ from vinga_server.events.catalog import (
     value,
 )
 from vinga_server.events.values import (
+    ABSENT,
+    Absent,
     CloseReason,
     Identifier,
     Rejection,
@@ -106,6 +109,33 @@ class CalledUnnamed(Variant):
 
 
 @dataclass(frozen=True)
+class CalledOrNothing(Variant):
+    """A scratch variant whose enum field may be null. A closed set is
+    declared inside a union like any other type, and no production
+    variant declares one that way yet: every field the catalog fixes is
+    required by construction."""
+
+    CHANNEL: ClassVar[str] = CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "called something"
+
+    source: ToolSource | None = value(default=None)
+
+
+@dataclass(frozen=True)
+class MaybeUnnamed(Variant):
+    """And one whose narrowed field may be absent, which is the other
+    answer: a field that is present and null is a fact the record
+    states, and an absent one is a key the JSON object does not have."""
+
+    CHANNEL: ClassVar[str] = CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "called something"
+
+    source: Unnamed | Absent = value(default=ABSENT)
+
+
+@dataclass(frozen=True)
 class Rejected(Variant):
     """A scratch variant that IS its member: this shape says one reason
     and no other, so the field is not a parameter at all."""
@@ -117,7 +147,8 @@ class Rejected(Variant):
     reason: Rejection = value(fixed=Rejection.NO_AGENT)
 
 
-def declared(variant: type[Variant], name: str) -> object:
+def declared(variant: type[Variant], name: str) -> Declared:
+    """One of a variant's own declared values, by name."""
     (one,) = [held for held in carried_values(variant) if held.name == name]
     return one
 
@@ -172,6 +203,39 @@ def test_a_literal_narrows_the_declared_set_to_the_members_it_names() -> None:
     assert tokens_of(declared(CalledUnnamed, "source")) == frozenset(
         {"device", "unknown"}
     )
+
+
+def test_a_nullable_enum_field_declares_its_set_and_keeps_its_key() -> None:
+    """A closed set inside a union: the annotation still says which set,
+    and null is an answer the record states rather than a value the set
+    has to admit."""
+    declare("scratch_or_nothing", variants=(CalledOrNothing,))
+    source = declared(CalledOrNothing, "source")
+
+    assert tokens_of(source) == frozenset({"builtin", "device", "mcp", "unknown"})
+    assert (source.required, source.nullable) == (True, True)
+    assert CalledOrNothing().payload() == {"source": None}
+    CalledOrNothing().verify()
+    CalledOrNothing(source=ToolSource.MCP).verify()
+
+
+def test_an_omittable_narrowed_field_declares_its_narrowing() -> None:
+    """The other union, and the narrowing survives it: an absent field
+    drops its key, and a member outside the `Literal` is still refused
+    where one is passed."""
+    declare("scratch_maybe_unnamed", variants=(MaybeUnnamed,))
+    source = declared(MaybeUnnamed, "source")
+
+    assert tokens_of(source) == frozenset({"device", "unknown"})
+    assert (source.required, source.nullable) == (False, False)
+    assert MaybeUnnamed().payload() == {}
+    MaybeUnnamed().verify()
+    MaybeUnnamed(source=ToolSource.DEVICE).verify()
+
+    with pytest.raises(CatalogError) as raised:
+        MaybeUnnamed(source=ToolSource.BUILTIN).verify()  # type: ignore[arg-type]
+
+    assert raised.value.args == ("MaybeUnnamed.source is a narrowed ToolSource",)
 
 
 def test_a_fixed_member_narrows_the_declared_set_to_the_one_it_says() -> None:
