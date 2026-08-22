@@ -252,51 +252,96 @@ but faithful:
    suffix, `_event_section`'s Internal paragraph, and the baseline
    filter; plus `test_the_internal_event_is_listed_as_internal`.
    Implementing the layout as written leaves `reference()` raising.
+   *Resolution* (`bcb90357`): all four readers named, the counting
+   sentence rewritten, both docgen branches deleted, the docs test
+   deleted; decision 5 and the module layout updated.
+
 2. **P1: this repository's own Dockerfile sets
    `VINGA_EVENTS_ENFORCEMENT=forgiving`** with a nine-line posture
    comment; decision 4 said only another repo sets it, and the
    src/tests greps cannot see it.
+   *Resolution* (`cf6c4c53`): the Dockerfile ENV line and its
+   posture comment are milestone work, named in the module layout.
+
 3. **P1: the README is an unnamed fifth pin.** A `schema_violation`
    index row that three docs tests hold against the catalog, and a
    hand-written Logging paragraph documenting the variable and the
    boot refusal; `test_an_unusable_enforcement_value_does_not_block_the_reference`
    must go too.
+   *Resolution* (`fbe99750`): five pins; the README index row, the
+   Logging paragraph, and the boot-refusal docs test named.
+
 4. **P2: `_built` cannot keep its `-> Checked` shape and dispatch
    nothing.** It must answer `Checked | None` (or invert into the
    emitters), both emitters need drop branches, the clock read must
    survive the drop path, and `Checked`'s docstring goes stale.
+   *Resolution* (`95f76c33`): `_built` answers `Checked | None`,
+   both emitters grow the drop branch, the clock read survives,
+   `Checked`'s docstring loses the recovery clause.
+
 5. **P2: the per-identity guard and `Identity` survive only to
    serve the deleted recovery.** One guard around the loop is
    behaviorally identical once any identity failure refuses whole;
    `Identity` is a box around a lambda without `unstated`.
+   *Resolution* (`7276535c`): `Identity` deleted, `_identities`
+   takes a mapping of callables under one guard, docstring
+   rewritten.
+
 6. **P2: the lanes lose their only mechanism for making a
    construction bug visible.** conftest's strict mode existed so CI
    could not quietly relax; dropping it with nothing in its place
    lets malformed emissions drop silently under green suites.
+   *Resolution* (`eae022d0`): an autouse conftest fixture fails any
+   test whose run produced a refusal report; stated as what keeps
+   the lanes loud.
+
 7. **P2: decision 6 classifies tests by mechanism and deletes the
    only coverage of three surviving behaviors** (the wrong-channel
    branch, verify()'s misplaced-value check, the descriptor bound
    at emit), plus a broken-log test whose observable disappears.
    Classify by property and re-pin each against drop-and-report.
+   *Resolution* (`1a3b8987`): tests classified by property; six
+   surviving properties listed, each re-pinned against
+   drop-and-report.
+
 8. **P2: the `-O` pin dies as collateral.** The only `python -O`
    run in the suite pins #155's no-assert rule, which outlives the
    modes; rewrite it against the drop path and rehome it, along
    with the no-assert comment in the mode section.
+   *Resolution* (`4fc24578`): the `-O` pin is rewritten against the
+   drop path and rehomed with the no-assert comment.
+
 9. **P2: kept vocabulary with no caller or no second value.**
    `refusal_text`'s only caller is `_refuse`; every surviving
    `Fault` has no detail, so the two-field record and `rendered()`
    conditional encode variation that no longer exists.
+   *Resolution* (`6b59d111`): `refusal_text` and `Fault` go;
+   `_Refusal` carries the bare code string.
+
 10. **P2: the exit-criterion grep cannot pass and misses prose.**
     Four unrelated subsystems use the word "enforcement"; and
     `events_cli.py`, `main.py`, `values.py`, and the baseline
     harness carry prose about strictness no ENFORCEMENT grep finds.
+    *Resolution* (`a14b1495`): identifier-scoped greps over src,
+    tests, Dockerfile and README; the four prose sites named in the
+    module layout.
+
 11. **P3: "no longer raises at all on the emit path" is broader
     than the code.** `deepcopy`, `replace`, `Emission(...)` and the
     clock run outside guards; claim the guarded region only.
+    *Resolution* (`8b334fda`): the claim is narrowed to the guarded
+    region, with the outside-guard expressions named as unchanged.
+
 12. **P3: the refusal report is unattributed once `safe` goes.**
     No session or device on the report record; state the accepted
     loss with its reason or keep the validated half solely for the
     report's extra.
+    *Resolution* (`448e7fe3`): stated as an accepted loss with the
+    recovery's own reason; the lane guard makes a refusal a failing
+    test in development.
+
 13. **P3: the CHANGELOG entry covers the inert variable but not the
     surface removal.** A declared event and a boot refusal
     disappear; that is a `### Removed` entry.
+    *Resolution* (`d0d8c3ce`): a `### Removed` entry naming the
+    event, the variable, and the boot refusal.
