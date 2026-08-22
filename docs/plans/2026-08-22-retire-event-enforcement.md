@@ -176,11 +176,17 @@ and discoveries; no deviations says so explicitly.
   nothing else changes.
 - **Honest seams.** `Identity` is deleted (decision 2); no
   injectable defaults change.
-- **Inventories by tooling.** `grep -rn "enforcement\|ENFORCEMENT"
-  src tests` from `vinga-server/` bounds the removal (wiring,
-  conftest, suites); after the milestone the same grep returns
-  nothing, and `grep -rn "schema_violation\|SCHEMA_VIOLATION" src
-  tests ../docs/reference` returns nothing.
+- **Inventories by tooling.** The removal is bounded by the exact
+  identifiers, not the word: `grep -rnE
+  "ENFORCEMENT_ENV|VINGA_EVENTS_ENFORCEMENT|resolve_enforcement|set_enforcement|EventSchemaError|EventEnforcementError|SCHEMA_VIOLATION|schema_violation"
+  src tests Dockerfile README.md` from `vinga-server/` returns
+  nothing after the milestone (four unrelated subsystems use the
+  word "enforcement" and keep it). Four prose sites the identifier
+  grep cannot find are named as work in the module layout: the
+  dispatch-order justifications in `events_cli.py` and `main.py`
+  that cite the variable, `values.py`'s strict/forgiving refusal
+  explanation, and the baseline harness's "the emitters have to
+  stay strict" environment note.
 
 ## Module layout
 
@@ -194,6 +200,11 @@ and discoveries; no deviations says so explicitly.
 - `app.py`, `main.py`: the resolve calls and error handling out.
 - `Dockerfile`: the `ENV VINGA_EVENTS_ENFORCEMENT=forgiving` line
   and its posture comment out.
+- Prose rewrites the identifier grep cannot find: `events_cli.py`
+  and `main.py` (dispatch-order justifications citing the
+  variable), `events/values.py` (the strict/forgiving refusal
+  explanation), `tests/tools/event_baseline.py` (the regeneration
+  environment note).
 - Tests per decision 6.
 
 ## Milestones
