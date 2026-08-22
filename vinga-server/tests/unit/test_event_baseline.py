@@ -44,6 +44,8 @@ from tests.tools.event_baseline import (
     a_turn,
     captured,
     committed,
+    driven,
+    payload,
     rendered,
 )
 from vinga_server.conversations.store import ConversationStore
@@ -58,11 +60,19 @@ REGENERATE = (
 
 
 @pytest.fixture(scope="module")
-def capture() -> dict[str, list[dict[str, Any]]]:
+def produced() -> dict[str, list[logging.LogRecord]]:
     """Driven once for the whole file: every driver opens a database and
     some park a writer thread, so running them per test would pay for
-    the same evidence four times."""
-    return captured()
+    the same evidence several times over."""
+    return driven()
+
+
+@pytest.fixture(scope="module")
+def capture(
+    produced: dict[str, list[logging.LogRecord]],
+) -> dict[str, list[dict[str, Any]]]:
+    """The same run, in the dimensions the committed baseline holds."""
+    return captured(produced)
 
 
 def test_every_driver_names_a_path_of_its_own() -> None:
@@ -166,6 +176,47 @@ def test_the_baseline_records_shapes_rather_than_values() -> None:
                 "fields",
                 "event",
             }
+
+
+# The types a JSON record is made of. Matched exactly rather than by
+# subclass, which is the whole point: a `StrEnum` member IS a `str`, so
+# `isinstance` would call an unconverted one lawful and `json.dumps`
+# would serialize it without a word.
+BUILTINS = (str, int, float, bool, type(None))
+
+
+def plain(held: Any) -> bool:
+    """Whether one payload value is a builtin, containers included."""
+    if type(held) in BUILTINS:
+        return True
+    if type(held) is list:
+        return all(plain(one) for one in held)
+    if type(held) is dict:
+        return all(plain(key) and plain(one) for key, one in held.items())
+    return False
+
+
+def test_every_driven_record_carries_builtins(
+    produced: dict[str, list[logging.LogRecord]],
+) -> None:
+    """No wrapper and no enumeration member reaches a record.
+
+    The committed baseline cannot say this: it records the argument
+    TYPES and the payload's KEYS, so a member left unconverted in a
+    carried, never-rendered field moves nothing in it, and a tap reading
+    the payload would get the subclass. Asserted over the real catalog
+    rather than a scratch one, since what is being claimed is that every
+    declared path converts.
+    """
+    unconverted = [
+        f"{key}: {name} is a {type(held).__name__}"
+        for key, records in produced.items()
+        for record in records
+        for name, held in payload(record).items()
+        if not plain(held)
+    ]
+
+    assert unconverted == []
 
 
 def test_the_store_says_nothing_else(
