@@ -126,3 +126,65 @@ and discoveries; no deviations says so explicitly.
   production code moves). Deepens nothing and deletes two review
   surfaces; the one interface change a developer feels is that
   event work stops requiring two regeneration commands.
+
+## Plan review round
+
+External review of commit HEAD~0 (`git log` records it), 2026-08-22
+late. Backend: claude CLI 2.1.239, model `claude-opus-5`, read-only
+tool set (interim fallback tier). Verdict as received: ready after
+the P1 and P2 amendments; the deletions are sound and the issue's
+decisions respected, but two of the plan's three load-bearing
+justifications were wrong as written and the removal inventory
+named three prose sites where the tree has about a dozen. Findings
+condensed but faithful:
+
+1. **P1: the derivability claim is false for payload key sets.**
+   `matches()` asserts a RANGE (`required <= keys <= declared`),
+   while the committed capture pinned each path's EXACT key set; a
+   regressed `_entry_fields` or dead usage plumbing would pass
+   everything that survives. Name per-site optional-field presence
+   as a second loss and decide its replacement (a live in-test
+   table of driver key to expected carried keys) or accept it.
+2. **P1: `events.md` does not render argument identity.** The
+   Argument cell is the ArgKind name; ordered field lists and token
+   sets survive in the reference, the ordered argument list does
+   not, and the one-shape implementation doc says the golden was
+   the only committed pin on that retype. Reversing `Handover.ARGS`
+   moves nothing committed. State the loss as its own priced
+   decision or restore the pin inside the kept artifact by printing
+   the declared field name in the Argument column.
+3. **P1: the prose inventory is wrong.** About a dozen live sites
+   name the deleted artifacts as the pin, two of them
+   coverage-delegation claims (`test_event_catalog.py`'s header,
+   the surface/server pin suites'); `AGENTS.md` names neither
+   command; and two docstrings in `src/vinga_server/events/
+   catalog.py` change, so "no production surface changes at all"
+   needs qualifying.
+4. **P2: the grep bound excludes the trees the plan says to
+   correct.** Run it repo-wide and list the expected survivors
+   (historical plans, the CI wheel comment's Alembic "baseline").
+5. **P2: the two module docstrings that would become the largest
+   false statements are not named as work**; both are rewritten,
+   and the harness states what "baseline" means with no committed
+   capture.
+6. **P2: dead names in both directions.** `COMMITTED`,
+   `REGENERATE`, `shape()`'s `argument_types` once unread,
+   `captured(produced=None)`'s only caller being `__main__`, and
+   the #210 walk relics (`MODULES`, `PACKAGE`, `LEVEL_METHODS`,
+   `TYPED_METHOD`, `SESSION_RECEIVER`). List them, decide each.
+7. **P2: no Tests section.** Name the mutations that must go red
+   (a moved TEMPLATE, a changed LEVEL, an unmatched record, a
+   half-quartet `llm_round`) and the suite's count change; the
+   repository's practice on this suite was mutation, not argument.
+8. **P2: `test_the_store_says_nothing_else` is in neither list.**
+   It survives with its docstring corrected.
+9. **P3: the successor practice contradicts the layout** (it says
+   "regenerate" while deleting `rendered()` and `__main__`); pick
+   capture-twice-in-memory and drop the word.
+10. **P3: the harness has a second in-suite consumer**
+    (`test_event_surface_pins.py` imports `Failing`,
+    `failing_reply`, `turned_away`); name it in the inventory.
+11. **P3: the no-leak lens ignores the surface that changes.** The
+    live suite works from records carrying real values (a planted
+    API token among them); state that the new assertions report
+    channel, level, template, key names and type names only.
