@@ -96,6 +96,15 @@ providers.
    values, never `runtime/` or `providers/` types; `pipeline.py`
    unpacks its objects at the call. Module docstring states the
    contract.
+   Two boundary cases the signatures must respect, named so they
+   are not discovered mid-milestone: `_reported` takes `Usage | None`
+   (a `providers/` type) and therefore STAYS in `pipeline.py`; the
+   `llm_rounded` assembly function takes
+   `input_tokens: int | None`, `output_tokens: int | None`,
+   `first_token_ms: int | None` as plain values. And
+   `provider_failure` keeps taking `BaseException` (a builtin, so
+   it crosses lawfully) with `ClassName.of` still built from the
+   exception itself inside the thunk.
 4. **The tool-call SOURCE selection stays in `pipeline.py`, beside
    the classifier that produces the token; only construction
    moves.** `runtime/turns.py` spells its source constants locally
