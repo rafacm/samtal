@@ -546,3 +546,23 @@ Run from `vinga-server/`, at the last commit of the round.
 
 Not verified here, and not claimed: the container image and the smoke
 lane, which no part of this round touches.
+
+## Corrections
+
+### 2026-08-22: the agent comparison rule above is superseded
+
+The M1 section's sentence that agents and `agent_defaults` are compared
+"by model equality with the `mcp` field excluded" describes a rule that
+no longer holds, and reading it as a specification would be worse than
+reading nothing: excluding the field takes real grant edits out of
+`agents.changed` entirely, which is the opposite of what the exclusion
+was reaching for. What the exclusion was reaching for is that a
+grants-only edit is not claimed pending a restart, and the regime map
+answers that on its own.
+
+Under #225 the comparison reads an agent layer's `mcp` list through
+`as_mcp_grant`, so the two spellings of one grant compare equal while a
+real grant edit still reports, and unset stays distinct from empty. The
+history above is left as it was written; `config/diff.py`'s own
+docstring and the comments on `_same_layer` and `_grants` are the
+current statement of the rule.

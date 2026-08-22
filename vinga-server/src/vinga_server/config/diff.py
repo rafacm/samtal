@@ -16,6 +16,13 @@ enters the comparison, so what comes out is entity names and closed
 tokens by construction rather than by filtering: there is no value here
 to leave out.
 
+An agent layer is where model equality read literally is not the
+question: one `mcp` grant has two spellings, so the comparison reads
+that list as the grants it means (`_same_layer`). Rewriting an entry
+from one form into the other changes nothing a reload would install,
+and this module is the only place that has to know it, since a caller
+asks whether an entity moved and not how it is written.
+
 Changed means the stored state differs from the baseline, never that
 something was written. An edit changed back before anyone looked
 produces no diff, and a stored secret set again to the same plaintext
@@ -43,7 +50,14 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import NamedTuple, Protocol
 
-from vinga_server.config.models import PROVIDER_STAGES, Config, ProviderConfig
+from vinga_server.config.models import (
+    PROVIDER_STAGES,
+    AgentDefaults,
+    Config,
+    McpGrant,
+    ProviderConfig,
+    as_mcp_grant,
+)
 from vinga_server.config.responses import (
     AgentsDiff,
     Applies,
@@ -159,7 +173,7 @@ def config_diff(running: Loaded, stored: Loaded, mcp: McpPending) -> ConfigDiff:
         return running.config.prompt_fragments[name] == stored.config.prompt_fragments[name]
 
     def same_agent(name: str) -> bool:
-        return running.config.agents[name] == stored.config.agents[name]
+        return _same_layer(running.config.agents[name], stored.config.agents[name])
 
     def same_fields(name: str, fields: tuple[str, ...]) -> bool:
         own, theirs = running.config.agents[name], stored.config.agents[name]
@@ -192,7 +206,9 @@ def config_diff(running: Loaded, stored: Loaded, mcp: McpPending) -> ConfigDiff:
         ),
         agent_defaults=SingletonDiff(
             applies=APPLIES["agent_defaults"],
-            changed=running.config.agent_defaults != stored.config.agent_defaults,
+            changed=not _same_layer(
+                running.config.agent_defaults, stored.config.agent_defaults
+            ),
         ),
         agents=AgentsDiff(
             applies=APPLIES["agents"],
@@ -214,6 +230,37 @@ def config_diff(running: Loaded, stored: Loaded, mcp: McpPending) -> ConfigDiff:
         devices=LiveKind(applies=APPLIES["devices"]),
         default_agent=LiveKind(applies=APPLIES["default_agent"]),
     )
+
+
+def _same_layer(running: AgentDefaults, stored: AgentDefaults) -> bool:
+    """Whether two versions of one agent layer, an agent's own entry or
+    the defaults under all of them, hold the same configuration.
+
+    Model equality, with the `mcp` list compared as the grants it means
+    rather than as it was spelled. `as_mcp_grant` in `models.py` is
+    where that rule lives and this reads it, so the string form and the
+    object form of one whole-server grant are the same grant here for
+    the same reason they are the same grant to a reload: an operator who
+    rewrites `- tools` as `- {server: tools}` has changed nothing, and
+    reporting it as pending would send them to look for an edit that is
+    not there.
+    """
+    return running.model_copy(update={"mcp": _grants(running)}) == stored.model_copy(
+        update={"mcp": _grants(stored)}
+    )
+
+
+def _grants(layer: AgentDefaults) -> list[McpGrant] | None:
+    """One layer's `mcp` list as grants, and unset left as unset.
+
+    The distinction is the field's own: `None` inherits the list under
+    it and `[]` replaces that list with nothing, which is how an agent
+    opts out of every tool its siblings have (`Config.mcp_for_agent`).
+    Mapping the absent list to an empty one would report nothing pending
+    for an edit from `null` to `[]`, while the reload it is waiting for
+    revokes every inherited grant.
+    """
+    return None if layer.mcp is None else [as_mcp_grant(item) for item in layer.mcp]
 
 
 class _Names(NamedTuple):

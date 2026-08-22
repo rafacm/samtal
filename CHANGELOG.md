@@ -87,6 +87,19 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   type, reported against the device it was written under and without
   the value. Nothing an operator can type moves.
 
+### Fixed
+
+- **The configuration diff reads a grant, not its spelling** (#225).
+  An `mcp` entry can be written as the server name on its own or as an
+  object naming that server with no tool list, and the two mean one
+  grant. The comparison behind `GET /api/config/diff` read them as two,
+  so an operator who rewrote one form as the other was told an agent
+  was pending a reload that would install nothing. Both the agent
+  comparison and the layer under it now read the list as the grants it
+  means. Unset stays distinct from empty: an agent edited from no `mcp`
+  list to an empty one is still reported, because that edit revokes
+  every tool it inherited.
+
 ## 2026-08-21
 
 ### Added

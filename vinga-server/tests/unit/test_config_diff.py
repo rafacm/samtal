@@ -261,6 +261,63 @@ def test_a_grants_only_edit_is_the_registry_s_to_report() -> None:
     assert answer.agents.removed == ()
 
 
+def test_a_grant_rewritten_in_the_other_form_is_no_edit_at_all() -> None:
+    """The same grant has two spellings: the entry name on its own is
+    the whole server, and so is the object naming that server with no
+    tool list. An operator who rewrote one as the other has written
+    nothing a reload would install, and an answer reporting the agent as
+    pending would send them looking for an edit that is not there."""
+    answer = diff_of(granting("tools"), granting({"server": "tools"}))
+
+    assert answer.agents.changed == ()
+    assert (answer.agents.added, answer.agents.removed) == ((), ())
+    assert answer.agents.grants.changed == ()
+    assert answer.agents.prompt.changed == ()
+    assert answer.agents.filler.changed == ()
+    assert answer.agent_defaults.changed is False
+
+
+def test_the_layer_under_every_agent_reads_its_grants_the_same_way() -> None:
+    """`agent_defaults` holds the same field under the same rule, and a
+    comparison that knew the two spellings for an agent's own list and
+    not for the one it inherits would answer the same edit two ways."""
+    stages = dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
+
+    def defaults(*grants: object) -> Config:
+        return config_with(
+            mcp_servers={"tools": entry_data()},
+            agent_defaults=stages | {"mcp": list(grants)},
+            agents={"assistant": {"prompt": "A"}},
+        )
+
+    answer = diff_of(defaults("tools"), defaults({"server": "tools"}))
+
+    assert answer.agent_defaults.changed is False
+    assert answer.agents.changed == ()
+
+
+def test_an_agent_opting_out_of_the_tools_it_inherits_is_an_edit() -> None:
+    """Unset and empty are two states and not one: an agent with no
+    `mcp` list of its own inherits the layer's, and an agent naming an
+    empty one replaces that list with nothing. The edit between them
+    revokes every tool the agent had at the next reload, so a comparison
+    that read the absent list as an empty one would report nothing
+    pending for the change that takes them all away."""
+    stages = dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
+
+    def agent(**own: object) -> Config:
+        return config_with(
+            mcp_servers={"tools": entry_data()},
+            agent_defaults=stages | {"mcp": ["tools"]},
+            agents={"assistant": {"prompt": "A"} | own},
+        )
+
+    answer = diff_of(agent(), agent(mcp=[]))
+
+    assert answer.agents.changed == ("assistant",)
+    assert answer.agent_defaults.changed is False
+
+
 def test_an_edit_beside_the_three_halves_is_a_change_of_the_entry() -> None:
     """The three halves are a breakdown and not the whole of what an
     entry holds. Which provider entry serves a stage is on none of them,
