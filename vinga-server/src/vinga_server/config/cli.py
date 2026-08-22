@@ -263,17 +263,6 @@ SUPPLIED_ENDPOINT = "the supplied OTA endpoint"
 # itself is never repeated at all, bounded or otherwise.
 GLIMPSE_LENGTH = 120
 
-# How many redirects `doctor` follows. One, and one is already more
-# than a current server produces: since the hardware checkpoint of
-# 2026-08-13 every device-facing route answers both spellings of its
-# path directly, because the firmware does not follow a redirect on
-# that request either. What is left for this to meet is a server older
-# than that change, or a proxy in front of one that canonicalizes a
-# missing trailing slash. The limit is explicit rather than left to the
-# client's default of twenty, since every hop past the first is a hop
-# somebody else chose.
-CANONICAL_REDIRECTS = 1
-
 # How much of a body is looked at at all. The description this reads is
 # three short lines, so a few kilobytes is generous; what the bound is
 # for is a megabyte of anything, which nothing should walk a pattern
@@ -406,10 +395,12 @@ def _doctor(args: argparse.Namespace) -> None:
     if answered is None:
         raise ConfigError(_unreadable_websocket(shown))
     scheme, websocket = answered
-    # Both sides normalized, and the probe's side taken from the
-    # response rather than from the string an operator typed: `HTTPS://`
-    # is the same scheme as `https://`, and a URL that redirected is
-    # answered by wherever it ended up.
+    # Both sides normalized, and the probe's side read from the response
+    # rather than from the string an operator typed: `HTTPS://` is the
+    # same scheme as `https://`, and the client has already lowered the
+    # one the request went out with. No redirect is followed, so the
+    # response came from the address that was asked and this is that
+    # address's scheme.
     if response.url.scheme == "https" and scheme == "ws":
         raise ConfigError(_plain_websocket(shown, websocket))
     print(
@@ -894,15 +885,15 @@ def _probed(url: str, shown: str) -> httpx.Response:
     and spend the mint budget would be a diagnosis nobody could run
     twice, so this method is not a default but a rule.
 
-    One redirect is followed, and only one shape of it: from a URL
-    typed without its trailing slash to the canonical path on the same
-    origin. A current server never sends it, since every device-facing
-    route answers both spellings directly, but a server older than that
-    change does, and reporting it as "not vinga-server" would be this
-    command's worst answer. Following any other would let whatever
-    answers at an address choose where this request goes next, which
-    inside the network a deployment sits in is worth refusing rather
-    than reasoning about.
+    One request, and no redirect is followed at all. Since the hardware
+    checkpoint of 2026-08-13 every device-facing route answers both
+    spellings of its path directly, because the firmware does not follow
+    a redirect on that request either, so a redirect from that address
+    is by definition something other than a current deployment
+    answering, and where it points is that something's choice. Following
+    it would let whatever answers at an address decide which host this
+    request reaches next, which inside the network a deployment sits in
+    is worth refusing rather than reasoning about.
 
     Building the client is inside the boundary with the request and the
     close. httpx validates a URL when it is given one, so construction
@@ -915,13 +906,6 @@ def _probed(url: str, shown: str) -> httpx.Response:
         try:
             client = build_client(url)
             response = client.request("GET", url, follow_redirects=False)
-            for _ in range(CANONICAL_REDIRECTS):
-                if not response.is_redirect:
-                    return response
-                target = _canonical_slash(response)
-                if target is None:
-                    raise ConfigError(_redirect_refused(shown))
-                response = client.request("GET", target, follow_redirects=False)
             if response.is_redirect:
                 raise ConfigError(_redirect_refused(shown))
             return response
@@ -945,42 +929,13 @@ def _probed(url: str, shown: str) -> httpx.Response:
     raise ConfigError(problem)
 
 
-def _canonical_slash(response: httpx.Response) -> str | None:
-    """The target of the one redirect this command follows, or None for
-    every other redirect there is.
-
-    Same scheme, same host, same port, the same query, and a path that
-    is the one just asked for with a slash after it. That is what
-    Starlette answers a missing trailing slash with, which is the only
-    redirect an operator can meet on the way to an OTA endpoint served
-    by this project, and only from a deployment older than the change
-    that made every spelling answer for itself. A `Location` this
-    cannot read is refused the same way one pointing elsewhere is, and
-    neither is repeated back.
-    """
-    current = response.request.url
-    try:
-        target = current.join(response.headers.get("location", ""))
-    except (httpx.InvalidURL, ValueError):
-        return None
-    if (target.scheme, target.host, target.port) != (
-        current.scheme,
-        current.host,
-        current.port,
-    ):
-        return None
-    if target.path != f"{current.path}/" or target.query != current.query:
-        return None
-    return str(target)
-
-
 def _redirect_refused(shown: str) -> str:
     return (
-        f"{shown} answered with a redirect this command does not follow. The only one it "
-        f"follows is the server's own, from a URL typed without its trailing slash to the "
-        f"canonical path on the same address; following any other would let whatever "
-        f"answers there choose which host this request reaches next, and this command "
-        f"runs inside the network a deployment sits in. The target is not repeated here: "
+        f"{shown} answered with a redirect this command does not follow. Following it "
+        f"would let whatever answers there choose which host this request reaches next, "
+        f"and this command runs inside the network a deployment sits in. Every "
+        f"device-facing route answers both spellings of its path directly, so a redirect "
+        f"from that address is something else answering. The target is not repeated here: "
         f"ask the address you meant directly."
     )
 
