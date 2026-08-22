@@ -1537,6 +1537,14 @@ def listening() -> Iterator[Collector]:
             channel.setLevel(level)
 
 
+def payload(record: logging.LogRecord) -> dict[str, Any]:
+    """One record's own fields: what the JSON formatter writes beside
+    the standard ones, which is what a tap reads."""
+    return {
+        key: held for key, held in vars(record).items() if key not in _STANDARD_ATTRIBUTES
+    }
+
+
 def shape(record: logging.LogRecord) -> dict[str, Any]:
     """One record in the dimensions a consumer sees."""
     return {
@@ -1544,33 +1552,43 @@ def shape(record: logging.LogRecord) -> dict[str, Any]:
         "level": record.levelno,
         "template": record.msg,
         "argument_types": [type(one).__name__ for one in (record.args or ())],
-        "fields": sorted(
-            key for key in vars(record) if key not in _STANDARD_ATTRIBUTES
-        ),
+        "fields": sorted(payload(record)),
         "event": getattr(record, "event", None),
     }
 
 
-def captured() -> dict[str, list[dict[str, Any]]]:
-    """Every driver run, in declaration order, with what its own path
-    produced.
+def driven() -> dict[str, list[logging.LogRecord]]:
+    """Every driver run, in declaration order, with the records its own
+    path produced.
 
     Filtered to the event each driver says its path emits, for the
-    reason `Driver` gives.
+    reason `Driver` gives. Whole records rather than shapes, because a
+    claim about what a payload HOLDS cannot be made from the keys the
+    baseline records; `captured()` takes a run already made, so a suite
+    wanting both pays for one.
     """
-    baseline: dict[str, list[dict[str, Any]]] = {}
+    produced: dict[str, list[logging.LogRecord]] = {}
     for driver in DRIVERS:
         with tempfile.TemporaryDirectory(prefix="vinga-baseline-") as directory:
             with listening() as collector:
                 answer = driver.drive(Path(directory))
                 if inspect.isawaitable(answer):
                     asyncio.run(answer)
-            baseline[driver.key] = [
-                shape(one)
+            produced[driver.key] = [
+                one
                 for one in collector.records
                 if getattr(one, "event", None) == driver.event
             ]
-    return baseline
+    return produced
+
+
+def captured(
+    produced: dict[str, list[logging.LogRecord]] | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    """What every path produced, in the dimensions the committed
+    baseline records."""
+    runs = driven() if produced is None else produced
+    return {key: [shape(one) for one in records] for key, records in runs.items()}
 
 
 def rendered(baseline: dict[str, list[dict[str, Any]]]) -> str:
