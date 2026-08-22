@@ -60,18 +60,30 @@ decision here is the issue's "judgment call" answered.
 
 - **No-leak.** No error text, event field, log line, or API body is
   touched.
-- **Pin before reshaping.** The pins exist: the session suites
-  (`tests/unit/test_session.py`, `test_session_tools.py`,
-  `test_session_events.py`, `test_session_record.py`,
-  `test_session_characterization.py`, `test_session_watchdog.py`)
-  drive the loop through fake providers yielding `TextDelta`,
-  `Usage`, and tool-call events, and assert spoken sentences,
-  usage on the round event, and dispatched calls. They are committed
-  green before the change and must be byte-unchanged after; the
-  milestone's verification names the subset that fails when any arm
-  is mis-mapped (a `TextDelta` routed to `calls` breaks the
-  spoken-sentence assertions; a lost `Usage` breaks the round-event
-  pins; a swallowed tool call breaks `test_session_tools.py`).
+- **Pin before reshaping.** Three of the four arms are pinned by the
+  session suites (`tests/unit/test_session.py`,
+  `test_session_tools.py`, `test_session_events.py`,
+  `test_session_record.py`, `test_session_characterization.py`,
+  `test_session_watchdog.py`), which drive the loop through fake
+  providers yielding `TextDelta`, `Usage`, and tool-call events: a
+  `TextDelta` routed to `calls` breaks the spoken-sentence
+  assertions, a lost `Usage` breaks the round-event pins, a
+  swallowed tool call breaks `test_session_tools.py`. The
+  `StreamStarted` arm is the one arm with no pin anywhere: every
+  producer yields it once in first position, `_watchdog_stream`
+  swallows exactly that one (`pipeline.py:815`), and the support
+  fakes never yield it at all, so the arm could be deleted green
+  while the contract (`providers/base.py:282`, consumers "must
+  nevertheless tolerate and ignore it") breaks on the first
+  mid-stream occurrence. The milestone therefore adds the missing
+  pin BEFORE the conversion, committed green against the chain: a
+  scripted stream that yields a second `StreamStarted` mid-stream
+  and a whitespace-only `TextDelta`, asserting the reply still
+  speaks every scripted sentence, the whitespace still reaches the
+  splitter, no phantom tool call is recorded, and no first-token
+  time is taken from whitespace. The existing suites stay
+  byte-unchanged through the conversion; the new pin is the one test
+  change.
 - **Closed sets.** The event union is the closed set, declared where
   the events are; the `match` restates the same arms over the same
   types with the same catch-all, adding and removing none.
@@ -83,14 +95,17 @@ decision here is the issue's "judgment call" answered.
 
 ## Module layout
 
-Unchanged. One file touched in `src` (`runtime/pipeline.py`), no
-test files change.
+Unchanged. One file touched in `src` (`runtime/pipeline.py`), one
+test file gains the pin the review found missing.
 
 ## Tests
 
-No new tests: the change is behavior-preserving and the existing
-session suites are the characterization. A new test restating the
-dispatch would pin the idiom, not the behavior.
+The existing session suites are the characterization for three arms
+and stay byte-unchanged. One new pin is added before the conversion
+(the review's finding 1): the mid-stream `StreamStarted` plus
+whitespace-only `TextDelta` stream described under the pin lens,
+which is a behavior pin on the loop's contract, not a restatement of
+the dispatch idiom.
 
 ## Risks and mitigations
 
@@ -104,11 +119,15 @@ dispatch would pin the idiom, not the behavior.
 
 ## Milestones
 
-- [ ] **M1: Convert the LLM event loop to `match`.** One commit.
-  Design footprint: no interface changes anywhere; the loop's reader
-  stops having to parse an `if`/`elif` chain to see that four event
-  shapes have four fates, and the device edge and the runtime edge
-  read identically. No new modules, no new seams.
+- [ ] **M1: Pin the unpinned arms, then convert the loop to
+  `match`.** Two code commits (the pin, then the conversion with its
+  changelog entry), plus the implementation-doc section and the
+  ticked checklist entry in the change that completes the milestone,
+  as AGENTS.md requires. Design footprint: no interface changes
+  anywhere; the loop's reader stops having to parse an `if`/`elif`
+  chain to see that four event shapes have four fates, and the
+  device edge and the runtime edge read identically. No new modules,
+  no new seams.
 
 ## Plan review round
 
@@ -129,6 +148,13 @@ arm with no pin and add one: a fake yielding a second
 `StreamStarted` mid-stream, asserting the reply still speaks and no
 phantom tool call is recorded; "No new tests" and "no test files
 change" fall with it.
+
+*Resolution*: accepted in full. The pin lens, module layout, and
+tests sections now state the `StreamStarted` arm as the one unpinned
+arm and add the pin (a mid-stream `StreamStarted` plus a
+whitespace-only `TextDelta`, folding finding 2's coverage in),
+committed green against the chain before the conversion. The
+milestone becomes two commits: the pin, then the conversion.
 
 **2 (P2). The whitespace-only timing guard is unpinned and the plan
 never forbids the spelling that breaks it.** The guard
