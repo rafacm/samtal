@@ -75,6 +75,10 @@ and discoveries; no deviations says so explicitly.
    migrated.
 3. **What raised, and everything spelled for raising, goes.**
    `EventSchemaError`, `_refuse` and its scrubbed-chain mechanics,
+   `refusal_text` (whose only caller is `_refuse`), the `Fault`
+   dataclass (every surviving fault has no detail, so `_Refusal`
+   carries the bare code string and the report renders it
+   directly),
    `EventEnforcementError`, `STRICT`/`FORGIVING`/
    `ENFORCEMENT_MODES`/`ENFORCEMENT_ENV`/`_enforcement`,
    `enforcement()`, `set_enforcement`, `resolve_enforcement`. The
