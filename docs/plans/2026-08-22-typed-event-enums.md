@@ -12,7 +12,8 @@ three narrowed wrappers provide, teaches the docgen to introspect an
 enum field, and deletes `TokenValue` and its subclasses, roughly 25
 names. The reader-facing reference (`docs/reference/events.md`) and
 the committed event baseline do not change by a byte; the golden
-inventory changes only in its recorded type names.
+inventory changes only in its recorded type names and a new
+`tokens` key that keeps the narrowed sets structurally pinned.
 
 The companion implementation doc,
 [`2026-08-22-typed-event-enums-implementation.md`](2026-08-22-typed-event-enums-implementation.md),
@@ -161,9 +162,15 @@ section.
    (`tests/unit/test_event_baseline.py`'s harness output) must be
    byte-identical before and after; the golden inventory
    (`tests/unit/data/event-catalog-golden.json`) is regenerated with
-   its own script and changes only in `"type"` strings (wrapper name
-   to enum name; a narrowed field records the parent enum, its
-   narrowing already printed by the reference's token column).
+   its own script and changes in two deliberate ways: the `"type"`
+   strings (wrapper name to enum name; a narrowed field records the
+   parent enum) and a new `"tokens"` key on token fields holding
+   the declared set as a sorted list. The second exists because the
+   wrapper names carried the narrowing into the golden and the
+   parent enum names do not; without it the reference's token
+   column would become the sole committed pin on the three
+   narrowed sets, and the golden was built to complement exactly
+   that kind of reader-facing pin with a structural one.
 8. **`_check` refuses a bad `fixed=` member at import.** Today the
    wrapper's constructor runs while the catalog module imports, so
    a fixed value outside its set raises before any lane starts, the
@@ -459,3 +466,8 @@ findings 4 to 8 amendable in place. Findings condensed but faithful:
     reference's token column becomes the sole pin on the narrowed
     sets. Record `tokens` in the golden or state the single-pin
     situation explicitly.
+    *Resolution* (amendment `F10`): design decision 7 now adds a
+    `"tokens"` key to the golden for token fields, holding the
+    declared set as a sorted list, so the narrowed sets keep a
+    committed structural pin after their type names collapse to the
+    parent enums.
