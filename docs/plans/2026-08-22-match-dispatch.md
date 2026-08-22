@@ -125,13 +125,17 @@ the dispatch idiom.
 
 ## Risks and mitigations
 
-- **A subtle arm-ordering change**: under `match`, an event matching
-  two class patterns takes the first, same as the `isinstance`
-  chain; the arms are mutually exclusive types, and the suites catch
-  a mis-route as above.
-- **`Usage` instances also matching a wider pattern** (if the event
-  types share a base): mitigated by keeping the arm order identical
-  to the chain's and by the pins.
+The four event types are unrelated frozen dataclasses with no shared
+base, so arm ordering is not load-bearing and no subject can match
+two arms; the real risks are the two the review named:
+
+- **The `StreamStarted` arm converts wrong or gets dropped**, which
+  no existing suite would catch. Mitigated by the new pin, committed
+  green against the chain before the conversion touches the loop.
+- **The text arm converts to a case guard**, silently rerouting
+  whitespace-only deltas into the tool-call arm. Mitigated by the
+  explicit spelling in the decisions section and the whitespace-only
+  delta in the same pin.
 
 ## Milestones
 
@@ -215,6 +219,10 @@ against its docstring and its single caller at `pipeline.py:1266`.
 absent.** The four event types are unrelated frozen dataclasses with
 no base, so no subject can match two arms; the real risks are
 findings 1 and 2. Replace the section.
+
+*Resolution*: accepted; the section is replaced with the two real
+risks and their mitigations, and the impossibility of the old two is
+stated once where the ordering question would next be asked.
 
 **6 (P3). The inventory grep misses the sibling dispatch in the same
 file.** `isinstance(first, StreamStarted)` at `pipeline.py:815` is
