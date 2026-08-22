@@ -52,11 +52,15 @@ providers.
 1. **The collapsed variant carries the quartet as absent-able
    fields.** `provider: Identifier | Absent` and `type: Identifier |
    Absent` join the already absent-able `host` and `model`, each
-   `value(default=ABSENT)`. Payloads are byte-identical on both
-   paths by construction: `payload()` drops absent keys, which IS
-   today's entry-less record, and carries them when present, which
-   IS today's of-entry record. Templates and ARGS are unchanged, so
-   rendered sentences and `record.msg` are unchanged everywhere.
+   `value(default=ABSENT)`, placed to reproduce
+   `LlmRoundOfEntry`'s carried order exactly (the quartet sits
+   after `duration_s` and before `input_tokens`), so production
+   JSON key order does not move. Payloads are byte-identical on
+   both paths by construction: `payload()` drops absent keys,
+   which IS today's entry-less record, and carries them when
+   present, which IS today's of-entry record. Templates and ARGS
+   are unchanged, so rendered sentences and `record.msg` are
+   unchanged everywhere.
    The two field notes (the GenAI model note, the no-entry note)
    merge onto the surviving fields.
 2. **Provider and type stay atomic as a pair, enforced where the
@@ -124,10 +128,15 @@ providers.
   exactly as the helpers do today (the `_entry_of` docstring's
   rule, "called inside a construction thunk, never beside one",
   moves with the code and stays true).
-- **Pin before reshaping.** The baseline is the proof this refactor
-  preserves behavior: byte-identical before and after, plus the
-  golden and reference diffs showing exactly the twin removals and
-  nothing else. The unit suites' existing pins on the events
+- **Pin before reshaping.** The pins divide the proof honestly.
+  The baseline proves channel, level, template, and payload key SET
+  did not move on any driven path; it records sorted key sets and
+  argument type names of rendered strings, so it cannot see a
+  fragment retype or a misplaced quartet. The golden's ordered
+  field and argument lists are the pin for exactly those two: its
+  diff must show three deleted variants, the survivors' field
+  lists in the stated order, and the `provider_failed` argument
+  rows moving to the optional fragment types, and nothing else. The unit suites' existing pins on the events
   (surface pins, typed emit) keep passing unmodified except where
   they name an OfEntry class.
 - **Closed sets.** The tool-call selection by `source` is a real
