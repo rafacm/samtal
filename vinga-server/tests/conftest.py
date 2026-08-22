@@ -183,8 +183,8 @@ def packaged_database_dir() -> Iterator[Path]:
 # the whole design decision here. A function-scoped fixture is only live
 # between its own setup and teardown, and pytest builds higher-scoped
 # fixtures first and tears them down last, so a handler it installed
-# would miss exactly the runs worth policing: the module-scoped baseline
-# fixture that drives all eighty-one emit paths, the integration lane's
+# would miss exactly the runs worth policing: the module-scoped fixture
+# that drives all eighty-one emit paths, the integration lane's
 # module-scoped uvicorn boot, and anything a module teardown emits.
 # Strict mode used to cover those because it raised from inside the
 # emitter, at whatever scope was running, and a replacement that covers

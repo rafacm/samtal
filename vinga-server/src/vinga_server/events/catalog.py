@@ -15,8 +15,7 @@ different sentences about two different failures under one name, and
 the surface has events with variants across channels and levels. So a
 declaration names the event and owns its variants, and a caller
 constructs the specific variant named after the thing that happened.
-Documentation and the golden inventory derive from the enclosing
-declaration.
+The generated reference derives from the enclosing declaration.
 
 **A variant owns its whole emission.** Its channel, its level, its
 exact payload shape (names, types, requiredness, nullability), and its
@@ -24,7 +23,7 @@ rendering. `Emission` and `LogTap` are untouched: every variant derives
 its logging specification, the unrendered template and the ordered
 argument tuple those two already carry, from its own fields. The record
 a tap or a log reader sees is therefore the record it saw before, which
-is what the committed baseline proves rather than claims.
+the driver suite proves by driving every path rather than claims.
 
 **Absence and null are different answers.** A field that is present and
 null is a fact the record states; a field that is absent is a key the
@@ -282,9 +281,8 @@ def _carried(held: EventValue | StrEnum) -> object:
     """The plain builtin one held value rides the payload as.
 
     `str()` for an enumeration member rather than the member itself: a
-    member is a `str` subclass, and a record carrying one would put the
-    subclass's name into a baseline's argument types and its `repr` into
-    anything that renders it.
+    member is a `str` subclass, and a record carrying one would hand the
+    subclass to a tap and its `repr` to anything that renders it.
     """
     return str(held) if isinstance(held, StrEnum) else held.carried()
 
@@ -678,9 +676,9 @@ def declaration_of(variant: type[Variant]) -> Declaration:
 # --- the payload shape, base fields included --------------------------
 #
 # A variant declares its own fields; the emitter puts the channel's base
-# in front of them. The golden inventory and the generated reference
-# both need the whole payload, so the base is described here, once,
-# rather than by each of them.
+# in front of them. The generated reference and the suite that holds
+# every record to its declaration both need the whole payload, so the
+# base is described here, once, rather than by each of them.
 
 def _base(
     name: str,

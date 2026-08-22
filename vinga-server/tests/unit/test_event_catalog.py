@@ -11,10 +11,12 @@ refused at import rather than at the first emit, because a catalog is
 read by a lane, a REPL and a server alike and all three should refuse
 the same one.
 
-The declarations themselves are pinned by the golden inventory
-(`test_event_golden.py`), which is where names, channels, levels, field
-names, types, requiredness and nullability live. What is here is the
-machinery those declarations are written with.
+The declarations themselves are pinned by `docs/reference/events.md`,
+which is where names, channels, levels, argument order, field names,
+types, requiredness and nullability are written down and diffed, and
+they are held to being emitted by `test_event_baseline.py`, which drives
+every path and matches what it produced against them. What is here is
+the machinery those declarations are written with.
 """
 
 import logging
@@ -67,7 +69,8 @@ SESSION_CHANNEL = "vinga_server.session"
 def _scratch() -> Iterator[None]:
     """Every declaration this file makes is its own. A scratch event
     that reached the production catalog would reach the generated
-    reference and the golden inventory with it."""
+    reference with it, and would be a declaration no driver
+    produces."""
     with scratch_catalog():
         yield
 
@@ -499,7 +502,7 @@ def test_a_null_in_a_field_that_is_not_nullable_is_refused() -> None:
 def test_an_absence_in_a_field_that_is_required_is_refused() -> None:
     """`Absent` is a value like any other at runtime, so a site that
     passed one where the declaration requires a value would otherwise
-    drop a key the golden inventory says is always there."""
+    drop a key the declaration says is always there."""
     declare("scratch_coded", variants=(Coded,))
 
     with pytest.raises(CatalogError, match="is required"):

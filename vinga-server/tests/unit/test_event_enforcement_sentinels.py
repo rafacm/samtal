@@ -124,7 +124,7 @@ class CheckedIn(Variant):
 @pytest.fixture(autouse=True)
 def _scratch() -> Iterator[None]:
     """Declared into a catalog of this file's own, so a scratch event
-    reaches neither the generated reference nor the golden inventory."""
+    reaches neither the generated reference nor the driver suite."""
     with scratch_catalog():
         declare("checked", variants=(CheckedIn,))
         yield

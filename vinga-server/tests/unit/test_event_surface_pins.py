@@ -3,11 +3,11 @@
 This file used to pin every session event exactly as it was emitted:
 channel, level, unrendered template, arguments and field set, restated
 per path. That duplication is gone (#210). The declaration is the
-template and the argument order now, the golden inventory
-(`test_event_golden.py`) is the committed contract for names, channels,
-levels, types, requiredness and nullability, and the record baseline
-(`test_event_baseline.py`) is the proof that the conversion moved
-neither. Names and structure are pinned in one file each, once.
+template and the argument order now, `docs/reference/events.md` is the
+committed contract for names, channels, levels, argument order, types,
+requiredness and nullability, and the driver suite
+(`test_event_baseline.py`) is the proof that every declared shape is
+really emitted. Names and structure are pinned in one artifact, once.
 
 What is left here is the half none of those can carry, and the half the
 plan says survives whole: a pin says a sentence is what it is, never
@@ -32,11 +32,11 @@ is refused live in `test_event_enforcement_sentinels.py`; these are the
 sentinels for what a lawful record may say.
 
 The file keeps its name. What it pins is still the event surface, in
-the one dimension no declaration can carry: a golden inventory says
-which fields exist and a baseline says the record did not move, and
+the one dimension no declaration can carry: the reference says which
+fields exist and the driver suite says a record really carries them, and
 neither can say that what a stranger sent is not in one of them.
 
-The driving is the record baseline's, imported rather than repeated:
+The driving is the driver harness's, imported rather than repeated:
 those drivers are where every session path is reached from now, and a
 second copy of them here would be a second thing to keep working.
 """
@@ -427,7 +427,7 @@ async def a_failing_reply(
     """One reply against a provider that fails, with a consumer
     attached.
 
-    The driving is the record baseline's, which is where every session
+    The driving is the driver harness's, which is where every session
     path is reached from now; what this adds is the sentinel in the
     exception and the tap that watches for it."""
     provider = Unreachable(stage, failure) if wrapped else failure
