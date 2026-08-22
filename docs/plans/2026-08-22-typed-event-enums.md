@@ -155,6 +155,18 @@ section.
    its own script and changes only in `"type"` strings (wrapper name
    to enum name; a narrowed field records the parent enum, its
    narrowing already printed by the reference's token column).
+8. **`_check` refuses a bad `fixed=` member at import.** Today the
+   wrapper's constructor runs while the catalog module imports, so
+   a fixed value outside its set raises before any lane starts, the
+   property the catalog advertises ("a lane, a REPL and a server
+   all refuse the same catalog"). A bare member is inert data, so
+   `_check` takes over that duty for enum-typed fields: `fixed` is
+   an instance of `Declared.type` and, where the annotation
+   narrows, a member of `Declared.tokens`, refused with
+   `CatalogError` at declaration exactly like the other by-eye
+   checks. Without this, the first evidence of a mismatch would be
+   a detail-free `construction_failed` at emit, in a running
+   deployment on forgiving mode, naming nothing.
 
 ## The standing review lenses, pre-answered
 
@@ -371,6 +383,12 @@ findings 4 to 8 amendable in place. Findings condensed but faithful:
    `_check` never looks at `Declared.fixed` and the first evidence
    is a detail-free `construction_failed` at emit. Add a
    declaration-time check in `_check`.
+   *Resolution* (amendment `F5`): added as design decision 8:
+   `_check` refuses at declaration a `fixed=` member that is not an
+   instance of the field's enum or not within its narrowed tokens,
+   preserving the refuse-at-import property the wrapper's
+   constructor carried.
+
 6. **P2: the migration inventory grep does not cover the three
    hardest sites.** `UnnamedToolSource(`, `PendingRefusal(`,
    `McpConnectFailure(` contain no `Token(`; and the verification
