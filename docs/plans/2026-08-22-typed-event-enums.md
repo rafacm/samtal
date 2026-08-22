@@ -190,12 +190,15 @@ section.
   nothing in that discipline changes.
 - **Honest seams.** No injectable or default-construction policy
   changes.
-- **Inventories by tooling.** The migration inventory is
-  `grep -rn "Token(" src tests` from `vinga-server/` (65 hits at
-  main `9366dbd4`), refreshed after any rebase; the wrapper deletion
-  is verified by `grep -rn "TokenValue\|Token(" src` returning
-  nothing but the tokenize false positive in
-  `tests/tools/reach_ins.py`.
+- **Inventories by tooling.** The migration inventory is the union
+  `grep -rnE "Token\(|UnnamedToolSource\(|PendingRefusal\(|McpConnectFailure\(" src tests`
+  from `vinga-server/` (65 `Token(` hits plus the narrowed-class
+  constructions at `runtime/pipeline.py:270`, `ota/reply.py:337`,
+  `tools/mcp/manager.py:622` and their tests, at main `9366dbd4`),
+  refreshed after any rebase. The wrapper deletion is verified by
+  the same grep over `src` returning nothing (the narrowed names
+  survive only as `Literal` aliases, which are never called), plus
+  `grep -rn "TokenValue" src tests` returning nothing.
 
 ## Module layout
 
