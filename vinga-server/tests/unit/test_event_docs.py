@@ -349,7 +349,8 @@ def test_a_device_bound_to_an_agent_this_server_is_not_serving_names_the_reload(
 #
 # So this is the completeness half, and it is complete in the plan's own
 # terms: every event, every variant, every template byte for byte, every
-# argument position with its kind, nullability, constraint and note,
+# argument position with the field it renders, its kind, nullability,
+# constraint and note,
 # every payload field with its kind, requiredness, nullability,
 # constraint and note, every declared token inside those constraints,
 # every syntax, bound and grammar, and every prose note the catalog
@@ -419,10 +420,15 @@ def test_every_argument_row_matches_its_declaration() -> None:
             for position, (row, arg) in enumerate(
                 zip(rows, rendered_args, strict=True), start=1
             ):
-                index, kind, nullable, constraint, note = row
+                index, argument, nullable, constraint, note = row
                 assert index == str(position), where
                 kind_name = arg_kind_named(arg)
-                assert kind == f"`{kind_name}`", f"{where} argument {position}"
+                # Name as well as kind: `ARGS` is an ordered tuple of
+                # field names, so two same-kinded positions swapped would
+                # render identical cells and move nothing committed.
+                assert argument == f"`{arg.name}` (`{kind_name}`)", (
+                    f"{where} argument {position}"
+                )
                 assert nullable == yes(arg.nullable), f"{where} argument {position}"
                 assert note == cell(arg.rendered_note), f"{where} argument {position}"
                 check_constraint(
