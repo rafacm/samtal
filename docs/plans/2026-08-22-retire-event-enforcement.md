@@ -142,3 +142,68 @@ and discoveries; no deviations says so explicitly.
   event, which is not a state `main` should release. Deepens
   `events/__init__.py` by subtraction: callers keep the same
   `emit(thunk)` interface and stop having to know that modes exist.
+
+## Plan review round
+
+External review of commit `434bfe46`, 2026-08-22. Backend: claude
+CLI 2.1.239, model `claude-opus-5`, read-only tool set (the interim
+fallback tier while the codex quota is exhausted). Verdict as
+received: ready after the P1/P2 amendments; the shape (drop after
+one report, no substitute, one milestone) is right, and what is
+missing is the blast radius outside src/tests, the emitter-side
+drop mechanics, and a property-based test plan. Findings condensed
+but faithful:
+
+1. **P1: `Declaration.internal` has four readers, not one.** The
+   docgen's header counting sentence, `_index_row`'s `(internal)`
+   suffix, `_event_section`'s Internal paragraph, and the baseline
+   filter; plus `test_the_internal_event_is_listed_as_internal`.
+   Implementing the layout as written leaves `reference()` raising.
+2. **P1: this repository's own Dockerfile sets
+   `VINGA_EVENTS_ENFORCEMENT=forgiving`** with a nine-line posture
+   comment; decision 4 said only another repo sets it, and the
+   src/tests greps cannot see it.
+3. **P1: the README is an unnamed fifth pin.** A `schema_violation`
+   index row that three docs tests hold against the catalog, and a
+   hand-written Logging paragraph documenting the variable and the
+   boot refusal; `test_an_unusable_enforcement_value_does_not_block_the_reference`
+   must go too.
+4. **P2: `_built` cannot keep its `-> Checked` shape and dispatch
+   nothing.** It must answer `Checked | None` (or invert into the
+   emitters), both emitters need drop branches, the clock read must
+   survive the drop path, and `Checked`'s docstring goes stale.
+5. **P2: the per-identity guard and `Identity` survive only to
+   serve the deleted recovery.** One guard around the loop is
+   behaviorally identical once any identity failure refuses whole;
+   `Identity` is a box around a lambda without `unstated`.
+6. **P2: the lanes lose their only mechanism for making a
+   construction bug visible.** conftest's strict mode existed so CI
+   could not quietly relax; dropping it with nothing in its place
+   lets malformed emissions drop silently under green suites.
+7. **P2: decision 6 classifies tests by mechanism and deletes the
+   only coverage of three surviving behaviors** (the wrong-channel
+   branch, verify()'s misplaced-value check, the descriptor bound
+   at emit), plus a broken-log test whose observable disappears.
+   Classify by property and re-pin each against drop-and-report.
+8. **P2: the `-O` pin dies as collateral.** The only `python -O`
+   run in the suite pins #155's no-assert rule, which outlives the
+   modes; rewrite it against the drop path and rehome it, along
+   with the no-assert comment in the mode section.
+9. **P2: kept vocabulary with no caller or no second value.**
+   `refusal_text`'s only caller is `_refuse`; every surviving
+   `Fault` has no detail, so the two-field record and `rendered()`
+   conditional encode variation that no longer exists.
+10. **P2: the exit-criterion grep cannot pass and misses prose.**
+    Four unrelated subsystems use the word "enforcement"; and
+    `events_cli.py`, `main.py`, `values.py`, and the baseline
+    harness carry prose about strictness no ENFORCEMENT grep finds.
+11. **P3: "no longer raises at all on the emit path" is broader
+    than the code.** `deepcopy`, `replace`, `Emission(...)` and the
+    clock run outside guards; claim the guarded region only.
+12. **P3: the refusal report is unattributed once `safe` goes.**
+    No session or device on the report record; state the accepted
+    loss with its reason or keep the validated half solely for the
+    report's extra.
+13. **P3: the CHANGELOG entry covers the inert variable but not the
+    surface removal.** A declared event and a boot refusal
+    disappear; that is a `### Removed` entry.
