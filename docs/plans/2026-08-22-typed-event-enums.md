@@ -313,7 +313,7 @@ section.
 
 - [x] **[M1: the catalog admits enum-typed fields, proven on the
   fixed fields](2026-08-22-typed-event-enums-implementation.md#m1-the-catalog-admits-enum-typed-fields-proven-on-the-fixed-fields).**
-  (PR TBD) Machinery in `catalog.py` and `events_docgen.py`
+  (PR #252) Machinery in `catalog.py` and `events_docgen.py`
   as designed, scratch-catalog tests, and the pilot migration:
   every `value(fixed=...)` token field in the catalog moves to its
   enum member. Fixed fields take no caller argument (`init=False`),
