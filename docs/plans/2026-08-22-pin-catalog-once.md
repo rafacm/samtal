@@ -221,6 +221,9 @@ condensed but faithful:
    everything that survives. Name per-site optional-field presence
    as a second loss and decide its replacement (a live in-test
    table of driver key to expected carried keys) or accept it.
+   *Resolution* (`f2587768`): decision 2 rewritten; the per-driver
+   carried-key table is the live replacement, asserted exactly.
+
 2. **P1: `events.md` does not render argument identity.** The
    Argument cell is the ArgKind name; ordered field lists and token
    sets survive in the reference, the ordered argument list does
@@ -229,6 +232,11 @@ condensed but faithful:
    moves nothing committed. State the loss as its own priced
    decision or restore the pin inside the kept artifact by printing
    the declared field name in the Argument column.
+   *Resolution* (`3c3afc6c`): the docgen prints the declared field
+   name beside the kind, restoring the ordered-argument pin inside
+   the kept artifact; the reference regeneration is the one-time
+   reader-improving diff.
+
 3. **P1: the prose inventory is wrong.** About a dozen live sites
    name the deleted artifacts as the pin, two of them
    coverage-delegation claims (`test_event_catalog.py`'s header,
@@ -236,31 +244,60 @@ condensed but faithful:
    command; and two docstrings in `src/vinga_server/events/
    catalog.py` change, so "no production surface changes at all"
    needs qualifying.
+   *Resolution* (`9f1b8035`): the dozen sites enumerated with the
+   coverage delegations called out; the no-leak lens qualified for
+   the two src docstrings.
+
 4. **P2: the grep bound excludes the trees the plan says to
    correct.** Run it repo-wide and list the expected survivors
    (historical plans, the CI wheel comment's Alembic "baseline").
+   *Resolution* (`9f1b8035`): the bound is repo-wide with the
+   expected survivors listed.
+
 5. **P2: the two module docstrings that would become the largest
    false statements are not named as work**; both are rewritten,
    and the harness states what "baseline" means with no committed
    capture.
+   *Resolution* (`d0cdd7d5`): both docstrings named as rewrites,
+   the harness's stating what baseline means now.
+
 6. **P2: dead names in both directions.** `COMMITTED`,
    `REGENERATE`, `shape()`'s `argument_types` once unread,
    `captured(produced=None)`'s only caller being `__main__`, and
    the #210 walk relics (`MODULES`, `PACKAGE`, `LEVEL_METHODS`,
    `TYPED_METHOD`, `SESSION_RECEIVER`). List them, decide each.
+   *Resolution* (`d0cdd7d5`): each dead name listed and decided;
+   argument_types deleted with identity moving to events.md; the
+   walk relics swept with their own sentence.
+
 7. **P2: no Tests section.** Name the mutations that must go red
    (a moved TEMPLATE, a changed LEVEL, an unmatched record, a
    half-quartet `llm_round`) and the suite's count change; the
    repository's practice on this suite was mutation, not argument.
+   *Resolution* (`e4aa6776`): the Tests section names the count
+   change and the four mutations that must go red.
+
 8. **P2: `test_the_store_says_nothing_else` is in neither list.**
    It survives with its docstring corrected.
+   *Resolution* (`e4aa6776`): it survives unchanged with its
+   docstring corrected.
+
 9. **P3: the successor practice contradicts the layout** (it says
    "regenerate" while deleting `rendered()` and `__main__`); pick
    capture-twice-in-memory and drop the word.
+   *Resolution* (`03696939`): capture-twice-in-memory, no file,
+   the word regenerate dropped.
+
 10. **P3: the harness has a second in-suite consumer**
     (`test_event_surface_pins.py` imports `Failing`,
     `failing_reply`, `turned_away`); name it in the inventory.
+    *Resolution* (`03696939` and `9f1b8035`): the surface-pins
+    imports are listed among the grep survivors.
+
 11. **P3: the no-leak lens ignores the surface that changes.** The
     live suite works from records carrying real values (a planted
     API token among them); state that the new assertions report
     channel, level, template, key names and type names only.
+    *Resolution* (`03696939`): the new assertions report channel,
+    level, template, key names and type names only; the builtins
+    test is the model and a red lane stays values-free.
