@@ -150,3 +150,69 @@ providers.
   helpers twice. Deepens `events/`: the orchestrator's interface
   to telemetry shrinks from nine shape constructors plus selection
   logic to a handful of assembly calls.
+
+## Plan review round
+
+External review of commit `be065bca`, 2026-08-22. Backend: claude
+CLI 2.1.239, model `claude-opus-5`, read-only tool set (interim
+fallback tier). Verdict as received: ready after the P1/P2
+amendments; the spine (collapse the pairs, move assembly, baseline
+still) is sound, but finding 1 is a design that cannot be declared
+as written, findings 3 to 6 mean the module's contents and
+signatures were not yet decided, and findings 2, 7, 8 point the
+preservation claims at the wrong artifacts. Findings condensed but
+faithful:
+
+1. **P1: `provider_failed`'s twins differ in two required rendered
+   fields.** `named: Nothing` vs `named: QuotedProvider` and
+   `where: Nothing` vs `where: ReachingHost`; unions of two value
+   types are refused at `_read`, rendered fields cannot be
+   `ABSENT`, and `QuotedProvider("")` refuses at construction.
+   `ReachingHost` already models the optional tail; `QuotedProvider`
+   does not. The collapse needs `QuotedProvider.of(str | None)` and
+   a widened `QUOTED_PROVIDER` grammar, which is a documented
+   constraint genuinely loosening, so "the docgen needs no change"
+   and "no new surface" are false as written.
+2. **P2: the baseline is byte-still for unstated reasons and cannot
+   see what could move.** It records sorted key sets and argument
+   type names of rendered strs, so a fragment retype or a
+   misplaced quartet is invisible to it; the golden's ordered lists
+   are the pin for both. The quartet's placement must reproduce
+   `LlmRoundOfEntry`'s carried order.
+3. **P2: the adapter justification contradicts the plain-value
+   signature rule** (one vocabulary in, not two), the post-collapse
+   builders are single constructor calls, and decision 4 moves out
+   `_tool_called`, which the plan's own lens calls a real decision
+   site. Justify by what the caller stops knowing, or design
+   around the selection.
+4. **P2: no stated answer for the classifier constants.** Moving
+   the source selection into `events/` forces an upward import, a
+   second home for `TOOL_SOURCES`, or an untested equality; the
+   cheapest honest answer is that the selection stays in
+   `pipeline.py` and only construction moves.
+5. **P2: `_reported` and the `Usage` type are unnamed work.** Under
+   the plain-value rule the assembly cannot take `Usage`;
+   `_reported` stays or the call site unpacks. `BaseException` is a
+   builtin and may cross.
+6. **P2: `_tool_fragment` has a second caller that is not an emit
+   thunk** (the malformed-arguments warning line), which the merged
+   signature erases and which already falsifies the
+   thunk-only rule the lens claims moves intact.
+7. **P2: #235's `match` is a different region.** Its four arms call
+   no assembly helper; the five real call sites are
+   `_watchdog_stream`, `_llm_round_done`, `_provider_failed`,
+   `_run_one`, and `_dispatch`.
+8. **P2: the atomicity pin does not pin the variant, and the plan
+   contradicts itself on `_Entry`.** After the collapse the variant
+   admits a half-quartet; keep the frozen quartet type inside
+   `assembly.py` with required `provider`/`type` so atomicity stays
+   structural, re-home the NOTE onto the survivor, and name
+   `test_event_surface_pins.py`'s emission-level half as surviving.
+9. **P3: the note merge is undercounted and misnamed.** The
+   no-entry note is a variant-level NOTE, five field notes need
+   reconciling across the `llm_round` pair, and the survivors'
+   docstrings stop being true.
+10. **P3: the plan assigns machinery to #241 that #241 is not
+    scoped to carry.** State the loss and the pin; a
+    declaration-time entanglement check is out of scope and worth
+    its own issue if wanted.
