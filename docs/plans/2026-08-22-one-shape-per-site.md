@@ -74,15 +74,18 @@ providers.
    surviving field unchanged; and the survivors' class docstrings
    drop "on a provider with no configured identity", which stops
    being true.
-2. **Provider and type stay atomic as a pair, enforced where the
-   value is built.** Today "answered whole or not at all" is a type
-   fact (`_Entry` has required `provider`/`type`). After the
-   collapse it is an assembly fact: the one assembly function
-   answers the whole quartet or all-absent, and a catalog-level
-   declaration-time check is NOT added (the catalog cannot know two
-   optional fields are entangled without new machinery, which
-   #241's thinning would then carry; the entanglement is pinned by
-   a unit test on the assembly function instead).
+2. **Provider and type stay atomic as a pair, as a type fact
+   inside the assembly module.** The frozen quartet type (decision
+   3) has required `provider`/`type`, so nothing but it can
+   produce the four values and "answered whole or not at all"
+   survives structurally. What is accepted and stated: the
+   COLLAPSED VARIANT itself admits a half-quartet if constructed
+   by hand, since `verify()` accepts absent optionals; the pin for
+   that is the quartet type being the only producer plus the
+   assembly unit test, and a declaration-time entanglement check
+   is out of scope for this issue and for #241 (a pin thinning,
+   not a machinery enlargement); if one is ever wanted it is its
+   own issue.
 3. **The assembly helpers move to a new `events/assembly.py`, with
    plain-value signatures, and the module is justified by what its
    caller stops knowing.** One responsibility: one provider's
