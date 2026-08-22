@@ -147,9 +147,16 @@ providers.
 - **No-leak.** No new surface: the collapsed variants carry the
   same values the OfEntry twins carried, all validated at
   construction; assembly functions build values inside emit thunks
-  exactly as the helpers do today (the `_entry_of` docstring's
-  rule, "called inside a construction thunk, never beside one",
-  moves with the code and stays true).
+  exactly as the helpers do today. The `_entry_of` docstring's
+  thunk rule moves with the quartet builder and stays true THERE;
+  the name fragment is the stated exception and always has been:
+  it has a second caller that is not an emit thunk (the
+  malformed-arguments warning line in `_dispatch`), so
+  `assembly.py` exports the fragment as its own function serving
+  both callers, and its docstring states the rule for a fragment
+  deliberately built beside a log line (a refusing construction
+  there lands in the tool-error path, not the emitter's guard, and
+  the fragment's own grammar is what bounds it).
 - **Pin before reshaping.** The pins divide the proof honestly.
   The baseline proves channel, level, template, and payload key SET
   did not move on any driven path; it records sorted key sets and
