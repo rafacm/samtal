@@ -34,6 +34,15 @@ Settled by #235 and not re-litigated here:
    clauses, the boolean-condition chains in `ota/reply.py` and the
    LLM turn builders, the two-arm shape ternaries, and the recursive
    secret walkers. The issue records why; no code there changes.
+   One site the issue's sweep missed entirely, found by this PR's
+   review round: the conversation writer's queue dispatch
+   (`conversations/store.py:497-535`), sequential `isinstance`
+   guards with early returns over the closed `_Stop`/`Event`/`Open`/
+   `Turn`/`Close` set, which the sweep's `elif`-shaped grep could
+   not see. It is the same four-shapes-four-fates shape and a
+   genuine candidate; it stays out of this milestone's scope and is
+   noted on #235 as a follow-up decision with its own pin
+   assessment.
 
 ## The issue's open questions, resolved
 
