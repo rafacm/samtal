@@ -97,6 +97,27 @@ and discoveries; no deviations says so explicitly.
    answers `captured()`); the implementation doc records this as
    the successor practice.
 
+## Tests
+
+The suite has eight tests today. After M1: the two byte-comparison
+tests and the shapes-not-values test go (their subject is gone);
+the five behavioral ones survive (driver-path uniqueness,
+driven-path-produces-its-event, every-variant-produced, builtin
+payload values, and `test_the_store_says_nothing_else`, which
+survives unchanged with its docstring corrected since it cites
+both deleted files); and two are added: the per-driver carried-key
+table of decision 2 and the template/level/channel conformance
+check. Net seven.
+
+The strengthened checks are proved by mutation before the PR, in
+the repository's own practice for this suite, and the mutations
+are named here so the proof is checkable: a moved `TEMPLATE` on a
+driven variant fails the conformance check; a changed `LEVEL`
+fails it; a record whose event matches no declared variant fails
+it; a half-quartet `llm_round` (entry fields dropped from one
+driver's path) fails the carried-key table. Each mutation is
+reverted by copy-back plus `touch` per AGENTS.md.
+
 ## The standing review lenses, pre-answered
 
 - **No-leak.** No production surface changes at all; deletions are
