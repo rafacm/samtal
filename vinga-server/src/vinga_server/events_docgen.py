@@ -41,8 +41,11 @@ from vinga_server.events.catalog import (
     Declaration,
     Declared,
     Variant,
+    arg_kind_of,
     carried_values,
     catalog,
+    grammar_of,
+    kind_of,
     rendered_values,
     tokens_of,
 )
@@ -418,7 +421,7 @@ def _variant_section(position: int, variant: type[Variant]) -> list[str]:
             "| # | Argument | Nullable | Constraint | Note |",
             "| --- | --- | --- | --- | --- |",
             *[
-                f"| {index} | `{one.type.ARG_KIND.name}` | {_yes(one.nullable)} | "
+                f"| {index} | `{_arg_kind(one)}` | {_yes(one.nullable)} | "
                 f"{_arg_constraint(one)} | {_cell(one.rendered_note)} |"
                 for index, one in enumerate(rendered, start=1)
             ],
@@ -430,7 +433,7 @@ def _variant_section(position: int, variant: type[Variant]) -> list[str]:
         "| Field | Kind | Required | Nullable | Constraint | Note |",
         "| --- | --- | --- | --- | --- | --- |",
         *[
-            f"| `{one.name}` | `{one.type.KIND.name}` | {_yes(one.required)} | "
+            f"| `{one.name}` | `{_kind(one)}` | {_yes(one.required)} | "
             f"{_yes(one.nullable)} | {_field_constraint(one)} | {_cell(one.note)} |"
             for one in carried_values(variant)
         ],
@@ -439,9 +442,22 @@ def _variant_section(position: int, variant: type[Variant]) -> list[str]:
     return lines
 
 
+def _kind(declared: Declared) -> str:
+    """One carried value's kind, which `_check` holds every carried
+    value to having."""
+    kind = kind_of(declared)
+    return "" if kind is None else kind.name
+
+
+def _arg_kind(declared: Declared) -> str:
+    """And one rendered value's, which every value type declares."""
+    kind = arg_kind_of(declared)
+    return "" if kind is None else kind.name
+
+
 def _field_constraint(declared: Declared) -> str:
     """What holds this field's values, beside its kind."""
-    kind = declared.type.KIND
+    kind = kind_of(declared)
     if kind is Kind.TOKEN:
         return _tokens(tokens_of(declared))
     if kind is Kind.ID:
@@ -458,8 +474,8 @@ def _field_constraint(declared: Declared) -> str:
 
 
 def _arg_constraint(declared: Declared) -> str:
-    kind = declared.type.ARG_KIND
-    grammar = declared.type.GRAMMAR
+    kind = arg_kind_of(declared)
+    grammar = grammar_of(declared)
     if kind is ArgKind.TOKEN:
         return _tokens(tokens_of(declared))
     if kind is ArgKind.ID:
