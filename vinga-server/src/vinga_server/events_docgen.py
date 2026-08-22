@@ -208,7 +208,8 @@ def reference() -> str:
         "",
         *_paragraph(
             "The template is byte-exact, and the argument table's rows are its "
-            "`%` positions in order. A message that is not one of the declared "
+            "`%` positions in order, each naming the declared field whose value "
+            "that position renders. A message that is not one of the declared "
             "templates fails even when every field is lawful, because the "
             "rendered sentence reaches the same taps the payload does."
         ),
@@ -402,7 +403,7 @@ def _variant_section(position: int, variant: type[Variant]) -> list[str]:
             "| # | Argument | Nullable | Constraint | Note |",
             "| --- | --- | --- | --- | --- |",
             *[
-                f"| {index} | `{_arg_kind(one)}` | {_yes(one.nullable)} | "
+                f"| {index} | {_argument(one)} | {_yes(one.nullable)} | "
                 f"{_arg_constraint(one)} | {_cell(one.rendered_note)} |"
                 for index, one in enumerate(rendered, start=1)
             ],
@@ -434,6 +435,18 @@ def _arg_kind(declared: Declared) -> str:
     """And one rendered value's, which every value type declares."""
     kind = arg_kind_of(declared)
     return "" if kind is None else kind.name
+
+
+def _argument(declared: Declared) -> str:
+    """One `%` position, named as well as kinded.
+
+    The kind alone does not identify the position: `ARGS` is an ordered
+    tuple of field names, and two same-kinded entries swapped would
+    render two identical cells, so the ordered argument list would have
+    no pin in this document at all. The name is the field's own, which
+    is what makes a position readable against the field table below it.
+    """
+    return f"`{declared.name}` (`{_arg_kind(declared)}`)"
 
 
 def _field_constraint(declared: Declared) -> str:
