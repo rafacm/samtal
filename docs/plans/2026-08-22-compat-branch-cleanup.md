@@ -321,7 +321,11 @@ Reuse the existing assets; the new bites are:
 - **`parse_base_url` in the LLM factory changing boot behavior for a
   deployed config with a malformed URL.** That is the point; the
   changelog entry says so, and the pre-release stance covers the
-  blast radius.
+  blast radius. The write path knowingly stays as it is: an operator
+  can still `config set` a scheme-less `base_url`, be acknowledged,
+  and meet the refusal at the next boot or apply, an asymmetry
+  shared with the `openai` ASR and TTS types and not this plan's to
+  fix.
 
 ## Milestones
 
@@ -511,6 +515,8 @@ and scopes the waiver to the version-1 pin alone.
 write path still accepts the value.** The asymmetry is shared with
 the sibling types and not this plan's to fix; say in the risks
 section that the write path is knowingly left as it is.
+
+*Resolution*: accepted; the risks section carries the sentence.
 
 On the pre-answered lenses the review confirms: no-leak (1) holds,
 (2) held in conclusion but named the wrong path, (3) did not hold;
