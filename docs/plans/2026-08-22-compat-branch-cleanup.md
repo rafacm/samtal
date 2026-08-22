@@ -185,11 +185,25 @@ changes.
   `openai_compatible` change is inside its factory; the injected
   client path (`client is not None`) is untouched.
 - **Inventories by tooling.** Before the binding-deletion commit, a
-  grep inventory of `_binding_as_list` callers and of the string form
-  in tests and docs (`tests/integration/test_two_personas.py:53` is
-  known; the sweep is rerun, not trusted) goes in the implementation
-  doc. Same for `CANONICAL_REDIRECTS`/`_canonical_slash` references
-  before the doctor commit.
+  grep inventory of `_binding_as_list` callers and of the string
+  binding form across `tests/` and docs goes in the implementation
+  doc. The review's own sweep sizes it at roughly fifteen files:
+  `tests/support/checkin.py:74` (`unbound_config`, shared with the
+  activation suite M2's version-1 commit builds on), seven sites in
+  `tests/unit/test_config.py` (`:372`, `:489`, `:501`, `:665`,
+  `:725`, `:732`, `:746`, four of which are pins whose test text
+  carries the string and rewrites to the list form while their
+  behavior claims stay), seven integration tests
+  (`test_activation.py:51`, `test_ota_endpoint.py:59`,
+  `test_drain.py:51`, `test_access_logs.py:66`,
+  `test_device_bindings.py:47`, `test_ws_auth.py:35`,
+  `test_two_personas.py:54`), and
+  `test_event_descriptor_sanitization.py:355`. That list is the
+  starting point and the grep is rerun at commit time, not trusted.
+  For the doctor commit, the sweep is the `redirecting` fixture's
+  users in `tests/unit/test_config_cli_onboarding.py`, not just
+  `CANONICAL_REDIRECTS`/`_canonical_slash` references (finding 7
+  names the two tests the symbol sweep misses).
 
 ## Module layout
 
@@ -303,6 +317,12 @@ Four are pins the plan promised untouched and will start failing
 with a `list_type` error instead of the refusal they are about. M1's
 binding commit rewrites them to the list form; the commit is roughly
 fifteen files, not one.
+
+*Resolution*: accepted. The inventory lens now carries the review's
+full site list as the starting point (rerun at commit time), names
+the shared `checkin.py` fixture and the four pins whose text
+rewrites, and the tests section stops claiming those pins stay
+untouched.
 
 **3 (P2). Reusing `parse_base_url`'s refusal extends a credential
 echo to a third provider type, and the plan defers rather than
