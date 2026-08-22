@@ -21,9 +21,15 @@ Settled by #235 and not re-litigated here:
 1. **The LLM event loop converts.** The chain over `StreamStarted`,
    `TextDelta`, `Usage`, and the everything-else tool-call arm
    becomes `match event:`, destructuring the one field the text arm
-   uses (`case TextDelta(text=text):`) and making the catch-all arm
-   explicit (`case _:`). The surrounding comments move into the arms
-   unchanged.
+   uses and making the catch-all arm explicit (`case _:`). The
+   surrounding comments move into the arms unchanged. The text arm
+   is spelled `case TextDelta(text=text):` with the first-token
+   check remaining an inner `if first_token_at is None and
+   text.strip():`, never a case guard: `splitter.push(text)` runs
+   unconditionally, whitespace included, and a guard spelling
+   (`case TextDelta(text=text) if text.strip():`) would route a
+   whitespace-only delta into `case _:` as a phantom tool call. The
+   pin under the lenses section covers exactly that delta.
 2. **The rejected sites stay rejected**: `parse_message`'s guard
    clauses, the boolean-condition chains in `ota/reply.py` and the
    LLM turn builders, the two-arm shape ternaries, and the recursive
@@ -166,6 +172,10 @@ whitespace-only deltas into `case _:` and ship green, since no test
 yields one. The plan must spell the arm as
 `case TextDelta(text=text):` with the strip check remaining an inner
 `if`, and cover the whitespace-only delta in the finding-1 pin.
+
+*Resolution*: accepted. The decisions section now spells the arm
+explicitly, forbids the case-guard spelling with the reason, and the
+finding-1 pin covers the whitespace-only delta.
 
 **3 (P2). The stated reason for skipping the changelog is
 contradicted by the changelog.** `CHANGELOG.md` records
