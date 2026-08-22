@@ -36,7 +36,7 @@ from vinga_server.events.values import (  # noqa: E402
     ClassNames,
     Count,
     Identifier,
-    McpConnectFailure,
+    McpDown,
     McpTransport,
     Whole,
 )
@@ -621,7 +621,9 @@ class McpServerManager:
             events.emit(
                 lambda: McpConnectFailed(
                     entry=Identifier(self._name),
-                    reason=McpConnectFailure(_down_reason(failed, phase)),
+                    # `_down_reason` answers the transport module's own
+                    # constants, so the crossing is spelled here.
+                    reason=McpDown(_down_reason(failed, phase)),
                     duration_ms=Whole(round((time.monotonic() - began) * 1000)),
                     failure=ClassNames(_reason(failed)),
                 )

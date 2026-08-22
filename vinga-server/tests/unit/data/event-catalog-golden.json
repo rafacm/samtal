@@ -1563,7 +1563,7 @@
         },
         {
           "name": "source",
-          "type": "UnnamedToolSource"
+          "type": "ToolSource"
         },
         {
           "name": "named",
@@ -1605,7 +1605,7 @@
         },
         {
           "name": "source",
-          "type": "UnnamedToolSource",
+          "type": "ToolSource",
           "required": true,
           "nullable": false,
           "tokens": [
@@ -2335,7 +2335,7 @@
         },
         {
           "name": "reason",
-          "type": "PendingRefusal"
+          "type": "NotOffered"
         },
         {
           "name": "device",
@@ -2357,7 +2357,7 @@
         },
         {
           "name": "reason",
-          "type": "PendingRefusal",
+          "type": "NotOffered",
           "required": true,
           "nullable": false,
           "tokens": [
@@ -3073,7 +3073,7 @@
         },
         {
           "name": "reason",
-          "type": "McpConnectFailure",
+          "type": "McpDown",
           "required": true,
           "nullable": false,
           "tokens": [
