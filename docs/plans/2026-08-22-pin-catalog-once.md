@@ -106,14 +106,18 @@ and discoveries; no deviations says so explicitly.
   it (src is untouched), so there is nothing the deleted pins were
   protecting mid-flight.
 - **Closed sets, honest seams.** Not this issue's territory.
-- **Inventories by tooling.** `grep -rn "golden\|baseline"
-  vinga-server/tests vinga-server/src .github/workflows` before and
-  after bounds the removal; after the milestone the only survivors
-  are the harness module's own name (`tests/tools/event_baseline.py`,
-  which keeps it: it is the driver inventory, not a baseline file),
-  `test_event_baseline.py`'s live suite, and unrelated uses of the
-  words (the CI wheel-migration comment's "baseline script" means
-  Alembic and stays).
+- **Inventories by tooling.** The bound is REPO-WIDE:
+  `grep -rn "golden\|baseline" .` from the repository root
+  (excluding `.git` and `vendor/`), before and after. Expected
+  survivors, listed so the after-grep is checkable: the two
+  harness/suite module names (`tests/tools/event_baseline.py`,
+  `tests/unit/test_event_baseline.py`, kept as the driver
+  inventory and the live conformance suite, their docstrings
+  saying so), `test_event_surface_pins.py`'s imports of harness
+  helpers (`Failing`, `failing_reply`, `turned_away`), historical
+  `docs/plans/*` records, the CI wheel-migration comment whose
+  "baseline script" means Alembic, and unrelated word uses. Any
+  other survivor is a missed site.
 
 ## Module layout
 
@@ -127,8 +131,23 @@ and discoveries; no deviations says so explicitly.
 - `tests/unit/data/event-baseline.json`,
   `tests/unit/data/event-catalog-golden.json`,
   `tests/unit/test_event_golden.py`: deleted.
-- `AGENTS.md` and any live doc naming the regeneration commands:
-  corrected (historical plan/implementation docs stay as records).
+- The live prose sites naming the deleted artifacts as the pin,
+  enumerated so none is discovered mid-milestone, each corrected in
+  M1: `src/vinga_server/events/catalog.py` (two docstrings, lines
+  ~18 and ~681, inside the mypy-strict scope, so the no-leak
+  lens's "no production surface changes" is qualified to "no
+  behavioral surface changes; two docstrings in `src` move"),
+  `tests/support/catalog.py:7`, `test_event_catalog.py` (the
+  header's coverage delegation at 14-17 plus lines 70 and 502),
+  `test_events.py` (31, 161), `test_event_enum_fields.py:23`,
+  `test_event_enforcement_sentinels.py:127`,
+  `test_event_surface_pins.py` (6-10, 34-37),
+  `test_server_event_pins.py` (7-8). The two coverage-delegation
+  headers (the catalog suite's and the pin suites') are rewritten
+  to name what now carries the coverage: the live suite and
+  `events.md`. `AGENTS.md` names neither regeneration command
+  (checked), so it needs nothing; historical plan and
+  implementation docs stay as records.
 - `CHANGELOG.md`: `### Removed` entry (two committed pins retired;
   the guarantees that survive and where).
 
