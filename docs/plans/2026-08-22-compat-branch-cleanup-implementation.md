@@ -502,3 +502,38 @@ malformed `base_url`, which is a boot this repository cannot stand up.
 What it does there is fail the boot instead of every conversation,
 which is the plan's stated intent and the changelog entry's stated
 consequence.
+
+## PR review round, M2 (PR #250)
+
+External review of the PR diff: claude backend (codex quota
+exhausted), claude CLI, model claude-opus-5, read-only tool set,
+2026-08-22, posted on the PR by the self-posting script. Verdict:
+mergeable after fix 1; findings 2 through 5 taken in the same round.
+Each fixed with its own commit.
+
+1. **Two changelog entries under `### Changed` against the plan's
+   settled `### Fixed`, unrecorded.** Fixed in `0141d2ce`: both
+   moved, the store entry cut to the plan's one-liner, and the
+   deviations section now records the miss.
+2. **The request-shape pin never exercised the factory path.** Fixed
+   in `d186e47f` by assertion rather than client swap: a
+   factory-built entry's public `host` is pinned to the host its own
+   `base_url` names, which is the whole input `_ask_for_usage`
+   derives from; the reviewer's hypothetical (`build` passing
+   `DEFAULT_BASE_URL`) was run as a mutation and fails the pin. A
+   client swap was rejected because reading a factory-built
+   provider's requests needs an underscore reach-in.
+3. **The credential sentinel asserted only absence.** Fixed in
+   `6d360165`: the label, the rule, and the example are asserted
+   present, so the whole planned bite is pinned.
+4. **"Reports nothing anywhere" overclaimed a vacuous grants
+   assertion.** Fixed in `bc9ab9b4`: the doc claims what the pin
+   shows (nothing the diff computes), with the registry's own suite
+   named for the other half.
+5. **A ragged mid-paragraph line from the docstring edit.** Fixed in
+   `ad421abb`, comment-only, drift check re-verified.
+
+A figure to correct in passing: the M2 verification block above says
+2,805 unit items, which was true at the pre-rebase HEAD; after the
+rebase onto merged main (which brought #236's pin into history) the
+tree gives 2,806, and the five fix commits add no test items.
