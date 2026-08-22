@@ -9,6 +9,22 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **An event field is declared as the closed set it carries** (#238).
+  A variant that says one of a fixed set of words used to name the
+  `TokenValue` subclass built for that enumeration, so the set existed
+  twice: once as the members, once as a class holding a string checked
+  against them at construction. A field can now be annotated with the
+  enumeration itself, or with a `Literal` over some of its members
+  where a variant admits fewer than the enumeration holds, and the
+  catalog derives the kind and the declared set from the annotation.
+  Every field the catalog fixes to one member has moved; the fields a
+  caller passes, and the deletion of the wrappers, follow. Nothing an
+  operator sees changed: the generated reference and the committed
+  record baseline are byte-identical, and a record still carries a
+  plain string. The golden inventory now records each token field's
+  declared set, so a narrowing stays pinned by something other than the
+  reference's prose.
+
 - **Getting Started reads like a front page again.** The eight steps
   keep every command block but shed the deep rationale between them
   (the secret-regeneration trap, write-then-apply semantics, the
