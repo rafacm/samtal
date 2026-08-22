@@ -403,8 +403,9 @@ Run from `vinga-server/`, at commit time.
 
 ### Deviations from the plan
 
-Four, all additions inside what the plan delegates rather than
-departures from it.
+Five. The first four are additions inside what the plan delegates
+rather than departures from it; the fifth was a departure and is
+corrected.
 
 1. **A fourth diff pin.** The plan names three; the second comparison
    the fix changes is `agent_defaults`, and a change to a comparison
@@ -428,6 +429,15 @@ departures from it.
    `conversations/docgen.py`. The store's module docstring carries the
    same claim at line 55 ("what keeps it correct for a database written
    by an older server") and is corrected with the other two.
+5. **Two changelog entries landed under the wrong heading, and were
+   moved.** The plan settles `### Fixed` for all three of this
+   milestone's entries (its changelog decision, and the review's
+   finding 11 for the documentation correction). The
+   `openai_compatible` refusal and the conversation-store correction
+   were written under `### Changed` instead, and the store entry was
+   written long where the plan decided one line. Both are under
+   `### Fixed` now and the store entry is the one-liner, which is what
+   the rest of this section describes.
 
 ### Discoveries
 
