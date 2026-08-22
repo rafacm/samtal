@@ -21,6 +21,21 @@ importer to rebuild configuration and encrypted secrets from, and
 the existing upgrade tests deliberately prove that data survives
 migration from the first revision.
 
+**Addendum, 2026-08-22 (issue #225).** The audit the last consequence
+below sent to its own issue settled the stance this Context left open,
+and the settlement belongs here rather than only in that issue. The
+project is pre-release, says so in a notice nobody reading it can miss,
+and has declared no beta. No third-party installation is known: a
+deployment model that permits one is not evidence that one exists, and
+the maintainer's own boards are resettable, their configuration a file
+and a database that can be rebuilt from it. So tolerance for a state
+only a pre-release build could have produced is cost with no
+beneficiary, and a refusal path may stop accepting a shape no supported
+deployment produces. That is what licenses the deletions recorded under
+issue #225, and it is bounded twice: it does not reach the databases,
+whose floor the Decision below sets and which this addendum leaves
+exactly as it is, and it ends the day a beta is declared.
+
 ## Decision
 
 - **Upgrades are supported from the first beta image onward.** The
