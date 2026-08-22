@@ -198,7 +198,7 @@ reverted by copy-back plus `touch` per AGENTS.md.
 
 ## Milestones
 
-- [x] **[M1: retire the two JSON pins.](2026-08-22-pin-catalog-once-implementation.md#m1-retire-the-two-json-pins)** (PR TBD) One milestone,
+- [x] **[M1: retire the two JSON pins.](2026-08-22-pin-catalog-once-implementation.md#m1-retire-the-two-json-pins)** (PR #260) One milestone,
   test-and-data-side only; `main` stays releasable trivially (no
   production code moves). Deepens nothing and deletes two review
   surfaces; the one interface change a developer feels is that
