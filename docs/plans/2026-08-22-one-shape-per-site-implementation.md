@@ -161,17 +161,32 @@ the file rather than argued: the golden's ordered argument lists,
 naming the value classes, are the only committed pin on that retype,
 and they show it.
 
-**Two test docstrings named the twins as their example** and became
-false with the collapse: `tests/unit/test_event_baseline.py`'s module
-docstring and its `matches` helper both explained why payload keys are
-part of a variant's identity by pointing at `llm_round`'s pair. The
-rule is unchanged and its last example is `tool_call`, whose three
-variants share channel, level and template and are told apart by their
-keys alone; a check over the whole catalog says it is now the only such
-event. Both docstrings name it instead, and the harness comment about
-drivers running more than one scenario now says "record shape" where it
-said "variant", which is what the two halves of the retry and round
-drivers produce.
+**Four test docstrings named the twins** and became false with the
+collapse. Two explained why payload keys are part of a variant's
+identity by pointing at `llm_round`'s pair:
+`tests/unit/test_event_baseline.py`'s module docstring and its
+`matches` helper. The rule is unchanged and its last example is
+`tool_call`, whose three variants share channel, level and template and
+are told apart by their keys alone; a check over the whole catalog says
+it is now the only such event, and both docstrings name it instead.
+
+The other two called the entry-less record a second shape, and the PR
+review found them after the first sweep had missed them:
+`tests/unit/test_event_surface_pins.py`'s
+`test_a_failing_provider_the_registry_never_built_says_even_less` said
+"the other shape of the same event" and called its two rendered
+positions empty fragments, which is now the one variant saying less
+with the empty forms of `QuotedProvider` and `ReachingHost`; and the
+baseline harness's `unregistered` helper called it "the variant beside
+every provider event", which is now the same variant with the four
+fields it cannot fill left absent. Both say the post-collapse fact.
+Beside them, the harness comment about drivers running more than one
+scenario says "record shape" where it said "variant", which is what the
+two halves of the retry and round drivers produce.
+
+The lesson for the next collapse is the cheap one: `grep -rn "OfEntry"`
+finds the names and finds nothing that describes them, and prose about
+a deleted shape does not mention the class it described.
 
 **`UnnamedToolCall.source` needed a cast the untyped orchestrator never
 did.** `mypy` runs strict over `events/` and the field is declared
