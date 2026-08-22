@@ -937,6 +937,14 @@ class PromptSources(EventValue):
 # exception and ARE imported, because `config/models.py` reaches nothing
 # in this package.
 #
+# These are the one refusal on this surface that does repeat what it
+# refused: a lookup of a string outside the set raises the enumeration's
+# own `ValueError`, which names the value, and the module's second
+# load-bearing property above does not hold for it. That is why every
+# site that looks a string up spells the lookup inside the thunk it
+# hands the emitter, where `_construct` catches it and answers
+# `construction_failed` with the value nowhere in it.
+#
 # Three variants admit fewer members than their enumeration does, and
 # each declares the narrowing as a `Literal` alias beside the set it
 # narrows. A `Literal` names the parent's members rather than restating
