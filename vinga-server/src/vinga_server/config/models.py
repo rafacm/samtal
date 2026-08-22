@@ -2275,8 +2275,8 @@ class Config(BaseModel):
     agents: dict[NonBlankStr, AgentConfig] = Field(
         default_factory=dict, description=DOMAIN_DESCRIPTIONS["agents"]
     )
-    # One device may be bound to several agents; the value is written as a
-    # single name or a list, and always stored as a list.
+    # One device may be bound to several agents; the value is a list of
+    # agent names, the first of them the one a conversation starts on.
     devices: dict[str, list[NonBlankStr]] = Field(
         default_factory=dict, description=DOMAIN_DESCRIPTIONS["devices"]
     )
