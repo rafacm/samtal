@@ -106,8 +106,15 @@ decision here is the issue's "judgment call" answered.
 - **Honest seams.** No seam changes; the loop consumes the same
   `LlmEvent` stream from the same watchdog wrapper.
 - **Inventories by tooling.** One site converts; the inventory is
-  the issue's own rejected-sites list, re-checked by grepping for
-  `isinstance(event` under `runtime/` before the commit.
+  the issue's own rejected-sites list, re-checked before the commit
+  by grepping for `isinstance(` over `runtime/pipeline.py` whole,
+  not just `isinstance(event`. That wider sweep is what finds the
+  sibling dispatch the narrow one cannot:
+  `isinstance(first, StreamStarted)` at `pipeline.py:815`, the
+  watchdog's own single negated check on the same type. It stays as
+  it is; a one-arm boolean is not a dispatch, and converting it
+  would be the guard-clause mistake the issue's rejected list
+  already names for `parse_message`.
 
 ## Module layout
 
@@ -229,6 +236,10 @@ file.** `isinstance(first, StreamStarted)` at `pipeline.py:815` is
 the other dispatch on the same type; correctly out of scope, but the
 plan should name it and why it stays rather than rely on a grep that
 cannot see it.
+
+*Resolution*: accepted; the inventory lens now names line 815, why
+it stays, and widens the grep so the sweep itself would have found
+it.
 
 **7 (P3). The milestone's footprint omits the documentation work
 AGENTS.md requires.** The implementation-doc section and the ticked
