@@ -109,3 +109,66 @@ dispatch would pin the idiom, not the behavior.
   stops having to parse an `if`/`elif` chain to see that four event
   shapes have four fates, and the device edge and the runtime edge
   read identically. No new modules, no new seams.
+
+## Plan review round
+
+External review: claude backend (codex quota exhausted), claude CLI,
+model claude-opus-5, read-only tool set, 2026-08-22, of commit
+85d8352. Findings condensed but faithful; resolutions follow each.
+
+**1 (P1). The `StreamStarted` arm is pinned by nothing; the plan's
+central verification claim is false.** Every producer yields
+`StreamStarted` once, in first position, and `_watchdog_stream`
+swallows a first-position one (`pipeline.py:815`), so no suite ever
+delivers the event to the loop; the support fakes never yield it at
+all. Deleting the arm keeps all six named suites green while a
+mid-stream `StreamStarted` would land in `calls`, defeat
+`if not calls: break`, and reach `_reserve_tools`. The arm is
+contract (`providers/base.py:282`). The plan must name it as the one
+arm with no pin and add one: a fake yielding a second
+`StreamStarted` mid-stream, asserting the reply still speaks and no
+phantom tool call is recorded; "No new tests" and "no test files
+change" fall with it.
+
+**2 (P2). The whitespace-only timing guard is unpinned and the plan
+never forbids the spelling that breaks it.** The guard
+`if first_token_at is None and event.text.strip():` sits above a
+`splitter.push(event.text)` that runs unconditionally, whitespace
+included. The obvious case-guard spelling
+(`case TextDelta(text=text) if text.strip():`) would route
+whitespace-only deltas into `case _:` and ship green, since no test
+yields one. The plan must spell the arm as
+`case TextDelta(text=text):` with the strip check remaining an inner
+`if`, and cover the whitespace-only delta in the finding-1 pin.
+
+**3 (P2). The stated reason for skipping the changelog is
+contradicted by the changelog.** `CHANGELOG.md` records
+behavior-preserving refactors under `### Changed` as a matter of
+course, with "nothing an operator sees changed" as the entry's own
+point; AGENTS.md exempts nothing. Add the entry or argue a real
+premise.
+
+**4 (P3). The "closed sets" lens claims a type-level property the
+code does not have.** `_watchdog_stream` is typed
+`AsyncIterator[Any]`, so neither the chain nor the `match` gets any
+exhaustiveness help and `case _:` accepts a fifth `LlmEvent` member
+into `calls` silently. Say the catch-all gain is a reading gain, or
+take the cheap win and annotate the stream `AsyncIterator[LlmEvent]`.
+
+**5 (P3). Both listed risks are impossible; the two real ones are
+absent.** The four event types are unrelated frozen dataclasses with
+no base, so no subject can match two arms; the real risks are
+findings 1 and 2. Replace the section.
+
+**6 (P3). The inventory grep misses the sibling dispatch in the same
+file.** `isinstance(first, StreamStarted)` at `pipeline.py:815` is
+the other dispatch on the same type; correctly out of scope, but the
+plan should name it and why it stays rather than rely on a grep that
+cannot see it.
+
+**7 (P3). The milestone's footprint omits the documentation work
+AGENTS.md requires.** The implementation-doc section and the ticked
+checklist entry are milestone work in the same change; the plan
+references the doc but never lists the work.
+
+Verdict: ready after the P1/P2 amendments.
