@@ -121,7 +121,15 @@ and discoveries; no deviations says so explicitly.
    strict raising, forgiving substitution, mode resolution, or the
    recovery event's shape are deleted with the machinery.
    `tests/conftest.py` and `tests/support/apps.py` drop their
-   enforcement-mode setup. Suites that only touched the layer
+   enforcement-mode setup, and the lanes get a replacement for the
+   loudness strict mode provided: an autouse fixture in
+   `tests/conftest.py` that captures records on the
+   `vinga_server.*` channels and fails the test if any record's
+   `msg` is `REFUSAL_MESSAGE` (a refused emission anywhere in a
+   lane is a failing test, not a silent drop under a green suite).
+   The plan states this fixture, not strict mode, is what keeps the
+   lanes loud from now on; a test that deliberately drives a
+   refusal opts out by using the fixture's own allowance. Suites that only touched the layer
    incidentally (`test_event_typed_emit.py`,
    `test_event_surface_pins.py`, `test_event_docs.py`,
    `test_event_values.py`) migrate mechanically where they
