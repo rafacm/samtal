@@ -71,7 +71,7 @@ def unbound_config(**server) -> Config:
     return Config(
         providers=MOCK_PROVIDERS,
         agents={"assistant": MOCK_AGENT},
-        devices={BOUND_MAC: "assistant"},
+        devices={BOUND_MAC: ["assistant"]},
         server=server,
     )
 

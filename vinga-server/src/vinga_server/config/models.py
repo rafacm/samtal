@@ -1985,9 +1985,10 @@ def check_prompt_fragment_names(
 
 
 def normalize_device_bindings(value: object) -> object:
-    """The devices mapping with every MAC in its canonical form and
-    every binding a list. Anything that is not a mapping is left for
-    pydantic to report."""
+    """The devices mapping with every MAC in its canonical form, and
+    every binding held to the rules a list of agent names has to
+    satisfy. Anything that is not a mapping is left for pydantic to
+    report."""
     if not isinstance(value, dict):
         return value
     normalized: dict[str, object] = {}
@@ -1995,7 +1996,8 @@ def normalize_device_bindings(value: object) -> object:
         key = normalize_mac(str(mac))
         if key in normalized:
             raise ValueError(f'device "{mac}" appears more than once (as {key})')
-        normalized[key] = _binding_as_list(key, bound)
+        _check_binding(key, bound)
+        normalized[key] = bound
     return normalized
 
 
@@ -2395,19 +2397,20 @@ class Config(BaseModel):
         return [self.default_agent] if self.default_agent is not None else []
 
 
-def _binding_as_list(mac: str, bound: object) -> object:
-    """A device binding written as one agent name or as a list, normalized
-    to a list. Anything else is left for pydantic to report."""
-    names = [bound] if isinstance(bound, str) else bound
-    if not isinstance(names, list):
-        return bound
-    if not names:
+def _check_binding(mac: str, bound: object) -> None:
+    """The two rules one device's binding has to satisfy that its type
+    cannot state: at least one agent, and no agent named twice. A
+    binding written as anything but a list is left for pydantic to
+    report against the field's own type, which is where the shape a
+    binding has to have is declared."""
+    if not isinstance(bound, list):
+        return
+    if not bound:
         raise ValueError(f"devices.{mac}: bind the device to at least one agent")
     seen: set[str] = set()
-    for name in names:
+    for name in bound:
         if not isinstance(name, str):
             continue
         if name.strip() in seen:
             raise ValueError(f'devices.{mac}: agent "{name.strip()}" is listed more than once')
         seen.add(name.strip())
-    return names

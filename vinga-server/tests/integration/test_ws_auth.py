@@ -32,7 +32,7 @@ def bound_config() -> Config:
     return Config(
         providers=MOCK_PROVIDERS,
         agents={"assistant": MOCK_AGENT},
-        devices={DEVICE_MAC: "assistant"},
+        devices={DEVICE_MAC: ["assistant"]},
         default_agent="assistant",
     )
 

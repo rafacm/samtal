@@ -129,7 +129,7 @@ def test_unknown_device_falls_back_to_the_default_agent(
     config = Config(
         providers=MOCK_PROVIDERS,
         agents={"assistant": MOCK_AGENT, "kitchen": MOCK_AGENT},
-        devices={"11:22:33:44:55:66": "kitchen"},
+        devices={"11:22:33:44:55:66": ["kitchen"]},
         default_agent="assistant",
     )
     with caplog.at_level("INFO"):
@@ -145,7 +145,7 @@ def test_bound_device_resolves_to_its_own_agent(
     config = Config(
         providers=MOCK_PROVIDERS,
         agents={"assistant": MOCK_AGENT, "kitchen": MOCK_AGENT},
-        devices={DEVICE_MAC.lower(): "kitchen"},
+        devices={DEVICE_MAC.lower(): ["kitchen"]},
         default_agent="assistant",
     )
     with caplog.at_level("INFO"):
@@ -195,7 +195,7 @@ def test_dashed_and_uppercase_macs_resolve_the_same_device(
     config = Config(
         providers=MOCK_PROVIDERS,
         agents={"kitchen": MOCK_AGENT},
-        devices={"aa:bb:cc:dd:ee:ff": "kitchen"},
+        devices={"aa:bb:cc:dd:ee:ff": ["kitchen"]},
         default_agent="kitchen",
     )
     with caplog.at_level("INFO"):

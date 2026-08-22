@@ -56,7 +56,7 @@ CONFIG = Config(
     server={"database": {"dir": DATABASE_DIR}},
     providers=MOCK_PROVIDERS,
     agents={"assistant": MOCK_AGENT, "kitchen": MOCK_AGENT},
-    devices={DEVICE_MAC: "kitchen"},
+    devices={DEVICE_MAC: ["kitchen"]},
     default_agent="assistant",
 )
 

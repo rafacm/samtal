@@ -352,7 +352,7 @@ def test_the_token_is_still_signed_for_the_header_as_it_arrived(
     config = Config(
         providers=MOCK_PROVIDERS,
         agents={"assistant": MOCK_AGENT},
-        devices={NORMALIZED: "assistant"},
+        devices={NORMALIZED: ["assistant"]},
     )
     with entered_client(config) as client, caplog.at_level(logging.INFO):
         answered = client.post(

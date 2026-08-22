@@ -23,7 +23,7 @@ def bound_config(**overrides: object) -> Config:
             {
                 "providers": MOCK_PROVIDERS,
                 "agents": {"assistant": MOCK_AGENT},
-                "devices": {DEVICE_MAC.lower(): "assistant"},
+                "devices": {DEVICE_MAC.lower(): ["assistant"]},
             }
             | overrides
         )
@@ -75,7 +75,7 @@ def test_a_device_with_no_agent_gets_no_token() -> None:
     config = Config(
         providers=MOCK_PROVIDERS,
         agents={"assistant": MOCK_AGENT},
-        devices={"11:22:33:44:55:66": "assistant"},
+        devices={"11:22:33:44:55:66": ["assistant"]},
     )
     assert issued_token(config) == ""
 

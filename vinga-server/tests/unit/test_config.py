@@ -369,7 +369,7 @@ MOVED_SECTIONS: list[tuple[str, str, str]] = [
     ),
     ("agent_defaults", "agent_defaults:\n  llm: claude\n", "set agent-defaults"),
     ("agents", "agents:\n  assistant:\n    prompt: hi\n", "set agent"),
-    ("devices", 'devices:\n  "aa:bb:cc:dd:ee:ff": assistant\n', "bind-device"),
+    ("devices", 'devices:\n  "aa:bb:cc:dd:ee:ff":\n    - assistant\n', "bind-device"),
     ("default_agent", "default_agent: assistant\n", "set-default-agent"),
 ]
 
@@ -486,7 +486,7 @@ def test_bound_devices_make_default_agent_optional() -> None:
     config = load_config_from_data(
         {
             "agents": {"assistant": {}},
-            "devices": {"aa:bb:cc:dd:ee:ff": "assistant"},
+            "devices": {"aa:bb:cc:dd:ee:ff": ["assistant"]},
         }
     )
     assert config.default_agent is None
@@ -498,7 +498,7 @@ def test_device_bound_to_unknown_agent() -> None:
     data = {
         "agents": {"assistant": {}},
         "default_agent": "assistant",
-        "devices": {"aa:bb:cc:dd:ee:ff": "ghost"},
+        "devices": {"aa:bb:cc:dd:ee:ff": ["ghost"]},
     }
     with pytest.raises(ConfigError, match=r'devices\.aa:bb:cc:dd:ee:ff: agent "ghost"'):
         load_config_from_data(data)
@@ -662,7 +662,7 @@ def test_device_macs_are_normalized() -> None:
         {
             "agents": {"assistant": {}},
             "default_agent": "assistant",
-            "devices": {"AA-BB-CC-DD-EE-FF": "assistant"},
+            "devices": {"AA-BB-CC-DD-EE-FF": ["assistant"]},
         }
     )
     assert config.devices == {"aa:bb:cc:dd:ee:ff": ["assistant"]}
@@ -682,6 +682,41 @@ def test_a_device_can_be_bound_to_several_agents() -> None:
     # what M6's switch_agent will be allowed to reach.
     assert config.agents_for_device("aa:bb:cc:dd:ee:ff") == ["poet", "tutor"]
     assert config.agents_for_device("11:22:33:44:55:66") == ["kitchen"]
+
+
+def test_a_binding_written_as_one_name_is_refused() -> None:
+    """A binding is a list of agent names, and a bare string is not one
+    of them any more. Composing a configuration from a raw mapping is
+    the one route that reaches the field with something a write path
+    has not already shaped, so it is where the refusal is asked for,
+    and the refusal is the field's own type reported against the device
+    it was written under."""
+    data = {
+        "agents": {"assistant": {}},
+        "devices": {"aa:bb:cc:dd:ee:ff": "assistant"},
+    }
+    with pytest.raises(ConfigError) as excinfo:
+        load_config_from_data(data)
+
+    message = str(excinfo.value)
+    assert "devices.aa:bb:cc:dd:ee:ff" in message
+    assert "valid list" in message
+
+
+def test_a_binding_that_is_a_pasted_credential_is_not_repeated() -> None:
+    """The same refusal over the value an operator can most expensively
+    write there. What is rendered is the location and pydantic's own
+    sentence about the type, and the input is not part of either."""
+    data = {
+        "agents": {"assistant": {}},
+        "devices": {"aa:bb:cc:dd:ee:ff": PARSER_SENTINEL},
+    }
+    with pytest.raises(ConfigError) as excinfo:
+        load_config_from_data(data)
+
+    message = str(excinfo.value)
+    assert "devices.aa:bb:cc:dd:ee:ff" in message
+    assert PARSER_SENTINEL not in message
 
 
 def test_a_device_resolves_to_nothing_when_no_agent_is_configured() -> None:
@@ -722,14 +757,17 @@ def test_an_unknown_agent_in_a_device_list_is_rejected() -> None:
 
 def test_invalid_mac_is_rejected() -> None:
     with pytest.raises(ConfigError, match="not a MAC address"):
-        load_config_from_data({"devices": {"not-a-mac": "assistant"}})
+        load_config_from_data({"devices": {"not-a-mac": ["assistant"]}})
 
 
 def test_colliding_macs_are_rejected() -> None:
     data = {
         "agents": {"assistant": {}},
         "default_agent": "assistant",
-        "devices": {"AA:BB:CC:DD:EE:FF": "assistant", "aa-bb-cc-dd-ee-ff": "assistant"},
+        "devices": {
+            "AA:BB:CC:DD:EE:FF": ["assistant"],
+            "aa-bb-cc-dd-ee-ff": ["assistant"],
+        },
     }
     with pytest.raises(ConfigError, match="more than once"):
         load_config_from_data(data)
@@ -743,7 +781,7 @@ def test_normalize_mac_rejects_garbage() -> None:
 def test_multiple_problems_reported_together() -> None:
     data = {
         "agents": {"assistant": {"llm": "ghost"}},
-        "devices": {"aa:bb:cc:dd:ee:ff": "nobody"},
+        "devices": {"aa:bb:cc:dd:ee:ff": ["nobody"]},
         "default_agent": "also-nobody",
     }
     with pytest.raises(ConfigError) as excinfo:
