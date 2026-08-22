@@ -109,14 +109,15 @@ its first row.
 
 The two halves of that strip are in different states, which is worth knowing
 before reading a row. The three text fields no longer reach the events at all,
-so stripping them is defense in depth and the rule that reads a database
-written before the narrowing. `tool` does still reach `tool_call`, on the one
-branch that names a tool this server authored itself (a builtin); the strip
-removes it from the row anyway, so every name a call carries lives on
-`tool_invocations` under the text switch rather than in two tables under two
-rules. A called tool's name is content for the same reason its result is,
-since it is usually a device's self-description or an MCP server's vocabulary
-rather than anything this server authored.
+so stripping them is defense in depth on the way in: it is applied where a row
+is written and by no read, so it says what lands in a database this server
+wrote and nothing about one written before the narrowing. `tool` does still
+reach `tool_call`, on the one branch that names a tool this server authored
+itself (a builtin); the strip removes it from the row anyway, so every name a
+call carries lives on `tool_invocations` under the text switch rather than in
+two tables under two rules. A called tool's name is content for the same
+reason its result is, since it is usually a device's self-description or an
+MCP server's vocabulary rather than anything this server authored.
 
 ## The OpenTelemetry GenAI correspondence
 
