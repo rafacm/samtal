@@ -58,7 +58,6 @@ from vinga_server.events.catalog import (
 )
 from vinga_server.events.values import (
     CaptureWrite,
-    CaptureWriteToken,
     ClassName,
     ConfiguredPath,
     Count,
@@ -261,7 +260,7 @@ class SessionCapture:
         events.emit(
             lambda: CaptureFailed(
                 session=SessionId(self._session_id),
-                reason=CaptureWriteToken(doing),
+                reason=doing,
                 failure=ClassName.of(exc),
             )
         )

@@ -522,7 +522,7 @@
         },
         {
           "name": "reason",
-          "type": "CloseReasonToken",
+          "type": "CloseReason",
           "required": true,
           "nullable": false,
           "tokens": [
@@ -1231,7 +1231,7 @@
         },
         {
           "name": "outcome",
-          "type": "ProviderOutcomeToken"
+          "type": "ProviderOutcome"
         },
         {
           "name": "duration_s",
@@ -1309,7 +1309,7 @@
         },
         {
           "name": "outcome",
-          "type": "ProviderOutcomeToken"
+          "type": "ProviderOutcome"
         },
         {
           "name": "duration_s",
@@ -1417,7 +1417,7 @@
         },
         {
           "name": "outcome",
-          "type": "ToolOutcomeToken"
+          "type": "ToolOutcome"
         }
       ],
       "fields": [
@@ -1496,7 +1496,7 @@
         },
         {
           "name": "outcome",
-          "type": "ToolOutcomeToken"
+          "type": "ToolOutcome"
         }
       ],
       "fields": [
@@ -1575,7 +1575,7 @@
         },
         {
           "name": "outcome",
-          "type": "ToolOutcomeToken"
+          "type": "ToolOutcome"
         }
       ],
       "fields": [
@@ -2564,7 +2564,7 @@
       "arguments": [
         {
           "name": "refusal",
-          "type": "OtaRefusalToken"
+          "type": "OtaRefusal"
         }
       ],
       "fields": [
@@ -2606,7 +2606,7 @@
         },
         {
           "name": "origin_source",
-          "type": "OriginSourceToken",
+          "type": "OriginSource",
           "required": true,
           "nullable": false,
           "tokens": [
@@ -2651,7 +2651,7 @@
         },
         {
           "name": "origin_source",
-          "type": "OriginSourceToken",
+          "type": "OriginSource",
           "required": true,
           "nullable": false,
           "tokens": [
@@ -2734,7 +2734,7 @@
       "arguments": [
         {
           "name": "reason",
-          "type": "AuthRejectionToken"
+          "type": "AuthRejection"
         }
       ],
       "fields": [
@@ -2752,7 +2752,7 @@
         },
         {
           "name": "reason",
-          "type": "AuthRejectionToken",
+          "type": "AuthRejection",
           "required": true,
           "nullable": false,
           "tokens": [
@@ -3021,7 +3021,7 @@
         },
         {
           "name": "transport",
-          "type": "McpTransportToken",
+          "type": "McpTransport",
           "required": true,
           "nullable": false,
           "tokens": [
@@ -3257,7 +3257,7 @@
       "arguments": [
         {
           "name": "reason",
-          "type": "McpRefusalToken"
+          "type": "McpRefusal"
         }
       ],
       "fields": [
@@ -3278,7 +3278,7 @@
         },
         {
           "name": "reason",
-          "type": "McpRefusalToken",
+          "type": "McpRefusal",
           "required": true,
           "nullable": false,
           "tokens": [
@@ -3649,7 +3649,7 @@
         },
         {
           "name": "reason",
-          "type": "CaptureWriteToken"
+          "type": "CaptureWrite"
         },
         {
           "name": "failure",
@@ -3671,7 +3671,7 @@
         },
         {
           "name": "reason",
-          "type": "CaptureWriteToken",
+          "type": "CaptureWrite",
           "required": true,
           "nullable": false,
           "tokens": [

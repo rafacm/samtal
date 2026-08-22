@@ -54,7 +54,6 @@ from vinga_server.events.values import (
     FirmwareVersion,
     Identifier,
     OtaRefusal,
-    OtaRefusalToken,
     PendingRefusal,
     ReportedMac,
 )
@@ -366,7 +365,7 @@ def _bad_request(message: OtaRefusal) -> JSONResponse:
     interpolated into either channel, which is what keeps a header this
     endpoint could not read out of the log a deployment ships.
     """
-    events.emit(lambda: OtaRequestRejected(refusal=OtaRefusalToken(message)))
+    events.emit(lambda: OtaRequestRejected(refusal=message))
     return JSONResponse({"error": message}, status_code=400)
 
 

@@ -47,7 +47,7 @@ from vinga_server.config.loader import (
 from vinga_server.config.responses import McpReloadResult
 from vinga_server.config.secrets import SecretStore
 from vinga_server.events.catalog import McpReloadApplied, McpReloadRefused
-from vinga_server.events.values import Count, McpRefusalToken, Whole
+from vinga_server.events.values import Count, McpRefusal, Whole
 
 from . import events
 from .manager import McpConfigError, McpManager, McpServerManager, _managers_for, _stopped
@@ -157,7 +157,11 @@ def refused(exc: BaseException) -> None:
     afterwards, and what it has to answer is that the servers are as
     they were.
     """
-    events.emit(lambda: McpReloadRefused(reason=McpRefusalToken(_refusal(exc))))
+    # `_refusal` answers one of this module's own `REFUSED_*`
+    # constants, which are package surface a caller reads; the lookup
+    # that crosses them into the event vocabulary belongs here rather
+    # than in their definitions.
+    events.emit(lambda: McpReloadRefused(reason=McpRefusal(_refusal(exc))))
 
 
 def _prepared(

@@ -37,7 +37,7 @@ from vinga_server.events.values import (  # noqa: E402
     Count,
     Identifier,
     McpConnectFailure,
-    McpTransportToken,
+    McpTransport,
     Whole,
 )
 from vinga_server.providers import ToolDef
@@ -589,7 +589,9 @@ class McpServerManager:
                 events.emit(
                     lambda: McpConnected(
                         entry=Identifier(self._name),
-                        transport=McpTransportToken(self._config.transport),
+                        # The configured transport is the config model's
+                        # own literal, read into the event vocabulary here.
+                        transport=McpTransport(self._config.transport),
                         tools=Count(published),
                         duration_ms=Whole(round((time.monotonic() - began) * 1000)),
                     )

@@ -88,13 +88,11 @@ from vinga_server.events.values import (
     Nothing,
     PromptSources,
     ProviderOutcome,
-    ProviderOutcomeToken,
     QuotedProvider,
     QuotedToolName,
     ReachingHost,
     Real,
     ToolOutcome,
-    ToolOutcomeToken,
     UnnamedToolSource,
     Whole,
 )
@@ -243,7 +241,7 @@ def _tool_called(
     on the store's `tool_invocations` row, where the text switch decides
     whether it is kept.
     """
-    outcome = ToolOutcomeToken(ToolOutcome.FAILED if is_error else ToolOutcome.ANSWERED)
+    outcome = ToolOutcome.FAILED if is_error else ToolOutcome.ANSWERED
     duration_ms = Whole(round(duration_s * 1000))
     if classified.source == BUILTIN:
         return BuiltinToolCall(
@@ -385,7 +383,7 @@ def _provider_failure(
     `openai.APITimeoutError` is an `APIConnectionError` and
     `httpx.TimeoutException` inherits from neither.
     """
-    outcome = ProviderOutcomeToken(
+    outcome = (
         ProviderOutcome.TIMED_OUT
         if isinstance(failure, TimeoutError)
         else ProviderOutcome.FAILED

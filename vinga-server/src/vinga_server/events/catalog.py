@@ -63,14 +63,14 @@ from vinga_server.events.values import (
     AgentNames,
     AlsoBoundTo,
     ArgKind,
-    AuthRejectionToken,
+    AuthRejection,
     BoardName,
     CaptureDeclined,
-    CaptureWriteToken,
+    CaptureWrite,
     ClassName,
     ClassNames,
     ClientId,
-    CloseReasonToken,
+    CloseReason,
     ConfiguredPath,
     Count,
     DeviceId,
@@ -89,17 +89,17 @@ from vinga_server.events.values import (
     LanguageTag,
     McpConnectFailure,
     McpDown,
-    McpRefusalToken,
+    McpRefusal,
     McpReloadOutcome,
-    McpTransportToken,
+    McpTransport,
     Nothing,
     NotOffered,
     OriginProvenance,
-    OriginSourceToken,
-    OtaRefusalToken,
+    OriginSource,
+    OtaRefusal,
     PendingRefusal,
     PromptSources,
-    ProviderOutcomeToken,
+    ProviderOutcome,
     QuotedProvider,
     QuotedToolName,
     ReachingHost,
@@ -110,7 +110,7 @@ from vinga_server.events.values import (
     SessionIds,
     SessionList,
     Suppression,
-    ToolOutcomeToken,
+    ToolOutcome,
     ToolSource,
     UnnamedToolSource,
     Whole,
@@ -1100,7 +1100,7 @@ class SessionClosed(Variant):
     ARGS: ClassVar[tuple[str, ...]] = ("session", "mac")
 
     duration_s: Real = value()
-    reason: CloseReasonToken = value(
+    reason: CloseReason = value(
         note=(
             "The first cause to fire, so a drain closing a session an "
             "idle timer was about to hang up on reads `drain`."
@@ -1348,7 +1348,7 @@ class ProviderFailed(Variant):
     duration_ms: Whole = value()
     stage: Identifier = value()
     named: Nothing = value(carried=False)
-    outcome: ProviderOutcomeToken = value(carried=False)
+    outcome: ProviderOutcome = value(carried=False)
     duration_s: Real = value(carried=False)
     where: Nothing = value(carried=False)
 
@@ -1380,7 +1380,7 @@ class ProviderOfEntryFailed(Variant):
     provider: Identifier = value()
     type: Identifier = value()
     named: QuotedProvider = value(carried=False)
-    outcome: ProviderOutcomeToken = value(carried=False)
+    outcome: ProviderOutcome = value(carried=False)
     duration_s: Real = value(carried=False)
     where: ReachingHost = value(carried=False)
     host: Identifier | Absent = value(default=ABSENT)
@@ -1410,7 +1410,7 @@ class BuiltinToolCall(Variant):
     is_error: Flag = value()
     named: QuotedToolName = value(carried=False)
     duration_s: Real = value(carried=False)
-    outcome: ToolOutcomeToken = value(carried=False)
+    outcome: ToolOutcome = value(carried=False)
 
 
 @dataclass(frozen=True)
@@ -1437,7 +1437,7 @@ class McpToolCall(Variant):
     is_error: Flag = value()
     named: FromEntry = value(carried=False)
     duration_s: Real = value(carried=False)
-    outcome: ToolOutcomeToken = value(carried=False)
+    outcome: ToolOutcome = value(carried=False)
 
 
 @dataclass(frozen=True)
@@ -1465,7 +1465,7 @@ class UnnamedToolCall(Variant):
     is_error: Flag = value()
     named: Nothing = value(carried=False)
     duration_s: Real = value(carried=False)
-    outcome: ToolOutcomeToken = value(carried=False)
+    outcome: ToolOutcome = value(carried=False)
 
 
 # --- runtime/turntaking.py: who is talking ---------------------------
@@ -1968,7 +1968,7 @@ class OtaRequestRejected(Variant):
     TEMPLATE: ClassVar[str] = "rejected OTA request: %s"
     ARGS: ClassVar[tuple[str, ...]] = ("refusal",)
 
-    refusal: OtaRefusalToken = value(carried=False)
+    refusal: OtaRefusal = value(carried=False)
 
 
 # --- onboarding/: the banner and the short path -----------------------
@@ -1989,7 +1989,7 @@ class OnboardingOff(Variant):
     ARGS: ClassVar[tuple[str, ...]] = ("origin", "provenance")
 
     origin: Identifier = value()
-    origin_source: OriginSourceToken = value()
+    origin_source: OriginSource = value()
     onboarding: Flag = value(fixed=Flag(False))
     provenance: OriginProvenance = value(carried=False)
 
@@ -2009,7 +2009,7 @@ class OnboardingOn(Variant):
     ARGS: ClassVar[tuple[str, ...]] = ("origin", "provenance")
 
     origin: Identifier = value()
-    origin_source: OriginSourceToken = value()
+    origin_source: OriginSource = value()
     onboarding: Flag = value(fixed=Flag(True))
     keyed: Flag = value(
         note=(
@@ -2069,7 +2069,7 @@ class AuthRejected(Variant):
     ARGS: ClassVar[tuple[str, ...]] = ("reason",)
 
     device: DeviceId | None = value()
-    reason: AuthRejectionToken = value()
+    reason: AuthRejection = value()
 
 
 # --- providers/openai_asr.py: the prompt-echo guard -------------------
@@ -2206,7 +2206,7 @@ class McpConnected(Variant):
     ARGS: ClassVar[tuple[str, ...]] = ("entry", "tools")
 
     entry: Identifier = value()
-    transport: McpTransportToken = value()
+    transport: McpTransport = value()
     tools: Count = value(note="A count, never a list.")
     duration_ms: Whole = value()
 
@@ -2317,7 +2317,7 @@ class McpReloadRefused(Variant):
     ARGS: ClassVar[tuple[str, ...]] = ("reason",)
 
     outcome: McpReloadOutcome = value(fixed=McpReloadOutcome.REFUSED)
-    reason: McpRefusalToken = value(
+    reason: McpRefusal = value(
         note=(
             "Chosen where the exception is classified and never built out "
             "of its message."
@@ -2479,7 +2479,7 @@ class CaptureFailed(Variant):
     ARGS: ClassVar[tuple[str, ...]] = ("session", "reason", "failure")
 
     session: SessionId = value()
-    reason: CaptureWriteToken = value(
+    reason: CaptureWrite = value(
         note="Which of the recording's two tracks the write was for."
     )
     failure: ClassName = value()
