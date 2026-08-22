@@ -9,6 +9,15 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **The README's status marks caught up with the code.** The warning
+  block still described the pre-vinga demo (upstream firmware and
+  upstream server); the loop has run on vinga's own server for a
+  while, so it says that now. The Pluggable LLM bullet loses its 🚧
+  (the anthropic, openai_compatible, and openai providers all exist),
+  and Features gains the bullet the repository description promised:
+  configurable agents, several per device, switchable mid-conversation
+  through the builtin `switch_agent` tool.
+
 - **The credits say what was actually taken from the upstream
   server.** vinga-server was written against the firmware's protocol
   docs (now hyperlinked where mentioned), not started from the
