@@ -82,7 +82,7 @@ and discoveries; no deviations says so explicitly.
    is harmless; only the infra repository's ConfigMap remains a
    separate cleanup, recorded as a follow-up note in the
    implementation doc.
-5. **The pins move deliberately, all four.**
+5. **The pins move deliberately, all five.**
    `docs/reference/events.md` loses the `schema_violation` section,
    its per-channel variants, its index row, the header prose that
    names the env var, and the internal half of the header's
@@ -90,8 +90,15 @@ and discoveries; no deviations says so explicitly.
    event baseline loses nothing (the internal event was exempt from
    driving, verified in the milestone rather than assumed); the
    docgen loses whatever prose renders the enforcement mechanics.
-   Each regenerated artifact is a reviewed diff produced by its own
-   script, and the reference regeneration is CI-checked as always.
+   The fifth pin is hand-written: `vinga-server/README.md` carries
+   a `schema_violation` row in its events index, which three docs
+   tests hold against the catalog in both directions, and a Logging
+   paragraph documenting the variable, both defaults, the recovery
+   event and the boot refusal; the row and the paragraph go, and
+   `test_an_unusable_enforcement_value_does_not_block_the_reference`
+   is deleted with the machinery it exercises. Each regenerated
+   artifact is a reviewed diff produced by its own script, and the
+   reference regeneration is CI-checked as always.
 6. **The test surface follows the deleted surface down.**
    `test_event_enforcement_mode.py` is deleted whole.
    `test_event_enforcement_sentinels.py` is split by what each test
