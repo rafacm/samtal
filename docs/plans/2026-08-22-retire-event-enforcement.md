@@ -229,7 +229,8 @@ and discoveries; no deviations says so explicitly.
 
 ## Milestones
 
-- [ ] **M1: retire the layer whole.** (PR TBD) One milestone: the
+- [x] **[M1: retire the layer whole.](2026-08-22-retire-event-enforcement-implementation.md#m1-retire-the-layer-whole)**
+  (PR TBD) One milestone: the
   deletion is one behavior change and splitting it would leave a
   merge where the modes exist but nothing declares the recovery
   event, which is not a state `main` should release. Deepens
