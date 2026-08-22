@@ -215,7 +215,7 @@ worth remembering when it is made.
 
 External review of the PR diff: claude backend (codex quota exhausted),
 claude CLI, model `claude-opus-5`, read-only tool set, 2026-08-22,
-posted on the PR. Verdict: mergeable after the listed fixes, with the
+[posted on the PR](https://github.com/rafacm/vinga/pull/258#issuecomment-5382331047). Verdict: mergeable after the listed fixes, with the
 behavior change itself confirmed correct and complete against the plan
 (the guarded region contains no `raise`, both emitters drop on `None`,
 the clock read survives the drop path, the identifier grep is clean, the
