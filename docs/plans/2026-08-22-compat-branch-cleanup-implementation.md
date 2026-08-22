@@ -354,9 +354,15 @@ mask).
 Three bites in `tests/unit/test_providers_llm.py`: the scheme-less,
 hostless and host-without-scheme URLs refused at build with the shared
 sentence and the entry's own name; a credential-shaped `base_url`
-whose value is asserted absent from the refusal; and a round driven
-through an injected client for both a local endpoint and OpenAI's own,
-asserting `stream_options` is on one request and not the other.
+whose value is asserted absent from the refusal; and the usage bite,
+which is in two halves because a deployment's client is built inside
+the provider and handed to nobody. A factory-built entry is asserted to
+hold the host its own `base_url` names, for a local endpoint and for
+OpenAI's, and a round driven through an injected client for the same
+two hosts asserts `stream_options` is on one request and not the other.
+The halves meet at the host, which is the whole of what the decision is
+taken on, so a factory that passed the default URL rather than the
+entry's fails the first half.
 
 **The events strip is described as what it is.** Three sentences
 corrected, in `conversations/store.py` (the module docstring and the
@@ -417,7 +423,9 @@ corrected.
    at all (`grep -rn "stream_options\|_ask_for_usage" tests` found
    nothing before this commit), so the bite drives a round against both
    a local endpoint and OpenAI's own: absence alone would pass for a
-   provider that never asks anybody.
+   provider that never asks anybody. The factory half was added in the
+   review round, since a round through an injected client says nothing
+   about which URL the factory handed the provider.
 3. **Two docstrings in `openai_endpoint.py`.** The plan allows
    "docstring truth only, if at all". The module docstring said the LLM
    stage takes only the host from the shared module, which stopped

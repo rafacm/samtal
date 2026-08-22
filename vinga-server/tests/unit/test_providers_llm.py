@@ -17,6 +17,7 @@ from vinga_server.config.models import ProviderConfig
 from vinga_server.providers import LlmProvider, ProviderError, TextDelta, Turn, build_entry
 from vinga_server.providers.anthropic_llm import AnthropicLlm
 from vinga_server.providers.kit import DEFAULT_TIMEOUT_S, MAX_RETRIES
+from vinga_server.providers.openai_endpoint import OPENAI_HOST
 from vinga_server.providers.openai_llm import OpenAiCompatibleLlm, chat_messages
 
 
@@ -193,7 +194,28 @@ async def test_a_compatible_endpoint_is_not_asked_for_token_counts() -> None:
     not to know, so asking a self-hosted endpoint for usage could fail a
     conversation to enrich a log line. The host decides, which is why
     the same round against OpenAI's own asks: a refusal added at the
-    factory must not have moved that answer for either of them."""
+    factory must not have moved that answer for either of them.
+
+    Two halves, because a deployment's client is built inside the
+    provider and handed to nobody, so no request a factory-built entry
+    sends can be read without reaching into it. What can be read is the
+    host it was built with, which is the whole of what the decision
+    below is taken on, so the halves meet there: the factory hands the
+    entry's own `base_url` through, and a provider holding that host
+    shapes the request this way. A factory that passed the default URL
+    instead of what the entry wrote would fail the first half."""
+    for name, base_url, host in (
+        ("local", "http://localhost:11434/v1", "localhost"),
+        ("hosted", "https://api.openai.com/v1", OPENAI_HOST),
+    ):
+        built = await build_entry(
+            "llm",
+            name,
+            provider_config(type="openai_compatible", base_url=base_url, model="qwen3:8b"),
+        )
+        assert isinstance(built, OpenAiCompatibleLlm)
+        assert built.host == host
+
     local = FakeCompletions([FakeChunk([FakeChoice(FakeDelta(content="Said."))])])
     openai = FakeCompletions([FakeChunk([FakeChoice(FakeDelta(content="Said."))])])
 
