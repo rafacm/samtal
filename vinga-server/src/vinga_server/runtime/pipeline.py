@@ -102,6 +102,7 @@ from vinga_server.generation import Generation, Generations
 from vinga_server.providers import (
     AgentProviders,
     AsrResult,
+    LlmEvent,
     StreamStarted,
     TextDelta,
     ToolCall,
@@ -742,8 +743,8 @@ class PipelineRuntime:
             yield event
 
     async def _watchdog_stream(
-        self, provider: object, make_stream: Callable[[], AsyncIterator[Any]]
-    ) -> AsyncIterator[Any]:
+        self, provider: object, make_stream: Callable[[], AsyncIterator[LlmEvent]]
+    ) -> AsyncIterator[LlmEvent]:
         """An LLM stream whose wait for the first event is bounded.
 
         Nothing used to bound the gap between sending the request and
@@ -1267,29 +1268,31 @@ class PipelineRuntime:
                     providers.llm,
                     functools.partial(providers.llm.stream, system, working, tools, choice),
                 ):
-                    if isinstance(event, StreamStarted):
-                        # Liveness, not content. The watchdog consumes
-                        # the one the adapters yield; this keeps the
-                        # loop indifferent should one arrive anyway.
-                        continue
-                    if isinstance(event, TextDelta):
-                        # Speech only, and speech that is not just
-                        # whitespace. Both providers assemble tool
-                        # calls and usage after their stream has ended,
-                        # so timing from those would report a whole
-                        # generation as its own time to first token,
-                        # and a round that only calls a tool has no
-                        # first token to time.
-                        if first_token_at is None and event.text.strip():
-                            first_token_at = loop.time()
-                        for sentence in splitter.push(event.text):
-                            speaking = await self._speak_after(
-                                speaking, sentence, providers.tts, resampler, leg, spoken
-                            )
-                    elif isinstance(event, Usage):
-                        usage = event
-                    else:
-                        calls.append(event)
+                    match event:
+                        case StreamStarted():
+                            # Liveness, not content. The watchdog
+                            # consumes the one the adapters yield; this
+                            # keeps the loop indifferent should one
+                            # arrive anyway.
+                            continue
+                        case TextDelta(text=text):
+                            # Speech only, and speech that is not just
+                            # whitespace. Both providers assemble tool
+                            # calls and usage after their stream has
+                            # ended, so timing from those would report a
+                            # whole generation as its own time to first
+                            # token, and a round that only calls a tool
+                            # has no first token to time.
+                            if first_token_at is None and text.strip():
+                                first_token_at = loop.time()
+                            for sentence in splitter.push(text):
+                                speaking = await self._speak_after(
+                                    speaking, sentence, providers.tts, resampler, leg, spoken
+                                )
+                        case Usage():
+                            usage = event
+                        case _:
+                            calls.append(event)
                 # The earliest point the model's calls exist: both
                 # adapters assemble them after their stream has ended.
                 # Reserved here rather than at the dispatch because

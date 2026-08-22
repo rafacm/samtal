@@ -47,6 +47,17 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   `agent-defaults`, `set-default-agent`), the named thing instead of
   the generic "voice assistant". README and AGENTS.md prose follow.
 
+- **The LLM event loop dispatches with `match`** (#235). The reply
+  round in `runtime/pipeline.py` read its provider stream through an
+  `isinstance` chain; it now states the same four fates for the same
+  four event shapes as `match` arms, with the everything-else
+  tool-call arm spelled out as `case _:`, which is the idiom the
+  device edge already dispatches its protocol messages in. The stream
+  the loop consumes is annotated `AsyncIterator[LlmEvent]`, which is
+  what its docstring and its one caller already said it was. Nothing
+  an operator sees changed: the same events with the same fields, and
+  the same speech.
+
 ## 2026-08-21
 
 ### Added
