@@ -326,10 +326,12 @@ FROM_ENTRY = Grammar(
 
 QUOTED_PROVIDER = Grammar(
     "quoted_provider",
-    r' "[\s\S]+"',
+    r'(?: "[\s\S]+")?',
     ("vinga_server.events.values:QuotedProvider.of",),
     "The configuration entry the failing provider is, bounded by the "
-    "quoting alone.",
+    "quoting alone, and empty for a provider the registry never built. "
+    "Optional for the reason the host tail below is: one variant says "
+    "both, and a rendered position cannot be absent.",
 )
 
 REACHING_HOST = Grammar(
@@ -1266,13 +1268,18 @@ class FromEntry(Fragment):
 
 @dataclass(frozen=True)
 class QuotedProvider(Fragment):
-    """The configuration entry a failing provider is, quoted."""
+    """The configuration entry a failing provider is, quoted, and
+    nothing at all for a provider the registry never built."""
 
     GRAMMAR: ClassVar[Grammar | None] = QUOTED_PROVIDER
 
     @classmethod
-    def of(cls, entry: str) -> "QuotedProvider":
-        return cls(f' "{entry}"')
+    def of(cls, entry: str | None) -> "QuotedProvider":
+        """Optional exactly as `ReachingHost` is: the same sentence
+        reports a failure on a provider with a configured entry and on
+        one that has none, and a position the template renders cannot
+        be absent."""
+        return cls(f' "{entry}"' if entry is not None else "")
 
 
 @dataclass(frozen=True)
