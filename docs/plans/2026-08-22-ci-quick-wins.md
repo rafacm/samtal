@@ -186,8 +186,9 @@ lint/mypy/doc-drift/wheel seconds; critical path 12m45s.
   `image` needs both. Deepens nothing and moves nothing but YAML;
   `main` stays releasable because every step still runs, just in
   two lanes.
-- [ ] **M2: shrink the four slow drivers' waits in the baseline
-  harness.** (PR TBD) Harness-local stall values and the
+- [x] **[M2: shrink the four slow drivers' waits in the baseline
+  harness](2026-08-22-ci-quick-wins-implementation.md#m2-shrink-the-four-slow-drivers-waits-in-the-baseline-harness).**
+  (PR TBD) Harness-local stall values and the
   `unregistered()` config parameter per decisions 2 and 4;
   committed baseline byte-still; the four drivers each under one
   second and capture() setup around 17 seconds.
