@@ -69,9 +69,10 @@ Reasons, against the smaller-enum alternative:
   and two structures that must agree are one structure with a bug
   pending. A `Literal` names the parent's members, so there is
   nothing to drift.
-- mypy checks a `Literal` of enum members statically, which is the
-  whole point of the issue: passing `ToolSource.BUILTIN` where the
-  annotation says `UnnamedToolSource` is an error at the site.
+- mypy checks a `Literal` of enum members statically wherever mypy
+  looks (which today is the events package alone; the honest scope
+  is stated under design decision 5), and the alias documents the
+  narrowing in one greppable name either way.
 - The members remain members of the parent enum, so nothing about
   the enumerations themselves moves.
 
@@ -131,14 +132,19 @@ section.
 4. **`value(fixed=...)` and `Declared.fixed` widen** to admit a
    StrEnum member, so `value(fixed=Rejection.BAD_DEVICE_ID)` replaces
    `value(fixed=RejectionToken(Rejection.BAD_DEVICE_ID))`.
-5. **The mypy scope does not change.** Strict mypy runs over
-   `src/vinga_server/events` only (pyproject `[tool.mypy]`), so the
-   static guarantee lands fully inside the package (every `fixed=`
-   value, the catalog declarations) and at the decision sites that
-   adopt the narrowed aliases; emit sites outside the package remain
-   runtime-checked by `verify()`, as they are today. Widening mypy to
-   the whole tree is its own decision with its own cost and is not
-   smuggled into this issue.
+5. **The mypy scope does not change, and the static gain is stated
+   plainly.** Strict mypy runs over `src/vinga_server/events` only
+   (pyproject `[tool.mypy]`), so the static gain of this change is
+   the declarations' internal consistency inside that package and
+   nothing more. Every emit site sits outside the scope, so no site
+   gets a mypy error from a bad token; and `value()` is annotated
+   `-> Any`, so a `fixed=` member is invisible to mypy even inside
+   the scope (it is checked at import instead, per design decision
+   8). `verify()` inside the emit guard remains the enforcement
+   everywhere, exactly as it is today. The `Literal` aliases are
+   chosen for the no-drift reason alone, not for site-level
+   checking. Widening mypy to the whole tree is its own decision
+   with its own cost and is not smuggled into this issue.
 6. **`Kind.TOKEN` and `ArgKind.TOKEN` stay.** The reference's kind
    vocabulary is reader-facing and unchanged.
 7. **The pins move deliberately or not at all.**
@@ -352,6 +358,13 @@ findings 4 to 8 amendable in place. Findings condensed but faithful:
    so a `fixed=` member is invisible to mypy. Decision 5 should
    claim only the declarations' internal consistency and name
    `verify()` as the backstop everywhere else.
+   *Resolution* (amendment `F4`): design decision 5 now claims only
+   the declarations' internal consistency inside the mypy scope,
+   names `value()`'s `Any` return as hiding `fixed=` from mypy, and
+   states that the `Literal` aliases are chosen for the no-drift
+   reason alone; the open-questions bullet making the site-level
+   claim is corrected likewise.
+
 5. **P2: migrating the fixed fields removes an import-time refusal
    and puts nothing in its place.** Today the wrapper constructor
    raises at import for a member outside the set; after the change
