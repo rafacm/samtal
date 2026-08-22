@@ -1236,6 +1236,12 @@ class LlmRound(Variant):
     LEVEL: ClassVar[int] = logging.INFO
     TEMPLATE: ClassVar[str] = "session %s: %s round %d took %.2f s over %d turns"
     ARGS: ClassVar[tuple[str, ...]] = ("session", "agent", "round", "duration_s", "turns")
+    NOTE: ClassVar[str] = (
+        "`provider` and `type` are atomic: a provider with an identity "
+        "carries both, and one the registry never built carries neither. "
+        "`host` is absent for an engine that runs in this process and "
+        "`model` for a type that has none to name."
+    )
 
     agent: Identifier = value()
     round: Whole = value(
