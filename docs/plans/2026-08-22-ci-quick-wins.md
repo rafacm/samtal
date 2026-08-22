@@ -36,11 +36,21 @@ Per-driver timing of the harness (2026-08-22, this machine): 86.4s
 total over 81 drivers. The skew is four drivers: the three
 `FillerRunner._fire` drivers at 20.02s each and the
 `PipelineRuntime._watchdog_stream` driver at 10.07s; the remaining 77
-drivers sum to about 16s. The three filler drivers hold a reply from
-`StallingLlm([STALL_S])` with `STALL_S = 30.0` from
-`tests/support/providers.py`, and their 20s is the bound that cuts
-the stalled reply off, not the stall itself; the watchdog driver
-waits out a real 10s stream watchdog from `watchdog_config`.
+drivers sum to about 16s. Both slow numbers are one mechanism: the
+production default `llm_first_token_timeout_s = 10.0`
+(`config/models.py`). The three filler drivers hold a reply from
+`StallingLlm([STALL_S])` (`STALL_S = 30.0`,
+`tests/support/providers.py`) and their 20.02s is two consecutive
+watchdog windows, a 10s timeout, one retry, a second 10s timeout,
+after which the round is given up; `masked_config()` does not
+override the server section, so the default applies. The 10.07s
+watchdog driver is `drive_llm_retry`'s second scenario, which runs
+against `unregistered(...)`, and `unregistered()` hardcodes
+`base_config()`, so the same 10s default applies there while the
+scenario's first half already runs at `watchdog_config()`'s 0.05s.
+The M2 fix for that driver is to let `unregistered()` take the
+config its caller wants and pass `watchdog_config()`, bringing both
+scenarios to 0.05s.
 
 CI job timings (run 32583062338): unit 7m46s, integration 4m34s,
 lint/mypy/doc-drift/wheel seconds; critical path 12m45s.
