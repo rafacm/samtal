@@ -307,6 +307,7 @@ def test_a_fragment_is_built_by_the_type_that_declares_its_grammar() -> None:
     assert QuotedToolName.of("remember").carried() == ' "remember"'
     assert FromEntry.of("tools").carried() == ' from entry "tools"'
     assert QuotedProvider.of("cloud").carried() == ' "cloud"'
+    assert QuotedProvider.of(None).carried() == ""
     assert ReachingHost.of("api.example.com").carried() == " reaching api.example.com"
     assert ReachingHost.of(None).carried() == ""
     assert Nothing("").carried() == ""
@@ -322,6 +323,7 @@ def test_a_fragment_is_built_by_the_type_that_declares_its_grammar() -> None:
         lambda: AgentList(""),
         lambda: QuotedToolName("remember"),
         lambda: FromEntry(' "tools"'),
+        lambda: QuotedProvider("cloud"),
         lambda: ReachingHost("api.example.com"),
         lambda: DeviceOrUnidentified("a device nobody knows"),
     ],
