@@ -255,11 +255,13 @@ section.
   guard (`McpDown`'s six values are exactly the transport module's
   six constants, and the `McpConnectFailure` subset is exactly the
   four connect-phase ones).
-  Existing suites that construct wrappers
-  (`test_event_catalog.py`, `test_ota_tokens.py`,
-  `test_session_watchdog.py`, `test_session_filler.py`,
-  `test_session_reply_failures.py`, `test_config_api.py`) migrate
-  mechanically to members.
+  The only other suite that constructs wrappers is
+  `test_event_catalog.py` (three sites); it migrates mechanically
+  to members. Every other suite is expected untouched: the matches
+  a bare `Token` grep finds elsewhere are `FirstTokenTimeout`, OTA
+  token issuance, and an `Authorization: Token` header, and that
+  the rest of the test tree does not move is itself part of the
+  claim that the surface did not.
 - Byte-identity: `uv run vinga-server events reference` diffed
   against the committed `docs/reference/events.md` (locally and by
   CI), and the baseline suite proving the committed records are what
@@ -403,6 +405,11 @@ findings 4 to 8 amendable in place. Findings condensed but faithful:
    `FirstTokenTimeout`, OTA token issuance, or an `Authorization:
    Token` header. Name the two that migrate and claim the rest
    untouched.
+   *Resolution* (amendment `F7`): the Tests section now names
+   `test_event_values.py` and `test_event_catalog.py` as the only
+   suites constructing wrappers and claims the rest of the tree
+   untouched, as part of the surface-did-not-move claim.
+
 8. **P2: the baseline pin does not cover payload-only token
    fields.** `event_baseline.py` records argument types and sorted
    payload key names only; a member left unconverted in a carried,
