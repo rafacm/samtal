@@ -33,17 +33,21 @@ and discoveries; no deviations says so explicitly.
 
 ## Design decisions this plan makes
 
-1. **A refused emission drops, after one plain report.** `_built`
-   keeps its shape: identities and the variant are constructed under
-   the guard, and a refusal is reported with the existing
-   `_report(log, ERROR, REFUSAL_MESSAGE, label, fault.rendered())`
-   line, whose vocabulary is registry-owned only (`Fault`,
-   `refusal_text`, `CONSTRUCTION_FAILED`, `WRONG_CHANNEL`,
-   `UNBUILT_LABEL`, `REFUSAL_MESSAGE` all stay). Nothing is
-   dispatched for a refused emission: the recovery event was the
-   forgiving mode's substitute, and with the modes gone there is
-   nothing to substitute. `SessionEvents.emit` still returns its
-   timestamp either way.
+1. **A refused emission drops, after one plain report.**
+   Identities and the variant are constructed under the guard, and
+   a refusal is reported with the existing
+   `_report(log, ERROR, REFUSAL_MESSAGE, label, code)` line, whose
+   vocabulary is registry-owned only (`CONSTRUCTION_FAILED`,
+   `WRONG_CHANNEL`, `UNBUILT_LABEL`, `REFUSAL_MESSAGE` stay).
+   Nothing is dispatched for a refused emission: the recovery event
+   was the forgiving mode's substitute, and with the modes gone
+   there is nothing to substitute. The mechanics, stated so they
+   are not discovered mid-milestone: `_built` answers
+   `Checked | None`, both emitters grow an early-return drop branch
+   on `None` before building an `Emission`, `SessionEvents.emit`
+   reads `self._clock()` before the drop decision so it returns its
+   timestamp either way, and `Checked`'s docstring drops its "or
+   the recovery event's" clause.
 2. **What existed only to feed the recovery payload goes with it.**
    `_replacement`, `SCHEMA_VIOLATION`, `SCHEMA_VIOLATION_MESSAGE`,
    the 14 generated `_violation_on` variants and their `internal`
