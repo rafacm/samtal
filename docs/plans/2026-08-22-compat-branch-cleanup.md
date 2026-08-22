@@ -127,14 +127,23 @@ backwards. The docgen change regenerates
 the drift check green.
 
 **Is the version-1 activation poll a branch to delete or to pin?** To
-pin. The early return in `_version_two` (`ota/poll.py`) is what lets
-a stock board polling without the version-2 header activate at all,
+pin, and the reach half of the pin already exists: the audit's "no
+test naming the header" was wrong.
+`test_a_version_one_body_is_accepted_as_it_is`
+(`test_onboarding_activation.py:360`) already drives the branch with
+`Activation-Version: 1`, which per `docs/xiaozhi-notes.md` is what a
+board without a burned serial actually sends (the header present
+with value 1, not absent; the absent case is separately exercised at
+`:342-347`), and the integration onboarding test polls the same way.
+What no test asserts is the branch's consequence, and that is the
+bite: extend the existing test to assert `ActivationPending` carries
+the waiting code and that none of the version-2 refusal events
+(`ActivationRefusedUnreadableBody`,
+`ActivationRefusedUnknownAlgorithm`,
+`ActivationRefusedChallengeMismatch`) fires. The early return in
+`_version_two` (`ota/poll.py`) is what lets a stock board activate,
 and stock xiaozhi firmware is the compatibility floor promised in
-`docs/architecture/principles.md`. The fix is the test #225 requires
-for every kept branch: a version-1 poll (no `Activation-Version`
-header) reaches the pending path, emits `ActivationPending` with its
-code, and produces none of the version-2 refusal events. No behavior
-changes.
+`docs/architecture/principles.md`. No behavior changes.
 
 ## Design decisions this plan makes
 
@@ -247,8 +256,10 @@ Reuse the existing assets; the new bites are:
   build with the shared refusal; a well-formed non-OpenAI URL still
   builds keyless with `_ask_for_usage` off, pinned through public
   behavior (the request sent), not attribute reach-in.
-- Activation: the version-1 poll pin in
-  `tests/unit/test_onboarding_activation.py`.
+- Activation: the event assertions added to
+  `test_a_version_one_body_is_accepted_as_it_is` in
+  `tests/unit/test_onboarding_activation.py`, with the header sent
+  as `Activation-Version: 1`.
 
 ## Risks and mitigations
 
@@ -362,6 +373,11 @@ the header with value 1, so present-and-1 is the floor, not absent.
 What is missing is the event assertion: extend the existing test to
 assert `ActivationPending` carries the code and no version-2 refusal
 event fires. Drop "no test naming the header".
+
+*Resolution*: accepted; the audit's claim was wrong and the plan now
+says so. The bite becomes event assertions on the existing test,
+with the header present and equal to 1, which is the shape a board
+sends.
 
 **5 (P2). The diff normalization must preserve `None` against `[]`,
 or it masks a real change.** `mcp: None` inherits defaults and
