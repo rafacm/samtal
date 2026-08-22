@@ -79,7 +79,7 @@ decision here is the issue's "judgment call" answered.
   swallowed tool call breaks `test_session_tools.py`. The
   `StreamStarted` arm is the one arm with no pin anywhere: every
   producer yields it once in first position, `_watchdog_stream`
-  swallows exactly that one (`pipeline.py:815`), and the support
+  swallows exactly that one (`pipeline.py:816`), and the support
   fakes never yield it at all, so the arm could be deleted green
   while the contract (`providers/base.py:282`, consumers "must
   nevertheless tolerate and ignore it") breaks on the first
@@ -110,7 +110,7 @@ decision here is the issue's "judgment call" answered.
   by grepping for `isinstance(` over `runtime/pipeline.py` whole,
   not just `isinstance(event`. That wider sweep is what finds the
   sibling dispatch the narrow one cannot:
-  `isinstance(first, StreamStarted)` at `pipeline.py:815`, the
+  `isinstance(first, StreamStarted)` at `pipeline.py:816`, the
   watchdog's own single negated check on the same type. It stays as
   it is; a one-arm boolean is not a dispatch, and converting it
   would be the guard-clause mistake the issue's rejected list
@@ -220,7 +220,7 @@ take the cheap win and annotate the stream `AsyncIterator[LlmEvent]`.
 *Resolution*: accepted, both halves. The lens now states the
 reading-gain honestly, and the conversion commit annotates
 `_watchdog_stream` with `AsyncIterator[LlmEvent]`, verified truthful
-against its docstring and its single caller at `pipeline.py:1266`.
+against its docstring and its single caller at `pipeline.py:1267`.
 
 **5 (P3). Both listed risks are impossible; the two real ones are
 absent.** The four event types are unrelated frozen dataclasses with
@@ -237,7 +237,7 @@ the other dispatch on the same type; correctly out of scope, but the
 plan should name it and why it stays rather than rely on a grep that
 cannot see it.
 
-*Resolution*: accepted; the inventory lens now names line 815, why
+*Resolution*: accepted; the inventory lens now names line 816, why
 it stays, and widens the grep so the sweep itself would have found
 it.
 
