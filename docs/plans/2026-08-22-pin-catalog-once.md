@@ -125,8 +125,22 @@ and discoveries; no deviations says so explicitly.
   the file constant deleted; live-against-declaration checks
   survive or are strengthened per decision 2.
 - `tests/tools/event_baseline.py`: the `__main__` regeneration
-  block, `rendered()`, `committed()` deleted; `captured()`,
-  `driven()`, `shape()`, the drivers, and `driver_times.py`'s
+  block, `rendered()`, `committed()`, and the `COMMITTED` path
+  constant deleted; `captured()` loses its `produced=None` branch
+  (its only caller was the regeneration path) or is folded into
+  the suite's fixture, whichever reads better; `shape()` survives
+  only as far as the live checks consume it, and `argument_types`
+  is deleted from it (argument identity now lives in `events.md`
+  per decision 3; the live suite checks template equality, which
+  subsumes arity). The #210 walk relics (`MODULES`, `PACKAGE`,
+  `LEVEL_METHODS`, `TYPED_METHOD`, `SESSION_RECEIVER`, used by
+  nothing) are swept in the same commit with their own sentence.
+  Both module docstrings are REWRITTEN: the harness's states what
+  "baseline" means now (a driver inventory and a live conformance
+  suite, no committed capture, no regeneration command), the
+  suite's closes on the live guarantee instead of "a file that
+  does not move". `REGENERATE` in the suite dies with the message
+  it carried. `driven()`, the drivers, and `driver_times.py`'s
   imports untouched.
 - `tests/unit/data/event-baseline.json`,
   `tests/unit/data/event-catalog-golden.json`,
