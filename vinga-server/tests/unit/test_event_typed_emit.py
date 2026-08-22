@@ -309,15 +309,35 @@ def a_mismatched_thunk() -> Variant:
     return Elsewhere(stage=Identifier("asr"))
 
 
+# The two branches, each with the pair its report has to carry. The
+# pair is part of the parametrization rather than asserted once for
+# both, because the two branches say DIFFERENT things and that is the
+# whole of what the code distinguishes: a thunk that raised names
+# nothing, since it is opaque until it returns, while a variant handed
+# to the wrong emitter is a declared event whose own name the report may
+# state and whose code says which of the two faults it was.
 REFUSING = (
-    ("a construction that raised", a_failing_thunk),
-    ("a variant from another channel", a_mismatched_thunk),
+    (
+        "a construction that raised",
+        a_failing_thunk,
+        (UNBUILT_LABEL, "construction_failed"),
+    ),
+    (
+        "a variant from another channel",
+        a_mismatched_thunk,
+        ("scratch_elsewhere", "wrong_channel"),
+    ),
 )
 
 
-@pytest.mark.parametrize("build", [one for _, one in REFUSING], ids=[one for one, _ in REFUSING])
+@pytest.mark.parametrize(
+    "build, expected",
+    [(one, two) for _, one, two in REFUSING],
+    ids=[one for one, _, _ in REFUSING],
+)
 def test_an_emission_the_guard_could_not_build_is_dropped(
     build: object,
+    expected: tuple[str, str],
     emitter: ServerEvents,
     tap: Tap,
     caplog: pytest.LogCaptureFixture,
@@ -326,11 +346,18 @@ def test_an_emission_the_guard_could_not_build_is_dropped(
     """A telemetry bug costs a log line, never a reply. Nothing rides in
     the emission's place: what the site meant to say is exactly what
     could not be built, so the report is the whole of what is said and
-    no consumer is handed anything at all."""
+    no consumer is handed anything at all.
+
+    The report by equality on both halves, unrendered, which is what
+    makes the refusal vocabulary a closed set with a test behind each
+    member rather than behind one of them."""
     with caplog.at_level(logging.INFO):
         emitter.emit(build)  # type: ignore[arg-type]
 
-    assert refused(caplog, CHANNEL).levelno == logging.ERROR
+    report = refused(caplog, CHANNEL)
+    assert report.levelno == logging.ERROR
+    assert report.msg == REFUSAL_MESSAGE
+    assert report.args == expected
     assert tap.seen == []
 
 
