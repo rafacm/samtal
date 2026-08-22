@@ -821,7 +821,16 @@ def test_a_failing_api_request_refuses_carrying_nothing(
     tmp_path: Path, caplog: pytest.LogCaptureFixture, tap: Tap
 ) -> None:
     """The same shape on a request path, where what the handler caught
-    is whatever a request put in front of it."""
+    is whatever a request put in front of it.
+
+    The response is asserted rather than the call merely surviving, and
+    that is the point of driving this path at all. The handler emits
+    from inside its own `except` arm and then answers 500 from the line
+    after it, so an emit that escaped would skip the answer entirely:
+    the request would get no response, and the exception would reach an
+    outer logger that writes the traceback this whole surface exists to
+    keep out of the log. A test that swallowed the escape would pass
+    through exactly that."""
     from fastapi.testclient import TestClient
 
     from vinga_server.config.api import build_api
@@ -833,9 +842,15 @@ def test_a_failing_api_request_refuses_carrying_nothing(
     def endpoint() -> dict[str, str]:
         raise hostile()
 
-    with caplog.at_level("DEBUG"), contextlib.suppress(Exception):
-        TestClient(api).get("/boom", headers={"Authorization": f"Bearer {token}"})
+    with caplog.at_level("DEBUG"):
+        response = TestClient(api).get(
+            "/boom", headers={"Authorization": f"Bearer {token}"}
+        )
 
+    assert response.status_code == 500
+    # The body is a surface of its own, and the only one the sentinel
+    # hunt below does not otherwise reach.
+    assert SENTINEL not in response.text
     carries_nothing(caplog, tap, CONFIG_API_CHANNEL)
 
 
