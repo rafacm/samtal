@@ -404,6 +404,19 @@ the real routers: a current server answers both `/x/<key>` and
 disabled), and `doctor` probing the slashless spelling reports it
 healthy without a second request existing to make.
 
+**Correction, 2026-08-22 (PR #237).** The two paragraphs above are the
+record of what that round decided and stay as they are, but their
+present tense has stopped being true: `config doctor` follows no
+redirect at all now. `CANONICAL_REDIRECTS`, `_canonical_slash` and the
+follow loop are deleted, `_probed` makes one GET and refuses every
+redirect, and the two tests that asserted a healthy verdict behind one
+assert the refusal instead. The reasoning is issue #225's audit read
+under the pre-release stance the compatibility-floor ADR now records
+in its Context: the deployment the follow covered is one no supported
+release produces, so what is left behind a redirect is somebody else's
+server choosing where this request goes next. `_probed`'s own
+docstring is the current statement of the contract.
+
 
 ## Milestone 2: live device bindings
 
