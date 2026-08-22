@@ -326,7 +326,7 @@ section.
   sites, delete the wrappers](2026-08-22-typed-event-enums-implementation.md#m2-migrate-the-caller-passed-fields-retype-the-decision-sites-delete-the-wrappers).**
   (PR #253) Every remaining token field and its
   emit sites move to members; the three narrowed aliases replace
-  their classes and the decision sites adopt them; `TokenValue` and
+  their classes and the emit sites convert into them; `TokenValue` and
   all subclasses are deleted with their tests; `__all__`, the golden
   inventory, and the test suites land in the same change;
   `events.md` and the committed baseline are proven byte-still.
