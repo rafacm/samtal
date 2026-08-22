@@ -522,11 +522,20 @@ def speaking_session(scripts: dict[str, Any] | None = None, mac: str = POET_MAC)
     return session
 
 
-def unregistered(llm: Any, agent: str = "poet", mac: str = POET_MAC) -> Any:
+def unregistered(
+    llm: Any, agent: str = "poet", mac: str = POET_MAC, config: Config | None = None
+) -> Any:
     """A session whose LLM the provider registry never built, so the
     events it emits name no configured entry: the variant beside every
-    provider event that says less rather than guessing."""
-    config = base_config()
+    provider event that says less rather than guessing.
+
+    `config` defaults to the two-agent base, which is what every caller
+    but one wants. The one is the watchdog driver: a bound is a server
+    setting, so a scenario about a timeout has to be able to say which
+    configuration the unregistered session runs under, or it silently
+    waits out the production default.
+    """
+    config = base_config() if config is None else config
     engines = built_world(config)
     built = engines.agents[agent]
     agents = dict(engines.agents)
@@ -622,12 +631,32 @@ def drive_speaking_started(directory: Path) -> None:
 
 
 async def drive_llm_retry(_: Path) -> None:
+    """Both halves of the retry, under the same shrunk bound.
+
+    What must stay true here is the opposite of the filler drivers'
+    invariant: the first stall has to EXCEED the bound, or the watchdog
+    never fires and the path emits nothing. `watchdog_config()`'s bound
+    is 0.05 s and `STALL_S` is 30 s, six hundred times it, so each half
+    times out once and retries; the retry's own delay is 0.0, under the
+    bound, so the round recovers rather than being given up, which is
+    what keeps this one `llm_retry` per half rather than a
+    `provider_failed`. The 30 s is never waited out: the watchdog
+    cancels the sleep at its deadline.
+
+    The second half runs unregistered, and passes the same config for
+    that reason: it used to take `base_config()` and so ran against the
+    production default of 10 s, waiting out a real timeout for a record
+    identical to the one 0.05 s produces.
+    """
     llm = StallingLlm(delays=[STALL_S, 0.0])
     session = session_for(watchdog_config(), POET_MAC, {"poet": cast(Any, llm)})
     llm.identity = replace(llm.identity, model=MODEL)  # type: ignore[attr-defined]
     await run_reply(session, "are you there")
     await run_reply(
-        unregistered(StallingLlm(delays=[STALL_S, 0.0]), mac=POET_MAC), "again"
+        unregistered(
+            StallingLlm(delays=[STALL_S, 0.0]), mac=POET_MAC, config=watchdog_config()
+        ),
+        "again",
     )
 
 
@@ -794,10 +823,37 @@ async def drive_barge_in_confirmed(_: Path) -> None:
 
 
 # runtime/filler_runner.py
+#
+# A stall of this milliseconds' own scale, the way
+# `tests/unit/test_session_filler.py` keeps a local one: the shared
+# `STALL_S` is 30 s, which the watchdog suites never wait out because
+# the watchdog cancels the sleep, but no filler driver shrinks the
+# watchdog's bound, so here 30 s was waited out in full, twice per
+# driver (a 10 s production-default window, one retry, a second window,
+# and the round given up).
+#
+# What each of the three drivers below needs is only that the filler's
+# timer expires while the reply is still silent, which is a race between
+# the 60 ms `DELAY_MS` and this: 0.5 s is over eight times it, and the
+# reply now simply succeeds at 0.5 s instead of being given up at 20 s.
+# The three `filler_*` records the drivers keep are emitted before
+# `FillerRunner._fire` touches the reply at all (`_fire` reads the
+# output's speaking time, the endpointer's speech, and the output pause,
+# then emits and returns), so what the stalled round eventually does
+# reaches none of them.
+FILLER_STALL_S = 0.5
 
 
 async def drive_filler_skipped_for_speech(_: Path) -> None:
-    session = await masked_session(masked_config(), POET_MAC, {"poet": StallingLlm([STALL_S])})
+    """Speech held at fire time, so the mask stands down.
+
+    Still true at 0.5 s: the endpointer is fed 20 ms in, the timer fires
+    at 60 ms, and both are inside a stall that keeps the reply's first
+    audio away until 500 ms.
+    """
+    session = await masked_session(
+        masked_config(), POET_MAC, {"poet": StallingLlm([FILLER_STALL_S])}
+    )
     start_reply(session, UTTERANCE)
     await asyncio.sleep(DELAY_MS / 1000 / 3)
     turn_taking(session).endpointer.feed(SPEECH)
@@ -805,7 +861,15 @@ async def drive_filler_skipped_for_speech(_: Path) -> None:
 
 
 async def drive_filler_skipped_for_a_barge_in(_: Path) -> None:
-    session = await masked_session(masked_config(), POET_MAC, {"poet": StallingLlm([STALL_S])})
+    """The outgoing frames paused at fire time, so the mask stands down.
+
+    Still true at 0.5 s: the pause goes on at 20 ms and comes off at
+    80 ms, the timer fires at 60 ms between them, and the reply's first
+    audio cannot arrive before 500 ms.
+    """
+    session = await masked_session(
+        masked_config(), POET_MAC, {"poet": StallingLlm([FILLER_STALL_S])}
+    )
     start_reply(session, UTTERANCE)
     await asyncio.sleep(DELAY_MS / 1000 / 3)
     # White-box: the pause the confirmation ladder holds, put on at the
@@ -818,7 +882,17 @@ async def drive_filler_skipped_for_a_barge_in(_: Path) -> None:
 
 
 async def drive_filler_played(_: Path) -> None:
-    session = await masked_session(masked_config(), POET_MAC, {"poet": StallingLlm([STALL_S])})
+    """Nothing in the way at fire time, so the clip plays.
+
+    Still true at 0.5 s: the timer fires at 60 ms with the floor free
+    and the reply still silent, which is the whole condition the clip
+    needs. The reply then arrives and queues behind the clip's tail,
+    where before it was given up two watchdog windows later; both are
+    after the `filler_played` this driver keeps.
+    """
+    session = await masked_session(
+        masked_config(), POET_MAC, {"poet": StallingLlm([FILLER_STALL_S])}
+    )
     await drive_reply(session, UTTERANCE)
 
 
