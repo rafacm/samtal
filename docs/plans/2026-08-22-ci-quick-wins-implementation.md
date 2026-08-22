@@ -119,13 +119,24 @@ Two, both small and both additive.
   plus `workflow_dispatch`), `image needs: ['unit', 'integration']`
   with its `if:` intact, and the two lanes' step lists in full. The
   step lists are what the landing table above was checked against.
-- **Not verifiable locally: that the split runs green.** GitHub
-  Actions cannot be run from this checkout, so nothing here shows the
-  two lanes passing, the critical path shrinking, or the durations
-  tables appearing. The plan's proof is the `workflow_dispatch` run on
-  this branch before merge, which also exercises `image`'s new
-  `needs:` line, followed by reading the first push-to-main run after
-  merge. Both are the driving session's to trigger and read.
+- **The publishing gate was exercised before merge, and held.** GitHub
+  Actions cannot be run from this checkout, so the proof is the
+  `workflow_dispatch` run the plan prescribes, run 32588063442 on this
+  branch: `unit` success, `integration` success, `image (default,
+  latest)` success, `image (slim, slim, -slim)` success. The two image
+  matrix jobs started only after both lanes had succeeded, which is
+  `needs: [unit, integration]` doing its work on a real run rather
+  than in a parse. A dispatch run builds and smokes but never
+  publishes, so this cost nothing at the registry. That closes the
+  plan's "image publishes with half the suite green" risk before
+  merge; the read of the first push-to-main run after merge stays as
+  confirmation and is still owed.
+- **The lanes run at the same time, and both report their slow tail.**
+  The PR's own CI run 32588127826 shows `unit` at 7m50s and
+  `integration` at 5m0s running in parallel, so the critical path is
+  the unit lane rather than the sum the old job paid, and each lane's
+  log carries its "slowest 25 durations" table. The unit lane's
+  duration is the number M2 is aimed at.
 - **No test suite is affected.** M1 touches no Python, so the unit and
   integration suites were not re-run for it; the lanes that run them
   are what M1 changes, and only CI can show that.
