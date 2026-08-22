@@ -340,7 +340,8 @@ Reuse the existing assets; the new bites are:
   accepted shape); callers stop having to know that a redirect might
   be followed or that a binding might be a string. No new modules,
   no new seams.
-- [ ] **M2: Fix the audit's four defects.** Four commits, one per
+- [x] **[M2: Fix the audit's four defects](2026-08-22-compat-branch-cleanup-implementation.md#m2-fix-the-audits-four-defects).**
+  (PR TBD) Four commits, one per
   finding, in the order: diff normalization, `openai_compatible`
   build validation, conversation-store comment correction with
   regenerated schema reference, version-1 activation pin. Plus the
