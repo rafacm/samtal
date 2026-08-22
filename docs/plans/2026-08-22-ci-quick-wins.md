@@ -84,12 +84,20 @@ lint/mypy/doc-drift/wheel seconds; critical path 12m45s.
    ("stall well under the bound") would stop `drive_llm_retry`
    firing at all. The shared `STALL_S` and production code do not
    change.
-3. **The committed baseline cannot move, by construction and by
-   check.** `shape()` records channel, level, template, argument
-   TYPES, sorted field KEYS, and the event name; no timing value is
-   recorded, so shrinking waits cannot change the bytes. The suite's
-   own byte comparison and a manual regeneration double-run are the
-   proof.
+3. **What the committed baseline pins, said precisely.** `shape()`
+   records channel, level, template, argument TYPES, sorted field
+   KEYS, and the event name, and `driven()` records how many
+   records each path produced; no timing value appears. So the byte
+   comparison catches a shrink that stops a path firing (or fires
+   it twice), which is the real risk here, but it cannot see a
+   driver that reaches its event by a different route: a filler
+   record looks the same whether the stalled reply was given up or
+   succeeded after the filler played. M2 therefore states, per
+   shrunk driver, what must still be true of the scenario (the
+   filler fires before the reply's first audio; the retry driver's
+   watchdog times out twice) and the implementation doc records
+   that each was checked by reading the driver against the runtime
+   code, not inferred from an empty diff.
 4. **Margins against slow runners.** CI runners are slower than this
    machine, so the shrunk values keep at least a 5x ratio between
    each ordering pair (delay vs stall vs bound) and no shrunk value
