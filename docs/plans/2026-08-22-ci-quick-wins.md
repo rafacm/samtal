@@ -118,9 +118,13 @@ lint/mypy/doc-drift/wheel seconds; critical path 12m45s.
   double-run must pass unchanged. The reference docs are untouched.
 - **Closed sets, honest seams**: not this plan's territory; the one
   seam question (a bound with no config seam) is named in decision 2.
-- **Inventories by tooling**: the per-driver timing script and the
-  `--durations` output are the before/after inventory; the M2
-  section of the implementation doc records both numbers.
+- **Inventories by tooling**: the per-driver timing script lands
+  in M2 as `tests/tools/driver_times.py`, because it is the only
+  way to see inside the module-scoped fixture (`--durations`
+  reports one 87s setup line and nothing per driver), which is a
+  second responsibility the durations report cannot carry. The M2
+  section of the implementation doc records the before and after
+  per-driver tables from it.
 
 ## Module layout
 
