@@ -828,9 +828,9 @@ async def drive_barge_in_confirmed(_: Path) -> None:
 # `tests/unit/test_session_filler.py` keeps a local one: the shared
 # `STALL_S` is 30 s, which the watchdog suites never wait out because
 # the watchdog cancels the sleep, but no filler driver shrinks the
-# watchdog's bound, so here 30 s was waited out in full, twice per
-# driver (a 10 s production-default window, one retry, a second window,
-# and the round given up).
+# watchdog's bound, so here the 10 s bound was waited out in full, twice
+# per driver (a 10 s production-default window, one retry, a second
+# window, and the round given up).
 #
 # What each of the three drivers below needs is only that the filler's
 # timer expires while the reply is still silent, which is a race between
