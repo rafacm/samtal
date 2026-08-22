@@ -29,6 +29,7 @@ from vinga_server.providers import (
     LlmProvider,
     ProviderIdentity,
     ProviderWorld,
+    StreamStarted,
     TextDelta,
     ToolCall,
     ToolChoice,
@@ -72,14 +73,15 @@ async def _built(config: Config, secrets: SecretStore | None) -> ProviderWorld:
 # --- the models -------------------------------------------------------
 
 
-Step = str | list[str | ToolCall | Usage]
+Step = str | list[str | StreamStarted | ToolCall | Usage]
 
 
 class ScriptedLlm(LlmProvider):
     """A model whose every round is written down in advance. A round is
-    a sentence to speak, or a list mixing sentences, the tool calls to
-    ask for, and the usage a provider that reports one would end with;
-    the last round repeats if the loop asks for more."""
+    a sentence to speak, or a list mixing sentences, the liveness a real
+    adapter announces its first raw chunk with, the tool calls to ask
+    for, and the usage a provider that reports one would end with; the
+    last round repeats if the loop asks for more."""
 
     def __init__(self, rounds: Sequence[Step]) -> None:
         self._rounds = list(rounds)
