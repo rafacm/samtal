@@ -56,14 +56,20 @@ the order the steps run in.
 The plan counts the four drift checks as one inventory item, which is
 why ten items expand to twelve rows. The first three rows are the
 duplication the plan calls for by design: a job is its own runner with
-its own empty workspace, and the uv cache both lanes share keeps the
-second install cheap. Every other step appears in exactly one lane,
+its own empty workspace, so each lane fetches and installs for itself.
+What keeps both installs cheap is the uv cache carried over from
+earlier runs; the lanes start together, so neither warms the other,
+and on a run where `uv.lock` changed the key is cold for both. Only
+the unit lane saves that key (`save-cache: false` on the integration
+lane's setup-uv step), since two jobs writing identical bytes under
+one key on the same run is a race whose loser reports a failed
+reserve. Every other step appears in exactly one lane,
 and every step that existed still exists: the parse check below lists
 the two lanes' steps in full, and the two lists concatenated are the
 old job's list.
 
 The moved steps kept their bodies and their comments byte for byte.
-The whole workflow diff is 42 insertions and 6 deletions, and the six
+The whole workflow diff is 55 insertions and 6 deletions, and the six
 deletions are the `test:` job key, the two pytest `run:` lines, the
 two lines of the old `needs: test` comment, and the `needs: test` line
 itself.

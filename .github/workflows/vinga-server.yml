@@ -49,8 +49,14 @@ jobs:
   #
   # The first three steps (checkout, setup-uv, `uv sync --frozen`) are
   # duplicated by design. A job is its own runner with its own empty
-  # workspace, so each lane has to fetch and install for itself; the uv
-  # cache both lanes share is what keeps the second install cheap.
+  # workspace, so each lane has to fetch and install for itself. What
+  # makes both installs cheap is the uv cache carried over from earlier
+  # runs, not one lane warming the other: the lanes start together, so
+  # both restore the same key from the previous run, and on a run where
+  # `uv.lock` changed the key is cold and both pay the full install.
+  # Only the unit lane saves it (see the integration lane's
+  # `save-cache: false`), because two jobs writing the same key on the
+  # same run is a race one of them loses.
   #
   # `--durations=25` on both pytest invocations so a lane's log keeps
   # naming its slow tail. Splitting the job hides a regression that a
@@ -95,6 +101,13 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: "vinga-server/uv.lock"
+          # Restore from the shared key, never write it. Both lanes
+          # resolve the identical dependency set, so a second save is
+          # the same bytes under the same key and only ever a race the
+          # loser reports as a failed reserve. The unit lane keeps the
+          # save because it is the critical path: whatever it warms is
+          # what the next run's slowest job starts from.
+          save-cache: false
 
       - name: Install dependencies
         run: uv sync --frozen
