@@ -63,7 +63,11 @@ lint/mypy/doc-drift/wheel seconds; critical path 12m45s.
    `needs: [unit, integration]`, so publishing still waits for the
    whole suite. Nothing pins the old job name: the repository has no
    branch protection requiring a check named `test` (verified via the
-   API), and the workflow itself is the only reader.
+   API), and the workflow itself is the only reader. M1 also updates
+   the prose that explains what it changes: the comment block above
+   `image` that names `needs: test` as the publishing gate, and the
+   workflow description in `AGENTS.md`, checked for the same
+   staleness in the same commit.
 2. **The waits shrink by configuration, in the harness only, the
    way the sibling suite already does it.**
    `tests/unit/test_session_filler.py` drives these same three
