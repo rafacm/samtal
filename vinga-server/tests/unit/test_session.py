@@ -106,7 +106,7 @@ def two_persona_config() -> Config:
             "poet": {"prompt": "POET", "tts": "tenor"},
             "tutor": {"prompt": "TUTOR", "tts": "alto"},
         },
-        devices={POET_MAC: ["poet"], TUTOR_MAC: "tutor", BOTH_MAC: ["tutor", "poet"]},
+        devices={POET_MAC: ["poet"], TUTOR_MAC: ["tutor"], BOTH_MAC: ["tutor", "poet"]},
         default_agent="poet",
     )
 

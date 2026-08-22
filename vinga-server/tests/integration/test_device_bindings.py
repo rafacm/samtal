@@ -44,7 +44,7 @@ SYSTEM_INFO = {
 CONFIG = Config(
     providers=MOCK_PROVIDERS,
     agents={"assistant": MOCK_AGENT},
-    devices={BOUND_MAC: "assistant"},
+    devices={BOUND_MAC: ["assistant"]},
 )
 
 

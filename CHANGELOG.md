@@ -74,6 +74,19 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   hop, and the way out is the one the refusal states: ask the address
   you meant directly, trailing slash included.
 
+- **A device binding is a list of agent names, and only a list**
+  (#225). The conversion that read a bare string as a one-agent list
+  dates from when the whole domain configuration was a YAML file an
+  operator wrote by hand. It is a database now, and every path that
+  writes a binding builds a list before the models see it: the API
+  refuses a non-list body, the CLI builds one from its arguments, the
+  repository wraps what it is given, a leftover `devices:` section in
+  the configuration file is refused whole, and the database read
+  refuses a stored string. The one route left was composing a
+  configuration from a raw mapping, and it now meets the field's own
+  type, reported against the device it was written under and without
+  the value. Nothing an operator can type moves.
+
 ## 2026-08-21
 
 ### Added

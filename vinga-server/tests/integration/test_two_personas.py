@@ -51,7 +51,7 @@ def two_persona_config() -> Config:
             "tutor": {"prompt": "TUTOR", "llm": "lesson", "tts": "alto"},
         },
         # Written both ways on purpose: a list and a bare name.
-        devices={POET_MAC: ["poet"], TUTOR_MAC: "tutor"},
+        devices={POET_MAC: ["poet"], TUTOR_MAC: ["tutor"]},
         default_agent="tutor",
     )
 

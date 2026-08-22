@@ -63,7 +63,7 @@ DATABASE_DIR = tempfile.mkdtemp(prefix="vinga-access-logs-")
 CONFIG = Config(
     providers=MOCK_PROVIDERS,
     agents={"assistant": MOCK_AGENT},
-    devices={BOUND_MAC: "assistant"},
+    devices={BOUND_MAC: ["assistant"]},
     server={"ota_path": OTA_PATH, "database": {"dir": DATABASE_DIR}},
 )
 
