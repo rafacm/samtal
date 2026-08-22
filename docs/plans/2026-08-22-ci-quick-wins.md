@@ -153,8 +153,10 @@ lint/mypy/doc-drift/wheel seconds; critical path 12m45s.
   keeping the others, and the number is recorded in the
   implementation doc.
 - **The workflow split silently drops a step.** The step inventory
-  is fixed: lint, mypy, unit, integration, four doc-drift checks,
-  wheel migration. The M1 PR description lists where each landed,
+  is fixed: checkout, setup-uv, `uv sync --frozen`, lint, mypy,
+  unit, integration, four doc-drift checks, wheel migration, with
+  the first three duplicated into both jobs by design. The M1 PR
+  description lists where each landed,
   and the two job logs are checked against that list before the
   review round.
 - **`image` publishes with half the suite green.** Prevented by
