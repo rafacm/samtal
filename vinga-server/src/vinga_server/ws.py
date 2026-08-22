@@ -125,9 +125,7 @@ async def conversation(websocket: WebSocket) -> None:
         # choosing into the retained log surface, one record per attempt
         # and as fast as they could connect. The reason token is what a
         # reader can act on, and it is this server's own word.
-        events.emit(
-            lambda: AuthRejected(device=None, reason=refusal)
-        )
+        events.emit(lambda: AuthRejected(device=None, reason=refusal))
         # Closed before the accept, so the upgrade is answered 403 and no
         # websocket is ever established.
         await websocket.close()
