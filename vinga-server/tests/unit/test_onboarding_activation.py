@@ -30,6 +30,8 @@ from tests.support.checkin import (
 )
 from tests.support.checkin import activation_client as client_for
 from tests.support.configs import BOUND_MAC, DEVICE_MAC
+from tests.support.events import events as emitted
+from tests.support.events import fields_of, only
 from vinga_server import logs
 from vinga_server.config import Config
 from vinga_server.onboarding import (
@@ -357,14 +359,29 @@ def test_activate_answers_both_spellings_itself() -> None:
 # Version 2
 
 
-def test_a_version_one_body_is_accepted_as_it_is() -> None:
+def test_a_version_one_body_is_accepted_as_it_is(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """A board with no serial number burned, which is every consumer
     board, sends `{}` and version 1; upstream's own server never reads
-    that body."""
-    with client_for() as client:
-        check_in(client)
+    that body.
 
-        assert activate(client, body={}, version="1").status_code == 202
+    Stock firmware is the compatibility floor this project promises, so
+    the consequence is asserted and not just the status code: the poll
+    is answered as still waiting, carrying the code the board is showing
+    its owner, and none of the three version-2 checks is applied to a
+    body that was never written to answer them. Their three refusals
+    ride one event name, so an empty `activation_refused` is all three:
+    unreadable body, unknown algorithm, challenge mismatch."""
+    with client_for() as client:
+        code = check_in(client)["activation"]["code"]
+
+        with caplog.at_level(logging.DEBUG, logger="vinga_server.ota"):
+            answer = activate(client, body={}, version="1")
+
+    assert answer.status_code == 202
+    assert fields_of(only(caplog, "activation_pending"))["code"] == code
+    assert emitted(caplog, "activation_refused") == []
 
 
 def _refusal(caplog: pytest.LogCaptureFixture) -> str:
