@@ -68,6 +68,7 @@ from vinga_server.events.catalog import (
 from vinga_server.events.values import (
     ABSENT,
     Count,
+    Fragment,
     Identifier,
     LanguageTag,
     PromptSources,
@@ -150,6 +151,25 @@ def _reported(usage: Usage | None) -> tuple[int | None, int | None]:
     return (
         usage.prompt_tokens if usage is not None else None,
         usage.completion_tokens if usage is not None else None,
+    )
+
+
+def _tool_fragment(classified: ToolInvocation) -> Fragment:
+    """The fragment a sentence about one call renders where its name
+    would go, which is nothing at all for the two namespaces this
+    surface may not name.
+
+    One home for that decision. `events/assembly.py` renders whichever
+    name it is handed and refuses nothing, deliberately: deciding is
+    reading the classifier's source constants, which live next door in
+    `runtime/turns.py`. So the decision is here, where those constants
+    are, and it is here ONCE, so the plain line about unparseable
+    arguments and the `tool_call` event beside it cannot come to
+    disagree about which names are this application's to print.
+    """
+    return assembly.tool_fragment(
+        classified.name if classified.source == BUILTIN else None,
+        classified.entry if classified.source == MCP else None,
     )
 
 
@@ -1281,10 +1301,7 @@ class PipelineRuntime:
             # is structured or not. The length is what tells a truncated
             # object from a model that answered in prose, and the record
             # carries the same fact as its `malformed` flag.
-            named = assembly.tool_fragment(
-                classified.name if classified.source == BUILTIN else None,
-                classified.entry if classified.source == MCP else None,
-            ).carried()
+            named = _tool_fragment(classified).carried()
             logger.warning(
                 "session %s: %s tool%s got %d characters of unparseable arguments",
                 self.session_id,

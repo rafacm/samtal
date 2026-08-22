@@ -309,9 +309,21 @@ def test_a_call_this_surface_may_not_name_names_only_its_namespace(
 # --- the fragment the sentence that is not an event renders -----------
 
 
-def test_the_fragment_names_what_this_application_authored() -> None:
-    """Built beside a log line rather than inside an emit thunk, and the
-    only naming rule in this module no variant declares for itself."""
+def test_the_fragment_renders_whichever_name_it_is_handed() -> None:
+    """Rendering, which is all this function does.
+
+    WHICH of a call's names may be printed is not pinned here and is not
+    decided here: hand this a device tool's name as the first argument
+    and it quotes it, because the decision reads the classifier's source
+    constants and lives beside them, in `pipeline.py`'s `_tool_fragment`.
+    What pins the decision is `test_session_tools.py`, at the sentence
+    itself: a builtin's name reaches the warning line and a name no
+    namespace publishes does not.
+
+    Built beside a log call rather than inside an emit thunk, which is
+    the one exception in this module to the rule that a value refuses
+    where the emitter's guard is holding it.
+    """
     assert assembly.tool_fragment("remember", None).carried() == ' "remember"'
     assert assembly.tool_fragment(None, "tools").carried() == ' from entry "tools"'
     assert assembly.tool_fragment(None, None).carried() == ""
