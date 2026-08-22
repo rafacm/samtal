@@ -190,12 +190,27 @@ section.
   described; declarations retype their token fields.
 - `events_docgen.py`: token kind and constraint cells read `Declared`
   accessors; everything else untouched.
-- Emit sites (`auth.py`, `ws.py`, `capture.py`, `config/api.py`,
-  `device/session.py`, `onboarding/origin.py`, `ota/reply.py`,
-  `runtime/pipeline.py`, `tools/mcp/manager.py`,
-  `tools/mcp/reload.py`): pass the enum member where they passed a
-  wrapper; the three decision sites adopt the narrowed aliases in
-  their own types.
+- Emit sites, in two distinct kinds. Sites that already hold an
+  enum member and only unwrap the wrapper (one-line changes):
+  `capture.py` (`_disable(self, doing: CaptureWrite, ...)`),
+  `ws.py` (`refusal_reason(...) -> AuthRejection | None`),
+  `auth.py`, `config/api.py`, `ota/reply.py:362`
+  (`_bad_request(message: OtaRefusal)`), `onboarding/origin.py`
+  (`origin.source: OriginSource`), and `runtime/pipeline.py:246,388`.
+  Sites that hold a plain string and gain an explicit enum lookup
+  at the conversion seam: `device/session.py`
+  (`_closed_reason() -> str`, latched from several sites, becomes
+  `CloseReason(...)` at the emit construction),
+  `tools/mcp/reload.py` (`_refusal(exc) -> str` over the five
+  `REFUSED_*` constants, which stay exactly as they are: they are
+  package surface, re-exported through `tools/mcp/__init__.py` and
+  documented by `config/responses.py`, and the lookup happens at
+  the emit construction, not in their definitions),
+  `tools/mcp/manager.py:622` (`McpDown(_down_reason(...))`, the
+  function itself defined in `tools/mcp/transport.py` and not
+  touched), `runtime/pipeline.py:270`
+  (`ToolSource(classified.source)`), and `ota/reply.py:337`
+  (`NotOffered(unbound.refusal)`).
 
 ## Tests
 
@@ -303,6 +318,13 @@ findings 4 to 8 amendable in place. Findings condensed but faithful:
    member (`capture.py`, `ws.py`, `ota/reply.py:362`,
    `onboarding/origin.py`, `pipeline.py:246,388`) from the five
    that hold a string.
+   *Resolution* (amendment `F2`): the Module layout section now
+   lists the sites in two kinds, the seven that already hold a
+   member and the five that hold a plain string and gain the enum
+   lookup at the emit construction; `_down_reason` is credited to
+   `tools/mcp/transport.py` and neither it nor the `REFUSED_*`
+   package surface moves.
+
 3. **P1: the test paragraph would delete two live cross-module
    drift guards.** `test_event_values.py:511-517` is the only check
    that `onboarding/pending.py`'s wording and `NotOffered` agree;
