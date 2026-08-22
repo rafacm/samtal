@@ -341,7 +341,7 @@ Reuse the existing assets; the new bites are:
   be followed or that a binding might be a string. No new modules,
   no new seams.
 - [x] **[M2: Fix the audit's four defects](2026-08-22-compat-branch-cleanup-implementation.md#m2-fix-the-audits-four-defects).**
-  (PR TBD) Four commits, one per
+  (PR [#250](https://github.com/rafacm/vinga/pull/250)) Four commits, one per
   finding, in the order: diff normalization, `openai_compatible`
   build validation, conversation-store comment correction with
   regenerated schema reference, version-1 activation pin. Plus the
