@@ -259,7 +259,7 @@ unverifiable.
 ## PR review round (PR #259)
 
 External review of the PR diff: claude CLI backend, model
-`claude-opus-5`, read-only tool set, 2026-08-22, posted on the PR.
+`claude-opus-5`, read-only tool set, 2026-08-22, [posted on the PR](https://github.com/rafacm/vinga/pull/259#issuecomment-5382845290).
 Verdict: mergeable after findings 1 and 2 are fixed; two P2 and two P3,
 all four folded in before merge.
 
