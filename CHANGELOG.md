@@ -9,6 +9,24 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **Three events are declared once instead of twice, and event
+  assembly moved out of the reply path** (#240). `llm_retry`,
+  `llm_round` and `provider_failed` each had two variants saying one
+  sentence about two shapes: one for a provider the registry built out
+  of a configured entry, one for a provider it never built. They are
+  one variant each now, carrying the entry name, its type, its host and
+  its model as fields that may be absent, so a record is identical to
+  the one it was before on both paths and the reference describes 82
+  variants instead of 85. The code that chose between the shapes,
+  ordered their fields and wrapped their values was a third of
+  `runtime/pipeline.py`'s executable code; it is `events/assembly.py`
+  now, whose functions take plain values and answer the variant that
+  describes them. One documented constraint genuinely loosened to make
+  the collapse possible: the `quoted_provider` grammar admits the empty
+  rendering, because the surviving sentence has to be able to name no
+  entry. Nothing an operator reads changed: the committed record
+  baseline is byte-identical on every driven path.
+
 - **The CI suite runs as two parallel lanes instead of one queue**
   (#233). The single `test` job paid for everything in a row: lint,
   typing, the unit tests, the integration tests, the four
