@@ -229,7 +229,7 @@ class Declared:
     field with the set rather than finding the wrapper that held it.
     `tokens` is what such a field admits, the whole enumeration or the
     subset a `Literal` annotation narrows it to, and it is `None` for a
-    field a value type carries, whose own `TOKENS` answers instead.
+    field a value type carries, since a value type declares no set.
     """
 
     name: str
@@ -501,8 +501,8 @@ def _declared_type(
     admits every member, and a `Literal` over some of one enumeration's
     members, which admits those. A `Literal` mixing two enumerations
     names no set at all, so it is refused rather than answered with an
-    arbitrary one of them. Everything else is a value type, and the set
-    is its own `TOKENS` where it has one.
+    arbitrary one of them. Everything else is a value type, which states
+    no set: an enumeration is the only way to declare one.
     """
     if isinstance(annotation, type) and issubclass(annotation, StrEnum):
         return annotation, frozenset(str(one) for one in annotation)
@@ -784,8 +784,7 @@ def tokens_of(declared: Declared) -> frozenset[str] | None:
     reference prints and what a caller reading the catalog would
     otherwise re-derive from `fixed`.
     """
-    held = declared.type
-    tokens = declared.tokens if issubclass(held, StrEnum) else held.TOKENS
+    tokens = declared.tokens
     if declared.fixed is not None and tokens is not None:
         return frozenset({str(_carried(declared.fixed))})
     return tokens
