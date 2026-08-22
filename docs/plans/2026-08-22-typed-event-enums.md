@@ -269,10 +269,18 @@ section.
 
 ## Risks and mitigations
 
-- **An enum member leaks into a record as its subclass.** The single
-  conversion point in `payload()`/`logged()` is pinned by a test
-  asserting builtin `str`, and the committed baseline's typed args
-  would show any slip as a byte diff.
+- **An enum member leaks into a record as its subclass.** The
+  committed baseline records argument types for the rendered
+  positions but only sorted key names for the payload, and
+  `json.dumps` serializes a `str` subclass transparently, so a
+  member left unconverted in a carried, never-rendered field (most
+  of what M1 migrates) would diff nothing in any committed pin.
+  The cover is therefore a real-catalog assertion, not a scratch
+  one: a test drives the baseline harness's capture of every
+  declared emit path and asserts every payload value in every
+  produced record is a builtin type (`str`, `int`, `float`,
+  `bool`, `None`, or a list of builtin `str`), alongside the
+  conversion-point test asserting `type(...) is str`.
 - **`get_type_hints` reading of `Literal` and unions.** `_read` must
   handle `Literal[...]` alone and inside unions with `None` and
   `Absent`; the scratch-catalog tests declare exactly those shapes.
@@ -417,6 +425,12 @@ findings 4 to 8 amendable in place. Findings condensed but faithful:
    nothing, and `json.dumps` serializes the `str` subclass
    transparently. Add a real-catalog assertion that every driven
    record's payload values are builtin types.
+   *Resolution* (amendment `F8`): the risk entry now states why no
+   committed pin would catch a payload-only member and adds a
+   real-catalog test driving the baseline harness's capture and
+   asserting every payload value of every produced record is a
+   builtin type.
+
 9. **P3: two spots refuse an enum-typed field and are unnamed.**
    `Declared.type: type[EventValue]` and `_read`'s subclass refusal
    must widen (mypy-strict ripples into `verify`, `_check`,
