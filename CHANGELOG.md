@@ -10,8 +10,8 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 ### Changed
 
 - **The CI suite runs as two parallel lanes instead of one queue**
-  (#233). The single `test` job paid for everything in a row: the unit
-  tests, then the integration tests, then lint, typing, the four
+  (#233). The single `test` job paid for everything in a row: lint,
+  typing, the unit tests, the integration tests, the four
   generated-document drift checks and the wheel migration, a 12m45s
   critical path of which the unit tests alone were 7m46s. It is now a
   `unit` job (lint, the events type check, the unit tests) and an
