@@ -60,6 +60,8 @@ from vinga_server.events import (
     detach_server_tap,
 )
 from vinga_server.events.catalog import (
+    CAPTURE_CHANNEL,
+    CONFIG_API_CHANNEL,
     ConversationsDropped,
     Heard,
     Variant,
@@ -91,6 +93,11 @@ REJECTED = "sk-rej-8b2d7e0c\nnever-a-real-credential"
 CHANNEL = "vinga_server.ota"
 
 DEVICE = "aa:bb:cc:dd:ee:ff"
+
+# The filler library's own channel, which is its module name: the
+# production-path sentinel below drives a refusal from inside it, and a
+# report has to arrive on the channel of the subsystem that refused.
+FILLER_CHANNEL = "vinga_server.filler"
 
 # The code the report carries for everything that is not a channel
 # mismatch, spelled out rather than imported: what this suite pins is
@@ -183,10 +190,20 @@ def carrying(caplog: pytest.LogCaptureFixture, value: str) -> set[tuple[str, str
     }
 
 
-def reported(caplog: pytest.LogCaptureFixture, code: str = CONSTRUCTION_FAILED) -> None:
+def reported(
+    caplog: pytest.LogCaptureFixture,
+    channel: str,
+    code: str = CONSTRUCTION_FAILED,
+) -> None:
     """The whole of what a refusal leaves behind: one record on the
     emitter's own channel, at ERROR, carrying the fixed label and the
     fixed code and nothing else at all.
+
+    The channel is asserted rather than described. `logger` is a field
+    of every retained record and the thing a collector routes on, so a
+    report that went out on some other emitter's channel would be a
+    refusal filed against the wrong subsystem, and a helper that only
+    said "the emitter's own channel" in prose could not tell.
 
     By equality on `msg` and `args` rather than on the rendered
     sentence, because the record is what a JSON collector keeps and the
@@ -196,6 +213,7 @@ def reported(caplog: pytest.LogCaptureFixture, code: str = CONSTRUCTION_FAILED) 
     said = [one for one in caplog.records if one.msg == REFUSAL_MESSAGE]
     assert len(said) == 1, f"expected one report, got {len(said)}"
     (report,) = said
+    assert report.name == channel
     assert report.levelno == logging.ERROR
     assert report.args == (UNBUILT_LABEL, code)
 
@@ -241,7 +259,7 @@ def test_a_rejected_descriptor_reaches_nothing_at_all(
             lambda: CheckedIn(device=DeviceId(DEVICE), board=BoardName(REJECTED))
         )
 
-    reported(caplog)
+    reported(caplog, CHANNEL)
     assert dispatched(caplog) == []
     assert tap.seen == []
     assert carrying(caplog, REJECTED) == set()
@@ -261,7 +279,7 @@ def test_a_descriptor_past_its_declared_length_is_dropped(
             lambda: CheckedIn(device=DeviceId(DEVICE), board=BoardName("b" * 65))
         )
 
-    reported(caplog)
+    reported(caplog, CHANNEL)
     assert dispatched(caplog) == []
     assert tap.seen == []
 
@@ -323,7 +341,7 @@ def test_a_refused_construction_is_dropped_without_repeating_its_value(
     with caplog.at_level("DEBUG"):
         ServerEvents(STORE_CHANNEL).emit(build)
 
-    reported(caplog)
+    reported(caplog, STORE_CHANNEL)
     assert dispatched(caplog) == []
     assert tap.seen == []
     assert carrying(caplog, SENTINEL) == set()
@@ -404,12 +422,6 @@ def a_session() -> tuple[SessionEvents, Tap, Recording]:
     return emitter, consumer, capture
 
 
-def said_on_the_session(
-    caplog: pytest.LogCaptureFixture,
-) -> list[logging.LogRecord]:
-    return [one for one in caplog.records if one.name == SESSION_LOGGER]
-
-
 @REFUSING_CONVERSATIONS
 def test_a_refused_conversation_is_dropped_without_repeating_it(
     build: Callable[[], Variant], caplog: pytest.LogCaptureFixture
@@ -432,7 +444,7 @@ def test_a_refused_conversation_is_dropped_without_repeating_it(
     # emission survived: the one caller that reads it has a record to
     # place either way.
     assert at == 1.0
-    reported(caplog)
+    reported(caplog, SESSION_LOGGER)
     assert dispatched(caplog) == []
     assert consumer.seen == []
     assert capture.payloads == []
@@ -505,7 +517,7 @@ def test_an_unusable_identity_refuses_the_emission_whole(
     with caplog.at_level("DEBUG"):
         emitter.emit(a_lawful_conversation)
 
-    reported(caplog)
+    reported(caplog, SESSION_LOGGER)
     assert dispatched(caplog) == []
     assert consumer.seen == []
     assert capture.payloads == []
@@ -555,7 +567,7 @@ def test_a_misplaced_value_is_dropped_without_repeating_it(
     with caplog.at_level("DEBUG"):
         emitter.emit(a_misplaced_value)
 
-    reported(caplog)
+    reported(caplog, SESSION_LOGGER)
     assert dispatched(caplog) == []
     assert consumer.seen == []
     assert capture.payloads == []
@@ -679,7 +691,7 @@ def test_a_refusal_from_inside_a_handler_says_nothing_either(
     with caplog.at_level("DEBUG"):
         chained()
 
-    reported(caplog)
+    reported(caplog, STORE_CHANNEL)
     assert dispatched(caplog) == []
     assert tap.seen == []
     assert SENTINEL not in both_formats(caplog)
@@ -726,7 +738,7 @@ def test_a_conversations_refusal_reaches_no_capture_either(
                 )
             )
 
-    reported(caplog)
+    reported(caplog, SESSION_LOGGER)
     assert track.seen == []
     assert SENTINEL not in repr(track.seen)
     assert SENTINEL not in both_formats(caplog)
@@ -759,16 +771,19 @@ def hostile() -> BaseException:
         return raised
 
 
-def carries_nothing(caplog: pytest.LogCaptureFixture, consumer: Tap) -> None:
+def carries_nothing(
+    caplog: pytest.LogCaptureFixture, consumer: Tap, channel: str
+) -> None:
     """One refused emission on a production path, held to the whole
-    claim: the fixed report, and the sentinel in no record, no argument,
-    no shipped format and no consumer's copy.
+    claim: the fixed report on the refusing subsystem's own channel, and
+    the sentinel in no record, no argument, no shipped format and no
+    consumer's copy.
 
     The consumer is not asserted empty here, unlike the machinery tests
     above: these paths emit lawful events of their own around the
     refused one, and what is under test is that the refused one added
     nothing to them."""
-    reported(caplog)
+    reported(caplog, channel)
     assert SENTINEL not in both_formats(caplog)
     assert SENTINEL not in consumer.rendered()
 
@@ -799,7 +814,7 @@ async def test_a_filler_that_will_not_synthesize_refuses_carrying_nothing(
     with caplog.at_level("DEBUG"):
         await build_agent_fillers(config, providers)
 
-    carries_nothing(caplog, tap)
+    carries_nothing(caplog, tap, FILLER_CHANNEL)
 
 
 def test_a_failing_api_request_refuses_carrying_nothing(
@@ -821,7 +836,7 @@ def test_a_failing_api_request_refuses_carrying_nothing(
     with caplog.at_level("DEBUG"), contextlib.suppress(Exception):
         TestClient(api).get("/boom", headers={"Authorization": f"Bearer {token}"})
 
-    carries_nothing(caplog, tap)
+    carries_nothing(caplog, tap, CONFIG_API_CHANNEL)
 
 
 def test_a_failed_capture_write_refuses_carrying_nothing(
@@ -852,7 +867,7 @@ def test_a_failed_capture_write_refuses_carrying_nothing(
         with contextlib.suppress(Exception):
             capture.close()
 
-    carries_nothing(caplog, tap)
+    carries_nothing(caplog, tap, CAPTURE_CHANNEL)
 
 
 # --- and the rule that survives an optimized interpreter ---------------
