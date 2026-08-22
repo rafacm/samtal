@@ -53,9 +53,16 @@ and discoveries; no deviations says so explicitly.
    the 14 generated `_violation_on` variants and their `internal`
    declaration, `Identity.unstated`, `UNSTATED_SESSION`, and the
    `safe` half of `_identities` (which built the recovery's payload
-   from validated identities) are deleted. `Identity` keeps only its
-   `build` callable; `_identities` answers what was built and
-   whether all of it was. The `internal` flag on `Declaration` is
+   from validated identities) are deleted. `Identity` itself is
+   deleted, not shrunk: without `unstated` it is a frozen box
+   around one callable, which fails the deletion test. The emitters
+   hand `_identities` a `Mapping[str, Callable[[], EventValue |
+   None]]`; it answers what was built and whether all of it was,
+   under ONE guard around the loop rather than one per identity,
+   because the per-identity guard existed so the recovery could
+   still state the identity that validated, and with the recovery
+   gone any identity failure refuses the emission whole. Its
+   docstring is rewritten to say exactly that. The `internal` flag on `Declaration` is
    deleted WITH its only user unless another internal declaration
    exists (there is none today). `internal` has FOUR readers, all
    named here so none is discovered mid-milestone: the docgen
@@ -138,7 +145,7 @@ and discoveries; no deviations says so explicitly.
 - **Closed sets.** The refusal vocabulary (two fixed codes, one
   label) stays a closed set at its decision sites in the guard;
   nothing else changes.
-- **Honest seams.** `Identity` shrinks to its `build` callable; no
+- **Honest seams.** `Identity` is deleted (decision 2); no
   injectable defaults change.
 - **Inventories by tooling.** `grep -rn "enforcement\|ENFORCEMENT"
   src tests` from `vinga-server/` bounds the removal (wiring,
