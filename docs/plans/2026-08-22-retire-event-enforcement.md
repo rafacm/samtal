@@ -53,8 +53,15 @@ and discoveries; no deviations says so explicitly.
    `build` callable; `_identities` answers what was built and
    whether all of it was. The `internal` flag on `Declaration` is
    deleted WITH its only user unless another internal declaration
-   exists (there is none today); the baseline suite's
-   internal-exemption filter goes with it.
+   exists (there is none today). `internal` has FOUR readers, all
+   named here so none is discovered mid-milestone: the docgen
+   header's counting sentence ("58 events in 99 variants, 57 ...
+   and 1 internal" becomes a plain count of events and variants),
+   `_index_row`'s `(internal)` suffix and `_event_section`'s
+   "**Internal.**" paragraph (both branches deleted), and the
+   baseline suite's internal-exemption filter. The docs test
+   `test_the_internal_event_is_listed_as_internal` is deleted, not
+   migrated.
 3. **What raised, and everything spelled for raising, goes.**
    `EventSchemaError`, `_refuse` and its scrubbed-chain mechanics,
    `EventEnforcementError`, `STRICT`/`FORGIVING`/
@@ -74,8 +81,9 @@ and discoveries; no deviations says so explicitly.
    note in the implementation doc, not touched here.
 5. **The pins move deliberately, all four.**
    `docs/reference/events.md` loses the `schema_violation` section,
-   its per-channel variants, and the header prose that names the
-   env var; the golden inventory loses the event; the committed
+   its per-channel variants, its index row, the header prose that
+   names the env var, and the internal half of the header's
+   counting sentence; the golden inventory loses the event; the committed
    event baseline loses nothing (the internal event was exempt from
    driving, verified in the milestone rather than assumed); the
    docgen loses whatever prose renders the enforcement mechanics.
@@ -130,7 +138,9 @@ and discoveries; no deviations says so explicitly.
   keeps construct-report-drop; no new module and no new name.
 - `events/catalog.py`: `SCHEMA_VIOLATION`, `_violation_on`, the
   generated declarations, and `Declaration.internal` go.
-- `events_docgen.py`: enforcement prose out of the header material.
+- `events_docgen.py`: enforcement prose out of the header
+  material, the counting sentence rewritten, and the `internal`
+  branches out of `_index_row` and `_event_section`.
 - `app.py`, `main.py`: the resolve calls and error handling out.
 - Tests per decision 6.
 
