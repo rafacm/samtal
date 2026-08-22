@@ -359,3 +359,86 @@ code commit.
 
 Nothing here needs hardware, so no verification step was left
 unverifiable.
+
+## PR review round (PR #253)
+
+External review of the PR diff: claude backend (the codex quota is
+exhausted), claude CLI, model `claude-opus-5`, read-only tool set,
+2026-08-22, posted on the PR. Verdict: mergeable after finding 1 is
+fixed, no P1. Seven findings, all fixed before merge, each in a commit
+of its own. Findings condensed but faithful:
+
+1. **P2: the one seam this milestone adds that no drift guard pinned.**
+   `test_event_values.py`'s reload test reads `reload.APPLIED` and
+   `reload.REFUSED` for the outcomes and then restated the five refusal
+   words as literals beside them, so its name's claim was half true.
+   The emit site now looks the word up, so rewording `REFUSED_BUSY`
+   would leave the suite green and a reload refused by a busy database
+   would emit nothing: the lookup raises inside the thunk and
+   `_construct` answers `construction_failed`.
+   *Fixed in `f88611e9`*: held against `reload`'s five `REFUSED_*`
+   constants, like the other five seams. Checked by mutation, with the
+   file restored by copy and `touch`ed rather than by `git checkout`.
+2. **P3: `EventValue.TOKENS` is dead after the deletion and its
+   docstring still presented it as live.** `TokenValue.__init_subclass__`
+   was the only writer, so `tokens_of`'s value-type branch could answer
+   nothing but `None`, and a residual second way to declare a closed
+   set outlived the milestone that deleted the first.
+   *Fixed in `8de79d57`*: the classvar goes, `tokens_of` reads
+   `declared.tokens`, and the three docstrings that named it say an
+   enumeration is the only way to declare a set.
+3. **P3: the module's no-leak property is false for its own
+   enumerations and nothing said so.** A lookup outside the set raises
+   the enumeration's `ValueError`, which names the value; the
+   containment lived in the plan and in `_construct`'s docstring,
+   neither of which a reader of `values.py` or of the six emit sites
+   meets.
+   *Fixed in `e25e75d8`*: one paragraph in the closed-sets header
+   saying the lookup names the value, that this is why every site
+   spells it inside the thunk, and that `_construct` is what contains
+   it.
+4. **P3: the ticked milestone still stated the claim F1 withdrew.** The
+   M2 bullet promised the decision sites adopt the narrowed aliases;
+   the classifiers keep their plain strings and the emit site converts.
+   *Fixed in `f6ba821d`*: "the emit sites convert into them".
+5. **P3: `ws.py` left in a state `ruff format` would rewrite.**
+   Dropping the wrapper took the call to 69 columns and it stayed
+   wrapped over three lines; the lane runs `ruff check` only, so
+   nothing would have caught it.
+   *Fixed in `4fb1947c`*: collapsed onto one line.
+6. **P3: the changelog counted names it then said were kept.** Twenty
+   three classes existed, three survive as aliases of the same name,
+   `__all__` loses twenty; "about twenty-five" was the plan's estimate
+   carried into an operator-facing document.
+   *Fixed in `e84f4bfb`*: twenty.
+7. **P3: the golden's structural pin on a narrowing covered carried
+   fields only.** `_typed` recorded the type name alone for a rendered
+   position, and a narrowed field declared `carried=False` (the shape
+   `OtaRequestRejected.refusal` and the four `outcome` fields have)
+   appears in `arguments` and nowhere else, so its narrowing would have
+   had no committed structural pin: the single-pin situation the plan
+   review's finding 10 was raised to prevent. Latent today, since all
+   three narrowed fields are carried.
+   *Fixed in `bc5eb9f5`*: both lists read the declaration through one
+   helper, so a set is recorded the same way in each. The regenerated
+   file's diff is purely additive, thirteen argument entries gaining
+   the `tokens` their field entry already carried or the single member
+   a fixed one says, and the fields list is untouched.
+
+### Verification after the round
+
+From `vinga-server/`, on the seven fix commits.
+
+- `uv run ruff check .`: **All checks passed!**
+- `uv run mypy`: **Success: no issues found in 3 source files.**
+- `uv run pytest tests/unit -q`: **2819 passed, 20 skipped** in 337 s.
+  Unchanged: the round added and removed no test, it rewrote one
+  assertion and three docstrings.
+- `uv run pytest tests/integration -q`: **61 passed** in 192 s.
+- `uv run vinga-server events reference | diff - ../docs/reference/events.md`:
+  **empty**, run after findings 2, 3 and 7.
+- The committed event baseline (`tests/unit/data/event-baseline.json`)
+  is still untouched, and its suite passes inside the unit run above.
+- `uv run python -m tests.unit.test_event_golden` run twice after the
+  regeneration finding 7 asks for: the second run leaves the file
+  unchanged.
