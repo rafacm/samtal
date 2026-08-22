@@ -5,7 +5,7 @@ Two claims, and the second is the one that matters more. The first is
 ordinary: each value type accepts what its kind describes and refuses
 what it does not, at construction rather than at emit, so a site that
 holds one has already proved it. The second is the no-leak claim these
-types inherit from the enforcement diagnostics: the value handed to a
+types inherit from the emitter's refusal report: the value handed to a
 refusing constructor is precisely what may not reach a log, a lane's
 stderr or an exception chain, so a credential-shaped sentinel goes
 through every refusing branch and is hunted in the exception's `str`,
@@ -81,7 +81,7 @@ from vinga_server.events.values import (
 )
 from vinga_server.runtime.turns import TOOL_SOURCES as CLASSIFIED_AS
 
-# The same spelling the enforcement sentinels use: printable, so it is
+# The same spelling the refusal sentinels use: printable, so it is
 # an ordinary string rather than something a type check would catch
 # anyway, and dotted, so it satisfies no declared `ID` syntax.
 SENTINEL = "sk.leak.4a7d2f1e.never-a-real-credential"
@@ -364,9 +364,9 @@ def test_a_refusal_never_repeats_the_value_it_refused(
     name: str, build: object
 ) -> None:
     """The rule the whole surface keeps, applied one layer earlier than
-    the enforcement diagnostics keep it. A construction refusal reaches
-    a lane's stderr in strict mode and the emitter's guard in forgiving
-    mode, and the value is what neither may carry."""
+    the emitter's own refusal report keeps it. A construction refusal is
+    caught by the emitter's guard and reported on the emitter's own
+    channel, and the value is what that report may not carry."""
     with pytest.raises(EventValueError) as raised:
         build()  # type: ignore[operator]
 

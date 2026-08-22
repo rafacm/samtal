@@ -10,12 +10,16 @@ So the diagnostics render catalog-owned identifiers only: a fixed label,
 a fixed violation code, and on a value type's own refusal the type and
 the constraint it failed. Nothing else, on any surface. A
 credential-shaped sentinel therefore goes through every distinct refusal
-branch, in both modes, and is hunted in all six places a value could
-surface: the exception's `str`, `repr` and `args`, the forgiving
-complaint, both shipped log formats, `Emission.args`, and an attached
-tap. The complaint's `msg` and `args` and the exception's `args` are
-asserted by EQUALITY rather than by substring absence, because a
-substring hunt proves only that this spelling did not appear.
+branch and is hunted in every place a value could surface: the report's
+sentence and its arguments, both shipped log formats, `Emission.args`,
+an attached tap, and a capture's decision track. The report's `msg` and
+`args` are asserted by EQUALITY rather than by substring absence,
+because a substring hunt proves only that this spelling did not appear.
+
+A refused emission is DROPPED, after that one report. There is no
+substitute to inspect, so the other half of every test here is that
+nothing at all was dispatched: no tap saw an emission, no capture wrote
+one, and `emit` returned the way it returns for an event that worked.
 
 The sentinel is shaped so that it satisfies no `ID` syntax and no token
 set (the dots see to that) while still being an ordinary printable
@@ -33,7 +37,9 @@ door are held to from the other end.
 
 import contextlib
 import logging
-import traceback
+import os
+import subprocess
+import sys
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -43,21 +49,17 @@ import pytest
 
 from tests.support.catalog import scratch_catalog
 from tests.support.events import fields_of
-from vinga_server import events
 from vinga_server.events import (
     REFUSAL_MESSAGE,
     SESSION_LOGGER,
     UNBUILT_LABEL,
-    UNSTATED_SESSION,
     Emission,
-    EventSchemaError,
     ServerEvents,
     SessionEvents,
     attach_server_tap,
     detach_server_tap,
 )
 from vinga_server.events.catalog import (
-    SCHEMA_VIOLATION,
     ConversationsDropped,
     Heard,
     Variant,
@@ -90,6 +92,12 @@ CHANNEL = "vinga_server.ota"
 
 DEVICE = "aa:bb:cc:dd:ee:ff"
 
+# The code the report carries for everything that is not a channel
+# mismatch, spelled out rather than imported: what this suite pins is
+# the bytes an operator reads, and a constant would follow a rename the
+# surface is not allowed to make quietly.
+CONSTRUCTION_FAILED = "construction_failed"
+
 
 @dataclass(frozen=True)
 class CheckedIn(Variant):
@@ -116,12 +124,10 @@ def _scratch() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
-def _mode() -> Iterator[None]:
-    restored = events.enforcement()
-    try:
-        yield
-    finally:
-        events.set_enforcement(restored)
+def _driven(refusals_are_expected: None) -> None:
+    """Every refusal in this file is one the test drove on purpose, so
+    the lane guard's allowance is taken for the whole module rather than
+    per test."""
 
 
 class Tap:
@@ -177,6 +183,29 @@ def carrying(caplog: pytest.LogCaptureFixture, value: str) -> set[tuple[str, str
     }
 
 
+def reported(caplog: pytest.LogCaptureFixture, code: str = CONSTRUCTION_FAILED) -> None:
+    """The whole of what a refusal leaves behind: one record on the
+    emitter's own channel, at ERROR, carrying the fixed label and the
+    fixed code and nothing else at all.
+
+    By equality on `msg` and `args` rather than on the rendered
+    sentence, because the record is what a JSON collector keeps and the
+    arguments are what a text formatter renders: a value that reached
+    either would be a value on the retained surface.
+    """
+    said = [one for one in caplog.records if one.msg == REFUSAL_MESSAGE]
+    assert len(said) == 1, f"expected one report, got {len(said)}"
+    (report,) = said
+    assert report.levelno == logging.ERROR
+    assert report.args == (UNBUILT_LABEL, code)
+
+
+def dispatched(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    """Every record that was an event rather than a report. A refused
+    emission is dropped, so this is empty for every refusal below."""
+    return [one for one in caplog.records if hasattr(one, "event")]
+
+
 # --- descriptors, which are the one kind that carries far-side bytes --
 
 
@@ -187,8 +216,6 @@ def test_an_admissible_descriptor_reaches_exactly_where_it_is_declared(
     declared argument position, the rendered sentence and every tap, so
     the claim is containment rather than absence: exactly its own field
     and its own argument, and no other field of any record."""
-    events.set_enforcement(events.STRICT)
-
     with caplog.at_level("DEBUG"):
         ServerEvents(CHANNEL).emit(
             lambda: CheckedIn(device=DeviceId(DEVICE), board=BoardName(ADMISSIBLE))
@@ -209,35 +236,34 @@ def test_a_rejected_descriptor_reaches_nothing_at_all(
     value type rather than trusted to its decision site: a newline in a
     retained record is one line becoming two, and a terminal escape is
     whoever sent it painting an operator's screen."""
-    events.set_enforcement(events.FORGIVING)
-
     with caplog.at_level("DEBUG"):
         ServerEvents(CHANNEL).emit(
             lambda: CheckedIn(device=DeviceId(DEVICE), board=BoardName(REJECTED))
         )
 
-    (complaint,) = [one for one in caplog.records if not hasattr(one, "event")]
-    assert complaint.args == (UNBUILT_LABEL, "construction_failed")
+    reported(caplog)
+    assert dispatched(caplog) == []
+    assert tap.seen == []
     assert carrying(caplog, REJECTED) == set()
     assert REJECTED not in both_formats(caplog)
     assert REJECTED not in tap.rendered()
-    (recovered,) = [one for one in caplog.records if hasattr(one, "event")]
-    assert fields_of(recovered) == {"event": SCHEMA_VIOLATION}
 
 
-def test_strict_refuses_a_descriptor_past_its_declared_length() -> None:
+def test_a_descriptor_past_its_declared_length_is_dropped(
+    caplog: pytest.LogCaptureFixture, tap: Tap
+) -> None:
     """The bound is per value type, and it is enforced at construction
-    whatever the decision site did."""
-    events.set_enforcement(events.STRICT)
-
-    with pytest.raises(EventSchemaError) as raised:
+    whatever the decision site did. Driven through `emit` rather than
+    through the constructor, because the claim is what the EMITTER does
+    with a value the bound cuts: one report and no emission."""
+    with caplog.at_level("DEBUG"):
         ServerEvents(CHANNEL).emit(
             lambda: CheckedIn(device=DeviceId(DEVICE), board=BoardName("b" * 65))
         )
 
-    assert raised.value.args == (
-        REFUSAL_MESSAGE % (UNBUILT_LABEL, "construction_failed"),
-    )
+    reported(caplog)
+    assert dispatched(caplog) == []
+    assert tap.seen == []
 
 
 # --- the construction guard, on a server channel ----------------------
@@ -287,56 +313,23 @@ REFUSING_CONSTRUCTIONS = pytest.mark.parametrize(
 
 
 @REFUSING_CONSTRUCTIONS
-def test_strict_refuses_a_construction_without_repeating_its_value(
+def test_a_refused_construction_is_dropped_without_repeating_its_value(
     build: Callable[[], Variant], caplog: pytest.LogCaptureFixture, tap: Tap
 ) -> None:
-    """`args` whole, so `str` and `repr` are pinned with it, and nothing
-    written or dispatched on the way to the refusal."""
-    events.set_enforcement(events.STRICT)
-
-    with caplog.at_level("DEBUG"), pytest.raises(EventSchemaError) as raised:
-        ServerEvents(STORE_CHANNEL).emit(build)
-
-    assert raised.value.args == (
-        "the event schema refused an emission of an event that could not "
-        "be built: construction_failed",
-    )
-    assert SENTINEL not in str(raised.value)
-    assert SENTINEL not in repr(raised.value)
-    assert SENTINEL not in repr(raised.value.args)
-    # The chains as well: an exception raised inside a handler carries
-    # the one it was handling, and the refusal is raised outside the
-    # handler for exactly this reason.
-    assert raised.value.__cause__ is None
-    assert raised.value.__context__ is None
-    assert caplog.records == []
-    assert tap.seen == []
-
-
-@REFUSING_CONSTRUCTIONS
-def test_forgiving_recovers_a_construction_without_repeating_its_value(
-    build: Callable[[], Variant], caplog: pytest.LogCaptureFixture, tap: Tap
-) -> None:
-    """The complaint by equality, then the sentinel hunted through every
+    """The report by equality, then the sentinel hunted through every
     surface a value could reach: both shipped formats, the arguments
-    behind them, and what the taps were handed."""
-    events.set_enforcement(events.FORGIVING)
-
+    behind them, and what the taps were handed. Nothing was dispatched,
+    so the only thing said about the emission at all is the report."""
     with caplog.at_level("DEBUG"):
         ServerEvents(STORE_CHANNEL).emit(build)
 
-    (complaint,) = [one for one in caplog.records if not hasattr(one, "event")]
-    assert complaint.levelno == logging.ERROR
-    assert complaint.msg == REFUSAL_MESSAGE
-    assert complaint.args == (UNBUILT_LABEL, "construction_failed")
-    # The declared recovery event rode in the emission's place, carrying
-    # the fixed token and nothing the thunk was holding.
-    (recovered,) = [one for one in caplog.records if hasattr(one, "event")]
-    assert fields_of(recovered) == {"event": SCHEMA_VIOLATION}
-    assert recovered.args == ()
+    reported(caplog)
+    assert dispatched(caplog) == []
+    assert tap.seen == []
     assert carrying(caplog, SENTINEL) == set()
     assert SENTINEL not in both_formats(caplog)
     assert SENTINEL not in tap.rendered()
+
 
 # --- the same guard on the session channel ----------------------------
 #
@@ -411,68 +404,43 @@ def a_session() -> tuple[SessionEvents, Tap, Recording]:
     return emitter, consumer, capture
 
 
-@REFUSING_CONVERSATIONS
-def test_strict_refuses_a_conversation_construction_without_repeating_it(
-    build: Callable[[], Variant], caplog: pytest.LogCaptureFixture
-) -> None:
-    """`args` whole, so `str` and `repr` are pinned with it, and nothing
-    written, dispatched or recorded on the way to the refusal."""
-    events.set_enforcement(events.STRICT)
-    emitter, consumer, capture = a_session()
-
-    with caplog.at_level("DEBUG"), pytest.raises(EventSchemaError) as raised:
-        emitter.emit(build)
-
-    assert raised.value.args == (
-        "the event schema refused an emission of an event that could not "
-        "be built: construction_failed",
-    )
-    assert SENTINEL not in str(raised.value)
-    assert SENTINEL not in repr(raised.value)
-    assert SENTINEL not in repr(raised.value.args)
-    assert raised.value.__cause__ is None
-    assert raised.value.__context__ is None
-    assert caplog.records == []
-    assert consumer.seen == []
-    assert capture.payloads == []
+def said_on_the_session(
+    caplog: pytest.LogCaptureFixture,
+) -> list[logging.LogRecord]:
+    return [one for one in caplog.records if one.name == SESSION_LOGGER]
 
 
 @REFUSING_CONVERSATIONS
-def test_forgiving_recovers_a_conversation_construction_without_repeating_it(
+def test_a_refused_conversation_is_dropped_without_repeating_it(
     build: Callable[[], Variant], caplog: pytest.LogCaptureFixture
 ) -> None:
-    """The complaint by equality, then the sentinel hunted through every
+    """The report by equality, then the sentinel hunted through every
     surface it could reach: both shipped formats, the arguments behind
     them, what the session's own tap was handed, and what the capture
     wrote to the decision track.
 
-    The recovery keeps the session's identity, which is this server's
-    own minted value rather than anything a far side chose, and carries
-    nothing the thunk was holding.
+    The emission itself reaches none of the three. It is dropped, so
+    the session's tap and the capture see nothing at all and the
+    operator's only line about it is the report.
     """
-    events.set_enforcement(events.FORGIVING)
     emitter, consumer, capture = a_session()
 
     with caplog.at_level("DEBUG"):
-        emitter.emit(build)
+        at = emitter.emit(build)
 
-    said = [one for one in caplog.records if one.name == SESSION_LOGGER]
-    (complaint,) = [one for one in said if not hasattr(one, "event")]
-    assert complaint.levelno == logging.ERROR
-    assert complaint.msg == REFUSAL_MESSAGE
-    assert complaint.args == (UNBUILT_LABEL, "construction_failed")
-    (recovered,) = [one for one in said if hasattr(one, "event")]
-    assert fields_of(recovered) == {
-        "event": SCHEMA_VIOLATION,
-        "session": "alpha",
-        "device": "aa:bb:cc:dd:ee:ff",
-    }
-    assert recovered.args == ()
+    # The reading the emit was stamped with, answered whether or not the
+    # emission survived: the one caller that reads it has a record to
+    # place either way.
+    assert at == 1.0
+    reported(caplog)
+    assert dispatched(caplog) == []
+    assert consumer.seen == []
+    assert capture.payloads == []
     assert carrying(caplog, SENTINEL) == set()
     assert SENTINEL not in both_formats(caplog)
     assert SENTINEL not in consumer.rendered()
     assert SENTINEL not in repr(capture.payloads)
-    assert capture.payloads, "the capture recorded nothing, so this proves nothing"
+
 
 # --- and the identity the emitter contributes -------------------------
 #
@@ -482,12 +450,13 @@ def test_forgiving_recovers_a_conversation_construction_without_repeating_it(
 # would have answered with, refuses inside the guard exactly as a
 # variant's own value does.
 #
-# What a recovery may say about it is the question this covers, and the
-# rule is the one the whole surface keeps: a recovery is built from the
-# identities that VALIDATED, never from what the emitter was handed.
-# Where one did not, the session gets this module's own word and the
-# device gets the null the surface already uses for "none was
-# understood".
+# Any identity that fails refuses the emission WHOLE, and that is the
+# whole of the rule now: a conversation record missing the session it
+# belongs to is a shape the declaration denies exists, and with nothing
+# dispatched in its place there is no half-built identity for anything
+# to be built out of. The report says nothing about either half, which
+# is what makes the string a caller opened its session under
+# unrepeatable by construction.
 
 # The sentinel in the two shapes an identity can hold it: dotted, so no
 # `session_id` syntax admits it, and hyphenated, so no MAC does.
@@ -525,60 +494,27 @@ UNUSABLE_IDENTITIES = pytest.mark.parametrize(
 
 
 @UNUSABLE_IDENTITIES
-def test_strict_refuses_an_unusable_identity_without_repeating_it(
+def test_an_unusable_identity_refuses_the_emission_whole(
     session: str, device: str, caplog: pytest.LogCaptureFixture
 ) -> None:
-    events.set_enforcement(events.STRICT)
-    emitter, consumer, capture = a_session_of(session, device)
-
-    with caplog.at_level("DEBUG"), pytest.raises(EventSchemaError) as raised:
-        emitter.emit(a_lawful_conversation)
-
-    assert raised.value.args == (
-        "the event schema refused an emission of an event that could not "
-        "be built: construction_failed",
-    )
-    for planted in (SESSION_SENTINEL, DEVICE_SENTINEL):
-        assert planted not in str(raised.value)
-        assert planted not in repr(raised.value)
-        assert planted not in repr(raised.value.args)
-    assert raised.value.__cause__ is None
-    assert raised.value.__context__ is None
-    assert caplog.records == []
-    assert consumer.seen == []
-    assert capture.payloads == []
-
-
-@UNUSABLE_IDENTITIES
-def test_forgiving_recovers_an_unusable_identity_without_repeating_it(
-    session: str, device: str, caplog: pytest.LogCaptureFixture
-) -> None:
-    """The recovery by equality, so what it DOES carry is pinned rather
-    than merely absent, and then the sentinel hunted through every
-    surface it could reach: both shipped formats, the arguments behind
-    them, the session's own tap and the capture's decision track."""
-    events.set_enforcement(events.FORGIVING)
+    """One unusable half is enough, and the half that validated buys the
+    emission nothing: all three cases produce the same one report and
+    the same silence on every consumer."""
     emitter, consumer, capture = a_session_of(session, device)
 
     with caplog.at_level("DEBUG"):
         emitter.emit(a_lawful_conversation)
 
-    said = [one for one in caplog.records if one.name == SESSION_LOGGER]
-    (complaint,) = [one for one in said if not hasattr(one, "event")]
-    assert complaint.args == (UNBUILT_LABEL, "construction_failed")
-    (recovered,) = [one for one in said if hasattr(one, "event")]
-    assert fields_of(recovered) == {
-        "event": SCHEMA_VIOLATION,
-        "session": "alpha" if session == "alpha" else UNSTATED_SESSION,
-        "device": "aa:bb:cc:dd:ee:ff" if device == "aa:bb:cc:dd:ee:ff" else None,
-    }
-    assert recovered.args == ()
+    reported(caplog)
+    assert dispatched(caplog) == []
+    assert consumer.seen == []
+    assert capture.payloads == []
     for planted in (SESSION_SENTINEL, DEVICE_SENTINEL):
         assert carrying(caplog, planted) == set()
         assert planted not in both_formats(caplog)
         assert planted not in consumer.rendered()
         assert planted not in repr(capture.payloads)
-    assert capture.payloads, "the capture recorded nothing, so this proves nothing"
+
 
 # --- and a value in the wrong field -----------------------------------
 #
@@ -608,55 +544,25 @@ def a_misplaced_value() -> Variant:
     )
 
 
-def test_strict_refuses_a_misplaced_value_without_repeating_it(
+def test_a_misplaced_value_is_dropped_without_repeating_it(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    events.set_enforcement(events.STRICT)
-    emitter, consumer, capture = a_session()
-
-    with caplog.at_level("DEBUG"), pytest.raises(EventSchemaError) as raised:
-        emitter.emit(a_misplaced_value)
-
-    assert raised.value.args == (
-        "the event schema refused an emission of an event that could not "
-        "be built: construction_failed",
-    )
-    assert SENTINEL not in str(raised.value)
-    assert SENTINEL not in repr(raised.value)
-    assert SENTINEL not in repr(raised.value.args)
-    assert raised.value.__cause__ is None
-    assert raised.value.__context__ is None
-    assert caplog.records == []
-    assert consumer.seen == []
-    assert capture.payloads == []
-
-
-def test_forgiving_recovers_a_misplaced_value_without_repeating_it(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """And the field it was misplaced into reaches nothing either: the
-    recovery carries the fixed token and the session's own identity, so
-    there is no `language` key for the value to have survived in."""
-    events.set_enforcement(events.FORGIVING)
+    """And the field it was misplaced into reaches nothing either: there
+    is no record for the value to have survived in, because the emission
+    it was part of was never dispatched."""
     emitter, consumer, capture = a_session()
 
     with caplog.at_level("DEBUG"):
         emitter.emit(a_misplaced_value)
 
-    said = [one for one in caplog.records if one.name == SESSION_LOGGER]
-    (complaint,) = [one for one in said if not hasattr(one, "event")]
-    assert complaint.args == (UNBUILT_LABEL, "construction_failed")
-    (recovered,) = [one for one in said if hasattr(one, "event")]
-    assert fields_of(recovered) == {
-        "event": SCHEMA_VIOLATION,
-        "session": "alpha",
-        "device": "aa:bb:cc:dd:ee:ff",
-    }
+    reported(caplog)
+    assert dispatched(caplog) == []
+    assert consumer.seen == []
+    assert capture.payloads == []
     assert carrying(caplog, SENTINEL) == set()
     assert SENTINEL not in both_formats(caplog)
     assert SENTINEL not in consumer.rendered()
     assert SENTINEL not in repr(capture.payloads)
-    assert capture.payloads, "the capture recorded nothing, so this proves nothing"
 
 
 # --- and the one report that is not about a construction --------------
@@ -688,7 +594,6 @@ def test_a_failing_taps_exception_names_nothing_at_all(
     asymmetry: a tap is an object this server's composition attached,
     and which consumer is broken is the whole of what makes the line
     actionable."""
-    events.set_enforcement(events.STRICT)
     hostile = Hostile()
     attach_server_tap(hostile)
 
@@ -717,7 +622,6 @@ def test_a_failing_log_taps_exception_names_nothing_either(
         def handle(self, record: logging.LogRecord) -> bool:
             raise type(SENTINEL, (Exception,), {})()
 
-    events.set_enforcement(events.STRICT)
     channel = logging.getLogger(CHANNEL)
     handler = HostileHandler()
     channel.addHandler(handler)
@@ -737,27 +641,20 @@ def test_a_failing_log_taps_exception_names_nothing_either(
     assert SENTINEL not in both_formats(caplog)
 
 
-# --- and what the refusal itself carries as an object ------------------
+# --- and a refusal made while an exception is being handled ------------
 #
-# Strict mode is the one place anything leaves this module, and half the
-# converted sites emit from inside an `except` arm, because that is
-# where a failure is known. Python attaches whatever exception is being
-# handled to any exception raised while it is, so a refusal about a
-# thunk this module deliberately never looked at used to arrive holding
-# the original under `__context__`: its message, its own chain, and
-# everything they render as.
-#
-# The tests below assert the object rather than the text. `raise ...
-# from None` would pass a text-only check and fail these, which is the
-# distinction that matters: it suppresses the default traceback's
-# printing of a context that is still attached and still reachable from
-# anything that walks the chain.
+# Half the converted sites emit from inside an `except` arm, because
+# that is where a failure is known: a capture that could not open its
+# files, a provider that raised, an API handler sanitizing what it
+# caught. Nothing on this path raises any more, so nothing can carry the
+# handled exception out under `__context__`; what is left to check is
+# that the report made from inside the arm says no more than a report
+# made anywhere else.
 
 
 def raising_variant() -> Variant:
-    """A construction that refuses because the class name it is handed
-    is not one: `ClassName.of` is what every converted catch site calls,
-    and `type()` accepts any string as a class name."""
+    """A construction that refuses because the value it is handed is not
+    one the type admits."""
     return ConversationsDropped(session=SessionId(SENTINEL))
 
 
@@ -773,48 +670,18 @@ def chained() -> None:
         ServerEvents(STORE_CHANNEL).emit(raising_variant)
 
 
-def unchained(error: BaseException) -> str:
-    """Everything an exception carries as an object, walked: both chain
-    links to the bottom, and the traceback as it would be printed."""
-    parts = [str(error), repr(error), repr(error.args)]
-    seen = error
-    while True:
-        following = seen.__cause__ or seen.__context__
-        if following is None:
-            break
-        parts += [str(following), repr(following)]
-        seen = following
-    parts.append("".join(traceback.format_exception(error)))
-    return "\n".join(parts)
-
-
-def test_a_strict_refusal_carries_neither_a_cause_nor_a_context() -> None:
-    """Both, by identity. A context that is merely suppressed from
-    rendering is still an object a consumer, a reporter or a debugger
-    reaches through one attribute."""
-    events.set_enforcement(events.STRICT)
-
-    with pytest.raises(EventSchemaError) as raised:
-        chained()
-
-    assert raised.value.__cause__ is None
-    assert raised.value.__context__ is None
-    assert SENTINEL not in unchained(raised.value)
-
-
-def test_a_forgiving_recovery_from_inside_a_handler_says_nothing_either(
+def test_a_refusal_from_inside_a_handler_says_nothing_either(
     caplog: pytest.LogCaptureFixture, tap: Tap
 ) -> None:
-    """The other mode on the same path: nothing is raised, so nothing
-    can carry a context, and the recovery event and its complaint are
-    the fixed pair."""
-    events.set_enforcement(events.FORGIVING)
-
+    """The emit returns rather than raising, so the handled exception
+    reaches nothing at all, and the report is the same fixed pair it is
+    everywhere else."""
     with caplog.at_level("DEBUG"):
         chained()
 
-    (complaint,) = [one for one in caplog.records if not hasattr(one, "event")]
-    assert complaint.args == (UNBUILT_LABEL, "construction_failed")
+    reported(caplog)
+    assert dispatched(caplog) == []
+    assert tap.seen == []
     assert SENTINEL not in both_formats(caplog)
     assert SENTINEL not in tap.rendered()
 
@@ -840,10 +707,9 @@ class TrackSpy:
 def test_a_conversations_refusal_reaches_no_capture_either(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """The session scope, where a capture is attached: forgiving, since
-    strict dispatches nothing at all, so what is asserted is that the
-    recovery reached the track and the sentinel did not."""
-    events.set_enforcement(events.FORGIVING)
+    """The session scope, where a capture is attached and where the
+    decision track is written to disk beside the room audio: a refused
+    emission leaves the track with nothing on it at all."""
     session = SessionEvents("alpha", clock=lambda: 1.0)
     track = TrackSpy()
     session.attach_capture(track)
@@ -860,7 +726,8 @@ def test_a_conversations_refusal_reaches_no_capture_either(
                 )
             )
 
-    assert [one["event"] for one in track.seen] == [SCHEMA_VIOLATION]
+    reported(caplog)
+    assert track.seen == []
     assert SENTINEL not in repr(track.seen)
     assert SENTINEL not in both_formats(caplog)
 
@@ -892,15 +759,16 @@ def hostile() -> BaseException:
         return raised
 
 
-def carries_nothing(raised: BaseException, caplog: pytest.LogCaptureFixture,
-                    consumer: Tap) -> None:
-    """One escaping refusal, held to the whole claim: no cause, no
-    context, and the sentinel in no record, no argument, no shipped
-    format and no consumer's copy."""
-    assert isinstance(raised, EventSchemaError)
-    assert raised.__cause__ is None
-    assert raised.__context__ is None
-    assert SENTINEL not in unchained(raised)
+def carries_nothing(caplog: pytest.LogCaptureFixture, consumer: Tap) -> None:
+    """One refused emission on a production path, held to the whole
+    claim: the fixed report, and the sentinel in no record, no argument,
+    no shipped format and no consumer's copy.
+
+    The consumer is not asserted empty here, unlike the machinery tests
+    above: these paths emit lawful events of their own around the
+    refused one, and what is under test is that the refused one added
+    nothing to them."""
+    reported(caplog)
     assert SENTINEL not in both_formats(caplog)
     assert SENTINEL not in consumer.rendered()
 
@@ -924,15 +792,14 @@ async def test_a_filler_that_will_not_synthesize_refuses_carrying_nothing(
         def synthesize(self, text: str) -> object:
             raise hostile()
 
-    events.set_enforcement(events.STRICT)
     config = masked_config()
     providers = dict(built_world(config).agents)
     providers["poet"] = replace_field(providers["poet"], tts=cast(Any, HostileTts()))
 
-    with caplog.at_level("DEBUG"), pytest.raises(EventSchemaError) as raised:
+    with caplog.at_level("DEBUG"):
         await build_agent_fillers(config, providers)
 
-    carries_nothing(raised.value, caplog, tap)
+    carries_nothing(caplog, tap)
 
 
 def test_a_failing_api_request_refuses_carrying_nothing(
@@ -951,12 +818,10 @@ def test_a_failing_api_request_refuses_carrying_nothing(
     def endpoint() -> dict[str, str]:
         raise hostile()
 
-    events.set_enforcement(events.STRICT)
-
-    with caplog.at_level("DEBUG"), pytest.raises(EventSchemaError) as raised:
+    with caplog.at_level("DEBUG"), contextlib.suppress(Exception):
         TestClient(api).get("/boom", headers={"Authorization": f"Bearer {token}"})
 
-    carries_nothing(raised.value, caplog, tap)
+    carries_nothing(caplog, tap)
 
 
 def test_a_failed_capture_write_refuses_carrying_nothing(
@@ -967,7 +832,6 @@ def test_a_failed_capture_write_refuses_carrying_nothing(
     handled a frame further up than the site that reports it."""
     from tests.support.stores import CAPTURE_MANIFEST, store, tone
 
-    events.set_enforcement(events.STRICT)
     opened = 100.0
     capture = store(tmp_path).open("s1", opened, CAPTURE_MANIFEST)
     assert capture is not None
@@ -982,12 +846,82 @@ def test_a_failed_capture_write_refuses_carrying_nothing(
     capture._mic.add = refuse  # type: ignore[method-assign]
 
     try:
-        with caplog.at_level("DEBUG"), pytest.raises(EventSchemaError) as raised:
+        with caplog.at_level("DEBUG"):
             capture.microphone(tone(100, 1000), opened)
     finally:
-        # `_disable` raises before it closes, since the emit is the first
-        # thing it does; the files are this test's to shut.
         with contextlib.suppress(Exception):
             capture.close()
 
-    carries_nothing(raised.value, caplog, tap)
+    carries_nothing(caplog, tap)
+
+
+# --- and the rule that survives an optimized interpreter ---------------
+#
+# `python -O` strips `assert` statements, so nothing on this path is
+# written as one: an optimized production process silently losing its
+# guard is the quiet failure #155 exists to end. The check is a process
+# of its own because `__debug__` is fixed at interpreter start, which is
+# exactly what a pytest process cannot change about itself.
+
+OPTIMIZED = """
+import logging
+
+from vinga_server import events
+from vinga_server.events import REFUSAL_MESSAGE
+from vinga_server.events.catalog import ConversationsDropped
+from vinga_server.events.values import SessionId
+
+print("DEBUG=" + str(__debug__))
+
+CHANNEL = "vinga_server.conversations.store"
+
+reports = []
+
+
+class Watch(logging.Handler):
+    def emit(self, record):
+        reports.append(record)
+
+
+channel = logging.getLogger(CHANNEL)
+channel.setLevel(logging.DEBUG)
+channel.addHandler(Watch())
+
+seen = []
+
+
+class Tap:
+    def emit(self, emission):
+        seen.append(emission)
+
+
+events.attach_server_tap(Tap())
+events.ServerEvents(CHANNEL).emit(
+    lambda: ConversationsDropped(session=SessionId("has a space"))
+)
+
+print("REPORTED=" + str([one.msg for one in reports] == [REFUSAL_MESSAGE]))
+print("DISPATCHED=" + str(len(seen)))
+"""
+
+
+def test_optimized_python_still_refuses_an_invalid_emission(tmp_path: Path) -> None:
+    """Every check on this path is an explicit condition rather than an
+    `assert`: the value types' own, and the construction guard's around
+    them. Under `-O` an unbuildable emission is still reported once and
+    still dispatched to nobody."""
+    done = subprocess.run(
+        [sys.executable, "-O", "-c", OPTIMIZED],
+        cwd=tmp_path,
+        # Outside pytest, so no stale bytecode cache can answer instead
+        # of the source (the repository's own rule).
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert "DEBUG=False" in done.stdout
+    assert "REPORTED=True" in done.stdout
+    assert "DISPATCHED=0" in done.stdout

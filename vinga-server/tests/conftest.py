@@ -17,6 +17,7 @@ The bytecode setting below is here for the same reason: it has to be in
 place before pytest imports the first test module.
 """
 
+import logging
 import os
 import shutil
 import sys
@@ -94,20 +95,6 @@ TEST_API_SECRET = "test-api-token-" + "fedcba9876543210" * 2
 
 os.environ.setdefault(API_SECRET_ENV, TEST_API_SECRET)
 
-# Every event these lanes drive is held to its declaration (#155), and a
-# violation raises rather than being recovered from. The emitters
-# default to that already, so this is not what makes the lanes strict;
-# what it makes is a lane that STAYS strict when it builds an app.
-# `create_app` resolves this variable, and an unset one means forgiving
-# there, deliberately: a running server is a deployment however it was
-# launched. Set rather than defaulted, unlike the two secrets above,
-# because an ambient `forgiving` on a CI runner would quietly relax
-# every app-building lane in the suite, which is the one thing this
-# variable must not be able to do.
-ENFORCEMENT_ENV = "VINGA_EVENTS_ENFORCEMENT"
-
-os.environ[ENFORCEMENT_ENV] = "strict"
-
 # Where a database goes when nobody said.
 #
 # Most of both lanes composes a `Config` in memory and names no
@@ -180,3 +167,64 @@ def packaged_database_dir() -> Iterator[Path]:
     """
     _database_default(PACKAGED_DATABASE_DIR)
     yield PACKAGED_DATABASE_DIR
+
+
+# The root of every channel this server emits on. Records propagate to
+# their ancestors, so one handler here sees every subsystem's, which is
+# what makes the guard below one fixture rather than one per channel.
+EVENT_CHANNEL_ROOT = "vinga_server"
+
+REFUSALS_EXPECTED = "refusals_are_expected"
+
+
+@pytest.fixture
+def refusals_are_expected() -> None:
+    """Ask the guard below to let this test's refusals through.
+
+    Requested by name, and by the tests that drive the refusal path on
+    purpose: the sentinel suite, which exists to prove what a refusal
+    may say, and the emit-path pins next door. Everything else in both
+    lanes is held to emitting nothing the schema would refuse.
+    """
+
+
+@pytest.fixture(autouse=True)
+def no_unexpected_refusals(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Fail any test whose run made an emitter refuse an emission.
+
+    A refused emission is dropped after one report on the emitter's own
+    channel (#239), which is the right answer in production and a
+    terrible one in a lane: a malformed emission would cost a green
+    suite nothing at all and be discovered in a deployment's logs. So
+    the lanes read that report as a failure. This fixture, and not a
+    mode the emitters run in, is what keeps them loud.
+
+    The message is matched unrendered, which is what makes the check
+    exact: `msg` is the fixed template the emitter reports with, and
+    every other record on these channels is either an event or a
+    different sentence.
+    """
+    from vinga_server.events import REFUSAL_MESSAGE
+
+    refused: list[logging.LogRecord] = []
+
+    class Watch(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            if record.msg == REFUSAL_MESSAGE:
+                refused.append(record)
+
+    channel = logging.getLogger(EVENT_CHANNEL_ROOT)
+    watch = Watch(level=logging.NOTSET)
+    channel.addHandler(watch)
+    try:
+        yield
+    finally:
+        channel.removeHandler(watch)
+    if refused and REFUSALS_EXPECTED not in request.fixturenames:
+        pytest.fail(
+            f"the event schema refused {len(refused)} emission(s) in this "
+            f"test: "
+            + "; ".join(str(one.args) for one in refused)
+            + f". A refusal is a schema bug. If the test drives one on "
+            f"purpose, request the `{REFUSALS_EXPECTED}` fixture."
+        )
