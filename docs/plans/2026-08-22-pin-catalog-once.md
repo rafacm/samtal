@@ -47,20 +47,26 @@ and discoveries; no deviations says so explicitly.
    are builtins (#252's pin), and the shapes-not-values check
    becomes moot with no file to hold values (deleted with its
    subject). The suite keeps its module-scoped single drive.
-2. **The shape guarantee is held against the declarations, live.**
-   The committed capture pinned channel, level, template, argument
-   types, and payload key sets per path. Everything in that list is
-   derivable from the declaration a produced record matches, and
-   `matches()` already checks record against declaration; the live
-   suite therefore holds every produced record to its declaration
-   (template equality included) rather than to a snapshot of
-   itself. What is genuinely given up, stated plainly: a pin that
-   would catch the CATALOG and the code moving together in a way a
-   reviewer did not intend (the committed file was a third opinion
-   neither the code nor the declarations gave). That is the audit's
-   priced decision: drift between generator and committed copy is
-   cosmetic here, and `events.md` remains the reviewed artifact
-   where a catalog change is a visible diff.
+2. **The shape guarantee is held against the declarations, live,
+   with the one thing declarations cannot say held in a live
+   table.** The committed capture pinned channel, level, template,
+   argument types, and payload key sets per path. Channel, level,
+   and template are derivable from the matched declaration and the
+   live suite holds every produced record to them, template
+   equality included. Payload key sets are NOT derivable:
+   `matches()` asserts a range (`required <= keys <= declared`),
+   and a path that stopped carrying its optional fields (a
+   regressed entry quartet, dead usage plumbing) would pass every
+   range check while `events.md` did not move. So the suite gains
+   a live per-driver table, driver key to expected carried-key
+   set, asserted exactly; it is a declaration inside the suite
+   rather than a committed artifact, which is what the issue asked
+   for, and updating it is part of changing what a path carries.
+   What is genuinely given up, stated plainly: the committed
+   file's third-opinion property, catching the catalog and the
+   code moving together in a way a reviewer did not intend. That
+   is the audit's priced decision: `events.md` remains the
+   reviewed artifact where a catalog change is a visible diff.
 3. **The golden's suite and data file are deleted whole.**
    `test_event_golden.py` and `event-catalog-golden.json` go; their
    unique guarantees (ordered field lists, argument type names,
