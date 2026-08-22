@@ -34,7 +34,11 @@ from vinga_server.providers.kit import (
     call_failure,
     resolve_api_key,
 )
-from vinga_server.providers.openai_endpoint import OPENAI_HOST, endpoint_host
+from vinga_server.providers.openai_endpoint import (
+    OPENAI_HOST,
+    endpoint_host,
+    parse_base_url,
+)
 from vinga_server.providers.registry import OptionsReader
 
 # How this provider names itself in the message a failed request
@@ -262,6 +266,14 @@ def build(label: str, config: ProviderConfig) -> OpenAiCompatibleLlm:
     model = options.required_string("model")
     max_tokens = options.integer("max_tokens", DEFAULT_MAX_TOKENS)
     options.finish()
+    # The answer is deliberately discarded: the constructor derives the
+    # host it needs from the same URL for the failure event, and whether
+    # that host is OpenAI's is what decides usage, so threading this
+    # boolean in would encode one predicate twice. What the call is here
+    # for is the refusal, which belongs at build like every other thing
+    # this factory refuses rather than at the first request of the first
+    # conversation.
+    parse_base_url(label, base_url)
     return OpenAiCompatibleLlm(
         base_url=base_url,
         model=model,

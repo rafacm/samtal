@@ -58,6 +58,20 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   an operator sees changed: the same events with the same fields, and
   the same speech.
 
+- **An `openai_compatible` LLM refuses a malformed `base_url` at the
+  boot that reads it** (#225). The `openai` ASR and TTS types have
+  refused a `base_url` with no scheme or no host since the option
+  existed; the LLM type, which joined the dialect later, built a
+  provider anyway and failed on its first request instead, with the
+  round's token counts silently gone. It now meets the same refusal at
+  boot or apply. A deployment carrying a malformed URL that has been
+  failing every conversation will fail its next boot instead, which is
+  where the problem is. The refusal itself stops echoing the value it
+  rejected, for all three types: a key pasted where the URL goes is
+  exactly the shape that has no host, so the sentence that names the
+  problem would otherwise carry the key to stderr, to the API's 422
+  body and to the log.
+
 ### Removed
 
 - **`config doctor` follows no redirect at all** (#225). It used to
