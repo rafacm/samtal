@@ -148,7 +148,8 @@ From `vinga-server/`, on `feature/typed-event-enums-m1`.
 - `uv run pytest tests/unit -q`: **2821 passed, 20 skipped** in 338 s.
   The fifteen the branch adds are the fourteen in
   `test_event_enum_fields.py` and the baseline's payload-value pin; no
-  suite was removed.
+  suite was removed. (The review round below adds three more and
+  reruns everything.)
 - `uv run pytest tests/integration -q`: **61 passed** in 195 s.
 - `uv run vinga-server events reference | diff - ../docs/reference/events.md`:
   **empty**, run after the machinery, after the docgen change and again
@@ -163,3 +164,72 @@ From `vinga-server/`, on `feature/typed-event-enums-m1`.
 
 Nothing here needs hardware, so no verification step was left
 unverifiable.
+
+## PR review round (PR #252)
+
+External review of the PR diff: claude backend (the codex quota is
+exhausted), claude CLI, model `claude-opus-5`, read-only tool set,
+2026-08-22, [posted on the
+PR](https://github.com/rafacm/vinga/pull/252#issuecomment-5381088235).
+Verdict: mergeable after the listed fixes, no P1. Six findings, all
+fixed before merge, each in a commit of its own. Findings condensed but
+faithful:
+
+1. **P2: the docs suite's kind assertions stopped being a second
+   opinion.** `test_event_docs.py:417,440` built the expected cell with
+   `arg_kind_of` and `kind_of`, which is what the generator calls to
+   fill it, so an accessor answering the wrong kind would move the
+   document and the test together and the next regeneration would
+   commit a wrong reference against a green suite. The file's own
+   header and `check_constraint` claim the opposite, and so did this
+   document's deviation 1.
+   *Fixed in `48c904a6`*: `kind_named` and `arg_kind_named` read the
+   declaration, answering `TOKEN` for an enumeration and the value
+   type's own attribute otherwise, which leaves the accessors as the
+   thing under test. Checked by mutation: an accessor answering `INT`
+   for an enum field now fails with ``'`INT`' == '`TOKEN`'``.
+2. **P2: the plan's named mitigation for `Literal` and enum inside
+   unions shipped with no coverage.** Every migrated production field
+   is fixed, hence required and not nullable, and no scratch variant
+   was nullable or omittable, so `_read`'s union split and `verify()`'s
+   null and absent branches were never taken by an enum field.
+   *Fixed in `9e90d5c3`*: two more scratch variants, a nullable enum
+   field and an omittable narrowed one, asserting the declared set, the
+   requiredness and nullability, the payload's two answers, that
+   `verify()` accepts null and absence, and that the narrowing still
+   refuses a member outside it.
+3. **P3: the golden's header and one test docstring contradicted the
+   file.** Both said there is no wording in it at all, and three
+   carried fields have worded members now in it verbatim.
+   *Fixed in `6755b29a`*: the claim is narrower and true, no wording
+   ABOUT a declaration, with a declared set as the exception that
+   proves it; the header lists the sets among the recorded dimensions.
+4. **P3: `_arg_kind` turned a missing `ARG_KIND` into a silently empty
+   cell.** `AgentNames` and `PromptSources` declare a field kind and no
+   argument kind, and the old eager read raised on them; nothing
+   refused a variant rendering one at declaration.
+   *Fixed in `f2c7864b`*: `_check` holds a rendered name to having an
+   argument kind, beside the two rules it already holds it to, with a
+   scratch refusal case in `test_event_catalog.py`. The generator's
+   fallback stays as dead defence.
+5. **P3: the three accessors were missing from `__all__`.**
+   *Fixed in `b4c0c3d2`*: added, sorted, beside every other public
+   reader.
+6. **P3: this document said eleven wrapper imports were removed.**
+   *Fixed in `e7bc0347`*: ten, which is what the migration commit's
+   diff removes.
+
+### Verification after the round
+
+From `vinga-server/`, on the six fix commits:
+
+- `uv run ruff check .`: **All checks passed!**
+- `uv run mypy`: **Success: no issues found in 3 source files.**
+- `uv run pytest tests/unit -q`: **2824 passed, 20 skipped** in 336 s,
+  three more than before the round: the two union tests and the new
+  refusal case.
+- `uv run pytest tests/integration -q`: **61 passed** in 192 s.
+- `uv run vinga-server events reference | diff - ../docs/reference/events.md`:
+  **empty**.
+- `uv run python -m tests.unit.test_event_golden` run twice more: the
+  file is unchanged, and the committed baseline is still untouched.
