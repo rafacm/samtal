@@ -66,18 +66,22 @@ Before: 35 definitions in 1,783 lines. The eight module-level ones were
 `_entry_of`, `_tool_fragment`, `_tool_called`, `_llm_retried`,
 `_reported`, `_llm_rounded`, `_provider_failure` and `_not_allowed`.
 
-After: 30 definitions in 1,530 lines. Three module-level ones remain:
+After: 31 definitions in 1,547 lines. Four module-level ones remain:
 
 - `_reported`, which unpacks a `Usage`, a `providers/` type the
   assembly may not take.
-- `_tool_called`, which is the source selection and nothing else: three
+- `_tool_fragment`, which is the source selection for the one sentence
+  that is not an event: four lines choosing which of a call's names the
+  assembly is asked to render.
+- `_tool_called`, which is the source selection for the event: three
   lines picking which assembly constructor describes this call.
 - `_not_allowed`, which was never event assembly.
 
-The five that left are the quartet type and its reader, the fragment,
-and the three variant builders. The class's own 27 methods are
-unchanged in number and in name; what moved out of them is the body of
-three thunks.
+The four that left are `_entry_of`, `_llm_retried`, `_llm_rounded` and
+`_provider_failure`, taking the frozen quartet type with them;
+`_tool_fragment` stayed by handing its rendering over and keeping its
+decision. The class's own 27 methods are unchanged in number and in
+name; what moved out of them is the body of three thunks.
 
 `grep -rn "OfEntry" src tests` from `vinga-server/` returns nothing.
 
@@ -99,18 +103,28 @@ requires, since `duration_s` is `carried=False` and is not in that
 order at all. The golden's field lists for the three survivors are
 byte-unchanged, which is the measurement.
 
-**The tool-name fragment is not shared with the three tool-call
-builders, because the type system already shares it better.** The plan
+**The tool-name fragment splits into a rendering in `assembly.py` and
+a decision in `pipeline.py`, and only the rendering moved.** The plan
 has `assembly.py` export the fragment "serving both callers".
 `BuiltinToolCall.named` is declared `QuotedToolName`,
 `McpToolCall.named` is `FromEntry` and `UnnamedToolCall.named` is
 `Nothing`, so a builder handed the general `Fragment` fails the type
-check: each variant's declaration IS the rule for its own sentence, and
-cannot be got wrong. What has no variant to declare it is the
-malformed-arguments warning line, so `tool_fragment` exists for that
-caller, and it lives in `assembly.py` rather than in the reply path so
-that the rule sits beside the declarations it has to agree with. Its
-docstring says both halves, the beside-a-log-line rule included.
+check: for the three events, each variant's declaration IS the rule for
+its own sentence and cannot be got wrong. The one sentence with no
+variant to declare it is the malformed-arguments warning line, and its
+answer has two halves that belong in different modules. WHICH of a
+call's names may be printed is read off the classifier's source
+constants, which decision 4 keeps beside the classifier; HOW each of
+the three answers renders is the fragment vocabulary's. So
+`assembly.tool_fragment(tool, entry)` renders whichever name it is
+handed and refuses nothing, and `pipeline.py` keeps a four-line
+`_tool_fragment(classified)` as the one named home of the decision,
+which is what stops the warning line and the `tool_call` event beside
+it from coming to disagree. Both docstrings say plainly which half they
+are, and the assembly suite's fragment test is scoped to the rendering
+it can actually pin; the decision is pinned at the sentence, in
+`test_session_tools.py`, where a builtin's name reaches the warning
+line and a name no namespace publishes does not.
 
 **`_reported` lost a parameter.** The plan keeps it in `pipeline.py`
 for taking `Usage`, and gives `llm_rounded` plain token counts. Once

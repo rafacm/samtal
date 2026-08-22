@@ -10,14 +10,22 @@ class, orders no field list, and learns nothing about which value type
 wraps which argument.
 
 The depth is not a vocabulary crossing, because there is none: the
-signatures below take builtins and answer a `Variant`. It is two facts
-that would otherwise be the caller's. The entry quartet is one type
+signatures below take builtins and answer a `Variant`. It is one fact
+that would otherwise be the caller's: the entry quartet is one type
 whose `provider` and `type` are required, so the four values a
 configured provider contributes are built in exactly one place and are
-answered whole or not at all. And the fragment naming a tool is a
-function here, so the one sentence about a call that is not an event
-states the rule about which names this application may print beside the
-declarations that hold the three that are to the same rule.
+answered whole or not at all.
+
+One thing this module deliberately does NOT own, so that no reader
+takes its presence for a guarantee: which of a call's names may be
+printed at all. `tool_fragment` renders whichever name it is handed and
+refuses nothing, because deciding is reading the classifier's own
+source constants, which stay beside the classifier (#240, the plan's
+decision 4). The three `tool_call` variants make the decision
+structural for themselves by declaring the fragment type each carries;
+the one sentence that is not an event has `pipeline.py`'s
+`_tool_fragment` for its single named home. What lives here is the
+rendering, and the grammar bounding each shape of it.
 
 Plain values in, one variant out, and nothing injectable. The module
 imports the catalog and the value vocabulary and no subsystem, which is
@@ -143,18 +151,17 @@ def _spoken(held: Identifier | Absent) -> str | None:
 
 
 def tool_fragment(tool: str | None, entry: str | None) -> Fragment:
-    """The fragment a sentence about one call renders where its name
-    would go: a builtin's own name, the configured MCP entry a call
-    reached, or nothing at all for the two namespaces this surface may
-    not name.
+    """One of the three shapes a sentence renders where a call's name
+    would go, chosen by which name the caller passes: a builtin's own
+    name quoted, the configured MCP entry a call reached, or nothing.
 
-    For the sentence that is not an event. The three `tool_call`
-    variants each declare which fragment type they carry, so for them
-    the rule is a field's type and cannot be got wrong; the warning line
-    about unparseable arguments has no variant to declare it, and its
-    rule would otherwise be written in the reply path, next to nothing
-    that says why. It lives here instead, beside the declarations it has
-    to agree with.
+    Rendering only. WHICH of a call's names may be printed is the
+    caller's decision and is not checked here: hand this a device
+    tool's name as `tool` and it quotes it. The three `tool_call`
+    variants settle that question by declaring the fragment type each
+    one carries; `pipeline.py`'s `_tool_fragment` settles it for the
+    one sentence no variant declares, beside the classifier whose
+    source constants the answer is read from.
 
     The one construction in this module built beside a log call rather
     than inside an emit thunk. A refusal here lands in the tool-error
@@ -171,9 +178,8 @@ def tool_fragment(tool: str | None, entry: str | None) -> Fragment:
 # The builders below are thin, and each is one constructor call with its
 # arguments wrapped. That is what they should be, and it is not what
 # earns the module its name: the quartet type is, since it is the only
-# place the four entry values are built, and the fragment above is,
-# since it is where the naming rule is written for the one sentence no
-# variant declares it for.
+# place the four entry values are built, and the field lists and the
+# value vocabulary are, since a caller no longer holds either.
 
 
 def builtin_tool_called(
