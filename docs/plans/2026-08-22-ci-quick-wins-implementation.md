@@ -236,7 +236,7 @@ finding 9's resolution describe them.
 
 - The measured saving on the whole unit lane is about 65 s rather than
   the roughly 70 s the harness itself gives up (338.51 s to 273.17 s on
-  this machine, against 70.13 s to 1.28 s across the four drivers). The
+  this machine, against 70.13 s to 1.69 s across the four drivers). The
   difference is that `tests/unit/test_event_baseline.py` also holds the
   drivers, so a couple of seconds of the harness's own work is counted
   once in the fixture and the rest of the lane's variance covers the
@@ -258,7 +258,7 @@ finding 9's resolution describe them.
   | --- | --- | --- |
   | `runtime.filler_runner:FillerRunner._fire #1` | 20.02s | 0.53s |
   | `runtime.filler_runner:FillerRunner._fire #2` | 20.02s | 0.52s |
-  | `runtime.filler_runner:FillerRunner._fire #3` | 20.02s | 0.51s |
+  | `runtime.filler_runner:FillerRunner._fire #3` | 20.02s | 0.52s |
   | `runtime.pipeline:PipelineRuntime._watchdog_stream #1` | 10.07s | 0.12s |
   | **TOTAL over 81 drivers** | **86.82s** | **17.94s** |
 
