@@ -88,15 +88,18 @@ durations flag.
 
 Two, both small and both additive.
 
-1. **The `AGENTS.md` sentence also gained the `docs/reference/`
-   trigger path.** The plan asked for that sentence to be checked for
-   staleness in the same commit. It was stale in a second way the plan
-   did not anticipate: it said the workflow "only triggers on changes
-   under `vinga-server/` or to the workflow file itself", while the
-   `on:` block has matched `docs/reference/**` since the generated
-   references started being diffed. Correcting one clause and leaving
-   the other wrong in the same sentence was not worth the smaller
-   diff.
+1. **The `AGENTS.md` sentence also gained an accurate account of when
+   CI runs.** The plan asked for that sentence to be checked for
+   staleness in the same commit. It was stale in a way the plan did
+   not anticipate: it said the workflow "only triggers on changes
+   under `vinga-server/` or to the workflow file itself", and the
+   `on:` block disagrees three times over. It has matched
+   `docs/reference/**` since the generated references started being
+   diffed; its `push` trigger is restricted to `main`; and
+   `workflow_dispatch` ignores the path filters altogether, which is
+   how M1's own gate was proved on a branch. The sentence now names
+   all three events. Correcting one clause and leaving the others
+   wrong was not worth the smaller diff.
 
 2. **Both new jobs carry a comment block.** The plan's module layout
    only names the `image` comment as prose to update. This workflow
