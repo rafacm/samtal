@@ -96,14 +96,21 @@ Exactly what its siblings do: `build` in `providers/openai_llm.py`
 calls `parse_base_url` before constructing the provider, so a
 `base_url` without a scheme or host is refused at build time (boot or
 apply) instead of surfacing as a failed first request with token
-counts silently gone. `parse_base_url`'s refusal text is reused
-unchanged, including its echo of the rejected value; that echo is a
-pre-existing surface shared with the `openai` ASR and TTS types, and
-whether any of the three should echo is flagged to the external
-review rather than redecided here. After the call, `endpoint_host`
-can no longer return None on this path, which makes its docstring's
-claim true for all its callers. The host equality that drives
-`_ask_for_usage` is unchanged.
+counts silently gone. The same commit drops the `got "{base_url}"`
+clause from `parse_base_url`'s refusal for all three types that
+share it: `base_url` is this repository's known credential-bearing
+option under an innocuous name, an operator pasting a key where the
+URL goes produces a value with no netloc, which is exactly the case
+`url_credential` cannot mask, and echoing it would put the key on
+stderr, in the API's 422 body, and in the boot log. The sibling
+pins (`test_providers_openai_tts.py:190` and the ASR mirror) match
+on the static half of the sentence only, so nothing else moves. A
+sentinel bite plants a credential-shaped `base_url`
+(`sk-`-prefixed, no scheme) and asserts the refusal renders the
+label, the rule, and the example, never the value. After the
+`parse_base_url` call, `endpoint_host` cannot return None on the
+factory path. The host equality that drives `_ask_for_usage` is
+unchanged.
 
 **Is the conversation store's pre-narrowing claim a comment fix or a
 missing read-side strip?** A comment fix. The `EVENT_CONTENT` strip
@@ -168,10 +175,12 @@ changes.
   location only, never the input; the test bite asserts the refusal
   names `devices.<mac>` and that a planted credential-shaped binding
   value does not appear in the rendered message. (3)
-  `parse_base_url`'s refusal is reused unchanged; its
-  echo is pre-existing, shared with two sibling types, and named to
-  the review as an open question rather than silently extended or
-  silently fixed.
+  `parse_base_url`'s refusal loses its echo of the rejected value in
+  the same commit that adds the third caller; the sentinel bite in
+  the open-question answer covers the credential-shaped case. Its
+  removal is the review's finding 3, decided: the plan is what makes
+  the surface newly reachable, so the echo goes rather than gets a
+  third caller.
 - **Pin before reshaping.** The diff fix adds the failing-then-green
   characterization first: a form-only rewrite (string to equivalent
   object) currently reports the agent under `agents.changed` with an
@@ -336,6 +345,11 @@ commit (the sibling pins match on the static half only) and add a
 sentinel bite planting a credential-shaped `base_url`. Deferring to
 review is not available: the plan is what makes the surface newly
 reachable.
+
+*Resolution*: accepted; decided as the finding says. The echo clause
+goes from `parse_base_url` in the commit that adds the third caller,
+the sentinel bite is in the plan, and the no-leak pre-answer states
+the decision instead of deferring it.
 
 **4 (P2). The version-1 activation pin already exists, and the shape
 the plan proposes pinning is not one a board sends.**
