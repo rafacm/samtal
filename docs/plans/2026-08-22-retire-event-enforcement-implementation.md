@@ -210,3 +210,75 @@ worth remembering when it is made.
   plan required.
 - The exit grep from `vinga-server/` over `src tests Dockerfile
   README.md` returns nothing.
+
+## PR review round, M1 (PR #258)
+
+External review of the PR diff: claude backend (codex quota exhausted),
+claude CLI, model `claude-opus-5`, read-only tool set, 2026-08-22,
+posted on the PR. Verdict: mergeable after the listed fixes, with the
+behavior change itself confirmed correct and complete against the plan
+(the guarded region contains no `raise`, both emitters drop on `None`,
+the clock read survives the drop path, the identifier grep is clean, the
+two generated pins match their generators, the baseline is untouched,
+and all four prose sites were rewritten). What the round faulted was the
+PROOF: two of the six properties the plan promised to re-pin were pinned
+more weakly than claimed, and the fixture substituted for strict mode
+had a scope hole over the one run that drives every emit path. Three P2s
+and two P3s, each fixed with its own commit.
+
+1. **P2: the `wrong_channel` refusal was pinned by no test at all.**
+   The parametrized drop test drove the mismatch branch but asserted
+   only the level and an empty tap list, so the label, the code, or both
+   could have changed with the suite staying green; `wrong_channel`
+   appeared nowhere outside the module that returns it. Fixed in
+   `cccc453e`: the expected `(label, code)` pair rides the
+   parametrization and the report is asserted unrendered and by
+   equality. Checked by mutation: answering the mismatch with the other
+   pair fails the test.
+2. **P2: the lane guard did not see refusals from higher-scoped
+   fixtures.** It was function-scoped, and pytest builds higher-scoped
+   fixtures first and tears them down last, so the module-scoped
+   baseline fixture that drives all eighty-one emit paths, the
+   integration lane's module-scoped uvicorn boot, and every module
+   teardown were outside its window. Strict mode covered those because
+   it raised from inside the emitter at whatever scope was running.
+   Fixed in `d7370ae2`: the handler is installed once from
+   `pytest_configure` into a session-long ledger, the autouse fixture
+   reads a per-test delta off it (so a module fixture's refusal is
+   attributed to the test that first asked for it), and what is
+   unaccounted for at the end of the run gets its own terminal section
+   and fails the run. Both paths were driven with a throwaway probe.
+   The doc's "the lane guard found nothing" claim was corrected to what
+   is now actually checked in `4e865ba2`, after rerunning both lanes
+   with the widened guard: still green, residual bucket empty.
+3. **P2: the API production-path sentinel swallowed the escape it
+   exists to detect.** Its request was wrapped in
+   `contextlib.suppress(Exception)`, dead in the passing case and fatal
+   in the failing one: a reintroduced `raise` after the report line
+   would skip the handler's 500, leave the request with no response and
+   send a traceback to an outer logger, and the test would still pass.
+   Fixed in `fea4a7fa`: the suppression goes, the response is asserted
+   500, and its body is asserted sentinel-free, which the hunt did not
+   otherwise reach. Checked by mutation.
+4. **P3: `reported()` claimed a channel it never checked.** Fixed in
+   `9942165e`: the helper takes the channel and asserts `record.name`
+   at every caller, `carries_nothing` passes the refusing subsystem's
+   own, and the unused `said_on_the_session` helper goes.
+5. **P3: the README said the refusal line "says what was refused",**
+   which is the one thing it may not say. Fixed in `5ee8c0f2` with the
+   CHANGELOG's own wording, which agrees with the generated reference
+   the section points readers at.
+
+### Verification after the round
+
+- `uv run ruff check .`: clean.
+- `uv run mypy`: clean.
+- `uv run pytest tests/unit -q`: green, with the widened guard armed and
+  no residual section.
+- `uv run pytest tests/integration -q`: green, same.
+- The reference and the golden inventory were regenerated again and
+  neither moved: the round touched tests, the conftest and one README
+  paragraph, none of which the generators read.
+- The committed event baseline is still byte-untouched, by the same
+  SHA-256.
+- The exit grep still returns nothing.
