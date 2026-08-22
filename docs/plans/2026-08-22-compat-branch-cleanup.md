@@ -91,7 +91,14 @@ consumer goes through. `same_agent` (and the `agent_defaults`
 comparison beside it, which holds the same field) compares entries
 with their `mcp` lists mapped through `as_mcp_grant`, so a form-only
 rewrite compares equal everywhere and a real grant change still shows
-in both the agents list and the registry-derived grants list. The
+in both the agents list and the registry-derived grants list. One
+stale record to correct alongside:
+`docs/plans/2026-08-20-config-diff-read-implementation.md` still
+states the superseded comparison rule ("with the `mcp` field
+excluded"), which could steer an implementer into exclusion, and
+exclusion would remove real grant edits from `agents.changed`
+entirely; the diff commit appends a dated correction note to that
+doc pointing at `config/diff.py`'s own comments as current. The
 mapping preserves the `None`-vs-`[]` distinction the field's own
 semantics carry (`None` inherits `agent_defaults`, `[]` opts out,
 and `mcp_for_agent` turns on exactly that): it is `None if
@@ -482,6 +489,11 @@ states the opposite comparison rule** ("with the `mcp` field
 excluded"), which could steer the implementer into exclusion,
 removing real grant edits from `agents.changed`. Note the staleness
 and whether the diff commit corrects it.
+
+*Resolution*: accepted; the open-question answer notes the stale
+line and the diff commit appends a dated correction note to that
+implementation doc pointing at `config/diff.py`'s comments as
+current, rather than silently rewriting the doc's history.
 
 **11 (P3). The comment correction changes a published reference but
 the plan waives a changelog entry.** The regenerated
