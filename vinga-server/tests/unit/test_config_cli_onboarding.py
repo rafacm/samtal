@@ -388,18 +388,20 @@ def test_the_real_describe_body_is_recognized(
     assert f"vinga-server {__version__}" in capsys.readouterr().out
 
 
-def test_a_slash_an_older_server_would_redirect_still_reaches_it(
+def test_a_slash_an_older_server_would_redirect_is_refused_too(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A server older than the 2026-08-13 checkpoint answers a missing
+    """A server older than the 2026-08-13 checkpoint answered a missing
     trailing slash with Starlette's own 307, issued before any handler
-    runs. A current one answers both spellings itself (the test below),
-    so this is what the followed redirect is for: reporting an older
-    deployment as "not vinga-server" would be this command's worst
-    answer.
+    runs, and this command used to follow that one shape. It follows
+    none now: a current server answers both spellings itself (the test
+    below), so what sends this redirect is something other than a
+    deployment this release supports, and where it points is that
+    something's choice.
 
     The canned app registers only the slashed route, which is exactly
-    what those servers were."""
+    what those servers were, so the 307 here is the framework's own
+    rather than one written by hand."""
     app = FastAPI()
 
     @app.get("/x/ABCDEFGH/")
@@ -417,9 +419,12 @@ def test_a_slash_an_older_server_would_redirect_still_reaches_it(
         lambda base_url, token=None: TestClient(app, base_url=base_url),
     )
 
-    assert cli.main(["doctor", "https://voice.example/x/ABCDEFGH"]) == 0
+    assert cli.main(["doctor", "https://voice.example/x/ABCDEFGH"]) == 1
 
-    assert "vinga-server 9.9.9" in capsys.readouterr().out
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "does not follow" in captured.err
+    assert "Traceback" not in captured.err
 
 
 def test_a_current_server_answers_both_spellings_with_no_redirect(
@@ -431,9 +436,9 @@ def test_a_current_server_answers_both_spellings_with_no_redirect(
     request. So a probe of a current server never meets one, whichever
     way the URL was typed.
 
-    Asserted against the real routers rather than a canned app, since it
-    is their behavior the followed redirect is now only a fallback for.
-    """
+    Asserted against the real routers rather than a canned app, since
+    their behavior is why this command needs to follow no redirect at
+    all: the test above is what it answers one with instead."""
     monkeypatch.setenv(API_SECRET_ENV, "test-api-token-" + "0123456789abcdef" * 2)
     app = create_app(Config())
     with TestClient(app) as client:
@@ -562,34 +567,6 @@ def test_an_upper_case_secure_websocket_url_is_still_healthy(
     assert cli.main(["doctor", "HTTPS://voice.example/x/ABCDEFGH/"]) == 0
 
     assert "voice.example/xiaozhi/v1/" in capsys.readouterr().out
-
-
-def test_the_verdict_reads_the_url_the_response_came_from(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """Behind a redirect (an older server, or a proxy that
-    canonicalizes), the verdict is decided on where the response came
-    from rather than on the string that was typed."""
-    app = FastAPI()
-
-    @app.get("/x/ABCDEFGH/")
-    async def described() -> Response:
-        return Response(
-            DESCRIBE.format(
-                websocket="ws://voice.example/xiaozhi/v1/", url="https://voice.example"
-            ),
-            media_type="text/plain",
-        )
-
-    monkeypatch.setattr(
-        cli,
-        "build_client",
-        lambda base_url, token=None: TestClient(app, base_url=base_url),
-    )
-
-    assert cli.main(["doctor", "https://voice.example/x/ABCDEFGH"]) == 1
-
-    assert "server.websocket_url" in capsys.readouterr().err
 
 
 def test_a_plain_websocket_url_behind_plain_http_is_healthy(
@@ -779,18 +756,21 @@ def redirecting(monkeypatch: pytest.MonkeyPatch):
     return _serve
 
 
-def test_the_canonical_trailing_slash_redirect_is_followed(
+def test_the_canonical_trailing_slash_redirect_is_refused_as_well(
     redirecting, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The one redirect this follows, which is what a deployment older
-    than the 2026-08-13 checkpoint answers a missing trailing slash
-    with, and the reason any are followed at all."""
+    """The redirect this used to follow, and the last one to stop being
+    special: the missing trailing slash a deployment older than the
+    2026-08-13 checkpoint canonicalized for itself. One request goes
+    out, and the second address is never asked."""
     seen = redirecting({"/x/ABCDEFGH": "https://voice.example/x/ABCDEFGH/"})
 
-    assert cli.main(["doctor", "https://voice.example/x/ABCDEFGH"]) == 0
+    assert cli.main(["doctor", "https://voice.example/x/ABCDEFGH"]) == 1
 
-    assert [request.url.path for request in seen] == ["/x/ABCDEFGH", "/x/ABCDEFGH/"]
-    assert "vinga-server 9.9.9" in capsys.readouterr().out
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "does not follow" in captured.err
+    assert [request.url.path for request in seen] == ["/x/ABCDEFGH"]
 
 
 @pytest.mark.parametrize(
@@ -804,7 +784,7 @@ def test_the_canonical_trailing_slash_redirect_is_followed(
         ("no Location at all", ""),
     ],
 )
-def test_any_other_redirect_is_refused_without_naming_the_target(
+def test_every_other_redirect_is_refused_without_naming_the_target(
     redirecting, capsys: pytest.CaptureFixture[str], what: str, location: str
 ) -> None:
     """A redirect is the far end choosing where this request goes next,
@@ -823,43 +803,6 @@ def test_any_other_redirect_is_refused_without_naming_the_target(
     # And it was never sent: the refusal is in front of the second
     # request, not after it.
     assert [request.url.path for request in seen] == ["/x/ABCDEFGH"], what
-
-
-def test_a_location_that_cannot_be_read_is_not_a_canonical_slash() -> None:
-    """Asserted on the rule rather than through the command, because the
-    test client is built on a different httpx distribution than the CLI
-    is (httpx2 beside httpx), and it raises its own protocol error for
-    an unreadable Location before this rule is ever consulted. Through
-    the real client that error is a transport failure, which the probe
-    already reports without quoting anything."""
-    response = httpx.Response(
-        307,
-        headers={"location": f"http://[::{PASTED}"},
-        request=httpx.Request("GET", "https://voice.example/x/ABCDEFGH"),
-    )
-
-    # White-box: this rule sits between two libraries, and the
-    # docstring above says why the public route cannot reach it here.
-    # The redirect is built by hand for the same reason.
-    assert cli._canonical_slash(response) is None  # noqa: SLF001
-
-
-def test_a_second_redirect_is_one_too_many(
-    redirecting, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """Each hop is canonical on its own, and the chain is still somebody
-    else deciding how far this goes."""
-    seen = redirecting(
-        {
-            "/x/ABCDEFGH": "https://voice.example/x/ABCDEFGH/",
-            "/x/ABCDEFGH/": "https://voice.example/x/ABCDEFGH//",
-        }
-    )
-
-    assert cli.main(["doctor", "https://voice.example/x/ABCDEFGH"]) == 1
-
-    assert "does not follow" in capsys.readouterr().err
-    assert len(seen) == 2
 
 
 # A URL somebody passed is never displayed
@@ -940,6 +883,26 @@ def test_a_refused_supplied_url_is_not_repeated_either(
         assert SECRET_SEGMENT not in captured.err
         assert PASTED not in captured.err
         assert captured.out == ""
+
+
+def test_a_redirect_repeats_neither_its_target_nor_the_supplied_url(
+    redirecting, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The fifth verdict, and the one with two secrets in it at once:
+    the address that was asked holds the deployment's own path segment,
+    and the target it was answered with arrives from the far end, which
+    is what makes it text nobody vouched for. The refusal names the
+    endpoint the way every other verdict does and repeats neither."""
+    redirecting({f"/xiaozhi/ota/{SECRET_SEGMENT}": f"https://voice.example/{PASTED}/"})
+
+    assert cli.main(["doctor", f"https://voice.example/xiaozhi/ota/{SECRET_SEGMENT}"]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "does not follow" in captured.err
+    assert SECRET_SEGMENT not in captured.err
+    assert PASTED not in captured.err
+    assert cli.SUPPLIED_ENDPOINT in captured.err
 
 
 def test_the_derived_url_is_still_shown(

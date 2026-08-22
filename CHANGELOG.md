@@ -58,6 +58,22 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   an operator sees changed: the same events with the same fields, and
   the same speech.
 
+### Removed
+
+- **`config doctor` follows no redirect at all** (#225). It used to
+  follow one shape of one: the trailing slash a deployment older than
+  the 2026-08-13 checkpoint canonicalized for itself, before every
+  device-facing route began answering both spellings of its path
+  directly. No supported deployment sends that redirect, so the
+  tolerance had no beneficiary, and what is left behind one is a proxy
+  or something else choosing where this request goes next inside the
+  network a deployment sits in. The probe is one GET now, and every
+  redirect meets the refusal that already covered the rest, which names
+  neither the target nor the address that was asked. An operator behind
+  a canonicalizing proxy meets that refusal instead of a silent second
+  hop, and the way out is the one the refusal states: ask the address
+  you meant directly, trailing slash included.
+
 ## 2026-08-21
 
 ### Added
