@@ -39,7 +39,7 @@ def timed() -> list[tuple[str, float]]:
     times: list[tuple[str, float]] = []
     for driver in DRIVERS:
         started = time.perf_counter()
-        with tempfile.TemporaryDirectory(prefix="vinga-baseline-") as directory:
+        with tempfile.TemporaryDirectory(prefix="vinga-drivers-") as directory:
             with listening():
                 answer = driver.drive(Path(directory))
                 if inspect.isawaitable(answer):
