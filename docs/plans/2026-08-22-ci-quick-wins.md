@@ -128,9 +128,12 @@ lint/mypy/doc-drift/wheel seconds; critical path 12m45s.
 - M2: the baseline suite (`tests/unit/test_event_baseline.py`)
   passes with the committed file byte-identical; regeneration
   double-run leaves the tree clean; the per-driver timing script
-  shows the four drivers each under one second and `capture()`
-  setup in single digits; the full unit suite passes and its wall
-  time drops by roughly 80 seconds.
+  shows the four named drivers each under one second and
+  `capture()` setup around 17 seconds (the ~16s tail over the
+  other 77 drivers is real work this milestone does not chase; the
+  scope call is recorded here, and the issue's "single digits"
+  verification box is corrected to match when M2 lands); the full
+  unit suite passes and its wall time drops by roughly 70 seconds.
 
 ## Risks and mitigations
 
@@ -156,9 +159,10 @@ lint/mypy/doc-drift/wheel seconds; critical path 12m45s.
   `main` stays releasable because every step still runs, just in
   two lanes.
 - [ ] **M2: shrink the four slow drivers' waits in the baseline
-  harness.** (PR TBD) Harness-local stall and bound values with the
-  ratios and floors of decision 4; committed baseline byte-still;
-  capture() setup to single digits.
+  harness.** (PR TBD) Harness-local stall values and the
+  `unregistered()` config parameter per decisions 2 and 4;
+  committed baseline byte-still; the four drivers each under one
+  second and capture() setup around 17 seconds.
 
 ## Plan review round
 
