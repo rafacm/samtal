@@ -239,3 +239,89 @@ Reasons, against the smaller-enum alternative:
   inventory, and the test suites land in the same change;
   `events.md` and the committed baseline are proven byte-still.
   Deletes about 25 names from the events vocabulary; no new module.
+
+## Plan review round
+
+External review of commit `470f2e78`, 2026-08-22. Backend: claude
+CLI 2.1.239, model `claude-opus-5`, read-only tool set (the interim
+fallback tier; the codex quota is exhausted, so independence is
+weaker than the sol default: fresh eyes and no session context, but
+shared training with the model that wrote the plan). Verdict as
+received: not ready; findings 1 and 2 rest on what the three
+decision sites actually hold, finding 3 depends on that answer,
+findings 4 to 8 amendable in place. Findings condensed but faithful:
+
+1. **P1: the three decision sites hold plain `str`, not enum
+   members, so "hand the member straight through, no conversion"
+   cannot be implemented as written.** `runtime/turns.py:37-46`
+   classifies tool sources into local string constants on purpose
+   (held equal to the `tool_invocations.source` column);
+   `onboarding/pending.py:104-110` builds `CAPACITY_REACHED` and
+   `BUDGET_SPENT` as f-strings over configured bounds, with
+   `unbound.py:75` typing `refusal: str | None`;
+   `tools/mcp/transport.py:251-273` defines `_down_reason(...) ->
+   str` over six local constants. Retyping those to the aliases
+   drags four unlisted modules (plus the store column and the
+   bound interpolation) into scope; either scope them in or convert
+   at the emit site and withdraw the narrowing-at-the-decision-site
+   claim.
+2. **P1: the emit-site list is wrong in one entry and short by
+   two.** `_down_reason` lives in `tools/mcp/transport.py`, not
+   `manager.py`; `device/session.py:585` (`_closed_reason() ->
+   str`) and `tools/mcp/reload.py:81-107` (`_refusal(exc) -> str`
+   over five `REFUSED_*` constants re-exported through the package
+   `__all__` and documented by `config/responses.py`) hold plain
+   strings. The plan should distinguish the sites already holding a
+   member (`capture.py`, `ws.py`, `ota/reply.py:362`,
+   `onboarding/origin.py`, `pipeline.py:246,388`) from the five
+   that hold a string.
+3. **P1: the test paragraph would delete two live cross-module
+   drift guards.** `test_event_values.py:511-517` is the only check
+   that `onboarding/pending.py`'s wording and `NotOffered` agree;
+   `test_event_values.py:534-548` the only check that the
+   transport's six constants and `McpDown` agree. Scratch-catalog
+   tests cannot carry either claim; say they are rewritten against
+   the enums and the decision sites' constants.
+4. **P2: the mypy scope contradicts the plan's own reason for
+   choosing `Literal`.** All three decision sites are outside
+   `files = ["src/vinga_server/events"]`, so "a mypy error at the
+   site" is false at every site named; and `value()` returns `Any`,
+   so a `fixed=` member is invisible to mypy. Decision 5 should
+   claim only the declarations' internal consistency and name
+   `verify()` as the backstop everywhere else.
+5. **P2: migrating the fixed fields removes an import-time refusal
+   and puts nothing in its place.** Today the wrapper constructor
+   raises at import for a member outside the set; after the change
+   `_check` never looks at `Declared.fixed` and the first evidence
+   is a detail-free `construction_failed` at emit. Add a
+   declaration-time check in `_check`.
+6. **P2: the migration inventory grep does not cover the three
+   hardest sites.** `UnnamedToolSource(`, `PendingRefusal(`,
+   `McpConnectFailure(` contain no `Token(`; and the verification
+   grep's `reach_ins.py` note is wrong twice over (not under `src`,
+   and `tokenize.TokenInfo` does not match `Token(`).
+7. **P2: five of the six suites named as constructing wrappers do
+   not.** Only `test_event_values.py` (6) and
+   `test_event_catalog.py` (3) contain `Token(`; the others match
+   `FirstTokenTimeout`, OTA token issuance, or an `Authorization:
+   Token` header. Name the two that migrate and claim the rest
+   untouched.
+8. **P2: the baseline pin does not cover payload-only token
+   fields.** `event_baseline.py` records argument types and sorted
+   payload key names only; a member left unconverted in a carried,
+   never-rendered field (most of what M1 migrates) would diff
+   nothing, and `json.dumps` serializes the `str` subclass
+   transparently. Add a real-catalog assertion that every driven
+   record's payload values are builtin types.
+9. **P3: two spots refuse an enum-typed field and are unnamed.**
+   `Declared.type: type[EventValue]` and `_read`'s subclass refusal
+   must widen (mypy-strict ripples into `verify`, `_check`,
+   `_base`); `_arg_constraint` reads `declared.type.ARG_KIND` and
+   `.GRAMMAR` eagerly before branching, so an enum-typed argument
+   raises `AttributeError` regardless of the token branch.
+10. **P3: after the change no committed structural pin records the
+    narrowing.** The golden writes `one.type.__name__`, so the
+    three narrowed fields record their parent enums; the
+    reference's token column becomes the sole pin on the narrowed
+    sets. Record `tokens` in the golden or state the single-pin
+    situation explicitly.
