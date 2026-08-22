@@ -38,9 +38,11 @@ uv run ruff check .              # Lint
 CI (`.github/workflows/vinga-server.yml`) runs the same lint, unit, and
 integration steps in two parallel jobs: `unit` (lint, the events package's
 type check, the unit tests) and `integration` (the integration tests, the
-generated-document drift checks, the wheel migration). It only triggers on
-changes under `vinga-server/`, under `docs/reference/`, or to the workflow
-file itself.
+generated-document drift checks, the wheel migration). It runs on pull
+requests, and on pushes to `main`, when the change touches
+`vinga-server/`, `docs/reference/`, or the workflow file itself; a
+`workflow_dispatch` runs it against any branch whatever the change
+touched.
 
 ### Restoring a file mid-experiment
 
