@@ -185,6 +185,32 @@ Three, all inside the plan's own delegations rather than against it.
   comes from the framework, and neither names a redirect symbol nor
   uses the fixture. The general form: a sweep by fixture is a sweep by
   one of the ways a behavior gets exercised.
+- **The doctor deletion got no repo-wide symbol sweep, and the binding
+  deletion did.** The plan swapped the doctor's symbol sweep for the
+  fixture sweep (finding 7), which found the tests but not the prose,
+  and the asymmetry cost a review finding. Run afterwards,
+  `grep -rn 'CANONICAL_REDIRECTS\|_canonical_slash'` over everything
+  outside `vendor/` returns eleven lines, counted before the
+  correction note described next was appended: nine in this plan and
+  this document, one in
+  `docs/plans/2026-08-12-device-onboarding-implementation.md:393`, and
+  one in
+  `docs/plans/2026-08-19-governance-simplification-implementation.md:2136`.
+  No source, no test, no reference document. The lesson is that the
+  fixture sweep and the symbol sweep answer different questions: one
+  finds what exercises the behavior, the other finds what claims it.
+- **A standing claim gets a correction note; a dated measurement does
+  not.** The two prose hits above are different kinds of record, and
+  the criterion that separates them is tense, not topic. The
+  onboarding milestone's paragraph says `config doctor` "still follows
+  one redirect" in the present, which a reader would take as current,
+  so it gets a dated correction note appended pointing at `_probed`'s
+  docstring, the way the diff plan's own stale-rule note is handled.
+  The governance milestone's line is a row in a before-and-after
+  audit table of underscore reach-ins in one suite, a count taken on a
+  dated day and true of that day; the test it counts is deleted, and
+  amending the table would rewrite a measurement rather than correct a
+  claim. It is left as it is.
 - **No documentation outside the plans claimed the string form.** The
   `devices` prose in `docs/reference/domain-config.md` gives the type
   as `dict[str, list[str]]`, the OpenAPI description speaks of a
