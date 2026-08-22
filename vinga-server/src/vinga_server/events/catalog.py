@@ -46,8 +46,9 @@ import logging
 import re
 from collections.abc import Mapping
 from dataclasses import MISSING, dataclass, field, fields, is_dataclass
+from enum import StrEnum
 from types import MappingProxyType, UnionType
-from typing import Any, ClassVar, Union, get_args, get_origin, get_type_hints
+from typing import Any, ClassVar, Literal, Union, get_args, get_origin, get_type_hints
 
 from vinga_server.events.values import (
     ABSENT,
@@ -58,6 +59,7 @@ from vinga_server.events.values import (
     AgentList,
     AgentNames,
     AlsoBoundTo,
+    ArgKind,
     AuthRejectionToken,
     BoardName,
     CaptureDeclined,
@@ -81,7 +83,9 @@ from vinga_server.events.values import (
     FirmwareVersion,
     Flag,
     FromEntry,
+    Grammar,
     Identifier,
+    Kind,
     LanguageTag,
     McpConnectFailure,
     McpDown,
@@ -225,16 +229,24 @@ class Declared:
     token set is that one member, which is what the untyped registry
     spelled out per variant and what a shared enumeration would have
     widened.
+
+    `type` is a value type or a `StrEnum`: a closed-set field is
+    annotated with its enumeration, so declaring one is annotating the
+    field with the set rather than finding the wrapper that held it.
+    `tokens` is what such a field admits, the whole enumeration or the
+    subset a `Literal` annotation narrows it to, and it is `None` for a
+    field a value type carries, whose own `TOKENS` answers instead.
     """
 
     name: str
-    type: type[EventValue]
+    type: type[EventValue] | type[StrEnum]
     required: bool
     nullable: bool
     carried: bool
     note: str
     rendered_note: str
-    fixed: EventValue | None = None
+    fixed: EventValue | StrEnum | None = None
+    tokens: frozenset[str] | None = None
 
 
 def value(
@@ -242,7 +254,7 @@ def value(
     carried: bool = True,
     note: str = "",
     rendered_note: str = "",
-    fixed: EventValue | None = None,
+    fixed: EventValue | StrEnum | None = None,
     default: Any = MISSING,
 ) -> Any:
     """Declare one of a variant's values.
@@ -270,6 +282,23 @@ def value(
     if default is not MISSING:
         return field(default=default, metadata=metadata)
     return field(metadata=metadata)
+
+
+def _carried(held: EventValue | StrEnum) -> object:
+    """The plain builtin one held value rides the payload as.
+
+    `str()` for an enumeration member rather than the member itself: a
+    member is a `str` subclass, and a record carrying one would put the
+    subclass's name into a baseline's argument types and its `repr` into
+    anything that renders it.
+    """
+    return str(held) if isinstance(held, StrEnum) else held.carried()
+
+
+def _rendered(held: EventValue | StrEnum) -> object:
+    """What one held value's `%` position receives, converted for the
+    reason above."""
+    return str(held) if isinstance(held, StrEnum) else held.rendered()
 
 
 class Variant:
@@ -327,6 +356,14 @@ class Variant:
                 continue
             if not isinstance(held, declared.type):
                 raise CatalogError(f"{where} is a {declared.type.__name__}")
+            # And within the narrowing where the annotation states one: a
+            # member of the enumeration is not necessarily a member of
+            # the `Literal` the field declared. Asked of every enum-typed
+            # field, since the check is the same one for a field whose
+            # set is the whole enumeration and passes there by
+            # construction.
+            if declared.tokens is not None and str(held) not in declared.tokens:
+                raise CatalogError(f"{where} is a narrowed {declared.type.__name__}")
 
     def payload(self) -> dict[str, Any]:
         """This variant's own fields, as the plain builtins a record
@@ -338,7 +375,7 @@ class Variant:
             held = getattr(self, declared.name)
             if isinstance(held, Absent):
                 continue
-            built[declared.name] = None if held is None else held.carried()
+            built[declared.name] = None if held is None else _carried(held)
         return built
 
     def logged(self, base: Mapping[str, EventValue | None] = _NO_BASE) -> Logged:
@@ -355,7 +392,7 @@ class Variant:
         return Logged(
             self.TEMPLATE,
             tuple(
-                None if held is None else held.rendered()
+                None if held is None else _rendered(held)
                 for held in (
                     base[name] if name in base else getattr(self, name)
                     for name in self.ARGS
@@ -439,27 +476,56 @@ def _read(variant: type[Variant]) -> tuple[Declared, ...]:
             for member in members
             if member is not type(None) and member is not Absent
         ]
-        if len(carried_types) != 1 or not (
-            isinstance(carried_types[0], type)
-            and issubclass(carried_types[0], EventValue)
-        ):
+        if len(carried_types) != 1:
             raise CatalogError(
                 f"{variant.__name__}.{one.name} declares one value type, "
                 f"optionally with None or Absent"
             )
+        held, tokens = _declared_type(variant, one.name, carried_types[0])
         read.append(
             Declared(
                 name=one.name,
-                type=carried_types[0],
+                type=held,
                 required=required,
                 nullable=nullable,
                 carried=bool(one.metadata.get("carried", True)),
                 note=str(one.metadata.get("note", "")),
                 rendered_note=str(one.metadata.get("rendered_note", "")),
                 fixed=one.metadata.get("fixed"),
+                tokens=tokens,
             )
         )
     return tuple(read)
+
+
+def _declared_type(
+    variant: type["Variant"], name: str, annotation: Any
+) -> tuple[type[EventValue] | type[StrEnum], frozenset[str] | None]:
+    """What one field carries, and the closed set it admits.
+
+    Three annotations say a closed set: the enumeration itself, which
+    admits every member, and a `Literal` over some of one enumeration's
+    members, which admits those. A `Literal` mixing two enumerations
+    names no set at all, so it is refused here rather than answering an
+    arbitrary one of them.
+    """
+    if isinstance(annotation, type) and issubclass(annotation, StrEnum):
+        return annotation, frozenset(str(one) for one in annotation)
+    if get_origin(annotation) is Literal:
+        members = get_args(annotation)
+        enums = {type(one) for one in members}
+        held = enums.pop() if len(enums) == 1 else None
+        if held is None or not issubclass(held, StrEnum):
+            raise CatalogError(
+                f"{variant.__name__}.{name} declares members of one StrEnum"
+            )
+        return held, frozenset(str(one) for one in members)
+    if isinstance(annotation, type) and issubclass(annotation, EventValue):
+        return annotation, None
+    raise CatalogError(
+        f"{variant.__name__}.{name} declares one value type, "
+        f"optionally with None or Absent"
+    )
 
 
 def _frozen(variant: type[Variant]) -> None:
@@ -503,8 +569,18 @@ def _check(variant: type[Variant], declared: tuple[Declared, ...]) -> None:
         # what a reference prints and what says the value is metadata. A
         # formatted fragment has none: it is a shape a sentence renders,
         # never a key a record carries.
-        if one.carried and getattr(one.type, "KIND", None) is None:
+        if one.carried and kind_of(one) is None:
             raise CatalogError(f"{where}.{one.name} carries a value with no field kind")
+        # A wrapper's constructor used to hold a fixed token to its set
+        # while this module imported, and a bare member is inert data, so
+        # the duty is this check's now: without it the first evidence of
+        # a mismatch would be a `construction_failed` at emit, in a
+        # running deployment, naming nothing.
+        if one.tokens is not None and one.fixed is not None:
+            if not isinstance(one.fixed, one.type) or str(one.fixed) not in one.tokens:
+                raise CatalogError(
+                    f"{where}.{one.name} fixes a value outside its declared tokens"
+                )
     # A sentence may render one of the emitter's own values as well as
     # one of the variant's: every session sentence opens with the
     # session id, and a base name cannot collide with a declared one
@@ -666,18 +742,52 @@ def payload_shape(variant: type[Variant]) -> tuple[Declared, ...]:
 # rather than a second description built beside them.
 
 
+def kind_of(declared: Declared) -> Kind | None:
+    """What one declared value is called as a payload field.
+
+    Asked of the declaration rather than of the type it names, because
+    a closed-set field is annotated with its enumeration and an
+    enumeration carries none of these documentation facts. `None` where
+    the value has no field kind at all: a formatted fragment is a shape
+    a sentence renders and never a key a record carries, which is what
+    `_check` refuses for a carried value.
+    """
+    held = declared.type
+    if issubclass(held, StrEnum):
+        return Kind.TOKEN
+    return getattr(held, "KIND", None)
+
+
+def arg_kind_of(declared: Declared) -> ArgKind | None:
+    """And what it is called as a `%` position."""
+    held = declared.type
+    if issubclass(held, StrEnum):
+        return ArgKind.TOKEN
+    return getattr(held, "ARG_KIND", None)
+
+
+def grammar_of(declared: Declared) -> Grammar | None:
+    """The shape a `COMPOSED` argument is held to, where it is one."""
+    held = declared.type
+    if issubclass(held, StrEnum):
+        return None
+    return held.GRAMMAR
+
+
 def tokens_of(declared: Declared) -> frozenset[str] | None:
     """The closed set one declared value admits.
 
-    The type's own, or the single member where the variant fixes it: a
-    variant that always says `no_agent` declares that one reason and not
-    the four its enumeration holds. Public because it is what a
+    The annotation's own, or the single member where the variant fixes
+    it: a variant that always says `no_agent` declares that one reason
+    and not the four its enumeration holds. Public because it is what a
     reference prints and what a caller reading the catalog would
     otherwise re-derive from `fixed`.
     """
-    if declared.fixed is not None and declared.type.TOKENS is not None:
-        return frozenset({str(declared.fixed.carried())})
-    return declared.type.TOKENS
+    held = declared.type
+    tokens = declared.tokens if issubclass(held, StrEnum) else held.TOKENS
+    if declared.fixed is not None and tokens is not None:
+        return frozenset({str(_carried(declared.fixed))})
+    return tokens
 
 
 def rendered_values(variant: type[Variant]) -> tuple[Declared, ...]:
