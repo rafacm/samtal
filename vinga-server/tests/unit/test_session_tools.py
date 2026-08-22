@@ -27,6 +27,7 @@ from tests.support.configs import (
     base_config,
     registry_config,
 )
+from tests.support.events import events
 from tests.support.mcp_stdio_server import SHADOWED_TOOL_ENV
 from tests.support.providers import ScriptedLlm
 from tests.support.sessions import call, history, run_reply, session_for, talking
@@ -34,7 +35,7 @@ from tests.support.tools_mcp import Applying, reading
 from tests.support.wire import connect, say_something, sentences, shake_hands, tone_strength
 from vinga_server.app import create_app
 from vinga_server.config import Config
-from vinga_server.providers import ToolCall, Turn
+from vinga_server.providers import StreamStarted, ToolCall, Turn
 from vinga_server.tools.builtin import switch_agent_tool
 from vinga_server.tools.mcp import McpServers
 from vinga_server.tools.memory import MemoryStore
@@ -45,6 +46,49 @@ async def test_a_reply_with_no_tool_calls_is_one_round() -> None:
     session = session_for(base_config(), POET_MAC, {"poet": script})
     assert await run_reply(session, "hello") == ["Nothing to look up."]
     assert len(script.seen) == 1
+
+
+async def test_an_announcement_and_a_whitespace_delta_are_not_tool_calls(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The two events the loop is indifferent to, which no other suite
+    delivers to it.
+
+    A `StreamStarted` is liveness rather than content: the watchdog
+    consumes the one an adapter yields in first position, and the
+    contract says a consumer tolerates one arriving anywhere else
+    (`providers/base.py`). A whitespace-only `TextDelta` is speech that
+    times no first token and still belongs to the sentence being
+    assembled. The everything-else arm of the loop is what makes a tool
+    call, so either event landing there would put a phantom on the
+    turn's record and keep the round loop going after the model had
+    stopped asking for anything.
+    """
+    script = ScriptedLlm(
+        [
+            ["   ", StreamStarted(), call("ghost_tool")],
+            ["Two", StreamStarted(), " ", "words here. ", "And a second sentence."],
+        ]
+    )
+    session = session_for(base_config(), POET_MAC, {"poet": script})
+    with caplog.at_level("INFO"):
+        spoken = await run_reply(session, "do it")
+
+    # Every scripted sentence is spoken, and the whitespace delta was
+    # assembled into the first of them: routed anywhere but the
+    # splitter, the two deltas around it would run together.
+    assert spoken == ["Two words here.", "And a second sentence."]
+    # Two rounds, the second of them the reply: no phantom call
+    # survived to ask for a third, and the record carries the one call
+    # the model actually made.
+    assert len(script.seen) == 2
+    made = [c for turns, _, _ in script.seen for turn in turns for c in turn.tool_calls]
+    assert [c.name for c in made] == ["ghost_tool"]
+    # Whitespace is not a first token: the round that streamed only
+    # whitespace and a call times none, the way a tool-only round does.
+    tool_round, speaking_round = events(caplog, "llm_round")
+    assert not hasattr(tool_round, "first_token_ms")
+    assert speaking_round.first_token_ms >= 0
 
 
 async def test_an_unknown_tool_comes_back_as_an_error_result() -> None:
