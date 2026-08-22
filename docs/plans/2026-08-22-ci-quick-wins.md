@@ -182,7 +182,7 @@ lint/mypy/doc-drift/wheel seconds; critical path 12m45s.
 
 - [x] **[M1: split the test job into parallel unit and integration
   jobs](2026-08-22-ci-quick-wins-implementation.md#m1-split-the-test-job-into-parallel-unit-and-integration-jobs).**
-  (PR TBD) Workflow-only; `--durations=25` in both lanes;
+  (PR #256) Workflow-only; `--durations=25` in both lanes;
   `image` needs both. Deepens nothing and moves nothing but YAML;
   `main` stays releasable because every step still runs, just in
   two lanes.
