@@ -24,6 +24,7 @@ import sys
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -169,17 +170,135 @@ def packaged_database_dir() -> Iterator[Path]:
     yield PACKAGED_DATABASE_DIR
 
 
+# --- the lane guard -----------------------------------------------------
+#
+# A refused emission is dropped after one report on the emitter's own
+# channel (#239), which is the right answer in production and a terrible
+# one in a lane: a malformed emission would cost a green suite nothing
+# at all and be discovered in a deployment's logs. So the lanes read
+# that report as a failure. This, and not a mode the emitters run in, is
+# what keeps them loud.
+#
+# The handler is installed ONCE, from `pytest_configure`, and that is
+# the whole design decision here. A function-scoped fixture is only live
+# between its own setup and teardown, and pytest builds higher-scoped
+# fixtures first and tears them down last, so a handler it installed
+# would miss exactly the runs worth policing: the module-scoped baseline
+# fixture that drives all eighty-one emit paths, the integration lane's
+# module-scoped uvicorn boot, and anything a module teardown emits.
+# Strict mode used to cover those because it raised from inside the
+# emitter, at whatever scope was running, and a replacement that covers
+# less is not a replacement.
+#
+# So the ledger below runs for the whole session and the per-test
+# fixture reads a DELTA off it. A refusal made in a module fixture's
+# setup is attributed to the test that first asked for that fixture,
+# which is the test whose failure a reader can act on. What is left over
+# at the end of the run belongs to no test at all (a session or module
+# teardown, an atexit hook) and is reported against the run itself
+# rather than dropped.
+
 # The root of every channel this server emits on. Records propagate to
 # their ancestors, so one handler here sees every subsystem's, which is
-# what makes the guard below one fixture rather than one per channel.
+# what makes the guard one handler rather than one per channel.
 EVENT_CHANNEL_ROOT = "vinga_server"
 
 REFUSALS_EXPECTED = "refusals_are_expected"
 
 
+class _Ledger:
+    """Every refusal report this run has made, and how much of it has
+    been accounted for.
+
+    An append-only list and a high-water mark rather than a list the
+    per-test check empties, because what is unaccounted for at the end
+    of the run is a fact worth reporting and an emptied list cannot
+    state it.
+    """
+
+    def __init__(self) -> None:
+        self.refused: list[logging.LogRecord] = []
+        self.accounted = 0
+
+    def unaccounted(self) -> list[logging.LogRecord]:
+        """What has been refused since the last time this was asked, and
+        marked as accounted for by the asking."""
+        fresh = self.refused[self.accounted :]
+        self.accounted = len(self.refused)
+        return fresh
+
+    def described(self, records: list[logging.LogRecord]) -> str:
+        return "; ".join(f"{one.name}: {one.args}" for one in records)
+
+
+_LEDGER = _Ledger()
+
+
+class _Watch(logging.Handler):
+    """The handler that fills the ledger.
+
+    The message is matched unrendered, which is what makes the check
+    exact: `msg` is the fixed template the emitter reports with, and
+    every other record on these channels is either an event or a
+    different sentence.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(level=logging.NOTSET)
+        self._message = message
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if record.msg == self._message:
+            _LEDGER.refused.append(record)
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Arm the guard before anything is collected, so that no fixture
+    scope, and no import a test module does at collection time, runs
+    outside it."""
+    from vinga_server.events import REFUSAL_MESSAGE
+
+    logging.getLogger(EVENT_CHANNEL_ROOT).addHandler(_Watch(REFUSAL_MESSAGE))
+
+
+def pytest_sessionfinish(session: pytest.Session) -> None:
+    """Fail the run for refusals no test could be held to.
+
+    A module or session teardown is the ordinary way to reach this, and
+    a refusal there is exactly as much of a schema bug as one inside a
+    test. Reported against the run rather than dropped, and the run
+    fails for it, because a guard whose residual is a printed line
+    nobody reads is a guard with a hole in it.
+    """
+    residual = _LEDGER.unaccounted()
+    if not residual:
+        return
+    session.config.stash[_RESIDUAL] = _LEDGER.described(residual)
+    session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+_RESIDUAL: pytest.StashKey[str] = pytest.StashKey()
+
+
+def pytest_terminal_summary(
+    terminalreporter: Any, exitstatus: int, config: pytest.Config
+) -> None:
+    """Say so where a reader looks, since a mutated exit status on its
+    own says only that something failed."""
+    residual = config.stash.get(_RESIDUAL, None)
+    if residual is None:
+        return
+    terminalreporter.section("event schema refusals outside any test")
+    terminalreporter.write_line(
+        f"the event schema refused an emission where no test owns it: "
+        f"{residual}. A refusal is a schema bug; the likely site is a "
+        f"module or session fixture's teardown."
+    )
+
+
 @pytest.fixture
 def refusals_are_expected() -> None:
-    """Ask the guard below to let this test's refusals through.
+    """Ask the guard to let this test's refusals through.
 
     Requested by name, and by the tests that drive the refusal path on
     purpose: the sentinel suite, which exists to prove what a refusal
@@ -192,39 +311,18 @@ def refusals_are_expected() -> None:
 def no_unexpected_refusals(request: pytest.FixtureRequest) -> Iterator[None]:
     """Fail any test whose run made an emitter refuse an emission.
 
-    A refused emission is dropped after one report on the emitter's own
-    channel (#239), which is the right answer in production and a
-    terrible one in a lane: a malformed emission would cost a green
-    suite nothing at all and be discovered in a deployment's logs. So
-    the lanes read that report as a failure. This fixture, and not a
-    mode the emitters run in, is what keeps them loud.
-
-    The message is matched unrendered, which is what makes the check
-    exact: `msg` is the fixed template the emitter reports with, and
-    every other record on these channels is either an event or a
-    different sentence.
+    The check is at teardown and reads everything unaccounted for, not
+    only what arrived after this fixture's own setup: a refusal made
+    while a module-scoped fixture was being built belongs to the test
+    that asked for it, and that fixture was built before this one.
     """
-    from vinga_server.events import REFUSAL_MESSAGE
-
-    refused: list[logging.LogRecord] = []
-
-    class Watch(logging.Handler):
-        def emit(self, record: logging.LogRecord) -> None:
-            if record.msg == REFUSAL_MESSAGE:
-                refused.append(record)
-
-    channel = logging.getLogger(EVENT_CHANNEL_ROOT)
-    watch = Watch(level=logging.NOTSET)
-    channel.addHandler(watch)
-    try:
-        yield
-    finally:
-        channel.removeHandler(watch)
-    if refused and REFUSALS_EXPECTED not in request.fixturenames:
+    yield
+    unaccounted = _LEDGER.unaccounted()
+    if unaccounted and REFUSALS_EXPECTED not in request.fixturenames:
         pytest.fail(
-            f"the event schema refused {len(refused)} emission(s) in this "
-            f"test: "
-            + "; ".join(str(one.args) for one in refused)
-            + f". A refusal is a schema bug. If the test drives one on "
-            f"purpose, request the `{REFUSALS_EXPECTED}` fixture."
+            f"the event schema refused {len(unaccounted)} emission(s) in "
+            f"this test or in a fixture it asked for: "
+            f"{_LEDGER.described(unaccounted)}. A refusal is a schema bug. "
+            f"If the test drives one on purpose, request the "
+            f"`{REFUSALS_EXPECTED}` fixture."
         )
