@@ -326,9 +326,14 @@ not the question, since the file's opening claim was that equality is
 model inequality plus a fingerprint.
 
 Three pins in `tests/unit/test_config_diff.py`: a form-only rewrite of
-an agent's own grant reports nothing anywhere, the same rewrite in
-`agent_defaults` reports nothing, and an agent edited from no `mcp`
-list to an empty one is still reported under `agents.changed`.
+an agent's own grant reports nothing the diff computes, the same
+rewrite in `agent_defaults` reports nothing, and an agent edited from
+no `mcp` list to an empty one is still reported under `agents.changed`.
+The grants half of the first pin is worth nothing on its own and the
+plan says so: the grants list is `McpPending`'s, handed in by the case
+and carried through verbatim, so a pin on it holds the carrying and not
+the comparison. What the registry answers is `test_mcp_pending.py`, and
+widening it is not this milestone's.
 `test_a_grants_only_edit_is_the_registry_s_to_report` is byte-unchanged,
 which is what holds the other direction.
 
