@@ -235,3 +235,127 @@ From `vinga-server/`, on the six fix commits:
   **empty**.
 - `uv run python -m tests.unit.test_event_golden` run twice more: the
   file is unchanged, and the committed baseline is still untouched.
+
+## M2: Migrate the caller-passed fields, retype the decision sites, delete the wrappers
+
+### What was done
+
+Two code commits and this one. The first types the thirteen
+caller-passed token fields whose set is the whole enumeration and moves
+the ten emit sites that pass them; the second replaces the three
+narrowed wrappers with their `Literal` aliases, deletes `TokenValue`
+and its twenty-two subclasses, and moves the three remaining emit sites
+and the suites.
+
+**The aliases** (`events/values.py`). `UnnamedToolSource`,
+`PendingRefusal` and `McpConnectFailure` keep their names and are
+declared beside the sets they narrow, each with the reason the class
+carried: what its variant may not say. The paragraph above the
+enumerations says why they are plain assignments rather than PEP 695
+`type` statements, which is the catalog's `get_type_hints` reading.
+
+**The deletion** (`events/values.py`). `TokenValue` and all twenty-two
+subclasses go, and `__all__` loses twenty names and keeps the three the
+aliases now hold. The enumerations themselves did not move.
+
+**The declarations** (`events/catalog.py`). Sixteen field annotations
+name their enumeration, or the alias for the three narrowed ones, and
+nine wrapper imports go with them.
+
+**The emit sites**, in the two kinds the plan distinguishes. Seven
+already held a member and only dropped the wrapper: `capture.py`,
+`ws.py`, `onboarding/origin.py`, `ota/reply.py`'s `_bad_request`, and
+`runtime/pipeline.py`'s two outcome expressions. Six hold a plain
+string and gained the lookup at the emit construction, each with a
+comment saying which vocabulary the string belongs to:
+`device/session.py`, `tools/mcp/reload.py`, `tools/mcp/manager.py`
+twice, `runtime/pipeline.py` and `ota/reply.py`. None of the modules
+that own those strings was retyped, which is the plan's finding 1
+resolution.
+
+**The suites.** `test_event_values.py` loses the three construction and
+narrowing tests with the classes they tested and two entries of the
+refusal sweep, and keeps both cross-module drift guards, rewritten
+against the enumerations and `get_args` of the aliases.
+`test_event_catalog.py` migrates its three wrapper constructions.
+`test_event_enum_fields.py` had to move too (see the deviations).
+
+**The golden inventory** was regenerated in each of the two code
+commits rather than once at the end, because a commit that retypes a
+field and leaves the golden behind is a red commit. The union of the
+two diffs is twenty-one `"type"` strings and nothing else: the sixteen
+renames, and the three narrowed fields recording their parent
+enumeration in the five places the file names their types. Their
+narrowing is pinned by the `tokens` key M1 added.
+
+### Deviations from the plan
+
+Five, four of them additions to lists the plan drew.
+
+1. **A sixth string-holding emit site.** `tools/mcp/manager.py`'s
+   `McpConnected.transport` reads `self._config.transport`, which is
+   the configuration model's `Literal["stdio", "streamable_http"]` and
+   not an `McpTransport` member, so it gains the same lookup as the
+   five sites the plan lists. The plan's Module layout had it in
+   neither kind.
+2. **`runtime/pipeline.py` imports the enumeration under a second
+   name.** `tools/source.py` exports `ToolSource`, the protocol the
+   three tool origins answer, and the pipeline holds a tuple of them;
+   the payload's `ToolSource` is a different thing with the same
+   spelling, so it is imported as `ToolNamespace` with the reason
+   beside it. The wrapper's name had hidden the collision.
+3. **`tests/unit/test_event_enum_fields.py` moved.** M1's suite
+   declared a scratch variant through the wrapper and asserted the
+   generated section was identical to the enum-typed one, which is
+   exactly the claim that cannot be made once the wrapper is gone. The
+   variant and the comparison go; the test states the enum field's two
+   cells directly and says in its docstring that the equivalence over
+   the real catalog is now carried by the byte-identity of
+   `docs/reference/events.md` across the migration. The plan expected
+   every suite but two to be untouched, and this one is M1's own.
+4. **`test_event_catalog.py`'s narrowing test changed its claim.** It
+   held that a field declaring the wider wrapper takes the narrower
+   subclass. There is no subclassing left, so it holds that the field
+   takes every member `get_args(UnnamedToolSource)` names, which is the
+   same relation between the two shapes and is why the alias reads
+   better here than a second enumeration would.
+5. **`tests/tools/event_baseline.py` needed no change.** The brief for
+   this milestone expected wrapper constructions in the drivers; there
+   are none, because the harness drives the production emit paths
+   rather than building variants. `auth.py` and `config/api.py`,
+   likewise named as emit sites, construct no token values either.
+
+### Discoveries
+
+**One flaky failure, not reproducible.** The full unit run made before
+the first commit reported
+`test_config.py::test_secret_like_option_names_are_rejected[password-password]`
+failed alongside the two expected golden failures. The test passes
+alone and passed in both later full runs, and nothing in this milestone
+reaches `config/cli.py`. Recorded rather than explained.
+
+### Verification
+
+From `vinga-server/`, on `feature/typed-event-enums-m2`, after the last
+code commit.
+
+- `uv run ruff check .`: **All checks passed!**
+- `uv run mypy`: **Success: no issues found in 3 source files.**
+- `uv run pytest tests/unit -q`: **2816 passed, 20 skipped** in 343 s.
+  Five fewer than M1's 2821: three deleted tests and two entries of a
+  parametrized refusal sweep, all of them claims about constructors
+  that no longer exist.
+- `uv run pytest tests/integration -q`: **61 passed** in 196 s.
+- `uv run vinga-server events reference | diff - ../docs/reference/events.md`:
+  **empty**, run after each of the two code commits.
+- The committed event baseline (`tests/unit/data/event-baseline.json`)
+  is unmodified, and its suite passes inside the unit run above.
+- `uv run python -m tests.unit.test_event_golden` run twice after each
+  regeneration: the second run leaves the file unchanged.
+- `grep -rnE "Token\(|UnnamedToolSource\(|PendingRefusal\(|McpConnectFailure\(" src tests`:
+  **no matches**. `grep -rn "TokenValue" src tests`: **no matches**
+  (the one remaining mention was a sentence in a suite's docstring,
+  reworded).
+
+Nothing here needs hardware, so no verification step was left
+unverifiable.

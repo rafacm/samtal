@@ -17,13 +17,15 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   enumeration itself, or with a `Literal` over some of its members
   where a variant admits fewer than the enumeration holds, and the
   catalog derives the kind and the declared set from the annotation.
-  Every field the catalog fixes to one member has moved; the fields a
-  caller passes, and the deletion of the wrappers, follow. Nothing an
-  operator sees changed: the generated reference and the committed
-  record baseline are byte-identical, and a record still carries a
-  plain string. The golden inventory now records each token field's
-  declared set, so a narrowing stays pinned by something other than the
-  reference's prose.
+  Every token field has moved, and `TokenValue` and its twenty-two
+  subclasses are deleted with about twenty-five names they added to the
+  vocabulary. The three variants that admit fewer members than their
+  enumeration keep their narrowing as a `Literal` alias of the same
+  name. Nothing an operator sees changed: the generated reference and
+  the committed record baseline are byte-identical, and a record still
+  carries a plain string. The golden inventory now records each token
+  field's declared set, so a narrowing stays pinned by something other
+  than the reference's prose.
 
 - **Getting Started reads like a front page again.** The eight steps
   keep every command block but shed the deep rationale between them
