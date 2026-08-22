@@ -1,6 +1,6 @@
 # Agent guidance for vinga
 
-vinga is a self-hostable voice assistant: ESP32-S3 devices (mic, speaker,
+vinga is a self-hostable voice agent: ESP32-S3 devices (mic, speaker,
 display) talk to a Python conversation server over WebSocket. It builds on
 78/xiaozhi-esp32 (device firmware) and xinnan-tech/xiaozhi-esp32-server
 (server), both MIT.

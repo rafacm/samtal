@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-08-22
+
+### Changed
+
+- **The tagline and repository description speak of agents, on your
+  own terms.** The README header line becomes "Come on, speak, on
+  your own terms": the old "with your own hardware" implied a
+  local-only pipeline, while the architecture's promise is choice
+  (local, hosted, or hybrid providers behind your own server). The
+  GitHub description becomes "Conversational AI. Sweded.
+  Self-hostable voice agents on ESP32-S3 devices with pluggable LLM,
+  voice, and MCP providers", making the agent, the concept the
+  configuration surface already speaks (`config set agent`,
+  `agent-defaults`, `set-default-agent`), the named thing instead of
+  the generic "voice assistant". README and AGENTS.md prose follow.
+
 ## 2026-08-21
 
 ### Added
