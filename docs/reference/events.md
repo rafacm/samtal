@@ -708,6 +708,10 @@ A generation call finishes.
 
 #### Variant 1: `vinga_server.session` at INFO
 
+`provider` and `type` are atomic: a provider with an identity carries both,
+and one the registry never built carries neither. `host` is absent for an
+engine that runs in this process and `model` for a type that has none to name.
+
 ```text
 session %s: %s round %d took %.2f s over %d turns
 ```
