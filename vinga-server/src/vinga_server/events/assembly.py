@@ -30,12 +30,9 @@ from typing import cast
 from vinga_server.events.catalog import (
     BuiltinToolCall,
     LlmRetry,
-    LlmRetryOfEntry,
     LlmRound,
-    LlmRoundOfEntry,
     McpToolCall,
     ProviderFailed,
-    ProviderOfEntryFailed,
     UnnamedToolCall,
     Variant,
 )
@@ -116,6 +113,33 @@ def _entry_of(provider: object) -> _Entry | None:
         host=Identifier(identity.host) if identity.host is not None else ABSENT,
         model=Identifier(identity.model) if identity.model is not None else ABSENT,
     )
+
+
+# The quartet as the fields carry it: one value per field, and four
+# absences where the registry never built the provider.
+_Quartet = tuple[
+    Identifier | Absent, Identifier | Absent, Identifier | Absent, Identifier | Absent
+]
+
+
+def _entry_fields(provider: object) -> _Quartet:
+    """One provider's entry, as the four values the events declare.
+
+    The only crossing from the type above to the fields, which is what
+    lets the type keep `provider` and `type` required now that the
+    variants cannot: four values or four absences leave here, so a
+    record naming an entry but no type has nowhere to come from.
+    """
+    entry = _entry_of(provider)
+    if entry is None:
+        return ABSENT, ABSENT, ABSENT, ABSENT
+    return entry.provider, entry.type, entry.host, entry.model
+
+
+def _spoken(held: Identifier | Absent) -> str | None:
+    """What a fragment renders from a field that may be absent, in the
+    vocabulary the fragment builders take."""
+    return None if isinstance(held, Absent) else held.carried()
 
 
 def tool_fragment(tool: str | None, entry: str | None) -> Fragment:
@@ -232,26 +256,18 @@ def _namespace(source: str) -> UnnamedToolSource:
 def llm_retried(
     agent: str, stage: str, provider: object, round_: int, elapsed: float
 ) -> Variant:
-    """Which `llm_retry` shape describes this stall."""
-    entry = _entry_of(provider)
-    if entry is None:
-        return LlmRetry(
-            agent=Identifier(agent),
-            round=Whole(round_),
-            duration_ms=Whole(round(elapsed * 1000)),
-            stage=Identifier(stage),
-            duration_s=Real(elapsed),
-        )
-    return LlmRetryOfEntry(
+    """The `llm_retry` event for this stall."""
+    entry, type_, host, model = _entry_fields(provider)
+    return LlmRetry(
         agent=Identifier(agent),
         round=Whole(round_),
         duration_ms=Whole(round(elapsed * 1000)),
         stage=Identifier(stage),
-        provider=entry.provider,
-        type=entry.type,
         duration_s=Real(elapsed),
-        host=entry.host,
-        model=entry.model,
+        provider=entry,
+        type=type_,
+        host=host,
+        model=model,
     )
 
 
@@ -266,50 +282,35 @@ def llm_rounded(
     output_tokens: int | None,
     first_token_ms: int | None,
 ) -> Variant:
-    """Which `llm_round` shape describes this generation.
+    """The `llm_round` event for this generation.
 
     The token counts and the time to first token arrive as the plain
     numbers a provider reported, or as None where it reported none:
     their absence is a fact about the endpoint rather than a zero, and
     a round that only asked for a tool timed no spoken token.
     """
-    inputs = Count(input_tokens) if input_tokens is not None else ABSENT
-    outputs = Count(output_tokens) if output_tokens is not None else ABSENT
-    first = Whole(first_token_ms) if first_token_ms is not None else ABSENT
-    entry = _entry_of(provider)
-    if entry is None:
-        return LlmRound(
-            agent=Identifier(agent),
-            round=Whole(round_),
-            turns=Count(turns),
-            duration_ms=Whole(round(elapsed * 1000)),
-            stage=Identifier(stage),
-            duration_s=Real(elapsed),
-            input_tokens=inputs,
-            output_tokens=outputs,
-            first_token_ms=first,
-        )
-    return LlmRoundOfEntry(
+    entry, type_, host, model = _entry_fields(provider)
+    return LlmRound(
         agent=Identifier(agent),
         round=Whole(round_),
         turns=Count(turns),
         duration_ms=Whole(round(elapsed * 1000)),
         stage=Identifier(stage),
-        provider=entry.provider,
-        type=entry.type,
         duration_s=Real(elapsed),
-        host=entry.host,
-        model=entry.model,
-        input_tokens=inputs,
-        output_tokens=outputs,
-        first_token_ms=first,
+        provider=entry,
+        type=type_,
+        host=host,
+        model=model,
+        input_tokens=Count(input_tokens) if input_tokens is not None else ABSENT,
+        output_tokens=Count(output_tokens) if output_tokens is not None else ABSENT,
+        first_token_ms=Whole(first_token_ms) if first_token_ms is not None else ABSENT,
     )
 
 
 def provider_failure(
     agent: str, stage: str, provider: object, failure: BaseException, elapsed: float
 ) -> Variant:
-    """Which `provider_failed` shape describes this failure.
+    """The `provider_failed` event for this failure.
 
     The class name is reported and the exception's message is not, which
     the value types make structural rather than careful: `ClassName` is
@@ -332,31 +333,18 @@ def provider_failure(
         if isinstance(failure, TimeoutError)
         else ProviderOutcome.FAILED
     )
-    entry = _entry_of(provider)
-    if entry is None:
-        return ProviderFailed(
-            agent=Identifier(agent),
-            error=ClassName.of(failure),
-            duration_ms=Whole(round(elapsed * 1000)),
-            stage=Identifier(stage),
-            named=Nothing(""),
-            outcome=outcome,
-            duration_s=Real(elapsed),
-            where=Nothing(""),
-        )
-    return ProviderOfEntryFailed(
+    entry, type_, host, model = _entry_fields(provider)
+    return ProviderFailed(
         agent=Identifier(agent),
         error=ClassName.of(failure),
         duration_ms=Whole(round(elapsed * 1000)),
         stage=Identifier(stage),
-        provider=entry.provider,
-        type=entry.type,
-        named=QuotedProvider.of(entry.provider.carried()),
+        named=QuotedProvider.of(_spoken(entry)),
         outcome=outcome,
         duration_s=Real(elapsed),
-        where=ReachingHost.of(
-            None if isinstance(entry.host, Absent) else entry.host.carried()
-        ),
-        host=entry.host,
-        model=entry.model,
+        where=ReachingHost.of(_spoken(host)),
+        provider=entry,
+        type=type_,
+        host=host,
+        model=model,
     )

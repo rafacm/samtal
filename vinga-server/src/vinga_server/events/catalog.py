@@ -1202,26 +1202,7 @@ class PromptAssembled(Variant):
 
 @dataclass(frozen=True)
 class LlmRetry(Variant):
-    """The first-token watchdog retries a round, for a provider whose
-    identity the registry never built."""
-
-    CHANNEL: ClassVar[str] = SESSION_CHANNEL
-    LEVEL: ClassVar[int] = logging.WARNING
-    TEMPLATE: ClassVar[str] = "session %s: no first token after %.1f s, retrying round %d"
-    ARGS: ClassVar[tuple[str, ...]] = ("session", "duration_s", "round")
-    NOTE: ClassVar[str] = "A provider the registry did not build names no entry."
-
-    agent: Identifier = value()
-    round: Whole = value()
-    duration_ms: Whole = value()
-    stage: Identifier = value()
-    duration_s: Real = value(carried=False)
-
-
-@dataclass(frozen=True)
-class LlmRetryOfEntry(Variant):
-    """The same retry, for a provider the registry built out of a
-    configured entry."""
+    """The first-token watchdog retries a round."""
 
     CHANNEL: ClassVar[str] = SESSION_CHANNEL
     LEVEL: ClassVar[int] = logging.WARNING
@@ -1229,17 +1210,18 @@ class LlmRetryOfEntry(Variant):
     ARGS: ClassVar[tuple[str, ...]] = ("session", "duration_s", "round")
     NOTE: ClassVar[str] = (
         "`provider` and `type` are atomic: a provider with an identity "
-        "carries both. `host` is absent for an engine that runs in this "
-        "process and `model` for a type that has none to name."
+        "carries both, and one the registry never built carries neither. "
+        "`host` is absent for an engine that runs in this process and "
+        "`model` for a type that has none to name."
     )
 
     agent: Identifier = value()
     round: Whole = value()
     duration_ms: Whole = value()
     stage: Identifier = value()
-    provider: Identifier = value()
-    type: Identifier = value()
     duration_s: Real = value(carried=False)
+    provider: Identifier | Absent = value(default=ABSENT)
+    type: Identifier | Absent = value(default=ABSENT)
     host: Identifier | Absent = value(default=ABSENT)
     model: Identifier | Absent = value(
         default=ABSENT, note="The GenAI conventions' `gen_ai.request.model`."
@@ -1248,8 +1230,7 @@ class LlmRetryOfEntry(Variant):
 
 @dataclass(frozen=True)
 class LlmRound(Variant):
-    """A generation call finishes, on a provider with no configured
-    identity."""
+    """A generation call finishes."""
 
     CHANNEL: ClassVar[str] = SESSION_CHANNEL
     LEVEL: ClassVar[int] = logging.INFO
@@ -1267,34 +1248,8 @@ class LlmRound(Variant):
     duration_ms: Whole = value()
     stage: Identifier = value()
     duration_s: Real = value(carried=False)
-    input_tokens: Count | Absent = value(default=ABSENT)
-    output_tokens: Count | Absent = value(default=ABSENT)
-    first_token_ms: Whole | Absent = value(
-        default=ABSENT,
-        note=(
-            "Times the first spoken token, so a round that only asked "
-            "for a tool carries none."
-        ),
-    )
-
-
-@dataclass(frozen=True)
-class LlmRoundOfEntry(Variant):
-    """The same round, on a provider the registry built."""
-
-    CHANNEL: ClassVar[str] = SESSION_CHANNEL
-    LEVEL: ClassVar[int] = logging.INFO
-    TEMPLATE: ClassVar[str] = "session %s: %s round %d took %.2f s over %d turns"
-    ARGS: ClassVar[tuple[str, ...]] = ("session", "agent", "round", "duration_s", "turns")
-
-    agent: Identifier = value()
-    round: Whole = value()
-    turns: Count = value()
-    duration_ms: Whole = value()
-    stage: Identifier = value()
-    provider: Identifier = value()
-    type: Identifier = value()
-    duration_s: Real = value(carried=False)
+    provider: Identifier | Absent = value(default=ABSENT)
+    type: Identifier | Absent = value(default=ABSENT)
     host: Identifier | Absent = value(default=ABSENT)
     model: Identifier | Absent = value(
         default=ABSENT,
@@ -1311,13 +1266,18 @@ class LlmRoundOfEntry(Variant):
         ),
     )
     output_tokens: Count | Absent = value(default=ABSENT)
-    first_token_ms: Whole | Absent = value(default=ABSENT)
+    first_token_ms: Whole | Absent = value(
+        default=ABSENT,
+        note=(
+            "Times the first spoken token, so a round that only asked "
+            "for a tool carries none."
+        ),
+    )
 
 
 @dataclass(frozen=True)
 class ProviderFailed(Variant):
-    """An ASR, LLM or TTS call fails, on a provider with no configured
-    identity."""
+    """An ASR, LLM or TTS call fails."""
 
     CHANNEL: ClassVar[str] = SESSION_CHANNEL
     LEVEL: ClassVar[int] = logging.WARNING
@@ -1332,35 +1292,11 @@ class ProviderFailed(Variant):
         "error",
     )
     NOTE: ClassVar[str] = (
-        "A provider the registry did not build names no entry and no host."
-    )
-
-    agent: Identifier = value()
-    error: ClassName = value()
-    duration_ms: Whole = value()
-    stage: Identifier = value()
-    named: Nothing = value(carried=False)
-    outcome: ProviderOutcome = value(carried=False)
-    duration_s: Real = value(carried=False)
-    where: Nothing = value(carried=False)
-
-
-@dataclass(frozen=True)
-class ProviderOfEntryFailed(Variant):
-    """The same failure, on a provider the registry built out of a
-    configured entry."""
-
-    CHANNEL: ClassVar[str] = SESSION_CHANNEL
-    LEVEL: ClassVar[int] = logging.WARNING
-    TEMPLATE: ClassVar[str] = "session %s: %s provider%s %s after %.2f s%s: %s"
-    ARGS: ClassVar[tuple[str, ...]] = (
-        "session",
-        "stage",
-        "named",
-        "outcome",
-        "duration_s",
-        "where",
-        "error",
+        "`provider` and `type` are atomic: a provider with an identity "
+        "carries both, and one the registry never built carries neither "
+        "and names no entry and no host in the sentence either. `host` "
+        "is absent for an engine that runs in this process and `model` "
+        "for a type that has none to name."
     )
 
     agent: Identifier = value()
@@ -1369,12 +1305,12 @@ class ProviderOfEntryFailed(Variant):
     )
     duration_ms: Whole = value()
     stage: Identifier = value()
-    provider: Identifier = value()
-    type: Identifier = value()
     named: QuotedProvider = value(carried=False)
     outcome: ProviderOutcome = value(carried=False)
     duration_s: Real = value(carried=False)
     where: ReachingHost = value(carried=False)
+    provider: Identifier | Absent = value(default=ABSENT)
+    type: Identifier | Absent = value(default=ABSENT)
     host: Identifier | Absent = value(default=ABSENT)
     model: Identifier | Absent = value(default=ABSENT)
 
@@ -1649,12 +1585,10 @@ PROMPT_ASSEMBLED = declare(
 LLM_RETRY = declare(
     "llm_retry",
     note="The first-token watchdog cancels a stalled generation and retries the round once.",
-    variants=(LlmRetry, LlmRetryOfEntry),
+    variants=(LlmRetry,),
 )
 
-LLM_ROUND = declare(
-    "llm_round", note="A generation call finishes.", variants=(LlmRound, LlmRoundOfEntry)
-)
+LLM_ROUND = declare("llm_round", note="A generation call finishes.", variants=(LlmRound,))
 
 PROVIDER_FAILED = declare(
     "provider_failed",
@@ -1663,7 +1597,7 @@ PROVIDER_FAILED = declare(
         "the exception's message is not: a type name says what went "
         "wrong, a message says what a stranger wrote."
     ),
-    variants=(ProviderFailed, ProviderOfEntryFailed),
+    variants=(ProviderFailed,),
 )
 
 TOOL_CALL = declare(
@@ -3006,9 +2940,7 @@ __all__ = [
     "LLM_RETRY",
     "LLM_ROUND",
     "LlmRetry",
-    "LlmRetryOfEntry",
     "LlmRound",
-    "LlmRoundOfEntry",
     "Logged",
     "MCP_CALL_DROPPED",
     "MCP_CHANNEL",
@@ -3048,7 +2980,6 @@ __all__ = [
     "PROVIDER_FAILED",
     "PromptAssembled",
     "ProviderFailed",
-    "ProviderOfEntryFailed",
     "PruneFailed",
     "REGISTRY_CHANNEL",
     "REPLIED",
