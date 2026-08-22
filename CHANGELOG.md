@@ -69,7 +69,7 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   or something else choosing where this request goes next inside the
   network a deployment sits in. The probe is one GET now, and every
   redirect meets the refusal that already covered the rest, which names
-  neither the target nor the address that was asked. An operator behind
+  neither the target nor a URL an operator supplied. An operator behind
   a canonicalizing proxy meets that refusal instead of a silent second
   hop, and the way out is the one the refusal states: ask the address
   you meant directly, trailing slash included.
