@@ -31,10 +31,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from vinga_server import events_cli, events_docgen
-from vinga_server.events import ENFORCEMENT_ENV
 from vinga_server.events.catalog import (
     SESSION_CHANNEL,
     Declaration,
@@ -267,14 +264,6 @@ def test_the_two_channel_event_is_one_row_naming_both() -> None:
     when = dict(index_rows())["session_rejected"]
     assert "vinga_server.ws" in when
     assert SESSION_CHANNEL in when
-
-
-def test_the_internal_event_is_listed_as_internal() -> None:
-    """It is declared like any other event and emitted by nothing that
-    is an emit site, so the index says which it is rather than leaving a
-    reader to find out from the reference."""
-    when = dict(index_rows())["schema_violation"]
-    assert "internal" in when.lower()
 
 
 def test_the_base_field_claim_is_scoped_to_the_session_channel() -> None:
@@ -520,35 +509,6 @@ def test_the_reference_says_it_is_generated_and_how() -> None:
 
 
 # --- the command, in a process of its own ------------------------------
-
-
-@pytest.mark.parametrize(
-    "written",
-    # A plain misspelling, and a credential-shaped one, since an
-    # environment is a place secrets live. Neither is a word this
-    # document uses, which is what makes the absence assertion mean
-    # something.
-    ["yes-please", "sk-env-2f9c7b1d-never-a-real-credential"],
-)
-def test_an_unusable_enforcement_value_does_not_block_the_reference(
-    tmp_path: Path, written: str
-) -> None:
-    """The command dispatches before the entrypoint resolves the mode,
-    on purpose. A server-only variable somebody misspelled must not
-    stand between a reader and the document that says what the events
-    are, and the misspelling is not echoed back either way."""
-    done = subprocess.run(
-        [sys.executable, "-m", "vinga_server.main", "events", "reference"],
-        cwd=tmp_path,
-        env={**os.environ, ENFORCEMENT_ENV: written, "PYTHONDONTWRITEBYTECODE": "1"},
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert done.returncode == 0, done.stderr
-    assert done.stdout == events_docgen.reference()
-    assert written not in done.stdout
 
 
 def test_a_reader_who_stops_reading_gets_no_traceback(tmp_path: Path) -> None:

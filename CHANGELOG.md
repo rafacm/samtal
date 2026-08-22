@@ -107,6 +107,23 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Removed
 
+- **The event enforcement layer, and with it the `schema_violation`
+  event and `VINGA_EVENTS_ENFORCEMENT`** (#239). The emitters used to
+  hold every emission to its declaration a second time at emit, and the
+  variable decided what a failure cost: `strict` raised, `forgiving`
+  dispatched a declared `schema_violation` event in the emission's
+  place. Construction-time validation of every value, strict typing over
+  the events package and the CI catalog diff already prevent what that
+  layer caught, so it is gone. What stays is the guarantee it was built
+  around: an emission that cannot be built costs one plain sentence on
+  the emitter's own channel, naming a fixed label and a fixed code, and
+  is then dropped, so a telemetry bug still never costs a reply. Three
+  surfaces an upgrader can notice: the `schema_violation` event no
+  longer exists, so a collector filtering on it will see nothing;
+  `VINGA_EVENTS_ENFORCEMENT` is inert wherever it is still set,
+  including the image, which no longer sets it; and a misspelled value
+  of it no longer refuses to start the server.
+
 - **`config doctor` follows no redirect at all** (#225). It used to
   follow one shape of one: the trailing slash a deployment older than
   the 2026-08-13 checkpoint canonicalized for itself, before every

@@ -14,9 +14,9 @@ reaches server-side state on (`app.state.composition`). `entered_client`
 is the common case.
 
 What does NOT belong here is a test that inspects a refusal `create_app`
-itself makes (a missing auth secret, a missing API token, an unusable
-enforcement mode). Those stay in the describe phase and are still
-`pytest.raises(...)` around a bare `create_app`.
+itself makes (a missing auth secret, a missing API token). Those stay in
+the describe phase and are still `pytest.raises(...)` around a bare
+`create_app`.
 """
 
 import contextlib

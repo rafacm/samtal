@@ -8,10 +8,9 @@ guard beside the variant's own values.
 The second is the construction guard's, and it needs its own pins
 because no caller can prove it: a site hands the emitter a thunk and
 never learns whether it ran. So both of its refusals (a thunk that
-raised, a variant handed to an emitter on another channel) are driven
-in both modes, and both modes' behavior is asserted: strict refuses,
-forgiving says so once and dispatches the declared `schema_violation`
-in the emission's place.
+raised, a variant handed to an emitter on another channel) are driven,
+and what a refusal does is asserted whole: one report on the emitter's
+own channel, and the emission dropped rather than replaced.
 
 The third is what happens when saying so is itself what breaks. Every
 report this module makes is made from inside a guard, and a logging call
@@ -37,18 +36,16 @@ import pytest
 from tests.support.catalog import scratch_catalog
 from vinga_server import events as events_module
 from vinga_server.events import (
+    REFUSAL_MESSAGE,
     SESSION_LOGGER,
     UNBUILT_LABEL,
     Emission,
-    EventSchemaError,
     ServerEvents,
     SessionEvents,
     attach_server_tap,
     detach_server_tap,
 )
 from vinga_server.events.catalog import (
-    SCHEMA_VIOLATION,
-    SCHEMA_VIOLATION_MESSAGE,
     ConversationsDropped,
     ConversationsPruned,
     Variant,
@@ -93,15 +90,6 @@ def emitter() -> ServerEvents:
 
 
 @pytest.fixture(autouse=True)
-def _mode() -> Iterator[None]:
-    restored = events_module.enforcement()
-    try:
-        yield
-    finally:
-        events_module.set_enforcement(restored)
-
-
-@pytest.fixture(autouse=True)
 def _scratch() -> Iterator[None]:
     """A catalog of this file's own, holding one extra declaration: the
     variant on another channel that the mismatch branch needs. Declared
@@ -112,6 +100,20 @@ def _scratch() -> Iterator[None]:
         declare("recording", variants=(Recording,))
         declare("conversational", variants=(Conversational,))
         yield
+
+
+def refused(caplog: pytest.LogCaptureFixture, channel: str) -> logging.LogRecord:
+    """The one report a refused emission leaves on `channel`, whole.
+
+    An event carries an `event` field and a report does not, which is
+    what separates the two on a channel carrying both."""
+    said = [
+        one
+        for one in caplog.records
+        if one.name == channel and not hasattr(one, "event")
+    ]
+    assert len(said) == 1, f"expected one report, got {len(said)}"
+    return said[0]
 
 
 def only(tap: Tap) -> Emission:
@@ -244,65 +246,41 @@ def test_a_session_emission_answers_the_reading_it_was_stamped_with() -> None:
     assert events.emit(lambda: Conversational(stage=Identifier("asr"))) == 41.5
 
 
-def test_an_unusable_identity_is_refused_inside_the_guard() -> None:
+def test_an_unusable_identity_is_refused_whole(
+    caplog: pytest.LogCaptureFixture, refusals_are_expected: None
+) -> None:
     """A session id is a value type, so constructing one can refuse, and
     it must refuse where the variant's own values refuse rather than on
     whatever path was emitting.
 
-    What the recovery carries is the registry's own word for a session
-    it cannot state, never the string it was handed: what a caller
-    opened a session under is a caller's, and the recovery event is the
-    retained surface like any other record. The device answers the same
-    question with the null the surface already uses for "none was
-    understood"."""
+    Whole, and that is the rule the one guard around the identities
+    encodes: a conversation record missing the session it belongs to is
+    a shape the declaration denies exists, so a lawful device id buys a
+    refusing session id nothing and the emission is dropped."""
     events = SessionEvents("has a space", clock=lambda: 1.0)
-    events.device = "not-a-mac"
+    events.device = "aa:bb:cc:dd:ee:ff"
     consumer = Tap()
     events.attach(consumer)
-    events_module.set_enforcement(events_module.FORGIVING)
 
-    events.emit(lambda: Conversational(stage=Identifier("asr")))
-
-    assert only(consumer).payload == {
-        "event": SCHEMA_VIOLATION,
-        "session": events_module.UNSTATED_SESSION,
-        "device": None,
-    }
-
-
-def test_the_identity_that_did_validate_survives_the_one_that_did_not() -> None:
-    """One guard each rather than one around the pair. A recovery is a
-    record an operator reads, and the identity it can still state is the
-    half that makes it readable, so a device id that refuses must not
-    take a lawful session id down with it."""
-    events = SessionEvents("alpha", clock=lambda: 1.0)
-    events.device = "not-a-mac"
-    consumer = Tap()
-    events.attach(consumer)
-    events_module.set_enforcement(events_module.FORGIVING)
-
-    events.emit(lambda: Conversational(stage=Identifier("asr")))
-
-    assert only(consumer).payload == {
-        "event": SCHEMA_VIOLATION,
-        "session": "alpha",
-        "device": None,
-    }
-
-
-def test_an_unusable_identity_is_refused_whole_in_strict_mode() -> None:
-    """A conversation record missing the session it belongs to is a
-    shape the declaration denies exists, so an emission whose identity
-    could not be built is refused rather than half-emitted."""
-    events = SessionEvents("has a space", clock=lambda: 1.0)
-    consumer = Tap()
-    events.attach(consumer)
-    events_module.set_enforcement(events_module.STRICT)
-
-    with pytest.raises(EventSchemaError):
+    with caplog.at_level(logging.INFO):
         events.emit(lambda: Conversational(stage=Identifier("asr")))
 
+    assert refused(caplog, SESSION_LOGGER).args == (
+        UNBUILT_LABEL,
+        "construction_failed",
+    )
     assert consumer.seen == []
+
+
+def test_a_refused_identity_still_answers_the_reading_it_was_stamped_with(
+    refusals_are_expected: None,
+) -> None:
+    """The clock is read before the guard runs, so the one caller that
+    reads the answer (#120's turn record) has an instant to place its
+    row at whether or not the event beside it survived."""
+    events = SessionEvents("has a space", clock=lambda: 41.5)
+
+    assert events.emit(lambda: Conversational(stage=Identifier("asr"))) == 41.5
 
 
 # --- the guard, which no caller can prove -----------------------------
@@ -338,57 +316,39 @@ REFUSING = (
 
 
 @pytest.mark.parametrize("build", [one for _, one in REFUSING], ids=[one for one, _ in REFUSING])
-def test_strict_refuses_an_emission_the_guard_could_not_build(
-    build: object, emitter: ServerEvents, tap: Tap
-) -> None:
-    events_module.set_enforcement(events_module.STRICT)
-
-    with pytest.raises(EventSchemaError):
-        emitter.emit(build)  # type: ignore[arg-type]
-
-    assert tap.seen == []
-
-
-@pytest.mark.parametrize("build", [one for _, one in REFUSING], ids=[one for one, _ in REFUSING])
-def test_forgiving_answers_the_declared_recovery_event(
+def test_an_emission_the_guard_could_not_build_is_dropped(
     build: object,
     emitter: ServerEvents,
     tap: Tap,
     caplog: pytest.LogCaptureFixture,
+    refusals_are_expected: None,
 ) -> None:
-    """A telemetry bug costs a log line, never a reply: the emission is
-    replaced by the one event declared for exactly this, and the
-    complaint is said once on the emitter's own channel."""
-    events_module.set_enforcement(events_module.FORGIVING)
-
+    """A telemetry bug costs a log line, never a reply. Nothing rides in
+    the emission's place: what the site meant to say is exactly what
+    could not be built, so the report is the whole of what is said and
+    no consumer is handed anything at all."""
     with caplog.at_level(logging.INFO):
         emitter.emit(build)  # type: ignore[arg-type]
 
-    emission = only(tap)
-    assert emission.payload == {"event": SCHEMA_VIOLATION}
-    assert emission.level == logging.ERROR
-    assert emission.message == SCHEMA_VIOLATION_MESSAGE
-    assert emission.args == ()
+    assert refused(caplog, CHANNEL).levelno == logging.ERROR
+    assert tap.seen == []
 
 
-def test_the_forgiving_complaint_names_the_fault_and_nothing_else(
-    emitter: ServerEvents, caplog: pytest.LogCaptureFixture
+def test_the_refusal_report_names_the_fault_and_nothing_else(
+    emitter: ServerEvents,
+    caplog: pytest.LogCaptureFixture,
+    refusals_are_expected: None,
 ) -> None:
-    """Rendered by equality rather than hunted by substring: the
-    complaint's two halves are a fixed label and a fixed code, and there
-    is no third thing it may say. Not even the exception's class, which
+    """Unrendered and by equality rather than hunted by substring: the
+    report's two halves are a fixed label and a fixed code, and there is
+    no third thing it may say. Not even the exception's class, which
     `type()` lets a caller name whatever it likes."""
-    events_module.set_enforcement(events_module.FORGIVING)
-
     with caplog.at_level(logging.INFO):
         emitter.emit(a_failing_thunk)
 
-    (complaint,) = [
-        one
-        for one in caplog.records
-        if one.name == CHANNEL and getattr(one, "event", None) is None
-    ]
-    assert complaint.args == (UNBUILT_LABEL, "construction_failed")
+    report = refused(caplog, CHANNEL)
+    assert report.msg == REFUSAL_MESSAGE
+    assert report.args == (UNBUILT_LABEL, "construction_failed")
 
 
 # --- when saying so is itself what breaks -----------------------------
@@ -433,17 +393,25 @@ class BrokenTap:
 
 
 def test_a_broken_log_does_not_cost_the_reply_a_refusal_was_reported_on(
-    broken_log: None, emitter: ServerEvents, tap: Tap
+    broken_log: None,
+    emitter: ServerEvents,
+    tap: Tap,
+    refusals_are_expected: None,
 ) -> None:
     """Reporting a refusal is the last thing in the path, and it is on
     the channel the emission was going to. If that channel throws, the
-    complaint is lost and the reply is not: the recovery event still
-    reaches the taps ahead of the log tap."""
-    events_module.set_enforcement(events_module.FORGIVING)
+    report is lost and nothing else is: the emit returns, and the next
+    event the same emitter builds still reaches every tap.
 
+    The observable is that next event, deliberately. A refused emission
+    dispatches nothing, so a broken report has nothing of its own left
+    to be observed by, and what the guard is being held to is that it
+    cost the emitter nothing."""
     emitter.emit(a_failing_thunk)
 
-    assert only(tap).payload == {"event": SCHEMA_VIOLATION}
+    emitter.emit(lambda: ConversationsPruned(sessions=Count(2), days=Count(90)))
+
+    assert only(tap).payload["event"] == "conversations_pruned"
 
 
 def test_a_broken_tap_reported_on_a_broken_log_still_costs_nothing(
