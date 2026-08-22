@@ -9,6 +9,14 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **Getting Started reads like a front page again.** The eight steps
+  keep every command block but shed the deep rationale between them
+  (the secret-regeneration trap, write-then-apply semantics, the
+  onboarding-code alphabet, remote CLI use), each replaced by a link
+  to the vinga-server README section that already tells the full
+  story. Nothing was moved, because everything trimmed was already
+  documented there.
+
 - **The README's status marks caught up with the code.** The warning
   block still described the pre-vinga demo (upstream firmware and
   upstream server); the loop has run on vinga's own server for a
