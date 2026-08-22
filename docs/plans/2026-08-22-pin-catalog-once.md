@@ -91,11 +91,13 @@ and discoveries; no deviations says so explicitly.
    issues used "baseline SHA unchanged" as their
    behavior-preservation proof; this issue deletes that instrument.
    Future refactors prove stillness with the live suite green plus
-   the `events.md` byte diff, and where a byte-level record
-   comparison is genuinely needed, a branch can regenerate the
-   capture locally for the duration of the work (the harness still
-   answers `captured()`); the implementation doc records this as
-   the successor practice.
+   the `events.md` byte diff, and where a record-level comparison
+   is genuinely needed, the practice is capture-twice-in-memory: a
+   scratch test drives `captured()` before and after the change in
+   the same process (or on the two branches) and compares the
+   structures directly, with no file written and nothing to
+   regenerate; the implementation doc records this as the
+   successor practice.
 
 ## Tests
 
@@ -120,8 +122,16 @@ reverted by copy-back plus `touch` per AGENTS.md.
 
 ## The standing review lenses, pre-answered
 
-- **No-leak.** No production surface changes at all; deletions are
-  test-side and data-side. The sentinel suites are untouched.
+- **No-leak.** No behavioral surface changes (two `src` docstrings
+  move, per the prose inventory). The surface that DOES change is
+  the suite's failure output: the deleted shapes-not-values test
+  was what kept the committed material values-free, and the live
+  suite works from real `logging.LogRecord`s carrying real values,
+  a planted API token among the drivers' material. So the new
+  assertions report channel, level, template, key names, and type
+  names only, never payload values, and the builtins test is the
+  model; a red lane's output stays values-free. The sentinel
+  suites are untouched.
 - **Pin before reshaping.** This issue IS a pin change and is the
   audit's decision to make it; nothing behavioral is reshaped under
   it (src is untouched), so there is nothing the deleted pins were
