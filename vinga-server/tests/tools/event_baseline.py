@@ -837,10 +837,10 @@ async def drive_barge_in_confirmed(_: Path) -> None:
 # the 60 ms `DELAY_MS` and this: 0.5 s is over eight times it, and the
 # reply now simply succeeds at 0.5 s instead of being given up at 20 s.
 # The three `filler_*` records the drivers keep are emitted before
-# `FillerRunner._fire` touches the reply at all (`_fire` reads the
-# output's speaking time, the endpointer's speech, and the output pause,
-# then emits and returns), so what the stalled round eventually does
-# reaches none of them.
+# `FillerRunner._fire` touches the reply at all: the two skips emit and
+# return, and `filler_played` is emitted before `begin_speaking()` is
+# awaited. So what the stalled round eventually does reaches none of
+# them.
 FILLER_STALL_S = 0.5
 
 
