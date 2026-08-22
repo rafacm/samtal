@@ -67,15 +67,22 @@ and discoveries; no deviations says so explicitly.
    code moving together in a way a reviewer did not intend. That
    is the audit's priced decision: `events.md` remains the
    reviewed artifact where a catalog change is a visible diff.
-3. **The golden's suite and data file are deleted whole.**
-   `test_event_golden.py` and `event-catalog-golden.json` go; their
-   unique guarantees (ordered field lists, argument type names,
-   token sets recorded structurally) are consciously retired, since
-   `events.md` renders the same facts for review and CI byte-diffs
-   it. The regeneration command dies with the file, and the three
-   prose sites that tell a developer to run it (the golden test's
-   own header, `AGENTS.md` if it names it, any implementation-doc
-   references are historical and stay) are corrected.
+3. **The golden's suite and data file are deleted whole, and the
+   one guarantee `events.md` does not carry is restored INSIDE
+   `events.md`.** The golden's three guarantees separate: ordered
+   field lists and token sets already survive in the reference
+   (field rows in declared order; token sets in the Constraint
+   column). Argument identity does not: the reference's Argument
+   cell prints the ArgKind name, so reversing two same-kinded
+   `ARGS` entries would move nothing committed, and the one-shape
+   implementation doc records the golden as the only committed pin
+   on exactly that. So `events_docgen` prints the argument's
+   declared field name beside its kind in the Argument column, the
+   reference is regenerated (a one-time, reader-improving diff in
+   the argument tables), and the ordered-argument pin lives in the
+   single kept artifact from then on. The regeneration command
+   dies with the golden file; the prose sites naming the deleted
+   artifacts are enumerated under Module layout per finding 3.
 4. **`events.md` regeneration is unchanged**, and stays in CI as
    is. The reference's own docs suite (`test_event_docs.py`)
    already holds the committed file to the catalog line by line and
