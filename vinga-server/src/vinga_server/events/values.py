@@ -18,8 +18,8 @@ Three properties are load-bearing, and none of them is incidental:
 - **A refusal never repeats what it refused.** The value handed to a
   value type is exactly the thing that may not reach a log, a lane's
   stderr or an exception chain, so `EventValueError` names the type and
-  the constraint and stops there. This is the same rule the enforcement
-  diagnostics keep, applied one layer earlier.
+  the constraint and stops there. This is the same rule the emitter's
+  own refusal report keeps, applied one layer earlier.
 - **What rides the record is a plain builtin.** `carried()` and
   `rendered()` answer `str`, `int` or the configured path object, never
   the wrapper, so a tap, a JSON formatter and a `%` rendering meet
@@ -245,9 +245,9 @@ CLIENT_BOUNDS = Bounds(CLIENT_ID_LIMIT)
 # control characters and any length at all. An agent called
 # `secondary"agent` is lawful configuration today, so a value type
 # claiming a tighter domain would turn that deployment's every
-# `session_open` into a refusal, and forgiving mode would then replace
-# the emission: lawful traffic mangled by a claim the configuration
-# never made.
+# `session_open` into a refusal, and the emitter would then drop the
+# emission: lawful traffic lost to a claim the configuration never
+# made.
 #
 # So the identifier kinds and the grammars below describe what
 # configuration guarantees. Narrowing belongs at configuration
@@ -424,10 +424,10 @@ class EventValueError(ValueError):
     admit.
 
     Its text names the type and the constraint it failed, and never the
-    value: a construction refusal reaches a lane's stderr in strict mode
-    and the emitter's guard in forgiving mode, and the value is exactly
-    what neither may carry. The same reason `EventSchemaError` reports a
-    fixed code and a count instead of the bytes it rejected.
+    value: a construction refusal is caught by the emitter's guard and
+    reported on the emitter's own channel, and the value is exactly what
+    that report may not carry. The same reason the report names a fixed
+    label and a fixed code instead of the bytes it rejected.
     """
 
 
