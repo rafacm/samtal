@@ -122,7 +122,12 @@ lint/mypy/doc-drift/wheel seconds; critical path 12m45s.
 
 - `.github/workflows/vinga-server.yml`: the `test` job becomes
   `unit` and `integration`; `image.needs` updates; `--durations=25`
-  on both pytest invocations. No other file in M1.
+  on both pytest invocations. No other file in M1 but
+  `CHANGELOG.md`: each milestone lands its own dated `### Changed`
+  entry (M1: the test job splits into parallel lanes with
+  durations reporting; M2: the baseline harness's slow drivers
+  stop waiting out real provider timeouts), matching the
+  repository's precedent for CI-only and test-only entries.
 - `tests/tools/event_baseline.py`: the harness-local 0.5s stall
   for the three filler drivers, and `unregistered()` gaining a
   config parameter so `drive_llm_retry` passes
