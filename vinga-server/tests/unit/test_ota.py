@@ -319,10 +319,27 @@ def test_a_path_that_was_never_served_still_answers_404() -> None:
 
 DEVICE_ID_SENTINEL = "sentinel-4b7f\nWARNING forged entry"
 
+# The other thing a header that missed the MAC may be holding: a
+# credential, since a device's URL and its token are configured together
+# and a header is a place a paste lands (#205). Shaped so a substring
+# check for it cannot match by accident, and split into its own
+# fragments for the same reason the one above is.
+CREDENTIAL_SENTINEL = "sk-live-9c2e7a41-never-a-real-credential"
+
+DEVICE_IDS = [
+    (DEVICE_ID_SENTINEL, ("sentinel-4b7f", "forged entry")),
+    (CREDENTIAL_SENTINEL, (CREDENTIAL_SENTINEL,)),
+]
+
 
 @pytest.mark.parametrize("path", [OTA_PATH, f"{OTA_PATH}activate"])
+@pytest.mark.parametrize(("device_id", "fragments"), DEVICE_IDS)
 def test_a_device_id_that_is_not_a_mac_is_never_quoted_back(
-    path: str, caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
+    path: str,
+    device_id: str,
+    fragments: tuple[str, ...],
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """This endpoint is unauthenticated and reachable by anything that
     finds the path, so its headers are attacker-controlled text: a
@@ -338,7 +355,7 @@ def test_a_device_id_that_is_not_a_mac_is_never_quoted_back(
         refused = client.post(
             path,
             json=SYSTEM_INFO,
-            headers={"Device-Id": DEVICE_ID_SENTINEL, "Client-Id": DEVICE_UUID},
+            headers={"Device-Id": device_id, "Client-Id": DEVICE_UUID},
         )
 
     assert refused.status_code == 400
@@ -350,8 +367,8 @@ def test_a_device_id_that_is_not_a_mac_is_never_quoted_back(
         + "".join(logs.JsonFormatter().format(record) for record in caplog.records)
         + "".join(capsys.readouterr())
     )
-    assert "sentinel-4b7f" not in rendered
-    assert "forged entry" not in rendered
+    for fragment in fragments:
+        assert fragment not in rendered
     # And the line that was written is still a usable diagnostic.
     assert "Device-Id" in caplog.text
 
