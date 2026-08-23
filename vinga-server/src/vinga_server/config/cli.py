@@ -43,7 +43,6 @@ that caused it, and no traceback from pydantic, PyYAML, SQLAlchemy,
 cryptography or httpx reaches the user.
 """
 
-import argparse
 import getpass
 import ipaddress
 import os
@@ -52,12 +51,31 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, NoReturn, get_args, get_origin
+from typing import Annotated, Any, get_args, get_origin
 from urllib.parse import quote
 
 import httpx
+import typer
 import yaml
 from pydantic import BaseModel, TypeAdapter, ValidationError
+
+# Typer ships its own copy of Click rather than importing the installed
+# one, so a usage error arrives as a class of that copy: `click.UsageError`
+# would catch none of them, and a boundary that caught nothing would let
+# Click's own sentences out as a traceback. Imported from where they
+# actually are, named one by one rather than felt for through an
+# ancestor, so a Typer release that moves them fails loudly at import
+# instead of quietly widening what reaches an operator.
+from typer._click.exceptions import (
+    BadArgumentUsage,
+    BadOptionUsage,
+    BadParameter,
+    ClickException,
+    Exit,
+    MissingParameter,
+    NoSuchOption,
+)
+from typer.core import TyperCommand, TyperGroup
 
 from vinga_server.config import docgen, entities, views
 from vinga_server.config.entities import (
@@ -221,52 +239,164 @@ OTA_URL_GUIDANCE = (
 ONBOARDING_OFF_FOR_URL = "Turn onboarding on for a URL short enough to type."
 
 
+PROGRAM = "vinga-server config"
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run one config command. Returns the process exit code.
 
     Parsing is inside the boundary, so a mistake in the grammar answers
     the way a mistake in a fragment does: a sentence on stderr and exit
-    1. --help still leaves through argparse's own exit 0, because asking
+    1. --help still leaves through an exit 0 of its own, because asking
     for help is not a failure."""
     try:
-        args = _parser().parse_args(argv)
-        if args.local:
-            if not args.local_ok:
-                raise ConfigError(LOCAL_SUBSET)
-            print(LOCAL_NOTICE, file=sys.stderr)
-        args.run(args)
+        _parsed(sys.argv[1:] if argv is None else argv)
     except ConfigError as exc:
         print(exc, file=sys.stderr)
         return 1
     return 0
 
 
-class _Parser(argparse.ArgumentParser):
-    """A parser whose usage errors leave through the same door as every
-    other failure.
+def _parsed(argv: Sequence[str]) -> None:
+    """The command line, parsed and run.
 
-    argparse writes to stderr and exits 2 from inside parse_args, which
-    would make an unknown command or a missing argument the one failure
-    that bypasses the ConfigError boundary and the documented exit
-    codes. Subparsers inherit this class from the parser that creates
-    them, so the whole grammar answers alike."""
+    Click is driven directly rather than through its standalone mode,
+    which prints a usage error itself and exits 2: this group's contract
+    is one sentence on stderr and exit 1, and a failure that bypassed it
+    would bypass the sanitizing with it. `--help` is the one invocation
+    that is not a failure, and it leaves through the exit code Click
+    asked for, which is 0.
 
-    def error(self, message: str) -> NoReturn:
-        raise ConfigError(_usage_problem(message))
+    The refusal is built inside the handler and raised after it, the way
+    every other boundary in this module raises. A Click exception holds
+    the context it was raised from and that context holds the argument
+    list, so an exception raised while one is being handled would carry
+    the whole command line as its `__context__` for anything walking the
+    chain to find, which for this CLI is where a secret typed as an
+    argument would be.
+    """
+    problem: str | None = None
+    try:
+        grammar = command()
+        with grammar.make_context(PROGRAM, list(argv)) as context:
+            grammar.invoke(context)
+        return
+    except Exit as asked:
+        raise SystemExit(asked.exit_code) from None
+    except ClickException as exc:
+        problem = _usage_problem(exc)
+    raise ConfigError(problem)
 
 
-def _usage_problem(message: str) -> str:
-    if message.startswith("unrecognized arguments"):
-        # Never the arguments themselves. A secret is never an argument
-        # of this CLI, and the mistake that would put one there (typing
-        # the value after `set-secret ... api_key`) lands exactly here,
-        # where argparse would have echoed it back.
-        return (
-            "unrecognized extra arguments; run with --help for the grammar. Note that a "
-            "secret is never given as an argument: set-secret reads it from stdin, or "
-            "from the variable named with --from-env"
-        )
-    return f"{message}; run with --help for the grammar"
+# What a mistake in the grammar says
+#
+# Click's own sentences quote what was typed: an unknown option comes
+# with a did-you-mean built from it, a bad value is repeated back, an
+# unknown command names the word. A secret is never an argument of this
+# CLI, and the mistake that would make one (typing the value after
+# `set-secret ... api_key`) lands in exactly those sentences, so none of
+# them is passed through. Each shape gets a fixed sentence of this
+# grammar's own, and a shape not recognized gets the vague one, because
+# a message this code has not seen is a message that may carry a value.
+#
+# Two tables, because Click states its usage errors two ways. The
+# subclasses are chosen BY CLASS, which is the reading that cannot be
+# fooled by wording; the base `UsageError` is one class for three
+# different mistakes, so those are told apart by Click's own fixed
+# words, which are the part of the sentence carrying no value.
+
+# Ordered, first match wins, and a subclass comes before the class it
+# extends: `MissingParameter` is a `BadParameter`, and an argument that
+# is absent is not an argument that is wrong.
+_USAGE_PROBLEMS: tuple[tuple[type[BaseException], str], ...] = (
+    (NoSuchOption, "that is not an option of this command"),
+    (MissingParameter, "a required argument is missing"),
+    (BadOptionUsage, "an option was given without its value"),
+    (BadArgumentUsage, "an argument was given in a shape this command does not take"),
+    (BadParameter, "an argument was given a value this command does not take"),
+)
+
+# The mistake whose sentence has to say more than what went wrong,
+# because the value it would have echoed is the one thing this CLI is
+# built never to see: typing the secret after the slot is where an
+# operator meets this, and where Click would have quoted it back.
+SECRET_NEVER_AN_ARGUMENT = (
+    "unrecognized extra arguments. A secret is never given as an argument: set-secret "
+    "reads it from stdin, or from the variable named with --from-env"
+)
+
+_USAGE_SHAPES: tuple[tuple[str, str], ...] = (
+    ("Got unexpected extra argument", SECRET_NEVER_AN_ARGUMENT),
+    ("No such command", "that is not a command"),
+    ("Missing command", "a command is missing"),
+)
+
+# What an unrecognized shape gets. Deliberately vague about the mistake
+# rather than specific with Click's words in it.
+_USAGE_UNKNOWN = "the command line could not be parsed"
+
+
+def _usage_problem(exc: ClickException) -> str:
+    """One usage mistake, in this grammar's words.
+
+    Never in Click's: the message is read only to tell three shapes of
+    one class apart, on markers that are Click's fixed words, and what
+    it goes on to quote is exactly what the fixed sentences replace.
+    """
+    for shape, sentence in _USAGE_PROBLEMS:
+        if isinstance(exc, shape):
+            return f"{sentence}; run with --help for the grammar"
+    stated = exc.format_message()
+    for marker, sentence in _USAGE_SHAPES:
+        if marker in stated:
+            return f"{sentence}; run with --help for the grammar"
+    return f"{_USAGE_UNKNOWN}; run with --help for the grammar"
+
+
+# What one command was given
+#
+# The seam between the grammar and everything under it. Every act
+# addresses its resource, builds its body and takes its break-glass path
+# from one of these, and the fields are the whole vocabulary the grammar
+# has: the three options accepted on either side of the command word,
+# and the arguments that address one entry. Stated as a type rather than
+# as a bag of attributes, so what a command can be asked is readable in
+# one place and an act that reads a field nobody sets is a name that is
+# not there.
+
+
+@dataclass(frozen=True, kw_only=True)
+class Invocation:
+    """One command's arguments, resolved."""
+
+    # The three global options, after the merge below: each is what the
+    # command position said when it said anything, and what the root
+    # position said otherwise.
+    config: str | None = None
+    api_url: str | None = None
+    local: bool = False
+
+    # What addresses one entry, under the names the descriptors'
+    # `addressing` tuples use, which are the URL's path parameters and
+    # the CLI's positionals for the same reason.
+    stage: str = ""
+    name: str = ""
+    mac: str = ""
+    code: str = ""
+    slot: str = ""
+
+    # Which kind of entity a command that covers two of them was asked
+    # about: the word under `set-secret` and `clear-secret`, which is
+    # what decides where a credential is addressed.
+    kind: str = ""
+
+    # The rest of what a command can carry: the agents a binding names,
+    # the fragment a write reads, the variable a secret is read from,
+    # and the entity a schema is asked for.
+    agents: tuple[str, ...] = ()
+    file: str = ""
+    from_env: str | None = None
+    entity: str | None = None
 
 
 # The commands that reach no API
@@ -278,7 +408,7 @@ def _usage_problem(message: str) -> str:
 # without opening a database, reaching a server or needing a key.
 
 
-def _ota_url(args: argparse.Namespace) -> None:
+def _ota_url(args: Invocation) -> None:
     """The URL to type into a board's captive portal.
 
     The one command here that talks to nothing: no server, no database,
@@ -300,20 +430,20 @@ def _ota_url(args: argparse.Namespace) -> None:
     print(f"The URL above is {origin.provenance}.", file=sys.stderr)
 
 
-def _schema(args: argparse.Namespace) -> None:
+def _schema(args: Invocation) -> None:
     """The JSON Schema of one entity kind, or of the whole domain
     configuration. Reads the models and nothing else: no database, no
     configuration file, no encryption key, no server."""
     print(docgen.schema(args.entity), end="")
 
 
-def _reference(args: argparse.Namespace) -> None:
+def _reference(args: Invocation) -> None:
     """The markdown reference, the same document CI diffs the committed
     copy against."""
     print(docgen.reference(), end="")
 
 
-def _openapi(args: argparse.Namespace) -> None:
+def _openapi(args: Invocation) -> None:
     """The configuration API's OpenAPI document, the other artifact CI
     diffs its committed copy against. Rendered from the routes, so it
     opens no database and needs no token: the application is built, its
@@ -355,7 +485,7 @@ _NOTHING = object()
 
 
 def _call(
-    args: argparse.Namespace,
+    args: Invocation,
     method: str,
     path: str,
     body: object = _NOTHING,
@@ -449,7 +579,7 @@ def _unreadable(response: httpx.Response, base_url: str) -> str:
     )
 
 
-def _base_url(args: argparse.Namespace, file_config: FileConfig) -> str:
+def _base_url(args: Invocation, file_config: FileConfig) -> str:
     """Where the API is: the flag, then the environment, then this
     machine on the port the server half names."""
     if args.api_url:
@@ -536,7 +666,7 @@ def _path(*parts: str) -> str:
     return "/" + "/".join(quote(part, safe="") for part in parts)
 
 
-def _secret_path(args: argparse.Namespace) -> str:
+def _secret_path(args: Invocation) -> str:
     if args.kind == "provider":
         return _path("providers", args.stage, args.name, "secrets", args.slot)
     return _path("mcp-servers", args.name, "secrets", args.slot)
@@ -629,7 +759,7 @@ def _declared(shape: object, answer: object) -> object:
 # what a person is supposed to type.
 
 
-def _server_config(args: argparse.Namespace) -> ServerConfig:
+def _server_config(args: Invocation) -> ServerConfig:
     """The file half's `server` section, read the way every command
     reads it. No database is opened and no config file has to exist:
     without one the field defaults and the VINGA_ environment are the
@@ -1117,7 +1247,7 @@ def _stdin() -> str:
     return sys.stdin.read()
 
 
-def _read_secret(args: argparse.Namespace) -> str:
+def _read_secret(args: Invocation) -> str:
     """The secret itself, from a named environment variable or from
     stdin. Never from an argument: arguments land in shell history and
     in the process list. An interactive terminal is read without echo;
@@ -1144,7 +1274,7 @@ def _read_secret(args: argparse.Namespace) -> str:
     return secret
 
 
-def _secret_location(args: argparse.Namespace) -> SecretLocation:
+def _secret_location(args: Invocation) -> SecretLocation:
     if args.kind == "provider":
         return SecretLocation.provider(args.stage, args.name, args.slot)
     return SecretLocation.mcp_server(args.name, args.slot)
@@ -1154,7 +1284,7 @@ def _secret_location(args: argparse.Namespace) -> SecretLocation:
 
 
 @contextmanager
-def _store(args: argparse.Namespace, keyed: bool = False) -> Iterator[ConfigStore]:
+def _store(args: Invocation, keyed: bool = False) -> Iterator[ConfigStore]:
     """The repository, opened directly. Reached only through --local,
     whose four commands are the ones an operator needs when the server
     they would otherwise ask will not start.
@@ -1174,7 +1304,7 @@ def _store(args: argparse.Namespace, keyed: bool = False) -> Iterator[ConfigStor
         engine.dispose()
 
 
-def _database_dir(args: argparse.Namespace) -> Path:
+def _database_dir(args: Invocation) -> Path:
     """Where the server keeps its domain configuration, read through the
     settings machinery the server reads it with, so the two cannot
     disagree. No configuration file has to exist: without one the field
@@ -1233,8 +1363,8 @@ class Act:
     # The request: the verb, the path this command's arguments address,
     # and the body it carries, where it carries one.
     method: str
-    path: Callable[[argparse.Namespace], str]
-    body: Callable[[argparse.Namespace], object] | None = None
+    path: Callable[[Invocation], str]
+    body: Callable[[Invocation], object] | None = None
 
     # How long this one endpoint may take to answer. Every act but the
     # reload takes the default, whose bound is the database's.
@@ -1254,11 +1384,11 @@ class Act:
     # The break-glass path: the same act against the database, answering
     # what the API would have answered for it. Present for exactly the
     # four commands `--local` covers and for nothing else, which is the
-    # same fact `local_ok` states on the subparser.
-    local: Callable[[argparse.Namespace], Any] | None = None
+    # same fact `local_ok` states on the command's row.
+    local: Callable[[Invocation], Any] | None = None
 
 
-def _act(args: argparse.Namespace) -> None:
+def _act(args: Invocation, act: Act) -> None:
     """One act, run whichever way it was reached.
 
     The acknowledgement and the notice reach the same renderer either
@@ -1271,7 +1401,6 @@ def _act(args: argparse.Namespace) -> None:
     each of these acts both ways and asserts one answer, which is what
     keeps the two spellings of a sentence from drifting apart.
     """
-    act: Act = args.act
     if args.local:
         act.render(act.local(args))
         return
@@ -1285,7 +1414,7 @@ def _act(args: argparse.Namespace) -> None:
     act.render(answer if act.answers is None else _understood(act.answers, answer, act.refusal))
 
 
-def _identity(descriptor: entities.EntityDescriptor, args: argparse.Namespace) -> tuple[str, ...]:
+def _identity(descriptor: entities.EntityDescriptor, args: Invocation) -> tuple[str, ...]:
     """What addresses one entry of this kind, taken off the command
     line. The descriptor's parameters are the URL's path parameters and
     the CLI's positional arguments, which are the same names for the
@@ -1296,10 +1425,10 @@ def _identity(descriptor: entities.EntityDescriptor, args: argparse.Namespace) -
 
 def _entity_path(
     descriptor: entities.EntityDescriptor, *under: str
-) -> Callable[[argparse.Namespace], str]:
+) -> Callable[[Invocation], str]:
     """Where one entry of this kind is, and what is addressed under it."""
 
-    def path(args: argparse.Namespace) -> str:
+    def path(args: Invocation) -> str:
         return _path(descriptor.route.lstrip("/"), *_identity(descriptor, args), *under)
 
     return path
@@ -1307,13 +1436,13 @@ def _entity_path(
 
 def _fragment_body(
     descriptor: entities.EntityDescriptor,
-) -> Callable[[argparse.Namespace], object]:
+) -> Callable[[Invocation], object]:
     """The fragment a write of this kind carries, refused before it
     travels if JSON has no way to say what YAML said. Where it is being
     written is the kind's own section of the configuration document and
     the identity under it, which is what such a refusal names."""
 
-    def body(args: argparse.Namespace) -> object:
+    def body(args: Invocation) -> object:
         fragment = _fragment(args.file)
         location = ".".join((descriptor.moved_key, *_identity(descriptor, args)))
         check_transportable(location, fragment)
@@ -1342,7 +1471,7 @@ _AGENT = entities.descriptor("agent")
 _AGENT_DEFAULTS = entities.descriptor("agent-defaults")
 
 
-def _deleting_provider(args: argparse.Namespace) -> Any:
+def _deleting_provider(args: Invocation) -> Any:
     with _store(args) as store:
         store.delete_provider(args.stage, args.name)
     return {
@@ -1351,7 +1480,7 @@ def _deleting_provider(args: argparse.Namespace) -> Any:
     }
 
 
-def _deleting_mcp_server(args: argparse.Namespace) -> Any:
+def _deleting_mcp_server(args: Invocation) -> Any:
     with _store(args) as store:
         store.delete_mcp_server(args.name)
     return {
@@ -1360,7 +1489,7 @@ def _deleting_mcp_server(args: argparse.Namespace) -> Any:
     }
 
 
-def _deleting_prompt_fragment(args: argparse.Namespace) -> Any:
+def _deleting_prompt_fragment(args: Invocation) -> Any:
     with _store(args) as store:
         store.delete_prompt_fragment(args.name)
     return {
@@ -1369,37 +1498,37 @@ def _deleting_prompt_fragment(args: argparse.Namespace) -> Any:
     }
 
 
-def _deleting_agent(args: argparse.Namespace) -> Any:
+def _deleting_agent(args: Invocation) -> Any:
     with _store(args) as store:
         store.delete_agent(args.name)
     return {"wrote": f"agent {args.name} deleted", "notice": _AGENT.notice}
 
 
-def _showing_provider(args: argparse.Namespace) -> Any:
+def _showing_provider(args: Invocation) -> Any:
     with _store(args) as store:
         read = store.read_provider(args.stage, args.name)
     return views.provider(read)
 
 
-def _showing_mcp_server(args: argparse.Namespace) -> Any:
+def _showing_mcp_server(args: Invocation) -> Any:
     with _store(args) as store:
         read = store.read_mcp_server(args.name)
     return views.mcp_server(read)
 
 
-def _showing_prompt_fragment(args: argparse.Namespace) -> Any:
+def _showing_prompt_fragment(args: Invocation) -> Any:
     with _store(args) as store:
         read = store.read_prompt_fragment(args.name)
     return views.prompt_fragment(read)
 
 
-def _showing_agent(args: argparse.Namespace) -> Any:
+def _showing_agent(args: Invocation) -> Any:
     with _store(args) as store:
         read = store.read_agent(args.name)
     return views.agent(read)
 
 
-def _showing_agent_defaults(args: argparse.Namespace) -> Any:
+def _showing_agent_defaults(args: Invocation) -> Any:
     with _store(args) as store:
         read = store.read_agent_defaults()
     return views.agent_defaults(read)
@@ -1409,14 +1538,14 @@ def _showing_agent_defaults(args: argparse.Namespace) -> Any:
 # the registry uses, so a kind added there without one here is a
 # KeyError at import rather than a command that quietly has no
 # break-glass path.
-_LOCAL_DELETE: dict[str, Callable[[argparse.Namespace], Any]] = {
+_LOCAL_DELETE: dict[str, Callable[[Invocation], Any]] = {
     "provider": _deleting_provider,
     "mcp-server": _deleting_mcp_server,
     "prompt-fragment": _deleting_prompt_fragment,
     "agent": _deleting_agent,
 }
 
-_LOCAL_SHOW: dict[str, Callable[[argparse.Namespace], Any]] = {
+_LOCAL_SHOW: dict[str, Callable[[Invocation], Any]] = {
     "provider": _showing_provider,
     "mcp-server": _showing_mcp_server,
     "prompt-fragment": _showing_prompt_fragment,
@@ -1470,31 +1599,31 @@ SHOW_ENTITY: dict[str, Act] = {
 # kind's descriptor.
 
 
-def _device_path(args: argparse.Namespace) -> str:
+def _device_path(args: Invocation) -> str:
     return _path("devices", args.mac)
 
 
-def _binding(args: argparse.Namespace) -> object:
+def _binding(args: Invocation) -> object:
     return {"agents": list(args.agents)}
 
 
-def _claim_path(args: argparse.Namespace) -> str:
+def _claim_path(args: Invocation) -> str:
     return _path("devices", "pending", args.code)
 
 
-def _waiting_path(args: argparse.Namespace) -> str:
+def _waiting_path(args: Invocation) -> str:
     return _path("devices", "pending")
 
 
-def _default_agent_path(args: argparse.Namespace) -> str:
+def _default_agent_path(args: Invocation) -> str:
     return _path("default-agent")
 
 
-def _default_agent_name(args: argparse.Namespace) -> object:
+def _default_agent_name(args: Invocation) -> object:
     return {"name": args.name}
 
 
-def _deleting_device(args: argparse.Namespace) -> Any:
+def _deleting_device(args: Invocation) -> Any:
     """The break-glass unbind. A running server reads the devices table,
     so the removal reaches the device at its next check-in whether the
     row was deleted through the API or, as here, underneath it, which is
@@ -1511,7 +1640,7 @@ def _deleting_device(args: argparse.Namespace) -> Any:
     return {"wrote": f"device {deleted} deleted", "notice": BINDING_NOTICE}
 
 
-def _showing_device(args: argparse.Namespace) -> Any:
+def _showing_device(args: Invocation) -> Any:
     with _store(args) as store:
         read = store.read_device(args.mac)
     return views.device(read)
@@ -1596,11 +1725,11 @@ def _secret_notice(kind: EntityKind) -> str:
     return RELOAD_NOTICE if kind in ("mcp_server", "provider") else RESTART_NOTICE
 
 
-def _secret_body(args: argparse.Namespace) -> object:
+def _secret_body(args: Invocation) -> object:
     return {"secret": _read_secret(args)}
 
 
-def _storing_secret(args: argparse.Namespace) -> Any:
+def _storing_secret(args: Invocation) -> Any:
     location = _secret_location(args)
     secret = _read_secret(args)
     # The one recovery command that needs a key: it encrypts.
@@ -1612,7 +1741,7 @@ def _storing_secret(args: argparse.Namespace) -> Any:
     }
 
 
-def _clearing_secret(args: argparse.Namespace) -> Any:
+def _clearing_secret(args: Invocation) -> Any:
     location = _secret_location(args)
     with _store(args) as store:
         store.clear_secret(location)
@@ -1657,24 +1786,24 @@ def _printed(listing: Callable[[Any], str]) -> Callable[[Any], None]:
     return render
 
 
-def _config_path(args: argparse.Namespace) -> str:
+def _config_path(args: Invocation) -> str:
     return _path("config")
 
 
-def _stored_config(args: argparse.Namespace) -> Any:
+def _stored_config(args: Invocation) -> Any:
     with _store(args) as store:
         return views.config(store.load())
 
 
-def _running_path(args: argparse.Namespace) -> str:
+def _running_path(args: Invocation) -> str:
     return _path("runtime", "mcp-servers")
 
 
-def _reload_path(args: argparse.Namespace) -> str:
+def _reload_path(args: Invocation) -> str:
     return _path("runtime", "config", "reload")
 
 
-def _assembled_path(args: argparse.Namespace) -> str:
+def _assembled_path(args: Invocation) -> str:
     return _path("runtime", "agents", args.name, "prompt")
 
 
@@ -1719,317 +1848,890 @@ RELOAD = Act(
 
 
 # The grammar
+#
+# One row per command: where it sits in the command tree, what it does,
+# whether the break-glass path covers it, and how it declares its
+# arguments. The table is the whole of the grammar and the loop at the
+# foot of this module is the only reader of a row, so adding a command
+# is a row rather than a paragraph of parser construction.
+#
+# `local_ok` is a column here for the same reason an act's two paths are
+# one row above: it used to be installed imperatively on a subparser,
+# where nothing could read it back, and the differential suite's claim
+# to cover the whole break-glass subset was kept by review alone. A
+# column is a fact a test can hold that suite to.
 
 
-def _fragment_parser(
-    kinds: argparse._SubParsersAction, name: str, parents: list[argparse.ArgumentParser]
-) -> argparse.ArgumentParser:
-    """One `set <kind>` command, whose help lists the fields its
-    fragment may carry. The list is generated from the same
-    Field(description=...) values the reference and the JSON Schema are
-    rendered from, so the three cannot disagree and nobody has to
-    remember to update a help string when a field changes."""
-    return kinds.add_parser(
-        name,
-        parents=parents,
-        epilog=docgen.fragment_help(name),
-        # The epilog is laid out already; the default formatter would
-        # reflow it into one paragraph.
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+# What each of the three global options says, and the two positions they
+# are accepted in. Both readings are natural: `vinga-server --config
+# path` is how the server takes it, and options after their subcommand
+# is how everything else does.
+CONFIG_HELP = (
+    f"path to the YAML config file naming server.port and server.api.secret_env "
+    f"(default: ${CONFIG_ENV_VAR})"
+)
+
+API_URL_HELP = (
+    f"base URL of the configuration API (default: ${API_URL_ENV}, then "
+    f"http://127.0.0.1:<server.port>{API_MOUNT_PATH})"
+)
+
+LOCAL_HELP = (
+    "read and write the database directly instead of the API: the recovery subset "
+    "(show, delete, clear-secret, set-secret), for when the server will not start"
+)
+
+FILE_HELP = "YAML fragment for this entity, or - to read it from stdin"
+
+FROM_ENV_HELP = "read the value from this variable"
+
+STAGE_HELP = ", ".join(PROVIDER_STAGES)
+
+PROVIDER_SLOT_HELP = "the option it fills, such as api_key"
+
+MCP_SLOT_HELP = "env.<KEY> or headers.<KEY>"
+
+DESCRIPTION = (
+    "Read and write the domain half of the configuration: providers, "
+    "MCP servers, agents, devices and their secrets. Commands go through the "
+    "configuration API on the running server; --local is the recovery path."
+)
+
+# The declared copy of each option, as one annotation apiece, so a
+# command that takes them says so in three lines and cannot come to
+# spell one of them differently from its siblings.
+#
+# `None` and `False` are the not-given values, and they are answers
+# rather than sentinels of convenience: neither option can be typed as
+# None, and `--local` has no negative spelling, so the merge below
+# reproduces argparse's `default=SUPPRESS` dance exactly. A sentinel
+# object of this module's own would read back as its repr in the help,
+# which is the one place these defaults are published.
+ConfigOption = Annotated[str | None, typer.Option("--config", metavar="PATH", help=CONFIG_HELP)]
+
+ApiUrlOption = Annotated[str | None, typer.Option("--api-url", metavar="URL", help=API_URL_HELP)]
+
+LocalOption = Annotated[bool, typer.Option("--local", help=LOCAL_HELP)]
+
+
+@dataclass(frozen=True, kw_only=True)
+class Globals:
+    """The three options, as far as the positions so far have resolved
+    them.
+
+    The root callback builds the first answer and every position under
+    it folds its own copies in, so a value given before the command
+    survives a command that was not given one. That survival is the
+    load-bearing half: without it `--config path show provider` would
+    read the default file, because the command's own empty copy would
+    overwrite what came before it.
+    """
+
+    config: str | None = None
+    api_url: str | None = None
+    local: bool = False
+
+    def merged(self, *, config: str | None, api_url: str | None, local: bool) -> "Globals":
+        """The same options with one more position's copies folded in,
+        each winning only where it was given.
+
+        `--local` accumulates rather than overrides, because it is
+        presence-only: a flag that is not there says nothing, and cannot
+        unsay a flag that is.
+        """
+        return Globals(
+            config=self.config if config is None else config,
+            api_url=self.api_url if api_url is None else api_url,
+            local=self.local or local,
+        )
+
+
+@dataclass(frozen=True, kw_only=True)
+class Command:
+    """One command of the grammar."""
+
+    # Where it sits: the words that name it, root first. One word is a
+    # command of the group itself, two is a command under one of the
+    # groups named in `GROUPS`.
+    words: tuple[str, ...]
+
+    # What it does. An act is a request to the configuration API, or the
+    # same act against the database where `--local` covers it; the four
+    # commands that reach neither carry their own function instead.
+    does: "Act | Callable[[Invocation], None]"
+
+    # How its arguments are declared, which is a function Typer reads a
+    # signature off. One per argument shape rather than one per command,
+    # and the row is handed to it, so what a command performs is read
+    # off the row rather than closed over a second time.
+    declare: "Callable[[Command], Callable[..., None]]"
+
+    # What the command listing says about it, which is also the heading
+    # of its own help page.
+    help: str
+
+    # What follows that page, for the commands that take a fragment: the
+    # fields the fragment may carry, rendered from the models.
+    epilog: str | None = None
+
+    # Whether `--local` covers it.
+    local_ok: bool = False
+
+    def perform(self, args: Invocation) -> None:
+        """What this command does, once its arguments are in hand."""
+        if isinstance(self.does, Act):
+            _act(args, self.does)
+            return
+        self.does(args)
+
+
+class _Verbatim(TyperCommand):
+    """A command whose epilog is printed as it was laid out.
+
+    Click rewraps an epilog paragraph by paragraph, which would reflow
+    the field listing under a `set` command into prose. That listing is
+    generated already wrapped, at a width narrower than a terminal, for
+    exactly the reason argparse's raw formatter was asked for before
+    this: a line that wraps on its own is worse than one wrapped on
+    purpose.
+    """
+
+    def format_epilog(self, ctx: Any, formatter: Any) -> None:
+        if not self.epilog:
+            return
+        formatter.write_paragraph()
+        for line in self.epilog.splitlines():
+            formatter.write(f"{line}\n")
+
+
+def _root(
+    context: typer.Context,
+    config: ConfigOption = None,
+    api_url: ApiUrlOption = None,
+    local: LocalOption = False,
+) -> None:
+    """The three options in the position before the command word.
+
+    Their answer is put on the context rather than passed, because the
+    positions under this one add to it: a group callback folds its own
+    copies in and a command folds its own in after that, and each of
+    them reads one object.
+    """
+    context.obj = Globals(config=config, api_url=api_url, local=local)
+
+
+def _resolved(context: typer.Context) -> Globals:
+    """What the positions above this one made of the three options.
+
+    Answered as an empty `Globals` when there is nothing there, which is
+    what a command reached without the root callback having run would
+    see. Nothing in this grammar reaches one, and defaulting is cheaper
+    than a branch every command would have to carry.
+    """
+    resolved = context.obj
+    return resolved if isinstance(resolved, Globals) else Globals()
+
+
+def _invocation(row: Command, context: typer.Context, **given: Any) -> Invocation:
+    """One command's arguments, with the break-glass gate passed.
+
+    The gate is here rather than in `main` because membership of the
+    recovery subset is a fact of the command and the row states it. It
+    runs before the command does anything at all, which is what keeps a
+    refused `--local set` from reading a fragment off stdin first.
+    """
+    resolved = _resolved(context).merged(
+        config=given.pop("config", None),
+        api_url=given.pop("api_url", None),
+        local=given.pop("local", False),
+    )
+    if resolved.local:
+        if not row.local_ok:
+            raise ConfigError(LOCAL_SUBSET)
+        print(LOCAL_NOTICE, file=sys.stderr)
+    return Invocation(
+        config=resolved.config,
+        api_url=resolved.api_url,
+        local=resolved.local,
+        # Which kind a command that covers several of them was asked
+        # about is its last word, which is the same string the registry
+        # keys that kind under.
+        kind=row.words[-1] if len(row.words) > 1 else "",
+        **given,
     )
 
 
-def _parser() -> argparse.ArgumentParser:
-    config_help = (
-        f"path to the YAML config file naming server.port and server.api.secret_env "
-        f"(default: ${CONFIG_ENV_VAR})"
-    )
-    api_url_help = (
-        f"base URL of the configuration API (default: ${API_URL_ENV}, then "
-        f"http://127.0.0.1:<server.port>{API_MOUNT_PATH})"
-    )
-    local_help = (
-        "read and write the database directly instead of the API: the recovery subset "
-        "(show, delete, clear-secret, set-secret), for when the server will not start"
-    )
-    # Accepted before the command and after it, because both readings are
-    # natural: `vinga-server --config path` is how the server takes it,
-    # and options after their subcommand is how everything else does. The
-    # per-command copy suppresses its default rather than defaulting to
-    # None, or an option given before the command would be overwritten by
-    # the command's own empty default.
-    common = argparse.ArgumentParser(add_help=False)
-    common.add_argument(
-        "--config", metavar="PATH", default=argparse.SUPPRESS, help=config_help
-    )
-    common.add_argument(
-        "--api-url", metavar="URL", default=argparse.SUPPRESS, help=api_url_help
-    )
-    common.add_argument(
-        "--local", action="store_true", default=argparse.SUPPRESS, help=local_help
-    )
-    # For the commands that read the file half and reach no API: the
-    # same --config, and none of the flags that address one.
-    file_only = argparse.ArgumentParser(add_help=False)
-    file_only.add_argument(
-        "--config", metavar="PATH", default=argparse.SUPPRESS, help=config_help
-    )
-    fragment = argparse.ArgumentParser(add_help=False)
-    fragment.add_argument(
-        "-f",
-        "--file",
-        metavar="PATH",
-        required=True,
-        help="YAML fragment for this entity, or - to read it from stdin",
-    )
+# How each shape of command declares its arguments
+#
+# Typer reads a signature, so an argument shape is a function and a
+# command is one of these applied to its row. There are fewer of them
+# than there are commands because the grammar repeats itself: five kinds
+# addressed by a name, one addressed by a stage and a name, two settings
+# addressed by a MAC and by six digits on a screen.
 
-    parser = _Parser(
-        prog="vinga-server config",
-        description=(
-            "Read and write the domain half of the configuration: providers, "
-            "MCP servers, agents, devices and their secrets. Commands go through the "
-            "configuration API on the running server; --local is the recovery path."
-        ),
-    )
-    parser.add_argument("--config", metavar="PATH", default=None, help=config_help)
-    parser.add_argument("--api-url", metavar="URL", default=None, help=api_url_help)
-    parser.add_argument("--local", action="store_true", help=local_help)
-    # Which commands --local covers, carried on the command itself so
-    # that adding one to the subset is a line beside the command rather
-    # than a list somewhere else to keep in step.
-    parser.set_defaults(local_ok=False)
-    commands = parser.add_subparsers(dest="command", required=True)
 
-    setter = commands.add_parser(
-        "set", help="create or replace one entity from a YAML fragment"
-    )
-    kinds = setter.add_subparsers(dest="kind", required=True)
-    entity = _fragment_parser(kinds, "provider", [common, fragment])
-    entity.add_argument("stage", metavar="STAGE", help=", ".join(PROVIDER_STAGES))
-    entity.add_argument("name", metavar="NAME")
-    entity.set_defaults(run=_act, act=SET_ENTITY["provider"])
-    entity = _fragment_parser(kinds, "mcp-server", [common, fragment])
-    entity.add_argument("name", metavar="NAME")
-    entity.set_defaults(run=_act, act=SET_ENTITY["mcp-server"])
-    entity = _fragment_parser(kinds, "prompt-fragment", [common, fragment])
-    entity.add_argument("name", metavar="NAME")
-    entity.set_defaults(run=_act, act=SET_ENTITY["prompt-fragment"])
-    entity = _fragment_parser(kinds, "agent", [common, fragment])
-    entity.add_argument("name", metavar="NAME")
-    entity.set_defaults(run=_act, act=SET_ENTITY["agent"])
-    entity = _fragment_parser(kinds, "agent-defaults", [common, fragment])
-    entity.set_defaults(run=_act, act=SET_ENTITY["agent-defaults"])
+def _plain(row: Command) -> Callable[..., None]:
+    """A command that addresses nothing: the reads of the whole
+    configuration and of the running server, the reload, and the
+    singleton, which is the one entity there is only one of."""
 
-    deleter = commands.add_parser("delete", help="delete one entity")
-    deleter.set_defaults(local_ok=True)
-    kinds = deleter.add_subparsers(dest="kind", required=True)
-    entity = kinds.add_parser("provider", parents=[common])
-    entity.add_argument("stage", metavar="STAGE", help=", ".join(PROVIDER_STAGES))
-    entity.add_argument("name", metavar="NAME")
-    entity.set_defaults(run=_act, act=DELETE_ENTITY["provider"])
-    entity = kinds.add_parser("mcp-server", parents=[common])
-    entity.add_argument("name", metavar="NAME")
-    entity.set_defaults(run=_act, act=DELETE_ENTITY["mcp-server"])
-    entity = kinds.add_parser("prompt-fragment", parents=[common])
-    entity.add_argument("name", metavar="NAME")
-    entity.set_defaults(run=_act, act=DELETE_ENTITY["prompt-fragment"])
-    entity = kinds.add_parser("agent", parents=[common])
-    entity.add_argument("name", metavar="NAME")
-    entity.set_defaults(run=_act, act=DELETE_ENTITY["agent"])
-    entity = kinds.add_parser("device", parents=[common])
-    entity.add_argument("mac", metavar="MAC")
-    entity.set_defaults(run=_act, act=DELETE_DEVICE)
+    def run(
+        context: typer.Context,
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        local: LocalOption = False,
+    ) -> None:
+        row.perform(_invocation(row, context, config=config, api_url=api_url, local=local))
 
+    return run
+
+
+def _named(row: Command) -> Callable[..., None]:
+    """A command addressing one entry by its name."""
+
+    def run(
+        context: typer.Context,
+        name: Annotated[str, typer.Argument(metavar="NAME")],
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        local: LocalOption = False,
+    ) -> None:
+        row.perform(
+            _invocation(row, context, config=config, api_url=api_url, local=local, name=name)
+        )
+
+    return run
+
+
+def _staged(row: Command) -> Callable[..., None]:
+    """A command addressing one provider, which takes two words because
+    two stages may hold the same name."""
+
+    def run(
+        context: typer.Context,
+        stage: Annotated[str, typer.Argument(metavar="STAGE", help=STAGE_HELP)],
+        name: Annotated[str, typer.Argument(metavar="NAME")],
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        local: LocalOption = False,
+    ) -> None:
+        row.perform(
+            _invocation(
+                row, context, config=config, api_url=api_url, local=local, stage=stage, name=name
+            )
+        )
+
+    return run
+
+
+def _by_mac(row: Command) -> Callable[..., None]:
+    """A command addressing one device by the address it connects
+    with."""
+
+    def run(
+        context: typer.Context,
+        mac: Annotated[str, typer.Argument(metavar="MAC")],
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        local: LocalOption = False,
+    ) -> None:
+        row.perform(
+            _invocation(row, context, config=config, api_url=api_url, local=local, mac=mac)
+        )
+
+    return run
+
+
+def _written(row: Command) -> Callable[..., None]:
+    """The singleton's write: a fragment and nothing to address it
+    with."""
+
+    def run(
+        context: typer.Context,
+        file: Annotated[str, typer.Option("-f", "--file", metavar="PATH", help=FILE_HELP)],
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        local: LocalOption = False,
+    ) -> None:
+        row.perform(
+            _invocation(row, context, config=config, api_url=api_url, local=local, file=file)
+        )
+
+    return run
+
+
+def _named_write(row: Command) -> Callable[..., None]:
+    """One named entity's write, from a fragment."""
+
+    def run(
+        context: typer.Context,
+        name: Annotated[str, typer.Argument(metavar="NAME")],
+        file: Annotated[str, typer.Option("-f", "--file", metavar="PATH", help=FILE_HELP)],
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        local: LocalOption = False,
+    ) -> None:
+        row.perform(
+            _invocation(
+                row, context, config=config, api_url=api_url, local=local, name=name, file=file
+            )
+        )
+
+    return run
+
+
+def _staged_write(row: Command) -> Callable[..., None]:
+    """One provider's write, from a fragment."""
+
+    def run(
+        context: typer.Context,
+        stage: Annotated[str, typer.Argument(metavar="STAGE", help=STAGE_HELP)],
+        name: Annotated[str, typer.Argument(metavar="NAME")],
+        file: Annotated[str, typer.Option("-f", "--file", metavar="PATH", help=FILE_HELP)],
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        local: LocalOption = False,
+    ) -> None:
+        row.perform(
+            _invocation(
+                row,
+                context,
+                config=config,
+                api_url=api_url,
+                local=local,
+                stage=stage,
+                name=name,
+                file=file,
+            )
+        )
+
+    return run
+
+
+def _provider_secret(row: Command) -> Callable[..., None]:
+    """Storing a credential on one provider. The value is never here: it
+    is read from stdin or from the variable `--from-env` names."""
+
+    def run(
+        context: typer.Context,
+        stage: Annotated[str, typer.Argument(metavar="STAGE", help=STAGE_HELP)],
+        name: Annotated[str, typer.Argument(metavar="NAME")],
+        slot: Annotated[str, typer.Argument(metavar="SLOT", help=PROVIDER_SLOT_HELP)],
+        from_env: Annotated[
+            str | None, typer.Option("--from-env", metavar="VAR", help=FROM_ENV_HELP)
+        ] = None,
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        local: LocalOption = False,
+    ) -> None:
+        row.perform(
+            _invocation(
+                row,
+                context,
+                config=config,
+                api_url=api_url,
+                local=local,
+                stage=stage,
+                name=name,
+                slot=slot,
+                from_env=from_env,
+            )
+        )
+
+    return run
+
+
+def _mcp_secret(row: Command) -> Callable[..., None]:
+    """The same, on one MCP server."""
+
+    def run(
+        context: typer.Context,
+        name: Annotated[str, typer.Argument(metavar="NAME")],
+        slot: Annotated[str, typer.Argument(metavar="SLOT", help=MCP_SLOT_HELP)],
+        from_env: Annotated[
+            str | None, typer.Option("--from-env", metavar="VAR", help=FROM_ENV_HELP)
+        ] = None,
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        local: LocalOption = False,
+    ) -> None:
+        row.perform(
+            _invocation(
+                row,
+                context,
+                config=config,
+                api_url=api_url,
+                local=local,
+                name=name,
+                slot=slot,
+                from_env=from_env,
+            )
+        )
+
+    return run
+
+
+def _provider_slot(row: Command) -> Callable[..., None]:
+    """Clearing a stored credential from one provider."""
+
+    def run(
+        context: typer.Context,
+        stage: Annotated[str, typer.Argument(metavar="STAGE", help=STAGE_HELP)],
+        name: Annotated[str, typer.Argument(metavar="NAME")],
+        slot: Annotated[str, typer.Argument(metavar="SLOT", help=PROVIDER_SLOT_HELP)],
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        local: LocalOption = False,
+    ) -> None:
+        row.perform(
+            _invocation(
+                row,
+                context,
+                config=config,
+                api_url=api_url,
+                local=local,
+                stage=stage,
+                name=name,
+                slot=slot,
+            )
+        )
+
+    return run
+
+
+def _mcp_slot(row: Command) -> Callable[..., None]:
+    """The same, on one MCP server."""
+
+    def run(
+        context: typer.Context,
+        name: Annotated[str, typer.Argument(metavar="NAME")],
+        slot: Annotated[str, typer.Argument(metavar="SLOT", help=MCP_SLOT_HELP)],
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        local: LocalOption = False,
+    ) -> None:
+        row.perform(
+            _invocation(
+                row, context, config=config, api_url=api_url, local=local, name=name, slot=slot
+            )
+        )
+
+    return run
+
+
+def _bound_by_mac(row: Command) -> Callable[..., None]:
+    """Binding a board whose address is already known, to one agent or
+    several."""
+
+    def run(
+        context: typer.Context,
+        mac: Annotated[str, typer.Argument(metavar="MAC")],
+        agents: Annotated[list[str], typer.Argument(metavar="AGENT")],
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        local: LocalOption = False,
+    ) -> None:
+        row.perform(
+            _invocation(
+                row,
+                context,
+                config=config,
+                api_url=api_url,
+                local=local,
+                mac=mac,
+                agents=tuple(agents),
+            )
+        )
+
+    return run
+
+
+def _bound_by_code(row: Command) -> Callable[..., None]:
+    """The same binding, addressed by the six digits on a board's screen
+    instead of by a MAC nobody has had to find."""
+
+    def run(
+        context: typer.Context,
+        code: Annotated[
+            str,
+            typer.Argument(
+                metavar="CODE", help="the six digits the device is showing and speaking"
+            ),
+        ],
+        agents: Annotated[list[str], typer.Argument(metavar="AGENT")],
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        local: LocalOption = False,
+    ) -> None:
+        row.perform(
+            _invocation(
+                row,
+                context,
+                config=config,
+                api_url=api_url,
+                local=local,
+                code=code,
+                agents=tuple(agents),
+            )
+        )
+
+    return run
+
+
+def _from_the_file_half(row: Command) -> Callable[..., None]:
+    """The onboarding command, which takes `--config` and nothing else.
+
+    It contacts nothing at all, so it has nothing to do with `--api-url`
+    or the bearer token, and offering the flags would say it had. What
+    answers on the URL it prints is `vinga-server doctor`, a command of
+    its own since #244.
+    """
+
+    def run(context: typer.Context, config: ConfigOption = None) -> None:
+        row.perform(_invocation(row, context, config=config))
+
+    return run
+
+
+def _of_an_entity(row: Command) -> Callable[..., None]:
+    """The schema command, which names one entity kind or none."""
+
+    def run(
+        context: typer.Context,
+        entity: Annotated[
+            str | None,
+            typer.Argument(
+                metavar="ENTITY", help=", ".join(docgen.entity_names()) + " (default: domain)"
+            ),
+        ] = None,
+    ) -> None:
+        row.perform(_invocation(row, context, entity=entity))
+
+    return run
+
+
+def _rendered(row: Command) -> Callable[..., None]:
+    """The two documents rendered from the models and from the routes,
+    which take no arguments at all."""
+
+    def run(context: typer.Context) -> None:
+        row.perform(_invocation(row, context))
+
+    return run
+
+
+def _whole_or_one(row: Command) -> Callable[..., None]:
+    """The one group word that is also a command: `show` alone is the
+    whole configuration, `show <kind>` is one entity.
+
+    Its options are accepted in its own position either way, so when a
+    kind follows they are folded into what the command under it reads
+    rather than acted on here.
+    """
+
+    def run(
+        context: typer.Context,
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        local: LocalOption = False,
+    ) -> None:
+        if context.invoked_subcommand is not None:
+            context.obj = _resolved(context).merged(
+                config=config, api_url=api_url, local=local
+            )
+            return
+        row.perform(_invocation(row, context, config=config, api_url=api_url, local=local))
+
+    return run
+
+
+# What a command listing says about one entity kind's command: the verb,
+# and where in the configuration document the kind lives. Read off the
+# descriptor, so a kind cannot come to be described one way in the help
+# and another way in the generated reference.
+
+
+def _about(verb: str, kind: entities.EntityDescriptor) -> str:
+    return f"{verb} {kind.location}"
+
+
+# The four groups that are only groups, and the one that is also a
+# command. A group's own help is the one fact a leaf row cannot carry,
+# so it is stated here; everything else about the shape of the tree is
+# derived from the words in the table below.
+GROUPS: dict[str, str] = {
+    "set": "create or replace one entity from a YAML fragment",
+    "delete": "delete one entity",
+    "set-secret": "store one credential, encrypted, read from stdin or a variable",
+    "clear-secret": "remove one stored credential",
+    "show": "everything, or one entity",
+}
+
+
+COMMANDS: tuple[Command, ...] = (
+    *(
+        Command(
+            words=("set", kind.name),
+            does=SET_ENTITY[kind.name],
+            declare=_staged_write if kind.addressing == ("stage", "name") else (
+                _named_write if kind.addressing else _written
+            ),
+            help=_about("create or replace", kind),
+            # Generated from the same Field(description=...) values the
+            # reference and the JSON Schema are rendered from, so the
+            # three cannot disagree and nobody has to remember to update
+            # a help string when a field changes.
+            epilog=docgen.fragment_help(kind.name),
+        )
+        for kind in entities.ENTITIES
+    ),
+    *(
+        Command(
+            words=("delete", kind.name),
+            does=DELETE_ENTITY[kind.name],
+            declare=_staged if kind.addressing == ("stage", "name") else _named,
+            help=_about("delete", kind),
+            local_ok=True,
+        )
+        for kind in entities.ENTITIES
+        if kind.has_delete
+    ),
+    Command(
+        words=("delete", "device"),
+        does=DELETE_DEVICE,
+        declare=_by_mac,
+        help="delete devices.<mac>, so the board it names reaches the default agent",
+        local_ok=True,
+    ),
     # Two ways to bind a board, and which one an operator wants depends
     # on what they are holding: a MAC they already know, or a device in
     # front of them showing six digits. The help text says exactly that,
     # because the pair is otherwise the kind of thing a person picks
     # wrongly once and then remembers wrongly.
-    bind = commands.add_parser(
-        "bind-device",
-        parents=[common],
+    Command(
+        words=("bind-device",),
+        does=BIND_DEVICE,
+        declare=_bound_by_mac,
         help="bind a device by the MAC you already know, to one or more agents",
-    )
-    bind.add_argument("mac", metavar="MAC")
-    bind.add_argument("agents", metavar="AGENT", nargs="+")
-    bind.set_defaults(run=_act, act=BIND_DEVICE)
-
-    add = commands.add_parser(
-        "add-device",
-        parents=[common],
+    ),
+    Command(
+        words=("add-device",),
+        does=ADD_DEVICE,
+        declare=_bound_by_code,
         help=(
             "bind the device showing this activation code, which is the six digits on "
             "its screen; use bind-device when you know the MAC instead"
         ),
-    )
-    add.add_argument(
-        "code",
-        metavar="CODE",
-        help="the six digits the device is showing and speaking",
-    )
-    add.add_argument("agents", metavar="AGENT", nargs="+")
-    add.set_defaults(run=_act, act=ADD_DEVICE)
-
-    waiting = commands.add_parser(
-        "pending",
-        parents=[common],
+    ),
+    Command(
+        words=("pending",),
+        does=PENDING,
+        declare=_plain,
         help="the devices showing an activation code, and the code each is showing",
-    )
-    waiting.set_defaults(run=_act, act=PENDING)
-
-    # The other read of the running server rather than of the database,
-    # and the reason neither takes --local: there is no state to report
-    # when there is no server to ask.
-    running = commands.add_parser(
-        "status",
-        parents=[common],
+    ),
+    # A read of the running server rather than of the database, and the
+    # reason neither this nor the next takes --local: there is no state
+    # to report when there is no server to ask.
+    Command(
+        words=("status",),
+        does=STATUS,
+        declare=_plain,
         help=(
             "what each configured MCP server is doing on the running server: connected, "
             "down, or unused because no agent references it, since when, and which "
             "tools it published"
         ),
-    )
-    running.set_defaults(run=_act, act=STATUS)
-
+    ),
     # The other read of the running server, and the one that answers
     # what the model is actually given: the configuration says what an
     # agent is made of, and this says what that adds up to.
-    assembled = commands.add_parser(
-        "prompt",
-        parents=[common],
+    Command(
+        words=("prompt",),
+        does=PROMPT,
+        declare=_named,
         help=(
             "the system prompt a new session as this agent would be sent, block by "
             "block with the size of each and the total; a conversation already running "
             "holds what it assembled when it started"
         ),
-    )
-    assembled.add_argument("name", metavar="AGENT")
-    assembled.set_defaults(run=_act, act=PROMPT)
-
+    ),
     # The one command that changes what the server is doing rather than
     # what is stored, which is why it is a verb of its own rather than a
     # flag on a write: an operator writes several entries and grant
     # lists and applies them once.
-    applying = commands.add_parser(
-        "reload",
-        parents=[common],
+    Command(
+        words=("reload",),
+        does=RELOAD,
+        declare=_plain,
         help=(
             "apply the stored configuration to the running server, without a restart "
             "and without dropping a conversation"
         ),
-    )
-    applying.set_defaults(run=_act, act=RELOAD)
-
-    # The onboarding command takes --config and nothing else. It
-    # contacts nothing at all, so it has nothing to do with --api-url or
-    # the bearer token, and offering the flags would say it had. What
-    # answers on the URL it prints is `vinga-server doctor`, a command
-    # of its own since #244.
-    portal = commands.add_parser(
-        "ota-url",
-        parents=[file_only],
+    ),
+    Command(
+        words=("ota-url",),
+        does=_ota_url,
+        declare=_from_the_file_half,
         help=(
             "the URL to type into a device's captive portal; derived from this "
             "configuration and the device-auth secret, and it contacts nothing"
         ),
-    )
-    portal.set_defaults(run=_ota_url)
-
-    default = commands.add_parser(
-        "set-default-agent", parents=[common], help="the agent an unbound device reaches"
-    )
-    default.add_argument("name", metavar="NAME")
-    default.set_defaults(run=_act, act=SET_DEFAULT_AGENT)
-
-    cleared = commands.add_parser(
-        "clear-default-agent",
-        parents=[common],
+    ),
+    Command(
+        words=("set-default-agent",),
+        does=SET_DEFAULT_AGENT,
+        declare=_named,
+        help="the agent an unbound device reaches",
+    ),
+    Command(
+        words=("clear-default-agent",),
+        does=CLEAR_DEFAULT_AGENT,
+        declare=_plain,
         help="unset it, leaving the devices map as the allowlist",
-    )
-    cleared.set_defaults(run=_act, act=CLEAR_DEFAULT_AGENT)
-
-    secret = commands.add_parser(
-        "set-secret", help="store one credential, encrypted, read from stdin or a variable"
-    )
-    secret.set_defaults(local_ok=True)
-    kinds = secret.add_subparsers(dest="kind", required=True)
-    entity = kinds.add_parser("provider", parents=[common])
-    entity.add_argument("stage", metavar="STAGE", help=", ".join(PROVIDER_STAGES))
-    entity.add_argument("name", metavar="NAME")
-    entity.add_argument("slot", metavar="SLOT", help="the option it fills, such as api_key")
-    entity.add_argument("--from-env", metavar="VAR", help="read the value from this variable")
-    entity.set_defaults(run=_act, act=SET_SECRET)
-    entity = kinds.add_parser("mcp-server", parents=[common])
-    entity.add_argument("name", metavar="NAME")
-    entity.add_argument("slot", metavar="SLOT", help="env.<KEY> or headers.<KEY>")
-    entity.add_argument("--from-env", metavar="VAR", help="read the value from this variable")
-    entity.set_defaults(run=_act, act=SET_SECRET)
-
-    clear = commands.add_parser("clear-secret", help="remove one stored credential")
-    clear.set_defaults(local_ok=True)
-    kinds = clear.add_subparsers(dest="kind", required=True)
-    entity = kinds.add_parser("provider", parents=[common])
-    entity.add_argument("stage", metavar="STAGE", help=", ".join(PROVIDER_STAGES))
-    entity.add_argument("name", metavar="NAME")
-    entity.add_argument("slot", metavar="SLOT")
-    entity.set_defaults(run=_act, act=CLEAR_SECRET)
-    entity = kinds.add_parser("mcp-server", parents=[common])
-    entity.add_argument("name", metavar="NAME")
-    entity.add_argument("slot", metavar="SLOT")
-    entity.set_defaults(run=_act, act=CLEAR_SECRET)
-
-    listing = commands.add_parser("list", parents=[common], help="a summary tree")
-    listing.set_defaults(run=_act, act=LIST)
-
+    ),
+    Command(
+        words=("set-secret", "provider"),
+        does=SET_SECRET,
+        declare=_provider_secret,
+        help="store a credential on providers.<stage>.<name>",
+        local_ok=True,
+    ),
+    Command(
+        words=("set-secret", "mcp-server"),
+        does=SET_SECRET,
+        declare=_mcp_secret,
+        help="store a credential on mcp_servers.<name>",
+        local_ok=True,
+    ),
+    Command(
+        words=("clear-secret", "provider"),
+        does=CLEAR_SECRET,
+        declare=_provider_slot,
+        help="remove a stored credential from providers.<stage>.<name>",
+        local_ok=True,
+    ),
+    Command(
+        words=("clear-secret", "mcp-server"),
+        does=CLEAR_SECRET,
+        declare=_mcp_slot,
+        help="remove a stored credential from mcp_servers.<name>",
+        local_ok=True,
+    ),
+    Command(words=("list",), does=LIST, declare=_plain, help="a summary tree"),
     # Read-only and local: these three render the models and the API's
     # own routes, so they take no --config, open no database, reach no
     # server and need no encryption key. Keep it that way: the
     # documentation lane runs `config reference` and `config openapi`
     # from a plain sync, with no database, no key and no token anywhere.
-    schema = commands.add_parser(
-        "schema", help="the JSON Schema of one entity, or of the whole domain half"
+    Command(
+        words=("schema",),
+        does=_schema,
+        declare=_of_an_entity,
+        help="the JSON Schema of one entity, or of the whole domain half",
+    ),
+    Command(
+        words=("reference",),
+        does=_reference,
+        declare=_rendered,
+        help="the markdown reference, generated from the models",
+    ),
+    Command(
+        words=("openapi",),
+        does=_openapi,
+        declare=_rendered,
+        help="the configuration API's OpenAPI document, generated from its routes",
+    ),
+    Command(
+        words=("show",),
+        does=SHOW_ALL,
+        declare=_whole_or_one,
+        help=GROUPS["show"],
+        local_ok=True,
+    ),
+    *(
+        Command(
+            words=("show", kind.name),
+            does=SHOW_ENTITY[kind.name],
+            declare=_staged if kind.addressing == ("stage", "name") else (
+                _named if kind.addressing else _plain
+            ),
+            help=_about("print", kind),
+            local_ok=True,
+        )
+        for kind in entities.ENTITIES
+    ),
+    Command(
+        words=("show", "device"),
+        does=SHOW_DEVICE,
+        declare=_by_mac,
+        help="print devices.<mac>: the agents that board is bound to",
+        local_ok=True,
+    ),
+)
+
+
+# The order a reader meets the commands in, which is the table's own.
+_ORDER = tuple(dict.fromkeys(row.words[0] for row in COMMANDS))
+
+
+def command() -> TyperGroup:
+    """The whole grammar, as the one command that runs it.
+
+    Built per call, the way the parser it replaces was: nothing here is
+    stateful, and a fresh tree is what keeps one test reading a command's
+    help from depending on what another did to it. A name rather than a
+    private because the tree is what the help tests enumerate and what
+    the committed command reference will be rendered from.
+    """
+    app = typer.Typer(
+        help=DESCRIPTION,
+        # A group with nothing after it is a mistake in the grammar, not
+        # a request for help: `vinga-server config` on its own answers
+        # the way every other mistake does.
+        no_args_is_help=False,
+        # Neither of the two options Typer would otherwise add: this
+        # group's options are the three below and nothing else.
+        add_completion=False,
+        # Help formatted by Click rather than by Rich, so that what it
+        # prints does not depend on a terminal, on colors, or on whether
+        # an optional package happens to be installed.
+        rich_markup_mode=None,
     )
-    schema.add_argument(
-        "entity",
-        metavar="ENTITY",
-        nargs="?",
-        help=", ".join(docgen.entity_names()) + " (default: domain)",
-    )
-    schema.set_defaults(run=_schema)
-
-    reference = commands.add_parser(
-        "reference", help="the markdown reference, generated from the models"
-    )
-    reference.set_defaults(run=_reference)
-
-    openapi = commands.add_parser(
-        "openapi", help="the configuration API's OpenAPI document, generated from its routes"
-    )
-    openapi.set_defaults(run=_openapi)
-
-    show = commands.add_parser("show", parents=[common], help="everything, or one entity")
-    show.set_defaults(run=_act, act=SHOW_ALL, local_ok=True)
-    kinds = show.add_subparsers(dest="kind")
-    entity = kinds.add_parser("provider", parents=[common])
-    entity.add_argument("stage", metavar="STAGE", help=", ".join(PROVIDER_STAGES))
-    entity.add_argument("name", metavar="NAME")
-    entity.set_defaults(run=_act, act=SHOW_ENTITY["provider"])
-    entity = kinds.add_parser("mcp-server", parents=[common])
-    entity.add_argument("name", metavar="NAME")
-    entity.set_defaults(run=_act, act=SHOW_ENTITY["mcp-server"])
-    entity = kinds.add_parser("prompt-fragment", parents=[common])
-    entity.add_argument("name", metavar="NAME")
-    entity.set_defaults(run=_act, act=SHOW_ENTITY["prompt-fragment"])
-    entity = kinds.add_parser("agent", parents=[common])
-    entity.add_argument("name", metavar="NAME")
-    entity.set_defaults(run=_act, act=SHOW_ENTITY["agent"])
-    entity = kinds.add_parser("agent-defaults", parents=[common])
-    entity.set_defaults(run=_act, act=SHOW_ENTITY["agent-defaults"])
-    entity = kinds.add_parser("device", parents=[common])
-    entity.add_argument("mac", metavar="MAC")
-    entity.set_defaults(run=_act, act=SHOW_DEVICE)
-
-    return parser
+    app.callback()(_root)
+    groups = {word: typer.Typer(no_args_is_help=False, rich_markup_mode=None) for word in GROUPS}
+    for row in COMMANDS:
+        declared = row.declare(row)
+        if len(row.words) == 1 and row.words[0] in groups:
+            groups[row.words[0]].callback(invoke_without_command=True)(declared)
+            continue
+        under = groups[row.words[0]] if len(row.words) > 1 else app
+        under.command(
+            row.words[-1],
+            cls=_Verbatim,
+            help=row.help,
+            # Click shortens a command's help for the listing, cutting
+            # it at its first sentence or at the terminal's width. These
+            # are one sentence each and the listing is where an operator
+            # reads them, so the short form is the same string rather
+            # than a truncation of it.
+            short_help=row.help,
+            epilog=row.epilog,
+        )(declared)
+    for word, described in GROUPS.items():
+        app.add_typer(
+            groups[word],
+            name=word,
+            help=described,
+            short_help=described,
+            invoke_without_command=any(row.words == (word,) for row in COMMANDS),
+        )
+    grammar = typer.main.get_command(app)
+    # Typer registers every command before every group, which would put
+    # `set` and `show` at the foot of the listing whatever the table
+    # says. The order a reader meets them in is the table's, so it is
+    # restored from the table rather than left to the library.
+    grammar.commands = {word: grammar.commands[word] for word in _ORDER}
+    return grammar
 
 
-__all__ = ["RESTART_NOTICE", "build_client", "main"]
+__all__ = ["COMMANDS", "RESTART_NOTICE", "build_client", "command", "main"]
