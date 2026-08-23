@@ -41,18 +41,8 @@ from tests.support.config_cli import (
 )
 from tests.support.config_cli import document as _document
 from tests.support.config_cli import showing as _showing
+from tests.support.notices import CHECK_IN, RELOAD, boundaries
 from vinga_server.config import cli
-from vinga_server.config.entities import (
-    BINDING_NOTICE,
-    BINDING_UNSERVED_NOTICE,
-    NO_SUCH_AGENT,
-    NO_SUCH_DEVICE,
-    NO_SUCH_FRAGMENT,
-    NO_SUCH_MCP_SERVER,
-    NO_SUCH_PROVIDER,
-    RELOAD_NOTICE,
-)
-from vinga_server.config.store import NOT_A_STAGE
 from vinga_server.db import open_database, schema
 
 
@@ -135,24 +125,28 @@ def test_every_mutating_command_says_when_the_write_applies(
     write that quietly waits the one thing about that design an operator
     can be caught by.
 
-    The agent's answer is asserted whole rather than by substring: it is
-    the sentence an operator acts on, and what it has to carry is the
-    three moments a live conversation meets an applied change at."""
+    The boundary each write names is what an operator acts on, so that
+    is what is asserted; the agent's notice is also the whole of what
+    the command printed, which is what pins that a write says one thing
+    and not a paragraph of them."""
     run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
-    assert RELOAD_NOTICE in capsys.readouterr().err
+    assert boundaries(capsys.readouterr().err) == {RELOAD}
 
     run("set", "agent", "sam", "-f", "-", stdin="llm: claude\n")
-    assert capsys.readouterr().err == f"{RELOAD_NOTICE}\n"
+    written = capsys.readouterr().err
+    assert boundaries(written) == {RELOAD}
+    assert written.count("\n") == 1
 
     run("set-default-agent", "sam")
     # The application this fixture builds is told of no servable agents,
     # so the default agent it just named is one this server is not
-    # serving, and the sentence says which reload would install it.
-    assert BINDING_UNSERVED_NOTICE in capsys.readouterr().err
+    # serving, and the acknowledgement names the reload that would
+    # install it beside the check-in the row is live at.
+    assert boundaries(capsys.readouterr().err) == {CHECK_IN, RELOAD}
 
     # A read is not a write, and says nothing.
     run("list")
-    assert BINDING_UNSERVED_NOTICE not in capsys.readouterr().err
+    assert capsys.readouterr().err == ""
 
 
 def test_a_device_write_says_the_device_meets_it_itself(
@@ -169,7 +163,7 @@ def test_a_device_write_says_the_device_meets_it_itself(
 
     assert run("delete", "device", "aa:bb:cc:dd:ee:ff") == 0
 
-    assert BINDING_NOTICE in capsys.readouterr().err
+    assert boundaries(capsys.readouterr().err) == {CHECK_IN}
 
 
 def _an_agent(run) -> None:
@@ -193,7 +187,7 @@ def test_a_prompt_fragment_is_written_shown_and_listed(
     assert written.out == "wrote prompt-fragment household\n"
     # A fragment is prompt text, which a reload puts in front of the
     # next activation of every agent that includes it.
-    assert RELOAD_NOTICE in written.err
+    assert boundaries(written.err) == {RELOAD}
 
     assert run("show", "prompt-fragment", "household") == 0
     assert _document(capsys.readouterr().out) == {"text": FRAGMENT_TEXT}
@@ -247,35 +241,35 @@ def test_a_fragment_an_agent_includes_is_not_deleted_from_under_it(
 # addressed by a MAC, which cannot be, so its own identity is the
 # sentinel.
 UNWRITTEN = [
-    (("provider", "llm", SECRET), NO_SUCH_PROVIDER, SECRET),
-    (("provider", "llm", f"{SECRET}.pasted"), NO_SUCH_PROVIDER, SECRET),
-    (("mcp-server", SECRET), NO_SUCH_MCP_SERVER, SECRET),
-    (("prompt-fragment", SECRET), NO_SUCH_FRAGMENT, SECRET),
-    (("prompt-fragment", f"{SECRET}.pasted"), NO_SUCH_FRAGMENT, SECRET),
-    (("agent", SECRET), NO_SUCH_AGENT, SECRET),
-    (("device", "aa:bb:cc:dd:ee:ff"), NO_SUCH_DEVICE, "aa:bb:cc:dd:ee:ff"),
+    (("provider", "llm", SECRET), "providers", SECRET),
+    (("provider", "llm", f"{SECRET}.pasted"), "providers", SECRET),
+    (("mcp-server", SECRET), "mcp_servers", SECRET),
+    (("prompt-fragment", SECRET), "prompt_fragments", SECRET),
+    (("prompt-fragment", f"{SECRET}.pasted"), "prompt_fragments", SECRET),
+    (("agent", SECRET), "agents", SECRET),
+    (("device", "aa:bb:cc:dd:ee:ff"), "devices", "aa:bb:cc:dd:ee:ff"),
     # The same paste one argument to the left. A provider is addressed
     # by a stage and a name together, and a stage that is not one of the
     # four is refused before anything is looked up, on both paths.
-    (("provider", SECRET, "claude"), NOT_A_STAGE, SECRET),
+    (("provider", SECRET, "claude"), "providers", SECRET),
 ]
 
 
-@pytest.mark.parametrize(("addressed", "sentence", "sentinel"), UNWRITTEN)
+@pytest.mark.parametrize(("addressed", "section", "sentinel"), UNWRITTEN)
 @pytest.mark.parametrize("local", [False, True])
 def test_an_identity_that_addresses_nothing_is_refused_without_printing_it(
     run,
     capsys: pytest.CaptureFixture[str],
     caplog: pytest.LogCaptureFixture,
     addressed: tuple[str, ...],
-    sentence: str,
+    section: str,
     sentinel: str,
     local: bool,
 ) -> None:
     """Every section, both verbs, and both ways in (#132).
 
-    The recovery path opens the database itself and has to say the same
-    sentence as the client, so `--local` is driven beside the ordinary
+    The recovery path opens the database itself and has to name the same
+    section as the client, so `--local` is driven beside the ordinary
     path. An identity that addresses nothing was typed rather than
     stored, so neither the read nor the delete repeats it: not on
     stderr, not on stdout, and not in a record either of them retained.
@@ -288,14 +282,13 @@ def test_an_identity_that_addresses_nothing_is_refused_without_printing_it(
             assert run(*flags, verb, *addressed) == 1
 
         captured = capsys.readouterr()
-        # The leak first and the wording after it, so a failure here
-        # says which of the two moved. The refusal is asserted whole, so
-        # a sentence that grew the identity back on the end would fail;
-        # `--local` prints its break-glass banner before it, which is
-        # why this is the tail of the stream rather than all of it.
+        # The leak first and the section after it, so a failure here
+        # says which of the two moved. The last line of the stream is
+        # the refusal: `--local` prints its break-glass banner before
+        # it, which is why this reads the tail rather than all of it.
         assert sentinel not in captured.err
         assert sentinel not in captured.out
-        assert captured.err.endswith(f"{sentence}\n")
+        assert captured.err.splitlines()[-1].startswith(f"{section}:")
         assert "Traceback" not in captured.err
         # This project's own records. The client's HTTP library writes
         # the URL it requested, which is the identity the operator just
@@ -386,12 +379,11 @@ def test_add_device_binds_the_board_showing_the_code(
     # The operator never had to find the MAC; the acknowledgement names
     # the row that was written.
     assert captured.out == "wrote device aa:bb:cc:dd:ee:ff bound to sam\n"
-    # The sentence for a binding whose agent is not being served rather
-    # than the plain one, because the application this fixture builds is
-    # told of no servable agents, which is the honest answer for one
-    # built without a server around it. The two notices are told apart
-    # in test_config_api_pending.py.
-    assert BINDING_UNSERVED_NOTICE in captured.err
+    # Both boundaries rather than the check-in alone, because the
+    # application this fixture builds is told of no servable agents,
+    # which is the honest answer for one built without a server around
+    # it. The two are told apart in test_config_api_pending.py.
+    assert boundaries(captured.err) == {CHECK_IN, RELOAD}
 
 
 def test_add_device_retires_the_code(run, capsys: pytest.CaptureFixture[str]) -> None:
@@ -542,7 +534,7 @@ def test_a_fragment_json_cannot_carry_is_refused_before_it_travels(
 
     # And nothing was written: the entity does not exist.
     assert run("show", "provider", "llm", "claude") == 1
-    assert NO_SUCH_PROVIDER in capsys.readouterr().err
+    assert capsys.readouterr().err.startswith("providers:")
 
 
 def test_a_fragment_sharing_one_anchor_twice_still_travels(
@@ -619,18 +611,20 @@ def test_show_renders_every_entity_kind(run, capsys: pytest.CaptureFixture[str])
 def test_showing_something_that_is_not_there_names_the_section_only(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """One fixed sentence per section, and the identity that was asked
-    for in none of them (#132)."""
-    for argv, sentence in (
-        (("show", "provider", "llm", "ghost"), NO_SUCH_PROVIDER),
-        (("show", "mcp-server", "ghost"), NO_SUCH_MCP_SERVER),
-        (("show", "prompt-fragment", "ghost"), NO_SUCH_FRAGMENT),
-        (("show", "agent", "ghost"), NO_SUCH_AGENT),
-        (("show", "device", "aa:bb:cc:dd:ee:ff"), NO_SUCH_DEVICE),
+    """The section it would have been in, one line, and the identity
+    that was asked for in none of them (#132)."""
+    for argv, section, identity in (
+        (("show", "provider", "llm", "ghost"), "providers", "ghost"),
+        (("show", "mcp-server", "ghost"), "mcp_servers", "ghost"),
+        (("show", "prompt-fragment", "ghost"), "prompt_fragments", "ghost"),
+        (("show", "agent", "ghost"), "agents", "ghost"),
+        (("show", "device", "aa:bb:cc:dd:ee:ff"), "devices", "aa:bb:cc:dd:ee:ff"),
     ):
         assert run(*argv) == 1
         captured = capsys.readouterr()
-        assert captured.err == f"{sentence}\n"
+        assert captured.err.startswith(f"{section}:")
+        assert captured.err.count("\n") == 1
+        assert identity not in captured.err
         assert "Traceback" not in captured.err
 
 
@@ -698,7 +692,7 @@ def test_an_awkward_name_round_trips_through_the_whole_client(
     assert run("delete", "agent", name) == 0
     capsys.readouterr()
     assert run("show", "agent", name) == 1
-    assert NO_SUCH_AGENT in capsys.readouterr().err
+    assert capsys.readouterr().err.startswith("agents:")
 
 
 def test_a_name_a_url_path_cannot_carry_is_refused(

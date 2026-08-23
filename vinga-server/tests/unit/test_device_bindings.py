@@ -22,12 +22,12 @@ from starlette.websockets import WebSocketDisconnect
 
 from tests.conftest import TEST_API_SECRET
 from tests.support.configs import BOUND_MAC, DEVICE_UUID, world
+from tests.support.notices import CHECK_IN, RELOAD, boundaries
 from tests.support.registry import AGENT, STAGES, booted, check_in, store_at
 from tests.support.registry import BINDINGS_DEVICE_MAC as DEVICE_MAC
 from vinga_server import logs
 from vinga_server.app import create_app
 from vinga_server.config import Config
-from vinga_server.config.entities import BINDING_NOTICE, BINDING_UNSERVED_NOTICE
 from vinga_server.config.models import API_MOUNT_PATH
 from vinga_server.db import open_database, read_engine, schema
 from vinga_server.device.bindings import DeviceBindings
@@ -302,7 +302,7 @@ def test_an_agent_added_by_an_apply_is_served_at_the_next_check_in(tmp_path: Pat
             headers=BEARER,
         )
         assert bound.status_code == 200
-        assert bound.json()["notice"] == BINDING_UNSERVED_NOTICE
+        assert boundaries(bound.json()["notice"]) == {CHECK_IN, RELOAD}
         # The binding is live and the agent is not, so the board is
         # still turned away.
         assert token_of(client) == ""
@@ -321,7 +321,7 @@ def test_an_agent_added_by_an_apply_is_served_at_the_next_check_in(tmp_path: Pat
             json={"agents": ["poet"]},
             headers=BEARER,
         )
-        assert again.json()["notice"] == BINDING_NOTICE
+        assert boundaries(again.json()["notice"]) == {CHECK_IN}
 
 
 def test_an_agent_removed_by_an_apply_is_out_of_reach_at_the_next_one(

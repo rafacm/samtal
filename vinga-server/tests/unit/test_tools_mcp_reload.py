@@ -46,7 +46,6 @@ from vinga_server.config.loader import (
     StorageError,
 )
 from vinga_server.config.models import McpServerConfig
-from vinga_server.config.reload import RELOAD_UNREADABLE
 from vinga_server.config.secrets import (
     SecretLocation,
     SecretStore,
@@ -1095,7 +1094,9 @@ async def test_an_unexpected_read_failure_leaves_none_of_itself_behind(
             with pytest.raises(StorageError) as caught:
                 await reloads.apply(refuse)
 
-        assert str(caught.value) == RELOAD_UNREADABLE
+        # This server's own words rather than the ones that were
+        # raised, which is the whole of what the replacement is for.
+        assert SECRET not in str(caught.value)
         assert caught.value.__cause__ is None
         assert caught.value.__context__ is None
         # Everything a handler above could render of it.

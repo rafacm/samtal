@@ -18,8 +18,8 @@ import httpx
 import pytest
 
 from tests.integration.conftest import spoken
+from tests.support.notices import CHECK_IN, boundaries
 from vinga_server.config import Config
-from vinga_server.config.entities import BINDING_NOTICE
 from vinga_server.db import DATABASE_FILENAME
 from vinga_server.ota import OTA_PATH
 
@@ -82,7 +82,7 @@ async def test_a_bind_over_the_api_reaches_the_devices_next_check_in(
             assert answer.status_code == 200, answer.text
             # The acknowledgement says what just became true, and this is
             # the path an operator's CLI prints it from.
-            assert answer.json()["notice"] == BINDING_NOTICE
+            assert boundaries(answer.json()["notice"]) == {CHECK_IN}
 
             assert (await _check_in(client))["websocket"]["token"] != ""
 

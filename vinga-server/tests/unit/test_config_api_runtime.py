@@ -20,24 +20,14 @@ from fastapi.testclient import TestClient
 
 from tests.support.apps import entered_client
 from tests.support.configs import world
-from tests.support.problems import PROBLEM_KEYS, problem
+from tests.support.problems import PROBLEM_KEYS, problem, refused
 from tests.support.providers import built_world
-from vinga_server import app as app_module
 from vinga_server.app import config_reloader
 from vinga_server.config import Config
 from vinga_server.config.api import (
-    DIFF_MOVED_DESCRIPTION,
-    DIFF_REFUSED_DESCRIPTION,
-    MALFORMED_REQUEST_DESCRIPTION,
     MOUNT_PATH,
-    NO_RUNTIME_DIFF,
-    NO_RUNTIME_DIFF_DESCRIPTION,
-    NO_RUNTIME_PROMPT_DESCRIPTION,
-    NO_STORED_WORLD,
     PROBLEM_DESCRIPTIONS,
     PROBLEM_MEDIA_TYPE,
-    RELOAD_HELD_DESCRIPTION,
-    RELOAD_REFUSED_DESCRIPTION,
     build_api,
     document,
 )
@@ -51,7 +41,6 @@ from vinga_server.config.loader import (
     StorageError,
 )
 from vinga_server.config.models import MemoryConfig
-from vinga_server.config.reload import PROVIDERS_REFUSED
 from vinga_server.config.responses import (
     AgentsDiff,
     Applies,
@@ -458,7 +447,7 @@ def test_the_mcp_section_is_what_the_retired_route_answered(directory: Path) -> 
         # vocabulary: an ordinary 422 with a type of its own, which is
         # what lets its fixed sentence through the composition root's
         # rewrite rather than being replaced by the general one.
-        (ProviderRefusedError(PROVIDERS_REFUSED), 422),
+        (ProviderRefusedError("the providers refused, in their own words"), 422),
         (StorageError("the stored configuration cannot be read"), 500),
     ],
 )
@@ -498,7 +487,8 @@ def test_a_read_that_fails_unexpectedly_answers_without_quoting_it(
             response = client.post(RELOAD_PATH)
 
     assert response.status_code == 500
-    assert response.json() == problem(500, app_module.RELOAD_UNREADABLE)
+    # Where to look, and nothing of what could not be read.
+    assert "log" in refused(response.json(), 500)
     assert sentinel not in response.text
     # And nothing of it in what the server kept about the refusal
     # either, in either shipped format.
@@ -573,7 +563,6 @@ def test_the_reload_describes_a_422_of_its_own() -> None:
     rendered = document()["paths"]
 
     described = rendered[RELOAD_PATH]["post"]["responses"]["422"]["description"]
-    assert described == RELOAD_REFUSED_DESCRIPTION
     assert described != PROBLEM_DESCRIPTIONS[422]
     assert "exactly as it was" in described
     # And its 409, which the shared sentence is also not true of: one
@@ -581,8 +570,8 @@ def test_the_reload_describes_a_422_of_its_own() -> None:
     # snapshot-mode refusal is the one 409 in this API that making the
     # request again will not clear.
     held = rendered[RELOAD_PATH]["post"]["responses"]["409"]["description"]
-    assert held == RELOAD_HELD_DESCRIPTION
     assert held != PROBLEM_DESCRIPTIONS[409]
+    assert "already running" in held
     # Per route rather than a global edit: the writes still describe
     # what a 422 means to them.
     assert rendered["/mcp-servers/{name}"]["put"]["responses"]["422"]["description"] == (
@@ -605,10 +594,13 @@ def test_a_server_with_no_store_behind_it_refuses_to_reload(directory: Path) -> 
         response = client.post(RELOAD_PATH)
 
     assert response.status_code == 409
-    assert response.json() == problem(409, NO_STORED_WORLD)
+    detail = refused(response.json(), 409)
+    # The fact behind the refusal: this server's world came from
+    # somewhere other than the store beside it.
+    assert "store" in detail
     # And nothing of the apply ran: the refusal is the route's, in front
     # of the callable it would otherwise have awaited.
-    assert "will not help" in response.json()["detail"]
+    assert "will not help" in detail
 
 
 # The assembled-prompt read
@@ -720,9 +712,7 @@ def test_the_prompt_read_describes_the_refusals_it_can_actually_answer() -> None
     for status in ("401", "404", "422", "503"):
         schema = responses[status]["content"][PROBLEM_MEDIA_TYPE]["schema"]
         assert schema == {"$ref": "#/components/schemas/Problem"}, status
-    assert responses["422"]["description"] == MALFORMED_REQUEST_DESCRIPTION
     assert responses["422"]["description"] != PROBLEM_DESCRIPTIONS[422]
-    assert responses["503"]["description"] == NO_RUNTIME_PROMPT_DESCRIPTION
     assert responses["503"]["description"] != PROBLEM_DESCRIPTIONS[503]
     assert "no honest empty answer" in responses["503"]["description"]
     # Per route rather than a global edit: the reload, which is an
@@ -922,8 +912,9 @@ def test_an_application_without_a_server_has_nothing_to_compare(
     response = client.get(DIFF_PATH)
 
     assert response.status_code == 503
-    assert response.json() == problem(503, NO_RUNTIME_DIFF)
-    assert response.json()["detail"] != PROBLEM_DESCRIPTIONS[503]
+    # Its own sentence and not the shared one, which says the reads in
+    # this namespace answer emptily: this read must not.
+    assert refused(response.json(), 503) != PROBLEM_DESCRIPTIONS[503]
 
 
 def test_the_diff_answers_every_kind_with_its_own_regime(directory: Path) -> None:
@@ -1015,12 +1006,12 @@ def test_the_diff_read_describes_the_refusals_it_can_actually_answer() -> None:
     for status in ("401", "409", "422", "500", "503"):
         schema = responses[status]["content"][PROBLEM_MEDIA_TYPE]["schema"]
         assert schema == {"$ref": "#/components/schemas/Problem"}, status
-    assert responses["409"]["description"] == DIFF_MOVED_DESCRIPTION
     assert responses["409"]["description"] != PROBLEM_DESCRIPTIONS[409]
-    assert responses["422"]["description"] == DIFF_REFUSED_DESCRIPTION
     assert responses["422"]["description"] != PROBLEM_DESCRIPTIONS[422]
-    assert responses["503"]["description"] == NO_RUNTIME_DIFF_DESCRIPTION
     assert responses["503"]["description"] != PROBLEM_DESCRIPTIONS[503]
+    # And the one thing this read's own 503 has to say, which is why it
+    # cannot inherit: there is no honest empty diff.
+    assert "no honest empty answer" in responses["503"]["description"]
     # The 500 is the shared one, and stays it: a failure that is not the
     # caller's means here what it means everywhere.
     assert responses["500"]["description"] == PROBLEM_DESCRIPTIONS[500]

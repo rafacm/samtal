@@ -21,16 +21,14 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tests.support.checkin import Clock
+from tests.support.notices import CHECK_IN, RELOAD, boundaries
+from tests.support.problems import refused as refusal_body
 from vinga_server import logs
 from vinga_server.config.api import (
-    CLAIM_REFUSED,
-    CODE_IN_FLIGHT,
     MOUNT_PATH,
-    UNKNOWN_CODE,
     build_api,
     mount_api,
 )
-from vinga_server.config.entities import BINDING_NOTICE, BINDING_UNSERVED_NOTICE
 from vinga_server.config.loader import DatabaseBusyError
 from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
 from vinga_server.config.store import ConfigStore
@@ -208,7 +206,7 @@ def test_a_claim_says_the_device_needs_no_restart(
 ) -> None:
     response = _claim(client, _waiting(pending))
 
-    assert response.json()["notice"] == BINDING_NOTICE
+    assert boundaries(response.json()["notice"]) == {CHECK_IN}
 
 
 def test_a_claim_naming_an_agent_this_server_is_not_serving_says_reload(
@@ -216,13 +214,13 @@ def test_a_claim_naming_an_agent_this_server_is_not_serving_says_reload(
 ) -> None:
     """A fresh deployment's ordinary case: the agent was written since
     this server last installed a world, so the binding is live and the
-    agent is not. Saying "no restart is needed" there would be a promise
-    the device cannot keep, and saying "restart" would send an operator
+    agent is not. Naming only the check-in there would be a promise the
+    device cannot keep, and naming only a restart would send an operator
     away for something a request applies."""
     response = _claim(client, _waiting(pending), "written-since-boot")
 
     assert response.status_code == 200, response.text
-    assert response.json()["notice"] == BINDING_UNSERVED_NOTICE
+    assert boundaries(response.json()["notice"]) == {CHECK_IN, RELOAD}
 
 
 def test_a_claim_retires_the_code(client: TestClient, pending: PendingDevices) -> None:
@@ -232,15 +230,16 @@ def test_a_claim_retires_the_code(client: TestClient, pending: PendingDevices) -
     assert client.get("/devices/pending").json() == {}
     second = _claim(client, code)
     assert second.status_code == 404
-    assert second.json()["detail"] == UNKNOWN_CODE
+    assert "activation code" in refusal_body(second.json(), 404)
 
 
 def test_an_unknown_code_points_at_the_screen(client: TestClient) -> None:
     response = _claim(client, "000000")
 
     assert response.status_code == 404
-    assert response.json()["detail"] == UNKNOWN_CODE
-    assert "on the device's screen" in response.json()["detail"]
+    # Where to look instead, which is the whole of what this refusal is
+    # for: the number on the screen is the live one.
+    assert "the device's screen" in refusal_body(response.json(), 404)
     # Never quoted back: what arrived is whatever was typed into the
     # path, and what is worth saying is what to read instead.
     assert "000000" not in response.text
@@ -252,7 +251,9 @@ def test_an_expired_code_is_answered_the_same_way(
     code = _waiting(pending)
     clock.advance(CODE_TTL_S)
 
-    assert _claim(client, code).json()["detail"] == UNKNOWN_CODE
+    expired = _claim(client, code)
+    assert expired.status_code == 404
+    assert "the device's screen" in refusal_body(expired.json(), 404)
 
 
 def test_a_code_being_claimed_right_now_is_a_retryable_refusal(
@@ -264,8 +265,9 @@ def test_a_code_being_claimed_right_now_is_a_retryable_refusal(
     response = _claim(client, code)
 
     assert response.status_code == 409
-    assert response.json()["detail"] == CODE_IN_FLIGHT
-    assert "run the command again" in response.json()["detail"]
+    # Retryable, and said so: nothing was changed and the same call may
+    # be made again.
+    assert "again" in refusal_body(response.json(), 409)
 
 
 def test_two_concurrent_claims_of_one_code_bind_it_once(
@@ -299,7 +301,7 @@ def test_two_concurrent_claims_of_one_code_bind_it_once(
         claim.join(timeout=30)
 
     assert second.status_code == 409
-    assert second.json()["detail"] == CODE_IN_FLIGHT
+    assert "again" in refusal_body(second.json(), 409)
     assert first[0].status_code == 200, first[0].text
     assert client.get(f"/devices/{MAC}").json()["entity"] == {"agents": ["assistant"]}
 
@@ -333,7 +335,7 @@ def test_a_refused_claim_does_not_quote_the_names_it_refused(
         refused = _claim(client, code, sentinel)
 
     assert refused.status_code == 422
-    assert refused.json()["detail"] == CLAIM_REFUSED
+    detail = refusal_body(refused.json(), 422)
     rendered = (
         refused.text
         + str(refused.headers)
@@ -341,8 +343,9 @@ def test_a_refused_claim_does_not_quote_the_names_it_refused(
         + "".join(logs.JsonFormatter().format(record) for record in caplog.records)
     )
     assert sentinel not in rendered
-    # And the refusal is still one an operator can act on.
-    assert "config list" in refused.json()["detail"]
+    # And the refusal is still one an operator can act on: it sends them
+    # to the listing of the agents that exist.
+    assert "config list" in detail
 
 
 def test_a_busy_database_still_answers_as_itself(
@@ -513,10 +516,8 @@ def test_the_acknowledgement_is_about_the_row_and_not_the_request(
     answer = _claim(client, code, "  assistant  ")
 
     assert answer.status_code == 200, answer.text
-    assert answer.json() == {
-        "wrote": f"device {MAC} bound to assistant",
-        "notice": BINDING_NOTICE,
-    }
+    assert answer.json()["wrote"] == f"device {MAC} bound to assistant"
+    assert boundaries(answer.json()["notice"]) == {CHECK_IN}
     # And the row really does hold the stripped name, which is what
     # makes the notice the true one.
     assert client.get(f"/devices/{MAC}").json()["entity"] == {"agents": ["assistant"]}

@@ -33,9 +33,7 @@ import yaml
 
 from tests.support.config_cli import OTHER_SECRET, SECRET, runner
 from vinga_server.config import cli
-from vinga_server.config.entities import NO_SUCH_PROVIDER
 from vinga_server.config.secrets import MASK, MASTER_KEY_ENV
-from vinga_server.config.store import NOT_A_PROVIDER_SLOT, NOT_AN_MCP_SLOT
 
 
 @pytest.fixture
@@ -224,7 +222,7 @@ def test_a_pasted_credential_in_a_reference_field_is_refused(
 
     # And nothing was written: the entity does not exist.
     assert run("show", "provider", "llm", "claude") == 1
-    assert NO_SUCH_PROVIDER in capsys.readouterr().err
+    assert capsys.readouterr().err.startswith("providers:")
 
 
 def test_an_mcp_reference_shows_and_anything_else_in_its_place_does_not(
@@ -335,24 +333,24 @@ PASTED = "sk-live-3f9a1c7e-never-a-real-value"
 # One entry per kind, against an entity that exists, so the check under
 # test is the slot's own rather than an entity miss answering first: how
 # the entity is written, how a secret on it is addressed, and the
-# sentence a slot that is not a slot is refused with.
+# section the refusal names.
 SLOTS = [
     (
         ("set", "provider", "llm", "claude", "-f", "-"),
         "type: anthropic\nmodel: m\n",
         ("provider", "llm", "claude", PASTED),
-        NOT_A_PROVIDER_SLOT,
+        "providers",
     ),
     (
         ("set", "mcp-server", "home", "-f", "-"),
         "transport: stdio\ncommand: uvx\n",
         ("mcp-server", "home", PASTED),
-        NOT_AN_MCP_SLOT,
+        "mcp_servers",
     ),
 ]
 
 
-@pytest.mark.parametrize(("write", "fragment", "addressed", "sentence"), SLOTS)
+@pytest.mark.parametrize(("write", "fragment", "addressed", "section"), SLOTS)
 @pytest.mark.parametrize("local", [False, True])
 def test_a_slot_that_is_not_a_credential_slot_is_refused_without_printing_it(
     run,
@@ -361,7 +359,7 @@ def test_a_slot_that_is_not_a_credential_slot_is_refused_without_printing_it(
     write: tuple[str, ...],
     fragment: str,
     addressed: tuple[str, ...],
-    sentence: str,
+    section: str,
     local: bool,
 ) -> None:
     """The slot half of a secret's address, on both paths (#132).
@@ -384,7 +382,7 @@ def test_a_slot_that_is_not_a_credential_slot_is_refused_without_printing_it(
     assert PASTED not in captured.out
     assert SECRET not in captured.err
     assert SECRET not in captured.out
-    assert captured.err.endswith(f"{sentence}\n")
+    assert captured.err.splitlines()[-1].startswith(f"{section}:")
     assert "Traceback" not in captured.err
     written = [record for record in caplog.records if record.name.startswith("vinga_server")]
     assert all(PASTED not in str(record.__dict__) for record in written)

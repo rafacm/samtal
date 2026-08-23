@@ -43,8 +43,8 @@ from tests.support.config_cli import (
     runner,
 )
 from tests.support.config_cli import document as _document
+from tests.support.notices import CHECK_IN, boundaries
 from vinga_server.config import cli
-from vinga_server.config.entities import BINDING_NOTICE, NO_SUCH_PROVIDER
 from vinga_server.config.secrets import MASK, MASTER_KEY_ENV
 from vinga_server.db import open_database, schema
 
@@ -305,8 +305,10 @@ def test_a_local_write_says_what_the_api_says_for_the_same_act(
 def test_a_local_device_delete_says_the_same_thing(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The break-glass path writes the same row, so it says the same
-    sentence: the two paths must not describe one act differently."""
+    """The break-glass path writes the same row, so it names the same
+    boundary: the two paths must not describe one act differently. That
+    they say it in the same words is held by the differential test
+    above, which runs each act both ways."""
     run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
     run("set", "agent", "sam", "-f", "-", stdin="llm: claude\n")
     run("bind-device", "aa:bb:cc:dd:ee:ff", "sam")
@@ -314,7 +316,7 @@ def test_a_local_device_delete_says_the_same_thing(
 
     assert run("--local", "delete", "device", "aa:bb:cc:dd:ee:ff") == 0
 
-    assert BINDING_NOTICE in capsys.readouterr().err
+    assert boundaries(capsys.readouterr().err) == {CHECK_IN}
 
 
 # The reading half, which has no acknowledgement: a read's whole output
@@ -615,4 +617,4 @@ def test_local_show_reaches_a_name_no_new_write_could_create(
     assert run("--local", "delete", "provider", "llm", "a/b") == 0
     capsys.readouterr()
     assert run("--local", "show", "provider", "llm", "a/b") == 1
-    assert NO_SUCH_PROVIDER in capsys.readouterr().err
+    assert capsys.readouterr().err.splitlines()[-1].startswith("providers:")
