@@ -428,7 +428,7 @@ this one for the documents. Decision 5's shape survived contact with the
 code intact: no new module was dropped, added or renamed, and no
 interface member the plan names went missing.
 
-**`device/pacing.py`, `ReplyPacer`** (`1ed0d54a`). All eight pacing
+**`device/pacing.py`, `ReplyPacer`** (`66d5092a`). All eight pacing
 facts the plan lists (`_encoder`, `_pace_start`, `_pace_count`,
 `_pace_resume`, `_pace_paused_at`, `_speaking_started`,
 `_speaking_started_at`, `_tts_started`), and the interface decision 5
@@ -453,7 +453,7 @@ The `PlayableAudio` wrapping stayed in the session, per the plan:
 so `speaking_started` is still emitted by `send_audio` and the pacer
 has never heard of an event or an agent.
 
-**`device/capture_audio.py`, `CaptureAudio`** (`d0125056`). The three
+**`device/capture_audio.py`, `CaptureAudio`** (`72dcf86a`). The three
 codec objects, the protocol version, and the close of the
 `SessionCapture` it is handed; `microphone(data)`, `reply(packet)`,
 `close()`. Both fail-open docstrings moved with their code unchanged,
@@ -467,7 +467,7 @@ raw capture, then constructs `CaptureAudio` around it; the `finally`
 emits `session_closed`, detaches the events capture, calls
 `CaptureAudio.close()` and clears the field, in that order.
 
-**`device/watchdog.py`, both watchdogs** (`d9160d8c`).
+**`device/watchdog.py`, both watchdogs** (`0f350ccb`).
 `HELLO_TIMEOUT_S` re-homed beside `first_contact()`, which reads the
 module global at call time; the session imports the module
 (`from vinga_server.device import watchdog`) and writes
@@ -516,24 +516,28 @@ That is the only line in the M2 test diff that is not a row above.
 
 | | Lines |
 | --- | --- |
-| Before (`802c8d28`, M1's tip) | 1,229 |
-| After | 1,148 |
+| Before (`40641396`, M1's tip) | 1,229 |
+| After the milestone's three commits (`a7e48ec0`) | 1,148 |
+| At the branch head, after the review round | 1,175 |
 
-Eighty-one lines net, which is a smaller number than the move looks
-like: 390 lines of new module were written, and `session.py`'s own diff
+Eighty-one lines net over the milestone, which is a smaller number than
+the move looks
+like: 392 lines of new module were written, and `session.py`'s own diff
 is 204 lines removed against 123 added. Most of what came back is
 prose rather than code, because most of the idle watchdog's docstring
 was policy rather than arithmetic and stayed behind in
 `_idle_deferred`. The split is visible in what the class holds rather
 than in its length: fourteen fields became three, the seven pacing
 methods became one-line delegations, and the two capture decode paths
-and the four idle-watchdog methods left entirely.
+and the four idle-watchdog methods left entirely. The twenty-seven
+lines the head carries above the milestone are the review round's
+capture-codec guard and the prose that says why it is there.
 
 | Module | Lines |
 | --- | --- |
 | `device/pacing.py` | 183 |
 | `device/watchdog.py` | 115 |
-| `device/capture_audio.py` | 92 |
+| `device/capture_audio.py` | 94 |
 
 ### Deviations from the plan
 
@@ -607,18 +611,23 @@ applied to a two-line duplication that had never been wrong.
 
 ### Verification
 
-From `vinga-server/`, on `feature/session-split-m2` at `d9160d8c`, with
-`PYTHONDONTWRITEBYTECODE=1` exported for everything outside pytest.
+Rerun on the branch head after the review round, so these are what a
+reader can reproduce rather than what the milestone's tip once said.
+From `vinga-server/`, with `PYTHONDONTWRITEBYTECODE=1` exported for
+everything outside pytest.
 
 - `uv run ruff check .`: **All checks passed!**
 - `uv run mypy` (the events lane): **Success: no issues found in 4
   source files**
-- `uv run pytest tests/unit -q -n auto --dist loadfile`: **2859 passed,
-  20 skipped** in 42.35 s. Exactly M1's counts: no test was added,
-  deleted, skipped or renamed, which is the milestone's own claim about
-  its diff.
-- `uv run pytest tests/integration -q`: **61 passed** in 189.69 s, also
-  M1's count.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: **2862 passed,
+  20 skipped** in 42.70 s. The milestone itself added, deleted, skipped
+  and renamed no test, which is its own claim about its diff, and the
+  lane it ran in was M1's own count at the time. The comparison is
+  restated because both numbers have since moved for reasons outside
+  M2: M1's review round added two pins, taking the rebased M1 lane to
+  2,861, and this round's regression test is the one above that.
+- `uv run pytest tests/integration -q`: **61 passed** in 189.95 s,
+  unchanged by either milestone or either review round.
 - The generated-document drift checks, all four, run the way CI runs
   them: `domain-config.md`, `conversations-schema.md`, `events.md` and
   `api-openapi.json` all **diff clean**. Expected, and checked rather
@@ -745,3 +754,55 @@ and is recorded with it below.
 
    The file was restored by copy and `touch`ed after each, per the trap
    recorded in `AGENTS.md`, and the caches cleared.
+
+2. **P2: the M2 verification record went stale in the rebase.** The
+   section reported 2,859 unit tests and called that "exactly M1's
+   counts" while the rebased M1 lane is 2,861, M1's own review round
+   having added two pins; and the module table said
+   `device/capture_audio.py` was 92 lines against a tree holding 94.
+
+   *Accepted, fixed.* Every lane was rerun on the branch head, after
+   finding 1's fix, and the M2 section's verification block, unit count,
+   module table and derived totals now hold what was observed rather
+   than what was true for a moment. Four things moved:
+
+   - **The unit count** is the head's, and the claim that stood on the
+     stale comparison is restated as what it was actually worth: the
+     milestone added, deleted, skipped and renamed no test, and both
+     numbers have since moved for reasons outside it (M1's review round,
+     then this one's regression test).
+   - **`capture_audio.py` is 94**, not 92, and it was 94 at the
+     milestone's own tip too: the 92 was measured before a two-line
+     comment correction was amended into the same commit and never
+     re-measured. The derived total is 392.
+   - **`session.py`'s table gained a third row**, the head's 1,175
+     against the milestone's 1,148, because finding 1's guard and its
+     prose are twenty-seven lines the milestone did not have. The
+     milestone's own before and after are unchanged and still measured
+     at its tip.
+   - **The three milestone commit hashes** were the pre-rebase ones and
+     name nothing on this branch any more. They are the rebased hashes
+     now, as is the base the line count is measured from.
+
+   A general lesson worth the line: a verification record is a claim
+   about a tree, so a rebase invalidates it the same way an edit does,
+   and a count copied forward across one is a count nobody has run.
+
+### Verification after the review round
+
+Rerun on the branch head, with `PYTHONDONTWRITEBYTECODE=1` exported for
+everything outside pytest. These are the same numbers the M2 section's
+verification block now carries, since both describe this head.
+
+- `uv run ruff check .`: **All checks passed!**
+- `uv run mypy` (the events lane): **Success: no issues found in 4
+  source files**
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: **2862 passed,
+  20 skipped** in 42.70 s, one more than the rebased M1 lane's 2,861,
+  being finding 1's regression test.
+- `uv run pytest tests/integration -q`: **61 passed** in 189.95 s.
+- The generated-document drift checks, all four, run the way CI runs
+  them: `domain-config.md`, `conversations-schema.md`, `events.md` and
+  `api-openapi.json` all **diff clean**. `events.md` is the one that
+  matters here: it is what says finding 1's fix reported its failure
+  without enlarging the declared event surface.
