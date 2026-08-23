@@ -2312,7 +2312,8 @@ LOCAL_HELP = (
 
 FILE_HELP = (
     "YAML fragment for this entity, or - to read it from stdin; the alternative to "
-    "key=value arguments, and never both"
+    "key=value arguments, and never both (default: none, and one of the two forms "
+    "must be given)"
 )
 
 DOCUMENT_HELP = (
