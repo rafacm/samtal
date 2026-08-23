@@ -316,7 +316,7 @@ starting, so the two are one step:
 
 External review of the milestone diff, 2026-08-23. Backend: claude CLI,
 model `claude-opus-5`, read-only tool set (interim fallback tier). The
-round is posted on the PR. Verdict as received: **mergeable after the
+round is [posted on the PR](https://github.com/rafacm/vinga/pull/262#issuecomment-5384106902). Verdict as received: **mergeable after the
 listed fixes**, with findings 1 to 3 named as the blockers ("the one
 operator-facing sentence this milestone exists to produce currently
 fires for the wrong failures, on the wrong database, and recommends
