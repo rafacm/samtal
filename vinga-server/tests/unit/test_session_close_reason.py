@@ -209,7 +209,7 @@ async def test_a_disconnect_a_drain_arrives_behind_is_still_a_client_close(
     # White-box, same file, different half: the window under test is
     # inside one cleanup step, and holding the close there is how a
     # drain arriving mid-close becomes a fact rather than a race.
-    session._stop_idle_watchdog = held  # type: ignore[method-assign]
+    session._watchdog.stop = held  # type: ignore[method-assign]
     registry = SessionRegistry(max_sessions=8)
     assert registry.try_add(session)
 

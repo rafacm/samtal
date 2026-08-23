@@ -6,6 +6,14 @@ hellos, decodes mic Opus, encodes and paces reply Opus, frames both,
 carries the device's own MCP tool transport, records the capture,
 enforces the session limits and the idle timeout, and closes politely.
 
+Three of those it owns without carrying: reply audio's encoder, cadence
+and per-reply latches are [`pacing`](pacing.py), the recording's own
+decode path is [`capture_audio`](capture_audio.py), and both of the
+deadlines a connection is held to are [`watchdog`](watchdog.py). What
+stays here is what those three would each need a copy of otherwise:
+the protocol version, the manifest, the events object, and the policy
+that decides what a deadline means.
+
 What is said in the conversation it does not own. Behind it sits one
 conversation runtime, built for this connection by the factory the
 composition root handed in, reached only through the two protocols in
@@ -61,6 +69,7 @@ from vinga_server.config.models import (
 )
 from vinga_server.config.views import provider_record
 from vinga_server.conversations import ConversationStore, SessionSink
+from vinga_server.device import watchdog
 from vinga_server.device.bindings import DeviceBindings
 from vinga_server.device.boundary import (
     PIPELINE_SAMPLE_RATE,
@@ -101,10 +110,6 @@ from vinga_server.tools.device import DeviceToolClient
 
 if TYPE_CHECKING:  # the registry names this class the same way
     from vinga_server.registry import SessionRegistry
-
-# How long to wait for the device hello; the firmware gives the server
-# hello the same ten seconds.
-HELLO_TIMEOUT_S = 10.0
 
 # What the server speaks: TTS output is resampled to this rate, encoded
 # in 60 ms Opus frames, and announced in the server hello.
@@ -247,12 +252,16 @@ class DeviceSession:
             sample_rate=OUTPUT_AUDIO.sample_rate,
             frame_duration_ms=OUTPUT_AUDIO.frame_duration,
         )
-        # When this session last did any conversing, which is what the
-        # idle timeout counts from. Set at the end of an utterance and at
-        # the end of a reply, so "whichever is later" needs no
-        # comparison: both just write the current time.
-        self._last_activity: float | None = None
-        self._idle_watchdog: asyncio.Task[None] | None = None
+        # The timer that hangs up on a conversation nobody is having any
+        # more. It is given the two things it cannot know (when the
+        # countdown does not apply, and what to do when it comes due)
+        # and never this session, so what idleness means stays here and
+        # the arithmetic stays there.
+        self._watchdog = watchdog.IdleWatchdog(
+            timeout_s=self._server.limits.idle_timeout_s,
+            defer=self._idle_deferred,
+            on_idle=self._idle_expired,
+        )
         # What ended this session, latched by the first termination to
         # fire and never overwritten. None until something decides, which
         # is what the ordinary end looks like from here.
@@ -436,7 +445,7 @@ class DeviceSession:
                 )
             )
             self._start_device_discovery(hello)
-            self._start_idle_watchdog()
+            self._watchdog.start()
             # The cap on a session's total life. The idle watchdog is
             # what ends an abandoned realtime conversation long before
             # this; what is left for the cap is the session that keeps
@@ -482,7 +491,7 @@ class DeviceSession:
             # swallow the event, the store's close or the capture's
             # behind it. This is the close path's contract: it always
             # reaches the end.
-            await self._cleanly("the idle watchdog", self._stop_idle_watchdog())
+            await self._cleanly("the idle watchdog", self._watchdog.stop())
             if self.runtime is not None:
                 await self._cleanly("the conversation", self.runtime.close())
             await self._cleanly("device tool discovery", self._stop_device_discovery())
@@ -743,30 +752,12 @@ class DeviceSession:
             described[stage] = {"name": name, **provider_record(entry)}
         return described
 
-    def _start_idle_watchdog(self) -> None:
-        """Start the timer that hangs up on a conversation nobody is
-        having any more."""
-        self._mark_activity()
-        self._idle_watchdog = asyncio.create_task(self._watch_for_idle())
+    def _idle_deferred(self) -> bool:
+        """Whether the idle countdown does not apply to this session
+        right now. Asked by the watchdog every time round its loop.
 
-    async def _stop_idle_watchdog(self) -> None:
-        if self._idle_watchdog is not None:
-            self._idle_watchdog.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._idle_watchdog
-            self._idle_watchdog = None
-
-    def _mark_activity(self) -> None:
-        """Record that the conversation is alive right now. Called at
-        both ends the idle timeout counts from, so "the last utterance or
-        the last reply, whichever is later" falls out of writing the
-        current time at each rather than having to compare them."""
-        self._last_activity = asyncio.get_running_loop().time()
-
-    async def _watch_for_idle(self) -> None:
-        """Close a realtime session that has stopped conversing.
-
-        Nothing on the device side ends a realtime session: the firmware
+        The timeout exists to close a realtime session that has stopped
+        conversing. Nothing on the device side ends one: the firmware
         has no idle timeout, and its only closers are a button press,
         losing the network, and powering off. So a user who simply walks
         away leaves the mic streaming to the server, holding one of
@@ -776,45 +767,43 @@ class DeviceSession:
         `max_session_s` is up. This is the bound that makes that a
         couple of minutes instead (#20).
 
-        Realtime only. An auto-mode device stops listening after each
-        reply and re-arms per turn, so it is not streaming a room to
-        anybody; realtime is the mode that asks once and then never
-        stops. The mode is not known until the device sends its `listen
-        start`, and it can in principle change, so this checks each time
-        round rather than deciding once.
+        Realtime only, which is the first half of this answer. An
+        auto-mode device stops listening after each reply and re-arms
+        per turn, so it is not streaming a room to anybody; realtime is
+        the mode that asks once and then never stops. The mode is not
+        known until the device sends its `listen start`, and it can in
+        principle change, which is why the watchdog asks each time round
+        rather than deciding once.
 
-        Arriving audio is deliberately not activity. A realtime session
+        A reply in flight is the second half. Not because it would
+        otherwise be cut off (`request_shutdown` waits politely for one
+        to finish speaking) but because of what follows: a timer that
+        came due mid-reply has already decided to hang up, so the socket
+        would close the instant the reply ended and the user would get
+        no window at all to answer what they just heard.
+
+        Arriving audio is deliberately not activity, which is why it
+        appears in neither half and marks nothing. A realtime session
         streams continuously, silence included, so counting frames would
         mean the timer never fires, which is the bug. What counts is
-        conversation: an utterance ending, or a reply ending. A reply
-        still streaming counts too, and not because it would otherwise
-        be cut off (`request_shutdown` waits politely for one to finish
-        speaking) but because of what follows: a timer that came due
-        mid-reply has already decided to hang up, so the socket would
-        close the instant the reply ended and the user would get no
-        window at all to answer what they just heard.
+        conversation: an utterance ending, or a reply ending.
         """
-        timeout = self._server.limits.idle_timeout_s
-        loop = asyncio.get_running_loop()
-        while True:
-            now = loop.time()
-            if not self._realtime or self._replying():
-                self._mark_activity()
-            assert self._last_activity is not None
-            remaining = self._last_activity + timeout - now
-            if remaining > 0:
-                await asyncio.sleep(remaining)
-                continue
-            self._events.emit(
-                lambda: SessionIdle(
-                    idle_s=Real(timeout), duration_s=Real(self._open_duration_s())
-                )
+        return not self._realtime or self._replying()
+
+    async def _idle_expired(self) -> None:
+        """The conversation has been quiet long enough. What that means
+        is this class's to decide, so the watchdog reports the deadline
+        and the policy stays here."""
+        self._events.emit(
+            lambda: SessionIdle(
+                idle_s=Real(self._server.limits.idle_timeout_s),
+                duration_s=Real(self._open_duration_s()),
             )
-            # A normal closure rather than going away: the server is
-            # fine, this conversation is simply over. The firmware reads
-            # it as the end of one and reconnects on the next wake word.
-            await self.request_shutdown(NORMAL_CLOSURE, "idle timeout", close_reason="idle")
-            return
+        )
+        # A normal closure rather than going away: the server is fine,
+        # this conversation is simply over. The firmware reads it as the
+        # end of one and reconnects on the next wake word.
+        await self.request_shutdown(NORMAL_CLOSURE, "idle timeout", close_reason="idle")
 
     def _start_device_discovery(self, hello: messages.DeviceHello) -> None:
         """Ask a device that advertised MCP for its tools. In the
@@ -848,7 +837,7 @@ class DeviceSession:
         """The device speaks first; anything but a timely, well-formed
         hello for opus over websocket ends the connection."""
         try:
-            async with asyncio.timeout(HELLO_TIMEOUT_S):
+            async with watchdog.first_contact():
                 received = await self.websocket.receive()
         except TimeoutError:
             await self._close(PROTOCOL_ERROR, "no hello received")
@@ -953,7 +942,7 @@ class DeviceSession:
                 # a window that was being extended for free while it was
                 # not realtime, and can be hung up on seconds after the
                 # user starts talking.
-                self._mark_activity()
+                self._watchdog.mark()
             case messages.ListenMessage(state="stop"):
                 self.listening = False
                 assert self.runtime is not None
@@ -1005,7 +994,7 @@ class DeviceSession:
 
         The activity mark comes first, so a device that has already gone
         away still resets the idle clock on its way out."""
-        self._mark_activity()
+        self._watchdog.mark()
         await self.begin_speaking()
         await self._send_text(messages.tts_message(self.session_id, "stop"))
 
@@ -1084,7 +1073,7 @@ class DeviceSession:
         asked once and is still streaming, so stopping here would leave
         nobody to re-arm it and the session would answer one utterance
         and go deaf."""
-        self._mark_activity()
+        self._watchdog.mark()
         if not self._realtime:
             self.listening = False
 

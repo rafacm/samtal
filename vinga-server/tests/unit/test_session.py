@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 import vinga_server.device.session as session_module
+import vinga_server.device.watchdog as watchdog_module
 import vinga_server.runtime.turntaking as turntaking_module
 from tests.support.configs import (
     BOTH_MAC,
@@ -810,7 +811,7 @@ def test_a_bad_opening_message_closes_the_connection(
 def test_a_silent_client_is_closed_after_the_hello_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(session_module, "HELLO_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(watchdog_module, "HELLO_TIMEOUT_S", 0.05)
     with TestClient(create_app(config_with_agent())) as client:
         with connect(client) as websocket:
             with pytest.raises(WebSocketDisconnect) as excinfo:

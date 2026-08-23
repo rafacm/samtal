@@ -384,15 +384,15 @@ async def test_the_end_of_a_user_turn_counts_as_activity() -> None:
         # configured silence. The public observation is waiting that
         # silence out, so a test of "the mark moved" would be a test
         # that sits through a timeout it did not move.
-        session._mark_activity()
-        before = session._last_activity
+        session._watchdog.mark()
+        before = session._watchdog.marked_at
         assert before is not None
         await asyncio.sleep(0.01)
 
         session.user_turn_ended()
 
-        assert session._last_activity is not None
-        assert session._last_activity > before, mode
+        assert session._watchdog.marked_at is not None
+        assert session._watchdog.marked_at > before, mode
 
 
 class ScriptedMcpSocket:
