@@ -865,6 +865,87 @@ def test_the_seam_cannot_carry_a_credential_and_takes_its_own_timeouts() -> None
         client.close()
 
 
+class _Unclosable(TestClient):
+    """A client whose close will not complete, and says something with a
+    credential in it on the way out. A driver is free to put anything in
+    such a message, which is why none of it may be repeated."""
+
+    def close(self) -> None:
+        raise OSError(f"the socket would not go: {PASTED}")
+
+
+def test_a_connection_that_will_not_close_is_a_sentence_not_a_traceback(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The close is the one step of the probe that used to run outside
+    the sanitizing handler: it was in the `finally`, so an OSError from
+    it left through `main` as a library traceback, with whatever the
+    driver wrote in its message. Now it answers a sentence like every
+    other failure here."""
+    app, _ = _endpoint(
+        DESCRIBE.format(websocket="wss://voice.example/xiaozhi/v1/", url="https://voice.example")
+    )
+    monkeypatch.setattr(doctor, "build_client", lambda url: _Unclosable(app, base_url=url))
+
+    assert doctor.main(["https://voice.example/x/ABCDEFGH/"]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "could not be closed" in captured.err
+    assert "OSError" in captured.err
+    assert doctor.SUPPLIED_ENDPOINT in captured.err
+    assert PASTED not in captured.out + captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_a_failing_close_does_not_replace_a_failure_already_found(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Whatever failed first is what is reported. A close that raises on
+    top of an already sanitized refusal would otherwise hide the
+    diagnosis behind the tidying, which is the same defect in the other
+    direction."""
+    app = FastAPI()
+
+    @app.get("/{path:path}")
+    async def redirect() -> Response:
+        return Response(status_code=307, headers={"location": "https://elsewhere.example/"})
+
+    monkeypatch.setattr(doctor, "build_client", lambda url: _Unclosable(app, base_url=url))
+
+    assert doctor.main(["https://voice.example/x/ABCDEFGH/"]) == 1
+
+    captured = capsys.readouterr()
+    assert "does not follow" in captured.err
+    assert "could not be closed" not in captured.err
+    assert PASTED not in captured.out + captured.err
+    assert "elsewhere.example" not in captured.err
+
+
+def test_the_close_refusal_carries_no_library_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The chain, not just the message, for the reason the URL refusals
+    above are checked that way: a driver's exception held as a
+    `__cause__` or a `__context__` is read by anything that renders a
+    traceback."""
+    app, _ = _endpoint(
+        DESCRIBE.format(websocket="wss://voice.example/xiaozhi/v1/", url="https://voice.example")
+    )
+    monkeypatch.setattr(doctor, "build_client", lambda url: _Unclosable(app, base_url=url))
+
+    # The second reach-in in this file, resolved the way the first one
+    # is: a chain is not printed, `main()` consumes the exception and
+    # prints one line, and promoting `_probed` would make a public name
+    # whose only caller is this test.
+    with pytest.raises(doctor.ConfigError) as caught:
+        doctor._probed("https://voice.example/x/ABCDEFGH/", doctor.SUPPLIED_ENDPOINT)  # noqa: SLF001
+
+    assert PASTED not in _chain(caught.value)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+
+
 @contextlib.contextmanager
 def _served(body: str):
     """A real HTTP server on a real port, for the length of a `with`.
