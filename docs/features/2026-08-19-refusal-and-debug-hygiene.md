@@ -148,6 +148,20 @@ sentence is rendered into any of them.
   never the key. The MAC rule is the same shape as the stage one and is
   worth the same fix; it is outside the issue's boundary and is left
   named here rather than done quietly.
+
+  **Taken up on 2026-08-23 as #205**, which is what leaving it named
+  here was for. `normalize_mac` now raises `NOT_A_MAC`
+  (`vinga_server/config/models.py`): `a MAC address is six
+  colon-separated hex pairs, for example aa:bb:cc:dd:ee:ff`, the rule
+  and never the value, with the sentinel discipline extended to the
+  shape-refusal path on the API, on both CLI paths and on the
+  configuration file. The one #132 shape it does not copy is the
+  section prefix: the surfaces that render this one supply their own
+  location (the loader names the field the unusable MAC was written
+  under), where the store's refusals are their own sentence end to end.
+  The two dotted-key rules are still deliberately unchanged, on the
+  reasoning stated above, which is about the entity they name rather
+  than about when they are reached.
 - **The CLI's own HTTP client.** `samtal-server config` talks to the
   API over a socket, and httpx narrates the URL it requested, identity
   included, at INFO. That is the client saying what the operator just
