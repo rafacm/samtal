@@ -472,10 +472,12 @@ class ConfigStore:
         it at all.
 
         Idempotent by comparison rather than by blind rewrite. Each
-        entry's row is compared with the one that is stored, through the
-        body a write would produce, and an entry that would write the
-        same bytes is answered `unchanged` with no row written. The same
-        document applied twice is therefore a no-op by construction.
+        entry is compared with the one that is stored, and an entry
+        describing the configuration that is already there is answered
+        `unchanged` with no row written; `_stage_entity` says what that
+        comparison is and what it deliberately is not. The same document
+        applied twice is therefore a no-op by construction, and so is an
+        exported document applied back onto the store it came from.
 
         Refused whole. Every entry is prepared, and then every entry is
         staged, before anything is raised, so an operator fixing a
@@ -1187,6 +1189,19 @@ def _stage_entity(domain: DomainConfig, prepared: _Prepared) -> _Staged:
     Resolving under a lock taken later would let a value that was gone
     by the time this write ran come back, which is an outcome no serial
     order of the two writes produces.
+
+    What decides `unchanged` is the two ENTRIES compared, not the two
+    row bodies and not the two masked displays, and both of those were
+    tried. A row body carries what the operator wrote and nothing they
+    did not, so an entry that spells a field at its own default reads as
+    a change from one that leaves it out, which would make every export
+    applied back onto its own store report a write it did not need: a
+    display shows a default that is a real value, so an exported body
+    holds fields the original write never set. And a masked display
+    would call two different values under a secret-shaped key equal,
+    which would silently skip a rotation of exactly the values #192's
+    marker exists for. The entries hold the values, and the question is
+    whether the configuration differs.
     """
     descriptor, identity = prepared.descriptor, prepared.identity
     stored = _entry(domain, descriptor, identity)
@@ -1194,15 +1209,18 @@ def _stage_entity(domain: DomainConfig, prepared: _Prepared) -> _Staged:
     if entry is None:
         kept = _keep(descriptor, prepared.location, prepared.data, prepared.marks, stored)
         entry = _parsed(descriptor, identity, prepared.location, kept)
-    values = _to_row(descriptor, entry)
-    moved = stored is None or _to_row(descriptor, stored) != values
+    moved = entry != stored
     _place(domain, descriptor, identity, entry)
     return _Staged(
         applied=Applied(
             section=descriptor.moved_key, identity=".".join(identity), wrote=moved
         ),
         row=(
-            _Row(_table(descriptor), _row_identity(descriptor, identity), values)
+            _Row(
+                _table(descriptor),
+                _row_identity(descriptor, identity),
+                _to_row(descriptor, entry),
+            )
             if moved
             else None
         ),

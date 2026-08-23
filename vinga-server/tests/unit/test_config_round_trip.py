@@ -427,3 +427,187 @@ def test_the_cli_resubmits_a_masked_document_it_printed(
     capsys.readouterr()
     run("show", "provider", "llm", "claude")
     assert document(capsys.readouterr().out) == printed
+
+
+# The other round trip: a store, exported and reproduced
+#
+# The per-entity contract above is a read that is a write. This is the
+# whole-store one: what `config export` prints is a document
+# `config apply` takes, and applying it onto an empty store and entering
+# the credentials it names produces a store whose own export is the same
+# bytes.
+#
+# The order is the supported one and the test does not shortcut it. A
+# stored credential is not in an exported body at all, and it cannot be:
+# the mask is not a value a creating write accepts, so an export with
+# masks injected would fail on the empty store it is most needed for,
+# and `set-secret` cannot run before the entity exists. So the sequence
+# is apply, then set-secret, which is what the export's own header says.
+
+# The three ways a secret reaches an entity, all three seeded below,
+# because they travel three different ways. An environment reference is
+# a body value and is exported as itself. A stored credential is not in
+# the body at all and is exported as the command that enters it. A
+# stored credential over a reference written for the same slot is both
+# at once, and the export has to carry both halves.
+ANTHROPIC_REFERENCE = "ANTHROPIC_API_KEY"
+HOME_REFERENCE = "$HOME_ASSISTANT_TOKEN"
+
+STORED = {
+    ("provider", "asr.whisper", "api_key"): "sk-test-asr-never-a-real-credential",
+    ("mcp_server", "home", "headers.Authorization"): "tok-test-mcp-never-a-real-value",
+}
+
+
+def _seed(run) -> None:
+    """A deployment holding all three, written the way an operator
+    writes one."""
+    assert run("set", "provider", "llm", "claude", "type=anthropic", "model=m",
+               f"api_key_env={ANTHROPIC_REFERENCE}") == 0
+    assert run("set", "provider", "asr", "whisper", "type=mock") == 0
+    assert run(
+        "set", "mcp-server", "home",
+        "transport=streamable_http",
+        "url=https://example.invalid/mcp",
+        f"headers.Authorization={HOME_REFERENCE}",
+    ) == 0
+    assert run("set", "agent", "sam", "prompt=You are Sam.", "llm=claude", "asr=whisper") == 0
+    assert run("bind-device", "AA-BB-CC-DD-EE-FF", "sam") == 0
+    assert run("set-default-agent", "sam") == 0
+    _enter_secrets(run, _SET_SECRETS)
+
+
+# The commands the seed enters its two stored credentials with, which
+# is also the shape and the ORDER the export names them in: the store
+# lists its locations sorted, so that two exports of one configuration
+# are the same bytes whatever order the credentials were entered in.
+_SET_SECRETS = [
+    ["set-secret", "mcp-server", "home", "headers.Authorization"],
+    ["set-secret", "provider", "asr", "whisper", "api_key"],
+]
+
+
+def _enter_secrets(run, commands: list[list[str]]) -> None:
+    for words in commands:
+        location = _located(words)
+        assert run(*words, stdin=STORED[location] + "\n") == 0, words
+
+
+def _located(words: list[str]) -> tuple[str, str, str]:
+    """One `set-secret` command as the location it addresses, which is
+    how a test knows which credential to feed it."""
+    kind, *identity, slot = words[1:]
+    return (kind.replace("-", "_"), ".".join(identity), slot)
+
+
+def _exported_secret_commands(exported: str) -> list[list[str]]:
+    """The commands an export's foot names, as an operator would run
+    them: the comment marker off, the words split the way a shell splits
+    them, and the two words that name this command group dropped."""
+    prefix = "#   vinga-server config "
+    return [
+        __import__("shlex").split(line[len(prefix):])
+        for line in exported.splitlines()
+        if line.startswith(prefix)
+    ]
+
+
+def test_an_export_reproduces_the_store_it_came_from(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The whole supported reproduction, end to end and byte for byte.
+
+    Two databases, because that is the claim: the document one
+    deployment exports is the document another is built from. The second
+    store is seeded by nothing but the export and the commands the
+    export itself names, so a slot the annotation forgot would show up
+    as a missing credential rather than as a passing test.
+    """
+    first = runner(tmp_path / "one", monkeypatch)
+    _seed(first)
+    capsys.readouterr()
+
+    assert first("export") == 0
+    exported = capsys.readouterr().out
+
+    # What the document carries, and what it must not. An environment
+    # reference is a body value and travels as itself; a stored
+    # credential is nowhere in it, and is named as the command that
+    # enters it.
+    assert ANTHROPIC_REFERENCE in exported
+    assert HOME_REFERENCE in exported
+    assert MASK not in exported
+    for secret in STORED.values():
+        assert secret not in exported
+    assert _exported_secret_commands(exported) == _SET_SECRETS
+
+    # A fresh store, built from the export and from nothing else.
+    second = runner(tmp_path / "two", monkeypatch)
+    assert second("apply", "-f", "-", stdin=exported) == 0
+    _enter_secrets(second, _exported_secret_commands(exported))
+    capsys.readouterr()
+
+    assert second("export") == 0
+
+    assert capsys.readouterr().out == exported
+
+
+def test_an_exported_document_applies_onto_the_store_it_came_from(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The other direction, which is what makes an export safe to keep
+    and re-run: applied back onto its own store it changes nothing, and
+    the credentials stored on those entities are still there."""
+    run = runner(tmp_path, monkeypatch)
+    _seed(run)
+    capsys.readouterr()
+    run("export")
+    exported = capsys.readouterr().out
+
+    assert run("apply", "-f", "-", stdin=exported) == 0
+
+    applied = capsys.readouterr()
+    assert {line.split(": ")[-1] for line in applied.out.splitlines()} == {"unchanged"}
+    run("export")
+    assert capsys.readouterr().out == exported
+
+
+def test_one_entity_exports_as_the_fragment_that_writes_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The per-entity half: a fragment, and the slots that hold a stored
+    credential named beside it. The fragment does not say where it goes,
+    so neither does the annotation: what writes it is the `set` an
+    operator chooses."""
+    run = runner(tmp_path, monkeypatch)
+    _seed(run)
+    capsys.readouterr()
+
+    assert run("export", "mcp-server", "home") == 0
+
+    exported = capsys.readouterr().out
+    assert "# One mcp server (mcp_servers.<name>)" in exported
+    assert MASK not in exported
+    assert "#   headers.Authorization" in exported
+    body = yaml.safe_load(exported)
+    assert body["headers"] == {"Authorization": HOME_REFERENCE}
+
+    # And it is a fragment: the command whose header it names takes it.
+    assert run("set", "mcp-server", "second", "-f", "-", stdin=exported) == 0
+    capsys.readouterr()
+    run("show", "mcp-server", "second")
+    assert document(capsys.readouterr().out)["url"] == "https://example.invalid/mcp"
+
+
+def test_an_entity_with_no_stored_credential_exports_without_an_annotation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run = runner(tmp_path, monkeypatch)
+    _seed(run)
+    capsys.readouterr()
+
+    assert run("export", "agent", "sam") == 0
+
+    exported = capsys.readouterr().out
+    assert "Stored credentials" not in exported
+    assert yaml.safe_load(exported)["prompt"] == "You are Sam."

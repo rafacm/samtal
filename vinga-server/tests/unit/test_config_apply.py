@@ -80,10 +80,6 @@ DEPLOYMENT: dict[str, object] = {
 }
 
 
-def _outcomes(store: ConfigStore, document: object) -> list[tuple[str, str, bool]]:
-    return [(one.section, one.identity, one.wrote) for one in store.apply(document)]
-
-
 def test_one_document_writes_a_whole_deployment(store: ConfigStore) -> None:
     """The acceptance case, and the one a loop of single writes could
     not do: the agent, the device bound to it and the default agent
@@ -149,8 +145,8 @@ def test_a_provider_is_named_by_its_stage_and_name_together(store: ConfigStore) 
 
 def test_the_same_document_twice_is_a_no_op(store: ConfigStore) -> None:
     """Comparison rather than blind rewrite: the second apply writes
-    nothing, because every entry's row would be written with the bytes
-    it already holds."""
+    nothing, because every entry already describes the configuration
+    that is there."""
     store.apply(DEPLOYMENT)
 
     again = store.apply(DEPLOYMENT)
@@ -180,6 +176,47 @@ def test_an_unchanged_singleton_is_reported_rather_than_rewritten(
     applied = store.apply({"agent_defaults": {}})
 
     assert [(one.section, one.wrote) for one in applied] == [("agent_defaults", False)]
+
+
+def test_a_body_spelling_a_default_it_holds_is_unchanged(store: ConfigStore) -> None:
+    """The comparison is between the two entries, not between the two
+    row bodies, and this is the case that decides it: a display shows a
+    default that is a real value, so an exported body carries fields the
+    write that created the entry never spelled. Comparing what a write
+    would store would report every such entry as changed, and an export
+    applied back onto its own store would rewrite most of itself.
+    """
+    store.set_mcp_server("home", {"transport": "stdio", "command": "uvx"})
+    spelled = {
+        "transport": "stdio",
+        "command": "uvx",
+        "tool_timeout_s": 15.0,
+        "use_server_instructions": False,
+    }
+
+    applied = store.apply({"mcp_servers": {"home": spelled}})
+
+    assert [one.wrote for one in applied] == [False]
+    # And the values really are the entry's defaults, which is what
+    # makes the two the same configuration.
+    entry = store.read_mcp_server("home").entry
+    assert (entry.tool_timeout_s, entry.use_server_instructions) == (15.0, False)
+
+
+def test_a_value_the_display_would_mask_is_still_compared(store: ConfigStore) -> None:
+    """The other comparison that was tried and rejected. A lowercase
+    environment name in an `*_env` option is a value a write accepts and
+    a read refuses to show, so comparing the two masked displays would
+    call every such value equal to every other and skip the rotation
+    silently."""
+    store.set_provider("llm", "claude", {"type": "mock", "api_key_env": "first_name"})
+
+    applied = store.apply(
+        {"providers": {"llm": {"claude": {"type": "mock", "api_key_env": "second_name"}}}}
+    )
+
+    assert [one.wrote for one in applied] == [True]
+    assert store.read_provider("llm", "claude").entry.api_key_env == "second_name"
 
 
 # Additive
