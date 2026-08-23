@@ -359,6 +359,11 @@ with a resolution note here.
    around the first receive) is the first-contact one, and the plan
    kept it behind.
 
+   *Resolution* (this commit): `device/watchdog.py` owns both:
+   `HELLO_TIMEOUT_S` and a `first_contact()` helper move there,
+   read at call time so the patch site retargets and still bites;
+   the session keeps hello parsing and the protocol-error close.
+
 2. **P1: M2's zero-test-change constraint was impossible.** Six
    session suites deliberately reach the names M2 moves:
    `test_session_barge_in.py` reads `_pace_start`/`_pace_resume`,
