@@ -47,20 +47,26 @@ and discoveries; no deviations says so explicitly.
 
 ## Design decisions this plan makes
 
-1. **What stays a column, stated per table.** `providers`: keys
-   `stage`+`name`, `secrets`, and `body`. `mcp_servers`: key
-   `name`, `secrets`, `body`. `agents`: key `name`, `body`.
-   `agent_defaults`: key `id` with its singleton check constraint,
-   `body`. `devices`: key `mac`, `body`. `prompt_fragments` and
-   `domain_settings` are ALREADY at the target shape (a key and
-   one value column) and do not move; forcing a `{text: ...}`
-   body onto `prompt_fragments` would be reshaping for symmetry,
-   which the deletion test rejects. No non-key model field keeps a
-   column today (nothing queries `type`, `egress`, or the slot
-   columns in SQL; every read loads the entity whole), so no
-   indexed extra columns exist at the baseline; the first field
-   that needs SQL-side filtering earns its column back through
-   autogenerate, and the plan says so in the schema docstring.
+1. **What stays a column, stated per table, and the body is
+   `Text`.** `providers`: keys `stage`+`name`, `secrets`, and
+   `body`. `mcp_servers`: key `name`, `secrets`, `body`.
+   `agents`: key `name`, `body`. `agent_defaults`: key `id` with
+   its singleton check constraint, `body`. The body column is
+   `Text`, not `JSON`: SQLAlchemy's JSON type would json.dumps
+   the already-dumped string into a double-encoded literal,
+   defeating both stable diffs and any future `json_extract`;
+   `Text` is what `model_validate_json` reads. `devices`,
+   `prompt_fragments`, and `domain_settings` are ALREADY at the
+   target shape (a key and one value column) and DO NOT MOVE:
+   `devices` has no entity model or descriptor (its rows read as
+   a bare list into `dict[str, list[NonBlankStr]]`), and
+   `_live_binding`'s select of `devices.c.agents` on the device
+   lookup path is the one column-level SQL read in `src`, which
+   stays exactly as it is. The no-SQL-reads claim is therefore
+   scoped to the four reshaped tables, where it is true. No
+   non-key model field keeps a column at the baseline; the first
+   field that needs SQL-side filtering earns its column back
+   through autogenerate, and the schema docstring says so.
 2. **The body is the model's JSON dump, secrets excluded, and the
    split is owned in one place.** The generic mapper pair lives in
    `config/store.py` beside the descriptors it reads: writing
