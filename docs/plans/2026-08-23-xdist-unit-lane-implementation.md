@@ -241,9 +241,16 @@ contention on 4 real cores is exercised only by this PR's own CI runs.
   post-repair ones showing the section and a non-zero exit serially and
   under `-n 4`.
 
-Left unverified, and unverifiable before the PR exists: this PR's own
-CI run green, with the durations table present and the unit lane at its
-projected time. That run is also the first of the week-of-runs watch
-that decision 3 of the issue's restated decisions keeps open on #254.
+- **PR #261's own CI run (run 32610208370): green**, and the one
+  verification the plan's Tests section named that the local runs
+  cannot stand in for, since the 4-core runner is where the fourth
+  hazard (contention) actually lives. The durations table is present in
+  the unit lane's log. The **unit lane ran in 2m25s**, against its
+  measured 6m31s serially, which is the projection met: the lane is no
+  longer the critical path, and the **integration lane at 4m54s** is
+  now the one that finishes last. This run is also the first data point
+  of the week-of-runs watch that decision 3 of the issue's restated
+  decisions keeps open on #254.
 
-Nothing here needs hardware.
+Nothing here needs hardware, so no verification step was left
+unverifiable.
