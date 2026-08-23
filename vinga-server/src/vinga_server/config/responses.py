@@ -34,7 +34,7 @@ the drift check compares them.
 
 from collections.abc import Awaitable, Callable
 from enum import StrEnum
-from typing import Any, Literal, Protocol, get_args, get_origin
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -299,26 +299,6 @@ class McpReloadResult(BaseModel):
     )
 
 
-def outcomes(section: type[BaseModel]) -> tuple[str, ...]:
-    """One reload section's outcome lists, in the order it declares
-    them: every field that is a list of names.
-
-    Presentation, which is why the answer is a tuple and not a set, but
-    presentation of the model's own fields: read off the declaration
-    rather than listed again, so an outcome added to a section is one
-    line on that section and the CLI prints it. What the rule leaves out
-    is every field that is not a list of names, which today is the MCP
-    status mapping and the agent-defaults flag; each of those is
-    rendered where its own shape is understood.
-    """
-    return tuple(
-        name
-        for name, field in section.model_fields.items()
-        if get_origin(field.annotation) is list and get_args(field.annotation) == (str,)
-    )
-
-
-
 class McpStatusSource(Protocol):
     """Where the two answers above come from: the running server's MCP
     registry, through the one method this API asks it for.
@@ -499,43 +479,6 @@ class ConfigReloadResult(BaseModel):
     agents: AgentsReload | None = None
 
 
-def flags(section: type[BaseModel]) -> tuple[str, ...]:
-    """One reload section's yes-or-no answers, in the order it declares
-    them.
-
-    The sibling of `outcomes` above and the other half of what a section
-    can say: a kind there is one of has nothing to name, so what moved
-    about it is a boolean. Read off the declaration for the same reason,
-    so that a flag added to a section is a flag the CLI prints.
-    """
-    return tuple(
-        name for name, field in section.model_fields.items() if field.annotation is bool
-    )
-
-
-def _section(annotation: object) -> type[BaseModel]:
-    """The model behind one section of the result, whether or not the
-    section is optional. A section that is not filled yet is declared
-    `Model | None`, and what a renderer needs is the model either way."""
-    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-        return annotation
-    return next(
-        argument
-        for argument in get_args(annotation)
-        if isinstance(argument, type) and issubclass(argument, BaseModel)
-    )
-
-
-# Which sections one reload answers with and what shape each of them
-# is, read off the result rather than written down beside it: a section
-# added to the model is a section the CLI renders, and a field whose
-# shape the rendering has no rule for is a failing test rather than
-# output that quietly went missing.
-RELOAD_SECTIONS: dict[str, type[BaseModel]] = {
-    name: _section(field.annotation)
-    for name, field in ConfigReloadResult.model_fields.items()
-}
-
 # Which agents the server around this application can be asked for, as
 # a question rather than a set. It used to be a set, because a restart
 # was what loaded an agent and the answer could not move while the
@@ -682,23 +625,6 @@ class Applies(StrEnum):
     CHECK_IN = "check-in"
 
 
-ADDED_DESCRIPTION = (
-    "The names the database holds that this server is not serving, sorted."
-)
-
-REMOVED_DESCRIPTION = (
-    "The names this server is serving that the database no longer holds, sorted."
-)
-
-CHANGED_DESCRIPTION = (
-    "The names both sides have and disagree about, sorted. Changed means the stored "
-    "state differs from what this server is serving, never that something was "
-    "written: an edit changed back before anyone looked is not here, and an entity "
-    "whose stored credential was set again is, because what is compared is an opaque "
-    "mark over the ciphertext and that moves even when the plaintext may not have."
-)
-
-
 class EntityDiff(BaseModel):
     """One kind of named entity, as the difference between two worlds:
     what the database holds that the running server does not, what it no
@@ -712,9 +638,26 @@ class EntityDiff(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     applies: Applies
-    added: tuple[str, ...] = Field(description=ADDED_DESCRIPTION)
-    removed: tuple[str, ...] = Field(description=REMOVED_DESCRIPTION)
-    changed: tuple[str, ...] = Field(description=CHANGED_DESCRIPTION)
+    added: tuple[str, ...] = Field(
+        description=(
+            "The names the database holds that this server is not serving, sorted."
+        )
+    )
+    removed: tuple[str, ...] = Field(
+        description=(
+            "The names this server is serving that the database no longer holds, sorted."
+        )
+    )
+    changed: tuple[str, ...] = Field(
+        description=(
+            "The names both sides have and disagree about, sorted. Changed means the "
+            "stored state differs from what this server is serving, never that "
+            "something was written: an edit changed back before anyone looked is not "
+            "here, and an entity whose stored credential was set again is, because "
+            "what is compared is an opaque mark over the ciphertext and that moves "
+            "even when the plaintext may not have."
+        )
+    )
 
 
 class GrantsDiff(BaseModel):

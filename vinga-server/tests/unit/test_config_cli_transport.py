@@ -35,8 +35,9 @@ from tests.support.config_cli import chain as _chain
 from vinga_server import db as db_module
 from vinga_server.config import cli
 from vinga_server.config.api import MOUNT_PATH, build_api
+from vinga_server.config.cli import outcomes
 from vinga_server.config.loader import ConfigError
-from vinga_server.config.responses import McpReloadResult, outcomes
+from vinga_server.config.responses import McpReloadResult
 from vinga_server.db import DATABASE_FILENAME
 
 
