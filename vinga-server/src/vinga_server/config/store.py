@@ -1440,18 +1440,9 @@ def _change(named: tuple[str, str, object]) -> _Change:
             raise ConfigError(_NOT_AN_AGENT_NAME)
         return _DefaultAgent(_identifier("default_agent", written))
     descriptor = _SECTION_KINDS[section]
-    return _prepare(descriptor, _addressed(descriptor, identity), written)
+    return _prepare(descriptor, addressed(descriptor, identity), written)
 
 
-def _addressed(descriptor: EntityDescriptor, identity: str) -> tuple[str, ...]:
-    """One entry's identity back as the parameters the kind is addressed
-    by. Split at the first separator only, and only as many times as the
-    kind has parameters, which is what keeps a name holding a dot still
-    one name: `providers.llm.claude.v2` is the `claude.v2` of the `llm`
-    stage, and nothing about a name forbids the dot."""
-    if not descriptor.addressing:
-        return ()
-    return tuple(identity.split(".", len(descriptor.addressing) - 1))
 
 
 def _bound(written: object) -> list[str]:
@@ -1773,11 +1764,24 @@ def _write_secrets(
         )
 
 
-def _secret_identity(descriptor: EntityDescriptor, location: SecretLocation) -> list[str]:
-    """A location's identity back as the parameters the kind is
-    addressed by. Split at the first separator only, so that a name
-    holding one is still one name."""
-    return location.identity.split(".", len(descriptor.addressing) - 1)
+def addressed(descriptor: EntityDescriptor, identity: str) -> tuple[str, ...]:
+    """One entry's identity back as the parameters that address it.
+
+    The inverse of the dotted join every surface names an entry by, and
+    one home for it because three of them ask: an applied document,
+    which names an entry by that join; a stored secret's location, whose
+    identity is the same join; and the CLI's export, which renders a
+    location back into the `set-secret` command that fills it.
+
+    Split at the first separator only, and only as many times as the
+    kind has parameters, which is what keeps a name holding a dot still
+    one name: `providers.llm.claude.v2` is the `claude.v2` of the `llm`
+    stage, and nothing about a name forbids the dot. A kind addressed by
+    nothing is the singleton, whose identity is the empty one.
+    """
+    if not descriptor.addressing:
+        return ()
+    return tuple(identity.split(".", len(descriptor.addressing) - 1))
 
 
 def _secret_section(location: SecretLocation) -> str:
@@ -1790,7 +1794,7 @@ def _secret_section(location: SecretLocation) -> str:
 def _secret_row(location: SecretLocation) -> tuple[Table, list[ColumnElement[bool]]]:
     descriptor = _HOLDER_OF[location.kind]
     table = _table(descriptor)
-    identity = _secret_identity(descriptor, location)
+    identity = addressed(descriptor, location.identity)
     return table, [
         table.c[column] == value
         for column, value in _row_identity(descriptor, identity).items()
@@ -1803,7 +1807,7 @@ def _check_slot(domain: DomainConfig, location: SecretLocation) -> None:
     an MCP server's is a dotted env or headers path, which is where the
     value would otherwise have been written as a $VAR reference."""
     descriptor = _HOLDER_OF[location.kind]
-    identity = _secret_identity(descriptor, location)
+    identity = addressed(descriptor, location.identity)
     if location.kind == "provider":
         stage, name = identity
         # The stage is an argument here rather than a stored value, so
@@ -2527,6 +2531,7 @@ def _refuse_unresolved(domain: DomainConfig) -> None:
 
 __all__ = [
     "APPLY_LIMIT",
+    "addressed",
     "APPLY_LOCATION",
     "Applied",
     "BoundDevice",
