@@ -5,12 +5,14 @@
 Implement issue #254, inserted into the #246 queue ahead of the
 config phase (maintainer decision, 2026-08-22, recorded on the
 issue with the verification spike's results). The CI unit lane runs
-under `pytest-xdist` with `-n 4 --dist loadfile`, taking it from
-about 6.5 minutes to a projected 2 to 2.5 and the critical path
-from ~7 minutes to roughly the integration lane's ~4.5. The spike
-(issue comment, 2026-08-22) already measured 3.6x at CI-like
-`-n 4` on a 14-core machine with all four configurations green and
-none of the issue's hazards biting.
+under `pytest-xdist` with `-n auto --dist loadfile` (4 workers on
+today's runner), taking the unit lane from its last measured 6m31s
+to a projected 2 to 3 minutes and the critical path to roughly the
+integration lane's measured ~5. The spike (issue comment,
+2026-08-22) measured 3.0x to 3.6x at `-n 4` on a 14-core machine
+with all four configurations green; what it could not exercise,
+contention on 4 real cores, is this plan's fourth hazard (decision
+2).
 
 The companion implementation doc,
 [`2026-08-23-xdist-unit-lane-implementation.md`](2026-08-23-xdist-unit-lane-implementation.md),
