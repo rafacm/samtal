@@ -241,10 +241,10 @@ The fix removed the possibility. One helper,
 model the route promised, strictly, dropping unknown fields so a newer
 server stays readable and refusing anything that is not that shape. The
 frozensets, the ten predicates and the bridge test went in the same
-commit. `RELOAD_OUTCOMES` survived, moved into `responses.py` and
-derived from the result model's own fields, which is the same lesson
-in its positive form: the fact stayed, and it stopped being written
-twice.
+commit. The derived fact survived, as `outcomes`, read off the result
+model's own fields, which is the same lesson in its positive form: the
+fact stayed, and it stopped being written twice. It lives in `cli.py`
+now, beside the renderer that is its only caller (#242).
 
 ### A seam is what a part asks of its parent
 
