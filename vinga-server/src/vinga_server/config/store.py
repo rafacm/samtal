@@ -1552,8 +1552,11 @@ def _check_addressable(location: str, what: str, value: str) -> None:
 def _mac(mac: str) -> str:
     # Recorded here and raised outside the handler, the rule this
     # codebase settled on: `from None` clears the cause and leaves the
-    # context, so the rejected value would still be reachable on the
-    # exception that travels out.
+    # context, so anything the caught exception carried would still be
+    # reachable on the exception that travels out. `normalize_mac`
+    # carries nothing to reach any more (#205), and the shape is kept
+    # because the rule is the repository's rather than that one
+    # validator's.
     problem: str | None = None
     try:
         return normalize_mac(mac)

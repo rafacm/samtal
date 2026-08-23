@@ -18,7 +18,7 @@ from sqlalchemy import select, update
 from tests.support.stores import planted, stored_row, stored_rows
 from vinga_server.config import ConfigError
 from vinga_server.config.loader import StorageError, UnknownEntityError
-from vinga_server.config.models import PROVIDER_STAGES, mcp_entry_fragment
+from vinga_server.config.models import NOT_A_MAC, PROVIDER_STAGES, mcp_entry_fragment
 from vinga_server.config.secrets import MASK, SecretLocation, generate_key
 from vinga_server.config.store import ConfigStore, verify_secrets
 from vinga_server.db import open_database, schema
@@ -694,8 +694,12 @@ def test_an_unknown_stage_and_an_empty_name_are_refused(store: ConfigStore) -> N
     assert "speech" not in refusal, refusal
     with pytest.raises(ConfigError, match="the name is empty"):
         store.set_agent("  ", {})
-    with pytest.raises(ConfigError, match="not a MAC address"):
+    with pytest.raises(ConfigError) as refused_mac:
         store.delete_device("nonsense")
+    # The same rule one section over, and the same discipline: the MAC
+    # refusal states what a MAC is and never what was sent (#205).
+    assert str(refused_mac.value) == NOT_A_MAC
+    assert "nonsense" not in str(refused_mac.value)
 
 
 def test_a_name_that_cannot_be_a_path_segment_is_refused(store: ConfigStore) -> None:

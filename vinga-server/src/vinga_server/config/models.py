@@ -1865,14 +1865,36 @@ class AgentConfig(AgentDefaults):
     )
 
 
+# What something that is not a MAC is told: the rule, and never the
+# value that failed it (#205).
+#
+# The same reasoning the entity misses and the stage and slot refusals
+# were fixed under (#132), one step earlier. This check runs on a value
+# the caller typed, before anything is looked up, and the places it is
+# typed are a URL path segment, a command-line argument and a device's
+# own header, which is where a paste lands. A value that failed this
+# check is by definition one nothing here has validated, and it travels
+# out as an API body, as a printed line, and into whatever the caller
+# keeps.
+#
+# No section prefix, unlike the store's own refusals. Every surface that
+# renders this supplies its own location: the loader names the field the
+# unusable MAC was written under, and a prefix here would be said twice.
+# The rule itself has one home, which is this constant, so no caller
+# restates it.
+NOT_A_MAC = "a MAC address is six colon-separated hex pairs, for example aa:bb:cc:dd:ee:ff"
+
+
 def normalize_mac(value: str) -> str:
-    """Normalize a MAC address to lowercase colon-separated form."""
+    """Normalize a MAC address to lowercase colon-separated form.
+
+    The refusal is `NOT_A_MAC`, fixed: it carries the rule and not the
+    value, so a caller may hand this exception's message to any surface
+    without reading it first.
+    """
     mac = value.strip().lower().replace("-", ":")
     if not _MAC_RE.match(mac):
-        raise ValueError(
-            f'"{value}" is not a MAC address; expected six colon-separated '
-            f"hex pairs, for example aa:bb:cc:dd:ee:ff"
-        )
+        raise ValueError(NOT_A_MAC)
     return mac
 
 

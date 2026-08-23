@@ -323,11 +323,15 @@ class DeviceSession:
             mac = self._mac = normalize_mac(device_id)
         except ValueError:
             # One fixed sentence, carrying neither the header nor the
-            # exception's message, which quotes it. What arrived in that
-            # header is bytes an unauthenticated caller chose, and these
-            # logs are the retained surface the observability ADR makes
-            # them: a rejected value written into them is a value the
-            # caller placed in an operator's retained logs. Nothing
+            # exception's message. That message is a fixed sentence of
+            # its own now (#205), and the rejection still passes on
+            # neither: this close reason is written for the device that
+            # is being turned away rather than for a configuration
+            # writer. What arrived in that header is bytes an
+            # unauthenticated caller chose, and these logs are the
+            # retained surface the observability ADR makes them: a
+            # rejected value written into them is a value the caller
+            # placed in an operator's retained logs. Nothing
             # diagnosable is lost, because nothing about the submitted
             # value was ever actionable: the reason token says which
             # rejection this is, `device` is null because none was

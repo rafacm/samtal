@@ -69,13 +69,15 @@ UNKNOWN_VERSION = "0.0.0"
 # Said to a device whose Device-Id is not a MAC, and logged in place of
 # what it sent.
 #
-# Deliberately not `normalize_mac`'s own sentence, which quotes the
-# value it refused. This endpoint is unauthenticated and reachable by
-# anything that finds the path, so the header is attacker-controlled
-# text: quoting it puts a chosen string into a response body and into
-# every log line and log shipper behind it. The rule the rest of this
+# Deliberately not `normalize_mac`'s own sentence. That sentence quoted
+# the value it refused until #205 fixed it and carries nothing now, but
+# this endpoint answers about a header rather than about a configuration
+# field, and it is unauthenticated and reachable by anything that finds
+# the path, so what it says is a fact of its own closed set rather than
+# a message borrowed from a validator. The rule the rest of this
 # codebase holds for a rejected configuration value holds here for a
-# rejected header.
+# rejected header: state what the header has to hold and never what
+# arrived in it.
 # The sentence itself is `OtaRefusal`'s, beside the two other fixed
 # refusals this endpoint may make: what the closed set holds and what a
 # rejection says are one fact, and the event surface is where it is
@@ -149,8 +151,8 @@ async def check_version(request: Request) -> Response:
     try:
         mac = normalize_mac(device_id)
     except ValueError:
-        # Deliberately not the validator's own sentence, which quotes
-        # what it refused: see DEVICE_ID_PROBLEM.
+        # Deliberately this endpoint's own sentence rather than the
+        # validator's: see DEVICE_ID_PROBLEM.
         return _bad_request(DEVICE_ID_PROBLEM)
     # The live view rather than a captured one, and awaited off the
     # event loop: a device bound a moment ago gets its token at this

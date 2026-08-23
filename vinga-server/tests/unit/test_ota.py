@@ -325,10 +325,15 @@ def test_a_device_id_that_is_not_a_mac_is_never_quoted_back(
     path: str, caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """This endpoint is unauthenticated and reachable by anything that
-    finds the path, so its headers are attacker-controlled text. The
-    validator's own sentence quotes what it refused, which would put a
-    chosen string into a response body, into the log, and into whatever
-    ships the log."""
+    finds the path, so its headers are attacker-controlled text: a
+    refusal that repeated one would put a chosen string into a response
+    body, into the log, and into whatever ships the log.
+
+    The endpoint answers with a sentence of its own rather than the
+    validator's, which held the rejected value until #205 and holds only
+    the rule now. What is asserted here is the property, on every
+    surface, so it survives either wording.
+    """
     with client_for() as client, caplog.at_level(logging.DEBUG):
         refused = client.post(
             path,
