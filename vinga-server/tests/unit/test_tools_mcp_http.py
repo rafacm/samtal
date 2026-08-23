@@ -14,6 +14,7 @@ sanitization, call timeouts, registry routing, mark-down on a failed
 call) stays covered once, over stdio, where it already lives.
 """
 
+import errno
 import json
 import logging
 import socket
@@ -114,6 +115,31 @@ def unused_url() -> Iterator[str]:
     with socket.socket() as held:
         held.bind(("127.0.0.1", 0))
         yield f"http://127.0.0.1:{held.getsockname()[1]}/mcp"
+
+
+def port_of(url: str) -> int:
+    return int(url.rsplit(":", 1)[1].split("/", 1)[0])
+
+
+def test_the_free_port_helper_holds_the_port_it_hands_out() -> None:
+    """The one thing the two tests below cannot notice.
+
+    Both of them see connection-refused whether the socket is held for
+    the block or bound and released a moment earlier, so a cleanup that
+    put the helper back the way it was would leave them green and put
+    the parallel hazard back: a released number is one another worker's
+    `port=0` server can be handed, and "nothing answers here" would then
+    be an assertion about somebody's live server.
+
+    A second bind to a bound port raises `EADDRINUSE`, and only while it
+    is bound, so this is exactly the property and it goes red the moment
+    the helper stops holding.
+    """
+    with unused_url() as url:
+        with socket.socket() as other, pytest.raises(OSError) as caught:
+            other.bind(("127.0.0.1", port_of(url)))
+
+    assert caught.value.errno == errno.EADDRINUSE
 
 
 async def test_a_started_server_offers_its_tools_under_its_entry_name(
