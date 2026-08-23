@@ -35,7 +35,7 @@ from tests.support.tools_mcp import Applying, reading
 from tests.support.wire import connect, say_something, sentences, shake_hands, tone_strength
 from vinga_server.app import create_app
 from vinga_server.config import Config
-from vinga_server.providers import StreamStarted, ToolCall, Turn
+from vinga_server.providers import ToolCall, Turn
 from vinga_server.tools.builtin import switch_agent_tool
 from vinga_server.tools.mcp import McpServers
 from vinga_server.tools.memory import MemoryStore
@@ -48,26 +48,28 @@ async def test_a_reply_with_no_tool_calls_is_one_round() -> None:
     assert len(script.seen) == 1
 
 
-async def test_an_announcement_and_a_whitespace_delta_are_not_tool_calls(
+async def test_a_whitespace_delta_is_not_a_tool_call(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """The two events the loop is indifferent to, which no other suite
+    """The event the loop is indifferent to, which no other suite
     delivers to it.
 
-    A `StreamStarted` is liveness rather than content: the watchdog
-    consumes the one an adapter yields in first position, and the
-    contract says a consumer tolerates one arriving anywhere else
-    (`providers/base.py`). A whitespace-only `TextDelta` is speech that
-    times no first token and still belongs to the sentence being
-    assembled. The everything-else arm of the loop is what makes a tool
-    call, so either event landing there would put a phantom on the
-    turn's record and keep the round loop going after the model had
-    stopped asking for anything.
+    A whitespace-only `TextDelta` is speech that times no first token
+    and still belongs to the sentence being assembled. The
+    everything-else arm of the loop is what makes a tool call, so this
+    event landing there would put a phantom on the turn's record and
+    keep the round loop going after the model had stopped asking for
+    anything.
+
+    No `StreamStarted` is scripted: `_watchdog_stream` consumes the one
+    an adapter yields first and consumes it exclusively, so this loop
+    never sees one (`providers/base.py`), and scripting one here would
+    drive a stream shape no adapter is allowed to produce.
     """
     script = ScriptedLlm(
         [
-            ["   ", StreamStarted(), call("ghost_tool")],
-            ["Two", StreamStarted(), " ", "words here. ", "And a second sentence."],
+            ["   ", call("ghost_tool")],
+            ["Two", " ", "words here. ", "And a second sentence."],
         ]
     )
     session = session_for(base_config(), POET_MAC, {"poet": script})

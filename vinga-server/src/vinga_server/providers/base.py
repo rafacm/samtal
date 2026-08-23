@@ -276,10 +276,12 @@ class StreamStarted:
     delivering, and without this signal the watchdog could not tell
     that round from a request the provider never answered (#68).
 
-    Yielded at most once, before anything else, and it carries nothing:
-    it is evidence of liveness, not content. The session consumes it in
-    the watchdog and it reaches nothing downstream; consumers of the
-    stream must nevertheless tolerate and ignore it."""
+    Yielded at most once, first, and it carries nothing: it is evidence
+    of liveness, not content. `_watchdog_stream` consumes it and
+    consumes it exclusively, so nothing downstream ever sees one. An
+    adapter that yielded a second one, or yielded one after any other
+    event, would reach the tool loop's everything-else arm and be
+    recorded as a call the model never made."""
 
 
 @dataclass(frozen=True)
