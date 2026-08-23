@@ -79,7 +79,9 @@ The honest behavior deltas, all recorded in `CHANGELOG.md`:
   `vinga-server doctor URL`;
 - the doctor's usage errors now come from its own parser (decision 5);
 - the entry point's unknown-word and root-parser errors become fixed
-  no-echo sentences.
+  no-echo sentences;
+- a shown URL loses its secret-shaped query parameters along with its
+  userinfo (decision 4), a display-only strengthening.
 
 Everything else the doctor prints, refuses and probes is
 byte-identical.
@@ -150,18 +152,39 @@ config CLI importing URL hygiene from the doctor would be backwards),
 and two copies of a no-leak rule are exactly the drift the audit's
 economy rule spends rigor against.
 
-They move, bodies byte-identical, to a new
-`src/vinga_server/config/printing.py` as `parsed_url`,
-`without_userinfo`, `printable` and `GLIMPSE_LENGTH`. The one
-sentence: callers stop having to know how text nobody vouched for, an
-operator-typed URL or a far-side string, is kept off retained
-surfaces: refusals that quote nothing, userinfo stripped before a URL
-is shown, far-side text bounded and made printable. It lives in
+They move to a new `src/vinga_server/config/printing.py` as
+`parsed_url`, `shown_url`, `printable` and `GLIMPSE_LENGTH`.
+`parsed_url` and `printable` move byte-identical. `shown_url` is
+`_without_userinfo` corrected, not blessed: the old helper kept the
+query string, and `_reported_websocket` prints its result, so a far
+side reporting `wss://host/ws?token=<secret>` published the secret
+on stdout, and the same hole sat under `_permitted`'s refusal
+sentences for an operator-typed API URL. The repository already has
+the rule that a secret-shaped query parameter is a URL credential
+(`config/models.py`, `url_credential` and
+`without_url_credential`), so `shown_url` composes both rules: the
+host rebuilt from parsed parts as today, the userinfo gone, and the
+query filtered through `models.is_secret_option` the way
+`without_url_credential` filters it, reusing that predicate rather
+than restating it. This is a recorded security behavior delta,
+display-only and strengthening, in the changelog beside the others;
+its sentinel tests plant `?token=<sentinel>` in a far-side websocket
+URL and in an operator-typed API URL and assert the sentinel reaches
+no stream.
+
+The one sentence: callers stop having to know how text nobody
+vouched for, an operator-typed URL or a far-side string, is kept off
+retained surfaces: refusals that quote nothing, a URL shown only
+with its credentials (userinfo and secret-shaped query parameters)
+taken out, far-side text bounded and made printable. Exposing
+`shown_url` as the single display door, rather than separate strip
+primitives a caller must order correctly, is what makes the module
+the rule's home instead of a toolbox beside it. It lives in
 `config/` beside the family's failure type (`loader.ConfigError`,
-which `parsed_url` raises) and is light enough for the top-level
-doctor to import. Three caller modules from day one (`cli.py`,
-`doctor.py`, and the tests that pin the policy), so it passes the
-deletion test.
+which `parsed_url` raises) and the credential predicate it reuses,
+and is light enough for the top-level doctor to import. Two caller
+modules from day one (`cli.py`, `doctor.py`), each using it at more
+than one surface, so it passes the deletion test.
 
 `PARSED_BODY_LENGTH`, `SUPPLIED_ENDPOINT` and the two DESCRIBE
 patterns are doctor-only and move to `doctor.py`.
@@ -215,8 +238,8 @@ no API and no database.
   body and the census's nine functions and doctor-only constants; its
   own `build_client` seam and timeout constants.
 - `src/vinga_server/config/printing.py`: new; `parsed_url`,
-  `without_userinfo`, `printable`, `GLIMPSE_LENGTH`, moved
-  byte-identical from `cli.py`.
+  `shown_url`, `printable`, `GLIMPSE_LENGTH`; all but `shown_url`
+  moved byte-identical from `cli.py`, `shown_url` per decision 4.
 - `src/vinga_server/onboarding/origin.py`: gains `onboarding_url`,
   `ONBOARDING_OFF` and the auth-unset refusal, moved from `cli.py`;
   gains the `ConfigError` import; docstring's command spellings
@@ -362,6 +385,15 @@ faithful:
    byte-identically would bless the weaker rule as the one home,
    and the doctor suite tests userinfo credentials but no query
    credential.
+
+   *Resolution* (this commit): the display helper becomes
+   `shown_url`, which strips userinfo and filters secret-shaped
+   query parameters through the predicate `config/models.py` already
+   owns; the fix is recorded as a display-only security delta in the
+   changelog list; sentinel tests plant `?token=<sentinel>` in a
+   far-side websocket URL and in an operator-typed API URL; and the
+   module's interface is the one display door rather than strip
+   primitives a caller must order.
 
 4. **P2: the config-schema byte-identity claim has no
    verification.** CI's drift checks cover the references and the
