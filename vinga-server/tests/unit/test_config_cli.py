@@ -39,6 +39,7 @@ from tests.support.config_cli import (
     SECRET,
     runner,
 )
+from tests.support.config_cli import chain as _chain
 from tests.support.config_cli import document as _document
 from tests.support.config_cli import showing as _showing
 from tests.support.notices import CHECK_IN, RELOAD, boundaries
@@ -758,3 +759,219 @@ def test_a_name_a_url_path_cannot_carry_is_refused(
 
     assert run("list") == 0
     assert "(none)" in capsys.readouterr().out
+
+
+# The other way to write an entity
+#
+# `set <kind> [identity] key=value...` assembles the fragment the YAML
+# would and enters the same path: the same transportability check, the
+# same request, the same acknowledgement. What each case below proves is
+# the resulting store state, read back through `show`, which is the only
+# thing that can say the two ways of writing one entity meant one thing.
+
+INLINE = [
+    (
+        "a flat entity",
+        ("set", "provider", "llm", "claude"),
+        ("type=anthropic", "model=m"),
+        "type: anthropic\nmodel: m\n",
+        ("show", "provider", "llm", "claude"),
+    ),
+    (
+        "the singleton, addressed by nothing",
+        ("set", "agent-defaults"),
+        ("llm=claude",),
+        "llm: claude\n",
+        ("show", "agent-defaults"),
+    ),
+    (
+        "a dotted key, which nests",
+        ("set", "agent", "sam"),
+        ("prompt=hi", "filler.enabled=false"),
+        "prompt: hi\nfiller:\n  enabled: false\n",
+        ("show", "agent", "sam"),
+    ),
+    (
+        "values that are not strings",
+        ("set", "provider", "llm", "claude"),
+        ("type=anthropic", "temperature=0.7", "stream=true", "retries=3", "seed=null"),
+        "type: anthropic\ntemperature: 0.7\nstream: true\nretries: 3\nseed: null\n",
+        ("show", "provider", "llm", "claude"),
+    ),
+    (
+        "a value holding the separator",
+        ("set", "provider", "llm", "claude"),
+        ("type=anthropic", "base_url=https://example.invalid/v1?a=b"),
+        "type: anthropic\nbase_url: https://example.invalid/v1?a=b\n",
+        ("show", "provider", "llm", "claude"),
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("argv", "pairs", "fragment", "read"),
+    [(argv, pairs, fragment, read) for _, argv, pairs, fragment, read in INLINE],
+    ids=[what for what, _, _, _, _ in INLINE],
+)
+def test_inline_fields_write_what_the_fragment_writes(
+    run,
+    capsys: pytest.CaptureFixture[str],
+    argv: tuple[str, ...],
+    pairs: tuple[str, ...],
+    fragment: str,
+    read: tuple[str, ...],
+) -> None:
+    """The claim the inline form makes is that it is the fragment, so
+    the case is differential: write it both ways against the same
+    starting state and read the same document back."""
+    _an_agent(run)
+    assert run(*argv, *pairs) == 0
+    capsys.readouterr()
+    run(*read)
+    inline = _document(capsys.readouterr().out)
+
+    assert run(*argv, "-f", "-", stdin=fragment) == 0
+    capsys.readouterr()
+    run(*read)
+
+    assert inline == _document(capsys.readouterr().out)
+    assert inline is not None
+
+
+def test_an_inline_write_is_acknowledged_the_way_a_fragment_is(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Same path, same answer: the acknowledgement and the boundary it
+    names are the API's, and the inline form does not touch either."""
+    assert run("set", "provider", "llm", "claude", "type=anthropic", "model=m") == 0
+
+    written = capsys.readouterr()
+    assert written.out == "wrote provider llm.claude\n"
+    assert boundaries(written.err) == {RELOAD}
+
+
+def test_an_inline_value_json_cannot_carry_meets_the_same_sentence(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A bare date is a YAML scalar, so the pair parser passes it, and
+    the rule about what JSON can carry stays where it lives for a
+    fragment too."""
+    assert run("set", "provider", "llm", "claude", "type=anthropic", "released=2026-01-01") == 1
+
+    captured = capsys.readouterr()
+    assert "JSON has no way to write" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_a_secret_shaped_inline_key_is_refused_by_the_store(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The rule that a plaintext credential never enters is the
+    repository's and is about the key's shape, so it holds whichever way
+    the entity was written."""
+    assert run("set", "provider", "llm", "claude", "type=anthropic", f"api_key={SECRET}") == 1
+
+    captured = capsys.readouterr()
+    assert "looks like an inline secret" in captured.err
+    assert SECRET not in captured.err
+    assert SECRET not in captured.out
+
+
+# The two ways are alternatives
+
+
+def test_neither_way_of_writing_an_entity_is_the_missing_argument(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Click cannot see this one, because either of the two satisfies
+    the command, so the grammar says it itself, in the words the
+    boundary says it in."""
+    assert run("set", "agent", "sam") == 1
+
+    captured = capsys.readouterr()
+    assert cli.MISSING_ARGUMENT in captured.err
+    assert "run with --help for the grammar" in captured.err
+    assert captured.out == ""
+
+
+def test_both_ways_at_once_is_refused(
+    run, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    fragment = tmp_path / "sam.yaml"
+    fragment.write_text("prompt: hi\n", encoding="utf-8")
+
+    assert run("set", "agent", "sam", "prompt=hi", "-f", str(fragment)) == 1
+
+    captured = capsys.readouterr()
+    assert cli.BOTH_INPUTS in captured.err
+    assert captured.out == ""
+    # And nothing was written either way.
+    assert run("show", "agent", "sam") == 1
+
+
+# The pair parser as a boundary
+#
+# Every malformed shape it names, each with a credential written where a
+# mistake would put one, asserted absent from stdout, stderr, every log
+# record and the exception's whole chain. The value typed beside a key
+# is exactly where a paste lands, which is what makes this the same
+# no-leak boundary `_fragment` is.
+
+MALFORMED = [
+    ("no separator at all", (SECRET,), cli.PAIR_NEEDS_EQUALS),
+    ("an empty key", (f"={SECRET}",), cli.PAIR_EMPTY_KEY),
+    ("an empty dotted segment", (f"a..b={SECRET}",), cli.PAIR_EMPTY_KEY),
+    ("a leading dot", (f".a={SECRET}",), cli.PAIR_EMPTY_KEY),
+    ("the same key twice", (f"model={SECRET}", f"model={SECRET}"), cli.PAIR_DUPLICATE_KEY),
+    ("a key nested inside another", (f"a.b={SECRET}", f"a={SECRET}"), cli.PAIR_NESTED_KEY),
+    ("a value that will not parse", (f"model='{SECRET}",), cli.PAIR_UNPARSEABLE),
+    ("a value that is a list", (f"model=[{SECRET}]",), cli.PAIR_NOT_SCALAR),
+    ("a value that is a mapping", (f"model={{a: {SECRET}}}",), cli.PAIR_NOT_SCALAR),
+]
+
+
+@pytest.mark.parametrize(
+    ("pairs", "sentence"),
+    [(pairs, sentence) for _, pairs, sentence in MALFORMED],
+    ids=[what for what, _, _ in MALFORMED],
+)
+def test_a_malformed_pair_says_nothing_of_what_was_typed(
+    run,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+    pairs: tuple[str, ...],
+    sentence: str,
+) -> None:
+    with caplog.at_level(logging.DEBUG):
+        assert run("set", "provider", "llm", "claude", "type=anthropic", *pairs) == 1
+
+    captured = capsys.readouterr()
+    assert sentence in captured.err
+    assert SECRET not in captured.err
+    assert SECRET not in captured.out
+    assert "Traceback" not in captured.err
+    assert all(SECRET not in str(record.__dict__) for record in caplog.records)
+    # And nothing of the refused write landed.
+    assert run("show", "provider", "llm", "claude") == 1
+
+
+@pytest.mark.parametrize(
+    ("pairs", "sentence"),
+    [(pairs, sentence) for _, pairs, sentence in MALFORMED],
+    ids=[what for what, _, _ in MALFORMED],
+)
+def test_a_malformed_pair_carries_no_parser_exception(
+    pairs: tuple[str, ...], sentence: str
+) -> None:
+    """White-box for the chain, which is not printed and so cannot be
+    asserted through the runner: PyYAML's mark holds the whole buffer it
+    was parsing, which here is the value, so the refusal is built inside
+    the handler and raised outside it and nothing walking the chain
+    finds the value behind it."""
+    with pytest.raises(cli.ConfigError) as caught:
+        cli._pairs(pairs)
+
+    assert sentence in str(caught.value)
+    assert SECRET not in _chain(caught.value)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
