@@ -135,17 +135,34 @@ live suite, and the two pin suites' say the same.
 ### Deviations from the plan
 
 1. **The prose inventory was four sites short.** Finding 3's
-   enumeration named about a dozen; the repo-wide grep found four more
-   live statements that the milestone makes false, and all four were
-   corrected with the listed ones:
-   `src/vinga_server/events/catalog.py:286`,
-   `tests/unit/test_event_enum_fields.py:14` and `:147` (each saying an
-   unconverted enumeration member would reach "a baseline's argument
-   types", which `shape()` no longer records), and
-   `tests/unit/test_event_typed_emit.py:22` (which named the committed
-   baseline as the owner of the claim that a converted path's record did
-   not move). That makes three `src` docstrings rather than the two the
-   no-leak lens qualified for, still behavior-free.
+   enumeration named about a dozen; the repo-wide grep found nine more
+   live statements that the milestone makes false, and all nine were
+   corrected with the listed ones. The count here was itself wrong at
+   first, at four, and is the review round's finding 6; it is the list a
+   later reader checks the sweep against, so it matches the diff:
+
+   - `src/vinga_server/events/catalog.py:286`,
+     `tests/unit/test_event_enum_fields.py:14` and `:147`, each saying
+     an unconverted enumeration member would reach "a baseline's
+     argument types", which `shape()` no longer records.
+   - `tests/unit/test_event_typed_emit.py:22`, which named the committed
+     baseline as the owner of the claim that a converted path's record
+     did not move.
+   - `tests/unit/test_event_surface_pins.py:39` and `:427`, both saying
+     "the driving is the record baseline's", outside the 34-37 the plan
+     listed.
+   - `tests/conftest.py:186`, "the module-scoped baseline fixture".
+   - `tests/tools/driver_times.py:1` and `:3`, two statements in the
+     docstring calling the harness "the event baseline" and its drivers
+     "baseline drivers".
+
+   That makes three `src` docstrings rather than the two the no-leak
+   lens qualified for, still behavior-free. Three further passages
+   inside `tests/tools/event_baseline.py` itself (the two ported-driver
+   notes and `patched()`'s reason for not using `monkeypatch`, each
+   describing a regeneration run) and its `vinga-baseline-` temporary
+   directory prefix were corrected under the docstring rewrite the plan
+   did name, and are listed under What was done rather than here.
 
 2. **Two of the four named mutations cannot go red as stated, and were
    planted where the disagreement they describe can exist.** A record's
