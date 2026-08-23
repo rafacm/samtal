@@ -1,7 +1,7 @@
 """The floor, decided without a pipeline behind it.
 
-`TurnTaking` reaches the orchestrator through `ReplyControl` and the
-device through `DeviceOutput`, so both can be scripted and the gate
+`TurnTaking` reaches the orchestrator through four of its methods and
+the device through `DeviceOutput`, so both can be scripted and the gate
 ladder driven straight onto each of its rungs: the speech floor, the
 mid-transcription merge, the playback-onset refractory window, a
 confirmation that heard nothing, and a confirmation that heard
@@ -43,7 +43,9 @@ SENTINEL = "sk-live-3f0a91c4-never-a-real-credential"
 class FakeReply:
     """The orchestrator as the gate ladder sees it: whether a reply is
     in flight, the cancels and starts it is asked for, and the
-    confirmation it answers with.
+    confirmation it answers with. A stand-in for `PipelineRuntime`,
+    which is what the annotation names, and it answers the four members
+    the ladder ever touches of one.
 
     `start_reply` flips it into replying, because that is what creating
     the task does on the real one, and the ladder's next rung turns on

@@ -21,14 +21,14 @@ speech, a transcript when in doubt), because acoustics alone are as
 often noise or the reply's own bleed as the user (#28). A manual
 `listen stop` mid-reply is a deliberate act and cancels unconditionally.
 
-The orchestrator is reached through `ReplyControl` and nothing else, so
-the reply task, the conversation history, and the provider
-observability stay where they are: this module decides, and something
-else acts on the decision.
+The orchestrator is reached through four calls and nothing else, so the
+reply task, the conversation history, and the provider observability
+stay where they are: this module decides, and something else acts on
+the decision.
 """
 
 import asyncio
-from typing import Protocol
+from typing import TYPE_CHECKING
 
 from vinga_server.config import ServerConfig
 from vinga_server.device.boundary import PIPELINE_SAMPLE_RATE, DeviceOutput
@@ -43,6 +43,11 @@ from vinga_server.events.catalog import (
 from vinga_server.events.values import ABSENT, Absent, Real, Whole
 from vinga_server.providers import AsrResult, Endpointer
 
+if TYPE_CHECKING:
+    # Named for the annotation alone: `pipeline` imports this module, so
+    # a runtime import here would close the cycle.
+    from vinga_server.runtime.pipeline import PipelineRuntime
+
 # How much recent mic audio the utterance buffer keeps. A realtime
 # session listens through the silences too, so without a bound the
 # buffer would grow for the whole session (about 115 MB at the one-hour
@@ -52,39 +57,29 @@ UTTERANCE_TAIL_S = 30
 UTTERANCE_TAIL_BYTES = UTTERANCE_TAIL_S * PIPELINE_SAMPLE_RATE * 2
 
 
-class ReplyControl(Protocol):
-    """The slice of the orchestrator the turn-taking side may touch:
-    whether a reply is in flight, how one is started, how one is
-    cancelled, and the confirmation transcription the gate ladder needs.
-
-    Narrow on purpose. The confirmation is injected whole rather than
-    assembled here, because what it runs inside (the provider watch, the
-    session's language lock) belongs to the orchestrator and the ladder
-    needs none of it to decide."""
-
-    def replying(self) -> bool: ...
-
-    def start_reply(self, pcm: bytes, result: AsrResult | None) -> None: ...
-
-    async def cancel_reply(self) -> None: ...
-
-    async def confirm_transcript(self, pcm: bytes) -> AsrResult: ...
-
-
 class TurnTaking:
     """One conversation's floor, for the life of one connection.
 
     `endpointer` is public and starts as None: the agent's VAD makes it,
     and an agent handover replaces it, since the previous agent's
     endpointer carries the previous agent's tuning and mid-utterance
-    state."""
+    state.
+
+    `reply` is the orchestrator, and only four of its members are ever
+    touched from here: whether a reply is in flight (`replying`), how
+    one is started (`start_reply`), how one is cancelled
+    (`cancel_reply`), and the confirmation transcription the gate ladder
+    needs (`confirm_transcript`). Narrow on purpose. The confirmation is
+    asked for whole rather than assembled here, because what it runs
+    inside (the provider watch, the session's language lock) belongs to
+    the orchestrator and the ladder needs none of it to decide."""
 
     def __init__(
         self,
         events: SessionEvents,
         output: DeviceOutput,
         server: ServerConfig,
-        reply: ReplyControl,
+        reply: "PipelineRuntime",
     ) -> None:
         self._events = events
         self.session_id = events.session_id

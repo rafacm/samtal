@@ -227,8 +227,8 @@ class PipelineRuntime:
 
     Two of the things it used to do are now modules of their own. Who
     holds the floor is `TurnTaking` ([turntaking.py](turntaking.py)),
-    which reaches back through `ReplyControl`, a Protocol this class
-    satisfies structurally; the latency mask is `FillerRunner`
+    which reaches back into four of this class's methods and nothing
+    else; the latency mask is `FillerRunner`
     ([filler_runner.py](filler_runner.py)), which reads the floor
     through `TurnView` and never writes it. What stays here is the
     orchestration: the reply task, the conversation history, the tool
@@ -336,9 +336,9 @@ class PipelineRuntime:
         # state, and the speaker does not change on an agent switch.
         self._asr_language: str | None = None
         # Who holds the floor: the mic feed, the utterance buffer and
-        # the barge-in gates. It reaches back through `ReplyControl`,
-        # which this class satisfies structurally, so the reply task and
-        # the conversation history stay on this side of the seam.
+        # the barge-in gates. It reaches back into four of this
+        # runtime's methods and nothing else, so the reply task and the
+        # conversation history stay on this side of the seam.
         self._turntaking = TurnTaking(events, output, self._server, self)
         self._reply_task: asyncio.Task[None] | None = None
         # This turn's latency mask, if any agent this device is bound to
