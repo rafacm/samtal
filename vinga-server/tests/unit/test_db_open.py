@@ -215,16 +215,28 @@ def test_an_unwritable_directory_names_the_configuration_key(tmp_path: Path) -> 
 # the whole of the operator-facing surface of "these are unsupported".
 
 
-def test_a_database_stamped_at_an_unknown_revision_says_to_reset(tmp_path: Path) -> None:
-    """Any revision this build does not carry, which is what every
-    database from the 0001 to 0004 chain now is."""
-    directory = tmp_path / "db"
+def _stamped(directory: Path, revision: str) -> None:
+    """A migrated database, then rewritten to say it is at `revision`,
+    which is what a deployment carrying another build's chain has."""
     engine = open_database(directory)
     try:
         with engine.begin() as connection:
-            connection.execute(text("update alembic_version set version_num = '0004'"))
+            connection.execute(
+                text("update alembic_version set version_num = :revision"),
+                {"revision": revision},
+            )
     finally:
         engine.dispose()
+
+
+@pytest.mark.parametrize("revision", ["0001", "0002", "0003", "0004"])
+def test_a_database_from_the_squashed_chain_says_to_reset(
+    tmp_path: Path, revision: str
+) -> None:
+    """Every revision the squash deleted, one by one, because the set is
+    closed and naming it is what makes the arm narrow."""
+    directory = tmp_path / "db"
+    _stamped(directory, revision)
 
     with pytest.raises(ConfigError) as caught:
         open_database(directory)
@@ -234,8 +246,57 @@ def test_a_database_stamped_at_an_unknown_revision_says_to_reset(tmp_path: Path)
     assert "Reset the database directory and re-seed" in problem
     # The stored revision is a value in a file nothing here validates, so
     # it is not quoted back, and neither is Alembic's own sentence.
-    assert "0004" not in problem
-    assert "Can't locate" not in problem
+    assert revision not in problem
+    assert "Can\'t locate" not in problem
+
+
+def test_a_database_from_a_newer_build_is_not_told_to_delete_itself(
+    tmp_path: Path,
+) -> None:
+    """The rollback: a deployment upgraded, then rolled back to this
+    image, so the volume is stamped at a revision from a chain this build
+    does not have yet.
+
+    Alembic fails it exactly as it fails a database from the squashed
+    chain, and the two want opposite things. This one is current: the
+    remedy is to roll forward to the build that wrote it, and telling its
+    operator to reset the volume would destroy a live configuration. So
+    it takes the ordinary migration-failure sentence instead, which is
+    what it took before the squash arm existed.
+    """
+    directory = tmp_path / "db"
+    _stamped(directory, "2002_a_migration_this_build_does_not_have")
+
+    with pytest.raises(ConfigError) as caught:
+        open_database(directory)
+
+    problem = str(caught.value)
+    assert "Reset the database directory" not in problem
+    assert "before the storage reshape" not in problem
+    assert "cannot migrate the database" in problem
+    assert "server.database.dir" in problem
+
+
+def test_an_alembic_failure_that_is_not_a_stranded_database_is_not_told_to_reset(
+    tmp_path: Path,
+) -> None:
+    """The other CommandError this used to answer with the reset
+    sentence: a script directory Alembic cannot read at all. Nothing
+    about the database is wrong, so nothing about the database is the
+    remedy."""
+    from vinga_server.db import migration_failure, open_at
+
+    with pytest.raises(ConfigError) as caught:
+        open_at(tmp_path / "db", "vinga.db", tmp_path / "no-such-migrations")
+
+    assert "Reset the database directory" not in str(caught.value)
+
+    # And the shape directly, since a resolution failure with no cause at
+    # all is a thing a future Alembic could produce.
+    from alembic.util.exc import CommandError
+
+    plain = migration_failure(CommandError("multiple heads"), tmp_path / "vinga.db")
+    assert "Reset the database directory" not in str(plain)
 
 
 def test_the_migrations_ship_inside_the_package() -> None:
