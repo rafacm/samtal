@@ -109,6 +109,44 @@ def test_asking_for_help_is_not_a_failure(run, capsys: pytest.CaptureFixture[str
     assert "Usage: vinga-server config" in capsys.readouterr().out
 
 
+# Where help leaves through, and what it leaves carrying
+#
+# `--help` is answered by Click, which asks its context to exit, and
+# this group turns that request into the SystemExit(0) it has always
+# left through. The turn happens after the handler rather than inside
+# it, for the reason every refusal in `cli.py` is raised after its
+# handler: an exception raised while another is being handled keeps that
+# one on `__context__`, and here that one is a library exception holding
+# the context it was raised from, which holds the argument list. That is
+# where a secret typed as an argument would be.
+#
+# `raise ... from None` is not the fix and was the bug: it sets
+# `__suppress_context__`, which stops a traceback being printed and
+# leaves `__context__` exactly where it was, so the leak survives every
+# assertion made about a stream.
+HELPED = [("the group",), ("show",), ("set", "provider"), ("schema",)]
+
+
+@pytest.mark.parametrize(
+    "words", HELPED, ids=[" ".join(words) for words in HELPED]
+)
+def test_asking_for_help_carries_no_library_exception_with_it(
+    run, capsys: pytest.CaptureFixture[str], words: tuple[str, ...]
+) -> None:
+    """At the root and at a leaf, and at the one group word that is also
+    a command: help leaves through exit 0 with both chain slots empty,
+    so nothing walking the chain finds a Typer exception behind it."""
+    asked = () if words == ("the group",) else words
+
+    with pytest.raises(SystemExit) as caught:
+        run(*asked, "--help")
+
+    assert caught.value.code == 0
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert capsys.readouterr().out.startswith("Usage: vinga-server config")
+
+
 # One case per shape the usage boundary names
 #
 # Click states a usage mistake two ways: as a subclass of `UsageError`,
