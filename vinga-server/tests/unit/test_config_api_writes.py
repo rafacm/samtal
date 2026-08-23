@@ -27,7 +27,7 @@ from fastapi.testclient import TestClient
 from tests.support.notices import CHECK_IN, RELOAD, boundaries
 from tests.support.problems import PROBLEM_KEYS, refused
 from vinga_server import db as db_module
-from vinga_server.config.api import build_api
+from vinga_server.config.api import APPLY_BODY_LIMIT, build_api
 from vinga_server.config.models import NOT_A_MAC, PROVIDER_STAGES
 from vinga_server.config.secrets import (
     MASTER_KEY_ENV,
@@ -1134,3 +1134,134 @@ def test_a_cleared_secret_stops_shadowing_its_reference(
     assert response.json()["wrote"] == "secret for provider llm.claude api_key cleared"
     assert client.get("/providers/llm/claude").json()["secrets"] == {}
     assert store.load().secrets.locations() == []
+
+
+# The whole document in one request
+#
+# `POST /apply` is the one write whose answer is a list, and the split
+# between the repository and this route is the one every write has: the
+# repository answers with the canonical outcome, and the route computes
+# what the repository cannot know, which is when each entry takes effect
+# and which activation codes a successful commit retired.
+
+DOCUMENT: dict[str, object] = {
+    "providers": {"llm": {"claude": {"type": "anthropic", "model": "m"}}},
+    "agents": {"sam": {"prompt": "You are Sam."}},
+    "devices": {"AA-BB-CC-DD-EE-FF": ["sam"]},
+    "default_agent": "sam",
+}
+
+
+def test_a_document_is_applied_whole_and_listed_in_order(
+    client: TestClient, store: ConfigStore
+) -> None:
+    response = client.post("/apply", json=DOCUMENT)
+
+    assert response.status_code == 200
+    entries = response.json()["entries"]
+    assert [(one["section"], one["identity"], one["outcome"]) for one in entries] == [
+        ("providers", "llm.claude", "wrote"),
+        ("agents", "sam", "wrote"),
+        ("devices", "aa:bb:cc:dd:ee:ff", "wrote"),
+        ("default_agent", "", "wrote"),
+    ]
+    assert store.load().domain.default_agent == "sam"
+
+
+def test_every_applied_entry_says_when_it_takes_effect(client: TestClient) -> None:
+    """The same four boundaries a single write announces, chosen the
+    same way: the entity kinds name the reload, and the two settings are
+    read as a device asks for them."""
+    entries = client.post("/apply", json=DOCUMENT).json()["entries"]
+
+    named = {one["section"]: boundaries(one["notice"]) for one in entries}
+    assert named["providers"] == {RELOAD}
+    assert named["agents"] == {RELOAD}
+    # This application serves no agent at all, which is the honest answer
+    # for one built without a server, so both settings name the reload
+    # that would install the agent beside the check-in the row is live at.
+    assert named["devices"] == {CHECK_IN, RELOAD}
+    assert named["default_agent"] == {CHECK_IN, RELOAD}
+
+
+def test_an_applied_binding_to_a_loaded_agent_needs_no_reload(
+    serving_client: TestClient,
+) -> None:
+    """The notice depends on the running server, which is why the route
+    computes it and the repository does not: the same document answers
+    differently on a server that is serving the agent it names."""
+    entries = serving_client.post("/apply", json=DOCUMENT).json()["entries"]
+
+    named = {one["section"]: boundaries(one["notice"]) for one in entries}
+    assert named["devices"] == {CHECK_IN}
+    assert named["default_agent"] == {CHECK_IN}
+
+
+def test_an_unchanged_entry_has_nothing_to_apply(client: TestClient) -> None:
+    """Applied twice: the second says every row was already what the
+    document says, and an entry with no write has no boundary to
+    announce."""
+    client.post("/apply", json=DOCUMENT)
+
+    entries = client.post("/apply", json=DOCUMENT).json()["entries"]
+
+    assert {one["outcome"] for one in entries} == {"unchanged"}
+    assert [one["notice"] for one in entries] == [None] * len(entries)
+
+
+def test_a_refused_document_writes_nothing_and_quotes_nothing(
+    client: TestClient, store: ConfigStore, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Refused whole, with the repository's own sentences, and the
+    fragment a mistake put a credential into is not quoted back."""
+    with caplog.at_level(logging.DEBUG):
+        response = client.post(
+            "/apply",
+            json={
+                "providers": {"llm": {"claude": {"type": "anthropic", "api_key": SECRET}}},
+                "agents": {"sam": {"prompt": "You are Sam."}},
+            },
+        )
+
+    assert response.status_code == 422
+    assert set(response.json()) == PROBLEM_KEYS
+    assert "looks like an inline secret" in refused(response.json(), 422)
+    assert SECRET not in response.text
+    assert SECRET not in str(response.headers)
+    assert SECRET not in caplog.text
+    snapshot = store.load()
+    assert snapshot.domain.providers.llm == {}
+    assert snapshot.domain.agents == {}
+
+
+def test_an_empty_document_applies_nothing(client: TestClient) -> None:
+    response = client.post("/apply", json={})
+
+    assert response.status_code == 200
+    assert response.json() == {"entries": []}
+
+
+def test_a_document_larger_than_the_endpoint_reads_is_refused(
+    client: TestClient, store: ConfigStore
+) -> None:
+    """Request hygiene, and the sentence names the size rather than
+    quoting anything: what is in an over-large body is as unvalidated as
+    anything else a fragment carries."""
+    padding = "x" * (APPLY_BODY_LIMIT + 1)
+
+    response = client.post(
+        "/apply", json={"prompt_fragments": {"household": {"text": padding}}}
+    )
+
+    assert response.status_code == 422
+    assert str(APPLY_BODY_LIMIT) in refused(response.json(), 422)
+    assert padding not in response.text
+    assert store.load().domain.prompt_fragments == {}
+
+
+def test_applying_is_gated(client: TestClient) -> None:
+    response = client.post(
+        "/apply", json=DOCUMENT, headers={"Authorization": "Bearer wrong"}
+    )
+
+    assert response.status_code == 401

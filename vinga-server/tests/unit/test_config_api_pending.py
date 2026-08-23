@@ -500,6 +500,83 @@ def test_unsetting_a_default_agent_leaves_the_listing_alone(
     assert second != code
 
 
+# And the same housekeeping from an applied document, which binds the
+# same rows through the same repository and so has to retire the same
+# codes. Done after the commit and for an unchanged row as well as a
+# changed one: what retires a code is the world the document describes,
+# not whether this particular request was the one that wrote it.
+
+
+def test_an_applied_binding_retires_the_code_that_device_was_showing(
+    client: TestClient, pending: PendingDevices
+) -> None:
+    code = _waiting(pending)
+    waiting = _waiting(pending, OTHER_MAC)
+
+    assert client.post("/apply", json={"devices": {MAC: ["assistant"]}}).status_code == 200
+
+    listed = client.get("/devices/pending").json()
+    assert code not in listed
+    assert listed[waiting]["mac"] == OTHER_MAC
+
+
+def test_an_applied_binding_that_changed_nothing_still_retires_the_code(
+    client: TestClient, pending: PendingDevices
+) -> None:
+    """The device is configured either way, so it is not one an operator
+    may claim by the code it was showing, and the code it is showing
+    binds nothing."""
+    client.post("/apply", json={"devices": {MAC: ["assistant"]}})
+    code = _waiting(pending)
+
+    applied = client.post("/apply", json={"devices": {MAC: ["assistant"]}})
+
+    assert [one["outcome"] for one in applied.json()["entries"]] == ["unchanged"]
+    assert code not in client.get("/devices/pending").json()
+
+
+def test_an_applied_default_agent_empties_the_listing(
+    client: TestClient, pending: PendingDevices
+) -> None:
+    _waiting(pending)
+    _waiting(pending, OTHER_MAC)
+
+    assert client.post("/apply", json={"default_agent": "assistant"}).status_code == 200
+
+    assert client.get("/devices/pending").json() == {}
+
+
+def test_an_applied_null_default_agent_leaves_the_listing_alone(
+    client: TestClient, pending: PendingDevices
+) -> None:
+    """Uncovering a device is not configuring it, exactly as the DELETE
+    beside it: the explicit null unsets the setting and retires
+    nothing."""
+    client.post("/apply", json={"default_agent": "assistant"})
+    code = _waiting(pending)
+
+    assert client.post("/apply", json={"default_agent": None}).status_code == 200
+
+    assert client.get("/devices/pending").json()[code]["mac"] == MAC
+
+
+def test_a_refused_document_retires_no_code(
+    client: TestClient, pending: PendingDevices
+) -> None:
+    """Every bit of the housekeeping runs after the commit, so a
+    document that was refused leaves the table exactly as it was: the
+    board is still showing its number, and the number still works."""
+    code = _waiting(pending)
+
+    refused = client.post(
+        "/apply", json={"devices": {MAC: ["assistant"]}, "agents": {"ghost": {"llm": "nope"}}}
+    )
+
+    assert refused.status_code == 422
+    assert client.get("/devices/pending").json()[code]["mac"] == MAC
+    assert _claim(client, code).status_code == 200
+
+
 # What the acknowledgement is about
 
 
