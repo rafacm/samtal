@@ -1,0 +1,284 @@
+# Rebuild the config CLI on Typer: implementation
+
+Companion to [`2026-08-23-typer-cli.md`](2026-08-23-typer-cli.md). One
+section per milestone, recording what was actually written, the
+deviations from the plan, what building it turned up, and the
+verification results as they came out. A milestone with no deviations
+says so explicitly.
+
+## M1: the grammar moves to Typer whole
+
+### What was done
+
+Seven commits: the dependency, the rebuild, and five that pin what the
+rebuild changed.
+
+**The dependency** (`ecc86d2a`). `typer>=0.27.1` joins the runtime
+dependencies, with `uv.lock` in the same commit because CI installs
+`--frozen`. Runtime rather than development: the command group ships
+with the server.
+
+**The rebuild** (`5e1e9c06`). `config/cli.py`'s argument layer is a
+Typer app. What went: `_Parser`, `_usage_problem`'s narrow shape,
+`_fragment_parser`, and `_parser()`'s 291 lines of subparser
+construction with their `set_defaults(run=..., act=...)` wiring. What
+carried over unchanged: the acts table, every renderer, every refusal
+sentence, the transport policy (`_call`, `_sent`, `_answer`,
+`_permitted`, `_base_url`, `_token`, both timeouts), `_fragment`,
+`_read_secret`, `_store`, and the four no-API commands' bodies. The
+verb set, the positional shapes and the `-f` writes are what they
+were, so all four artifact-pinned spellings (`config reload`,
+`config add-device`, `config bind-device`, `config ota-url`) and every
+other spelling stand.
+
+Four structures are new, and they are the whole of the argument layer:
+
+- `Invocation`, the seam. A frozen dataclass naming every field the
+  grammar can hand an act, replacing `argparse.Namespace` as the type
+  every act's `path`, `body` and `local` callable takes. The bodies
+  did not change; only the annotation did, so an act reading a field
+  nobody sets is now a name that is not there.
+- `Globals` and its `merged`, which is the `default=argparse.SUPPRESS`
+  dance restated. The root callback resolves the first answer onto the
+  Click context, every position under it folds its own copies in, and
+  a value wins only where it was given. `--local` accumulates rather
+  than overrides, because it is presence-only.
+- `Command`, one row per command: its words, what it does, how it
+  declares its arguments, its help, its epilog, and `local_ok`.
+  `COMMANDS` is thirty-four of them and `GROUPS` is the five group
+  words with the help a leaf row cannot carry. The registration loop
+  in `command()` is the only reader.
+- The usage boundary, below.
+
+`main`, `build_client` and the exit codes are unchanged.
+`cli.main(argv)` still returns 0 or 1, still prints a `ConfigError`
+sentence to stderr, and still leaves `--help` through `SystemExit(0)`.
+
+**The break-glass gate** moved from `main` into `_invocation`, which
+every command's declaration calls before it does anything. It reads
+`local_ok` off the row, which is decision 5: membership of the
+recovery subset is a fact of the command rather than an imperative
+install on a subparser, so `test_the_two_lists_cover_the_whole_break_glass_subset`
+(`e5eba024`) can hold the differential suite's two lists to it. Both
+differential pins carry over with their meaning intact: the
+acknowledgement equality and its wording sibling assert real output
+and name no sentence.
+
+**The usage boundary** is decision 2's. The app runs with Click's
+standalone mode off, driven through `make_context`/`invoke` directly,
+so nothing Click decides reaches a stream. A `ClickException` is
+translated two ways and never by passing its text through: the
+subclasses by CLASS (`NoSuchOption`, `MissingParameter`,
+`BadOptionUsage`, `BadArgumentUsage`, `BadParameter`), and the base
+`UsageError`, which is one class for three different mistakes, by
+Click's own fixed words (`Got unexpected extra argument`,
+`No such command`, `Missing command`), which are the part of those
+sentences carrying no value. Anything else gets the deliberately vague
+fallback. The secret-never-an-argument sentence stays on the
+unrecognized-arguments shape. The refusal is built inside the handler
+and raised after it, the way `_fragment` and `_understood` raise, so
+no Click exception is left as a `__context__` for a chain walker to
+find the argument list behind.
+
+That closes the hole the plan's decision 2 named: `config doctor` used
+to answer argparse's `invalid choice: 'doctor'`, echoing a word that a
+URL or a credential follows on the command line.
+
+**The planted-secret sweep** (`504430db`) is one case per shape the
+boundary names, each with a credential where the mistake would put
+one, asserting this grammar's sentence on stderr and the value on
+neither stream. `BadParameter` has no case: no argument of this
+grammar is a typed choice, so Click has nothing to refuse a value for,
+and the boundary translates it anyway.
+
+**`fragment_help` deepened** (`785970c0`) to render each field's type
+and default beside its description, through the same `type_name` and
+`default` the reference's table cells are computed with. Two tests
+enumerate the command tree the entry point runs: every command's help
+carries every parameter it declares with the description it was given
+and one `[required]` per parameter that has to be there, and every
+`set` help carries every field of the model its fragment is validated
+against with that field's type and default.
+
+**The position matrix** (`fe921df6`) is decision 2 as amended, stated
+separately for the two positions. The root half reads the options off
+the root's own declarations, so a fourth inherits the matrix; the leaf
+half holds every command of the table to the options it should take,
+with the four documented exclusions. The behavior half is
+parameterized over the two options that carry a value (before alone,
+after alone, and both with the nearer winning, read back through the
+address the client was built with) and `--local` gets the two cases
+presence-only admits.
+
+**The tightening** (`818b571d`) passes the three globals positionally
+into `_invocation`, which is what took a command declaration's body
+from eleven lines to one.
+
+### Deviations from the plan
+
+Four, none of them to the grammar.
+
+**1. Typer vendors Click, so the boundary imports from
+`typer._click.exceptions`.** Typer 0.27 ships its own copy of Click
+(`typer._click`) rather than importing the installed one, and it is
+that copy's classes a usage error is raised as. `click.UsageError`
+catches none of them, and translating by class is decision 2's
+requirement, so the five subclasses plus `ClickException` and `Exit`
+are imported from where they are, with a comment saying why and what
+a Typer release that moves them would do (fail at import, loudly). The
+alternatives were worse: matching on `type(exc).__name__` is a string
+where a class belongs, and reaching the base through
+`typer.BadParameter.__mro__` is the same private dependency spelled so
+that a reader cannot see it.
+
+**2. The UNSET sentinel is `None` and `False`.** The plan asks for
+each command's copy of a global option to default to an UNSET
+sentinel. It defaults to `None` for the two options that carry a value
+and `False` for the flag, which are the not-given values and are
+unambiguous: neither option can be typed as `None`, and `--local` has
+no negative spelling. A sentinel object of this module's own would be
+run through Click's string conversion on the way to `ctx.params` and
+would read back as its repr in the help, which is the one place these
+defaults are published. The SUPPRESS semantics are reproduced exactly;
+`Globals.merged` is where they live, and the matrix proves it (with
+the merge broken to always take the leaf value, 33 of the grammar and
+local suites' tests fail).
+
+**3. `cli.py` grew rather than shrank.** The plan's goal says the
+argument layer replaces "~800 lines of argparse machinery" with an
+expected saving of a few hundred lines. Neither half held for M1. The
+machinery that went was 333 lines (`_parser()` 291, `_fragment_parser`
+16, `_Parser` plus `_usage_problem` 26), and what replaced it is 889:
+the file is 2,035 lines before and 2,678 after, `+643`. The reason is
+structural rather than incidental: argparse builds a parameter by
+calling `add_argument` in a loop, while Typer reads a signature, so
+each of the grammar's argument shapes is a function with that shape
+written out. There are fourteen of them for thirty-four commands, and
+they are what the saving would have had to come out of. The rest of
+the growth is the table's own help prose (one row per command, where
+argparse had one `add_parser` call), the four new structures above,
+and this repository's comment density. What the milestone did buy is
+what its own design footprint claims and what M2 to M4 spend: adding a
+command is a row, `local_ok` is readable, and the help is generated.
+Reported rather than forced: no shape was compressed to hit a number.
+
+**4. Two help-rendering behaviors are Click's, not argparse's.** The
+usage line reads `Usage:` rather than `usage:`, and the command
+listing shows a command's short help, which Click cuts at the first
+sentence or the terminal width unless `short_help` is given. Every row
+passes its help as both, so the listing shows the whole sentence, and
+the two help-phrase assertions the grammar suite has always made pass
+unchanged. Click also rewraps an epilog into paragraphs, which would
+reflow the generated field listing into prose, so the commands are
+registered with a `TyperCommand` subclass whose `format_epilog` writes
+the lines as they were laid out. That is the same reason argparse's
+`RawDescriptionHelpFormatter` was asked for before this.
+
+### The changed usage sentences
+
+Every assertion that moved, and all of them under one rule:
+**usage-boundary wording only.** Nothing about what a command does,
+what it prints on success, or what a refusal from the API or the
+repository says changed anywhere.
+
+| File | Assertion | Before | After |
+| --- | --- | --- | --- |
+| `test_config_cli_grammar.py` | `test_asking_for_help_is_not_a_failure` | `"usage: vinga-server config"` | `"Usage: vinga-server config"` |
+| `test_doctor.py` | `test_the_config_group_no_longer_answers_this_command` | `"invalid choice" in err` | `"that is not a command" in err`, and `"doctor" not in err` |
+
+That is the whole list. The other seven config suites and the docgen
+suite kept every assertion they had; the two suites above kept theirs
+apart from these two lines, and the docstrings that named argparse
+were rewritten to name Click, which changed no assertion.
+
+The second row is the strengthening decision 2 records, and it gained
+an assertion rather than only changing one: the old refusal quoted the
+word that was typed, and the mistyped command an operator makes at
+this entry point is followed by whatever they were about to hand a
+command that takes secrets.
+
+### The sentences the boundary now says
+
+Each with `; run with --help for the grammar` appended, which is the
+sibling grammars' shape.
+
+| Shape | Sentence |
+| --- | --- |
+| `NoSuchOption` | that is not an option of this command |
+| `MissingParameter` | a required argument is missing |
+| `BadOptionUsage` | an option was given without its value |
+| `BadArgumentUsage` | an argument was given in a shape this command does not take |
+| `BadParameter` | an argument was given a value this command does not take |
+| `Got unexpected extra argument` | unrecognized extra arguments. A secret is never given as an argument: set-secret reads it from stdin, or from the variable named with --from-env |
+| `No such command` | that is not a command |
+| `Missing command` | a command is missing |
+| anything else | the command line could not be parsed |
+
+### The inventory
+
+`wc -l`, before at `877f391b` and after at `818b571d`:
+
+| File | Before | After |
+| --- | --- | --- |
+| `src/vinga_server/config/cli.py` | 2035 | 2678 |
+| `src/vinga_server/config/docgen.py` | 473 | 484 |
+| `tests/unit/test_config_cli_grammar.py` | 105 | 428 |
+| `tests/unit/test_config_cli_local.py` | 620 | 663 |
+
+The grammar's own shape, unchanged: 18 top-level commands in the order
+they were declared in before, 5 of them groups, 34 invocable commands
+in all, 9 of them mutating members of the break-glass subset and 7 of
+them reading members.
+
+Exit greps, from `vinga-server/`:
+
+```
+$ grep -n "argparse" src/vinga_server/config/cli.py
+1907:# reproduces argparse's `default=SUPPRESS` dance exactly. A sentinel
+1994:    exactly the reason argparse's raw formatter was asked for before
+```
+
+Both are prose naming what the new code replaced; there is no import
+and no call. `_Parser` and `_usage_problem`'s old shape: the class is
+gone, and `_usage_problem` is the name of the new boundary, which
+takes a `ClickException` rather than argparse's message string and
+translates by class.
+
+### Verification
+
+All from `vinga-server/`.
+
+- `uv run ruff check .`: `All checks passed!`, at each commit.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`:
+  `2959 passed, 20 skipped in 42.10s` at the tip (2870 before the
+  milestone; the 89 are the new derivation, planted-secret, help and
+  matrix cases).
+- `uv run pytest tests/integration -q`: `61 passed in 192.03s`.
+- `uv run mypy` (the scoped `events` lane):
+  `Success: no issues found in 4 source files`.
+- The four drift checks, run the way CI runs them
+  (`config reference`, `conversations schema`, `events reference`,
+  `config openapi` each diffed against its committed copy): all four
+  clean. `domain-config.md` did not move, which is what decision 3
+  requires of M1: no descriptor's `command` field changed.
+- `uv sync --frozen`: `Checked 99 packages`, after the lock change.
+- The child-interpreter docgen pin
+  (`test_the_reference_and_the_schema_render_from_the_models_alone`)
+  green untouched: `ALLOWED_IMPORTS` is the same exact set, because
+  the `fragment_help` deepening reads two functions that were already
+  in the module.
+- The matrix proved to bite: with `Globals.merged` rewritten to take
+  the leaf value unconditionally, 33 tests of the grammar and local
+  suites fail; restored, 133 pass.
+- The help tests proved width-independent: the grammar suite is green
+  at `COLUMNS=40`, `80` and `200`.
+
+### Not verified here
+
+Nothing about a real terminal. Every help assertion in this milestone
+is made against captured output with the spaces taken out, because the
+formatter wraps at the width of whatever it prints to. What a person
+sees in an 80-column terminal was read by hand during the rebuild and
+is not pinned; decision 8's marker-delimited reference, which renders
+at a fixed width with no terminal detection, is M4's and is where that
+becomes a check rather than a reading.
