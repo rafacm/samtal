@@ -267,24 +267,35 @@ def _parsed(argv: Sequence[str]) -> None:
     that is not a failure, and it leaves through the exit code Click
     asked for, which is 0.
 
-    The refusal is built inside the handler and raised after it, the way
-    every other boundary in this module raises. A Click exception holds
-    the context it was raised from and that context holds the argument
-    list, so an exception raised while one is being handled would carry
-    the whole command line as its `__context__` for anything walking the
-    chain to find, which for this CLI is where a secret typed as an
-    argument would be.
+    Both answers are recorded inside their handler and raised after it,
+    the way every other boundary in this module raises. A Click
+    exception holds the context it was raised from and that context
+    holds the argument list, so an exception raised while one is being
+    handled would carry the whole command line as its `__context__` for
+    anything walking the chain to find, which for this CLI is where a
+    secret typed as an argument would be.
+
+    That applies to `--help` as much as to a refusal, which is why the
+    exit code is carried out of the arm rather than raised in it.
+    `raise ... from None` sets `__suppress_context__`, which stops a
+    traceback being printed and stops nothing else: the Typer exception
+    is still on `__context__`, and this module's whole no-leak
+    discipline is about what a chain walker finds rather than about what
+    is displayed.
     """
     problem: str | None = None
+    asked_for: int | None = None
     try:
         grammar = command()
         with grammar.make_context(PROGRAM, list(argv)) as context:
             grammar.invoke(context)
         return
     except Exit as asked:
-        raise SystemExit(asked.exit_code) from None
+        asked_for = asked.exit_code
     except ClickException as exc:
         problem = _usage_problem(exc)
+    if asked_for is not None:
+        raise SystemExit(asked_for)
     raise ConfigError(problem)
 
 
