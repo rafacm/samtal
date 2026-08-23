@@ -1894,7 +1894,9 @@ LOCAL_HELP = (
 
 FILE_HELP = "YAML fragment for this entity, or - to read it from stdin"
 
-FROM_ENV_HELP = "read the value from this variable"
+FROM_ENV_HELP = (
+    "read the value from this variable (default: stdin, read without echo at a terminal)"
+)
 
 STAGE_HELP = ", ".join(PROVIDER_STAGES)
 

@@ -362,6 +362,43 @@ def _typed(parameter) -> str:
     return str(parameter.metavar)
 
 
+def _states_a_default(parameter) -> bool:
+    """Whether this parameter is one whose default has to be written
+    into its own description.
+
+    An option that takes a value and is not required has a default, and
+    not one of this grammar's is a value the library could print: two
+    are resolution orders and one is a stream, and each is declared as
+    the `None` that stands for not given, for which Typer prints
+    nothing at all. So the description is the only place the default can
+    be said, and saying it is not optional: `--from-env` unstated reads
+    as an option with no alternative rather than as the one that
+    replaces reading the secret from stdin.
+
+    A flag is excluded, because a flag that is not given is a flag that
+    is not given, and printing a default for it would be noise.
+    """
+    return (
+        parameter.param_type_name == "option"
+        and not parameter.required
+        and not getattr(parameter, "is_flag", False)
+    )
+
+
+def _first_sentence(description: str | None) -> str:
+    """The part of a field's description a help line carries.
+
+    The rule is `docgen`'s, restated here the way the docgen suite
+    restates it: a change to how much of a description the help carries
+    should turn up as a failing test rather than as help that quietly
+    says less. The descriptions are written so that the first sentence
+    is the one that has to be there.
+    """
+    assert description, "an undescribed field is invisible in all three renderings at once"
+    head, separator, _ = description.partition(". ")
+    return head + separator.strip()
+
+
 @pytest.mark.parametrize(
     "row", cli.COMMANDS, ids=[" ".join(row.words) for row in cli.COMMANDS]
 )
@@ -370,14 +407,13 @@ def test_every_command_describes_every_parameter_it_declares(
 ) -> None:
     """Nothing a command declares is missing from the page an operator
     reads: every parameter by the name it is typed under, every
-    description it was given, and one `[required]` for each parameter
-    that has to be there.
+    description it was given, one `[required]` for each parameter that
+    has to be there, and a stated default for every option that takes a
+    value and does not have to be given.
 
-    The two options whose default is a resolution order rather than a
-    value carry it in their description, which is where a default that
-    is not a literal has to live; `--local` has no default worth
-    printing, since a flag that is not given is a flag that is not
-    given.
+    That last one is the assertion `--from-env` needed and did not have:
+    its default is to read the secret from stdin, which is behavior an
+    operator has to know and which the library prints nothing about.
     """
     helped = printed_help(run, capsys, *row.words)
     declared = _leaf(row.words).params
@@ -386,6 +422,8 @@ def test_every_command_describes_every_parameter_it_declares(
         assert _typed(parameter) in helped, parameter.name
         if parameter.help:
             assert _said(parameter.help) in _said(helped), parameter.name
+        if _states_a_default(parameter):
+            assert "default:" in _said(parameter.help or ""), parameter.name
 
     assert helped.count("[required]") == sum(1 for one in declared if one.required)
 
@@ -397,10 +435,14 @@ def test_a_set_help_lists_the_model_it_writes(
     run, capsys: pytest.CaptureFixture[str], kind: str
 ) -> None:
     """Every field of the model a fragment is validated against, with
-    the type it holds and the value it has when the fragment leaves it
-    out. Read off the model here and rendered from the model there, so a
-    field added to a model appears in the help of the command that
-    writes it without anyone remembering to put it there.
+    the type it holds, the value it has when the fragment leaves it out,
+    and what it is for. Read off the model here and rendered from the
+    model there, so a field added to a model appears in the help of the
+    command that writes it without anyone remembering to put it there.
+
+    All three, because all three are what a person writing a fragment
+    has to know, and a type and a default with no sentence beside them
+    say what a key holds without saying what it is.
     """
     helped = printed_help(run, capsys, "set", kind)
     model = docgen.entity(kind).model
@@ -411,6 +453,7 @@ def test_a_set_help_lists_the_model_it_writes(
         given = docgen.default(info)
         held = "(required)" if given == "required" else f"(default: {given})"
         assert _said(held) in _said(helped), name
+        assert _said(_first_sentence(info.description)) in _said(helped), name
 
 
 # The two positions a global option is given in
