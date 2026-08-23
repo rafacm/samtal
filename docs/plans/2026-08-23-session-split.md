@@ -335,3 +335,64 @@ refreshed after any rebase.
   three modules whose one sentence each is stated in decision 5;
   deepens `device/session.py`, which stops carrying three
   implementations behind one class name.
+
+## Plan review round
+
+External review of commit `61bf2f44`, 2026-08-23. Backend: codex
+CLI 0.149.0, model `gpt-5.6-sol`, read-only sandbox, runtime 6m45s.
+Verdict as received: ready after the P1/P2 amendments. Ten
+findings, condensed but faithful; each amendment is its own commit
+with a resolution note here.
+
+1. **P1: the plan contradicted the issue by leaving the
+   first-contact watchdog in `session.py`.** The issue names both
+   watchdogs; the hello wait (`asyncio.timeout(HELLO_TIMEOUT_S)`
+   around the first receive) is the first-contact one, and the plan
+   kept it behind.
+
+2. **P1: M2's zero-test-change constraint was impossible.** Six
+   session suites deliberately reach the names M2 moves:
+   `test_session_barge_in.py` reads `_pace_start`/`_pace_resume`,
+   `test_session_characterization.py` replaces `_encoder`,
+   `test_boundary_contract.py` reads `_last_activity`,
+   `test_session_close_reason.py` replaces `_stop_idle_watchdog`,
+   `test_conversations_session.py` replaces `_start_idle_watchdog`
+   and asserts `_capture is None`, `test_session_events.py` resets
+   `_pace_start`. Compatibility aliases would defeat the split.
+
+3. **P2: `gate()` could not preserve the sent-frame accounting.**
+   The count advances only after send and capture succeed; a
+   pre-send gate makes the pacer advance blind or demands an
+   unnamed second call.
+
+4. **P2: the idle watchdog's loop needs live inputs the interface
+   omitted.** `_watch_for_idle` reevaluates realtime mode and
+   `runtime.replying()` every iteration.
+
+5. **P2: the framing amendment deleted the only nonzero-timestamp
+   compatibility pin.** A default-wrap round trip exercises only
+   zero; incoming stock-firmware v2 frames carry nonzero values.
+
+6. **P2: deleting the skip alone leaves the provider contract
+   contradictory.** `providers/base.py` requires consumers to
+   tolerate `StreamStarted` anywhere, and `_tool_loop`'s default
+   arm appends to `calls`, where reservation then reads `.name`.
+
+7. **P2: re-anchoring the stored-record test on `switch_agent`
+   abandons the path it protects.** `switch_agent` is special-cased
+   in `_run_tools`, bypasses `_run_one`, and a refused handover
+   emits no ordinary `tool_call` event.
+
+8. **P2: capture attachment and teardown ownership was missing.**
+   Startup attaches the raw `SessionCapture` to `SessionEvents`
+   after opening; shutdown emits `session_closed`, detaches, closes,
+   clears, in that order, and the proposed interface said nothing
+   about any of it.
+
+9. **P3: `CaptureTap` collides with `events.CaptureTap`,** the
+   existing adapter that writes event emissions to a capture.
+
+10. **P3: the reservation claim was wrong.** MCP tools are always
+    published qualified (`<entry>__<tool>`); what the freed name
+    permits is an MCP entry named `random_number`, never a bare
+    tool of that name.
