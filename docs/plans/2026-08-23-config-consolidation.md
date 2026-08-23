@@ -142,7 +142,7 @@ explicitly.
    An underscored constant with a test reader would be exactly
    the reach-in AGENTS.md flags, and none is created. The no-leak
    sentinels are NOT wording pins and do not change; neither is
-   the differential acknowledgement pin of decision 7.
+   the differential acknowledgement pin of decision 6.
 5. **The issue's `responses.py` premise is stale, and the plan
    records it.** Post-#210, every public name in the module has a
    production reader (verified by the review round against
@@ -154,7 +154,7 @@ explicitly.
    their only caller, per the deletion test. The wire-shape
    models stay, being the contract. Each name's disposition is
    enumerated in the implementation doc.
-7. **The `writes.py` fold keeps its guarantee through the
+6. **The `writes.py` fold keeps its guarantee through the
    differential pin, and its census is stated honestly.** The
    module is 13 f-string factories, one constant-returning
    function, and two branching decisions (`binding_notice`,
@@ -232,8 +232,18 @@ explicitly.
 ## Milestones
 
 - [ ] **M1: merge, fold, and shrink the structures.** (PR TBD)
-  Decisions 1, 2, and 5: the DomainConfig merge, the writes.py
-  fold, the responses split, the entities shrink. Byte-identical
+  Decisions 1, 2, 5, and 6: the DomainConfig merge, the writes.py
+  fold with its differential pin, the responses moves, the
+  entities shrink. M1's REAL test census, per the delta review:
+  nine notice-import files (four config, five outside),
+  `test_config_entities.py` losing its writes import and the
+  whole of the display-facts test whose only subject is the two
+  deleted fields, the two importers of the relocating responses
+  helpers (`test_config_cli_transport.py`,
+  `test_config_cli_rendering.py`), and the `CLEARED_DEFAULT_AGENT`
+  constant joining the census. `DomainSnapshot` may be DELETED in
+  M1 if the subclass makes the Protocol redundant, the deletion
+  test governing, with the choice recorded. Byte-identical
   artifacts prove nothing observable moved. Deepens
   `config/models.py` and `config/store.py`: the store's readers
   stop knowing a second domain model exists.
@@ -366,3 +376,17 @@ Findings condensed but faithful:
     factories, one constant, two decisions.
     *Resolution* (`5b84c09c`): runnable greps covering every
     import form, and the honest census everywhere.
+
+## Delta review round
+
+A focused re-review of the amended plan (same backend and model)
+verified all fifteen resolutions against the code, found NO new
+P1, and returned two residues folded in above: the decision
+numbering slip (the fold is decision 6; the milestones now say
+so) and M1's understated test census (nine notice-import files,
+the entities display-facts test dying with its two fields, the
+two responses-helper importers, `CLEARED_DEFAULT_AGENT` in the
+census). It also noted `DomainSnapshot`'s reason weakens under
+the subclass shape; M1 may delete it under the deletion test.
+Verdict as received: "Ready to implement: every P1 resolution
+holds against the code it claims to fix."
