@@ -486,7 +486,7 @@ async def _build_composition(
 # `REFUSAL_STATUS` still decides the status. Where the location is
 # available instead is a server started from this store, which refuses
 # on the same state and prints the location it refused on.
-RELOAD_REFUSED = (
+_RELOAD_REFUSED = (
     "the reload was refused and nothing was changed: the stored configuration does not "
     "compose into a snapshot this server can serve, a credential stored in it will not "
     "open under the configured keys, or a server it names could not be built. Where "
@@ -495,13 +495,13 @@ RELOAD_REFUSED = (
     "refuses on the same state and names the location it refused on."
 )
 
-RELOAD_UNREADABLE = (
+_RELOAD_UNREADABLE = (
     "the reload was refused and nothing was changed: this server's configuration could "
     "not be read, for a reason that is not this request's. The failure is recorded in "
     "this server's log."
 )
 
-RELOAD_DATABASE_BUSY = (
+_RELOAD_DATABASE_BUSY = (
     "the configuration database is busy: another process holds the write lock, so the "
     "stored configuration could not be read. Nothing was changed; make the request "
     "again."
@@ -563,11 +563,11 @@ def config_reloader(
         except (ReloadInProgressError, ProviderRefusedError):
             raise
         except DatabaseBusyError:
-            refusal = DatabaseBusyError(RELOAD_DATABASE_BUSY)
+            refusal = DatabaseBusyError(_RELOAD_DATABASE_BUSY)
         except StorageError:
-            refusal = StorageError(RELOAD_UNREADABLE)
+            refusal = StorageError(_RELOAD_UNREADABLE)
         except ConfigError:
-            refusal = ConfigError(RELOAD_REFUSED)
+            refusal = ConfigError(_RELOAD_REFUSED)
         raise refusal
 
     return reload
@@ -607,7 +607,7 @@ CONFIG_MOVED = (
 # apply beside this one refuses in the same shape and for the same
 # reason. The types are the store's own, so `REFUSAL_STATUS` still
 # decides the status.
-DIFF_REFUSED = (
+_DIFF_REFUSED = (
     "the stored configuration cannot be compared with what this server is running: it "
     "does not compose into a valid snapshot, or a credential stored in it will not "
     "open under the configured keys. Where exactly is deliberately not said here, "
@@ -616,12 +616,12 @@ DIFF_REFUSED = (
     "refuses on the same state and names the location it refused on."
 )
 
-DIFF_UNREADABLE = (
+_DIFF_UNREADABLE = (
     "the stored configuration could not be read, for a reason that is not this "
     "request's. The failure is recorded in this server's log."
 )
 
-DIFF_DATABASE_BUSY = (
+_DIFF_DATABASE_BUSY = (
     "the configuration database is busy: another process holds the write lock, so the "
     "stored half could not be read. Nothing was changed; make the request again."
 )
@@ -706,11 +706,11 @@ def config_diff_reader(
         try:
             return await asyncio.to_thread(read)
         except DatabaseBusyError:
-            refusal = DatabaseBusyError(DIFF_DATABASE_BUSY)
+            refusal = DatabaseBusyError(_DIFF_DATABASE_BUSY)
         except StorageError:
-            refusal = StorageError(DIFF_UNREADABLE)
+            refusal = StorageError(_DIFF_UNREADABLE)
         except ConfigError:
-            refusal = ConfigError(DIFF_REFUSED)
+            refusal = ConfigError(_DIFF_REFUSED)
         raise refusal
 
     async def diff() -> ConfigDiff:

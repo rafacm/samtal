@@ -113,7 +113,7 @@ LIVE_SECRETS: frozenset[EntityKind] = frozenset({"mcp_server", "provider"})
 # into an option name would find it in this answer, so the diagnosis is
 # where a diagnosis belongs, which is a server started from this store,
 # and the class of the failure goes to this server's log.
-PROVIDERS_REFUSED = (
+_PROVIDERS_REFUSED = (
     f"{mcp.RELOAD_REFUSED} the engines the stored configuration names could not all be "
     "built: a provider type, one of its options, its stored credential or the egress "
     "rule refused. Which one is deliberately not said here, because a sentence about a "
@@ -123,7 +123,7 @@ PROVIDERS_REFUSED = (
     "engines this server is running are the ones it was running before this request."
 )
 
-RELOAD_IN_PROGRESS = (
+_RELOAD_IN_PROGRESS = (
     "a reload of this server's configuration is already running. Nothing was changed by "
     "this request; make it again once the first has answered."
 )
@@ -137,7 +137,7 @@ RELOAD_IN_PROGRESS = (
 # beside this, which is where an operator looks; a `read` callable that
 # fails unexpectedly may be holding a connection string, and the reload
 # endpoint's response body is not the place to find out.
-RELOAD_UNREADABLE = (
+_RELOAD_UNREADABLE = (
     f"{mcp.RELOAD_REFUSED} this server's configuration could not be read. The failure "
     "is recorded in this server's log."
 )
@@ -287,8 +287,8 @@ class ConfigReload:
         whichever of them is still running has finished.
         """
         if self._running:
-            mcp.refused(ReloadInProgressError(RELOAD_IN_PROGRESS))
-            raise ReloadInProgressError(RELOAD_IN_PROGRESS)
+            mcp.refused(ReloadInProgressError(_RELOAD_IN_PROGRESS))
+            raise ReloadInProgressError(_RELOAD_IN_PROGRESS)
         self._running = True
         # When the request was accepted, which is what the applied
         # event's duration is measured from: a reload spends its time in
@@ -410,7 +410,7 @@ class ConfigReload:
             raise
         except Exception as exc:
             mcp.refused(exc)
-            problem = RELOAD_UNREADABLE
+            problem = _RELOAD_UNREADABLE
         raise StorageError(problem)
 
     async def _built(self, previous: Generation, candidate: Generation) -> Built:
@@ -440,7 +440,7 @@ class ConfigReload:
                 "a reload could not build the stored world's providers (%s)",
                 type(exc).__name__,
             )
-            problem = PROVIDERS_REFUSED
+            problem = _PROVIDERS_REFUSED
         raise ProviderRefusedError(problem)
 
     async def _stored(self) -> Loaded:
@@ -677,8 +677,5 @@ def _reassembled(previous: Config, applied: Config) -> tuple[str, ...]:
 
 __all__ = [
     "LIVE_SECRETS",
-    "PROVIDERS_REFUSED",
-    "RELOAD_IN_PROGRESS",
-    "RELOAD_UNREADABLE",
     "ConfigReload",
 ]
