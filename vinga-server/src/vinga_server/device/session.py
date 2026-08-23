@@ -51,14 +51,8 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from vinga_server import __version__
 from vinga_server.audio.opus import OpusDecoder
-from vinga_server.audio.resample import Resampler
 from vinga_server.build_info import revision
-from vinga_server.capture import (
-    CAPTURE_RATE,
-    CaptureStore,
-    DeviceFacts,
-    SessionCapture,
-)
+from vinga_server.capture import CAPTURE_RATE, CaptureStore, DeviceFacts
 from vinga_server.config.models import (
     CLIENT_ID_LIMIT,
     ServerConfig,
@@ -75,6 +69,7 @@ from vinga_server.device.boundary import (
     RuntimeFactory,
     SessionInput,
 )
+from vinga_server.device.capture_audio import CaptureAudio
 from vinga_server.device.pacing import ReplyPacer
 from vinga_server.events import SessionEvents, logger
 from vinga_server.events.catalog import (
@@ -213,12 +208,10 @@ class DeviceSession:
         self._conversations = conversations
         self._record: SessionSink | None = None
         self._device_facts = device_facts if device_facts is not None else DeviceFacts()
-        self._capture: SessionCapture | None = None
-        # Built only when a capture starts, so a server that is not
-        # recording pays for none of this.
-        self._capture_decoder: OpusDecoder | None = None
-        self._capture_reply_decoder: OpusDecoder | None = None
-        self._capture_resampler: Resampler | None = None
+        # The recording's own decode path, built only when a capture
+        # starts, so a server that is not recording pays for none of it.
+        # It is what closes the capture it was built around.
+        self._capture_audio: CaptureAudio | None = None
         self.session_id = uuid.uuid4().hex
         # Created at construction with the session id and no device
         # identity yet, so the bad-Device-Id rejection carries
@@ -507,10 +500,10 @@ class DeviceSession:
             # of the decision track, the last row of the record, and the
             # WAV header is patched with a length covering everything.
             self._stop_recording()
-            if self._capture is not None:
+            if self._capture_audio is not None:
                 self._events.detach_capture()
-                self._capture.close()
-                self._capture = None
+                self._capture_audio.close()
+                self._capture_audio = None
             if self._cancelled is not None:
                 # A cleanup step was cancelled, and now that the record
                 # is complete the cancellation goes on its way: the
@@ -618,18 +611,22 @@ class DeviceSession:
         return round(asyncio.get_running_loop().time() - self._opened_at, 2)
 
     def _start_capture(self, manifest: dict[str, Any]) -> None:
-        """Begin recording this session, when a directory is configured."""
+        """Begin recording this session, when a directory is configured.
+
+        The decision track is attached before the audio owner is built,
+        and from the raw capture: which events a session emits is this
+        class's business, through the events object it owns, while the
+        audio is the one thing recording needs codecs of its own for.
+        """
         if self._captures is None or self._opened_at is None:
             return
-        self._capture = self._captures.open(
-            self.session_id, self._opened_at, manifest
-        )
-        if self._capture is None:
+        capture = self._captures.open(self.session_id, self._opened_at, manifest)
+        if capture is None:
             return
-        self._events.attach_capture(self._capture)
-        self._capture_decoder = OpusDecoder(sample_rate=PIPELINE_SAMPLE_RATE)
-        self._capture_reply_decoder = OpusDecoder(sample_rate=OUTPUT_AUDIO.sample_rate)
-        self._capture_resampler = Resampler(OUTPUT_AUDIO.sample_rate, CAPTURE_RATE)
+        self._events.attach_capture(capture)
+        self._capture_audio = CaptureAudio(
+            capture, self.protocol_version, OUTPUT_AUDIO.sample_rate
+        )
 
     def _start_recording(self, manifest: dict[str, Any]) -> None:
         """Begin this session's row in the conversation store, when one
@@ -898,7 +895,8 @@ class DeviceSession:
         # mid-reply, and those are precisely the frames that explain a
         # misfire, so a capture taken after them would be missing the
         # evidence it exists for (#42).
-        self._capture_microphone(data)
+        if self._capture_audio is not None:
+            self._capture_audio.microphone(data)
         if not self.listening:
             self._note_dropped("not_listening")
             return
@@ -930,47 +928,6 @@ class DeviceSession:
 
     def _note_dropped(self, reason: str) -> None:
         self._events.dropped(reason)
-
-    def _capture_microphone(self, data: bytes) -> None:
-        """Decode a mic frame for the capture, whatever the session then
-        does with it.
-
-        Its own decoder, not the pipeline's: this one sees every frame
-        while the pipeline's sees only the frames that got past the
-        guards, and pushing the guarded frames through the pipeline
-        decoder would change what the conversation hears."""
-        if self._capture is None or self._capture_decoder is None:
-            return
-        try:
-            frame = framing.unwrap(self.protocol_version, data)
-            if frame.payload_type != framing.PAYLOAD_OPUS:
-                return
-            pcm = self._capture_decoder.decode(frame.payload)
-        except (framing.FramingError, av.FFmpegError):
-            # Already counted as dropped by the caller, and a frame the
-            # capture cannot read is not a reason to stop capturing.
-            return
-        self._capture.microphone(pcm, asyncio.get_running_loop().time())
-
-    def _capture_reply(self, packet: bytes) -> None:
-        """Record a frame as it is paced out, which is what the speaker
-        played rather than what was synthesized. Decoded back from the
-        Opus that actually went to the device, and resampled to the
-        capture rate so one sample index means one instant in both
-        channels."""
-        if (
-            self._capture is None
-            or self._capture_reply_decoder is None
-            or self._capture_resampler is None
-        ):
-            return
-        try:
-            pcm = self._capture_reply_decoder.decode(packet)
-        except av.FFmpegError:
-            return
-        self._capture.reply(
-            self._capture_resampler.process(pcm), asyncio.get_running_loop().time()
-        )
 
     async def _handle_text(self, text: str) -> None:
         try:
@@ -1151,7 +1108,8 @@ class DeviceSession:
             the recording, so what a capture holds is what the device
             was actually sent."""
             await self._send_frame(framing.wrap(self.protocol_version, packet))
-            self._capture_reply(packet)
+            if self._capture_audio is not None:
+                self._capture_audio.reply(packet)
 
         for packet in batch.packets:
             await self._pacer.transmit(packet, deliver)

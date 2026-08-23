@@ -618,7 +618,7 @@ async def test_a_failure_after_the_open_still_finishes_the_record(
     # says it finished, both of which show up in another process.
     assert session._record is None
     assert attached_taps(session) == [], "a consumer was left attached"
-    assert session._capture is None
+    assert session._capture_audio is None
     manifest = _capture_manifest(tmp_path)
     # The manifest's capture block is rewritten by the close, so its
     # `complete` is what says the capture was finished rather than left
