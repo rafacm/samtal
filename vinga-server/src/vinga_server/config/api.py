@@ -42,6 +42,7 @@ Nothing logs the token, a request body, or an Authorization header.
 import contextlib
 import hmac
 import os
+import re
 from collections.abc import (
     AsyncIterator,
     Awaitable,
@@ -167,150 +168,86 @@ API_VERSION = "1"
 
 API_TITLE = "vinga-server configuration API"
 
-API_DESCRIPTION = (
-    "The domain half of one vinga-server deployment's configuration: providers, "
-    "MCP servers, agents, devices, and the credentials they use. Every request "
-    "carries a bearer token, whose value is the environment variable "
-    "`server.api.secret_env` names.\n\n"
-    "A read of one entity is a write of it. The `entity` half of the envelope an "
-    "addressed read answers is resubmittable as it stands: a PUT replaces the "
-    "model-shaped half and never the credentials stored beside it, so an edit is "
-    "read it, change it, send the whole of it back, and the fields a read leaves "
-    "out are the ones that mean absence and mean the same absence on the way back. "
-    "An environment reference reads back as itself and resubmits as itself. A value "
-    f"shown as the mask, `{MASK}`, resubmits as keep the stored value, which is "
-    "substituted before the fragment is validated; that mask written where nothing "
-    "is stored is refused, naming the field where the field is one this API "
-    "declares. An "
-    "unchanged stored secret needs no action at all: the envelope's `secrets` "
-    "mapping is informational, and rotating a credential is the secret PUT, which "
-    "is the one door a plaintext value enters by. Everything else a read answers is "
-    "display-only, and named here so the writable category has a stated boundary: "
-    "that `secrets` mapping; the identity keys of every listing, which address the "
-    "target URL rather than belonging in a body; both halves of the "
-    "whole-configuration read, which has no PUT of its own; the pending-device "
-    "listing, which is the running server's state; and everything under `/runtime` "
-    "and `/conversations`, which is not stored configuration at all. The writable "
-    "shapes are that one `entity` and the three bodies this document describes as "
-    "arguments rather than as entities: a device's `agents`, the default agent's "
-    "`name`, and a credential's `secret`.\n\n"
-    "A write is stored, and when it reaches a running server depends on the kind. "
-    "What a server is serving of this half is a generation: an immutable snapshot, "
-    "validated whole, built entirely before anything binds it. There is more than one "
-    "over the life of a process, and applying a change installs the next one rather "
-    "than editing the one in place, so a conversation goes on speaking the world it "
-    "opened in and new work binds the world that is current. The one part of a "
-    "deployment's configuration that is genuinely read once is the server section, "
-    "which is this process's own file: the port, the directories, the limits. Nothing "
-    "this API writes is in it.\n\n"
-    "So a write converges at one of two boundaries. Device bindings and the default "
-    "agent are read as a device asks for them, so binding or unbinding a device "
-    "applies at that device's next OTA check or connection with nothing asked of the "
-    "server; that exception ends where the agent does, since a binding naming an "
-    "agent this server is not serving resolves to nothing until the reload that "
-    "installs it, which is what such a write's acknowledgement says. Everything else, "
-    "which is the whole of the rest of this half, is applied by "
-    "`POST /runtime/config/reload`, without a restart and without dropping a "
-    "conversation. Every write says which of the two it is, in its `notice`.\n\n"
-    "A device with no binding and no default agent to cover it is answered at its "
-    "configuration check with a six-digit activation code, which it shows on its "
-    "screen and speaks. `/devices/pending` lists the devices showing one, keyed by "
-    "the code, and posting to `/devices/pending/{code}` binds the device showing it. "
-    "That listing is the running server's own state rather than stored "
-    "configuration: a restart forgets it, and the devices come back with fresh "
-    "codes.\n\n"
-    "The `/runtime` namespace is the running server's own state as well, and is "
-    "kept apart from the entity namespaces because an entity may legally be named "
-    "after any word a route might want. `/runtime/mcp-servers` says what each "
-    "configured MCP server is doing right now: connected or down, since when, what "
-    "it published, and which agents may reach it. Nothing there is read from the "
-    "database, so it cannot disagree with what is running.\n\n"
-    "`GET /runtime/agents/{name}/prompt` is the other read there: the system prompt "
-    "a session opening now as that agent would be sent, block by block, with the "
-    "provenance and the character count of each and the total. It is assembled from "
-    "the loaded agents, the running MCP slice and the memory store rather than from "
-    "the database, so it cannot disagree with what a session would get, and it is a "
-    "preview of a new session rather than a readback of a running one: a conversation "
-    "already in progress holds the half it assembled at its own activation.\n\n"
-    "`GET /runtime/config/diff` is the third read there, and the one that spans both "
-    "sides: what the database holds that this server is not serving, kind by kind, as "
-    "the entity names added, removed and changed, each kind carrying the boundary its "
-    "changes converge at. `reload` is what the apply below puts in place, which is "
-    "every kind of this half; `check-in` is the device bindings and the default agent, "
-    "which a "
-    "device is answered as it asks and which are therefore never pending, so they "
-    "carry the label alone and no lists. `restart` is declared and unused here, for "
-    "the server section this API does not write. An agent entry converges at three "
-    "different moments inside the one reload, so their kind carries three entries of "
-    "its own beside its own lists: `grants`, `prompt` and `filler`, each labelled "
-    "`reload`, and each a breakdown of `changed` rather than an exception to it. "
-    "Changed means the stored state "
-    "differs from the "
-    "comparison baseline rather than that something was written: an edit changed back "
-    "before anyone looked produces no diff, and a rewritten stored secret counts as "
-    "different, because what is compared is an opaque mark over the ciphertext and it "
-    "moves even when the plaintext may not have. Entity names and those labels are the "
-    "whole of the answer: no bodies, no values and no marks cross it. The MCP half is "
-    "compared against the entries running now rather than the ones this process booted "
-    "with, so a change a reload has already applied is not reported as pending. What "
-    "an answer does not say is that applying what it lists would succeed: it compares "
-    "configuration and connects nothing, while the reload below goes on to build a "
-    "server for every entry an agent references and can still refuse on one of "
-    "those.\n\n"
-    "`POST /runtime/config/reload` is the one action in that namespace, and unlike "
-    "device bindings it is asked for rather than noticed. It re-reads the stored "
-    "configuration and applies the whole domain half: the "
-    "`providers` entries and the `mcp_servers` entries with the secrets stored on "
-    "them, the agents' `mcp` grant "
-    "lists, the shared prompt fragments, the agents themselves and the "
-    "`agent_defaults` layer under them. "
-    "Entries are started, restarted, stopped or left alone, and no "
-    "conversation is dropped. Nothing is swapped, stopped or started until the whole "
-    "new world has been composed, validated and built, so a refusal has changed "
-    "nothing at all. When a live conversation meets the result depends on which half "
-    "moved. The tools it may reach are snapshotted per reply, so a started, restarted "
-    "or stopped entry is picked up on its next utterance. Prompt text is assembled at "
-    "an activation and cached for it, so an agent's prompt, a fragment it includes and "
-    "an entry's `instructions` alike reach a conversation at its next activation, "
-    "which is a new session or an agent switch, and never a reply of one already "
-    "running; `GET /runtime/agents/{name}/prompt` previews what a session opening now "
-    "would be sent. Filled pauses are synthesized during the apply and bound by a "
-    "conversation when it opens, so an edited filler section reaches the next "
-    "conversation and never changes what one already open is masking with. An agent is "
-    "synthesized again when any field of its effective `filler` section moved or when "
-    "the voice that speaks it did, and its clips are carried over as they are "
-    "otherwise: the whole section is the unit of comparison, so an edit to `delay_ms` "
-    "alone is a round of text-to-speech work at the configured provider even though "
-    "the audio it produces is identical, and rewriting the provider entry an agent "
-    "speaks through is another, since that is the voice moving; an edit that reaches "
-    "neither, a prompt or a fragment, is none. An agent whose synthesis failed applies "
-    "with no clip and runs unmasked rather than refusing the reload, which the "
-    "answer's `fillers` section reports. The engines are the same clock and a "
-    "different cost: an entry whose definition and stored credential are unchanged is "
-    "carried into the new world as the object it already was, so an edit to a prompt "
-    "reloads no model at all, while a rewritten entry is built before anything is "
-    "swapped and the conversations that open after that speak through it. One that a "
-    "conversation is still speaking through is released when that conversation ends, "
-    "so an apply that changes a local model briefly holds two, and one whose engines "
-    "would not build refuses with nothing changed. The agent set moves with the rest: "
-    "an agent the store has added is one a device can be bound to and reach at its "
-    "next check-in, and one it has deleted is one no session can be opened as from the "
-    "moment this answers, while a conversation already talking as it finishes on the "
-    "world it was built from. The answer's `agents` section names both, and says "
-    "whether `agent_defaults` moved.\n\n"
-    "The `/conversations` namespace is not stored configuration either: it reads the "
-    "conversation store, the record of what was said, which "
-    "`server.conversations.enabled` switches on. Three reads: the session list "
-    "newest first, one session whole, and one session's turns oldest first with the "
-    "calls each turn made nested under it. The two listings are cursor-paginated on "
-    "monotonic row ids that are never reused, and the session read is singular and "
-    "takes neither `limit` nor `cursor`. A deployment that never recorded answers 404; one that "
-    "recorded and has since switched recording off still serves what it recorded, "
-    "because switching recording off stops the writer and not the reader. Content "
-    "columns come back as they were stored, which is null where text storage was "
-    "off, and every session says which way its switches were set.\n\n"
-    f"{API_OPTIONS_NOTE}"
-)
+# Where this document's prose lives, which is not in this file.
+#
+# The descriptions below are the document's own text rather than
+# anything this module decides, and as literals they ran to some 550
+# lines of string in the middle of the transport code. One file per
+# description under `api_descriptions/`, read at import. A route's own
+# prose stays a docstring, deliberately: FastAPI reads a route's
+# docstring as its operation description, so the docstring IS the
+# description, and a route whose prose lived in another file would be
+# harder to read rather than easier.
+#
+# The files are package data, and nothing run from a checkout can prove
+# a wheel carries them: the source tree makes every file readable
+# whether it was packaged or not. So CI renders this document from the
+# installed wheel with the source tree off sys.path and diffs it against
+# the committed copy, which is the same discipline the Alembic scripts
+# already get.
+_DESCRIPTIONS = Path(__file__).parent / "api_descriptions"
+
+# What a description file may ask to have filled in, and what fills it.
+# `$NAME$` sigils rather than `{name}` fields, because the prose carries
+# literal path braces (`/devices/pending/{code}`, `/runtime/agents/{name}/prompt`)
+# that a format call would read as placeholders; no `$` occurs in the
+# prose itself, which is what makes the sigil unambiguous. Filled from
+# the same constants the literals interpolated, so the mask the document
+# states and the mask a read displays are still one string.
+_SUBSTITUTIONS: dict[str, str] = {
+    "MASK": MASK,
+    "API_OPTIONS_NOTE": API_OPTIONS_NOTE,
+}
+
+_SIGIL = re.compile(r"\$([A-Z_]+)\$")
+
+
+class MissingDescriptionError(RuntimeError):
+    """A description file is missing, or names a substitution nothing
+    provides.
+
+    Raised at import rather than at the first render, and raised rather
+    than skipped: what would be missing is a piece of the committed
+    contract, and a document that quietly lost a paragraph is worse than
+    an application that refuses to start. A packaging fault is how this
+    happens, so the sentence says so.
+    """
+
+
+def _description(name: str) -> str:
+    """One description file, with its substitutions filled in.
+
+    The file holds the bytes the document carries, minus the single
+    trailing newline a text file ends with: a paragraph break in the
+    document is a blank line in the file, and nothing else is
+    transformed. The wrapping in the file is the wrapping in the
+    contract, which is what keeps the committed document byte-identical
+    across this move.
+    """
+    path = _DESCRIPTIONS / f"{name}.md"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise MissingDescriptionError(
+            f"the configuration API document's {name} description is missing from "
+            f"{_DESCRIPTIONS}: {error}. The descriptions are package data, so an "
+            f"installation without them is a packaging fault and not a deployment's."
+        ) from error
+
+    def fill(sigil: re.Match[str]) -> str:
+        key = sigil.group(1)
+        if key not in _SUBSTITUTIONS:
+            raise MissingDescriptionError(
+                f"the configuration API document's {name} description names "
+                f"${key}$, which nothing fills; what this loader substitutes is "
+                f"{sorted(_SUBSTITUTIONS)}."
+            )
+        return _SUBSTITUTIONS[key]
+
+    return _SIGIL.sub(fill, text.removesuffix("\n"))
+
+
+API_DESCRIPTION = _description("api")
 
 # The name the security scheme is registered under. Referenced by the
 # document-level requirement, so both come from one string.
@@ -593,62 +530,31 @@ UNLOADED_AGENT = (
     "that are stored."
 )
 
-UNLOADED_AGENT_DESCRIPTION = (
-    "No agent of that name is being served. An agent written since this server last "
-    "installed a world waits for the reload that installs it."
-)
+UNLOADED_AGENT_DESCRIPTION = _description("unloaded-agent")
 
 # Declared on the routes whose only 422 is the framework's own, so the
 # document carries the sanitized shape this API actually answers with
 # rather than FastAPI's default one, which lists the input it rejected
 # per error. Nothing here validates a body, so this is the request that
 # could not be read at all.
-MALFORMED_REQUEST_DESCRIPTION = (
-    "The request could not be read in the shape this endpoint expects. The refusal is "
-    "the sanitized `Problem` body every other refusal uses, and nothing sent is quoted "
-    "back."
-)
+MALFORMED_REQUEST_DESCRIPTION = _description("malformed-request")
 
 # The shared 503 sentence is about actions, and says the reads in this
 # namespace answer emptily. That is true of the MCP status read and
 # false of this one: there is no honest empty prompt.
-NO_RUNTIME_PROMPT_DESCRIPTION = (
-    "This application has no running server around it, so there is no loaded agent, no "
-    "running MCP slice and no memory store to assemble a prompt from. Unlike the MCP "
-    "status read beside it, there is no honest empty answer: an empty block list would "
-    "say a session opening now is sent nothing."
-)
+NO_RUNTIME_PROMPT_DESCRIPTION = _description("no-runtime-prompt")
 
 # The reload takes no body and addresses nothing, so the shared sentence
 # for 422 (a stage that is not a stage, a MAC that is not one) cannot be
 # what one of its own means. What it means instead is the whole of the
 # guarantee the endpoint makes about a refusal.
-RELOAD_REFUSED_DESCRIPTION = (
-    "The stored configuration was refused: it does not compose into a valid snapshot, "
-    "a credential stored in it will not open "
-    "under the configured keys, or an engine it names could not be built (an unknown "
-    "provider type or option, a model that would not load, an environment "
-    "reference nothing sets, an entry `server.local_only` forbids). Nothing was swapped, "
-    "stopped or started, and the running server is exactly as it was. The `detail` is "
-    "fixed and names no location, which this refusal shares with the comparison read "
-    "beside it and with nothing else in this API: what was refused is arbitrary stored "
-    "state, and a sentence composed over it can quote a value that was written into the "
-    "wrong field. A server started from this store refuses on the same state and names "
-    "the location it refused on."
-)
+RELOAD_REFUSED_DESCRIPTION = _description("reload-refused")
 
 # And its 409, which is neither of the two the shared sentence covers on
 # this route: one apply at a time is this endpoint's own exclusion, and
 # the snapshot-mode refusal is the one 409 in this API that retrying
 # will not clear.
-RELOAD_HELD_DESCRIPTION = (
-    "Either an apply of this server's configuration is already running, or the "
-    "configuration database's write lock is held by another request, or this server "
-    "serves a configuration that no store describes and so has nothing to apply. "
-    "Nothing was changed. The first two clear on their own and the request can be made "
-    "again; the third is what this server is, and only starting one from a store "
-    "changes it."
-)
+RELOAD_HELD_DESCRIPTION = _description("reload-held")
 
 # The diff read's three refusals that cannot inherit a shared sentence.
 # It addresses nothing and carries no body, so the shared 422 (a stage
@@ -656,32 +562,11 @@ RELOAD_HELD_DESCRIPTION = (
 # own means; its 409 is not one of the three things the shared sentence
 # lists; and the shared 503 says the reads in this namespace answer
 # emptily, which is exactly what this one must not do.
-DIFF_REFUSED_DESCRIPTION = (
-    "The stored half was refused: it does not compose into a valid snapshot, or a "
-    "credential stored in it will not decrypt under the configured keys. The `detail` "
-    "is fixed and names nothing, which this refusal shares with the reload beside it "
-    "and with nothing else this API answers with: what was refused is stored state, the "
-    "sentence for it would be composed over that state, and this read's answers are "
-    "entity names and labels only. A server started from this store refuses on the same "
-    "state and names the location it refused on. Nothing was compared here and nothing "
-    "was changed."
-)
+DIFF_REFUSED_DESCRIPTION = _description("diff-refused")
 
-DIFF_MOVED_DESCRIPTION = (
-    "Either the configuration database's write lock is held by another request, the "
-    "running world was replaced by a reload while this read was between its two halves, "
-    "or this server serves a configuration that no store describes and so has nothing "
-    "to compare. An answer built across a reload would describe two states that never "
-    "existed together, so it is refused instead. Nothing was changed. The first two "
-    "clear on their own and the request can be made again; the third is what this "
-    "server is, and only starting one from a store changes it."
-)
+DIFF_MOVED_DESCRIPTION = _description("diff-moved")
 
-NO_RUNTIME_DIFF_DESCRIPTION = (
-    "This application has no running server around it, so there is no world to compare "
-    "the database with. Unlike the MCP status read beside it, there is no honest empty "
-    "answer: an empty diff would say that everything stored is already in effect."
-)
+NO_RUNTIME_DIFF_DESCRIPTION = _description("no-runtime-diff")
 
 # And what the caller is told, which is not the shared sentence: that
 # one says the reads in this namespace answer emptily, and this read
