@@ -22,6 +22,7 @@ wait for any of it.
 import asyncio
 import json
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
@@ -583,9 +584,18 @@ async def test_a_device_that_vanishes_at_the_hello_opens_no_record(
     assert attached_taps(session) == [], "a consumer was left attached"
 
 
-@pytest.mark.parametrize("step", ["_start_device_discovery", "_start_idle_watchdog"])
+@pytest.mark.parametrize(
+    "break_step",
+    [
+        lambda session, boom: setattr(session, "_start_device_discovery", boom),
+        lambda session, boom: setattr(session._watchdog, "start", boom),
+    ],
+    ids=["device discovery", "the idle watchdog"],
+)
 async def test_a_failure_after_the_open_still_finishes_the_record(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture, step: str
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    break_step: Callable[[Any, Any], None],
 ) -> None:
     """Every step from the first attachment on is inside the guard, so a
     failure at any of them still reaches `session_closed`, the store's
@@ -598,7 +608,9 @@ async def test_a_failure_after_the_open_still_finishes_the_record(
     def boom(*args: object, **kwargs: object) -> None:
         raise RuntimeError("the step nobody expected to fail")
 
-    setattr(session, step, boom)
+    # Each step is broken where it lives, which for the watchdog is on
+    # the object the session starts rather than on the session.
+    break_step(session, boom)
     with caplog.at_level("INFO"):
         try:
             with pytest.raises(RuntimeError):
