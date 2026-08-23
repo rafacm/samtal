@@ -50,7 +50,7 @@ import av
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from vinga_server import __version__
-from vinga_server.audio.opus import OpusDecoder, OpusEncoder
+from vinga_server.audio.opus import OpusDecoder
 from vinga_server.audio.resample import Resampler
 from vinga_server.build_info import revision
 from vinga_server.capture import (
@@ -75,6 +75,7 @@ from vinga_server.device.boundary import (
     RuntimeFactory,
     SessionInput,
 )
+from vinga_server.device.pacing import ReplyPacer
 from vinga_server.events import SessionEvents, logger
 from vinga_server.events.catalog import (
     RejectedAgentNotLoaded,
@@ -241,37 +242,18 @@ class DeviceSession:
         # kept for the handshake log line and the capture manifest.
         self._agents: list[str] = []
         self._decoder = OpusDecoder(sample_rate=PIPELINE_SAMPLE_RATE)
-        self._encoder = OpusEncoder(
-            sample_rate=OUTPUT_AUDIO.sample_rate,
-            frame_duration_ms=OUTPUT_AUDIO.frame_duration,
-        )
         # The device's own tools, when it said it has any. Discovery runs
         # in the background, so an early utterance simply runs without
         # them rather than waiting.
         self._device_tools: DeviceToolClient | None = None
         self._discovery: asyncio.Task[None] | None = None
-        # Outgoing frame pacing, reset per reply on the first frame.
-        self._pace_start: float | None = None
-        self._pace_count = 0
-        # Whether this reply has sent any audio yet. Pacing restarts per
-        # agent leg, so it cannot double as this flag: the event below
-        # must fire once per reply, not once per handover.
-        self._speaking_started = False
-        # When this reply's first frame went out, for the barge-in
-        # refractory gate and the barge_in event's speaking_ms.
-        self._speaking_started_at: float | None = None
-        # Whether this reply has told the device it is speaking. The
-        # `tts start` it stands for is sent once per reply, and never
-        # before there is something to say.
-        self._tts_started = False
-        # The frame pacer waits on this before each send. The
-        # transcript-confirmation gate clears it to hold playback while
-        # ASR decides whether anything was said; resuming shifts the
-        # pacing clock by the pause, so the stream picks up where it
-        # stopped instead of bursting to catch up.
-        self._pace_resume = asyncio.Event()
-        self._pace_resume.set()
-        self._pace_paused_at: float | None = None
+        # Reply audio: the encoder, the cadence it goes out at, and the
+        # latches measured against it. The boundary methods below are
+        # this session's `DeviceOutput` vocabulary over it.
+        self._pacer = ReplyPacer(
+            sample_rate=OUTPUT_AUDIO.sample_rate,
+            frame_duration_ms=OUTPUT_AUDIO.frame_duration,
+        )
         # When this session last did any conversing, which is what the
         # idle timeout counts from. Set at the end of an utterance and at
         # the end of a reply, so "whichever is later" needs no
@@ -1041,21 +1023,13 @@ class DeviceSession:
         """Hold the outgoing frame pacing before the next send. Audio
         stops within a frame either way; what a pause preserves is the
         option of resuming."""
-        if self._pace_paused_at is not None:
-            return
-        self._pace_paused_at = asyncio.get_running_loop().time()
-        self._pace_resume.clear()
+        self._pacer.pause()
 
     def resume_output(self) -> None:
         """Let the frames flow again, with the pacing clock shifted by
         the pause so the stream picks up where it stopped rather than
         bursting to catch up on the frames the pause displaced."""
-        if self._pace_paused_at is None:
-            return
-        if self._pace_start is not None:
-            self._pace_start += asyncio.get_running_loop().time() - self._pace_paused_at
-        self._pace_paused_at = None
-        self._pace_resume.set()
+        self._pacer.resume()
 
     async def show_transcript(self, text: str) -> None:
         """The `stt` message: what the user was heard to say."""
@@ -1099,42 +1073,42 @@ class DeviceSession:
         talking": sent before the model has answered, it makes the
         board claim to be speaking through the whole of a slow
         generation (#55)."""
-        if self._tts_started:
+        if not self._pacer.tts_start_due():
             return
-        self._tts_started = True
         await self._send_text(messages.tts_message(self.session_id, "start"))
 
     def encode_audio(self, pcm: bytes) -> PlayableAudio:
         """Feed reply PCM at `output_sample_rate` into the encoder; the
         batch holds every packet that filled, possibly none. Synchronous,
-        and sends nothing."""
-        return PlayableAudio(self._encoder.encode(pcm))
+        and sends nothing.
+
+        The `PlayableAudio` wrapping is this side of the crossing: what
+        a packet is stops being visible here, and the pacer below never
+        speaks the boundary's vocabulary."""
+        return PlayableAudio(self._pacer.encode(pcm))
 
     def flush_encoder(self) -> PlayableAudio:
         """Pad the encoder's pending partial frame with silence and
         encode it. The codec object itself is never reset between
         replies: its few milliseconds of lookahead staying inside is what
         keeps it reusable."""
-        return PlayableAudio(self._encoder.flush())
+        return PlayableAudio(self._pacer.flush())
 
     def reply_started(self) -> None:
         """A new reply: nothing has been spoken and the device has not
         been told anything is coming. The encoder is deliberately left
         alone."""
-        self._speaking_started = False
-        self._speaking_started_at = None
-        self._tts_started = False
+        self._pacer.reply_started()
 
     def restart_pacing(self) -> None:
         """A new agent leg: the pacing clock starts again at its first
         frame."""
-        self._pace_start = None
-        self._pace_count = 0
+        self._pacer.restart()
 
     def speaking_started_at(self) -> float | None:
         """When this reply's first frame was stamped, or None before it.
         Read by the barge-in refractory gate and by the filler."""
-        return self._speaking_started_at
+        return self._pacer.speaking_started_at()
 
     def user_turn_ended(self) -> None:
         """The runtime decided the utterance ended.
@@ -1163,26 +1137,24 @@ class DeviceSession:
         starts at the first frame of the reply, not at ASR time."""
         if not batch:
             return
-        loop = asyncio.get_running_loop()
-        if not self._speaking_started:
+        if self._pacer.first_frame(asyncio.get_running_loop().time()):
             # The `replied` event marks the last frame of a reply, so on
             # its own the logs cannot tell synthesis cost from speaking
             # time; this marks the first frame, making time-to-first-audio
-            # measurable (#22).
-            self._speaking_started = True
-            self._speaking_started_at = loop.time()
+            # measurable (#22). Emitted here rather than by the pacer:
+            # the attribution is to whichever agent is speaking, and who
+            # that is has never been a fact about the audio clock.
             self._events.emit(lambda: SpeakingStarted(agent=Identifier(self._agent)))
-        frame_s = OUTPUT_AUDIO.frame_duration / 1000
-        if self._pace_start is None:
-            self._pace_start = loop.time()
-        for packet in batch.packets:
-            await asyncio.sleep(self._pace_start + self._pace_count * frame_s - loop.time())
-            # A barge-in being confirmed holds the stream here; resuming
-            # shifts `_pace_start`, so the cadence survives the pause.
-            await self._pace_resume.wait()
+
+        async def deliver(packet: bytes) -> None:
+            """What one paced frame's slot is spent on: the wire, then
+            the recording, so what a capture holds is what the device
+            was actually sent."""
             await self._send_frame(framing.wrap(self.protocol_version, packet))
             self._capture_reply(packet)
-            self._pace_count += 1
+
+        for packet in batch.packets:
+            await self._pacer.transmit(packet, deliver)
 
     async def _send_text(self, text: str) -> None:
         """One outgoing message, with a device that has gone away

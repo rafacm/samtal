@@ -406,7 +406,9 @@ async def test_a_filler_sounding_never_sends_the_replys_packets(
     # encoder's feed order leaves no trace in the frames that come out
     # of it. Wrapping the edge's own encoder is what makes the order
     # observable; building a second one would observe a second order.
-    session._encoder = cast(Any, RecordingEncoder(session._encoder, log))
+    # The encoder is the pacer's, which is what owning the reply audio
+    # clock means, and it is reached where it lives.
+    session._pacer._encoder = cast(Any, RecordingEncoder(session._pacer._encoder, log))
     with caplog.at_level("INFO"):
         await drive_reply(session, UTTERANCE)
 

@@ -184,8 +184,8 @@ def test_speaking_started_marks_the_first_frame_of_a_reply(
 async def test_a_reply_starts_speaking_only_once(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Pacing restarts per agent leg (a handover sets `_pace_start`
-    back to None); the event must not restart with it."""
+    """Pacing restarts per agent leg (a handover restarts the pacer's
+    clock); the event must not restart with it."""
 
     class Sink:
         async def send_bytes(self, data: bytes) -> None:
@@ -200,7 +200,7 @@ async def test_a_reply_starts_speaking_only_once(
         # rather than once per restart. The public restart is a whole
         # second reply, which would fire the event legitimately and
         # prove nothing about the one under way.
-        session._pace_start = None
+        session._pacer.restart()
         await session.send_audio(PlayableAudio([b"frame"]))
 
     started = only(caplog, "speaking_started")
