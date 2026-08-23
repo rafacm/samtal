@@ -75,7 +75,6 @@ from .manager import (  # noqa: E402
     UNUSED,
     McpCallFailed,
     McpConfigError,
-    McpManager,
     McpServerDown,
     McpServerManager,
     _abandon,
@@ -158,8 +157,7 @@ from .transport import (  # noqa: E402
 # invitation: the suites read some of them off this module, and the
 # ones that had a public seam worth drawing were given one
 # (`manager_of` on the registry, `session` on a
-# manager, `abandoned` beside the stop, and `McpManager` for what a
-# registry needs of one server). A re-export
+# manager, and `abandoned` beside the stop). A re-export
 # copies a binding, so it serves an IMPORT and not a rebinding: a test
 # that monkeypatches a relocated constant patches the submodule that
 # owns it, which is what the port table records.
@@ -179,7 +177,6 @@ __all__ = [
     "LISTING_CAP",
     "McpCallFailed",
     "McpConfigError",
-    "McpManager",
     "McpCandidate",
     "McpServerDown",
     "McpServerManager",
