@@ -417,6 +417,68 @@ def test_a_document_of_the_wrong_shape_names_where_and_nothing_else(
     assert store.load().domain.agents == {}
 
 
+# Two entries addressing one thing
+#
+# A mapping cannot hold one key twice, so a document's own syntax rules
+# out the obvious duplicate and rules out nothing else: a name is made
+# canonical on the way in, and two keys that differ before that are one
+# key after it. Left alone, both entries would be staged, both would be
+# answered with an outcome, and the row would hold whichever was written
+# last, which is a result the operator did not choose.
+
+CANONICAL_DUPLICATES = [
+    (
+        "two spellings of one MAC",
+        {"devices": {"AA-BB-CC-DD-EE-FF": ["sam"], "aa:bb:cc:dd:ee:ff": ["other"]}},
+    ),
+    (
+        "one name with and without space",
+        {"agents": {"fresh": {"prompt": "first"}, " fresh ": {"prompt": "second"}}},
+    ),
+    (
+        "one provider name with and without space",
+        {"providers": {"llm": {"c": {"type": "mock"}, " c ": {"type": "mock"}}}},
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "document",
+    [document for _, document in CANONICAL_DUPLICATES],
+    ids=[what for what, _ in CANONICAL_DUPLICATES],
+)
+def test_two_entries_addressing_one_thing_are_refused(
+    store: ConfigStore, document: object
+) -> None:
+    """Refused rather than merged, for the reason a claim by code is:
+    the two entries say different things about one thing and only
+    whoever wrote them knows which is meant."""
+    store.apply({"agents": {"sam": {"prompt": "p"}, "other": {"prompt": "p"}}})
+
+    with pytest.raises(ConfigError) as caught:
+        store.apply(document)
+
+    assert str(caught.value).startswith("document:")
+    assert "canonical" in str(caught.value)
+    snapshot = store.load()
+    assert snapshot.domain.devices == {}
+    assert sorted(snapshot.domain.agents) == ["other", "sam"]
+    assert snapshot.domain.providers.llm == {}
+
+
+def test_the_same_entry_written_once_is_not_a_duplicate(store: ConfigStore) -> None:
+    """The guard on the case above: what is refused is two entries
+    addressing one thing, not one entry whose name needed normalizing."""
+    applied = store.apply(
+        {"devices": {"AA-BB-CC-DD-EE-FF": ["sam"]}, "agents": {" sam ": {"prompt": "p"}}}
+    )
+
+    assert [(one.section, one.identity) for one in applied] == [
+        ("agents", "sam"),
+        ("devices", "aa:bb:cc:dd:ee:ff"),
+    ]
+
+
 def test_a_document_naming_more_entries_than_the_limit_is_refused_unmutated(
     store: ConfigStore,
 ) -> None:
