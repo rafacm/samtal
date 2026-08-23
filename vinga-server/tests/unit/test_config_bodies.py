@@ -24,6 +24,7 @@ exactly as a row holds one.
 import json
 from collections.abc import Iterator
 from pathlib import Path
+from typing import get_args
 
 import pytest
 from pydantic import BaseModel
@@ -34,6 +35,7 @@ from vinga_server.config import entities
 from vinga_server.config.entities import EntityDescriptor
 from vinga_server.config.loader import StorageError
 from vinga_server.config.models import (
+    McpServerConfig,
     is_env_name,
     is_mcp_secret_key,
     mcp_entry_fragment,
@@ -126,6 +128,35 @@ def _loaded(store: ConfigStore, descriptor: EntityDescriptor) -> BaseModel:
     for group in IDENTITIES[descriptor.name][:-1]:
         section = getattr(section, group)
     return section[IDENTITIES[descriptor.name][-1]]
+
+
+def test_the_floor_covers_every_entity_kind_and_both_transports() -> None:
+    """The inventory, asserted against the registry rather than against
+    the tree.
+
+    Everything else in this file is parameterized over whichever
+    directories happen to be on disk, so the whole family would stay
+    green if a kind's directory were deleted: there would simply be
+    nothing to run for it. A floor that can be lowered by deleting a file
+    is not one. The registry is the list of kinds that exist, so it is
+    the list of kinds that need bodies.
+
+    The transports are the same question one level down. `McpServerConfig`
+    is really two shapes behind one model, and a body naming the fields
+    of both is one the model refuses, so "every kind is covered" is not
+    true of it unless both values appear. The pair is read off the field's
+    own annotation rather than written out here, for the reason the kinds
+    are read off the registry.
+    """
+    assert KINDS == sorted(descriptor.name for descriptor in entities.ENTITIES)
+
+    transports = {
+        json.loads(path.read_text(encoding="utf-8"))["transport"]
+        for descriptor, path in FIXTURES
+        if descriptor.name == "mcp-server"
+    }
+    declared = set(get_args(McpServerConfig.model_fields["transport"].annotation))
+    assert transports == declared
 
 
 @pytest.mark.parametrize(("descriptor", "path"), FIXTURES, ids=IDS)
