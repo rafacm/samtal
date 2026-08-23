@@ -27,7 +27,10 @@ Two tiers, decided per round (maintainer decision, 2026-08-19):
 `run-pr-review.sh` reads the backend from `REVIEW_BACKEND` (default
 codex) and the model from `REVIEW_MODEL` (default sol under codex,
 opus under claude), and stamps whichever ran, with its enforcement
-mechanism, into the provenance header.
+mechanism and the reviewer run's wall-clock runtime, into the
+provenance header, so backend timing comparisons accumulate on the
+PRs themselves. Manual plan-mode rounds record the runtime in the
+plan's review-round section the same way.
 
 ### Fallback when the codex quota is exhausted
 

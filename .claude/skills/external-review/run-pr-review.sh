@@ -55,6 +55,10 @@ for key, value in [("__PR_NUMBER__", pr), ("__PR_TITLE__", title),
 open(out, "w").write(text)
 PY
 
+# Wall-clock of the reviewer run alone (not the diff or the posting),
+# stamped into the provenance header so backend timing comparisons
+# stop depending on temp-file birth times that a reboot deletes.
+STARTED="$(date +%s)"
 case "$BACKEND" in
   codex)
     codex exec -m "$MODEL" --sandbox read-only - < "$PROMPT" > "$OUT" 2> "$ERR"
@@ -75,11 +79,13 @@ case "$BACKEND" in
   *) echo "unreachable backend: $BACKEND" >&2; exit 2 ;;
 esac
 
+ELAPSED="$(( $(date +%s) - STARTED ))"
+DURATION="$(( ELAPSED / 60 ))m$(printf '%02d' "$(( ELAPSED % 60 ))")s"
 HEAD_SHA="$(git rev-parse --short HEAD)"
 {
   printf '## External review round\n\n'
-  printf 'Automated external review of this PR'"'"'s diff (%s...%s): %s, model %s, %s. Posted verbatim by the review run itself; resolutions follow as replies.\n\n' \
-    "$BASE" "$HEAD_SHA" "$CLI_STAMP" "$MODEL" "$(date -u +%Y-%m-%d)"
+  printf 'Automated external review of this PR'"'"'s diff (%s...%s): %s, model %s, %s, runtime %s. Posted verbatim by the review run itself; resolutions follow as replies.\n\n' \
+    "$BASE" "$HEAD_SHA" "$CLI_STAMP" "$MODEL" "$(date -u +%Y-%m-%d)" "$DURATION"
   printf -- '---\n\n'
   cat "$OUT"
 } > "$WORK/comment.md"
