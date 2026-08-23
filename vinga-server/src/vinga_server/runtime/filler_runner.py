@@ -23,8 +23,8 @@ talks over the user is worse than no mask at all.
 
 import asyncio
 import contextlib
-from collections.abc import Sequence
-from typing import TYPE_CHECKING, Protocol
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING
 
 from vinga_server.audio.resample import Resampler
 from vinga_server.device.boundary import DeviceGone, DeviceOutput
@@ -44,23 +44,6 @@ if TYPE_CHECKING:
     from vinga_server.runtime.turntaking import TurnTaking
 
 
-class FillerCache(Protocol):
-    """What this runner asks of the clip cache its session bound: is
-    there one for this agent, give me that one, give me this one or
-    nothing.
-
-    Three reads and no writes, declared as the surface rather than as a
-    type, so the mapping a generation carries and a plain dictionary of
-    clips are equally what this runner takes. A test that hands it two
-    entries should not have to build a world to do it."""
-
-    def __contains__(self, name: object, /) -> bool: ...
-
-    def __getitem__(self, name: str, /) -> FillerClips: ...
-
-    def get(self, name: str, /) -> FillerClips | None: ...
-
-
 class FillerRunner:
     """One turn's latency mask at a time, for the life of one connection.
 
@@ -68,7 +51,9 @@ class FillerRunner:
     this session bound and never asked for again: a reload that
     re-synthesizes a clip reaches the next session rather than this
     conversation, which is what keeps the masking a turn was armed under
-    from changing under it. Empty means no agent masks its latency.
+    from changing under it. Empty means no agent masks its latency, and
+    a plain dictionary is as much a cache as the mapping a generation
+    carries, so a test that hands it two entries need not build a world.
     `agents` is what the device is bound to, which is what the arming
     rule asks rather than only the agent talking now.
 
@@ -85,7 +70,7 @@ class FillerRunner:
         self,
         events: SessionEvents,
         output: DeviceOutput,
-        fillers: FillerCache,
+        fillers: Mapping[str, FillerClips],
         agents: Sequence[str],
         turn: "TurnTaking",
     ) -> None:
