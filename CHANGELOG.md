@@ -86,8 +86,8 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   sigil refuses at import with a sentence naming it, and because a
   checkout cannot prove a wheel carries package data, CI now renders
   the document from the built wheel with the source tree off `sys.path`
-  and diffs it against the committed copy. Beside that, twenty test
-  files stopped asserting the exact sentence a refusal or an
+  and diffs it against the committed copy. Beside that, twenty-three
+  test files stopped asserting the exact sentence a refusal or an
   acknowledgement carries and assert what it is instead: the status,
   the problem shape, and the semantic tokens (the section a refusal
   names, the entity, the field each problem addresses, the boundary a
