@@ -955,6 +955,60 @@ class Acknowledgement(BaseModel):
     )
 
 
+class AppliedEntry(BaseModel):
+    """What applying one entry of a document did."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    section: str = Field(
+        description=(
+            "Which section of the domain configuration the entry is in: one of "
+            "`providers`, `mcp_servers`, `prompt_fragments`, `agent_defaults`, "
+            "`agents`, `devices`, `default_agent`. The entries are listed in that "
+            "order, which is the order the configuration documents as its write, read "
+            "and creation order."
+        )
+    )
+    identity: str = Field(
+        description=(
+            "The entry's identity under that section, as the row holds it rather than "
+            "as the document spelled it: `<stage>.<name>` for a provider, the "
+            "canonical form of the MAC for a device, the name for everything else. "
+            "Empty for `agent_defaults` and `default_agent`, which hold one thing "
+            "rather than entries."
+        )
+    )
+    outcome: Literal["wrote", "unchanged"] = Field(
+        description=(
+            "Whether the row moved. `unchanged` means the entry was already exactly "
+            "what the document says, so nothing was written for it and nothing has to "
+            "be applied: the same document sent twice is a no-op by construction."
+        )
+    )
+    notice: str | None = Field(
+        description=(
+            "When this entry's change takes effect, in the same sentences a single "
+            "write of it is acknowledged with, and null for an entry that was "
+            "`unchanged`, which has nothing waiting to be applied."
+        )
+    )
+
+
+class AppliedDocument(BaseModel):
+    """What applying one document did, entry by entry."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    entries: list[AppliedEntry] = Field(
+        description=(
+            "One entry per thing the document named, in the configuration's own "
+            "section order. Empty for a document that named nothing. A document is "
+            "written whole or not at all, so a 200 means every entry below was "
+            "applied and any refusal means none of them was."
+        )
+    )
+
+
 # The three bodies that are arguments rather than fragments, as the
 # document describes them. The models below are documentation and
 # nothing else: `api.py` injects them into `components` and names them

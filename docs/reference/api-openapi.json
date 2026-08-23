@@ -2327,6 +2327,75 @@
         }
       }
     },
+    "/apply": {
+      "post": {
+        "summary": "Apply Document",
+        "description": "Write a whole document: every entry it names, in one\ntransaction, or none of them.\n\nThe body is a partial domain configuration: its top-level keys\nare the sections of the configuration, an entity's body is\nexactly the fragment its own PUT takes, and the two settings are\nin the shape the configuration holds them in rather than the\nshape their own routes take, because this is the configuration\nand not a batch of requests.\n\nApplying is additive. A section or an entry the document does\nnot name is left alone, an empty mapping adds nothing, and\nnothing here deletes: pruning a store down to a document is a\ndifferent verb with different stakes, secret deletion among\nthem, and it is deliberately not this one. The single entry that\ntakes something away is `default_agent: null`, which is the\nexplicit unset; leaving the key out says nothing about it.\n\nIdempotent by comparison: an entry that is already exactly what\nthe document says is answered `unchanged`, with nothing written\nand nothing to apply, so the same document twice is a no-op.\n\nRefused whole. The references are checked once against the\nconfiguration the whole document would leave, which is what lets\none document create an agent and bind a device to it in the same\nbreath; any refusal names every mistake at once, in the\nsentences the single writes earn, and leaves the store exactly\nas it was.",
+        "operationId": "apply_document_apply_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DomainConfig"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppliedDocument"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runtime/mcp-servers": {
       "get": {
         "summary": "Read Mcp Server Status",
@@ -2970,6 +3039,70 @@
         ],
         "title": "AgentsReload",
         "description": "What a reload did to the set of agents this server can serve.\n\nThe set moves at the swap and nowhere else: an agent named under\n`added` is servable from the instant this answered, and one under\n`removed` cannot be reached by anything that starts after it, while\nevery conversation already talking as it finishes on the world it\nwas built from."
+      },
+      "AppliedDocument": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/AppliedEntry"
+            },
+            "type": "array",
+            "title": "Entries",
+            "description": "One entry per thing the document named, in the configuration's own section order. Empty for a document that named nothing. A document is written whole or not at all, so a 200 means every entry below was applied and any refusal means none of them was."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "entries"
+        ],
+        "title": "AppliedDocument",
+        "description": "What applying one document did, entry by entry."
+      },
+      "AppliedEntry": {
+        "properties": {
+          "section": {
+            "type": "string",
+            "title": "Section",
+            "description": "Which section of the domain configuration the entry is in: one of `providers`, `mcp_servers`, `prompt_fragments`, `agent_defaults`, `agents`, `devices`, `default_agent`. The entries are listed in that order, which is the order the configuration documents as its write, read and creation order."
+          },
+          "identity": {
+            "type": "string",
+            "title": "Identity",
+            "description": "The entry's identity under that section, as the row holds it rather than as the document spelled it: `<stage>.<name>` for a provider, the canonical form of the MAC for a device, the name for everything else. Empty for `agent_defaults` and `default_agent`, which hold one thing rather than entries."
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "wrote",
+              "unchanged"
+            ],
+            "title": "Outcome",
+            "description": "Whether the row moved. `unchanged` means the entry was already exactly what the document says, so nothing was written for it and nothing has to be applied: the same document sent twice is a no-op by construction."
+          },
+          "notice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notice",
+            "description": "When this entry's change takes effect, in the same sentences a single write of it is acknowledged with, and null for an entry that was `unchanged`, which has nothing waiting to be applied."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "section",
+          "identity",
+          "outcome",
+          "notice"
+        ],
+        "title": "AppliedEntry",
+        "description": "What applying one entry of a document did."
       },
       "Applies": {
         "type": "string",
@@ -5001,6 +5134,133 @@
           "secret"
         ],
         "title": "SecretValue",
+        "type": "object"
+      },
+      "ProvidersConfig": {
+        "additionalProperties": false,
+        "description": "The provider entries of each pipeline stage, keyed by the name\nagents and agent_defaults reference them by.",
+        "properties": {
+          "llm": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ProviderConfig"
+            },
+            "description": "The language model providers, keyed by the name that agents and agent_defaults reference.",
+            "propertyNames": {
+              "minLength": 1
+            },
+            "title": "Llm",
+            "type": "object"
+          },
+          "asr": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ProviderConfig"
+            },
+            "description": "The speech recognition providers, keyed by the name that agents and agent_defaults reference.",
+            "propertyNames": {
+              "minLength": 1
+            },
+            "title": "Asr",
+            "type": "object"
+          },
+          "tts": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ProviderConfig"
+            },
+            "description": "The speech synthesis providers, keyed by the name that agents and agent_defaults reference. A voice is a provider entry, so two agents that should sound different reference two entries.",
+            "propertyNames": {
+              "minLength": 1
+            },
+            "title": "Tts",
+            "type": "object"
+          },
+          "vad": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ProviderConfig"
+            },
+            "description": "The voice activity detection providers, keyed by the name that agents and agent_defaults reference.",
+            "propertyNames": {
+              "minLength": 1
+            },
+            "title": "Vad",
+            "type": "object"
+          }
+        },
+        "title": "ProvidersConfig",
+        "type": "object"
+      },
+      "DomainConfig": {
+        "additionalProperties": false,
+        "description": "The domain half of a configuration, as the database holds it.\n\nThe same entity models the YAML file is validated through, in the\nsame shape, so nothing about a loaded snapshot is a second dialect\nof the configuration. What it does not hold is secrets: those ride\nbeside it in a SecretStore.",
+        "properties": {
+          "providers": {
+            "$ref": "#/components/schemas/ProvidersConfig",
+            "description": "The provider entries agents reference, one group per pipeline stage (llm, asr, tts, vad)."
+          },
+          "mcp_servers": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/McpServerConfig"
+            },
+            "description": "The MCP servers agents may be given tools from, keyed by entry name. The name becomes the prefix its tools are offered to the model under (home__turn_on_light), so it must match [A-Za-z0-9_-]+ and must not be one of the names the merged tool list already uses. What a tool answers with reaches the model as speakable text, since the reply is spoken; content of any other kind is named as a placeholder rather than dropped. Carrying structured content to a device is work for the display protocol, once the display path can render more than speech, rather than for the tool loop.",
+            "propertyNames": {
+              "minLength": 1
+            },
+            "title": "Mcp Servers",
+            "type": "object"
+          },
+          "prompt_fragments": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PromptFragmentConfig"
+            },
+            "description": "The shared blocks of prompt text agents include by name, keyed by fragment name. A fragment is written once and injected verbatim into the system prompt of every agent whose prompt_includes names it, which is how household facts or a house style stay in one place instead of being copied into every persona prompt and drifting apart. The name appears in the provenance the assembled prompt is reported under (fragment:<name>), so it must match [A-Za-z0-9_-]+.",
+            "propertyNames": {
+              "minLength": 1
+            },
+            "title": "Prompt Fragments",
+            "type": "object"
+          },
+          "agent_defaults": {
+            "$ref": "#/components/schemas/AgentDefaults",
+            "description": "What every agent uses unless it names something else. One entry for the whole deployment, and deliberately without a prompt: a prompt is what makes an agent that agent, so inheriting one silently would make two agents the same one."
+          },
+          "agents": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/AgentConfig"
+            },
+            "description": "The agents this deployment serves, keyed by name. An agent is a prompt plus whichever stages it overrides, and every stage must resolve to a provider, here or in agent_defaults, for the server to start.",
+            "propertyNames": {
+              "minLength": 1
+            },
+            "title": "Agents",
+            "type": "object"
+          },
+          "devices": {
+            "additionalProperties": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "description": "Which agents each device may talk to, keyed by MAC address as the Device-Id header sends it. The first name in a list is the agent a conversation starts on and the rest are the ones it may be switched to.",
+            "title": "Devices",
+            "type": "object"
+          },
+          "default_agent": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The agent an unknown device reaches. Leaving it unset makes the devices map an allowlist: a device with no binding is then turned away.",
+            "title": "Default Agent"
+          }
+        },
+        "title": "DomainConfig",
         "type": "object"
       },
       "FieldError": {

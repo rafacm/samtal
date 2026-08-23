@@ -151,6 +151,10 @@ def test_the_document_describes_every_route_the_api_serves() -> None:
         "/devices/pending/{code}": ["post"],
         "/devices/{mac}": ["delete", "get", "put"],
         "/default-agent": ["delete", "get", "put"],
+        # The whole domain half in one request, which is a write of the
+        # configuration rather than a runtime action: it lands in the
+        # store and a running server meets it at the reload that follows.
+        "/apply": ["post"],
         # The runtime namespace, which is deliberately not a route
         # inside an entity namespace: an entry may be named `status`,
         # and an agent may be named `prompt`.
@@ -203,6 +207,11 @@ def test_a_write_declares_the_entity_schema_it_takes() -> None:
         # the device, and the agents are the same argument.
         ("/devices/pending/{code}", "post", "DeviceBinding"),
         ("/default-agent", "put", "DefaultAgentName"),
+        # The one body that is the whole configuration rather than one
+        # entry of it: a partial `DomainConfig`, whose every field has a
+        # default, so the schema of the document is the schema of a
+        # partial one and no second model states the same shape.
+        ("/apply", "post", "DomainConfig"),
         ("/providers/{stage}/{name}/secrets/{slot}", "put", "SecretValue"),
         ("/mcp-servers/{name}/secrets/{slot}", "put", "SecretValue"),
     ):

@@ -90,10 +90,12 @@ from vinga_server.config.loader import (
 from vinga_server.config.models import (
     API_MOUNT_PATH,
     Config,
+    DomainConfig,
     FieldProblem,
 )
 from vinga_server.config.responses import (
     Acknowledgement,
+    AppliedDocument,
     AssembledPrompt,
     ConfigDiff,
     ConfigDiffReader,
@@ -116,7 +118,7 @@ from vinga_server.config.responses import (
     StoredSecretLocation,
 )
 from vinga_server.config.secrets import MASK, SecretLocation, load_keys, provider_identity
-from vinga_server.config.store import ConfigStore
+from vinga_server.config.store import Applied, ConfigStore
 from vinga_server.conversations import api as conversations
 from vinga_server.db import open_database
 from vinga_server.events import ServerEvents
@@ -358,6 +360,14 @@ ENTITY_MODELS: tuple[type[BaseModel], ...] = tuple(
 # further down, which describes the expectation and never echoes what it
 # refused.
 REQUEST_MODELS: tuple[type[BaseModel], ...] = (DeviceBinding, DefaultAgentName, SecretValue)
+
+# And the fourth, which is the whole domain half rather than one entry
+# of it: `POST /apply` takes a partial `DomainConfig`, so the model that
+# describes the configuration IS the model that describes the body, and
+# a second schema written for the request would be a second statement of
+# the same shape. Every field of it has a default, which is what makes
+# the schema of the whole document the schema of a partial one.
+DOCUMENT_MODELS: tuple[type[BaseModel], ...] = (DomainConfig,)
 
 # And the refusal shape, injected for the same reason since the refusal
 # declarations stopped naming it as a response model: they name its
@@ -2036,6 +2046,133 @@ def _writes(api: FastAPI) -> None:
             _CLEARED_DEFAULT_AGENT, _binding_notice(snapshot_only=snapshot_only)
         )
 
+    @api.post(
+        "/apply",
+        response_model=AppliedDocument,
+        responses=_problems(401, 409, 422, 500),
+        openapi_extra=_request_body(DomainConfig),
+    )
+    def apply_document(
+        request: Request,
+        body: RawBody,
+        store: StoreDep,
+        loaded: LoadedAgentsDep,
+        pending: PendingDep,
+        snapshot_only: SnapshotOnlyDep,
+    ) -> dict[str, Any]:
+        """Write a whole document: every entry it names, in one
+        transaction, or none of them.
+
+        The body is a partial domain configuration: its top-level keys
+        are the sections of the configuration, an entity's body is
+        exactly the fragment its own PUT takes, and the two settings are
+        in the shape the configuration holds them in rather than the
+        shape their own routes take, because this is the configuration
+        and not a batch of requests.
+
+        Applying is additive. A section or an entry the document does
+        not name is left alone, an empty mapping adds nothing, and
+        nothing here deletes: pruning a store down to a document is a
+        different verb with different stakes, secret deletion among
+        them, and it is deliberately not this one. The single entry that
+        takes something away is `default_agent: null`, which is the
+        explicit unset; leaving the key out says nothing about it.
+
+        Idempotent by comparison: an entry that is already exactly what
+        the document says is answered `unchanged`, with nothing written
+        and nothing to apply, so the same document twice is a no-op.
+
+        Refused whole. The references are checked once against the
+        configuration the whole document would leave, which is what lets
+        one document create an agent and bind a device to it in the same
+        breath; any refusal names every mistake at once, in the
+        sentences the single writes earn, and leaves the store exactly
+        as it was.
+        """
+        _bounded(request)
+        applied = store.apply(body)
+        # Everything below runs after the transaction has committed, so
+        # nothing here can be true of a document that was refused.
+        #
+        # A device this document bound is configured now, so it is not
+        # one an operator may still claim by the code it was showing,
+        # and a default agent covers every device that has no binding of
+        # its own, which is every device in the pending table. Both are
+        # the housekeeping the two settings routes do for the same acts,
+        # and both are done for an unchanged row as well as a changed
+        # one: what retires a code is the world the document describes,
+        # not whether this request was the one that wrote it.
+        for entry in applied:
+            if entry.section == "devices":
+                pending.retire(entry.identity)
+        if any(entry.section == "default_agent" and entry.agents for entry in applied):
+            pending.retire_all()
+        return {
+            "entries": [_applied(entry, loaded, snapshot_only) for entry in applied]
+        }
+
+
+# How large a document this API will read.
+#
+# Request hygiene beside the repository's own entry-count limit, and the
+# weaker of the two: the framework has read the body by the time a
+# handler runs, so what this bounds is what reaches the repository
+# rather than what the socket accepted, and a request that declares no
+# length is bounded by the entry count alone. The entry count is the one
+# that bounds the transaction, which is the thing worth bounding.
+APPLY_BODY_LIMIT = 1_000_000
+
+_TOO_LARGE = (
+    f"the document is larger than this endpoint reads, which is {APPLY_BODY_LIMIT} "
+    f"bytes. Nothing was changed and nothing sent is quoted back; apply it in several "
+    f"documents"
+)
+
+
+def _bounded(request: Request) -> None:
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > APPLY_BODY_LIMIT:
+        raise ConfigError(_TOO_LARGE)
+
+
+# When a write of each section takes effect, read off the registry
+# rather than written out: an applied document writes the same kinds the
+# entity routes write, so it answers the same sentences. The two
+# settings are absent, because theirs depend on what the running server
+# is serving and are computed per entry below.
+_SECTION_NOTICE: dict[str, str] = {
+    descriptor.moved_key: descriptor.notice for descriptor in entities.ENTITIES
+}
+
+
+def _applied(
+    entry: Applied, loaded: Collection[str], snapshot_only: bool
+) -> dict[str, Any]:
+    """One entry of an applied document, as the answer carries it.
+
+    The repository answers with the canonical outcome and nothing else,
+    because the rest is not a fact it holds: when a change takes effect
+    depends on whether this server is serving the agents a binding
+    names and on whether it reads a store at all, which is what the
+    single writes ask the same two dependencies about.
+    """
+    return {
+        "section": entry.section,
+        "identity": entry.identity,
+        "outcome": "wrote" if entry.wrote else "unchanged",
+        "notice": _applied_notice(entry, loaded, snapshot_only) if entry.wrote else None,
+    }
+
+
+def _applied_notice(
+    entry: Applied, loaded: Collection[str], snapshot_only: bool
+) -> str:
+    """When one applied entry takes effect: the settings' notice where
+    it depends on the running server, and the kind's own otherwise."""
+    if entry.section in _SECTION_NOTICE:
+        return _SECTION_NOTICE[entry.section]
+    return _binding_notice(_unloaded(entry.agents, loaded), snapshot_only)
+
 
 def _acknowledge(what: str, notice: str = RESTART_NOTICE) -> dict[str, str]:
     """What a write answers with. The start sentence is the default
@@ -2448,7 +2585,7 @@ def _entity_schemas() -> dict[str, Any]:
     repository.
     """
     schemas: dict[str, Any] = {}
-    for model in ENTITY_MODELS + REQUEST_MODELS + PROBLEM_MODELS:
+    for model in ENTITY_MODELS + REQUEST_MODELS + DOCUMENT_MODELS + PROBLEM_MODELS:
         schema = model.model_json_schema(ref_template="#/components/schemas/{model}")
         schemas.update(schema.pop("$defs", {}))
         schemas[model.__name__] = schema
