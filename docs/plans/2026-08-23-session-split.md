@@ -175,9 +175,10 @@ entry: this is the one user-visible change in M1, an agent loses a
 tool it used to be offered.
 
 Tests: `test_tools_random.py` is deleted whole;
-`test_tool_names.py` drops the reserved entry (the name stops being
-reserved, and an MCP tool may now claim it, which the reserved-name
-test's own framing already treats as the rule's content);
+`test_tool_names.py` drops the reserved entry (what the freed name
+permits is an MCP server ENTRY named `random_number`, whose tools
+publish as `random_number__<tool>`; MCP tools are always qualified,
+so no bare tool of that name can ever appear);
 `test_session_tools.py`'s exact-list assertions shrink by one
 honestly (they are the pin that the offering is exactly what the
 code offers); the integration `DUE_BUILTINS` set shrinks;
@@ -521,3 +522,6 @@ with a resolution note here.
     published qualified (`<entry>__<tool>`); what the freed name
     permits is an MCP entry named `random_number`, never a bare
     tool of that name.
+
+    *Resolution* (this commit): decision 4's sentence corrected to
+    say exactly that.
