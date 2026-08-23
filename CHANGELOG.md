@@ -60,7 +60,7 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   `events`. **There is no alias for the old spelling**, which answers
   the config grammar's ordinary invalid-choice refusal. The diagnosis
   itself is unchanged: the same four verdicts, the same single GET, the
-  same refusal to follow a redirect, the same sentences. Five things
+  same refusal to follow a redirect, the same sentences. Seven things
   did change, all of them at the edges. The sentence for a
   configuration with onboarding turned off names the new spelling
   (`vinga-server doctor URL`). The command's usage errors come from its
@@ -76,7 +76,15 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   stdout, and neither does a refusal naming an operator-typed
   `?token=` address. That last one is a security fix, display-only, and
   it reuses the rule `config/models.py` already applies to URL-shaped
-  configuration values.
+  configuration values. The probe also holds the HTTP client's own
+  request logging at WARNING while it runs, which is the second
+  security fix: that library writes one INFO record per request naming
+  the URL in full, and every verdict this command prints hides that URL
+  because it can be the deployment's secret `ota_path`. And a
+  connection that cannot be closed after the request is now a sentence
+  and exit 1 rather than a library traceback, which is what it used to
+  be: the close ran outside the handler that sanitizes everything else
+  the probe meets.
 
 - **The domain configuration model is declared once, and three
   admin-surface modules shrank around it** (#242). `DomainConfig` was
