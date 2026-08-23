@@ -2,12 +2,18 @@
 startup line that says it.
 
 One question, asked in four places: the banner below, the line
-`vinga-server config ota-url` and `config doctor` print, the `message`
-an activating device shows on its screen, and the websocket URL the OTA
-reply hands every board. The first three call `public_origin`, so a
-deployment names itself the same way wherever it is named, and the
-provenance travels with the value because two of the three sources it
-resolves are inferences. The fourth calls `websocket_url_for`.
+`vinga-server config ota-url` and `vinga-server doctor` print, the
+`message` an activating device shows on its screen, and the websocket
+URL the OTA reply hands every board. The first three call
+`public_origin`, so a deployment names itself the same way wherever it
+is named, and the provenance travels with the value because two of the
+three sources it resolves are inferences. The fourth calls
+`websocket_url_for`.
+
+`onboarding_url` is the assembly the two commands share, and it lives
+here for the same reason the origin does: it is one composition of the
+origin above and the key `keys.py` derives, and a second copy of it
+would be a second answer to what a person is supposed to type.
 
 Both of them assemble through `assemble` below and neither assembles on
 its own, which is the point of gathering them here (issue #143): there
@@ -29,6 +35,7 @@ from urllib.parse import urlsplit
 
 from fastapi import Request
 
+from vinga_server.config.loader import ConfigError
 from vinga_server.config.models import ServerConfig
 from vinga_server.device.boundary import WEBSOCKET_PATH
 from vinga_server.events.catalog import OnboardingOff, OnboardingOn
@@ -40,7 +47,18 @@ from vinga_server.events.values import (
 )
 
 from . import events
-from .keys import onboarding_key
+from .keys import onboarding_key, onboarding_path
+
+# Said when there is no short URL to derive, with the fix the command
+# that asked for one needs. The configured `ota_path` segment is named
+# and never quoted: it is a credential, and the derived key is the one
+# recorded exception to that rule.
+ONBOARDING_OFF = (
+    "device onboarding is off (server.onboarding.enabled is false), so this "
+    "configuration serves no short URL. Devices are configured at the path "
+    "server.ota_path names, on {origin} ({provenance}), and that segment is not printed "
+    "here, since it is this deployment's secret. {fix}"
+)
 
 # What `assemble` may be handed as an authority, and the whole of the
 # difference between its two modes. A `str` is a netloc taken verbatim
@@ -175,6 +193,42 @@ def _bracketed(host: str) -> str:
     if ":" in host and not host.startswith("["):
         return f"[{host}]"
     return host
+
+
+def onboarding_url(server: ServerConfig, fix: str) -> tuple[str, Origin]:
+    """The short URL this configuration serves, and where its origin
+    came from.
+
+    Nothing here is a second implementation of anything: the key comes
+    from `keys.onboarding_key` and the origin from `public_origin`
+    above, which are what the server mounts the route with and what the
+    startup banner prints. `fix` is what to do when onboarding is off,
+    which differs by the command that asked, so each of them keeps its
+    own sentence and this one keeps neither.
+
+    Reached by the two commands that answer with no server running, and
+    a refusal is theirs to print: it leaves as the `ConfigError` both of
+    their boundaries already catch.
+    """
+    origin = public_origin(server)
+    if not server.onboarding.enabled:
+        raise ConfigError(
+            ONBOARDING_OFF.format(origin=origin.url, provenance=origin.provenance, fix=fix)
+        )
+    key = onboarding_key(server)
+    # The one state the server itself cannot be in, since it refuses the
+    # boot: auth is on, no key is pinned, and the variable the secret
+    # would come from holds nothing. It is told apart from the keyless
+    # case by the two fields that decide it, so no secret is read here.
+    if key is None and server.auth.enabled and server.onboarding.key is None:
+        raise ConfigError(
+            f"{server.auth.secret_env} is not set, and the onboarding URL's key is "
+            f"derived from it. It is the same variable the server is started with: exec "
+            f"into the running container, where it is already in the environment, or "
+            f"export it here. A deployment that pinned a key under "
+            f"server.onboarding.key needs no secret to print its URL."
+        )
+    return f"{origin.url}{onboarding_path(key)}", origin
 
 
 def portal_url_line(server: ServerConfig, path: str) -> str:
