@@ -2032,19 +2032,28 @@ def _resolved(context: typer.Context) -> Globals:
     return resolved if isinstance(resolved, Globals) else Globals()
 
 
-def _invocation(row: Command, context: typer.Context, **given: Any) -> Invocation:
-    """One command's arguments, with the break-glass gate passed.
+def _invocation(
+    row: Command,
+    context: typer.Context,
+    config: str | None = None,
+    api_url: str | None = None,
+    local: bool = False,
+    **addressed: Any,
+) -> Invocation:
+    """One command's arguments, with the three global options resolved
+    and the break-glass gate passed.
+
+    The three come in as this command's own copies, which is one of the
+    positions they are accepted in; what the positions above it made of
+    them is on the context, and the merge is what lets a value given
+    before the command survive a command that was not given one.
 
     The gate is here rather than in `main` because membership of the
     recovery subset is a fact of the command and the row states it. It
     runs before the command does anything at all, which is what keeps a
     refused `--local set` from reading a fragment off stdin first.
     """
-    resolved = _resolved(context).merged(
-        config=given.pop("config", None),
-        api_url=given.pop("api_url", None),
-        local=given.pop("local", False),
-    )
+    resolved = _resolved(context).merged(config=config, api_url=api_url, local=local)
     if resolved.local:
         if not row.local_ok:
             raise ConfigError(LOCAL_SUBSET)
@@ -2057,7 +2066,7 @@ def _invocation(row: Command, context: typer.Context, **given: Any) -> Invocatio
         # about is its last word, which is the same string the registry
         # keys that kind under.
         kind=row.words[-1] if len(row.words) > 1 else "",
-        **given,
+        **addressed,
     )
 
 
@@ -2081,7 +2090,7 @@ def _plain(row: Command) -> Callable[..., None]:
         api_url: ApiUrlOption = None,
         local: LocalOption = False,
     ) -> None:
-        row.perform(_invocation(row, context, config=config, api_url=api_url, local=local))
+        row.perform(_invocation(row, context, config, api_url, local))
 
     return run
 
@@ -2096,9 +2105,7 @@ def _named(row: Command) -> Callable[..., None]:
         api_url: ApiUrlOption = None,
         local: LocalOption = False,
     ) -> None:
-        row.perform(
-            _invocation(row, context, config=config, api_url=api_url, local=local, name=name)
-        )
+        row.perform(_invocation(row, context, config, api_url, local, name=name))
 
     return run
 
@@ -2115,11 +2122,7 @@ def _staged(row: Command) -> Callable[..., None]:
         api_url: ApiUrlOption = None,
         local: LocalOption = False,
     ) -> None:
-        row.perform(
-            _invocation(
-                row, context, config=config, api_url=api_url, local=local, stage=stage, name=name
-            )
-        )
+        row.perform(_invocation(row, context, config, api_url, local, stage=stage, name=name))
 
     return run
 
@@ -2135,9 +2138,7 @@ def _by_mac(row: Command) -> Callable[..., None]:
         api_url: ApiUrlOption = None,
         local: LocalOption = False,
     ) -> None:
-        row.perform(
-            _invocation(row, context, config=config, api_url=api_url, local=local, mac=mac)
-        )
+        row.perform(_invocation(row, context, config, api_url, local, mac=mac))
 
     return run
 
@@ -2153,9 +2154,7 @@ def _written(row: Command) -> Callable[..., None]:
         api_url: ApiUrlOption = None,
         local: LocalOption = False,
     ) -> None:
-        row.perform(
-            _invocation(row, context, config=config, api_url=api_url, local=local, file=file)
-        )
+        row.perform(_invocation(row, context, config, api_url, local, file=file))
 
     return run
 
@@ -2171,11 +2170,7 @@ def _named_write(row: Command) -> Callable[..., None]:
         api_url: ApiUrlOption = None,
         local: LocalOption = False,
     ) -> None:
-        row.perform(
-            _invocation(
-                row, context, config=config, api_url=api_url, local=local, name=name, file=file
-            )
-        )
+        row.perform(_invocation(row, context, config, api_url, local, name=name, file=file))
 
     return run
 
@@ -2193,16 +2188,7 @@ def _staged_write(row: Command) -> Callable[..., None]:
         local: LocalOption = False,
     ) -> None:
         row.perform(
-            _invocation(
-                row,
-                context,
-                config=config,
-                api_url=api_url,
-                local=local,
-                stage=stage,
-                name=name,
-                file=file,
-            )
+            _invocation(row, context, config, api_url, local, stage=stage, name=name, file=file)
         )
 
     return run
@@ -2226,15 +2212,8 @@ def _provider_secret(row: Command) -> Callable[..., None]:
     ) -> None:
         row.perform(
             _invocation(
-                row,
-                context,
-                config=config,
-                api_url=api_url,
-                local=local,
-                stage=stage,
-                name=name,
-                slot=slot,
-                from_env=from_env,
+                row, context, config, api_url, local,
+                stage=stage, name=name, slot=slot, from_env=from_env,
             )
         )
 
@@ -2257,14 +2236,7 @@ def _mcp_secret(row: Command) -> Callable[..., None]:
     ) -> None:
         row.perform(
             _invocation(
-                row,
-                context,
-                config=config,
-                api_url=api_url,
-                local=local,
-                name=name,
-                slot=slot,
-                from_env=from_env,
+                row, context, config, api_url, local, name=name, slot=slot, from_env=from_env
             )
         )
 
@@ -2284,16 +2256,7 @@ def _provider_slot(row: Command) -> Callable[..., None]:
         local: LocalOption = False,
     ) -> None:
         row.perform(
-            _invocation(
-                row,
-                context,
-                config=config,
-                api_url=api_url,
-                local=local,
-                stage=stage,
-                name=name,
-                slot=slot,
-            )
+            _invocation(row, context, config, api_url, local, stage=stage, name=name, slot=slot)
         )
 
     return run
@@ -2310,11 +2273,7 @@ def _mcp_slot(row: Command) -> Callable[..., None]:
         api_url: ApiUrlOption = None,
         local: LocalOption = False,
     ) -> None:
-        row.perform(
-            _invocation(
-                row, context, config=config, api_url=api_url, local=local, name=name, slot=slot
-            )
-        )
+        row.perform(_invocation(row, context, config, api_url, local, name=name, slot=slot))
 
     return run
 
@@ -2332,15 +2291,7 @@ def _bound_by_mac(row: Command) -> Callable[..., None]:
         local: LocalOption = False,
     ) -> None:
         row.perform(
-            _invocation(
-                row,
-                context,
-                config=config,
-                api_url=api_url,
-                local=local,
-                mac=mac,
-                agents=tuple(agents),
-            )
+            _invocation(row, context, config, api_url, local, mac=mac, agents=tuple(agents))
         )
 
     return run
@@ -2364,15 +2315,7 @@ def _bound_by_code(row: Command) -> Callable[..., None]:
         local: LocalOption = False,
     ) -> None:
         row.perform(
-            _invocation(
-                row,
-                context,
-                config=config,
-                api_url=api_url,
-                local=local,
-                code=code,
-                agents=tuple(agents),
-            )
+            _invocation(row, context, config, api_url, local, code=code, agents=tuple(agents))
         )
 
     return run
@@ -2388,7 +2331,7 @@ def _from_the_file_half(row: Command) -> Callable[..., None]:
     """
 
     def run(context: typer.Context, config: ConfigOption = None) -> None:
-        row.perform(_invocation(row, context, config=config))
+        row.perform(_invocation(row, context, config))
 
     return run
 
@@ -2436,11 +2379,9 @@ def _whole_or_one(row: Command) -> Callable[..., None]:
         local: LocalOption = False,
     ) -> None:
         if context.invoked_subcommand is not None:
-            context.obj = _resolved(context).merged(
-                config=config, api_url=api_url, local=local
-            )
+            context.obj = _resolved(context).merged(config=config, api_url=api_url, local=local)
             return
-        row.perform(_invocation(row, context, config=config, api_url=api_url, local=local))
+        row.perform(_invocation(row, context, config, api_url, local))
 
     return run
 
