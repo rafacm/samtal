@@ -182,8 +182,13 @@ test's own framing already treats as the rule's content);
 honestly (they are the pin that the offering is exactly what the
 code offers); the integration `DUE_BUILTINS` set shrinks;
 `test_conversations_session.py`'s stored-record cases re-anchor on
-`switch_agent`, the builtin with the closest shape (arguments in,
-string out, no external reach).
+an invalid `remember` call with memory configured: its argument
+validation fails before any store access, so the case keeps
+driving the ordinary path the test protects
+(`BuiltinTools.dispatch`, `_run_one`'s exception rendering, the
+`tool_call` event, the stored invocation). `switch_agent` would
+not do: it is special-cased in `_run_tools`, bypasses `_run_one`,
+and a refused handover emits no ordinary `tool_call` event.
 
 ### 5. The split: three modules in `device/`, the session keeps the boundary
 
@@ -474,6 +479,11 @@ with a resolution note here.
    abandons the path it protects.** `switch_agent` is special-cased
    in `_run_tools`, bypasses `_run_one`, and a refused handover
    emits no ordinary `tool_call` event.
+
+   *Resolution* (this commit): decision 4 re-anchors the case on
+   an invalid `remember` call with memory configured, which fails
+   in argument validation before any store access and keeps the
+   whole ordinary dispatch-render-event-record path under test.
 
 8. **P2: capture attachment and teardown ownership was missing.**
    Startup attaches the raw `SessionCapture` to `SessionEvents`
