@@ -52,7 +52,7 @@ import threading
 import time
 import urllib.request
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
@@ -65,6 +65,7 @@ from vinga_server.config import cli
 from vinga_server.config.boot import load_boot_config
 from vinga_server.config.models import API_MOUNT_PATH
 from vinga_server.config.secrets import MASK, MASTER_KEY_ENV, generate_key
+from vinga_server.config.store import APPLY_LIMIT
 from vinga_server.ota import OTA_PATH
 
 # The one variable a fileless boot needs: where the database goes. The
@@ -972,3 +973,110 @@ def test_a_fragment_that_will_not_parse_never_travels(
 
     assert run("show", "agent", "sam") == 0
     assert document(capsys.readouterr().out)["prompt"] == "You are Sam."
+
+
+# The two bounds `apply` rides, on a real connection
+#
+# Both of them are about a transaction whose length nothing about the
+# request predicts, and both are what a mock transport cannot show: one
+# is a client that must not give up on a write the server is still
+# committing, and the other is the request hygiene that keeps the
+# transaction from being unbounded in the first place.
+#
+# These two ask for a store nobody else wrote, because what each of them
+# asserts is what the store holds afterwards.
+
+# A read bound short enough that this server cannot meet it. Deliberately
+# short so the test finishes, the way `test_config_api.py` shortens the
+# database's busy timeout for the same reason: what is being compared is
+# `apply` against an ordinary read, on the same server, over the same
+# connection, with the same store behind it.
+IMPATIENT_S = 0.005
+
+
+def impatient(words: tuple[str, ...], bound: float) -> tuple[cli.Command, ...]:
+    """The registration table with one command's read bound cut short.
+
+    The bound is a fact of the act on that command's row, which is where
+    a command's own answer about how long its endpoint may take is
+    stated, so this is where a test that needs a different answer says
+    so. The table is read and rewritten rather than a second one
+    written: every other row is the one the grammar ships.
+    """
+    return tuple(
+        replace(row, does=replace(row.does, read_timeout_s=bound))
+        if row.words == words
+        else row
+        for row in cli.COMMANDS
+    )
+
+
+def test_a_large_document_is_waited_out_however_long_it_takes(
+    isolated: Live,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A batch at the top of the accepted range, against a client that
+    is not allowed to give up.
+
+    `apply`'s read timeout is None, and the reason is that no finite one
+    can be derived: the transaction loads the whole existing store and
+    validates the whole resulting one, whose size no request bound
+    limits, and a client that gave up on a write the server then
+    committed would leave nobody able to say what is stored.
+
+    The comparison is what makes that observable in a lane's wall clock.
+    An ordinary read of this same server, over the same connection, with
+    its bound cut to a value this server cannot meet, gives up and says
+    so. The apply, whose request demonstrably took longer than that
+    bound, does not.
+    """
+    entries = APPLY_LIMIT - 1
+    many = {f"agent-{number:03d}": {"prompt": "You are one of many."} for number in range(entries)}
+    document_path = written(tmp_path, "large.yaml", {"agents": many})
+    monkeypatch.setattr(cli, "COMMANDS", impatient(("show",), IMPATIENT_S))
+
+    started = time.monotonic()
+    assert run("apply", "-f", document_path, "--api-url", isolated.api_url) == 0
+    took = time.monotonic() - started
+
+    applied = capsys.readouterr()
+    outcomes = [line.split(": ")[-1] for line in applied.out.splitlines()]
+    assert len(outcomes) == entries
+    assert set(outcomes) == {"wrote"}
+    assert took > IMPATIENT_S
+
+    # And the bound is a real one: the same server, asked for a read
+    # that carries it, gives up rather than answering.
+    assert run("show", "--api-url", isolated.api_url) == 1
+    assert "cannot reach the configuration API" in capsys.readouterr().err
+
+
+def test_an_over_limit_document_is_refused_with_the_store_unmutated(
+    isolated: Live, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The other side of the bound, read back rather than assumed.
+
+    The entry count is what keeps a transaction from being unbounded, so
+    it is refused before anything is prepared and before anything is
+    written. What proves the second half is reading the store back over
+    the same connection: an empty store afterwards is the whole claim.
+    """
+    document_path = written(
+        tmp_path,
+        "too-large.yaml",
+        {"agents": {f"agent-{number:03d}": {"prompt": "p"} for number in range(APPLY_LIMIT + 1)}},
+    )
+
+    assert run("apply", "-f", document_path, "--api-url", isolated.api_url) == 1
+
+    refused = capsys.readouterr()
+    assert str(APPLY_LIMIT) in refused.err
+    assert refused.out == ""
+    # Nothing of the document is quoted back, which is what makes the
+    # sentence safe to print whatever a generated document holds.
+    assert "agent-000" not in refused.err
+
+    assert run("show", "--api-url", isolated.api_url) == 0
+    assert document(capsys.readouterr().out)["agents"] == {}
