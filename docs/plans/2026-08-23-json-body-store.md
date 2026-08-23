@@ -145,16 +145,26 @@ and discoveries; no deviations says so explicitly.
    that makes the issue's adopt-autogenerate decision true, and
    it passes the deletion test by being the only way to run the
    command at all.
-5. **The ADR addendum is the compatibility record.** Appended to
+5. **The ADR addendum is the compatibility record, and it leaves
+   the record consistent.** Appended to
    `docs/adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md`
-   in the addendum style it already carries: the decision, the
+   in the addendum style it already carries: the decision; the
    explicit statement that domain databases from the 0001 to 0004
-   chain are unsupported from this change on, the only known
-   deployment and its tested reset path (the infra re-seed;
-   secrets re-encrypt from the env), the conversations chain
-   untouched, and the forward-only promise the body-parse family
-   pins from here to beta. The changelog carries the operator
-   half under `### Removed` and `### Changed`.
+   chain are unsupported from this change on; the RETRACTION, by
+   name, of the two Consequences bullets the change falsifies
+   ("nothing is squashed" and "the upgrade tests keep proving
+   data survives from 0001"); the explicit statement that this
+   extends the #225 addendum's reasoning past the database bound
+   that addendum drew for itself; what "tested" means INSIDE this
+   repository (the example-fragment install suite rebuilding a
+   full configuration on a fresh database, plus `set-secret`
+   re-encrypting from the env), answering the Context's
+   no-complete-importer objection, with the infra re-seed named
+   as the operational half exercised on deploy day; the
+   conversations chain untouched; and the forward-only promise
+   the body-parse family pins from here to beta. The changelog
+   carries the operator half under `### Removed` and
+   `### Changed`.
 6. **The body-parse family is the new floor.** Committed fixtures
    under `tests/unit/data/domain-bodies/`: one JSON body per
    entity type, written at the CURRENT model version, exercising
