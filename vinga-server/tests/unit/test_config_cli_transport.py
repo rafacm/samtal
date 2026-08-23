@@ -217,8 +217,14 @@ def test_a_token_in_the_query_is_not_repeated_by_the_refusal_either(
     assert run("--api-url", f"http://config.example.invalid/api?token={SECRET}", "list") == 1
 
     captured = capsys.readouterr()
-    assert SECRET not in captured.err
-    assert "?token=" not in captured.err
+    both = captured.out + captured.err
+    assert SECRET not in both
+    # The parameter and not only its value, on both streams: a refusal
+    # is printed on one of them and the claim is that the credential
+    # reaches neither. `token` alone cannot be the needle here, since
+    # the refusal's own prose is about the bearer token.
+    assert "?token=" not in both
+    assert f"token={SECRET}" not in both
     # And the address is still named, which is what makes the refusal
     # actionable: it is the credential that is taken out, not the host.
     assert "config.example.invalid" in captured.err
