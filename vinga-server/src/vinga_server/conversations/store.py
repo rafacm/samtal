@@ -185,7 +185,17 @@ def open_conversations(directory: str | Path) -> Engine:
     `secure_delete` because a right to delete honored in the query
     planner and broken in the file bytes is not honored: freed pages are
     overwritten with zeros rather than left in the freelist, which is
-    cheap for a store this append-mostly."""
+    cheap for a store this append-mostly.
+
+    No `superseded`, deliberately and not by omission. That argument is
+    what a database stamped at a revision its own chain deleted is told,
+    and this chain has deleted none: it is the single baseline it has
+    always been, untouched by the domain squash beside it. Handing in
+    the domain's answer would tell whoever met an unreadable
+    conversations database to reset a volume and re-seed a
+    configuration, which is advice about the other file, and acting on
+    it would destroy exactly the recorded conversations `secure_delete`
+    above exists to erase only when somebody asks."""
     return open_at(directory, DATABASE_FILENAME, _MIGRATIONS_DIR, secure_delete=True)
 
 
