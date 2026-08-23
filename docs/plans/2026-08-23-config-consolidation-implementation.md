@@ -448,10 +448,10 @@ Five code commits and this one: the description files with their
 loader, the wheel proof, the retreat in two slices, and the
 privatization the retreat freed. Byte-identity of
 `docs/reference/api-openapi.json` was checked before each was made, and
-again mechanically at all six afterwards, so every commit of the
-milestone is one a reviewer can check the claim at.
+again mechanically at every commit of the branch afterwards, so any of
+them is one a reviewer can check the claim at.
 
-**The prose to data** (`b83586a7`). The nine module-level description
+**The prose to data** (`f39c2b06`). The nine module-level description
 constants leave `api.py` for `config/api_descriptions/`, one file each:
 `api.md` for `API_DESCRIPTION` and one per member of the `*_DESCRIPTION`
 family. A loader beside them reads a file at import, drops the single
@@ -478,7 +478,7 @@ untouched and still closes the drift it was written for: the mask the
 document states and the mask a read displays are one string, now
 because the loader substitutes it rather than because an f-string did.
 
-**The wheel proof** (`cba9242d`). The plan's decision 8 extension. The
+**The wheel proof** (`75c84c6f`). The plan's decision 8 extension. The
 integration lane renders the OpenAPI document from the installed wheel,
 with `-P` and from outside the checkout so the source tree cannot
 answer, and diffs it against the committed copy. It reuses the venv the
@@ -491,7 +491,7 @@ against the committed document. The negative was run too: deleting one
 `MissingDescriptionError` naming `reload-held`, which is the sentence
 the loader exists to produce.
 
-**The retreat** (`de71c3ec`, then `95931b4b`). Twenty-three test files
+**The retreat** (`909e5297`, then `30dde34c`). Twenty-three test files
 in two slices: the four suites that exercise what the repository
 refuses, and then the API, CLI, runtime and conversation suites. Two
 support modules carry the whole vocabulary the suites now speak:
@@ -527,7 +527,7 @@ does the same for the terminal. Four pointer tests in
 covers them case by case, their reasons moved into the table's
 per-case comments.
 
-**The privatization** (`529d3a66`). Forty wording constants across five
+**The privatization** (`e658000c`). Forty wording constants across five
 modules had no reader left outside the module that raises them, and
 each is underscored; the five that were listed in an `__all__` leave
 it. `config/api.py` loses twenty-three (the refusal bodies, the
@@ -605,17 +605,18 @@ outside this territory.
 ### The inventory
 
 Public names of `src/vinga_server/config/` (module-level classes,
-functions, type aliases and non-underscored assignments), at `ee205d28`
-and at the tip. The same counting as M1's table, which is why its
-"after" column and this one's "before" column agree.
+functions, type aliases and non-underscored assignments), at the
+milestone's base and at the tip. The same counting as M1's table, one
+short in `api.py` because M1's own review round privatized the
+acknowledgement constant this milestone would otherwise have taken.
 
 | Module | Before | After |
 | --- | --- | --- |
-| `api.py` | 59 | 37 |
+| `api.py` | 58 | 36 |
 | `reload.py` | 6 | 3 |
 | `store.py` | 14 | 11 |
 | every other module | unchanged | unchanged |
-| **Total** | **320** | **292** |
+| **Total** | **319** | **291** |
 
 Outside the package, `app.py` loses six public names and
 `conversations/api.py` five, by the same rule and in the same commit.
@@ -685,7 +686,9 @@ privatization with the survivors listed.
 - `uv run ruff check .`: clean, at each of the five code commits and at
   the tip.
 - `uv run mypy` (the scoped `events` lane): clean.
-- `uv run pytest tests/unit -q` (serial): 2861 passed, 20 skipped.
+- `uv run pytest tests/unit -q` (serial): 2861 passed, 20 skipped,
+  measured before the branch was rebased onto main. The count is 2863
+  after it, M1's own review round having added two.
 - `uv run pytest tests/unit -q -n 4 --dist loadfile`: the same, and at
   each of the five code commits.
 - `uv run pytest tests/integration -q`: 61 passed.
@@ -708,3 +711,115 @@ privatization with the survivors listed.
   non-empty on that description and turns
   `test_the_committed_document_matches_the_routes` red. Reverted by
   copy-back and `touch`, and both go green again.
+
+## PR review round, M2 (PR #264)
+
+External review of the PR diff: claude backend (the codex quota is
+exhausted), claude CLI, model `claude-opus-5`, read-only tool set,
+2026-08-23, posted on the PR. Verdict as received: "Mergeable after fix
+1; findings 2 to 5 are worth folding in and none blocks." One P2 and
+four P3s. The round verified the milestone's load-bearing claims itself
+and could not break them, which is what makes the five findings the
+whole of what is left. As received:
+
+> I could not break the milestone's load-bearing claims: the loader's
+> two refusal paths are both exercised, the sigil substitution is
+> unambiguous against the prose (no `$` in any description file,
+> `re.sub` with a callable does not reprocess the replacement), the
+> byte-identity of `docs/reference/api-openapi.json` is held by the
+> pre-existing checkout drift step *and* the new wheel step, the wheel
+> step fails closed on both a missing data file (import raises before
+> the diff) and altered prose, and the 40 privatized names have no
+> reader left anywhere in `src` or `tests`.
+
+It also verified the wheel step's mechanics against the workflow (the
+venv and the run directory exist from the step above, the heredoc
+terminator's column, `docgen.openapi()` ending in a newline so it can
+diff against the committed file, and hatchling shipping non-`.py` files
+under `src/vinga_server`, with `script.py.mako` as the precedent).
+
+Every finding has its own commit.
+
+1. **P2: the conversations argument refusal lost its quotes-nothing
+   proof for every row but the sentinel ones.** The retreat replaced a
+   whole-body comparison, whose own comment said there is nowhere for
+   what was sent to be, with "the argument is named". Six of the nine
+   rows carry values that are not the sentinel, and nothing asserted
+   those were absent; and since `refused()` does not pin `errors`
+   empty, a refusal that grew a field entry quoting the value would
+   have passed on every row. Fixed in `5232eab3`, taking both halves of
+   the suggestion. `paths(body) == []` is the structured half: these
+   rules are about a query argument rather than a field of a body, so
+   naming no field is the honest answer and the value has nowhere to
+   be. `value not in response.text` is the other half, per row, which
+   is why the zero row is spelled `000`: a bare `0` occurs inside the
+   bounds the sentence names, so looking for it would have proved
+   nothing. The comment now says what the assertions hold.
+
+2. **P3: four tests named for a fixed sentence asserted only the body
+   shape.** Nothing held the claim in their own names, that two
+   different stored-side causes answer with one detail that names no
+   location. Fixed in `d2fa5ded`, taking the differential option where
+   it applies and the carried-token option where it does not. The two
+   tests called "refuses the same way", in `test_config_reload.py` and
+   `test_config_diff_read.py`, now drive both causes over one store,
+   the planted provider and then the credential that will no longer
+   open with the row put back, and assert the two answers carry the
+   same `detail`: a claim neither could make before, and one a copied
+   sentence cannot make at all, since a copy agrees with itself
+   whatever the two refusals do. The two beside them assert
+   "deliberately not said here", which only the fixed sentence carries.
+   No test needed renaming afterwards; the planting and the restoring
+   moved into named helpers.
+
+3. **P3: `"store"` did not identify the snapshot-mode refusal.** It is
+   satisfied by the other 409 the comparison read answers, the held
+   write lock, whose sentence says the stored half could not be read.
+   Fixed in `796aff49`: `"will not help"`, which the snapshot refusal
+   alone carries and which is the whole difference between the two, and
+   which the sibling assertion and the runtime suite already used.
+
+4. **P3: the retreat census was not computed by the rule it stated,
+   and the survivor list was not exhaustive.** Three mismatches, all
+   fixed in `b055179e` by recomputing rather than by editing numbers.
+   Import statements were excluded by the shape of a line, so a name
+   inside a parenthesised import counted as a body reference: that is
+   what made the MCP row two rather than one, and it inflated most of
+   the before column. They are excluded as whole syntax nodes now, and
+   both columns are recomputed, 207 before and 10 after. `LOCAL_NOTICE`
+   and the test-local golden beside it were disclosed only in the
+   deviations, where decision 4 asks for a survivor entry; they are a
+   fourth row now, cross-referencing that deviation, and their nine
+   references are counted. And the two status mappings were listed as
+   survivors while the files reading them showed zero, so the carve-out
+   is stated and the table says per row whether a survivor is counted.
+
+5. **P3: the CHANGELOG undercounted the retreat.** Twenty-three test
+   files carry it, three of them the integration lane's, which is what
+   the census table lists; the support modules and the document suite
+   are not retreats. Fixed in `88748890`.
+
+Beside the five, the recorded commit hashes in this milestone's section
+were re-anchored: the branch was rebased onto main after M1 merged, so
+every hash the section named was of a commit no longer in its history.
+The inventory's base moved with them, and its `api.py` column is one
+lower at both ends than it was: M1's own review round privatized the
+acknowledgement constant this milestone would otherwise have taken.
+
+### Verification after the round
+
+All from `vinga-server/`.
+
+- `uv run ruff check .`: clean.
+- `uv run mypy`: clean.
+- `uv run pytest tests/unit -q -n 4 --dist loadfile`: 2863 passed, 20
+  skipped. The round added no test, findings 1 to 3 sharpening
+  assertions inside tests that already existed; the two above the
+  milestone's own 2861 came with the rebase onto merged main, where
+  M1's review round had added them.
+- `uv run pytest tests/integration -q`: 61 passed.
+- `uv run vinga-server config openapi | diff - ../docs/reference/api-openapi.json`:
+  empty, and empty at every commit of the branch, checked by rendering
+  the document from each commit's extracted `src`.
+- `uv run vinga-server config reference | diff - ../docs/reference/domain-config.md`:
+  empty.
