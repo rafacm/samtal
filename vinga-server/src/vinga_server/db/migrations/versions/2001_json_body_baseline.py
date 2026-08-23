@@ -9,9 +9,15 @@ The revision id opens a new numbering block on purpose. No database
 was ever stamped `2001_json_body_baseline`, so a database from the
 0001 to 0004 chain cannot be mistaken for one at head: Alembic fails
 to locate its stored revision, and `db.migration_failure` answers that
-with the sentence that says to reset and re-seed. Reusing `0001` would
-have made those databases silently current and then broken at the
-first read of a column that is no longer there.
+with the sentence that says to delete this file and re-seed. Reusing
+`0001` would have made those databases silently current and then broken
+at the first read of a column that is no longer there.
+
+Those four ids are named in `db.DOMAIN_SUPERSEDED`, which is what keeps
+the sentence to the databases it is true of: a revision this build
+cannot find because it is from a LATER chain gets the ordinary
+migration-failure sentence instead, since that database is current and
+its operator has to roll forward rather than delete it.
 
 Domain databases written before this revision are not upgradeable, by
 the decision recorded in the addendum to

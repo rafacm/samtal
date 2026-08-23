@@ -88,17 +88,26 @@ class Superseded:
 # databases are unsupported": such a database reaches here rather than
 # being taken for current and failing later on a column that is gone.
 # The next step is the only thing worth saying, because there is no
-# other: reset the volume and re-seed, which is what the ADR addendum
+# other: replace this file and re-seed, which is what the ADR addendum
 # records and what the deploy runs.
+#
+# It names the FILE and not the directory it sits in, which is not
+# fussiness: `conversations.db` lives in the same directory under the
+# same `server.database.dir`, this change does not touch it, and it
+# holds recorded conversations that nothing here has any business
+# deleting. An instruction to reset the directory is an instruction to
+# destroy it.
 DOMAIN_SUPERSEDED = Superseded(
     revisions=frozenset({"0001", "0002", "0003", "0004"}),
     sentence=(
         "the database at {path} is stamped at a revision this build does not carry, "
         "which is what a domain database written before the storage reshape looks "
         "like: its migration chain was replaced by a single baseline and cannot be "
-        "upgraded in place. Reset the database directory and re-seed the "
-        "configuration; docs/adr/2026-08-20-database-upgrades-have-a-compatibility-"
-        "floor.md records the decision and what it costs"
+        "upgraded in place. Delete that file, together with the -wal and -shm files "
+        "beside it, and re-seed the configuration; keep any conversations.db in the "
+        "same directory, which this change does not touch. "
+        "docs/adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md records "
+        "the decision and what it costs"
     ),
 )
 

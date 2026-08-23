@@ -104,9 +104,19 @@ upgrade from one and there will not be one. Such a database is not
 mistaken for current: the new revision id is fresh, so Alembic
 cannot locate the stored revision and `db.migration_failure`
 answers with a sentence saying the database predates the storage
-reshape, to reset the directory and re-seed, and naming this record.
-That sentence is the whole of the operator-facing surface of
-"unsupported".
+reshape, to delete `vinga.db` and its `-wal` and `-shm` companions
+and re-seed, to keep any `conversations.db` beside it, and naming
+this record. That sentence is the whole of the operator-facing
+surface of "unsupported", and it names the file rather than the
+directory because both databases live in the same one.
+
+The sentence is also raised only about this database and only for
+the four revisions this squash deleted. A database stamped by a
+newer build and then met by a rolled-back image fails Alembic in
+exactly the same way and is current rather than stranded, so it is
+told nothing about resetting anything, and the conversations
+database, whose chain has deleted no revision, is never told this
+at all.
 
 **Two Consequences bullets above are retracted by name.** The first
 ("The four configuration revisions and the conversations baseline

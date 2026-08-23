@@ -256,10 +256,11 @@ before it, and answers the attempt with the reset sentence rather than
 starting, so the two are one step:
 
 1. Stop the deployment.
-2. Delete the contents of the domain database directory
-   (`server.database.dir`). The conversations database in the same
-   directory is unaffected by this change and may be kept; the file
-   this is about is `vinga.db`.
+2. Delete `vinga.db` from `server.database.dir`, together with its
+   `-wal` and `-shm` companions. That file and no more: the
+   conversations database lives in the same directory, is unaffected by
+   this change, and must be kept, so "reset the directory" is the one
+   thing not to do.
 3. Roll out the new image and start it.
 4. Re-seed the configuration from the files it is kept in, with
    `vinga-server config set ...` per entity, the same commands the
