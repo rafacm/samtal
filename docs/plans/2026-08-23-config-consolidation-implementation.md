@@ -538,21 +538,20 @@ descriptions and `API_TITLE`), `config/store.py` three,
 
 ### The survivors
 
-After the retreat, no test in the config family imports a wording
-constant. Three references to one remain in the whole suite, each named
-here rather than left to be found:
+No test in the config family imports a wording constant any more. What
+does still read one is listed here in full rather than left to be
+found, with what it reads it as:
 
-| Name | Where a test still reads it | Why it is not a wording pin |
-| --- | --- | --- |
-| `api.PROBLEM_TITLES` | `tests/support/problems.py`, `test_config_api_problems.py` | `problem_response` builds a body with it at runtime and the helper reads the same mapping, so the two agree by reading one source rather than by a copy. The second test holds it against RFC 9457's recommended reason phrases, which is a closed set and not this API's prose. |
-| `api.PROBLEM_DESCRIPTIONS` | `test_config_api_problems.py`, `test_config_api_runtime.py` | Read as the shared description a route either inherits or overrides: every assertion is `== PROBLEM_DESCRIPTIONS[status]` or `!=`, which says which description a route carries and stays green when the prose is edited. The key-set test holds it equal to `PROBLEM_TITLES`, which is a closed-set claim. |
-| `entities.RESTART_NOTICE`, through `cli` | `test_config_cli_local.py`, one negative | Inside `test_a_local_write_says_what_the_api_says_for_the_same_act`, the differential pin decision 6 made exempt. The assertion is `not in`, a sentinel rather than a pin, and it is what keeps a preamble from reasserting restart timing ahead of a reload notice. |
+| Name | Where a test reads it | Why it is not a wording pin | Counted below |
+| --- | --- | --- | --- |
+| `api.PROBLEM_TITLES` | `tests/support/problems.py`, `test_config_api_problems.py` | `problem_response` builds a body with it at runtime and the helper reads the same mapping, so the two agree by reading one source rather than by a copy. The second test holds it against RFC 9457's recommended reason phrases, which is a closed set and not this API's prose. | no, carved out |
+| `api.PROBLEM_DESCRIPTIONS` | `test_config_api_problems.py`, `test_config_api_runtime.py` | Read as the shared description a route either inherits or overrides: every assertion is `== PROBLEM_DESCRIPTIONS[status]` or `!=`, which says which description a route carries and stays green when the prose is edited. The key-set test holds it equal to `PROBLEM_TITLES`, which is a closed-set claim. | no, carved out |
+| `cli.LOCAL_NOTICE`, with the test-local `LOCAL_PREAMBLE` and `RESTART_TIMING` beside it | `test_config_cli_local.py`, nine references between them | The break-glass banner, which is neither a response nor an acknowledgement: it is printed before the command runs. Its equality with `LOCAL_PREAMBLE` is what ties that literal to the code for the exempt differential test, which pins the whole shape of what `--local` printed. The deviation below says why it did not retreat. | yes, nine |
+| `entities.RESTART_NOTICE`, through `cli` | `test_config_cli_local.py`, one negative | Inside `test_a_local_write_says_what_the_api_says_for_the_same_act`, the differential pin decision 6 made exempt. The assertion is `not in`, a sentinel rather than a pin, and it is what keeps a preamble from reasserting restart timing ahead of a reload notice. | yes, one of the nine |
 
-Two more references sit outside this issue's territory and were left:
-`tools/mcp`'s `RELOAD_REFUSED` in `test_tools_mcp_reload.py`, which is
-the MCP tool surface rather than the config admin surface, and the two
-prose comments in `test_config_cli_local.py` that name the notices to
-explain the exempt test.
+One reference sits outside this issue's territory and was left:
+`tools/mcp`'s `RELOAD_REFUSED` at `test_tools_mcp_reload.py:449`, which
+is the MCP tool surface rather than the config admin surface.
 
 The registry's own sentences stay public and are not survivors in this
 sense: `NO_SUCH_*` and the five `*_NOTICE` constants are declared in
@@ -561,39 +560,47 @@ an ordinary cross-module reader and not a test.
 
 ### The retreat's count
 
-A reference to a wording constant or to a golden sentence, inside a
-test body, counted per file at the milestone's base (`ee205d28`) and at
-its tip. Import lines, the constants' own declarations and comments are
-excluded.
+The rule, stated so the numbers can be recomputed: a reference to a
+wording constant or to a test-local golden sentence, inside a test
+body, counted per file at the milestone's base (`abb20c1d`) and at its
+tip. Import statements are excluded as whole syntax nodes rather than
+by the shape of a line, so a name inside a parenthesised import counts
+nowhere; so are the constants' own declarations and comments. Carved
+out by name: `PROBLEM_TITLES` and `PROBLEM_DESCRIPTIONS`, for the
+reason the table above gives, since a test reads them as the source of
+truth rather than as prose.
 
 | Suite | Before | After |
 | --- | --- | --- |
-| `unit/test_config_api_writes.py` | 53 | 0 |
-| `unit/test_config_cli.py` | 30 | 0 |
-| `unit/test_config_api_problems.py` | 29 | 0 |
-| `unit/test_conversations_api.py` | 23 | 0 |
-| `unit/test_config_api_runtime.py` | 20 | 0 |
-| `unit/test_config_api_pending.py` | 12 | 0 |
-| `unit/test_config_refusals.py` | 12 | 0 |
-| `unit/test_config_store.py` | 12 | 0 |
-| `unit/test_config_api_reads.py` | 11 | 0 |
-| `unit/test_config_reload.py` | 11 | 0 |
-| `unit/test_config_reads.py` | 10 | 0 |
-| `unit/test_config_diff_read.py` | 8 | 0 |
-| `unit/test_config_api.py` | 8 | 0 |
+| `unit/test_config_api_writes.py` | 41 | 0 |
+| `unit/test_config_api_problems.py` | 26 | 0 |
+| `unit/test_config_cli.py` | 22 | 0 |
+| `unit/test_conversations_api.py` | 18 | 0 |
+| `unit/test_config_api_runtime.py` | 11 | 0 |
+| `unit/test_config_cli_local.py` | 11 | 9 |
+| `unit/test_config_api_pending.py` | 9 | 0 |
+| `unit/test_config_reload.py` | 9 | 0 |
+| `unit/test_config_refusals.py` | 7 | 0 |
 | `unit/test_config_round_trip.py` | 7 | 0 |
+| `unit/test_config_store.py` | 7 | 0 |
+| `unit/test_config_api_reads.py` | 6 | 0 |
+| `unit/test_config_api.py` | 5 | 0 |
+| `unit/test_config_diff_read.py` | 5 | 0 |
+| `unit/test_config_reads.py` | 5 | 0 |
 | `unit/test_config_snapshot_mode.py` | 5 | 0 |
-| `unit/test_config_cli_local.py` | 3 | 1 |
 | `unit/test_config_cli_secrets.py` | 3 | 0 |
-| `unit/test_tools_mcp_reload.py` | 3 | 2 |
 | `unit/test_app_lifespan.py` | 2 | 0 |
 | `unit/test_device_bindings.py` | 2 | 0 |
+| `unit/test_tools_mcp_reload.py` | 2 | 1 |
 | `integration/test_mcp_reload.py` | 2 | 0 |
 | `integration/test_activation.py` | 1 | 0 |
 | `integration/test_device_bindings.py` | 1 | 0 |
-| **Total** | **268** | **3** |
+| **Total** | **207** | **10** |
 
-The three that remain are the three rows of the survivor table above.
+The ten that remain are the last two rows of the survivor table: nine
+in `test_config_cli_local.py`, all of them the break-glass banner and
+the exempt differential test around it, and the one MCP tool reference
+outside this territory.
 
 ### The inventory
 
