@@ -76,20 +76,28 @@ already holds every location to `safe_location`, so a key an operator
 invented is never named either.
 
 **The stranded-database refusal.** `migration_failure` grows one arm
-ahead of the driver-message one: an `alembic.util.exc.CommandError`
-answers with the sentence that says the database is stamped at a
-revision this build does not carry, that a domain database written
-before the storage reshape is what that looks like, and to reset the
-directory and re-seed, naming the ADR. It is told from the rest by the
-exception type, which is what the delta review's note asks for: the
-exception carries no `orig`, so the existing sentence would have
-reported the class name and nothing else. The stored revision is not
-quoted back and neither is Alembic's own wording.
+ahead of the driver-message one, answering with the sentence that says
+the database is stamped at a revision this build does not carry, that a
+domain database written before the storage reshape is what that looks
+like, and to delete `vinga.db` with its `-wal` and `-shm` companions and
+re-seed, keeping any `conversations.db` beside it, naming the ADR. The
+exception carries no `orig`, which is what the delta review's note is
+about: the existing sentence would have reported the class name and
+nothing else. The stored revision is not quoted back and neither is
+Alembic's own wording.
+
+The arm was written to match `CommandError` by type alone and to be
+supplied by this module, and the PR review round below narrowed both:
+it now takes four conditions rather than one (findings 1 and 2), and the
+remedy names the file rather than the directory (finding 3). What is
+described here is the first pass; the round records what it became and
+why.
 
 **The suites.** The column-planting sites are rewritten under the
 plan's one rule. A plant of lawful state goes through a new
-`tests/support/stores.body(entry)`, which dumps a model the way
-`_to_row` does and sits beside `planted` with the reason written down; a
+`tests/support/stores.body(entry)`, which sits beside `planted` with the
+reason written down and, since finding 6 of the round below, produces
+its body by calling `_to_row` rather than by restating what it does; a
 plant of a malformed or old-shaped row is a hand-written body string,
 because a dump is the one thing that cannot produce the shape the
 reader is being asked to survive. `test_db_open.py`'s `EXPECTED_COLUMNS`
@@ -108,7 +116,10 @@ where its own fixture holds the old shape.
 **The body-parse family.** `tests/unit/test_config_bodies.py` over
 twelve committed bodies under `tests/unit/data/domain-bodies/`, one
 directory per kind named as the registry names it, so the kind a body
-belongs to is read off the tree rather than restated in a table. Every
+belongs to is read off the tree rather than restated in a table (finding
+5 below added the assertion that the tree still holds every kind the
+registry declares, which is what stops the floor being lowered by a
+deletion). Every
 body validates through today's model; every body round trips through the
 store (planted, loaded, dumped, planted, loaded) with the entry and its
 `model_fields_set` unchanged; each kind has a body leaning on its
@@ -123,9 +134,10 @@ all.
 replaced by decision 7's two assertions: every entity table has a `body`
 column, and the fresh database the wheel migrates is at exactly
 `{"2001_json_body_baseline"}`. The comment above it says what it now
-proves and names `test_db_open.py`'s `EXPECTED_COLUMNS` as the in-repo
-twin that moves with it. The expected-tables block and the whole
-conversations half are untouched.
+proves and names the two places in the suite where the shape is checked
+in full (finding 7 below rewrote that comment, which had claimed a
+parity with `EXPECTED_COLUMNS` that neither side enforced). The
+expected-tables block and the whole conversations half are untouched.
 
 ### Deviations from the plan
 
@@ -299,3 +311,140 @@ starting, so the two are one step:
   wrong, not because that is where it belongs. If pydantic ever gains a
   per-model `allow_inf_nan=False` that reaches pass-through extras, the
   check becomes a model setting and this line goes away.
+
+### PR review round (PR #262)
+
+External review of the milestone diff, 2026-08-23. Backend: claude CLI,
+model `claude-opus-5`, read-only tool set (interim fallback tier). The
+round is posted on the PR. Verdict as received: **mergeable after the
+listed fixes**, with findings 1 to 3 named as the blockers ("the one
+operator-facing sentence this milestone exists to produce currently
+fires for the wrong failures, on the wrong database, and recommends
+deleting data that the same PR's ADR says to keep") and 4 and 5 as "the
+two gates the squash removed and the milestone claims to have
+replaced". Findings condensed but faithful:
+
+1. **P2: the `CommandError` arm answers every Alembic command failure
+   with the reset sentence.** The docstring's universal is false: the
+   same exception covers an unreadable script directory, a chain with
+   two heads, and a database stamped by a NEWER build and then met by a
+   rolled-back image, whose remedy is to roll forward rather than to
+   destroy a current volume. Narrow it to the resolution failure, or
+   compare the stored revision against the chain, and cover the
+   rollback case.
+   *Resolution* (`0eff30b4`): four conditions, not one. A
+   `CommandError`, a cause chain holding Alembic's own
+   `ResolutionError`, a caller that handed in a superseded set, and a
+   revision inside that closed set of the four ids the squash deleted,
+   which is the only thing that tells a stranded database from one
+   written by a later chain. Everything else falls through to the
+   sentence it took before the arm existed. The rollback case, an
+   unreadable script directory and a bare `CommandError` are each
+   pinned as not getting the reset sentence.
+
+2. **P2: the sentence fires for the conversations database too**,
+   through the shared `open_at`, with advice about the wrong file whose
+   deletion would destroy recorded conversations the store erases
+   physically only on request. The ADR addendum says the conversations
+   chain is untouched and nothing here reaches it; the code reached it.
+   *Resolution* (`249183d8`): what a stranded database is told became a
+   parameter of `open_at`, `Superseded`, carrying one chain's deleted
+   revisions and the sentence they earn. `open_database` supplies the
+   domain's; `open_conversations` supplies none and says why. Both
+   directions are pinned with `0001`, a live revision of one chain and a
+   deleted one of the other, so what decides is which chain was opened.
+
+3. **P2: "Reset the database directory" over-deletes** and contradicts
+   this document's own step 2: both databases live under
+   `server.database.dir`, and the changelog says in one bullet to reset
+   the directory and to keep `conversations.db`.
+   *Resolution* (`228d8d20`): the file is named in all four places (the
+   refusal, the changelog bullet, the ADR addendum, the deploy step):
+   delete `vinga.db` with its `-wal` and `-shm` companions, keep any
+   `conversations.db` beside it. The baseline's docstring picks up the
+   same wording.
+
+4. **P2: nothing checks that the single baseline still matches
+   `db.schema.metadata`.** With no successor revision, a column added to
+   `schema.py` without a migration is invisible until a deployment
+   write fails, and column types, nullability, primary keys and the
+   singleton constraint were pinned nowhere.
+   *Resolution* (`3681b33e`):
+   `test_the_baseline_builds_exactly_what_the_tables_declare` opens a
+   database at head and asserts `compare_metadata` against the metadata
+   is empty, which is the comparison autogenerate itself makes. Proved
+   by two mutations, both recorded in the table below.
+
+5. **P2: the body floor derives its inventory from the tree**, so
+   deleting a kind's directory or a transport's bodies leaves the whole
+   family green while the ADR goes on promising them.
+   *Resolution* (`f0d016ef`): the kinds are asserted equal to the entity
+   registry's names and the transports equal to the set the transport
+   field's own annotation declares. Both were proved by deleting: the
+   provider directory, and the two stdio bodies, each fails this test
+   and nothing else.
+
+6. **P3: the round trip never calls `_to_row`**; its dump half was a
+   copy of the `exclude_unset` decision in test support, so removing
+   `exclude_unset` from the shipped writer left the family green while
+   its docstring claimed to pin exactly that.
+   *Resolution* (`b51522e3`): `stores.body` delegates to `_to_row`,
+   finding the descriptor by the entry's model (exact match, since
+   `AgentConfig` is an `AgentDefaults`). With the copy gone, removing
+   `exclude_unset` fails eight round trips. The reach past the
+   underscore is deliberate and the helper says so.
+
+7. **P3: the workflow comment claims a parity with `EXPECTED_COLUMNS`
+   that does not exist**: CI holds five table names and checks for a
+   body column, the suite holds full column sets and checks equality.
+   *Resolution* (`cb1046ac`): the comment says what the block is, a
+   packaging check deliberately asking less, and names the two places
+   the shape is really checked.
+
+8. **P3: "one sparse and one fully written per kind" is untrue of
+   `prompt-fragment`**, whose model has no optional field, and the test
+   is vacuous for that kind.
+   *Resolution* (`4772ab6b`): the ADR promises both ends where a kind
+   has two ends, and the test's docstring names the single-body case and
+   points at the inventory assertion, which is what holds that kind.
+
+**On the flagged deviation, as received:** "The NaN guard's survival is
+correct and should stand. ... the plan's premise ('pydantic's JSON
+parser refuses NaN and non-finite numbers at the door') is indeed false
+for the one kind that can hold an untyped number at arbitrary depth.
+Keeping the check inside `_body`, asked of the validated entry,
+preserves the existing refusal and its wording ... The declined deletion
+was the right call; the follow-up note recording why it lives in `_body`
+rather than in the model is the right disposition." The one consequence
+it asked to be recorded, that the write side now serializes a
+non-finite float to `null` where the old column stored the literal, is
+in the deviation section above (`1941d8ec`).
+
+### Mutations, review round
+
+| Mutation | Expected | Result |
+| --- | --- | --- |
+| `Column("family", Text, nullable=True)` added to `agents` in `schema.py`, no migration | The new metadata comparison goes red | As expected, naming `add_column agents.family`. It is not the quiet case, though: 404 other tests fail with it, because a select names every metadata column. |
+| `agents.body` flipped to `nullable=True` in `schema.py`, no migration | The new metadata comparison goes red, and it is the only thing that notices | As expected, and this is the case the finding is about: 2854 tests pass, and `test_the_baseline_builds_exactly_what_the_tables_declare` fails alone. |
+| `exclude_unset` removed from `_to_row` | The body round trip goes red now that the helper delegates | As expected: 8 of the 12 round trips fail, every MCP body and the sparse provider among them. Before `b51522e3` this family stayed green. |
+| `tests/unit/data/domain-bodies/provider/` deleted | The inventory assertion goes red | As expected, and alone. |
+| `mcp-server/stdio-*.json` deleted | The inventory assertion goes red | As expected, and alone. |
+
+Every mutation was reverted by copying the backup back and `touch`ing
+it, per `AGENTS.md`; the suites were re-run green afterwards and
+`git status` was checked clean each time.
+
+### Verification, review round
+
+Everything run from `vinga-server/`, on the tree after the eight fixes.
+
+- `uv run ruff check .`: passed.
+- `uv run mypy`: passed, no issues in 4 source files.
+- `uv run pytest tests/unit -q`: 2856 passed, 20 skipped.
+- `uv run pytest tests/unit -q -n 4 --dist loadfile`: 2856 passed, 20
+  skipped.
+- `uv run pytest tests/integration -q`: 61 passed.
+- `vinga-server config reference` and `vinga-server config openapi`:
+  both still byte-identical to the committed artifacts.
+- The CI wheel-migration block, extracted and run locally against a
+  freshly built and installed wheel: both success lines printed.
