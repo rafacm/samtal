@@ -1,0 +1,10 @@
+{
+  "transport": "streamable_http",
+  "url": "https://example.invalid/mcp",
+  "headers": {"Accept-Language": "sv-SE", "Authorization": "$WEATHER_TOKEN"},
+  "egress": true,
+  "tool_timeout_s": 5.0,
+  "instructions": "Forecasts are for Barcelona unless the caller says otherwise.",
+  "use_server_instructions": false,
+  "inject_prompts": []
+}

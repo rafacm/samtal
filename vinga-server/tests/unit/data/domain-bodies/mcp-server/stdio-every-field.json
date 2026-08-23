@@ -1,0 +1,11 @@
+{
+  "transport": "stdio",
+  "command": "uvx",
+  "args": ["home-mcp", "--room", "kitchen"],
+  "env": {"HOME_MCP_ROOM": "kitchen", "API_ACCESS_TOKEN": "$HOME_MCP_TOKEN"},
+  "egress": false,
+  "tool_timeout_s": 7.5,
+  "instructions": "  Ask before unlocking the door.\n\n    The lights are safe.\n",
+  "use_server_instructions": true,
+  "inject_prompts": ["house_style", "safety"]
+}

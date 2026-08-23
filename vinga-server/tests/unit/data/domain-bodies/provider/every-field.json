@@ -1,0 +1,11 @@
+{
+  "type": "openai_compatible",
+  "api_key_env": "MY_PROVIDER_KEY",
+  "egress": false,
+  "model": "a-model",
+  "base_url": "http://127.0.0.1:8080/v1",
+  "temperature": 0.7,
+  "max_reply_length": 512,
+  "stop": ["\n\n"],
+  "connection": {"retries": 2, "timeout_s": null}
+}
