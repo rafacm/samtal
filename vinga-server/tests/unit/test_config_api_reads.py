@@ -23,18 +23,11 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import update
 
-from tests.support.problems import PROBLEM_KEYS, problem
+from tests.support.problems import PROBLEM_KEYS, refused
 from tests.support.stores import body, planted
 from vinga_server import db as db_module
 from vinga_server.config.api import build_api
-from vinga_server.config.entities import (
-    NO_SUCH_AGENT,
-    NO_SUCH_DEVICE,
-    NO_SUCH_FRAGMENT,
-    NO_SUCH_MCP_SERVER,
-    NO_SUCH_PROVIDER,
-)
-from vinga_server.config.models import ProviderConfig
+from vinga_server.config.models import PROVIDER_STAGES, ProviderConfig
 from vinga_server.config.secrets import (
     MASK,
     MASTER_KEY_ENV,
@@ -42,7 +35,7 @@ from vinga_server.config.secrets import (
     generate_key,
     load_keys,
 )
-from vinga_server.config.store import NOT_A_STAGE, ConfigStore
+from vinga_server.config.store import ConfigStore
 from vinga_server.db import DATABASE_FILENAME, open_database, schema
 
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
@@ -396,27 +389,29 @@ def test_a_dotted_slot_reads_back_under_its_own_name(
 
 
 MISSING = [
-    ("/providers/llm/ghost", NO_SUCH_PROVIDER),
-    ("/mcp-servers/ghost", NO_SUCH_MCP_SERVER),
-    ("/prompt-fragments/ghost", NO_SUCH_FRAGMENT),
-    ("/agents/ghost", NO_SUCH_AGENT),
-    ("/devices/aa:bb:cc:dd:ee:ff", NO_SUCH_DEVICE),
+    ("/providers/llm/ghost", "providers", "ghost"),
+    ("/mcp-servers/ghost", "mcp_servers", "ghost"),
+    ("/prompt-fragments/ghost", "prompt_fragments", "ghost"),
+    ("/agents/ghost", "agents", "ghost"),
+    ("/devices/aa:bb:cc:dd:ee:ff", "devices", "aa:bb:cc:dd:ee:ff"),
 ]
 
 
-@pytest.mark.parametrize(("path", "detail"), MISSING)
-def test_a_missing_entity_is_404_in_the_repository_s_own_words(
-    client: TestClient, store: ConfigStore, path: str, detail: str
+@pytest.mark.parametrize(("path", "section", "identity"), MISSING)
+def test_a_missing_entity_is_404_naming_its_section_and_not_itself(
+    client: TestClient, store: ConfigStore, path: str, section: str, identity: str
 ) -> None:
-    """The same fixed sentence the CLI prints, so an operator meets one
-    vocabulary whichever way they reached the read, and the identity
-    they addressed is in none of them (#132)."""
+    """404, the one refusal shape, and the section the operator should
+    look in. The identity they addressed is in none of it (#132): it
+    arrived in the URL path, which is where a paste lands."""
     store.set_provider("llm", "claude", {"type": "anthropic", "model": "m"})
 
     response = client.get(path)
 
     assert response.status_code == 404
-    assert response.json() == problem(404, detail)
+    detail = refused(response.json(), 404)
+    assert detail.startswith(f"{section}:"), detail
+    assert identity not in detail, detail
 
 
 def test_an_identity_that_cannot_be_addressed_at_all_is_422(
@@ -431,9 +426,14 @@ def test_an_identity_that_cannot_be_addressed_at_all_is_422(
     mac = client.get("/devices/not-a-mac")
 
     assert stage.status_code == 422
-    assert stage.json()["detail"] == NOT_A_STAGE
+    stage_detail = refused(stage.json(), 422)
+    # The four stages are constants of this server and are named; the
+    # word that was sent is not.
+    assert all(known in stage_detail for known in PROVIDER_STAGES), stage_detail
+    assert "nonsense" not in stage_detail, stage_detail
     assert mac.status_code == 422
-    assert "is not a MAC address" in mac.json()["detail"]
+    mac_detail = refused(mac.json(), 422)
+    assert "MAC" in mac_detail, mac_detail
 
 
 def test_a_row_that_cannot_be_read_is_500(
