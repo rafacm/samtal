@@ -72,20 +72,30 @@ explicitly.
    reference document byte-identical, `config schema` output
    byte-identical, and the store's write-order suite; the OpenAPI
    document cannot see either model and pins nothing here.
-2. **The fan-out is kept; the registry's generative half goes.**
-   The audit's finding was that the registry's 692 lines now buy
-   strings, not structure, after the conscious de-abstraction kept
-   the hand-written five-kind fan-out. Picking the registry side
-   would mean re-deriving the fan-out from it, reversing a
-   recorded decision; picking the fan-out side means the registry
-   shrinks to the descriptor strings the CLI help, docgen, and
-   API descriptions actually read (names, addressing, kind words),
-   and stops carrying machinery that could have generated code
-   nobody generates. `leads_with` and `always_shown` go with it:
-   each has one non-empty use, and the one consumer each serves
-   reads the fact from the descriptor today only to apply it in
-   one place, so the fact moves to that place as a literal with a
-   comment naming the entity.
+2. **The fan-out is kept, and the registry shrink is a field-by-
+   field disposition, not a slogan.** Post-#210 the registry holds
+   no generative machinery (the route factory died in that batch);
+   what decision 2 actually does is drop the two speculative
+   fields and state every other field's reader. Goes:
+   `leads_with` and `always_shown` (one non-empty use each; the
+   fact moves to its one consumer as a literal with a comment
+   naming the entity). Stays, with named readers recorded in the
+   implementation doc: `table`, `secret_slots`, `moved_key`,
+   `missing` (the store's 31 reads), `notice`, `has_delete`
+   (api and cli fan-out and row construction), `route` and
+   `addressing` (the CLI's URL building), the docgen strings, and
+   `secret_key`, the ONE non-string descriptor fact: an injected
+   predicate that is the masking rule for every displayed value
+   (`views.entity_body`'s path is unchanged, which is the no-leak
+   statement this decision owes). The one REAL duplication in this
+   territory is named and priced rather than hidden: `route` +
+   `addressing` on descriptors versus `api.py`'s literal path
+   strings are two spellings of the same paths, held together by
+   the committed OpenAPI document (which renders the literals) and
+   the CLI integration tests (which drive the descriptors); this
+   plan leaves both, because collapsing either direction re-opens
+   the de-abstraction decision the audit affirmed, and the pin
+   pair above is what keeps them agreeing.
 3. **Decision 3 moves DOCUMENT PROSE CONSTANTS only, and the
    boundary is drawn three ways.** First: most of the document's
    prose is route DOCSTRINGS, which FastAPI reads as the operation
