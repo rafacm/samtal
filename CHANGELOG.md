@@ -74,6 +74,32 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   `docs/reference/api-openapi.json` and
   `docs/reference/domain-config.md` say.
 
+- **The configuration API's document prose lives in data files, and the
+  suites stopped pinning sentences** (#242). The nine module-level
+  description literals in `config/api.py`, 204 lines of string in the
+  middle of the module that owns transport, are one file each under
+  `config/api_descriptions/`, read at import by a loader beside them
+  that fills `$MASK$`-style sigils from the same constants the literals
+  interpolated. A route's own description stays its docstring, which is
+  what FastAPI reads it as; the runtime refusal bodies stay in code,
+  being behavior an operator meets. A missing file or an unfillable
+  sigil refuses at import with a sentence naming it, and because a
+  checkout cannot prove a wheel carries package data, CI now renders
+  the document from the built wheel with the source tree off `sys.path`
+  and diffs it against the committed copy. Beside that, twenty test
+  files stopped asserting the exact sentence a refusal or an
+  acknowledgement carries and assert what it is instead: the status,
+  the problem shape, and the semantic tokens (the section a refusal
+  names, the entity, the field each problem addresses, the boundary a
+  write converges at). Two claims the goldens were holding are held
+  better without them, differentially: that the API answers the
+  repository's own sentence, and that the CLI prints what the API
+  answered. Forty refusal sentences with no reader left outside their
+  module are module-private now.
+  `docs/reference/api-openapi.json` is byte-identical throughout, which
+  is the whole proof that what changed is how the document is produced
+  and nothing it promises.
+
 - **A domain entity is one JSON body beside its keys, not a column per
   field** (#243). `providers`, `mcp_servers`, `prompt_fragments`,
   `agents` and `agent_defaults` each keep the columns that carry

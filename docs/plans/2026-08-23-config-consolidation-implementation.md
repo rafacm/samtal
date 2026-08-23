@@ -329,7 +329,7 @@ by keyword and never rendered, and no test reads its order either.
 
 External review of the PR diff: claude backend (the codex quota is
 exhausted), claude CLI, model `claude-opus-5`, read-only tool set,
-2026-08-23, [[posted on the PR](https://github.com/rafacm/vinga/pull/263#issuecomment-5384646103)](https://github.com/rafacm/vinga/pull/263).
+2026-08-23, [posted on the PR](https://github.com/rafacm/vinga/pull/263#issuecomment-5384646103).
 Verdict as received: "Mergeable after fix 1; findings 2 to 6 are worth
 folding in but none blocks." One P2 and five P3s. The round verified
 the milestone's load-bearing claims itself and could not break them,
@@ -439,3 +439,265 @@ All from `vinga-server/`.
   empty.
 - `uv run vinga-server config schema` against the pre-round rendering:
   empty. Unpinned from here on, which is finding 1's whole subject.
+
+## M2: the prose to data and the wording retreat
+
+### What was done
+
+Five code commits and this one: the description files with their
+loader, the wheel proof, the retreat in two slices, and the
+privatization the retreat freed. Byte-identity of
+`docs/reference/api-openapi.json` was checked before each was made, and
+again mechanically at all six afterwards, so every commit of the
+milestone is one a reviewer can check the claim at.
+
+**The prose to data** (`b83586a7`). The nine module-level description
+constants leave `api.py` for `config/api_descriptions/`, one file each:
+`api.md` for `API_DESCRIPTION` and one per member of the `*_DESCRIPTION`
+family. A loader beside them reads a file at import, drops the single
+trailing newline a text file ends with, and fills `$NAME$` sigils from
+`_SUBSTITUTIONS`, which holds `MASK` and `API_OPTIONS_NOTE`, the two
+values the literals interpolated. Sigils rather than `{}` fields because
+the prose carries literal path braces (`/devices/pending/{code}`,
+`/runtime/agents/{name}/prompt`) that a format call would read as
+placeholders; no `$` occurs in the moved prose, which is what makes the
+sigil unambiguous, and that was checked before the files were written.
+
+Nothing else moved, which is the three fences the plan drew. Route
+docstrings stay where they are, because FastAPI reads a docstring as
+the operation description and prose in another file would make the
+route harder to read rather than easier. The runtime refusal bodies
+stay in code, being behavior an operator meets rather than a document.
+`PROBLEM_DESCRIPTIONS` stays with its dual role stated in its comment,
+which it already said.
+
+A missing file or a sigil nothing fills raises `MissingDescriptionError`
+at import, named and with a sentence saying a packaging fault is what
+this is. `test_the_document_states_the_unchanged_value_marker` is
+untouched and still closes the drift it was written for: the mask the
+document states and the mask a read displays are one string, now
+because the loader substitutes it rather than because an f-string did.
+
+**The wheel proof** (`cba9242d`). The plan's decision 8 extension. The
+integration lane renders the OpenAPI document from the installed wheel,
+with `-P` and from outside the checkout so the source tree cannot
+answer, and diffs it against the committed copy. It reuses the venv the
+migration step above it builds, so the wheel is built and installed
+once. Run locally as far as a workflow step can be: the wheel was
+built, installed into a throwaway venv, and the extracted script run
+from a directory outside the checkout, and its output diffed clean
+against the committed document. The negative was run too: deleting one
+`.md` file from the installed package made the import refuse with
+`MissingDescriptionError` naming `reload-held`, which is the sentence
+the loader exists to produce.
+
+**The retreat** (`de71c3ec`, then `95931b4b`). Twenty-three test files
+in two slices: the four suites that exercise what the repository
+refuses, and then the API, CLI, runtime and conversation suites. Two
+support modules carry the whole vocabulary the suites now speak:
+
+- `tests/support/problems.py` gains `refused(body, status)`, which
+  asserts the members and no others, the status repeated in the body,
+  the standard reason phrase as the title, a non-empty `detail`, and a
+  string path and message on every entry of `errors`, then returns the
+  sentence uncompared so the caller can assert what it carries. And
+  `paths(body)`, the field paths a refusal names in order, which is
+  semantic: a form marks the field a pointer addresses. `problem`, the
+  helper that builds a whole body sentence and all, survives with
+  exactly three callers, and all three are spelled
+  `problem(status, str(refusal))`: the body held equal to the exception
+  the repository raised, which is differential and not a golden.
+- `tests/support/notices.py` is new and does the same for
+  acknowledgements. A notice answers one question, when does this reach
+  a running server, and there are four answers: `CHECK_IN`, `RELOAD`,
+  `RESTART`, `STORE_BOOT`. `boundaries(notice)` is the one place that
+  reads the prose, and it raises if a notice names no boundary at all,
+  which is both a real failure and the way a suite would otherwise
+  silently stop asserting anything. A binding to an agent this server
+  is not serving names two at once, which is why the answer is a set.
+
+Two claims the goldens were carrying are held better without them.
+#192's compatibility claim, that the API answers the repository's own
+sentence, is differential now: `test_the_api_answers_the_repository_s_own_words`
+writes each refused fragment through the repository and again over
+HTTP and compares `detail` and `errors` against the raised exception,
+with neither written down. `test_the_cli_prints_the_same_sentence_for_a_problem_document`
+does the same for the terminal. Four pointer tests in
+`test_config_api_problems.py` folded into the refusal table that now
+covers them case by case, their reasons moved into the table's
+per-case comments.
+
+**The privatization** (`529d3a66`). Forty wording constants across five
+modules had no reader left outside the module that raises them, and
+each is underscored; the five that were listed in an `__all__` leave
+it. `config/api.py` loses twenty-three (the refusal bodies, the
+argument-body expectations, the claim refusals, the document
+descriptions and `API_TITLE`), `config/store.py` three,
+`vinga_server/app.py` six, `conversations/api.py` five, and
+`config/reload.py` three.
+
+### The survivors
+
+After the retreat, no test in the config family imports a wording
+constant. Three references to one remain in the whole suite, each named
+here rather than left to be found:
+
+| Name | Where a test still reads it | Why it is not a wording pin |
+| --- | --- | --- |
+| `api.PROBLEM_TITLES` | `tests/support/problems.py`, `test_config_api_problems.py` | `problem_response` builds a body with it at runtime and the helper reads the same mapping, so the two agree by reading one source rather than by a copy. The second test holds it against RFC 9457's recommended reason phrases, which is a closed set and not this API's prose. |
+| `api.PROBLEM_DESCRIPTIONS` | `test_config_api_problems.py`, `test_config_api_runtime.py` | Read as the shared description a route either inherits or overrides: every assertion is `== PROBLEM_DESCRIPTIONS[status]` or `!=`, which says which description a route carries and stays green when the prose is edited. The key-set test holds it equal to `PROBLEM_TITLES`, which is a closed-set claim. |
+| `entities.RESTART_NOTICE`, through `cli` | `test_config_cli_local.py`, one negative | Inside `test_a_local_write_says_what_the_api_says_for_the_same_act`, the differential pin decision 6 made exempt. The assertion is `not in`, a sentinel rather than a pin, and it is what keeps a preamble from reasserting restart timing ahead of a reload notice. |
+
+Two more references sit outside this issue's territory and were left:
+`tools/mcp`'s `RELOAD_REFUSED` in `test_tools_mcp_reload.py`, which is
+the MCP tool surface rather than the config admin surface, and the two
+prose comments in `test_config_cli_local.py` that name the notices to
+explain the exempt test.
+
+The registry's own sentences stay public and are not survivors in this
+sense: `NO_SUCH_*` and the five `*_NOTICE` constants are declared in
+`entities.py` and read by `store.py`, `api.py` and `cli.py`, which is
+an ordinary cross-module reader and not a test.
+
+### The retreat's count
+
+A reference to a wording constant or to a golden sentence, inside a
+test body, counted per file at the milestone's base (`ee205d28`) and at
+its tip. Import lines, the constants' own declarations and comments are
+excluded.
+
+| Suite | Before | After |
+| --- | --- | --- |
+| `unit/test_config_api_writes.py` | 53 | 0 |
+| `unit/test_config_cli.py` | 30 | 0 |
+| `unit/test_config_api_problems.py` | 29 | 0 |
+| `unit/test_conversations_api.py` | 23 | 0 |
+| `unit/test_config_api_runtime.py` | 20 | 0 |
+| `unit/test_config_api_pending.py` | 12 | 0 |
+| `unit/test_config_refusals.py` | 12 | 0 |
+| `unit/test_config_store.py` | 12 | 0 |
+| `unit/test_config_api_reads.py` | 11 | 0 |
+| `unit/test_config_reload.py` | 11 | 0 |
+| `unit/test_config_reads.py` | 10 | 0 |
+| `unit/test_config_diff_read.py` | 8 | 0 |
+| `unit/test_config_api.py` | 8 | 0 |
+| `unit/test_config_round_trip.py` | 7 | 0 |
+| `unit/test_config_snapshot_mode.py` | 5 | 0 |
+| `unit/test_config_cli_local.py` | 3 | 1 |
+| `unit/test_config_cli_secrets.py` | 3 | 0 |
+| `unit/test_tools_mcp_reload.py` | 3 | 2 |
+| `unit/test_app_lifespan.py` | 2 | 0 |
+| `unit/test_device_bindings.py` | 2 | 0 |
+| `integration/test_mcp_reload.py` | 2 | 0 |
+| `integration/test_activation.py` | 1 | 0 |
+| `integration/test_device_bindings.py` | 1 | 0 |
+| **Total** | **268** | **3** |
+
+The three that remain are the three rows of the survivor table above.
+
+### The inventory
+
+Public names of `src/vinga_server/config/` (module-level classes,
+functions, type aliases and non-underscored assignments), at `ee205d28`
+and at the tip. The same counting as M1's table, which is why its
+"after" column and this one's "before" column agree.
+
+| Module | Before | After |
+| --- | --- | --- |
+| `api.py` | 59 | 37 |
+| `reload.py` | 6 | 3 |
+| `store.py` | 14 | 11 |
+| every other module | unchanged | unchanged |
+| **Total** | **320** | **292** |
+
+Outside the package, `app.py` loses six public names and
+`conversations/api.py` five, by the same rule and in the same commit.
+
+`wc -l src/vinga_server/config/api.py`: 2602 before, 2487 after. The
+nine literals were 204 lines of string between them (144 of them
+`API_DESCRIPTION`); what replaces them is the 80-line loader block (its
+comments, the substitution table, the error class, the function and the
+first assignment) and eight one-line assignments, so the net is 115.
+`config/api_descriptions/` holds 9 files and 13,316 bytes.
+
+### Deviations from the plan
+
+Four, three of them judgements the plan left open rather than changes
+of direction, and one a correction to a figure.
+
+**The "~550 lines of description literals" figure was the issue's, and
+it counted the docstrings.** The nine module-level constants decision 3
+actually moves are 204 lines, of which `API_DESCRIPTION` is 144. The
+rest of the document's prose is route docstrings, which fence one keeps
+in place, so the larger figure was never what this milestone moves.
+Recorded here because the first commit's message repeats it.
+
+**The data files are verbatim, and the loader unwraps nothing.** The
+plan says the move "preserves every byte including line wrapping". The
+alternative considered was a loader that treats a newline inside a
+paragraph as a soft wrap and joins it, which would let the files be
+hard-wrapped and reviewable in a diff. It was rejected: it makes the
+file's bytes and the contract's bytes two different things, which is
+exactly the property the byte-identity proof rests on, and a paragraph
+could then never carry a deliberate line break. So `api.md` holds eight
+long lines separated by blank ones, which is what the constant held,
+and the loader's only transformations are the sigils and the trailing
+newline. `test_a_description_carries_the_file_through_unchanged` states
+that as a test.
+
+**The loader's two refusals are tested through underscored names.** The
+plan asks for a named error at import and CI proves the missing-file
+path only when it does not happen. The three tests added to
+`test_api_openapi.py` reach `api._description` and `api._DESCRIPTIONS`,
+which AGENTS.md flags as a review point. It is deliberate, and the
+shape `test_build_info.py` already has for `_CHECKOUT`: what is being
+exercised is a refusal raised at import, and the only way to reach it
+without the reach-in would be to move the real directory aside under a
+suite that runs four workers over one filesystem. The alternative,
+making the loader public so a test could call it, would add an
+interface for the test's benefit alone.
+
+**`test_the_local_preamble_makes_no_timing_claim_of_its_own` did not
+retreat.** It asserts `cli.LOCAL_NOTICE == LOCAL_PREAMBLE`, an exact
+sentence. It stays because the preamble is neither a response nor an
+acknowledgement (it is the break-glass banner, printed before the
+command runs), and because that equality is what ties `LOCAL_PREAMBLE`
+to the code for the exempt differential test, which asserts the whole
+shape of what `--local` printed. Removing it would leave a floating
+copy able to drift from the constant and fail the exempt test for a
+reason that has nothing to do with what it holds.
+
+Everything else landed as written: the three fences, the sigil
+substitution, the named import-time refusal, the wheel proof, the
+per-test retreat under decision 4's one rule, the exempt differential
+pin and the no-leak sentinels untouched, and the no-residue
+privatization with the survivors listed.
+
+### Verification
+
+- `uv run ruff check .`: clean, at each of the five code commits and at
+  the tip.
+- `uv run mypy` (the scoped `events` lane): clean.
+- `uv run pytest tests/unit -q` (serial): 2861 passed, 20 skipped.
+- `uv run pytest tests/unit -q -n 4 --dist loadfile`: the same, and at
+  each of the five code commits.
+- `uv run pytest tests/integration -q`: 61 passed.
+- `uv run vinga-server config openapi`, diffed against the committed
+  document: empty at every one of the milestone's six commits, this one
+  included. Checked mechanically rather than by recollection, by
+  extracting each commit's `src` on its own and rendering the document
+  from it.
+- `uv run vinga-server config reference | diff - ../docs/reference/domain-config.md`:
+  empty at the tip. The milestone touches nothing it renders, which is
+  why it is checked once rather than per commit.
+- The wheel proof, run locally: `uv build --wheel`, installed into a
+  fresh venv, the workflow's script run with `-P` from outside the
+  checkout, its output diffed clean against the committed document. And
+  the negative: one description file deleted from the installed package
+  makes the import refuse with `MissingDescriptionError` naming it.
+- The mutation, which is what says the byte-identity check is load
+  bearing: one word changed in
+  `config/api_descriptions/reload-held.md` makes the OpenAPI diff
+  non-empty on that description and turns
+  `test_the_committed_document_matches_the_routes` red. Reverted by
+  copy-back and `touch`, and both go green again.
