@@ -52,6 +52,28 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **The domain configuration model is declared once, and three
+  admin-surface modules shrank around it** (#242). `DomainConfig` was
+  written out twice, in `config/store.py` and again inside
+  `models.Config`: the same seven sections, the same three validators,
+  the same descriptions. It is one declaration in `config/models.py`
+  now, and `Config` subclasses it, which is what keeps write-time
+  validation to the reference half (a write is still judged against
+  the domain half alone, so the first `set agent` into an empty
+  database is still accepted) while `config schema` and the generated
+  reference render exactly the bytes they rendered before. Beside it:
+  `config/writes.py` is gone, its thirteen one-line acknowledgement
+  factories written out where each is answered and its two timing
+  decisions moved whole to the single path each serves; the descriptor
+  registry drops `leads_with` and `always_shown`, whose one fact each
+  is now a literal in the display module that asks the question; and
+  `outcomes`, `flags` and `RELOAD_SECTIONS` move from
+  `config/responses.py`, which holds the shapes two surfaces share, to
+  the CLI that prints with them. Nothing an operator writes, reads or
+  is answered with changed, which is what the byte-identical
+  `docs/reference/api-openapi.json` and
+  `docs/reference/domain-config.md` say.
+
 - **A domain entity is one JSON body beside its keys, not a column per
   field** (#243). `providers`, `mcp_servers`, `prompt_fragments`,
   `agents` and `agent_defaults` each keep the columns that carry
