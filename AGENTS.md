@@ -33,6 +33,11 @@ uv run vinga-server             # Run the server (--config or VINGA_CONFIG)
 uv run pytest tests/unit -q      # Unit tests
 uv run pytest tests/integration -q  # Integration tests
 uv run ruff check .              # Lint
+
+# The unit lane the way CI runs it: distributed over worker
+# processes, a file at a time. Local runs are serial by default;
+# this is how to reproduce a failure that only shows up in CI.
+uv run pytest tests/unit -q -n auto --dist loadfile
 ```
 
 CI (`.github/workflows/vinga-server.yml`) runs the same lint, unit, and

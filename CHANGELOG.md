@@ -32,6 +32,22 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **The CI unit lane runs in parallel** (#254). The workflow's unit step
+  gained ` -n auto --dist loadfile` and the dev group gained
+  `pytest-xdist`, taking the longest lane from its measured 6m31s to a
+  projected two or three minutes and the critical path down to roughly
+  what the integration lane already costs. `loadfile` keeps a whole file
+  on one worker, so module-scoped fixtures stay paid once per file and
+  intra-file order is exactly what it was. Local runs are unchanged and
+  serial; `uv run pytest tests/unit -q -n auto --dist loadfile` is in
+  both command blocks as the way to reproduce the lane. Two supporting
+  fixes came with it: the tests' refusal ledger now carries a residual
+  refusal (one belonging to no test) from a worker up to the controller,
+  which prints it and fails the run, where under workers it used to
+  vanish silently; and the MCP HTTP suite's free-port helper holds its
+  socket for the test rather than releasing the number and assuming
+  nothing takes it.
+
 - **The event reference names the field behind each `%` position**
   (#241). `vinga-server events reference` and the committed
   `docs/reference/events.md` print an argument as its declared field

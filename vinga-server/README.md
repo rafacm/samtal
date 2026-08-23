@@ -1077,6 +1077,11 @@ uv run vinga-server                # run the server
 uv run pytest tests/unit -q         # unit tests
 uv run pytest tests/integration -q  # integration tests
 uv run ruff check .                 # lint
+
+# What CI runs the unit lane as: distributed over worker processes,
+# a file at a time. Reach for it to reproduce a failure that only
+# shows up in CI. Local runs are serial by default.
+uv run pytest tests/unit -q -n auto --dist loadfile
 ```
 
 The test lanes run the whole pipeline on the built-in mock providers, so
