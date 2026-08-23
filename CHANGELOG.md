@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-08-24
+
+### Added
+
+- **The config CLI is driven over a real socket, and every command it
+  registers is** (#194, M3). The six acceptance suites run the entry
+  point against the real application with one thing replaced: the client
+  factory hands back an in-process test client instead of opening a
+  connection. That is the right seam for them and it means the
+  addressing, the transport policy, the bearer token and the timeouts
+  are exercised only up to it. A new integration suite boots a real
+  server on a loopback port and runs the same entry point at it with
+  nothing patched, so a refusal is composed by the API, serialized,
+  sent, parsed and printed before it is asserted. Coverage is derived
+  rather than declared: the suite records which command each successful
+  run named and holds that recording to the registration table, so a
+  command added to the grammar and not to the suite fails a test instead
+  of quietly skipping the lane. All forty-one registered commands
+  complete over the wire, each of the twenty command families has a
+  refusal asserted as it arrived, and every one of those refusals is run
+  a second time against an address nothing listens on, which is what
+  says whether it was the server or the client that composed it. Two
+  claims that need a real connection are proven here for the first time:
+  a document one entry under the limit is applied while an ordinary read
+  of the same server under a bound this server cannot meet gives up, so
+  `config apply` really does wait however long the transaction takes;
+  and an over-limit document is refused with the store read back empty.
+  The suite's server is booted from environment variables alone with no
+  configuration file anywhere, which is the fileless start the quick
+  start will document. It adds about three seconds to the integration
+  lane.
+
 ## 2026-08-23
 
 ### Added
