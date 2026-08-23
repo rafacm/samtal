@@ -202,7 +202,7 @@ present and the unit lane at its projected time.
 ## Milestones
 
 - [x] **[M1: switch the lane.](2026-08-23-xdist-unit-lane-implementation.md#m1-switch-the-lane)**
-  (PR TBD) One milestone, one
+  (PR #261) One milestone, one
   dependency and one workflow line plus the verifications above;
   `main` stays releasable trivially. Deepens nothing; the one
   thing a developer stops paying is five minutes per CI round
