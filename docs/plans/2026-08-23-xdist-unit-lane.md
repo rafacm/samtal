@@ -38,12 +38,20 @@ and discoveries; no deviations says so explicitly.
 
 ## Design decisions this plan makes
 
-1. **The dependency is a dev dependency.** `uv add --dev
-   pytest-xdist` (lockfile moves with it); the CI unit step becomes
-   `uv run pytest tests/unit -q --durations=25 -n auto --dist
-   loadfile`. `--durations` aggregates across workers in xdist and
-   keeps reporting the slow tail. The integration step is
-   untouched.
+1. **The dependency is a dev dependency, and the step keeps its
+   verbosity.** `uv add --dev pytest-xdist` (lockfile moves with
+   it); the CI unit step becomes `uv run pytest tests/unit -v
+   --durations=25 -n auto --dist loadfile`, changing ONLY by the
+   two appended tokens: `-v` stays (the lanes' verbosity is a
+   deliberate, documented difference from the local `-q`, and
+   under workers the per-test lines interleave but remain
+   greppable). The revert is therefore exactly the removal of
+   ` -n auto --dist loadfile`. `--durations` aggregates across
+   workers and keeps reporting the slow tail. The integration
+   step is untouched. The real diff set, stated whole: the
+   workflow line and its comment, `pyproject.toml`, `uv.lock`,
+   the conftest changes of decisions 3 and 6, `AGENTS.md` and the
+   README command notes of decision 7b, and `CHANGELOG.md`.
 2. **`--dist loadfile` is the distribution, for the reason the
    spike softened but did not remove.** Module-scoped fixtures
    (the 81-driver capture, now ~18s) are paid once per file by
