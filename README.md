@@ -155,7 +155,7 @@ vinga config reload
 
 ```bash
 vinga config ota-url     # http://192.168.1.10:8003/x/AB2C4D5E/
-vinga config doctor      # says what a device would be told, or what is wrong
+vinga doctor             # says what a device would be told, or what is wrong
 ```
 
 **7. Provision WiFi** from the device's captive portal, putting that URL in the portal's advanced section as the server address. Which button brings the portal up depends on the board (PWR on the Touch-LCD-1.54, BOOT on the others), so start from your board's guide in [`docs/devices/`](docs/devices/README.md), which also covers its wake word, its display, and the rest of its controls.

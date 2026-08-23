@@ -2626,7 +2626,7 @@ only when the device-auth secret does.
 **2. Check what answers there**, before typing it into anything:
 
 ```bash
-vinga-server config doctor
+vinga-server doctor
 # http://192.168.1.10:8003/x/AB2C4D5E/ is vinga-server 0.1.0, and sends
 # devices to ws://192.168.1.10:8003/xiaozhi/v1/ (protocol version 1).
 ```
@@ -2782,7 +2782,7 @@ differently. Four things to get right:
   variable, which uvicorn reads when the setting is not passed. There is
   no config key for it: `server.websocket_url` is the explicit answer, and
   the environment variable covers the rest without a second way to say the
-  same thing. `vinga-server config doctor` is what says this has
+  same thing. `vinga-server doctor` is what says this has
   happened: it names a `ws://` websocket URL behind an `https://` OTA
   URL as the fault it is, rather than leaving a board failing at the
   handshake with every other line looking right.

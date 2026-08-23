@@ -52,6 +52,32 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **`vinga-server config doctor` is now `vinga-server doctor`** (#244).
+  The endpoint diagnostic was about 400 lines of `config/cli.py` that
+  lived there only because it reads the `server` section, and it is a
+  module and a top-level command of its own now: `vinga-server doctor
+  [URL] [--config PATH]`, beside `config`, `conversations` and
+  `events`. **There is no alias for the old spelling**, which answers
+  the config grammar's ordinary invalid-choice refusal. The diagnosis
+  itself is unchanged: the same four verdicts, the same single GET, the
+  same refusal to follow a redirect, the same sentences. Five things
+  did change, all of them at the edges. The sentence for a
+  configuration with onboarding turned off names the new spelling
+  (`vinga-server doctor URL`). The command's usage errors come from its
+  own parser now, which answers fixed sentences and never argparse's,
+  because the argument an operator mistypes here is a URL and an OTA
+  URL can be the deployment's own secret. The entry point's own
+  refusals became fixed sentences for the same reason: a first word
+  that is not a command names the four that are, without repeating what
+  was typed, and the server's argument errors no longer echo a shape.
+  And a URL that any of these commands displays now loses its
+  secret-shaped query parameters along with its userinfo, so a far side
+  reporting `wss://host/ws?token=<secret>` no longer publishes it on
+  stdout, and neither does a refusal naming an operator-typed
+  `?token=` address. That last one is a security fix, display-only, and
+  it reuses the rule `config/models.py` already applies to URL-shaped
+  configuration values.
+
 - **The domain configuration model is declared once, and three
   admin-surface modules shrank around it** (#242). `DomainConfig` was
   written out twice, in `config/store.py` and again inside

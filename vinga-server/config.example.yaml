@@ -125,7 +125,7 @@ server:
   # it would be told.
   #
   #   vinga-server config ota-url
-  #   vinga-server config doctor
+  #   vinga-server doctor
   #
   # A board typing that URL and resolving to no agent is answered with a
   # six-digit code it shows and speaks; `config pending` lists what is
