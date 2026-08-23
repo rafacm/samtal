@@ -195,13 +195,17 @@ def test_a_stored_secret_that_will_not_open_refuses_under_the_reload_s_status(
         refused = served.get(DIFF_PATH, headers=headers())
 
     assert refused.status_code == 422
-    refusal_body(refused.json(), 422)
+    # The sentence is fixed and says so: where exactly the stored half
+    # was refused is the one thing this read never carries, because a
+    # sentence composed over stored state can quote what was written
+    # into the wrong column.
+    assert "deliberately not said here" in refusal_body(refused.json(), 422)
     assert "api_key" not in refused.text
 
 
 @pytest.mark.usefixtures("keys")
 def test_a_stored_domain_that_will_not_compose_refuses_the_same_way(
-    directory: Path,
+    directory: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Model-valid rows that are not a valid deployment: an agent naming
     a provider nothing declares. No write this server offers can produce
@@ -214,27 +218,63 @@ def test_a_stored_domain_that_will_not_compose_refuses_the_same_way(
     sentence: what a refused row holds is whatever was written into it,
     which is as likely to be a credential pasted into the wrong column
     as a name somebody mistyped. The store names it, this read does
-    not."""
-    stored(directory)
+    not.
+
+    "The same way" is asserted rather than asserted about: both causes
+    are driven here, one after the other over one store, and the two
+    answers are held equal. A sentence copied into this file could not
+    make that claim, since a copy agrees with itself whatever the two
+    routes do."""
+    stored(directory, secret=PLAINTEXT)
     booted = load_boot_config()
+    _plant_unknown_provider(directory)
+
+    with entered_client(booted.config, booted.secrets) as served:
+        uncomposable = served.get(DIFF_PATH, headers=headers())
+
+    # The row put back, so the only thing wrong with the store is the
+    # credential that will no longer open.
+    _drop_planted_provider(directory)
+
+    with entered_client(booted.config, booted.secrets) as served:
+        monkeypatch.setenv(MASTER_KEY_ENV, generate_key())
+        unopenable = served.get(DIFF_PATH, headers=headers())
+
+    assert uncomposable.status_code == 422
+    assert unopenable.status_code == 422
+    assert refusal_body(uncomposable.json(), 422) == refusal_body(unopenable.json(), 422)
+    assert "ghost" not in uncomposable.text
+    assert "api_key" not in unopenable.text
+
+
+def _plant_unknown_provider(directory: Path) -> None:
+    """An agent naming a provider nothing declares, written as a row
+    because no write this server offers can produce one. Into the body
+    rather than into a column of its own, which is where every non-key
+    field lives since #243; `json_set` leaves the rest of the entry
+    exactly as it was written."""
     engine = open_database(directory)
     try:
         with engine.begin() as connection:
-            # Into the body rather than into a column of its own, which
-            # is where every non-key field lives since #243; json_set
-            # leaves the rest of the entry exactly as it was written.
             connection.execute(
                 text("update agents set body = json_set(body, '$.llm', 'ghost')")
             )
     finally:
         engine.dispose()
 
-    with entered_client(booted.config, booted.secrets) as served:
-        refused = served.get(DIFF_PATH, headers=headers())
 
-    assert refused.status_code == 422
-    refusal_body(refused.json(), 422)
-    assert "ghost" not in refused.text
+def _drop_planted_provider(directory: Path) -> None:
+    """The same row without the planted key, which is the entry
+    `stored` wrote: the agent names no llm of its own and inherits the
+    one `agent_defaults` names."""
+    engine = open_database(directory)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text("update agents set body = json_remove(body, '$.llm')")
+            )
+    finally:
+        engine.dispose()
 
 
 # What a refused stored half says, and what it stops carrying
