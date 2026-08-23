@@ -347,6 +347,22 @@ def test_the_client_is_built_with_those_timeouts() -> None:
         client.close()
 
 
+def test_the_client_carries_the_token_it_was_built_with() -> None:
+    """The other half of this seam's construction policy, and the half
+    that came back here when #244 gave the doctor a seam of its own.
+
+    The header is what the whole transport policy above exists to
+    protect, so it is asserted at the constructor rather than only
+    through a request. The token is a required argument now: every
+    caller resolves one before it builds a client, and the untaken
+    branch a default kept was a branch nothing was checking."""
+    client = cli.build_client("http://127.0.0.1:8003/api", TOKEN)
+    try:
+        assert client.headers["Authorization"] == f"Bearer {TOKEN}"
+    finally:
+        client.close()
+
+
 def test_reload_gives_the_server_longer_to_answer_than_a_write(
     run, monkeypatch: pytest.MonkeyPatch
 ) -> None:

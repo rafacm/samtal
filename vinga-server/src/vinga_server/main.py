@@ -15,6 +15,7 @@ import logging
 import socket
 import sys
 from types import FrameType
+from typing import NoReturn
 
 import uvicorn
 from dotenv import find_dotenv, load_dotenv
@@ -55,6 +56,35 @@ UVICORN_GRACEFUL_SHUTDOWN_S = 5
 CONFIG_COMMAND = "config"
 CONVERSATIONS_COMMAND = "conversations"
 EVENTS_COMMAND = "events"
+DOCTOR_COMMAND = "doctor"
+
+# All of them, in one place: the dispatch below checks them one at a
+# time and the refusal for a word that is none of them names them, so
+# the two cannot come to disagree about what this entry point takes.
+COMMANDS = (CONFIG_COMMAND, CONVERSATIONS_COMMAND, EVENTS_COMMAND, DOCTOR_COMMAND)
+
+# What a first word that is not one of them gets, and what a mistake in
+# the server's own arguments gets. Both are fixed sentences that repeat
+# nothing of what was typed, which used to be argparse's job and can no
+# longer be: `doctor` takes a URL, an OTA URL can be the deployment's
+# own secret, and `vinga-server docter https://host/<secret>/` would
+# otherwise have printed it on stderr on its way to an exit code.
+UNKNOWN_COMMAND = "that is not a command; expected one of: " + ", ".join(COMMANDS)
+
+# The server's own grammar is one option, so there are two shapes to
+# name and a vague fallback for anything else, the way the conversations
+# group does it.
+_USAGE_PROBLEMS: tuple[tuple[str, str], ...] = (
+    ("expected one argument", "an option was given without its value"),
+    ("unrecognized arguments", "unrecognized extra arguments"),
+)
+
+_USAGE_UNKNOWN = "the command line could not be parsed"
+
+# What both refusals exit with. Two, which is what argparse has always
+# answered a usage error with, so nothing scripted around this entry
+# point learns a new number from a change about what is printed.
+USAGE_EXIT_CODE = 2
 
 
 class DrainingServer(uvicorn.Server):
@@ -307,6 +337,31 @@ def serve(app: FastAPI, config: Config) -> None:
         uvicorn_errors.removeFilter(quiet)
 
 
+class _Parser(argparse.ArgumentParser):
+    """The server's own parser, whose usage errors say nothing of what
+    was typed.
+
+    argparse quotes the arguments it did not recognize, which was
+    harmless while everything reaching this parser was the server's own
+    `--config`. It stopped being harmless when a command word became
+    something an operator can mistype in front of a URL: the dispatch
+    above catches that shape, and this catches the rest, so no path out
+    of this entry point echoes an argument. Written the way the
+    conversations group writes it: a marker-matched table of fixed
+    sentences and a deliberately vague fallback."""
+
+    def error(self, message: str) -> NoReturn:
+        print(_usage_problem(message), file=sys.stderr)
+        raise SystemExit(USAGE_EXIT_CODE)
+
+
+def _usage_problem(message: str) -> str:
+    for marker, sentence in _USAGE_PROBLEMS:
+        if marker in message:
+            return f"{sentence}; run with --help for the grammar"
+    return f"{_USAGE_UNKNOWN}; run with --help for the grammar"
+
+
 def main() -> None:
     # Read a .env file into the environment before anything looks at it, so
     # it can carry VINGA_* overrides, VINGA_CONFIG, and provider secrets.
@@ -355,7 +410,28 @@ def main() -> None:
 
         raise SystemExit(events_cli.main(sys.argv[2:]))
 
-    parser = argparse.ArgumentParser(prog="vinga-server")
+    if sys.argv[1:2] == [DOCTOR_COMMAND]:
+        # The fourth, and the one that reaches furthest out: it asks a
+        # device-facing address what it would tell a device. Dispatched
+        # here for the reason the three above are, and imported lazily
+        # for a reason of its own: it opens no database and must not
+        # start needing one, which the import-weight test pins.
+        from vinga_server import doctor
+
+        raise SystemExit(doctor.main(sys.argv[2:]))
+
+    if sys.argv[1:2] and not sys.argv[1].startswith("-"):
+        # A first word that is not one of the four, answered here rather
+        # than by the parser below. Falling through was safe while the
+        # only thing past this point was the server's own --config;
+        # since `doctor` takes a URL, an unrecognized word is followed
+        # by whatever was being typed at a command that takes secrets,
+        # and argparse would have echoed it. The known words are named,
+        # the typed ones are not.
+        print(UNKNOWN_COMMAND, file=sys.stderr)
+        raise SystemExit(USAGE_EXIT_CODE)
+
+    parser = _Parser(prog="vinga-server")
     parser.add_argument(
         "--config",
         metavar="PATH",
