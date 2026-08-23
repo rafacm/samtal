@@ -28,6 +28,11 @@ dependencies = [
     "python-dotenv>=1.0",
     "pyyaml>=6.0",
     "sqlalchemy>=2.0.51",
+    # The argument layer of the `vinga-server config` command group.
+    # Click arrived transitively already (uvicorn); this is direct
+    # because the grammar is built on it, and it is a runtime dependency
+    # rather than a development one because the command group ships.
+    "typer>=0.27.1",
     "uvicorn[standard]>=0.34",
 ]
 
