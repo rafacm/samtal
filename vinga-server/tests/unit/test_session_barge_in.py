@@ -240,30 +240,31 @@ async def test_an_unconfirmed_barge_in_pauses_and_resumes_the_reply(
             await asyncio.sleep(0.02)
         # White-box, and the five reads below it are the same one. The
         # pacing clock and the gate that holds it are the edge's own
-        # state, and what they do is shift the cadence of frames going
-        # out. Observing that publicly means measuring the arrival times
+        # state, reached through the pacer the session keeps them in,
+        # and what they do is shift the cadence of frames going out.
+        # Observing that publicly means measuring the arrival times
         # of paced audio against a wall clock and inferring the shift,
         # which is a race dressed as an assertion; the frames-frozen
         # check beside it is the observable half, and this is the half
         # that says why they froze and that the clock moved with them
         # rather than the stream bursting to catch up afterwards.
-        pace_before = session._pace_start
+        pace_before = session._pacer.cadence_start
 
         await session.runtime.audio(speech_pcm(600))
         finish = asyncio.create_task(end_utterance(session))
         await asyncio.sleep(0.05)
         # Paused: the confirmation is in flight and no frames move.
-        assert not session._pace_resume.is_set()
+        assert session._pacer.paused
         frozen = socket.frames
         await asyncio.sleep(0.3)
         assert socket.frames == frozen
 
         asr.release.set()
         await finish
-        assert session._pace_resume.is_set()
+        assert not session._pacer.paused
         # The clock shifted by the pause, so the cadence survives it.
-        assert pace_before is not None and session._pace_start is not None
-        assert session._pace_start - pace_before >= 0.3
+        assert pace_before is not None and session._pacer.cadence_start is not None
+        assert session._pacer.cadence_start - pace_before >= 0.3
         # The same reply, never cancelled, plays to the end.
         assert reply_task(session) is reply
         await wait_for_reply(session)
