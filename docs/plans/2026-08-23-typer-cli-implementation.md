@@ -810,3 +810,229 @@ All from `vinga-server/`.
   at runtime and is not part of the contract's bytes, and no response
   model or schema changed.
 - `uv sync --frozen`: `Checked 99 packages in 1ms`
+
+## M3: the live acceptance lane
+
+### What was done
+
+Nine commits, all of them test assets. One new module,
+`tests/integration/test_cli_live.py` (1,161 lines, 17 test functions,
+59 cases), and nothing else in the repository moved.
+
+**The harness** (`d60cf052`). A real uvicorn on an ephemeral loopback
+port, in a thread, driven by `cli.main` with `build_client` untouched:
+the address resolution, the transport policy, the bearer token and both
+timeouts are the deployed ones, and what answers is a server. The
+module's server is booted once and shared, because what the cases
+describe is one operator's session against one deployment; the two that
+assert what a store holds afterwards ask for a second server on a store
+nobody else wrote.
+
+The boot is decision 9's fileless one: `load_boot_config()` with no path
+and no `VINGA_CONFIG`, so the file half comes from `VINGA_SERVER__*` and
+the packaged defaults. That is a deviation from decision 10's
+`served_api`, and the reason is below.
+
+`run` is the whole of the harness's own vocabulary: one command line,
+run the way the entry point runs it, recorded against its row of
+`cli.COMMANDS` when it succeeded.
+
+**The families** (`789eaf7c`, `c72116c4`, `aef0ffe3`, `5267ba88`,
+`31216a32`). One entity's whole life per commanded kind (written from a
+fragment, read, exported, written again from the inline pairs, deleted);
+both device commands, the second of them through a real OTA check-in;
+a credential entered both ways, read back masked, exported as the
+commands that refill it, cleared; the reload and the two reads of the
+running server; the export round trip against a store the lane wrote
+through nine commands. The four commands that reach nothing run in the
+same environment, which is the only thing worth asserting about them
+here: the environment names a server and a database and they still open
+neither.
+
+**The refusals** (`57a07619`). One per family, where a family is a
+top-level word of the grammar and the set of them is read off the
+registration table. Each asserts the sentence as it arrived, exit 1, and
+nothing on stdout. The table's `wire` column says where each refusal is
+composed, and a second parameterized case makes that load-bearing: every
+command line is run again with the root `--api-url` pointing at a port
+nothing listens on, where a refusal the server composes cannot happen
+and the transport sentence takes its place, and a refusal this side
+composes is unchanged.
+
+**The two apply-bound proofs** (`9439910d`), on a store of their own.
+`APPLY_LIMIT - 1` entries are applied while an ordinary read of the same
+server, over the same connection, with its bound cut to something this
+server cannot meet, gives up and says so. The over-limit document is
+refused with the limit named, nothing of it quoted, and the store read
+back empty.
+
+**The closing two** (`0829c5ba`). The fileless boot stated as a claim,
+and the completeness test.
+
+### The coverage map
+
+Twenty families, forty-one commands, every one of them driven to a
+successful answer over the wire. The `family` column is
+`row.words[0]` for `row in cli.COMMANDS`, which is what the refusal
+table is held to; the `commands` column is that family's rows.
+
+| Family | Commands | Driven by |
+| --- | --- | --- |
+| `set` | the 5 kinds | the per-kind cycle, both write forms |
+| `delete` | the 4 deletable kinds, `device` | the per-kind cycle; the bind case |
+| `show` | itself, the 5 kinds, `device` | the cycle, the bootstrap read, both device cases |
+| `export` | itself, the 5 kinds | the cycle; the round trip |
+| `apply` | itself | the bootstrap, idempotence, the round trip, both bounds |
+| `set-secret` | `provider`, `mcp-server` | the credential case, `--from-env` and stdin |
+| `clear-secret` | `provider`, `mcp-server` | the credential case |
+| `bind-device` | itself | the known-MAC case |
+| `add-device` | itself | the activation-code case, after a real check-in |
+| `pending` | itself | the activation-code case, before and after the claim |
+| `set-default-agent` | itself | the activation-code case (a check-in mints no code) |
+| `clear-default-agent` | itself | the same case (the next check-in does) |
+| `reload` | itself | the running-server case |
+| `status` | itself | the running-server case, after the reload |
+| `prompt` | itself | the running-server case, refused before and answered after |
+| `list` | itself | the running-server case |
+| `schema` | itself | the offline case, whole and per kind |
+| `reference` | itself | the offline case |
+| `openapi` | itself | the offline case |
+| `ota-url` | itself | the offline case |
+
+The completeness test is derived rather than declared: `run` records
+what ran, the test holds that recording to `cli.COMMANDS`, and a command
+with no successful run in the lane is named in the failure. It proved to
+bite: with the `ota-url` call taken out of the offline case, it fails
+with `['ota-url']` and nothing else does.
+
+### Deviations from the plan
+
+Four, none of them to what the lane covers.
+
+**1. The lane boots its own server rather than using `served_api`.**
+Decision 10 names the `served_api` fixture and the `test_ota_endpoint.py`
+pattern. The pattern is what this uses (a real uvicorn in a thread on
+port 0, waited for on `server.started`); the fixture is not, for two
+reasons. It composes a `Config(...)` in Python, which is not a fileless
+boot and would have left decision 9's case with a second server of its
+own to boot and assert against; and it is function-scoped, which would
+have been one boot per test where the whole point of the shared store is
+that a session has history. The lane's `serving` is the same shape with
+`load_boot_config()` in place of the composed `Config`, so the fileless
+boot is what every case in the lane runs against and the case that
+asserts it is a claim about the server the rest of the lane used rather
+than about a server built to be asserted about.
+
+**2. No production hook was needed for the inventory derivation.** The
+milestone entry allows one, required to be a read of the registration
+table. `cli.COMMANDS` is already in the module's `__all__` and `Command`
+already carries `words`, so the derivation is an import and the
+production tree is untouched. Recorded because the allowance was
+explicit and unused.
+
+**3. `add-device` is driven the whole way, not "as far as a real server
+allows without a device".** A board's part in the ceremony is one HTTP
+POST to the OTA endpoint, which `test_ota_endpoint.py` already makes
+without hardware, and the fixture serves the whole app rather than the
+API alone, so the endpoint is on the same port. The lane therefore mints
+a real code, lists it with `pending`, and claims it with `add-device`.
+That is more than the milestone asked for and is the reason the two
+settings commands became assertable too (see the discovery below).
+
+**4. The apply-timeout differential rewrites one row of the
+registration table.** Asserting that a large batch "completes with the
+client waiting it out" needs a comparison, because a batch this lane can
+afford to run finishes well inside the ordinary 30 second bound and a
+test with no comparison would pass with any bound at all. The bound
+reaches a request only through the act on a command's row (`_call`'s
+default and `Act.read_timeout_s` are both bound at import, so patching
+`cli.READ_TIMEOUT_S` changes nothing), so the case monkeypatches
+`cli.COMMANDS` with `show`'s row rebuilt at a 5 ms bound and compares
+the two commands against the same server over the same connection. The
+threshold is deliberately short so the test finishes, which is the same
+move `test_config_api.py` makes with the database's busy timeout and for
+the same reason. Measured: the apply of 499 entries takes ~145 ms and
+the read it is compared against ~30 ms, so both sides of the comparison
+clear the bound by an order of magnitude.
+
+### Discoveries
+
+**A binding and the default agent are observably live, and it takes two
+check-ins to say so.** `set-default-agent` then a check-in mints no code
+at all, because the board resolves to the default agent;
+`clear-default-agent` then the same check-in mints one. Nothing
+in-process can show that: what re-reads the database between the two
+requests is the running server, and the pair is now the whole of the
+onboarding case's spine rather than a setting written and read back.
+
+**A read of a 499-agent store takes about 30 ms over loopback.** That is
+what makes deviation 4's comparison possible at all, and it is worth
+recording as the number the 5 ms bound was chosen against.
+
+**`clear-secret` on an entity that does not exist says "no secret is
+stored for that slot".** Not "no provider of that name exists", which is
+what the sibling `set-secret` says and what the refusal table was first
+written expecting. It is the honest answer for a slot read rather than
+an entity read, and it is not a bug; recorded because the two commands
+sit next to each other and read differently.
+
+**Nothing in M1's or M2's work broke on a real socket.** The lane was
+written expecting to find something, since every case in it was
+previously asserted through an in-process client. Every command answered
+the way the acceptance suites say it does, and no production code was
+touched in this milestone.
+
+### The inventory
+
+| File | Lines |
+| --- | --- |
+| `tests/integration/test_cli_live.py` | 1161 |
+
+Nothing else changed. `src/` is byte for byte what M2 left, which is
+what the milestone's "test assets only" footprint means.
+
+### Verification
+
+All from `vinga-server/`.
+
+- `uv run ruff check .`: `All checks passed!`, at each commit.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`:
+  `3079 passed, 20 skipped in 44.59s` (unchanged in count from M2's tip:
+  this milestone adds no unit test).
+- `uv run pytest tests/integration -q`: `120 passed in 196.51s (0:03:16)`,
+  where M2's tip was `61 passed in 193.28s`. **The new lane's own
+  runtime is 2.7 to 3.6 s** over four consecutive runs of
+  `uv run pytest tests/integration/test_cli_live.py -q`, which is 59
+  cases and four server boots. The lane does not double the integration
+  lane's time; it adds about three seconds to it, which is what 59 cases
+  against a server that boots on an empty database and never speaks to a
+  device costs.
+- `uv run mypy` (the scoped `events` lane):
+  `Success: no issues found in 4 source files`.
+- The four drift checks, run the way CI runs them: all four clean.
+  Nothing in M3 touches an artifact source, and `git status` is empty
+  after regenerating all four.
+- The completeness test proved to bite: with the `ota-url` call removed
+  from the offline case, it fails naming `['ota-url']`; restored, it
+  passes. Under a partial selection (`-k`) it skips, with the reason
+  printed, rather than failing for commands nobody asked it to drive.
+- The apply-bound comparison proved to bite: with the shortened read
+  bound raised to the production 30 s, the elapsed-time assertion fails
+  at `0.14 > 30.0`, which is the case reporting that it has stopped
+  comparing anything.
+
+### Not verified here
+
+**The wheel-and-subprocess grade**, which decision 10 records as #223's:
+every command here runs in this process, through `cli.main`, rather than
+as `vinga-server config ...` from an installed wheel. What that would
+add is the entry point's own packaging, which is the standalone CLI
+issue's business.
+
+**A recipe run per published recipe**, which decision 9 puts in this
+lane and M4 writes: there are no recipes yet, and the lane they will run
+in is this file.
+
+**Anything about concurrency.** One client, one command at a time. The
+retryable 409 under a held lock is proven over a real socket in
+`test_config_api.py`, and nothing here adds to it.
