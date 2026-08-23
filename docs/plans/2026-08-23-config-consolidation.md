@@ -42,15 +42,36 @@ explicitly.
 
 ## Design decisions this plan makes
 
-1. **The merge direction is into `models.Config`, and `store.py`
-   imports it.** `DomainConfig` in `store.py` (line ~162) and the
-   domain half of `Config` in `models.py` carry the same fields
-   and validators; the one declaration lives in `models.py`, where
-   every other entity model lives, and the store validates
-   against it. Public name count drops by one model and its
-   validators; nothing observable moves (the same pydantic
-   metadata generates the same schema output, proved by the
-   byte-identical artifacts).
+1. **The merge is a move plus a subclass, never a collapse.**
+   `DomainConfig` (the 7 fields and 3 FIELD validators, no model
+   validator) is declared once in `models.py`, and `Config`
+   subclasses it, adding `server`, `memory`, the accessors, and
+   the boot-only `_check_domain` model validator. `store.py`
+   imports `DomainConfig` from `models`. The subclass shape is
+   what keeps two contracts intact: write-time validation stays
+   reference-half-only (validating the store against `Config`
+   would run `check_completeness` at write time and refuse the
+   first `set agent` into an empty database, the exact wedge the
+   store's docstring exists to prevent), and the 7-field model
+   survives BY NAME, so `config schema` and the reference's
+   whole-domain table render exactly what they render today.
+   Consequences stated: `Config.model_fields` order changes
+   (inherited domain fields first, `server` and `memory` last),
+   and the milestone verifies nothing reads that order before
+   relying on it; `docgen.py` stops importing `store` (it
+   imported SQLAlchemy and cryptography for this one class), an
+   incidental win recorded in the implementation doc;
+   `DomainSnapshot` SURVIVES with its docstring's reason updated
+   (the checks still run against two objects, now related by
+   inheritance); the `DOMAIN_DESCRIPTIONS` comment naming "two
+   models carry these fields" is rewritten in the same commit;
+   and the store's model stays FREE of after-validators
+   permanently, because `_read_domain` assigns `agent_defaults`
+   and `default_agent` after construction, a constraint now
+   stated beside the class. The pins for this decision are the
+   reference document byte-identical, `config schema` output
+   byte-identical, and the store's write-order suite; the OpenAPI
+   document cannot see either model and pins nothing here.
 2. **The fan-out is kept; the registry's generative half goes.**
    The audit's finding was that the registry's 692 lines now buy
    strings, not structure, after the conscious de-abstraction kept
