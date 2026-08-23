@@ -36,17 +36,17 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   gained ` -n auto --dist loadfile` and the dev group gained
   `pytest-xdist`, taking the longest lane from its measured 6m31s to a
   measured 2m25s and leaving the critical path on the integration lane,
-  which now finishes last at 4m54s. `loadfile` keeps a whole file
-  on one worker, so module-scoped fixtures stay paid once per file and
+  which now finishes last at 4m54s. `loadfile` keeps a whole file on one
+  worker, so module-scoped fixtures stay paid once per file and
   intra-file order is exactly what it was. Local runs are unchanged and
   serial; `uv run pytest tests/unit -q -n auto --dist loadfile` is in
   both command blocks as the way to reproduce the lane. Two supporting
   fixes came with it: the tests' refusal ledger now carries a residual
   refusal (one belonging to no test) from a worker up to the controller,
-  which prints it and fails the run, where under workers it used to
-  vanish silently; and the MCP HTTP suite's free-port helper holds its
-  socket for the test rather than releasing the number and assuming
-  nothing takes it.
+  which prints it and fails the run; without the repair a worker's
+  residual would have vanished silently. And the MCP HTTP suite's
+  free-port helper holds its socket for the test rather than releasing
+  the number and assuming nothing takes it.
 
 - **The event reference names the field behind each `%` position**
   (#241). `vinga-server events reference` and the committed
