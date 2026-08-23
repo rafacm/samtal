@@ -197,6 +197,14 @@ def packaged_database_dir() -> Iterator[Path]:
 # at the end of the run belongs to no test at all (a session or module
 # teardown, an atexit hook) and is reported against the run itself
 # rather than dropped.
+#
+# Under xdist there is one ledger per process, which is right for the
+# per-test half (the test and its fixtures ran in that process) and not
+# enough for the residual half: the run's exit status and the terminal
+# summary belong to the controller, which has neither the refusal nor a
+# way to hear about it. So a worker's residual is handed up over
+# `workeroutput` and the controller does the reporting and the failing,
+# in `pytest_testnodedown` and the two hooks below.
 
 # The root of every channel this server emits on. Records propagate to
 # their ancestors, so one handler here sees every subsystem's, which is
@@ -261,6 +269,25 @@ def pytest_configure(config: pytest.Config) -> None:
     logging.getLogger(EVENT_CHANNEL_ROOT).addHandler(_Watch(REFUSAL_MESSAGE))
 
 
+_RESIDUAL: pytest.StashKey[list[str]] = pytest.StashKey()
+
+# What a worker calls its residual when it hands it up. The controller
+# is a separate process with its own empty ledger, so without a channel
+# every one of the three process-local pieces above (the ledger, the
+# exit status, the terminal summary) would stay inside the worker and a
+# residual refusal would vanish: xdist unregisters a worker's terminal
+# reporter and derives the run's status from test reports, and a
+# residual belongs to no report. `workeroutput` is that channel, and it
+# carries strings, so what crosses is the description rather than the
+# records.
+_RESIDUAL_OUTPUT = "vinga_residual_refusals"
+
+
+def _note_residual(config: pytest.Config, described: str) -> None:
+    """Add one process's residual to what this run will report."""
+    config.stash.setdefault(_RESIDUAL, []).append(described)
+
+
 def pytest_sessionfinish(session: pytest.Session) -> None:
     """Fail the run for refusals no test could be held to.
 
@@ -269,30 +296,63 @@ def pytest_sessionfinish(session: pytest.Session) -> None:
     test. Reported against the run rather than dropped, and the run
     fails for it, because a guard whose residual is a printed line
     nobody reads is a guard with a hole in it.
+
+    Three processes reach this, and only one of them owns the run's exit
+    status. A worker (the one with a `workeroutput`) hands its residual
+    up and stops there. A serial run has no workers and both halves are
+    its own. A controller has an empty ledger of its own and whatever
+    `pytest_testnodedown` collected from the workers, and it is the
+    process whose exit status is the run's, so it is where the failing
+    happens in both parallel and serial shape.
     """
     residual = _LEDGER.unaccounted()
-    if not residual:
+    workeroutput = getattr(session.config, "workeroutput", None)
+    if workeroutput is not None:
+        if residual:
+            workeroutput[_RESIDUAL_OUTPUT] = _LEDGER.described(residual)
         return
-    session.config.stash[_RESIDUAL] = _LEDGER.described(residual)
-    session.exitstatus = pytest.ExitCode.TESTS_FAILED
+    if residual:
+        _note_residual(session.config, _LEDGER.described(residual))
+    if session.config.stash.get(_RESIDUAL, None):
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
 
-_RESIDUAL: pytest.StashKey[str] = pytest.StashKey()
+def pytest_testnodedown(node: Any, error: object) -> None:
+    """Collect a finished worker's residual, on the controller.
+
+    Called from the distribution session's own loop as each worker
+    reports itself finished, which is well before the controller's
+    `pytest_sessionfinish` above. The worker is named, because with the
+    files split across workers the name is the first thing that narrows
+    where the teardown ran.
+
+    Only xdist calls this, so a serial run never enters it and behaves
+    exactly as it did before there were workers.
+    """
+    described = getattr(node, "workeroutput", {}).get(_RESIDUAL_OUTPUT)
+    if described:
+        _note_residual(node.config, f"{node.gateway.id}: {described}")
 
 
 def pytest_terminal_summary(
     terminalreporter: Any, exitstatus: int, config: pytest.Config
 ) -> None:
     """Say so where a reader looks, since a mutated exit status on its
-    own says only that something failed."""
+    own says only that something failed.
+
+    On the controller as much as in a serial run: this is the process
+    that still has a terminal reporter under xdist, which is why the
+    residual has to reach it rather than being printed where it was
+    found.
+    """
     residual = config.stash.get(_RESIDUAL, None)
-    if residual is None:
+    if not residual:
         return
     terminalreporter.section("event schema refusals outside any test")
     terminalreporter.write_line(
         f"the event schema refused an emission where no test owns it: "
-        f"{residual}. A refusal is a schema bug; the likely site is a "
-        f"module or session fixture's teardown."
+        f"{'; '.join(residual)}. A refusal is a schema bug; the likely "
+        f"site is a module or session fixture's teardown."
     )
 
 
