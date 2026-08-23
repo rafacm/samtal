@@ -369,3 +369,219 @@ All from `vinga-server/`.
 - `uv run pytest tests/integration -q`: `61 passed in 198.43s (0:03:18)`
 - The four drift checks: all clean, `domain-config.md` still unmoved.
 - `uv sync --frozen`: `Checked 99 packages in 1ms`
+## M2: inline values, apply, export
+
+### What was done
+
+Six commits: the write path's reshape, the verb that reshape exists
+for, its route, and the three surfaces the milestone adds.
+
+**The phased write path** (`ab452399`). `store._write` was one function
+that opened its own transaction, placed the entry, ran the reference
+pass and wrote the row, in two arms telling apart a fragment that
+depends on stored state from one that does not. It is four phases now,
+with the transaction between them:
+
+- **Preparation** (`_prepare`), outside the lock: the name made usable,
+  the kind's own before-parse check, the body read as a fragment, and
+  the model where nothing about the fragment depends on the store,
+  which is whenever it carries no unchanged-value marker. A fragment a
+  caller got wrong still costs no lock.
+- **Staging** (`_stage_entity`), inside it: the marker resolved against
+  the one snapshot the transaction read, the model run where
+  preparation could not, and the entry placed where the configuration
+  would hold it.
+- **Checking**: `_refuse_unresolved` against that candidate state, once.
+- **Persistence** (`_persist`): the rows that moved.
+
+A row became data (`_Row`: a table, the columns that address it, and
+the columns to set, with `values=None` the delete). That is what lets
+staging decide what a write would do without doing it, and it gives a
+device binding and the default-agent setting one row shape each
+whichever of the three verbs writes them.
+
+`ConfigStore._write` is now the one-entity case of those phases, which
+is decision 6's requirement that there be one write path rather than
+two.
+
+**`ConfigStore.apply`** (`a5bfe63b`). A partial DomainConfig-shaped
+document, in one transaction: every entry prepared, every entry staged
+into one candidate state, `check_references` run once against it, then
+the rows written. The settings arrive in their domain shape and are
+adapted onto the same normalization and the same rows their own verbs
+write. Additive, idempotent by comparison, refused whole and reported
+whole. The entry count is bounded (`APPLY_LIMIT = 500`) and refused
+before anything is prepared.
+
+**`POST /apply`** (`b009659e`). The store answers canonical outcomes;
+the route computes the notices from the loaded-agents and snapshot-only
+dependencies the settings routes already use, and does the device
+housekeeping the two settings routes do, all of it after the commit.
+The body is described as `DomainConfig` in the document, which is one
+shape rather than a second schema restating it.
+
+**Inline `key=value`** (`fe774855`). The pairs assemble the mapping the
+fragment would have held and enter the exact path a `-f` fragment
+enters. `-f` and the pairs are exclusive, and neither given is the
+missing-argument sentence, raised by the grammar itself because Click
+cannot see it: either of the two satisfies the command. Six malformed
+shapes, six fixed value-free sentences, PyYAML's exception caught
+without binding it and the refusal raised after the arm.
+
+**`config apply`** (`c0a8d7fe`) and **`config export`** (`eb2d0a37`).
+`apply` posts a document with no read timeout at all;
+`export` is CLI-side assembly of the whole-document and per-entity
+reads, with a reproduction header and the stored credentials rendered
+as the commands that enter them.
+
+### Deviations from the plan
+
+Three, and the first is the one worth reading.
+
+**1. Idempotence compares the ENTRIES, not the write-shaped
+projection.** Decision 6 says an entry is compared "against the stored
+one through the same write-shaped projection reads use (masks resolving
+to keep-stored per #192's marker)". Both readings of that were tried
+and both are wrong, in opposite directions.
+
+Comparing the row a write would produce (`_to_row`, which is
+`exclude_unset`) reports an entry that spells a field at its own default
+as a change from one that leaves it out. That is not a corner case: a
+display shows a default that is a real value, so an EXPORTED body
+carries fields the write that created the entry never spelled, and an
+export applied back onto its own store reported most of itself as
+written. The round-trip test caught it.
+
+Comparing the masked display, which is what "the projection reads use"
+literally names, is worse. The marker substitutes stored values into
+the incoming fragment where a mask appears, but a fragment carrying a
+NEW value under a secret-shaped key is not touched by the marker, and
+the display masks both sides to `********`: rotating a lowercase
+`api_key_env` from one value to another would be reported unchanged and
+silently not written, on exactly the values #192's marker exists for.
+
+So the comparison is `entry != stored`, the two pydantic models. Two
+entries holding the same values are the same configuration however
+sparsely either was written, and a value that differs is a value that
+differs. Both rejected readings are pinned as tests
+(`test_a_body_spelling_a_default_it_holds_is_unchanged`,
+`test_a_value_the_display_would_mask_is_still_compared`) so the
+comparison cannot drift back to either.
+
+**2. The refusals aggregate in two rounds rather than one.** The plan
+says refusals "aggregate into one ConfigError". They aggregate per
+PHASE: every preparation refusal at once, and, if preparation was
+clean, every staging refusal at once. A document whose fragments will
+not parse never reaches staging, so its reference refusals are not in
+the same message. That falls out of the phase structure rather than
+being chosen: staging cannot run against a candidate state that has
+entries missing from it, and reporting reference refusals computed
+against a half-built state would be reporting refusals that are not
+true. The reference pass itself still produces one refusal listing
+every unresolved reference, which is the sentence a single write earns,
+byte for byte (`test_a_reference_refusal_is_the_sentence_a_single_write_earns`).
+
+**3. The body size bound is weaker than "refused before any
+mutation" suggests, and says so.** FastAPI reads and parses a request
+body before a handler or any dependency runs, so the check in
+`apply_document` is against `Content-Length` after the body is already
+in memory: what it bounds is what reaches the repository, not what the
+socket accepted, and a request that declares no length is bounded by
+the entry count alone. The entry count is the bound that matters, since
+it is the one that bounds the transaction, and the comment beside
+`APPLY_BODY_LIMIT` states this rather than implying otherwise.
+
+### Discoveries
+
+**Two name collisions, one of them silent.** `store.py` already had a
+`_stage(stage: str) -> str` (the provider-stage check) and `cli.py`
+already had a `_stored_slots(...)` for the summary tree. Ruff's F811
+does not fire when the first binding is used before the second is
+defined, so the store's collision passed lint and simply called the
+wrong function. Both were renamed (`_stage_change`, `_stored_slot_note`)
+and both files now pass a `grep -oE "^def [a-zA-Z_]+" | sort | uniq -d`
+check, which is worth running after any commit that adds several
+functions to one of these files.
+
+**Skipping the write for an unchanged entry is observationally
+equivalent.** The one case where it changes the TABLE rather than the
+row is `set agent-defaults` with an empty body against a store that has
+no singleton row: nothing is inserted. Every read answers the same,
+because an unwritten singleton is the empty entry by construction
+(`store._entry`), and the whole suite is green on it.
+
+**The apply document's schema is `DomainConfig` itself.** Every field
+of that model has a default, so the schema of the whole configuration
+IS the schema of a partial one, and the request body needed no model of
+its own.
+
+### The artifact diff
+
+`docs/reference/api-openapi.json` moved, and only it. Read as a diff
+rather than trusted:
+
+| | |
+| --- | --- |
+| paths added | `/apply` |
+| paths changed | none |
+| schemas added | `AppliedDocument`, `AppliedEntry`, `DomainConfig`, `ProvidersConfig` |
+| schemas changed | none |
+| schemas removed | none |
+| `info` changed | no |
+
+`+260` lines, all additions. `domain-config.md`, `conversations-schema.md`
+and `events.md` did not move, which is what the risks section requires
+of every milestone: no descriptor's `command` text changed, and no
+spelling did.
+
+### The inventory
+
+`wc -l`, before at `7a81395e` and after at `eb2d0a37`:
+
+| File | Before | After |
+| --- | --- | --- |
+| `src/vinga_server/config/store.py` | 2043 | 2533 |
+| `src/vinga_server/config/cli.py` | 2678 | 3217 |
+| `src/vinga_server/config/api.py` | 2487 | 2624 |
+| `src/vinga_server/config/responses.py` | 1016 | 1070 |
+
+New suite: `tests/unit/test_config_apply.py`, 512 lines. The grammar
+grew two top-level commands (`apply`, `export`) and five leaves under
+`export`, taking the invocable count from 34 to 41; the break-glass
+subset is unchanged at nine mutating and seven reading members, and
+neither new command is in it.
+
+### Verification
+
+All from `vinga-server/`.
+
+- `uv run ruff check .`: `All checks passed!`, at each commit.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`:
+  `3059 passed, 20 skipped in 42.77s` at the tip (2959 at M1's tip; the
+  100 are the apply suite, the inline-value and boundary cases, the
+  route's cases, the pending housekeeping and the export round trip).
+- `uv run pytest tests/integration -q`: `61 passed`.
+- `uv run mypy` (the scoped `events` lane):
+  `Success: no issues found in 4 source files`.
+- The four drift checks, run the way CI runs them: all four clean.
+  `api-openapi.json` regenerated and committed; the other three did not
+  move, asserted as `git diff --stat` over `docs/reference/` showing
+  one file.
+- `uv sync --frozen`: `Checked 99 packages`. No dependency moved in
+  this milestone.
+- The store refactor's equivalence: every one of the 2959 tests M1 left
+  green is green unchanged after `ab452399`, including the whole
+  unchanged-value marker round trip, the break-glass differential
+  (`test_a_local_write_acknowledges_what_the_api_acknowledges` and its
+  wording sibling), the body round trip in `test_config_bodies.py` and
+  every API write case. No assertion was edited to accommodate the
+  reshape.
+
+### Not verified here
+
+The live lane, which is M3's: every case in this milestone runs the CLI
+through the acceptance seam (`TestClient` in place of a socket) rather
+than over a real one, so `apply`'s unbounded read timeout is asserted
+against a mock transport rather than against a slow server, and the
+over-limit refusal is asserted through the in-process application.
+Decision 10 puts both of those on the wire.
