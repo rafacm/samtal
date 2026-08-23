@@ -64,6 +64,23 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **The device session is four modules instead of one** (#245). Purely
+  internal, with no behavior change: nothing a device sends or receives,
+  nothing a capture records, and nothing the logs say is different, and
+  the session's device-facing boundary is byte for byte the interface it
+  was. `device/session.py` used to carry three clusters that had nothing
+  to do with each other beyond happening to belong to one connection,
+  and each is its own module now. `device/pacing.py` owns the reply
+  audio clock: the Opus encoder, the frame cadence, the pause a barge-in
+  confirmation holds it with, and the per-reply latches measured against
+  it. `device/capture_audio.py` owns recording's own decode path, which
+  cannot share the pipeline's codecs because it records the frames the
+  pipeline never sees. `device/watchdog.py` owns both of the deadlines a
+  connection is held to, the hello wait and the idle timer, neither of
+  which knows what it is timing. What stays in the session is the
+  handshake, the wire, the manifest, the close path, and what a deadline
+  means.
+
 - **`vinga-server config doctor` is now `vinga-server doctor`** (#244).
   The endpoint diagnostic was about 400 lines of `config/cli.py` that
   lived there only because it reads the `server` section, and it is a

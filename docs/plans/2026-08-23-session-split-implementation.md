@@ -418,3 +418,227 @@ From `vinga-server/`, on the amended branch.
 - `uv run pytest tests/unit -q -n auto --dist loadfile`: **2861 passed,
   20 skipped**, two more than the milestone's, being the two new pins.
 - `uv run pytest tests/integration -q`: **61 passed**.
+## M2: split the session's three clusters
+
+### What was done
+
+Three commits, one per new module, each carrying its own session
+delegation and the reach-in migrations that module's move forces, plus
+this one for the documents. Decision 5's shape survived contact with the
+code intact: no new module was dropped, added or renamed, and no
+interface member the plan names went missing.
+
+**`device/pacing.py`, `ReplyPacer`** (`1ed0d54a`). All eight pacing
+facts the plan lists (`_encoder`, `_pace_start`, `_pace_count`,
+`_pace_resume`, `_pace_paused_at`, `_speaking_started`,
+`_speaking_started_at`, `_tts_started`), and the interface decision 5
+specifies: `encode`, `flush`, `reply_started`, `restart`, `pause`,
+`resume`, `speaking_started_at`, `tts_start_due`, `first_frame(now)`
+and `transmit(packet, deliver)`. Two read-only properties are there
+because the migration table requires them by name ("reads the pacer's
+public pause state and clock"): `paused` and `cadence_start`.
+
+`transmit` holds the pinned order of one transaction. The first-frame
+stamp is the session's call before the loop, exactly where today's is
+(`send_audio` stamps once per batch, not once per packet), and then per
+packet: cadence sleep, pause wait, `await deliver(packet)`, count
+advancement. The count moves only after `deliver` returns, which is
+today's post-send increment. `deliver` is the session's closure and
+does the socket send and then the capture feed, so the session keeps
+both halves of what a frame's slot is spent on.
+
+The `PlayableAudio` wrapping stayed in the session, per the plan:
+`encode` and `flush` return `list[bytes]` and `encode_audio` /
+`flush_encoder` wrap them. `first_frame` answers rather than announces,
+so `speaking_started` is still emitted by `send_audio` and the pacer
+has never heard of an event or an agent.
+
+**`device/capture_audio.py`, `CaptureAudio`** (`d0125056`). The three
+codec objects, the protocol version, and the close of the
+`SessionCapture` it is handed; `microphone(data)`, `reply(packet)`,
+`close()`. Both fail-open docstrings moved with their code unchanged,
+and the module docstring states the rule they are two instances of:
+nothing here raises. The session's field is `_capture_audio`, compared
+`is not None`, and both hot-path calls are one guarded line.
+
+The lifecycle is decision 5's, unchanged from today's: `_start_capture`
+opens the capture, calls `self._events.attach_capture(capture)` on the
+raw capture, then constructs `CaptureAudio` around it; the `finally`
+emits `session_closed`, detaches the events capture, calls
+`CaptureAudio.close()` and clears the field, in that order.
+
+**`device/watchdog.py`, both watchdogs** (`d9160d8c`).
+`HELLO_TIMEOUT_S` re-homed beside `first_contact()`, which reads the
+module global at call time; the session imports the module
+(`from vinga_server.device import watchdog`) and writes
+`async with watchdog.first_contact():`, so patching
+`watchdog.HELLO_TIMEOUT_S` still bites. Hello parsing and the
+protocol-error close policy stayed in `_receive_hello`.
+
+`IdleWatchdog` takes the task, the mark and the countdown arithmetic.
+Its constructor is the plan's three narrow dependencies and not the
+session: `timeout_s`, `defer`, `on_idle`. `start()`, `stop()`, `mark()`,
+plus the read-only `marked_at` the migration table requires by name.
+The loop calls `defer()` every iteration, so the two facts that change
+mid-session stay live exactly as `_watch_for_idle` had them. The
+session's two halves are named methods rather than lambdas, which is
+where the moved prose went: `_idle_deferred` carries the realtime-only
+paragraph, the reply-in-flight paragraph and the arriving-audio
+paragraph, and `_idle_expired` carries the `session_idle` emission, the
+normal-closure comment and the `request_shutdown` call.
+
+Both hot paths kept their statement order: `_handle_audio` feeds the
+capture before every guard, per its own comment, and `send_audio`
+stamps the first frame before the pause gate.
+
+### The test migration table
+
+Decision 5's table, each row as it landed. No row changes what its
+assertion means, and no test outside this table was edited.
+
+| File | Old reach-in | New form | What the assertion still pins |
+| --- | --- | --- | --- |
+| `test_session_barge_in.py` | `session._pace_start` (three reads) | `session._pacer.cadence_start` | The pacing clock shifted forward by at least the pause, so the cadence survives a barge-in confirmation instead of bursting to catch up. |
+| `test_session_barge_in.py` | `not session._pace_resume.is_set()` / `session._pace_resume.is_set()` | `session._pacer.paused` / `not session._pacer.paused` | The stream is held while the confirmation is in flight and flowing again after it. Equivalent by construction: `pause` clears the event and stamps `_pace_paused_at` together, and `resume` restores both. |
+| `test_session_characterization.py` | `session._encoder = RecordingEncoder(session._encoder, log)` | `session._pacer._encoder = RecordingEncoder(session._pacer._encoder, log)` | The feed order into the one Opus encoder a reply and a filler share: the filler's clip, resampler tail and flush are one synchronous batch with no send between them. Still a white-box wrap, now of the object that owns the encoder. |
+| `test_boundary_contract.py` | `session._mark_activity()`, `session._last_activity` (three reads) | `session._watchdog.mark()`, `session._watchdog.marked_at` | `user_turn_ended` marks conversational activity in both listening modes, so a runtime that answers nothing cannot leave the timer counting from before the user spoke. |
+| `test_session_close_reason.py` | `session._stop_idle_watchdog = held` | `session._watchdog.stop = held` | A drain arriving while a close is already under way does not take a cause decided before it: the reason stays `client`. The held step is the same step, on the object that now owns it. |
+| `test_conversations_session.py` | `parametrize("step", [..., "_start_idle_watchdog"])` with `setattr(session, step, boom)` | `parametrize` over two `(session, boom)` callables, the second `setattr(session._watchdog, "start", boom)`, with `ids` naming the steps | A failure at any step after the first attachment still reaches `session_closed`, the store's close, the sink's detach and the capture's close. Both parameter cases, both assertions, unchanged. |
+| `test_conversations_session.py` | `assert session._capture is None` | `assert session._capture_audio is None` | The session gave back the capture it took: same meaning, new name for the field that holds it. |
+| `test_session_events.py` | `session._pace_start = None` | `session._pacer.restart()` | `speaking_started` fires once per reply and not once per agent leg, with the leg's restart driven through the call a handover actually makes. The docstring's parenthesis was reworded to match. |
+| `test_session.py` | `monkeypatch.setattr(session_module, "HELLO_TIMEOUT_S", 0.05)` | `monkeypatch.setattr(watchdog_module, "HELLO_TIMEOUT_S", 0.05)` | A client that connects and says nothing is closed with a protocol error and "no hello". The plan's hello-timeout retarget. |
+
+`test_conversations_session.py` gained one import,
+`collections.abc.Callable`, for the parametrized callables' annotation.
+That is the only line in the M2 test diff that is not a row above.
+
+### `wc -l src/vinga_server/device/session.py`
+
+| | Lines |
+| --- | --- |
+| Before (`802c8d28`, M1's tip) | 1,229 |
+| After | 1,148 |
+
+Eighty-one lines net, which is a smaller number than the move looks
+like: 390 lines of new module were written, and `session.py`'s own diff
+is 204 lines removed against 123 added. Most of what came back is
+prose rather than code, because most of the idle watchdog's docstring
+was policy rather than arithmetic and stayed behind in
+`_idle_deferred`. The split is visible in what the class holds rather
+than in its length: fourteen fields became three, the seven pacing
+methods became one-line delegations, and the two capture decode paths
+and the four idle-watchdog methods left entirely.
+
+| Module | Lines |
+| --- | --- |
+| `device/pacing.py` | 183 |
+| `device/watchdog.py` | 115 |
+| `device/capture_audio.py` | 92 |
+
+### Deviations from the plan
+
+**None in the split itself.** Every module, class name, interface
+member and lifecycle order decision 5 pins is what landed, including
+the two amendments that changed the shape (`transmit` in place of
+`gate()`, and the watchdog's three narrow dependencies).
+
+Two things the plan did not name had to be decided, and neither
+contradicts it:
+
+**Two read-only properties were added that the interface lists do not
+mention.** `ReplyPacer.paused` and `cadence_start`, and
+`IdleWatchdog.marked_at`. The migration table requires them in so many
+words ("reads the pacer's public pause state and clock", "reads the
+watchdog's public mark time"), so they are mandated by decision 5 even
+though its interface bullets stop short of naming them. They are reads
+with no writer.
+
+**The encoder reach-in stayed a reach-in.** Decision 5 offers
+"replaces the encoder on the pacer, or the whole pacer, whichever keeps
+the assertion's subject", and the first was taken:
+`session._pacer._encoder`. The alternative would have been a public
+`encoder` attribute on `ReplyPacer` that no production caller wants,
+which is the compatibility-alias shape the same decision forbids.
+The test's subject is the shared encoder's feed order, which no public
+surface reports, and the reach-in is documented in place as it was
+before.
+
+### Discoveries
+
+**Two emit-path labels in the event-baseline harness now name a method
+that no longer exists.** `tests/tools/event_baseline.py:854` declares
+`Driver((EDGE, "DeviceSession._watch_for_idle", 1), ...)` and
+`tests/unit/test_event_baseline.py:318` keys `CARRIED` on
+`"vinga_server.device.session:DeviceSession._watch_for_idle #1"`. After
+the split, `session_idle` is emitted from `DeviceSession._idle_expired`.
+
+Nothing fails, and that is the point worth recording: the static walk
+that used to hold these labels to the source retired with the last
+event conversion (`tests/tools/event_baseline.py` says so in its own
+comment), so `identity` is a declared label matched against nothing but
+itself. The suite is green with the labels stale. They were left
+untouched because M2's own pin is that its test diff is exactly the
+migration table above, and this is not a row of it; the honest one-line
+fix is to rename both to `DeviceSession._idle_expired`, and it belongs
+to whoever takes the review flag rather than to a milestone whose
+checkable property is the size of its test diff.
+
+**The reach-in census moved by three sites and minus three names.**
+`uv run python -m tests.tools.reach_ins` reports 183 sites over 82 names
+before the split and 186 over 79 after. The census is lexical, so
+`session._pacer.cadence_start` counts as two sites where
+`session._pace_start` counted as one, which is where the three came
+from; the three names are the ones the split retired from the tests'
+vocabulary. No new name was reached for that the migration table does
+not list.
+
+**`filler_runner`-style cycle checks were unnecessary here.** All three
+new modules import downward only (`audio`, `capture`, `protocol`,
+`device.boundary`), and `device/session.py` imports all three, so there
+is no direction in which a cycle could form. `device/__init__.py`
+imports nothing, as M1 found for `runtime/__init__.py`.
+
+**The pacer's frame duration is now stated once.** `send_audio`
+computed `frame_s = OUTPUT_AUDIO.frame_duration / 1000` on every batch
+while the encoder was constructed with the same `frame_duration` in
+`__init__`: two readings of one fact. `ReplyPacer.__init__` takes
+`frame_duration_ms` once and derives both, which is the locality rule
+applied to a two-line duplication that had never been wrong.
+
+### Verification
+
+From `vinga-server/`, on `feature/session-split-m2` at `d9160d8c`, with
+`PYTHONDONTWRITEBYTECODE=1` exported for everything outside pytest.
+
+- `uv run ruff check .`: **All checks passed!**
+- `uv run mypy` (the events lane): **Success: no issues found in 4
+  source files**
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: **2859 passed,
+  20 skipped** in 42.35 s. Exactly M1's counts: no test was added,
+  deleted, skipped or renamed, which is the milestone's own claim about
+  its diff.
+- `uv run pytest tests/integration -q`: **61 passed** in 189.69 s, also
+  M1's count.
+- The generated-document drift checks, all four, run the way CI runs
+  them: `domain-config.md`, `conversations-schema.md`, `events.md` and
+  `api-openapi.json` all **diff clean**. Expected, and checked rather
+  than assumed: this milestone changes no artifact source, and
+  `events.md` in particular carries no emission sites, so moving one
+  could not have moved it.
+
+The grep decision 6 asks for after M2, over `src/vinga_server/device/session.py`:
+
+- `_pace_start`, `_pace_count`, `_pace_resume`, `_pace_paused_at`,
+  `_speaking_started`, `_speaking_started_at`, `_tts_started`,
+  `_encoder`, `_last_activity`, `_idle_watchdog`, `_capture_decoder`,
+  `_capture_reply_decoder`, `_capture_resampler`, `HELLO_TIMEOUT_S`,
+  `_mark_activity`, `_watch_for_idle`, `_start_idle_watchdog`,
+  `_stop_idle_watchdog`: **one hit**, `def flush_encoder`, which is the
+  `DeviceOutput` boundary method's name and stays.
+
+Across `src` and `tests`, the only surviving mentions of the moved
+method names are the two stale event-baseline labels recorded under
+Discoveries above.
+
+Nothing in M2 needs hardware, so no verification step was left
+unverifiable.
