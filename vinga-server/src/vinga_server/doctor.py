@@ -400,14 +400,14 @@ def _probed(url: str, shown: str) -> httpx.Response:
     """
     problem: str | None = None
     client: httpx.Client | None = None
+    answered: httpx.Response | None = None
     with quieted(REQUEST_LOGGERS, QUIET_LEVEL):
         try:
             try:
                 client = build_client(url)
-                response = client.request("GET", url, follow_redirects=False)
-                if response.is_redirect:
-                    raise ConfigError(_redirect_refused(shown))
-                return response
+                answered = client.request("GET", url, follow_redirects=False)
+                if answered.is_redirect:
+                    answered, problem = None, _redirect_refused(shown)
             except (httpx.HTTPError, httpx.InvalidURL, ValueError) as exc:
                 # The exception's class name and nothing else. httpx puts
                 # the request into its exceptions, its InvalidURL quotes
@@ -424,9 +424,47 @@ def _probed(url: str, shown: str) -> httpx.Response:
                     f"reach it."
                 )
         finally:
-            if client is not None:
-                client.close()
-    raise ConfigError(problem)
+            # The close is a step of the probe rather than tidying after
+            # it, so it answers a sentence instead of raising: an
+            # exception out of a `finally` leaves this boundary
+            # altogether, taking whatever a driver wrote into its message
+            # with it, and it would replace a refusal already in flight.
+            # Whatever failed first is what is reported.
+            problem = problem or _close_failed(client, shown)
+    if answered is None or problem is not None:
+        # Every path that gets here left a sentence: a request that
+        # produced no response, a redirect refused, or a close that
+        # would not complete after a response that did arrive.
+        raise ConfigError(problem)
+    return answered
+
+
+def _close_failed(client: httpx.Client | None, shown: str) -> str | None:
+    """Give the connection back, and say so when it will not go.
+
+    Answered rather than raised, for the reason the caller's `finally`
+    states, and named by its class rather than quoted, for the reason
+    every other failure here is: a transport failing on its way out can
+    put the address, a header or a driver's own text into its message.
+
+    A close that fails ends the command rather than being swallowed.
+    What this command answers is what one address said when it was asked
+    cleanly, and a probe that could not be finished is not something to
+    report a healthy endpoint from; a diagnostic that quietly dropped a
+    failure would be the wrong tool twice over.
+    """
+    if client is None:
+        return None
+    try:
+        client.close()
+    except Exception as exc:
+        return (
+            f"{shown} answered, but the connection to it could not be closed "
+            f"({type(exc).__name__}), so no verdict is printed: a probe that did not "
+            f"finish cleanly is not one to call an endpoint healthy from. What the "
+            f"library said is not repeated here."
+        )
+    return None
 
 
 def _redirect_refused(shown: str) -> str:
