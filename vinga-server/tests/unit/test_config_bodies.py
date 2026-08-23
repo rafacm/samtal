@@ -225,6 +225,13 @@ def test_each_kind_has_a_sparse_body_and_a_written_out_one(kind: str) -> None:
     field added to a model is absent from every body already stored, and
     a check that demanded the fixture grow with the model would turn the
     floor upside down: these files exist to be old.
+
+    A kind with no optional field has one body by construction, and both
+    assertions below are vacuously true of it. `PromptFragmentConfig` is
+    that kind: it declares one required field, so there is no second end
+    for it to have and nothing here to say about it. What holds that kind
+    is `test_the_floor_covers_every_entity_kind_and_both_transports`,
+    which requires it to have a body at all.
     """
     model = entities.descriptor(kind).model
     required = {name for name, field in model.model_fields.items() if field.is_required()}
