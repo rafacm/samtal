@@ -1170,6 +1170,61 @@ def test_a_misspelled_command_word_repeats_nothing_of_what_was_typed(
         assert word in captured.err, word
 
 
+def test_the_server_s_own_parser_repeats_nothing_either(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The third way out of the entry point, and the one neither the
+    word dispatch nor this command's parser reaches: an argument
+    starting with a dash falls through to the parser for the server's
+    own options, which is argparse and echoes what it did not
+    recognize.
+
+    It is reached with a secret-shaped URL behind an option nothing
+    declares, which is what an operator produces by typing the command
+    word wrongly as a flag. Replacing that parser with a plain
+    `argparse.ArgumentParser` puts the URL back on stderr and fails
+    this."""
+    from vinga_server import main as entrypoint
+
+    monkeypatch.setattr(entrypoint.sys, "argv", ["vinga-server", "-d", LEGACY_URL])
+
+    with pytest.raises(SystemExit) as left:
+        entrypoint.main()
+
+    assert left.value.code == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "unrecognized extra arguments" in captured.err
+    assert SECRET_SEGMENT not in captured.err
+    assert "voice.example" not in captured.err
+
+
+def test_the_server_s_own_parser_says_a_missing_value_in_fixed_words(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The other shape that parser can produce. Nothing of the command
+    line can appear in this one even from argparse, since the value is
+    the part that is missing, so what is asserted is that the sentence
+    is this repository's rather than the library's, and that a
+    secret-shaped argument sitting further along the line does not
+    arrive by way of a usage dump."""
+    from vinga_server import main as entrypoint
+
+    monkeypatch.setattr(
+        entrypoint.sys, "argv", ["vinga-server", "--config", "--config", LEGACY_URL]
+    )
+
+    with pytest.raises(SystemExit) as left:
+        entrypoint.main()
+
+    assert left.value.code == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "an option was given without its value" in captured.err
+    assert "expected one argument" not in captured.err
+    assert SECRET_SEGMENT not in captured.err
+
+
 def test_the_config_group_no_longer_answers_this_command(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
