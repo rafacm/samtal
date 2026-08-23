@@ -9,6 +9,18 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Removed
 
+- **The `random_number` builtin tool is gone** (#245). Every agent used
+  to be offered it, under no condition at all, and no agent is offered
+  it any more: a model asked to roll a die now answers out of its own
+  distribution again, or calls an MCP server that draws numbers.
+  Nothing needs configuring for the removal and no deployment has to do
+  anything; the two other builtins, `switch_agent` and `remember`, are
+  unchanged, as is the rule that neither is granted the way an MCP
+  server is. `random_number` is also free as an `mcp_servers` entry
+  name from now on, whose tools would publish as
+  `random_number__<tool>`, since an MCP tool is always qualified by its
+  entry.
+
 - **Domain configuration databases written before this build are not
   upgradeable** (#243). Every entity is now stored as one validated JSON
   body, which no in-place migration can produce, so the domain migration

@@ -6,8 +6,7 @@
 # The entry name is what its tools are prefixed with in the merged tool
 # list (`home__turn_on_light`), which is why it must be a plain
 # [A-Za-z0-9_-]+ name and cannot be `self` or a builtin's name
-# (`switch_agent`, `remember`, `random_number`): those already mean
-# something there.
+# (`switch_agent`, `remember`): those already mean something there.
 #
 # A server that is down at startup only logs a warning; its tools are
 # absent and the server reconnects in the background when a session
