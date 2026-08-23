@@ -430,6 +430,15 @@ with a resolution note here.
    omitted.** `_watch_for_idle` reevaluates realtime mode and
    `runtime.replying()` every iteration.
 
+   *Resolution* (this commit, with the shape already folded into
+   decision 5 by finding 1's amendment): the constructor's narrow
+   dependencies are the timeout, a read-only defer predicate the
+   session builds from its realtime flag and `runtime.replying()`,
+   and the async `on_idle` callback; passing the `DeviceSession`
+   itself is explicitly rejected; mode changes and replies crossing
+   the deadline stay pinned by the existing idle suites at the
+   session surface.
+
 5. **P2: the framing amendment deleted the only nonzero-timestamp
    compatibility pin.** A default-wrap round trip exercises only
    zero; incoming stock-firmware v2 frames carry nonzero values.
