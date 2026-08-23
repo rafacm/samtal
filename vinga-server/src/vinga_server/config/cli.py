@@ -1388,29 +1388,84 @@ def _yaml(data: object) -> str:
 # Input
 
 
-def _fragment(path: str) -> object:
-    """One entity's YAML fragment, from a file or from stdin. Parsed
-    here and validated by the models in the repository, which is where
-    the rule that a secret-bearing key may only name an environment
-    variable already lives."""
-    source = "the fragment on stdin" if path == "-" else path
-    text = _stdin() if path == "-" else _file(path)
-    # Rendered from the problem and the mark rather than from str(exc),
-    # which quotes the offending source line back, and recorded rather
-    # than raised inside the handler: a PyYAML mark holds the whole
-    # buffer it was parsing, which here is the fragment, and an
-    # exception raised inside a handler keeps the one being handled as
-    # its __context__.
+# Reading YAML
+#
+# The one place this CLI calls a parser, and therefore the one place a
+# value nobody has validated meets a library whose business is to
+# describe what it could not read. Both ways a YAML value reaches this
+# group go through it: a fragment or a document read from a file or
+# from stdin, and one inline value written beside a key.
+#
+# What a caller is told is fixed, plus at most the two integers saying
+# where the parser stopped. Never the parser's own words: `problem`
+# names the tag or the key it choked on, and `!<credential> value` is a
+# document PyYAML answers by quoting the credential back. That leak was
+# in the `-f` write from the beginning and is closed here for both
+# callers at once, because there is one boundary now rather than two
+# that happened to agree.
+#
+# What is caught is wider than `YAMLError`, which is the other half of
+# the same fix. The constructors that turn a scalar into a Python value
+# raise the ordinary exceptions when the scalar is out of range: an
+# integer of five thousand digits leaves as CPython's own `ValueError`
+# about the digit limit, an impossible date leaves as `ValueError` from
+# `datetime`, and two thousand nested lists leave as `RecursionError`
+# out of the composer. None of them is a `YAMLError`, so all three used
+# to reach an operator as a traceback with the source in it.
+_UNPARSEABLE = (yaml.YAMLError, ValueError, ArithmeticError, RecursionError)
+
+YAML_NOT_QUOTED = (
+    "Nothing of what it holds is quoted back: a source that will not parse is one "
+    "nothing here has validated, and what a parser says about one repeats the tag or "
+    "the key it stopped on"
+)
+
+# What the inline form calls the thing it could not read. Its own
+# source name rather than a path, because there is no file: the value
+# is one argument, and where the parser stopped is a column inside it.
+PAIR_SOURCE = "an inline field's value"
+
+
+def _parsed_yaml(text: str, source: str) -> object:
+    """One YAML source read, or the fixed sentence for one that will
+    not read.
+
+    Recorded inside the handler and raised after it, the rule this
+    module raises by: a PyYAML mark holds the whole buffer it was
+    parsing, and an exception raised inside a handler keeps the one
+    being handled as its `__context__` for anything walking the chain to
+    find. What survives the arm is a string built from `source`, which
+    is the caller's, and two integers.
+    """
     problem: str | None = None
+    parsed: object = None
     try:
-        return yaml.safe_load(text)
-    except yaml.YAMLError as exc:
-        detail = str(exc)
-        if isinstance(exc, yaml.MarkedYAMLError) and exc.problem_mark is not None:
-            mark = exc.problem_mark
-            detail = f"{exc.problem} at line {mark.line + 1}, column {mark.column + 1}"
-        problem = f"invalid YAML in {source}: {detail}"
-    raise ConfigError(problem)
+        parsed = yaml.safe_load(text)
+    except _UNPARSEABLE as exc:
+        problem = f"invalid YAML in {source}{_stopped_at(exc)}. {YAML_NOT_QUOTED}"
+    if problem is not None:
+        raise ConfigError(problem)
+    return parsed
+
+
+def _stopped_at(exc: BaseException) -> str:
+    """Where the parser stopped, when it says: two integers off the
+    exception's mark and nothing else off the exception at all. Empty
+    for the failures that carry no mark, which is every one of the
+    non-YAML family above."""
+    if not isinstance(exc, yaml.MarkedYAMLError) or exc.problem_mark is None:
+        return ""
+    mark = exc.problem_mark
+    return f" at line {mark.line + 1}, column {mark.column + 1}"
+
+
+def _fragment(path: str) -> object:
+    """One entity's YAML fragment or one whole document, from a file or
+    from stdin. Parsed here and validated by the models in the
+    repository, which is where the rule that a secret-bearing key may
+    only name an environment variable already lives."""
+    source = "the fragment on stdin" if path == "-" else path
+    return _parsed_yaml(_stdin() if path == "-" else _file(path), source)
 
 
 # Inline values
@@ -1421,12 +1476,12 @@ def _fragment(path: str) -> object:
 # the same check, the same request and the same acknowledgement follow.
 #
 # The parser is a no-leak boundary of its own, built the way `_fragment`
-# is and for the same reason: a value typed beside a key is where a
-# paste lands, so every refusal below is a fixed sentence naming what
-# was wrong with the shape and never what was written, the YAML parser's
-# exception is caught without keeping anything it holds, and each
-# refusal is raised after its arm rather than inside it, so no exception
-# chain carries the string that was being parsed.
+# is and, since the two share `_parsed_yaml` above, out of the same
+# boundary: a value typed beside a key is where a paste lands, so every
+# refusal below is a fixed sentence naming what was wrong with the shape
+# and never what was written, and each is raised after its arm rather
+# than inside it, so no exception chain carries the string that was
+# being parsed.
 #
 # A value is held to one scalar. `yaml.safe_load` will happily read
 # `[a, b]` or `{a: 1}` out of one argument, and the contract is that an
@@ -1451,11 +1506,6 @@ PAIR_DUPLICATE_KEY = (
 PAIR_NESTED_KEY = (
     "one inline field's key nests inside another's, such as a.b beside a, which says "
     "two things about the same place. Nothing typed is quoted back"
-)
-
-PAIR_UNPARSEABLE = (
-    "an inline field's value is not valid YAML. Nothing typed is quoted back: a value "
-    "that fails this check is one nothing here has validated"
 )
 
 PAIR_NOT_SCALAR = (
@@ -1532,26 +1582,19 @@ def _distinct(keys: Sequence[tuple[str, ...]]) -> None:
 def _scalar(value: str) -> object:
     """One pair's value, read as YAML reads it and held to a scalar.
 
-    Recorded inside the handler and raised after it, exactly as
-    `_fragment` does: a PyYAML mark holds the whole buffer it was
-    parsing, which here is the value, and an exception raised inside a
-    handler keeps the one being handled as its `__context__`. The
-    exception is not bound to a name either, so nothing of it survives
-    the arm.
+    Read through the same boundary a fragment is read through, so that
+    the two ways of writing an entity meet one sentence for a source
+    that will not parse and one set of failures is caught for both:
+    everything PyYAML raises rather than the documented `YAMLError`
+    alone, which for one argument matters as much as for a file, since
+    an integer of five thousand digits fits on a command line.
 
     What is not refused here is everything JSON cannot carry, which a
     scalar can still be: a bare date, `.nan`. Those meet
     `check_transportable`'s own sentence a step later, which is where
     that rule lives for a fragment too.
     """
-    problem: str | None = None
-    parsed: object = None
-    try:
-        parsed = yaml.safe_load(value)
-    except yaml.YAMLError:
-        problem = PAIR_UNPARSEABLE
-    if problem is not None:
-        raise ConfigError(problem)
+    parsed = _parsed_yaml(value, PAIR_SOURCE)
     if isinstance(parsed, (Mapping, list, tuple, set, frozenset)):
         raise ConfigError(PAIR_NOT_SCALAR)
     return parsed
