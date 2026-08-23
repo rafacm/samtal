@@ -113,7 +113,10 @@ session-scoped autouse fixture whose TEARDOWN emits
 `ServerEvents(CONVERSATIONS_CHANNEL)`. The session id is a value type
 the schema refuses, so the emitter reports a refusal after the last
 test of the session has run, which is a refusal no test owns. The file
-was removed once the three runs below were recorded.
+was removed once the three runs below were recorded; the PR review
+round below put the experiment back as
+`tests/unit/test_lane_guard_residual.py`, which runs both of the
+post-repair transcripts on every unit run.
 
 **Before the repair, under `-n 4` (the disabled path the plan
 predicts).** Run against the committed conftest, with the repaired copy
@@ -254,3 +257,128 @@ contention on 4 real cores is exercised only by this PR's own CI runs.
 
 Nothing here needs hardware, so no verification step was left
 unverifiable.
+
+## PR review round (PR #261)
+
+External review of the PR diff: claude backend, claude CLI, model
+`claude-opus-5`, read-only tool set, 2026-08-23, posted on the PR.
+Verdict: mergeable after the listed fixes, **no P1**. Six findings, two
+P2 and four P3, each fixed in a commit of its own, plus one addition
+the maintainer's observation prompted.
+
+The review's negative results are worth as much as its findings here,
+since the repair's whole risk is a hook ordering that is nobody's
+documented contract. It read xdist's, pluggy's and pytest's own sources
+and could not break: the worker-to-controller handoff ordering
+(`WorkerInteractor.pytest_sessionfinish` is a hookwrapper, so the
+conftest's write into `config.workeroutput` always precedes
+`sendevent("workerfinished")` whatever the registration order);
+`pytest_testnodedown` firing for every node before the controller's
+`pytest_sessionfinish`; `getattr(node, "workeroutput", {})` on a node
+that errored down; `Stash.setdefault` existing; the serial path being
+behaviorally identical and the printed sentence byte-identical; the
+residual description carrying only registry-owned identifiers, so the
+new cross-process channel adds no leak surface; and the bind-based port
+audit being materially complete for `tests/unit` (no
+`asyncio.start_server`, `HTTPServer(`, `TCPServer` or `websockets.serve`
+sites exist, and no test asserts "nothing answers" at a fixed port).
+
+Findings condensed but faithful:
+
+1. **P2: the milestone's one piece of shipped code had no automated
+   test, and its failure mode is silence.** The only proof was three
+   transcripts produced by a scratch file the doc says was removed.
+   Delete `pytest_testnodedown`, rename `_RESIDUAL_OUTPUT`, or let a
+   future edit put an early return back in front of the `workeroutput`
+   write, and 2798 tests still pass while the lane goes back to the
+   silent hole plan-review finding 1 was raised about.
+   *Fixed in `ad1e075a`*: `tests/unit/test_lane_guard_residual.py`, the
+   deleted scratch experiment kept. `pytester` gives a scratch
+   directory and a subprocess; a COPY of the real `tests/conftest.py`
+   goes in it, so the subject is the shipped file rather than a
+   paraphrase, beside one file whose session teardown emits what the
+   schema refuses. Two runs, serial and `-n 2 --dist loadfile`, each
+   asserting the printed section and a non-zero exit, the distributed
+   one also asserting the `gw` prefix. Checked by mutation against the
+   pre-repair conftest (`109b9347`): the distributed test fails there
+   and the serial one passes, which is exactly the split the repair
+   closed.
+2. **P2: the Verification section was stale where the plan made it
+   load-bearing, and two documents still said "projected".** The plan's
+   Tests section lists this PR's own CI run as a required recorded
+   verification, the milestone box was already ticked with #261, and the
+   run had since happened and measured 2m25s, while `CHANGELOG.md` and
+   the workflow comment still projected two or three minutes.
+   *Fixed in `ac5c4eb0`*: run 32610208370 recorded in Verification
+   (green, durations table present, unit lane 2m25s, integration lane
+   4m54s and now the last to finish, first data point of the
+   week-of-runs watch), and the measured figure replaces the projection
+   in both other places.
+3. **P3: the held-socket property was pinned by nothing.** Both
+   `unused_url()` call sites see connection-refused whether the socket
+   is held or bound-and-released, so a future cleanup could revert the
+   one genuine parallel hazard decision 5 named and keep a green suite.
+   *Fixed in `fa430046`*: a test that binds a second socket to the port
+   inside the helper's block and asserts `EADDRINUSE`, which is true
+   only while the port is held.
+4. **P3: the plan's standing-lenses section still named the port-audit
+   grep its own review round rejected.** `grep -rn "localhost:"
+   tests/unit` sat in the same file as decision 5 and resolution
+   `6532bcfa`, both of which say the audit is over bind calls precisely
+   because a `localhost:` grep reads the files that cannot bind.
+   *Fixed in `72761597`*: the parenthetical is the bind-based grep with
+   its three dispositions.
+5. **P3: thread oversubscription is a cheaper first lever than `-n 3`
+   and the workflow did not use it.** pysilero-vad is a core dependency,
+   so onnxruntime is in every worker, and its intra-op pool sizes to the
+   core count: four workers on four cores ask for roughly sixteen
+   threads. That amplifies exactly the descheduling the plan names as
+   the exposed set, and the 14-core local smoke check structurally
+   cannot see it.
+   *Fixed in `b8065241`*: `OMP_NUM_THREADS`, `ORT_NUM_THREADS` and
+   `OPENBLAS_NUM_THREADS` in the workflow's existing `env:` block, and
+   the step comment names checking them as step 0 of the graded
+   response, ahead of `-n 3`.
+6. **P3: a changelog sentence described a regime that never existed.**
+   "where under workers it used to vanish silently" implies past CI runs
+   were losing residual refusals; the lane had never run under workers.
+   *Fixed in `b28f46c2`*: said as the conditional it is, "without the
+   repair a worker's residual would have vanished silently".
+
+**7. Coordinator addition, not an external-review finding.** Prompted by
+the maintainer spotting "Unable to reserve cache with key
+setup-uv-2-...: another job may be creating this cache" in the unit
+run's log. Diagnosed as this PR's own `uv.lock` change making the cache
+key new, with the PR-creation run and the tick-commit run about a minute
+apart both racing to save it; the loser logs and skips. Benign, but the
+first run is entirely wasted, and this session's pipeline produces that
+create-then-tick double-run on every PR.
+*Fixed in `0e961e9e`*: a top-level `concurrency` block grouped on
+workflow and ref, with `cancel-in-progress` as the expression
+`github.event_name == 'pull_request'` rather than a plain `true`. A
+superseded PR run is cancelled; a push to main never is, because that is
+the event the `image` job publishes on and a merge cut short by the next
+merge would leave `latest` pointing at whichever build survived. It is
+the inter-run sibling of the intra-run cache race PR #256 fixed with
+`save-cache: false`.
+
+### Verification after the round
+
+From `vinga-server/`, on `feature/xdist-unit-lane-m1`, after the last
+commit of the round.
+
+- `uv run ruff check .`: **All checks passed!**
+- `uv run mypy`: **Success: no issues found in 4 source files.**
+- `uv run pytest tests/unit/test_lane_guard_residual.py -q`: **2
+  passed**, and the same file under `-n 2 --dist loadfile`: **2
+  passed**. The new test drives both modes itself, and this runs it in
+  both.
+- `uv run pytest tests/unit -q -n 4 --dist loadfile`: **2801 passed, 20
+  skipped**. Three more than before the round: the pytester pair and
+  the held-port pin.
+- `uv run pytest tests/unit -q` (serial): **2801 passed, 20 skipped**.
+- `uv run pytest tests/integration -q`: **61 passed**.
+- The workflow YAML parses, its `env:` block carries the three thread
+  caps, and its `concurrency` block carries the group and the
+  `cancel-in-progress` expression (checked by loading the YAML and
+  printing all three).
