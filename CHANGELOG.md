@@ -14,15 +14,17 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   body, which no in-place migration can produce, so the domain migration
   chain (revisions `0001` to `0004`) is deleted and replaced by a single
   baseline, `2001_json_body_baseline`. **A deployment carrying an older
-  database must reset its database directory and re-seed the
-  configuration, in the same step as the image bump and never after
-  it.** The revision id is one nothing was ever stamped with, so such a
+  database must delete `vinga.db` (with its `-wal` and `-shm`
+  companions) from `server.database.dir` and re-seed the configuration,
+  in the same step as the image bump and never after it.** Delete that
+  file and not the directory: `conversations.db` lives beside it and
+  must be kept. The revision id is one nothing was ever stamped with, so such a
   database is never taken for current: opening it refuses with a
   sentence saying it predates the storage reshape and what to do about
   it. Encrypted secrets come back from the environment through
   `vinga-server config set-secret`, as they were written the first time.
   The conversations database is untouched, keeps its chain and needs no
-  reset. The compatibility decision, what it retracts, and what "tested"
+  reset, and the refusal above is never raised about it. The compatibility decision, what it retracts, and what "tested"
   means for the reset path are recorded in the 2026-08-23 addendum to
   `docs/adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md`.
   The upgrade-from-`0001` tests and their fixtures go with the chain.

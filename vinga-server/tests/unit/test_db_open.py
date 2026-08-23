@@ -243,7 +243,8 @@ def test_a_database_from_the_squashed_chain_says_to_reset(
 
     problem = str(caught.value)
     assert "a revision this build does not carry" in problem
-    assert "Reset the database directory and re-seed" in problem
+    assert "Delete that file, together with the -wal and -shm files" in problem
+    assert "keep any conversations.db" in problem
     # The stored revision is a value in a file nothing here validates, so
     # it is not quoted back, and neither is Alembic's own sentence.
     assert revision not in problem
@@ -262,7 +263,7 @@ def test_the_domain_database_answers_only_for_its_own_deleted_revisions(
     with pytest.raises(ConfigError) as caught:
         open_database(directory)
 
-    assert "Reset the database directory and re-seed" in str(caught.value)
+    assert "Delete that file" in str(caught.value)
 
 
 def test_a_database_from_a_newer_build_is_not_told_to_delete_itself(
@@ -275,7 +276,7 @@ def test_a_database_from_a_newer_build_is_not_told_to_delete_itself(
     Alembic fails it exactly as it fails a database from the squashed
     chain, and the two want opposite things. This one is current: the
     remedy is to roll forward to the build that wrote it, and telling its
-    operator to reset the volume would destroy a live configuration. So
+    operator to delete the file would destroy a live configuration. So
     it takes the ordinary migration-failure sentence instead, which is
     what it took before the squash arm existed.
     """
@@ -286,7 +287,7 @@ def test_a_database_from_a_newer_build_is_not_told_to_delete_itself(
         open_database(directory)
 
     problem = str(caught.value)
-    assert "Reset the database directory" not in problem
+    assert "Delete that file" not in problem
     assert "before the storage reshape" not in problem
     assert "cannot migrate the database" in problem
     assert "server.database.dir" in problem
@@ -325,7 +326,7 @@ def test_the_conversations_database_is_never_told_the_domain_sentence(
         open_conversations(directory)
 
     problem = str(caught.value)
-    assert "Reset the database directory" not in problem
+    assert "Delete that file" not in problem
     assert "re-seed the configuration" not in problem
     assert "cannot migrate the database" in problem
 
@@ -342,14 +343,14 @@ def test_an_alembic_failure_that_is_not_a_stranded_database_is_not_told_to_reset
     with pytest.raises(ConfigError) as caught:
         open_at(tmp_path / "db", "vinga.db", tmp_path / "no-such-migrations")
 
-    assert "Reset the database directory" not in str(caught.value)
+    assert "Delete that file" not in str(caught.value)
 
     # And the shape directly, since a resolution failure with no cause at
     # all is a thing a future Alembic could produce.
     from alembic.util.exc import CommandError
 
     plain = migration_failure(CommandError("multiple heads"), tmp_path / "vinga.db")
-    assert "Reset the database directory" not in str(plain)
+    assert "Delete that file" not in str(plain)
 
 
 def test_the_migrations_ship_inside_the_package() -> None:
