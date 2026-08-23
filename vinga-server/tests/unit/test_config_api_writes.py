@@ -1334,3 +1334,55 @@ def test_a_single_write_quotes_no_name_it_could_not_resolve_either(
     assert SECRET not in response.text
     assert SECRET not in str(response.headers)
     assert SECRET not in caplog.text
+
+
+VALIDATOR_LEAKS = [
+    (
+        "a binding naming one agent twice",
+        {"devices": {"aa:bb:cc:dd:ee:ff": [SECRET, SECRET]}},
+        "more than one position",
+    ),
+    (
+        "an entry name that is not a tool prefix",
+        {"mcp_servers": {f"{SECRET}.pasted": {"transport": "stdio", "command": "uvx"}}},
+        "must match [A-Za-z0-9_-]+",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("document", "rule"),
+    [(document, rule) for _, document, rule in VALIDATOR_LEAKS],
+    ids=[what for what, _, _ in VALIDATOR_LEAKS],
+)
+def test_an_applied_validator_names_the_rule_and_not_the_value(
+    client: TestClient, caplog: pytest.LogCaptureFixture, document: object, rule: str
+) -> None:
+    """The two validators an applied document reaches that are not the
+    reference pass, over the wire: the sentence names the rule and the
+    position, and the value it rejected is nowhere on the response, its
+    headers or the log."""
+    with caplog.at_level(logging.DEBUG):
+        response = client.post("/apply", json=document)
+
+    assert response.status_code == 422
+    assert rule in refused(response.json(), 422)
+    assert SECRET not in response.text
+    assert SECRET not in str(response.headers)
+    assert SECRET not in caplog.text
+
+
+def test_a_single_binding_naming_one_agent_twice_says_the_same(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    """And the same sentence from the single write, which is where the
+    wording lived before an applied document could reach it."""
+    with caplog.at_level(logging.DEBUG):
+        response = client.put(
+            "/devices/aa:bb:cc:dd:ee:ff", json={"agents": [SECRET, SECRET]}
+        )
+
+    assert response.status_code == 422
+    assert "more than one position (1, 2)" in refused(response.json(), 422)
+    assert SECRET not in response.text
+    assert SECRET not in caplog.text

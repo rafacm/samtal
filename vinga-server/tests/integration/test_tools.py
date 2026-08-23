@@ -230,7 +230,7 @@ async def test_a_tool_that_runs_long_is_cut_off_and_still_answered(serve, simula
 
 @pytest.mark.parametrize("entry", ["self", "remember"])
 async def test_a_reserved_server_name_fails_the_boot(entry: str) -> None:
-    with pytest.raises(Exception, match="not a usable entry name"):
+    with pytest.raises(Exception, match=r"must match \[A-Za-z0-9_-\]\+"):
         one_agent({"type": "mock"}, mcp_servers={entry: stdio_server()})
 
 

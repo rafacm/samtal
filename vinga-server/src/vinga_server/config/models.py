@@ -1943,20 +1943,38 @@ def bounded_descriptor(value: str, limit: int) -> str:
     return printable.strip()[:limit].strip()
 
 
+# What a rejected MCP entry name is told, wherever it is rejected. The
+# sibling of `PROMPT_FRAGMENT_NAME_RULE` below and now the same shape:
+# it names the section and the rule and never the name, because a name
+# that fails the charset is exactly the string that must not be echoed,
+# and this sentence travels out as a CLI line, an HTTP 422 body and a
+# boot log.
+#
+# The reserved words are quoted, and they may be: they are constants of
+# this server rather than anything a request wrote.
+MCP_ENTRY_NAME_RULE = (
+    "mcp_servers: an entry name becomes a tool-name prefix, so it must match "
+    "[A-Za-z0-9_-]+ and must not be one of: "
+    + ", ".join(names.RESERVED_ENTRY_NAMES)
+    + ". The name is not quoted back: what fails this rule is the kind of string "
+    "that must not be echoed"
+)
+
+
 def check_mcp_entry_names(value: dict[str, McpServerConfig]) -> dict[str, McpServerConfig]:
     """An entry name becomes a tool-name prefix, so it has to be a legal
     tool name, and it may not be one the merged list already uses. That
     is what makes a namespace collision unrepresentable rather than
-    something to resolve at merge time."""
-    problems = [
-        f"mcp_servers.{name}: not a usable entry name; it becomes a tool-name "
-        f"prefix, so it must match [A-Za-z0-9_-]+ and must not be one of: "
-        + ", ".join(names.RESERVED_ENTRY_NAMES)
-        for name in value
-        if not names.is_valid_entry_name(name)
-    ]
-    if problems:
-        raise ValueError("\n".join(problems))
+    something to resolve at merge time.
+
+    One sentence however many names fail it, and never the names: a
+    section keyed by what the operator wrote has no position to point at
+    the way a list does, so what is left to say is the rule. Two
+    identical lines would only suggest the second was about something
+    else.
+    """
+    if any(not names.is_valid_entry_name(name) for name in value):
+        raise ValueError(MCP_ENTRY_NAME_RULE)
     return value
 
 
@@ -1994,11 +2012,13 @@ def check_prompt_fragment_names(
 ) -> dict[str, PromptFragmentConfig]:
     """Every name in the section, checked as a snapshot is validated.
 
-    The refusal is deliberately not `check_mcp_entry_names`', which
-    interpolates the name it rejected: a name that fails the charset is
-    exactly the string that must not be echoed, because what was written
-    there may be a pasted credential. So it names the section and the
-    rule, and a valid name is the only kind any surface here prints.
+    It names the section and the rule and never the name, because a name
+    that fails the charset is exactly the string that must not be
+    echoed: what was written there may be a pasted credential, and a
+    valid name is the only kind any surface here prints. This was the
+    first of the two name rules written that way and
+    `check_mcp_entry_names` above, which used to interpolate what it
+    rejected, has joined it.
     """
     if any(not is_valid_fragment_name(name) for name in value):
         raise ValueError(PROMPT_FRAGMENT_NAME_RULE)
@@ -2499,15 +2519,27 @@ def _check_binding(mac: str, bound: object) -> None:
     YAML no set, and the database stores a JSON array), so the gap is
     reachable only by constructing the model in-process and is left as
     it was rather than closed with a refusal path this milestone did not
-    come to add."""
+    come to add.
+
+    The duplicate refusal points at positions rather than at what is in
+    them, the rule every list in this file follows: an agent name is
+    written on a command line and in a document beside prompt text, so
+    it is a place a paste lands, and this sentence leaves the boundary
+    as a printed CLI line, an HTTP 422 body and a boot log. The MAC is
+    quoted because it is not a name somebody chose: it is the canonical
+    form the binding was normalized to, and a value that is not one
+    never reaches here.
+    """
     if not isinstance(bound, list):
         return
     if not bound:
         raise ValueError(f"devices.{mac}: bind the device to at least one agent")
-    seen: set[str] = set()
-    for name in bound:
-        if not isinstance(name, str):
-            continue
-        if name.strip() in seen:
-            raise ValueError(f'devices.{mac}: agent "{name.strip()}" is listed more than once')
-        seen.add(name.strip())
+    # Compared as they will be stored, which is trimmed, so that
+    # `sam` and ` sam ` are the one name they will become.
+    named = [name.strip() for name in bound if isinstance(name, str)]
+    repeated = _repeated_positions(named)
+    if repeated:
+        raise ValueError(
+            f"devices.{mac}: one agent is named at more than one position "
+            f"({repeated}); name each agent once, and the name is not quoted back"
+        )

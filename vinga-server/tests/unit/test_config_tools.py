@@ -126,8 +126,14 @@ def test_a_prompt_name_keeps_the_whitespace_it_was_written_with() -> None:
 
 @pytest.mark.parametrize("name", ["self", "switch_agent", "remember", "home.assistant"])
 def test_a_reserved_or_unusable_entry_name_fails_the_boot(name: str) -> None:
-    with pytest.raises(ValidationError, match="not a usable entry name"):
+    """The section and the rule, and never the name: a name that fails
+    the charset is exactly the string that must not be echoed, which is
+    the shape the prompt-fragment name rule already had."""
+    with pytest.raises(ValidationError) as caught:
         config_with(mcp_servers={name: STDIO})
+
+    assert "must match [A-Za-z0-9_-]+" in str(caught.value)
+    assert f"mcp_servers.{name}" not in str(caught.value)
 
 
 @pytest.mark.parametrize(

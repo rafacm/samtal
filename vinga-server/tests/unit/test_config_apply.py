@@ -600,3 +600,65 @@ def test_the_reference_pass_is_reached_at_all(
         populated.apply(document)
 
     assert str(caught.value).startswith("the change was refused")
+
+
+# The two validators a document reaches that are not reference checks
+#
+# A binding that names one agent twice and an MCP entry name that is not
+# a usable tool prefix are both refused by the models rather than by the
+# reference pass, and both used to quote what they rejected. Both are
+# reachable from a document exactly as they are from a single write, so
+# both are driven here with a credential in the rejected position.
+
+VALIDATOR_LEAKS = [
+    (
+        "a binding naming one agent twice",
+        {"devices": {"aa:bb:cc:dd:ee:ff": ["sam", "sam"]}},
+        "more than one position",
+    ),
+    (
+        "an entry name that is not a tool prefix",
+        {"mcp_servers": {f"{SECRET}.pasted": {"transport": "stdio", "command": "uvx"}}},
+        "must match [A-Za-z0-9_-]+",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("document", "rule"),
+    [(document, rule) for _, document, rule in VALIDATOR_LEAKS],
+    ids=[what for what, _, _ in VALIDATOR_LEAKS],
+)
+def test_a_refused_validator_names_the_rule_and_not_the_value(
+    populated: ConfigStore, document: object, rule: str
+) -> None:
+    with pytest.raises(ConfigError) as caught:
+        populated.apply(document)
+
+    assert rule in str(caught.value)
+    assert SECRET not in _chain(caught.value)
+    assert SECRET not in str(caught.value.problems)
+
+
+def test_a_binding_naming_one_agent_twice_never_prints_it(
+    populated: ConfigStore,
+) -> None:
+    """The planted value in the position the old sentence quoted: the
+    duplicate itself, which the refusal now names by position."""
+    with pytest.raises(ConfigError) as caught:
+        populated.apply({"devices": {"aa:bb:cc:dd:ee:ff": [SECRET, SECRET]}})
+
+    assert "more than one position (1, 2)" in str(caught.value)
+    assert SECRET not in _chain(caught.value)
+
+
+def test_a_binding_naming_one_agent_twice_with_different_spacing_is_still_twice(
+    populated: ConfigStore,
+) -> None:
+    """The names are compared as they will be stored, which is trimmed,
+    so the two spellings of one name are the one name they become rather
+    than a binding that silently holds it once."""
+    with pytest.raises(ConfigError) as caught:
+        populated.apply({"devices": {"aa:bb:cc:dd:ee:ff": ["sam", "  sam  "]}})
+
+    assert "more than one position (1, 2)" in str(caught.value)
