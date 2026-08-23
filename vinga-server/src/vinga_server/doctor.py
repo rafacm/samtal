@@ -34,6 +34,7 @@ reason: what an operator mistypes at this command is a URL.
 """
 
 import argparse
+import logging
 import re
 import sys
 from collections.abc import Mapping, Sequence
@@ -45,6 +46,7 @@ import httpx
 from vinga_server.config.loader import CONFIG_ENV_VAR, ConfigError, load_file_config
 from vinga_server.config.models import ServerConfig
 from vinga_server.config.printing import parsed_url, printable, shown_url
+from vinga_server.logs import quieted
 
 # What a URL given to this command is called in every line it prints.
 #
@@ -72,6 +74,26 @@ UNRECOGNIZED_ANSWER = "a body this client does not recognize"
 # for is a megabyte of anything, which nothing should walk a pattern
 # over.
 PARSED_BODY_LENGTH = 4096
+
+# The libraries that would narrate this request, and how quiet they are
+# held while it is made.
+#
+# `httpx` writes one line per request at INFO carrying the method, the
+# URL and the status, which `logs.py` names where it floors the vendor
+# libraries and keeps deliberately, since for every other caller in this
+# server it says nothing that is not already public. For this one it
+# says the whole of what every verdict below refuses to print: a
+# supplied OTA URL can be the deployment's secret `ota_path`, and a log
+# record is a retained surface in a way a terminal is not. `httpcore`
+# traces the connection under it and is held with it.
+#
+# WARNING rather than off, so a library that has something genuinely
+# wrong to say can still say it, and scoped to the request rather than
+# set once, so nothing this command does changes what a process that
+# imported it logs afterwards.
+REQUEST_LOGGERS = ("httpx", "httpcore")
+
+QUIET_LEVEL = logging.WARNING
 
 # How long this command waits, and the reason is its own. One GET of a
 # static description: a bounded connect, so an address nothing listens
@@ -368,33 +390,42 @@ def _probed(url: str, shown: str) -> httpx.Response:
     close. httpx validates a URL when it is given one, so construction
     is a place a URL refused by a library rather than by the check above
     would otherwise leave as a traceback with the address in it.
+
+    The whole of it is inside a logging boundary as well, and that is
+    the one thing here that is not about what reaches a terminal. The
+    client library writes a line per request naming the URL, which for
+    every other caller in this server is a fact worth keeping and for
+    this one is the deployment's own secret arriving in a retained
+    record. `REQUEST_LOGGERS` above says which loggers and why.
     """
     problem: str | None = None
     client: httpx.Client | None = None
-    try:
+    with quieted(REQUEST_LOGGERS, QUIET_LEVEL):
         try:
-            client = build_client(url)
-            response = client.request("GET", url, follow_redirects=False)
-            if response.is_redirect:
-                raise ConfigError(_redirect_refused(shown))
-            return response
-        except (httpx.HTTPError, httpx.InvalidURL, ValueError) as exc:
-            # The exception's class name and nothing else. httpx puts the
-            # request into its exceptions, its InvalidURL quotes the
-            # character it refused, and drivers put whatever they like
-            # into their messages; the class is the part that says what
-            # happened. Raised after the handler, so nothing walking a
-            # chain finds the original behind it. ValueError covers the
-            # UnicodeError an IDNA host raises on its way down.
-            problem = (
-                f"cannot reach {shown}: the request did not complete "
-                f"({type(exc).__name__}). Check that the server is running, that this is "
-                f"the address it serves, and that the network a device sits on can reach "
-                f"it."
-            )
-    finally:
-        if client is not None:
-            client.close()
+            try:
+                client = build_client(url)
+                response = client.request("GET", url, follow_redirects=False)
+                if response.is_redirect:
+                    raise ConfigError(_redirect_refused(shown))
+                return response
+            except (httpx.HTTPError, httpx.InvalidURL, ValueError) as exc:
+                # The exception's class name and nothing else. httpx puts
+                # the request into its exceptions, its InvalidURL quotes
+                # the character it refused, and drivers put whatever they
+                # like into their messages; the class is the part that
+                # says what happened. Raised after the handler, so nothing
+                # walking a chain finds the original behind it.
+                # ValueError covers the UnicodeError an IDNA host raises
+                # on its way down.
+                problem = (
+                    f"cannot reach {shown}: the request did not complete "
+                    f"({type(exc).__name__}). Check that the server is running, that this "
+                    f"is the address it serves, and that the network a device sits on can "
+                    f"reach it."
+                )
+        finally:
+            if client is not None:
+                client.close()
     raise ConfigError(problem)
 
 

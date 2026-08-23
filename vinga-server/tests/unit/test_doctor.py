@@ -24,9 +24,13 @@ holding them would be a name nobody could place for two suites that no
 longer share a command.
 """
 
+import contextlib
+import http.server
 import json
+import logging
 import subprocess
 import sys
+import threading
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -859,6 +863,93 @@ def test_the_seam_cannot_carry_a_credential_and_takes_its_own_timeouts() -> None
         assert client.timeout.read == doctor.READ_TIMEOUT_S
     finally:
         client.close()
+
+
+@contextlib.contextmanager
+def _served(body: str):
+    """A real HTTP server on a real port, for the length of a `with`.
+
+    The canned endpoint everywhere else in this file sits behind the
+    client seam, which means the client under test is a TestClient and
+    the library that would narrate the request is whichever one
+    Starlette imports. The test below is about what the shipped client
+    writes to the log, so it has to be the shipped client: this is an
+    address it can actually connect to.
+    """
+    served = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Describing(body))
+    thread = threading.Thread(target=served.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{served.server_address[1]}"
+    finally:
+        served.shutdown()
+        served.server_close()
+        thread.join(timeout=5)
+
+
+def _Describing(body: str) -> type[http.server.BaseHTTPRequestHandler]:
+    """A handler class answering every GET with this body, and saying
+    nothing on stderr: `BaseHTTPRequestHandler` logs each request to
+    stderr by default, which is a stream this suite reads."""
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            encoded = body.encode("utf-8")
+            self.send_response(200)
+            self.send_header("content-type", "text/plain; charset=utf-8")
+            self.send_header("content-length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    return Handler
+
+
+def test_the_probe_leaves_the_supplied_url_in_no_log_record(
+    caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The surface no verdict covers. Every sentence this command prints
+    hides a supplied URL, and the client library underneath it writes
+    one INFO record per request naming that URL in full, which is a
+    retained record in a way a terminal is not.
+
+    The real client against a real address, because the seam the rest of
+    this file replaces would put a different library's logger in the
+    way and prove nothing about the shipped one.
+    """
+    body = DESCRIBE.format(
+        websocket="ws://127.0.0.1:8003/xiaozhi/v1/", url="http://127.0.0.1:8003"
+    )
+    with _served(body) as address, caplog.at_level(logging.INFO):
+        assert doctor.main([f"{address}/xiaozhi/ota/{SECRET_SEGMENT}/"]) == 0
+
+    assert SECRET_SEGMENT not in caplog.text
+    for record in caplog.records:
+        assert SECRET_SEGMENT not in record.getMessage(), record.name
+    captured = capsys.readouterr()
+    assert SECRET_SEGMENT not in captured.out + captured.err
+    assert doctor.SUPPLIED_ENDPOINT in captured.out
+
+
+def test_the_probe_puts_the_logger_levels_back(
+    endpoint, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The boundary is scoped, so a process that imported this command
+    logs afterwards exactly what it logged before. Asserted on the
+    loggers' own levels rather than their effective ones, which is what
+    the boundary restores."""
+    before = {name: logging.getLogger(name).level for name in doctor.REQUEST_LOGGERS}
+    endpoint(
+        DESCRIBE.format(websocket="wss://voice.example/xiaozhi/v1/", url="https://voice.example")
+    )
+
+    assert doctor.main(["https://voice.example/x/ABCDEFGH/"]) == 0
+
+    assert {
+        name: logging.getLogger(name).level for name in doctor.REQUEST_LOGGERS
+    } == before
 
 
 # What the split made this module responsible for
