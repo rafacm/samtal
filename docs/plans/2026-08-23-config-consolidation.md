@@ -25,9 +25,11 @@ explicitly.
 
 1. **`store.DomainConfig` merges into `models.Config`** (the same 7
    domain fields and 3 validators declared verbatim in both).
-2. **`writes.py` folds into its call sites** (16 functions each
-   returning one f-string), and so do the tests-only parts of
-   `responses.py`; response models defining real wire shapes stay.
+2. **`writes.py` folds into its call sites** (13 f-string
+   factories, one constant, two decisions), and `responses.py`
+   moves what its real readers argue for (decision 5; the issue's
+   tests-only premise did not survive the review's grep);
+   response models defining real wire shapes stay.
 3. **`entities.py` shrinks to the descriptor strings actually
    read**: `leads_with` and `always_shown` (one non-empty use each)
    go, and ONE side of the registry-versus-handwritten-fan-out
@@ -200,22 +202,25 @@ explicitly.
 - **Honest seams.** The descriptor registry keeps only read
   strings; no injectable changes.
 - **Inventories by tooling.** Before/after public-name counts;
-  `grep -rn "from vinga_server.config.writes import" src tests`
-  returning nothing after; `wc -l` of the package before and
-  after in the implementation doc.
+  from `vinga-server/`, `grep -rnE "config\.writes|config import
+  writes" src tests` returning nothing after the fold (all import
+  forms, not one spelling); `wc -l src/vinga_server/config/*.py`
+  before and after in the implementation doc.
 
 ## Module layout
 
 - `config/models.py`: gains the merged domain model declaration.
 - `config/store.py`: loses `DomainConfig`, imports from models.
-- `config/writes.py`: deleted; its 16 f-strings inlined at their
-  call sites.
+- `config/writes.py`: deleted; its factories inlined at their
+  call sites, the two decisions moved whole with their docstrings,
+  and the eight-file notice-import redirect applied.
 - `config/responses.py`: shrunk per decision 5.
 - `config/entities.py`: shrunk per decision 2.
 - `config/api.py`: loses the description literals; gains the small
   loader; `config/api_descriptions/` gains the data files.
-- Tests: the wording-pin retreat per decision 4 across the config
-  family; everything else untouched.
+- Tests: M1 carries only the mechanical notice-import redirect
+  (eight files, five outside the config family, no assertion
+  change); M2 carries the wording-pin retreat per decision 4.
 - `CHANGELOG.md` under `## 2026-08-23`.
 
 ## Milestones
