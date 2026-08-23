@@ -616,3 +616,197 @@ than over a real one, so `apply`'s unbounded read timeout is asserted
 against a mock transport rather than against a slow server, and the
 over-limit refusal is asserted through the in-process application.
 Decision 10 puts both of those on the wire.
+
+## PR review round, M2 (PR #272)
+
+External review of the PR diff, 2026-08-24. Verdict as received:
+mergeable after fixes. Six findings, four P1 and two P2, each fixed in
+its own commit.
+
+Four of the six are about the same thing, and it is worth naming once
+because it is the pattern rather than four accidents. This milestone
+put a new surface in front of validators that already existed: a
+document is written by hand, holds several entities and reaches every
+refusal a single write reaches. Three of those refusals quoted what
+they rejected, and one library exception was not being caught at all.
+None of that was introduced here, and all of it was reachable here for
+the first time from one command an operator pastes a whole
+configuration into. Where a wording was pre-existing it is noted below,
+and every one of them was changed in the SHARED semantics rather than
+in apply's use of them, so a single write and an applied document keep
+saying one thing.
+
+### 1. P1: a YAML source could leak through the parser's own words, or not be caught at all
+
+Two failures behind one finding, and they were in the two halves of
+what had been two parsers.
+
+The fragment reader built its refusal from `exc.problem`, and PyYAML
+answers a tag it has no constructor for by quoting the tag. A tag is a
+run of characters an operator typed, so `!<credential> value` is a
+document whose refusal printed the credential. That shape was there
+from the beginning, for `-f` writes; apply inherited it by calling the
+same function. **Pre-existing wording**, hardened at the boundary the
+two now share.
+
+The inline reader caught `yaml.YAMLError`, which is what PyYAML
+documents rather than what it raises. Its constructors raise the
+ordinary exceptions for a scalar out of range: an integer of five
+thousand digits leaves as CPython's own `ValueError` about the digit
+limit, `2026-99-99` as a `ValueError` from `datetime`, and two thousand
+nested lists as a `RecursionError` out of the composer. All three
+reached an operator as a traceback with the source in it, and an
+integer of five thousand digits fits on a command line as easily as in
+a file.
+
+*Fixed* (`741cfe4d`): `_parsed_yaml` is the one boundary. It catches
+`(YAMLError, ValueError, ArithmeticError, RecursionError)`, records the
+category inside the arm and raises after it, and says a fixed sentence
+plus at most the two integers of the mark. Nothing of the exception
+survives the arm. Cases: four unreadable sources (a tag, a scalar the
+constructor refuses, an unterminated quote, an impossible date) times
+the two commands that read one, plus the chain for each, plus an
+eighth inline-value case for the non-YAMLError family.
+
+*Load-bearing:* narrowing the caught set back to `YAMLError` fails
+eight cases; putting the parser's words back into the sentence fails
+three.
+
+### 2. P1: an unresolved reference quoted the name it could not find
+
+Four of the five refusals `check_references` writes quoted it: the
+default agent, an agent in a device binding, a provider reference and
+an MCP server. The fifth, `prompt_includes`, was deliberately written
+the other way when it was added, and its own comment gave the reason:
+a reference is written beside prompt text and provider options, so it
+is a place a paste lands; the sentence travels out as a CLI line, an
+HTTP 422 body and a boot log; and the charset rules do not close it,
+since a credential can be written in `[A-Za-z0-9_-]`. Every word of
+that is true of the other four. **Pre-existing wording**, and #132's
+own rule already covered it: its deliberately-unchanged list is the
+refusals that describe STORED configuration, and a submitted reference
+is not one.
+
+The finding also caught that the M2 no-leak case for this never reached
+the reference pass at all: its fragment was refused a phase earlier, in
+preparation, so it was asserting the wrong boundary's promise.
+
+*Fixed* (`0b83302a`): each of the five names the field path, which says
+which entry to look at, and the names that DO exist, which say what
+could have been meant, both written by this deployment. A list entry is
+named by its position, the shape `prompt_includes` already had and
+which `mcp` and a device binding have joined. `defined()` is the hint's
+one home, since five refusals were spelling it four ways.
+
+Cases: one per reference edge over the store, HTTP and the CLI, each
+with a credential where the name goes and each fragment otherwise
+VALID, plus `test_the_reference_pass_is_reached_at_all` as the guard
+that says the pass was reached, which is the thing the first version
+did not check.
+
+*Load-bearing:* putting one quoted name back fails eleven cases across
+the three surfaces.
+
+### 3. P1: two more validators quoted their rejected input
+
+A binding naming one agent twice said which name; an MCP entry name
+that is not a usable tool prefix was interpolated into the refusal's
+own path. **Both pre-existing.** The second is the sharper miss:
+`check_prompt_fragment_names` sitting beside it had already been
+written the other way and its docstring named this one as the
+exception.
+
+*Fixed* (`168f2b46`): the binding names positions, which is what every
+other list in `models.py` does, and compares the names as they will be
+stored, so the two spellings of one name are the one name they become
+rather than a binding that silently holds it once. The entry-name rule
+becomes `MCP_ENTRY_NAME_RULE`, the sibling of
+`PROMPT_FRAGMENT_NAME_RULE`, and says one sentence however many names
+fail it: a section keyed by what the operator wrote has no position to
+point at, and two identical lines would only suggest the second was
+about something else.
+
+*Load-bearing:* putting either quoted value back fails fourteen cases
+across the store, the API, the CLI and the boot path.
+
+### 4. P1: two entries could address one thing, and the last one won
+
+A mapping cannot hold one key twice, which rules out the obvious
+duplicate and rules out nothing else: a name is made canonical on the
+way in, and two keys that differ before that are one key after it.
+`AA-BB-CC-DD-EE-FF` and `aa:bb:cc:dd:ee:ff` are one device; `sam` and
+` sam ` are one agent. Both were staged, both were answered with an
+outcome, and the row held whichever was written last. New in this
+milestone: a single write cannot have this problem, because it writes
+one entity.
+
+*Fixed* (`ab1ba5f0`): `_distinct_entries` between the two phases,
+because canonical is what preparation makes and because it is a
+question about the document rather than about the store. Refused rather
+than merged, for the reason a claim by activation code is refused
+rather than merged: the two entries say different things about one
+thing and only whoever wrote them knows which is meant.
+
+*Load-bearing:* removing the call fails the three cases.
+
+### 5. P2: the structural phase did not aggregate
+
+The two phases after it did, and the comment beside them says a
+document is refused whole and therefore reported whole, so a document
+with a malformed `agents` section and a malformed `devices` section
+contradicted the code's own claim by reporting one of them.
+
+*Fixed* (`082873d7`): the extraction aggregates, and the providers
+section aggregates its stage groups inside it. `_Aggregated` is what
+makes the nesting fold: a phase that runs another inside it catches the
+type and folds `lines` in, where an ordinary `ConfigError` would be
+folded in whole and put a second headline under the first. The stage is
+now checked before the shape under it, so a word that is not a stage is
+refused as one.
+
+*Load-bearing:* an eager loop reports one section; dropping the fold
+nests a headline. Either fails the case.
+
+### 6. P2: an exported command broke on a legal leading-dash name
+
+Nothing about a name forbids a leading dash: the write path refuses a
+slash and a control character and nothing else, so `--from-env` is a
+legal provider name and `--local` a legal slot. The exported
+reproduction command wrote it as a bare word, and the grammar read it
+as an option, so the one line an export exists to be pasted was the one
+line that did not run.
+
+*Fixed* (`242124e2`): Click's `--` after the command's own words.
+
+**What the live paths needed, which the finding asked about: nothing.**
+A leading-dash name is written, read, deleted and given a credential
+today with the same `--`, which is Click's own mechanism and works
+through this grammar unchanged; it is also the only way to write such a
+name in the first place, so the exported command is now the command an
+operator typed. Without the marker the refusal is an honest one (`that
+is not an option of this command` for a `set`, `a required argument is
+missing` for a `set-secret`) rather than a silent wrong write, and
+`test_the_same_command_without_the_marker_does_not_run` pins that side.
+The API is unaffected: an identity travels as a percent-encoded path
+segment, where a dash means nothing.
+
+*Load-bearing:* dropping the marker fails the executing case and the
+export round trip. The case EXECUTES the exported argv rather than
+reading it, because a rendering that merely looked right is what it
+replaces.
+
+### Verification after the round
+
+All from `vinga-server/`.
+
+- `uv run ruff check .`: `All checks passed!`, at each commit.
+- `uv run mypy`: `Success: no issues found in 4 source files`
+- `uv run pytest tests/unit -q -n auto --dist loadfile`:
+  `3137 passed, 20 skipped in 43.03s` (72 more than before the round).
+- `uv run pytest tests/integration -q`: `61 passed in 193.71s (0:03:13)`
+- The four drift checks: all four clean, and none of the four committed
+  documents moved in this round. `api-openapi.json` was allowed to and
+  did not need to: every refusal reworded here is carried in `detail`
+  at runtime and is not part of the contract's bytes, and no response
+  model or schema changed.
+- `uv sync --frozen`: `Checked 99 packages in 1ms`
