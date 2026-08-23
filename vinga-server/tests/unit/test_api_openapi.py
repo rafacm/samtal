@@ -20,12 +20,13 @@ import pytest
 from openapi_spec_validator import validate
 from openapi_spec_validator.readers import read_from_filename
 
-from vinga_server.config import cli, docgen
+from vinga_server.config import api, cli, docgen
 from vinga_server.config.api import (
     API_VERSION,
     BEARER_SCHEME,
     MOUNT_PATH,
     PROBLEM_MEDIA_TYPE,
+    MissingDescriptionError,
 )
 from vinga_server.config.secrets import MASK, MASTER_KEY_ENV
 
@@ -530,6 +531,70 @@ def test_the_document_states_the_unchanged_value_marker() -> None:
     for description in (document["info"]["description"], entity["description"]):
         assert f"`{MASK}`" in description
         assert "keep the stored value" in description
+
+
+# The prose the document is built from
+#
+# Since #242 the document-level and refusal descriptions are package
+# data under `config/api_descriptions/` rather than literals in
+# `api.py`, which puts a new way to break the contract on the table: an
+# installation that did not carry a file. The proof that a wheel carries
+# them is in CI, which renders this document from the installed artifact
+# with the source tree off sys.path. What is left to hold here is the
+# other half of that promise, the one a wheel check cannot show because
+# a passing wheel never takes the path: a description that cannot be
+# assembled refuses by name, with a sentence, rather than leaving the
+# contract a paragraph short.
+#
+# Both reach the loader and its directory through their underscored
+# names, which is deliberate and is the shape `test_build_info.py`
+# already has for `_CHECKOUT`: what is being exercised is a refusal
+# raised at import, and the only other way to reach it would be to move
+# the real directory aside under a suite that runs four workers over one
+# filesystem.
+
+
+def test_a_missing_description_refuses_by_name(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A packaging fault, said as one."""
+    monkeypatch.setattr(api, "_DESCRIPTIONS", tmp_path)
+
+    with pytest.raises(MissingDescriptionError) as refusal:
+        api._description("api")
+
+    assert "packaging" in str(refusal.value)
+
+
+def test_a_description_naming_an_unfillable_sigil_refuses_by_name(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """And the other way a description can fail to be assembled: a
+    substitution nothing provides. Silently leaving the sigil in place
+    would put `$NOTHING$` in a published contract."""
+    monkeypatch.setattr(api, "_DESCRIPTIONS", tmp_path)
+    (tmp_path / "api.md").write_text("a paragraph naming $NOTHING$\n", encoding="utf-8")
+
+    with pytest.raises(MissingDescriptionError) as refusal:
+        api._description("api")
+
+    assert "NOTHING" in str(refusal.value)
+
+
+def test_a_description_carries_the_file_through_unchanged(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The loader transforms two things and nothing else: it fills the
+    sigils, and it drops the single trailing newline a text file ends
+    with. Blank lines are paragraph breaks the document carries, and the
+    wrapping inside a paragraph is the wrapping the contract has, which
+    is what let the move leave the committed document byte-identical."""
+    monkeypatch.setattr(api, "_DESCRIPTIONS", tmp_path)
+    (tmp_path / "api.md").write_text(
+        "first, masked as $MASK$\n\nsecond,\nwrapped\n", encoding="utf-8"
+    )
+
+    assert api._description("api") == f"first, masked as {MASK}\n\nsecond,\nwrapped"
 
 
 def test_the_command_needs_no_database_no_key_and_no_token(

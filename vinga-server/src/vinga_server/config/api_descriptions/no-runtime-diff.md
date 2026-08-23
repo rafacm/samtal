@@ -1,0 +1,1 @@
+This application has no running server around it, so there is no world to compare the database with. Unlike the MCP status read beside it, there is no honest empty answer: an empty diff would say that everything stored is already in effect.

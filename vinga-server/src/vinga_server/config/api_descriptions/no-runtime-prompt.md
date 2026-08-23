@@ -1,0 +1,1 @@
+This application has no running server around it, so there is no loaded agent, no running MCP slice and no memory store to assemble a prompt from. Unlike the MCP status read beside it, there is no honest empty answer: an empty block list would say a session opening now is sent nothing.
