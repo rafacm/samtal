@@ -87,17 +87,17 @@ MAX_ROW_ID = 2**63 - 1
 # be and none of them repeats what arrived: these are the only values
 # this API is handed outside a request body, and the rule that a body is
 # never quoted back is not a weaker rule out here.
-LIMIT_REFUSED = (
+_LIMIT_REFUSED = (
     f"limit has to be a whole number between 1 and {LIMIT_MAX}, or absent for "
     f"{LIMIT_DEFAULT}. What was sent is not quoted back"
 )
 
-CURSOR_REFUSED = (
+_CURSOR_REFUSED = (
     "cursor has to be one of the row ids this API answers with, as a whole number, "
     "or absent for the first page. What was sent is not quoted back"
 )
 
-DEVICE_REFUSED = (
+_DEVICE_REFUSED = (
     "device has to be a MAC address: six colon-separated or dash-separated hex "
     "pairs, for example aa:bb:cc:dd:ee:ff. What was sent is not quoted back"
 )
@@ -105,7 +105,7 @@ DEVICE_REFUSED = (
 # The two 404s. Neither names what the request asked for: a session id
 # arrives in the path, and what is worth saying about it is where to
 # look instead.
-NO_STORE = (
+_NO_STORE = (
     "this deployment has no conversation store: there is no conversations.db in the "
     "directory server.database.dir names. Recording is switched on with "
     "server.conversations.enabled, which creates the file at the next start. A store "
@@ -113,7 +113,7 @@ NO_STORE = (
     "that never existed has nothing to serve."
 )
 
-UNKNOWN_SESSION = (
+_UNKNOWN_SESSION = (
     "no session of that id is in the conversation store. The id is the session's uuid "
     "hex, which its events carry and its capture triplet is named after; a session "
     "older than server.conversations.retention_days has been pruned, and one purged "
@@ -599,7 +599,7 @@ def reader(directory: Path) -> Callable[[], Iterator[Connection]]:
 
     def open_reader() -> Iterator[Connection]:
         if not store.conversations_path(directory).exists():
-            raise UnknownEntityError(NO_STORE)
+            raise UnknownEntityError(_NO_STORE)
         engine = store.read_conversations(directory)
         try:
             with engine.connect() as connection:
@@ -787,7 +787,7 @@ def _session(reader: Connection, session: str) -> dict[str, Any]:
     """
     found = _rows(reader, select(sessions).where(sessions.c.session == session))
     if not found:
-        raise UnknownEntityError(UNKNOWN_SESSION)
+        raise UnknownEntityError(_UNKNOWN_SESSION)
     return found[0]
 
 
@@ -800,14 +800,14 @@ def _count(reader: Connection, table: Table, session: str) -> int:
 def _limit(value: str | None) -> int:
     number = _whole(value)
     if value is not None and (number is None or not 1 <= number <= LIMIT_MAX):
-        raise ConfigError(LIMIT_REFUSED)
+        raise ConfigError(_LIMIT_REFUSED)
     return LIMIT_DEFAULT if number is None else number
 
 
 def _cursor(value: str | None) -> int | None:
     number = _whole(value)
     if value is not None and (number is None or number > MAX_ROW_ID):
-        raise ConfigError(CURSOR_REFUSED)
+        raise ConfigError(_CURSOR_REFUSED)
     return number
 
 
@@ -843,15 +843,13 @@ def _device(value: str | None) -> str | None:
         # Built here and raised outside the arm: `normalize_mac` quotes
         # the value back in its own message, and a refusal raised inside
         # the arm would carry that message as its `__context__`.
-        problem = ConfigError(DEVICE_REFUSED)
+        problem = ConfigError(_DEVICE_REFUSED)
     raise problem
 
 
 __all__ = [
     "LIMIT_DEFAULT",
     "LIMIT_MAX",
-    "NO_STORE",
-    "UNKNOWN_SESSION",
     "CloseReason",
     "ConversationDetail",
     "ConversationList",

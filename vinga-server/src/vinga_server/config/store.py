@@ -102,13 +102,13 @@ MCP_SECRET_GROUPS = ("env", "headers")
 # provider's slot is any secret-shaped option name, which is a rule
 # rather than a list, so that sentence gives the rule and the usual
 # name.
-NOT_A_PROVIDER_SLOT = (
+_NOT_A_PROVIDER_SLOT = (
     "providers: a credential slot is the option name the credential fills, such as "
     "api_key. A name that is not secret-shaped is not one, and neither is a name "
     "ending in _env, which is where an environment variable is named rather than a "
     "credential stored"
 )
-NOT_AN_MCP_SLOT = (
+_NOT_AN_MCP_SLOT = (
     "mcp_servers: a credential slot is "
     + " or ".join(f"{group}.<KEY>" for group in MCP_SECRET_GROUPS)
     + ", for example headers.Authorization, which is where the value would "
@@ -1314,7 +1314,7 @@ def _check_slot(domain: DomainConfig, location: SecretLocation) -> None:
         if _entry(domain, descriptor, (_stage(stage), name)) is None:
             raise UnknownEntityError(_missing(descriptor))
         if location.slot.lower().endswith("_env") or not is_secret_option(location.slot):
-            raise ConfigError(NOT_A_PROVIDER_SLOT)
+            raise ConfigError(_NOT_A_PROVIDER_SLOT)
         # A slot is addressed in a path of its own, so it obeys the same
         # rule a name does.
         _check_addressable(f"providers.{stage}.{name}", "slot", location.slot)
@@ -1324,7 +1324,7 @@ def _check_slot(domain: DomainConfig, location: SecretLocation) -> None:
         raise UnknownEntityError(_missing(descriptor))
     group, _, key = location.slot.partition(".")
     if group not in MCP_SECRET_GROUPS or not key:
-        raise ConfigError(NOT_AN_MCP_SLOT)
+        raise ConfigError(_NOT_AN_MCP_SLOT)
     # The key half names where the value would have been written as a
     # reference: a variable for env, a header for headers. Neither can
     # be spelled with a slash, so this is also what makes the dotted
@@ -1375,12 +1375,12 @@ def _secret_value(location: SecretLocation, secret: object) -> None:
 # repeating one (#132). A stage is a path segment and a command
 # argument, so it is a place a paste lands like any other, and a value
 # that failed this check is one nothing has validated.
-NOT_A_STAGE = "providers: the stage has to be one of " + ", ".join(sorted(PROVIDER_STAGES))
+_NOT_A_STAGE = "providers: the stage has to be one of " + ", ".join(sorted(PROVIDER_STAGES))
 
 
 def _stage(stage: str) -> str:
     if stage not in PROVIDER_STAGES:
-        raise ConfigError(NOT_A_STAGE)
+        raise ConfigError(_NOT_A_STAGE)
     return stage
 
 

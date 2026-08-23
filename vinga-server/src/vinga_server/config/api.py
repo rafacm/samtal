@@ -166,7 +166,7 @@ MOUNT_PATH = API_MOUNT_PATH
 # drift check cry wolf.
 API_VERSION = "1"
 
-API_TITLE = "vinga-server configuration API"
+_API_TITLE = "vinga-server configuration API"
 
 # Where this document's prose lives, which is not in this file.
 #
@@ -247,7 +247,7 @@ def _description(name: str) -> str:
     return _SIGIL.sub(fill, text.removesuffix("\n"))
 
 
-API_DESCRIPTION = _description("api")
+_API_DESCRIPTION = _description("api")
 
 # The name the security scheme is registered under. Referenced by the
 # document-level requirement, so both come from one string.
@@ -318,7 +318,7 @@ REFUSAL_STATUS: dict[type[ConfigError], int] = {
 # Said to a caller with no token or the wrong one, and identical for
 # both: only an authenticated caller learns anything about this API,
 # including whether a token was close.
-UNAUTHORIZED = (
+_UNAUTHORIZED = (
     "this API requires a bearer token: send it as the Authorization header, "
     "`Authorization: Bearer <token>`, where the token is the value of the "
     "environment variable server.api.secret_env names"
@@ -326,7 +326,7 @@ UNAUTHORIZED = (
 
 # The request never gets quoted back, here least of all: a body that
 # fails to parse may be a fragment carrying a pasted credential.
-MALFORMED_REQUEST = (
+_MALFORMED_REQUEST = (
     "the request could not be read in the shape this endpoint expects; send a "
     "JSON object body, and see the committed OpenAPI document for the shape. "
     "The body is never quoted back"
@@ -335,7 +335,7 @@ MALFORMED_REQUEST = (
 # What a caller is told when something in here failed rather than
 # something in the request. The log records that it happened and what
 # kind of failure it was, and deliberately no more than that.
-UNEXPECTED = "the server failed to handle this request; the failure is recorded in its log"
+_UNEXPECTED = "the server failed to handle this request; the failure is recorded in its log"
 
 # The entity models the document carries the schemas of, which is one
 # per commanded kind, in the order the registry lists them. FastAPI
@@ -370,17 +370,17 @@ PROBLEM_MODELS: tuple[type[BaseModel], ...] = (Problem, FieldError)
 # and for the secret write that is not a nicety: the rejected value is a
 # credential often enough that echoing it would make the refusal the
 # leak.
-DEVICE_BODY = (
+_DEVICE_BODY = (
     'the body has to be a JSON object with exactly one key, "agents", holding an '
     "array of agent names as strings. Nothing sent is quoted back"
 )
 
-DEFAULT_AGENT_BODY = (
+_DEFAULT_AGENT_BODY = (
     'the body has to be a JSON object with exactly one key, "name", holding the '
     "agent's name as a string. Nothing sent is quoted back"
 )
 
-SECRET_BODY = (
+_SECRET_BODY = (
     'the body has to be a JSON object with exactly one key, "secret", holding the '
     "credential as a non-empty string. Nothing sent is quoted back, which on this "
     "endpoint is the point"
@@ -389,7 +389,7 @@ SECRET_BODY = (
 # The two refusals a claim by code can meet. Neither quotes the code
 # back: it is what arrived in the path, and what is worth saying about
 # it is what the operator should read instead.
-UNKNOWN_CODE = (
+_UNKNOWN_CODE = (
     "no device is waiting with that activation code. A code lasts ten minutes and is "
     "retired the moment it is claimed, and a device that has been waiting longer is "
     "already showing a fresh one: read the code currently on the device's screen and "
@@ -397,7 +397,7 @@ UNKNOWN_CODE = (
     "right now."
 )
 
-CODE_IN_FLIGHT = (
+_CODE_IN_FLIGHT = (
     "that activation code is being claimed by another request right now. Nothing was "
     "changed; run the command again in a moment, when the code will either have been "
     "bound by that request or be free again."
@@ -408,7 +408,7 @@ CODE_IN_FLIGHT = (
 # This is the one route where an agent name is typed beside an
 # activation code rather than read out of stored configuration, so it is
 # the one route where a mistake puts something else there.
-CLAIM_REFUSED = (
+_CLAIM_REFUSED = (
     "the device showing that code could not be bound: the request's agents name at "
     "least one agent this deployment does not have. Nothing was changed and the code "
     "is still claimable. What was sent is not quoted back; run "
@@ -522,7 +522,7 @@ def problem_response(
 # What a prompt read answers for an agent this server is not serving.
 # The name is not quoted back: it arrived in the path, and what is worth
 # saying about it is where to look instead.
-UNLOADED_AGENT = (
+_UNLOADED_AGENT = (
     "this server is not serving an agent of that name. The agents a server can serve "
     "are the agents of the world it has installed, so one written since is served by "
     "the reload that installs it (`vinga-server config reload`), and one that never "
@@ -530,31 +530,31 @@ UNLOADED_AGENT = (
     "that are stored."
 )
 
-UNLOADED_AGENT_DESCRIPTION = _description("unloaded-agent")
+_UNLOADED_AGENT_DESCRIPTION = _description("unloaded-agent")
 
 # Declared on the routes whose only 422 is the framework's own, so the
 # document carries the sanitized shape this API actually answers with
 # rather than FastAPI's default one, which lists the input it rejected
 # per error. Nothing here validates a body, so this is the request that
 # could not be read at all.
-MALFORMED_REQUEST_DESCRIPTION = _description("malformed-request")
+_MALFORMED_REQUEST_DESCRIPTION = _description("malformed-request")
 
 # The shared 503 sentence is about actions, and says the reads in this
 # namespace answer emptily. That is true of the MCP status read and
 # false of this one: there is no honest empty prompt.
-NO_RUNTIME_PROMPT_DESCRIPTION = _description("no-runtime-prompt")
+_NO_RUNTIME_PROMPT_DESCRIPTION = _description("no-runtime-prompt")
 
 # The reload takes no body and addresses nothing, so the shared sentence
 # for 422 (a stage that is not a stage, a MAC that is not one) cannot be
 # what one of its own means. What it means instead is the whole of the
 # guarantee the endpoint makes about a refusal.
-RELOAD_REFUSED_DESCRIPTION = _description("reload-refused")
+_RELOAD_REFUSED_DESCRIPTION = _description("reload-refused")
 
 # And its 409, which is neither of the two the shared sentence covers on
 # this route: one apply at a time is this endpoint's own exclusion, and
 # the snapshot-mode refusal is the one 409 in this API that retrying
 # will not clear.
-RELOAD_HELD_DESCRIPTION = _description("reload-held")
+_RELOAD_HELD_DESCRIPTION = _description("reload-held")
 
 # The diff read's three refusals that cannot inherit a shared sentence.
 # It addresses nothing and carries no body, so the shared 422 (a stage
@@ -562,18 +562,18 @@ RELOAD_HELD_DESCRIPTION = _description("reload-held")
 # own means; its 409 is not one of the three things the shared sentence
 # lists; and the shared 503 says the reads in this namespace answer
 # emptily, which is exactly what this one must not do.
-DIFF_REFUSED_DESCRIPTION = _description("diff-refused")
+_DIFF_REFUSED_DESCRIPTION = _description("diff-refused")
 
-DIFF_MOVED_DESCRIPTION = _description("diff-moved")
+_DIFF_MOVED_DESCRIPTION = _description("diff-moved")
 
-NO_RUNTIME_DIFF_DESCRIPTION = _description("no-runtime-diff")
+_NO_RUNTIME_DIFF_DESCRIPTION = _description("no-runtime-diff")
 
 # And what the caller is told, which is not the shared sentence: that
 # one says the reads in this namespace answer emptily, and this read
 # refuses precisely because an empty answer would be a claim about a
 # server that is not there. A document that describes one thing and a
 # body that says another leave the reader to decide which to believe.
-NO_RUNTIME_DIFF = (
+_NO_RUNTIME_DIFF = (
     "this API has no running server around it, so there is nothing to compare the "
     "stored configuration with. An empty diff is not the honest answer here, since it "
     "would say that everything stored is already in effect. A deployment reaches this "
@@ -588,7 +588,7 @@ NO_RUNTIME_DIFF = (
 # install a domain half that describes some other server. Fixed, and
 # said once here because the two refusals are the same fact met from
 # two directions.
-NO_STORED_WORLD = (
+_NO_STORED_WORLD = (
     "this server serves a configuration it was given rather than one it read from a "
     "store, so no stored configuration describes what it is running. The database in "
     "its directory holds whatever has been written to it since, which is not this "
@@ -918,7 +918,7 @@ def api_token(config: Config) -> str:
     return token
 
 
-NO_ENGINE = (
+_NO_ENGINE = (
     "the configuration API has no database engine: its lifespan was never entered. "
     "Mounted on a server, the parent lifespan installs one; standalone, this "
     "application's own does."
@@ -945,7 +945,7 @@ def store_dependency(runtime: ApiRuntime) -> Iterator[ConfigStore]:
     """
     handle = runtime.store
     if handle is None:
-        raise RuntimeError(NO_ENGINE)
+        raise RuntimeError(_NO_ENGINE)
     yield ConfigStore(handle.engine, handle.keys)
 
 
@@ -1388,9 +1388,9 @@ def _runtime(api: FastAPI) -> None:
             422,
             503,
             instead={
-                404: UNLOADED_AGENT_DESCRIPTION,
-                422: MALFORMED_REQUEST_DESCRIPTION,
-                503: NO_RUNTIME_PROMPT_DESCRIPTION,
+                404: _UNLOADED_AGENT_DESCRIPTION,
+                422: _MALFORMED_REQUEST_DESCRIPTION,
+                503: _NO_RUNTIME_PROMPT_DESCRIPTION,
             },
         ),
     )
@@ -1423,7 +1423,7 @@ def _runtime(api: FastAPI) -> None:
             raise NoRuntimeError(PROBLEM_DESCRIPTIONS[503])
         assembled = await assemble(name)
         if assembled is None:
-            raise UnknownEntityError(UNLOADED_AGENT)
+            raise UnknownEntityError(_UNLOADED_AGENT)
         return {
             "blocks": [
                 {
@@ -1447,8 +1447,8 @@ def _runtime(api: FastAPI) -> None:
             500,
             503,
             instead={
-                409: RELOAD_HELD_DESCRIPTION,
-                422: RELOAD_REFUSED_DESCRIPTION,
+                409: _RELOAD_HELD_DESCRIPTION,
+                422: _RELOAD_REFUSED_DESCRIPTION,
             },
         ),
     )
@@ -1536,7 +1536,7 @@ def _runtime(api: FastAPI) -> None:
         if reload is None or servers is None:
             raise NoRuntimeError(PROBLEM_DESCRIPTIONS[503])
         if snapshot_only:
-            raise SnapshotOnlyError(NO_STORED_WORLD)
+            raise SnapshotOnlyError(_NO_STORED_WORLD)
         return await reload()
 
     @api.get(
@@ -1549,9 +1549,9 @@ def _runtime(api: FastAPI) -> None:
             500,
             503,
             instead={
-                409: DIFF_MOVED_DESCRIPTION,
-                422: DIFF_REFUSED_DESCRIPTION,
-                503: NO_RUNTIME_DIFF_DESCRIPTION,
+                409: _DIFF_MOVED_DESCRIPTION,
+                422: _DIFF_REFUSED_DESCRIPTION,
+                503: _NO_RUNTIME_DIFF_DESCRIPTION,
             },
         ),
     )
@@ -1598,9 +1598,9 @@ def _runtime(api: FastAPI) -> None:
         # decided where both are in hand, and a handler that took the
         # answer apart would be holding an invariant it cannot keep.
         if diff is None:
-            raise NoRuntimeError(NO_RUNTIME_DIFF)
+            raise NoRuntimeError(_NO_RUNTIME_DIFF)
         if snapshot_only:
-            raise SnapshotOnlyError(NO_STORED_WORLD)
+            raise SnapshotOnlyError(_NO_STORED_WORLD)
         return await diff()
 
 
@@ -1877,9 +1877,9 @@ def _writes(api: FastAPI) -> None:
         agents = _agents(body)
         claim = pending.reserve(code)
         if claim.in_flight:
-            raise ClaimInFlightError(CODE_IN_FLIGHT)
+            raise ClaimInFlightError(_CODE_IN_FLIGHT)
         if claim.device is None:
-            raise UnknownEntityError(UNKNOWN_CODE)
+            raise UnknownEntityError(_UNKNOWN_CODE)
         # A refusal is the repository's decision and its own sentence
         # everywhere else in this file, and here it is the decision but
         # not the sentence. `bind_device` refuses an unresolved
@@ -1920,7 +1920,7 @@ def _writes(api: FastAPI) -> None:
             elif bound is None:
                 pending.release(code)
         if refused:
-            raise ConfigError(CLAIM_REFUSED)
+            raise ConfigError(_CLAIM_REFUSED)
         pending.consume(code)
         # Both the line and the notice are built from what the row
         # holds, never from what the request sent, exactly as the write
@@ -2121,23 +2121,23 @@ def _sole_value(body: object, key: str, expectation: str) -> object:
 
 
 def _agents(body: object) -> list[str]:
-    value = _sole_value(body, "agents", DEVICE_BODY)
+    value = _sole_value(body, "agents", _DEVICE_BODY)
     if not isinstance(value, list) or not all(isinstance(name, str) for name in value):
-        raise ConfigError(DEVICE_BODY)
+        raise ConfigError(_DEVICE_BODY)
     return value
 
 
 def _name(body: object) -> str:
-    value = _sole_value(body, "name", DEFAULT_AGENT_BODY)
+    value = _sole_value(body, "name", _DEFAULT_AGENT_BODY)
     if not isinstance(value, str):
-        raise ConfigError(DEFAULT_AGENT_BODY)
+        raise ConfigError(_DEFAULT_AGENT_BODY)
     return value
 
 
 def _secret(body: object) -> str:
-    value = _sole_value(body, "secret", SECRET_BODY)
+    value = _sole_value(body, "secret", _SECRET_BODY)
     if not isinstance(value, str) or not value:
-        raise ConfigError(SECRET_BODY)
+        raise ConfigError(_SECRET_BODY)
     return value
 
 
@@ -2196,7 +2196,7 @@ class _BearerGate:
         # WWW-Authenticate is what makes this a 401 rather than a 403: it
         # names the scheme a client should have used.
         response = problem_response(
-            401, UNAUTHORIZED, headers={"WWW-Authenticate": "Bearer"}
+            401, _UNAUTHORIZED, headers={"WWW-Authenticate": "Bearer"}
         )
         await response(scope, receive, send)
 
@@ -2260,7 +2260,7 @@ class _SanitizedErrors:
                 # outer logger, which would write the traceback this
                 # just took care not to.
                 return
-            await problem_response(500, UNEXPECTED)(scope, receive, send)
+            await problem_response(500, _UNEXPECTED)(scope, receive, send)
 
 
 def _application(lifespan: Lifespan[FastAPI] | None = None) -> FastAPI:
@@ -2273,9 +2273,9 @@ def _application(lifespan: Lifespan[FastAPI] | None = None) -> FastAPI:
     serves and which therefore opens nothing.
     """
     api = FastAPI(
-        title=API_TITLE,
+        title=_API_TITLE,
         version=API_VERSION,
-        description=API_DESCRIPTION,
+        description=_API_DESCRIPTION,
         lifespan=lifespan,
         # The committed document is the contract. Serving it live, and
         # serving interactive docs, is an additive change the moment a
@@ -2361,7 +2361,7 @@ async def _malformed_request(request: Request, exc: Exception) -> JSONResponse:
 
     No `errors` either, for the same reason: the fields it would name
     are the ones it read out of the body it refused to read."""
-    return problem_response(422, MALFORMED_REQUEST)
+    return problem_response(422, _MALFORMED_REQUEST)
 
 
 async def _routing_refusal(request: Request, exc: Exception) -> JSONResponse:
