@@ -456,6 +456,24 @@ def test_a_set_help_lists_the_model_it_writes(
         assert _said(_first_sentence(info.description)) in _said(helped), name
 
 
+@pytest.mark.parametrize(
+    "kind", [row.words[1] for row in cli.COMMANDS if row.words[0] == "set"]
+)
+def test_a_set_help_says_a_credential_is_never_one_of_its_arguments(
+    run, capsys: pytest.CaptureFixture[str], kind: str
+) -> None:
+    """The store already refuses a plaintext credential by the shape of
+    the key it was written under, whichever way the entity was written.
+    What the help adds is the reason an inline value is the wrong place
+    for one even where the key would have been accepted, which is that
+    an argument lands in shell history and in the process list, and it
+    is on every `set` page because every one of them takes pairs."""
+    helped = printed_help(run, capsys, "set", kind)
+
+    assert _said(cli.SECRET_NOT_A_PAIR) in _said(helped)
+    assert _said("vinga-server config set-secret") in _said(helped)
+
+
 # The two positions a global option is given in
 #
 # `--config`, `--api-url` and `--local` are accepted before the command

@@ -373,8 +373,10 @@ All from `vinga-server/`.
 
 ### What was done
 
-Six commits: the write path's reshape, the verb that reshape exists
-for, its route, and the three surfaces the milestone adds.
+Ten commits: the write path's reshape, the verb that reshape exists
+for, its route, the three surfaces the milestone adds, two the review of
+the finished diff produced, and this record with the help pin beside
+it.
 
 **The phased write path** (`ab452399`). `store._write` was one function
 that opened its own transaction, placed the entry, ran the reference
@@ -433,6 +435,9 @@ without binding it and the refusal raised after the arm.
 `export` is CLI-side assembly of the whole-document and per-entity
 reads, with a reproduction header and the stored credentials rendered
 as the commands that enter them.
+
+**A dotted identity, split by its parameters** (`54088887`), and **one
+home for that split** (`1b1e0468`). Both are in Discoveries below.
 
 ### Deviations from the plan
 
@@ -493,6 +498,24 @@ it is the one that bounds the transaction, and the comment beside
 
 ### Discoveries
 
+**A name may hold a dot, and an identity is not split at every one
+of them.** An applied document names a provider by the dotted join of
+its stage and its name, which is the spelling every other surface uses.
+Reading it back by splitting at every dot made `llm.claude.v2` into
+three parameters where the kind takes two, and the zip that pairs them
+with the columns they select on raised a ValueError rather than a
+refusal. Nothing about a name forbids a dot: the write path refuses a
+slash and a control character and nothing else. Found by reading the
+finished diff rather than by a test, and now guarded by one
+(`test_a_name_holding_a_dot_is_still_one_name`).
+
+The fix has one home, `store.addressed(descriptor, identity)`, because
+three surfaces ask the same question: an applied document, a stored
+secret's location, and the CLI's export, which renders a location back
+into the `set-secret` command that fills it. That last one is new, and
+it is what made the rule worth publishing rather than spelling a third
+time.
+
 **Two name collisions, one of them silent.** `store.py` already had a
 `_stage(stage: str) -> str` (the provider-stage check) and `cli.py`
 already had a `_stored_slots(...)` for the summary tree. Ruff's F811
@@ -540,12 +563,12 @@ spelling did.
 
 | File | Before | After |
 | --- | --- | --- |
-| `src/vinga_server/config/store.py` | 2043 | 2533 |
-| `src/vinga_server/config/cli.py` | 2678 | 3217 |
+| `src/vinga_server/config/store.py` | 2043 | 2549 |
+| `src/vinga_server/config/cli.py` | 2678 | 3228 |
 | `src/vinga_server/config/api.py` | 2487 | 2624 |
 | `src/vinga_server/config/responses.py` | 1016 | 1070 |
 
-New suite: `tests/unit/test_config_apply.py`, 512 lines. The grammar
+New suite: `tests/unit/test_config_apply.py`, 525 lines. The grammar
 grew two top-level commands (`apply`, `export`) and five leaves under
 `export`, taking the invocable count from 34 to 41; the break-glass
 subset is unchanged at nine mutating and seven reading members, and
@@ -557,10 +580,18 @@ All from `vinga-server/`.
 
 - `uv run ruff check .`: `All checks passed!`, at each commit.
 - `uv run pytest tests/unit -q -n auto --dist loadfile`:
-  `3059 passed, 20 skipped in 42.77s` at the tip (2959 at M1's tip; the
-  100 are the apply suite, the inline-value and boundary cases, the
-  route's cases, the pending housekeeping and the export round trip).
-- `uv run pytest tests/integration -q`: `61 passed`.
+  `3065 passed, 20 skipped in 42.55s` at the tip (2959 at M1's tip; the
+  106 are the apply suite, the inline-value and boundary cases, the
+  route's cases, the pending housekeeping, the export round trip and
+  the help pin).
+- `uv run pytest tests/integration -q`: `61 passed in 193.28s`. The
+  first run of it reported a spurious error, and it is worth knowing
+  what it was: `tests/integration/conftest.py` asserts that no
+  `__pycache__` exists under `src/`, and a `uv run pytest` invoked
+  without `PYTHONDONTWRITEBYTECODE=1` leaves some. Delete them and
+  export the variable, which is what `AGENTS.md` says about everything
+  that is not pytest and, on the strength of this, about pytest run from
+  a shell too.
 - `uv run mypy` (the scoped `events` lane):
   `Success: no issues found in 4 source files`.
 - The four drift checks, run the way CI runs them: all four clean.
