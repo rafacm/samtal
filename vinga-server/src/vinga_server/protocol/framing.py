@@ -22,7 +22,32 @@ _V3_HEADER = struct.Struct(">BBH")
 
 
 class FramingError(ValueError):
-    """A binary frame that does not match the negotiated framing."""
+    """A binary frame that does not match the negotiated framing.
+
+    Its message is one of the fixed sentences below and never anything
+    else. The session logs this exception verbatim at warning level
+    (`device/session.py`), which is a retained surface, and the no-leak
+    model keeps that surface free of far-side bytes and exception prose
+    (`docs/architecture/observability-surfaces.md`). A header field is
+    whatever the far side wrote in it, and a length compared against one
+    is that value restated, so neither is interpolated here, integer
+    lengths included: which category a frame failed is the whole of what
+    a diagnosis is owed, and the drop is counted as `framing_error`
+    beside the line.
+    """
+
+
+# Everything a `FramingError` may say, one fixed sentence per category.
+# Named here rather than written at each raise so that a suite pinning
+# what reaches a log record reads the sentence from this module instead
+# of keeping a second copy of it, which is the only way the two cannot
+# come to disagree. The protocol version in a sentence is a literal at
+# the raise it belongs to, not a value read off the frame.
+SHORT_V2_FRAME = "version 2 frame is shorter than its header"
+SHORT_V3_FRAME = "version 3 frame is shorter than its header"
+V2_SIZE_MISMATCH = "version 2 frame carries a different number of payload bytes than it announces"
+V3_SIZE_MISMATCH = "version 3 frame carries a different number of payload bytes than it announces"
+UNSUPPORTED_VERSION = "unsupported binary protocol version"
 
 
 @dataclass(frozen=True)
@@ -55,7 +80,7 @@ def wrap(
         return header + payload
     if version == 3:
         return _V3_HEADER.pack(payload_type, 0, len(payload)) + payload
-    raise FramingError(f"unsupported binary protocol version {version}")
+    raise FramingError(UNSUPPORTED_VERSION)
 
 
 def unwrap(version: int, data: bytes) -> Frame:
@@ -64,25 +89,21 @@ def unwrap(version: int, data: bytes) -> Frame:
         return Frame(PAYLOAD_OPUS, bytes(data))
     if version == 2:
         if len(data) < _V2_HEADER.size:
-            raise FramingError(f"version 2 frame of {len(data)} bytes is shorter than its header")
+            raise FramingError(SHORT_V2_FRAME)
         # The timestamp a stock firmware stamps its frames with is
         # parsed and dropped: the header has to be read past to reach
         # the payload, and nothing above this line asks what it said.
         _, payload_type, _, _, size = _V2_HEADER.unpack_from(data)
         payload = data[_V2_HEADER.size :]
         if len(payload) != size:
-            raise FramingError(
-                f"version 2 frame announces {size} payload bytes but carries {len(payload)}"
-            )
+            raise FramingError(V2_SIZE_MISMATCH)
         return Frame(payload_type, payload)
     if version == 3:
         if len(data) < _V3_HEADER.size:
-            raise FramingError(f"version 3 frame of {len(data)} bytes is shorter than its header")
+            raise FramingError(SHORT_V3_FRAME)
         payload_type, _, size = _V3_HEADER.unpack_from(data)
         payload = data[_V3_HEADER.size :]
         if len(payload) != size:
-            raise FramingError(
-                f"version 3 frame announces {size} payload bytes but carries {len(payload)}"
-            )
+            raise FramingError(V3_SIZE_MISMATCH)
         return Frame(payload_type, payload)
-    raise FramingError(f"unsupported binary protocol version {version}")
+    raise FramingError(UNSUPPORTED_VERSION)
