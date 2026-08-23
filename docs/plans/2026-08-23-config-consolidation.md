@@ -171,12 +171,18 @@ explicitly.
    M2's wording work.
 8. **The proof surface.** `uv run vinga-server config openapi`
    byte-identical against the committed document at every commit
-   of the milestone; `config reference` (domain docgen)
-   byte-identical unless decision 2's descriptor shrink removes a
-   string the reference printed, in which case the diff is shown
-   and justified in the PR; the whole config test family green;
-   the public-name count of the package before and after recorded
-   by `python -c` over `__all__`s in the implementation doc.
+   of the milestone; `config reference` and `config schema`
+   byte-identical (decision 1's pins) unless decision 2's
+   descriptor shrink removes a string the reference printed, in
+   which case the diff is shown and justified in the PR; the
+   whole config test family green; the public-name count of the
+   package before and after recorded in the implementation doc.
+   And because decision 3 turns committed contract into package
+   data loaded at import, the CI wheel step is extended to render
+   the OpenAPI document FROM THE INSTALLED WHEEL with the source
+   tree off sys.path and diff it against the committed JSON,
+   which is the same discipline the Alembic scripts already get
+   and the only proof a checkout run cannot fake.
 
 ## The standing review lenses, pre-answered
 
