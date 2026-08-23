@@ -179,13 +179,19 @@ and discoveries; no deviations says so explicitly.
    floor the beta promise will stand on. A second test asserts
    the round trip (dump then validate) is identity on the
    fixtures, which pins the mapper pair itself.
-7. **The CI wheel-migration check moves with the schema.** The
-   workflow's expected-tables block stays; its added-columns
-   block (which asserts 0002 to 0004 columns exist) is replaced
-   by asserting the body columns exist and that a fresh database
-   migrates to the ONE revision head; the comment above it is
-   rewritten to say what it now proves (the wheel carries the
-   baseline; there are no later revisions to lose).
+7. **The CI wheel-migration check moves with the schema, and so
+   does its in-repo twin.** The workflow's expected-tables block
+   stays; its added-columns block (which asserts 0002 to 0004
+   columns exist) is replaced by asserting the body columns exist
+   and that a fresh database migrates to the ONE revision head;
+   the comment above it is rewritten to say what it now proves.
+   `test_db_open.py`'s `EXPECTED_TABLES`/`EXPECTED_COLUMNS`
+   constants move in the same commit, and
+   `test_provider_rows_hold_every_declared_model_field`, the
+   existing statement of the very property the body makes
+   automatic, is REPLACED by the body round-trip test rather than
+   deleted, with a comment saying which test inherited its
+   claim.
 8. **`OptionsReader` and everything above the store are
    untouched.** The store's public interface (`load`, the write
    paths, the descriptors, secret resolution, reload) does not
