@@ -54,7 +54,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NoReturn, get_args, get_origin
-from urllib.parse import SplitResult, quote, urlsplit, urlunsplit
+from urllib.parse import quote, urlsplit
 
 import httpx
 import yaml
@@ -73,6 +73,7 @@ from vinga_server.config.models import (
     FileConfig,
     ServerConfig,
 )
+from vinga_server.config.printing import parsed_url, printable, shown_url
 from vinga_server.config.responses import (
     Acknowledgement,
     AssembledPrompt,
@@ -243,17 +244,6 @@ ONBOARDING_OFF_FOR_DOCTOR = (
 # this stands in for it.
 SUPPLIED_ENDPOINT = "the supplied OTA endpoint"
 
-# How much of anything that arrived in a response may be repeated back.
-# What `doctor` reaches may be a proxy, a captive portal or anything
-# else that answers, so the version it claims and the URL it names are
-# attacker-controlled text: bounded and printable, or not printed. The
-# rule is the one `onboarding.pending._fact` applies to what a device
-# says about itself; the bound is its own, because what a stranger's
-# server claims about itself is not what a board waiting to be claimed
-# says, and the two have never had a reason to move together. The body
-# itself is never repeated at all, bounded or otherwise.
-GLIMPSE_LENGTH = 120
-
 # How much of a body is looked at at all. The description this reads is
 # three short lines, so a few kilobytes is generous; what the bound is
 # for is a megabyte of anything, which nothing should walk a pattern
@@ -395,8 +385,8 @@ def _doctor(args: argparse.Namespace) -> None:
     if response.url.scheme == "https" and scheme == "ws":
         raise ConfigError(_plain_websocket(shown, websocket))
     print(
-        f"{shown} is vinga-server {_printable(reported['version'])}, and sends devices "
-        f"to {websocket} (protocol version {_printable(reported['protocol'])})."
+        f"{shown} is vinga-server {printable(reported['version'])}, and sends devices "
+        f"to {websocket} (protocol version {printable(reported['protocol'])})."
     )
 
 
@@ -570,8 +560,8 @@ def _permitted(url: str, source: str) -> str:
     deliberately no flag to override it: such a flag's only purpose would
     be sending the token in clear.
     """
-    parsed = _parsed(url, source)
-    shown = _without_userinfo(parsed)
+    parsed = parsed_url(url, source)
+    shown = shown_url(parsed)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         raise ConfigError(
             f"{source} is not an http:// or https:// URL with a host: {shown}"
@@ -602,51 +592,6 @@ def _loopback(host: str) -> bool:
         return ipaddress.ip_address(host).is_loopback
     except ValueError:
         return False
-
-
-def _parsed(url: str, source: str) -> SplitResult:
-    """The URL, split, with the parser's own failures kept inside the
-    boundary.
-
-    `urlsplit` raises on a malformed IPv6 literal and `.port` raises on
-    a port that is not a number, and both put the text they refused into
-    the exception. Outside a handler that is a traceback out of main()
-    with the address in it; inside one it is a fixed sentence. The
-    address is not quoted even here: what a mistyped URL holds is
-    whatever was being typed, and the one thing an operator is typing
-    around this command is a token.
-
-    Both are provoked deliberately rather than trusted to happen later:
-    `.port` is read here so that its refusal belongs to this function
-    rather than to whichever caller touches it first.
-    """
-    problem: str | None = None
-    try:
-        parsed = urlsplit(url)
-        # Read rather than trusted to be read later: `.port` parses on
-        # access, so this is where its refusal belongs rather than in
-        # whichever caller touches it first.
-        _ = parsed.port
-        return parsed
-    except ValueError:
-        problem = (
-            f"{source} is not a URL this client can read. It has to be an http:// or "
-            f"https:// address with a host, and a port if it names one has to be a "
-            f"number. It is not quoted back, because a mistyped address holds whatever "
-            f"was being typed."
-        )
-    raise ConfigError(problem)
-
-
-def _without_userinfo(parsed: SplitResult) -> str:
-    """The URL as it may be printed. A credential written into a URL is
-    refused, and the refusal must not be the thing that publishes it."""
-    host = parsed.hostname or ""
-    if ":" in host:
-        host = f"[{host}]"
-    if parsed.port:
-        host = f"{host}:{parsed.port}"
-    return urlunsplit((parsed.scheme, host, parsed.path, parsed.query, ""))
 
 
 def _token(file_config: FileConfig) -> str:
@@ -848,7 +793,7 @@ def _device_url(url: str, source: str) -> str:
             f"deployment's own secret and because repeating a control character is how "
             f"one line of output becomes two."
         )
-    parsed = _parsed(url, source)
+    parsed = parsed_url(url, source)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         raise ConfigError(
             f"{source} is not an http:// or https:// URL with a host. It is not quoted "
@@ -1005,7 +950,7 @@ def _reported_websocket(url: str) -> tuple[str, str] | None:
     # this a normalization rather than a hope.
     if parsed.scheme not in ("ws", "wss") or not parsed.hostname:
         return None
-    return parsed.scheme, _printable(_without_userinfo(parsed))
+    return parsed.scheme, printable(shown_url(parsed))
 
 
 def _unreadable_websocket(shown: str) -> str:
@@ -1014,20 +959,6 @@ def _unreadable_websocket(shown: str) -> str:
         f"ws:// or wss:// URL this client can read, so a device pointed here would be "
         f"handed an address it cannot connect to. It is not quoted back, since it is "
         f"whatever that address returned. Check server.websocket_url on that deployment."
-    )
-
-
-def _printable(value: str, limit: int = GLIMPSE_LENGTH) -> str:
-    """Text that arrived in a response, bounded before it is printed.
-
-    Truncated first and then made printable, so no answer can choose how
-    long this command's output is or put a newline, an escape sequence
-    or a terminal control code into it. Unprintable characters become a
-    question mark rather than disappearing, because something that
-    arrived mangled should read as mangled.
-    """
-    return "".join(
-        character if character.isprintable() else "?" for character in value.strip()[:limit]
     )
 
 
@@ -1143,8 +1074,8 @@ def _status_block(entries: Mapping[str, Mapping[str, object]]) -> str:
     for name, entry in entries.items():
         reason = entry["reason"]
         lines.append(
-            f"{_printable(name)}: {entry['state']} since {_printable(str(entry['since']))}"
-            + (f" ({_printable(str(reason))})" if reason is not None else "")
+            f"{printable(name)}: {entry['state']} since {printable(str(entry['since']))}"
+            + (f" ({printable(str(reason))})" if reason is not None else "")
         )
         lines.append("  tools: " + (_names(entry["tools"]) or "(none)"))
         lines.append("  agents: " + (_granted(entry["grants"]) or "(none)"))
@@ -1157,7 +1088,7 @@ def _granted(grants: Mapping[str, object]) -> str:
     parentheses is the allow list that agent was given. Sorted by agent
     name, so two reads of an unchanged world print the same block."""
     return ", ".join(
-        f"{_printable(agent)} ({allowed})" if (allowed := _names(tools)) else _printable(agent)
+        f"{printable(agent)} ({allowed})" if (allowed := _names(tools)) else printable(agent)
         for agent, tools in sorted(grants.items())
     )
 
@@ -1169,7 +1100,7 @@ def _names(values: object) -> str:
     their type, not their length and not whether every character in them
     can be written to a terminal. `None` is a list of nothing here, which
     is how a grant of the whole server reads."""
-    return ", ".join(_printable(str(value)) for value in _sequence(values))
+    return ", ".join(printable(str(value)) for value in _sequence(values))
 
 
 def _sequence(value: object) -> Sequence[object]:
@@ -1181,7 +1112,7 @@ def _prompt_listing(answer: object) -> str:
 
     Every block is printed whole. This command exists to show what the
     model is given, so a concealed tail is exactly what the operator
-    came to see, which is why nothing here goes through `_printable`:
+    came to see, which is why nothing here goes through `printable`:
     that renderer strips a value and cuts it at `GLIMPSE_LENGTH`, which
     is right for an acknowledgement and fatally wrong here.
 

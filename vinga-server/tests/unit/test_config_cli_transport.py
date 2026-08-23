@@ -203,6 +203,28 @@ def test_a_url_carrying_a_credential_is_refused_without_repeating_it(
     assert run.reached == []
 
 
+def test_a_token_in_the_query_is_not_repeated_by_the_refusal_either(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The other place a credential is written into a URL, and the one
+    the display helper used to carry through: a refusal names the
+    address, and the address it named kept its query string whole.
+
+    The refusal here is the plain-http one, because that is the shape
+    that names the address at all. What it may name is the address
+    without its credentials, which is both of them and not only the
+    userinfo."""
+    assert run("--api-url", f"http://config.example.invalid/api?token={SECRET}", "list") == 1
+
+    captured = capsys.readouterr()
+    assert SECRET not in captured.err
+    assert "?token=" not in captured.err
+    # And the address is still named, which is what makes the refusal
+    # actionable: it is the credential that is taken out, not the host.
+    assert "config.example.invalid" in captured.err
+    assert run.reached == []
+
+
 def test_a_missing_token_is_named_before_any_request_is_sent(
     run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

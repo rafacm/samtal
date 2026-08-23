@@ -32,7 +32,7 @@ import pytest
 from tests.support.config_cli import chain as _chain
 from tests.support.config_cli import runner
 from tests.support.config_cli import showing as _showing
-from vinga_server.config import Config, cli
+from vinga_server.config import Config, cli, printing
 from vinga_server.config.cli import RELOAD_SECTIONS, flags, outcomes
 from vinga_server.config.loader import ConfigError
 from vinga_server.config.responses import (
@@ -311,10 +311,11 @@ def test_prompt_never_truncates_a_block(
     run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The whole reason this command does not render through
-    `_printable`: a realistic prompt is far longer than GLIMPSE_LENGTH,
-    and a concealed tail is exactly what an operator came to see."""
+    `printing.printable`: a realistic prompt is far longer than
+    GLIMPSE_LENGTH, and a concealed tail is exactly what an operator
+    came to see."""
     tail = "END-OF-THE-PROMPT"
-    long_block = "x" * (cli.GLIMPSE_LENGTH * 3) + tail
+    long_block = "x" * (printing.GLIMPSE_LENGTH * 3) + tail
     body = _assembled(
         _prompt_block(text=long_block, characters=len(long_block)),
         characters=len(long_block),
