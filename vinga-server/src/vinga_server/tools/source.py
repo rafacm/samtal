@@ -119,9 +119,6 @@ class BuiltinTools:
             tools.append(builtin.switch_agent_tool(self._agents))
         if self._memory is not None:
             tools.append(builtin.remember_tool())
-        # No condition to put on this one: it is configured by nothing
-        # and reaches nothing, so every agent has it.
-        tools.append(builtin.random_number_tool())
         return tools
 
     def owns(self, claim: "records.ToolInvocation") -> bool:
@@ -130,8 +127,6 @@ class BuiltinTools:
     async def dispatch(self, claim: "records.ToolInvocation", agent: str) -> tuple[str, bool]:
         if claim.name == names.REMEMBER and self._memory is not None:
             return await builtin.remember(self._memory, agent, claim.arguments or {}), False
-        if claim.name == names.RANDOM_NUMBER:
-            return builtin.random_number(claim.arguments or {}), False
         return f'there is no tool called "{claim.name}"', True
 
     def timeout_for(self, claim: "records.ToolInvocation") -> float:

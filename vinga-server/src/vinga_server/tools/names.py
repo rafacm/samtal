@@ -4,7 +4,7 @@ Three sources of tools reach the same list, and the model sees one flat
 set of names. Rather than detect collisions when the list is merged and
 then have to invent a tie-break, the namespace is structural:
 
-- builtins are bare (`switch_agent`, `remember`, `random_number`);
+- builtins are bare (`switch_agent`, `remember`);
 - the device's tools keep the firmware's `self.` prefix, with the dots
   sanitized away (`self_audio_speaker_set_volume`);
 - an MCP server's tools carry their configuration entry name and a
@@ -35,8 +35,7 @@ SERVER_SEPARATOR = "__"
 
 SWITCH_AGENT = "switch_agent"
 REMEMBER = "remember"
-RANDOM_NUMBER = "random_number"
-BUILTIN_TOOL_NAMES = (SWITCH_AGENT, REMEMBER, RANDOM_NUMBER)
+BUILTIN_TOOL_NAMES = (SWITCH_AGENT, REMEMBER)
 
 # Names an mcp_servers entry may not take, because they already mean
 # something in the merged list.
