@@ -236,6 +236,32 @@ class Entity[Entry]:
     secrets: tuple[StoredSecret, ...]
 
 
+@dataclass(frozen=True)
+class Applied:
+    """What applying one entry of a document did.
+
+    Canonical and nothing else, because what a caller adds to it is not
+    a fact this repository holds. `section` and `identity` say which
+    entry, in the vocabulary the configuration document uses: the
+    `DOMAIN_KEYS` section it lives in, and the identity under it as the
+    row holds it (a provider's `<stage>.<name>`, a canonical MAC),
+    empty for the two sections that hold one thing rather than entries.
+    `wrote` is whether the row moved.
+
+    `agents` is the one fact beyond that, and it is here because the
+    surface above cannot derive it: a device binding and the default
+    agent are answered with a sentence that depends on whether the
+    running server is serving the agents they name, and the names have
+    to be the ones the row holds rather than the ones the document
+    sent. Empty for every other section, which names no agent.
+    """
+
+    section: str
+    identity: str
+    wrote: bool
+    agents: tuple[str, ...] = ()
+
+
 def verify_secrets(secrets: SecretStore) -> None:
     """Every stored secret opens under the configured keys, or the
     server refuses to start naming the entity and the slot.
@@ -394,48 +420,28 @@ class ConfigStore:
         """Create or replace one entity from a fragment in the same shape
         its section of the YAML file has.
 
-        The order is every kind's: the name is made usable, then
-        whatever the kind checks before a body is looked at, then the
-        body read as a fragment, then the model that owns the shape,
-        then whatever the kind checks about the parsed entry. Inside the
-        transaction, the entry is put where the configuration would hold
-        it and the reference pass runs against the state the write would
-        leave, which is what makes an unresolvable write refusable
-        before it lands. The columns the kind names are what is written,
-        so the `secrets` column nobody named stays as it was.
+        The one-entity case of `apply` below, run through exactly the
+        same phases: prepared outside the lock, staged into the
+        candidate domain state inside it, checked once against that
+        state, and persisted. There is one write path and this is a
+        document with one entry in it, which is what keeps a `set` and
+        an applied document from coming to validate differently.
 
-        Two shapes, and the difference between them is one question: does
-        this fragment depend on what is stored? A fragment that does not
-        is parsed and checked before the write lock is asked for, so
-        nothing a caller got wrong costs a lock. A fragment carrying the
-        unchanged-value marker does depend on it, and the whole of that
-        write happens under one lock: the row it resolves against is read
-        inside the transaction that replaces it, so no other writer can
-        change or delete the value between the resolution and the write.
-        Resolving under a lock taken later would let a value that was
-        gone by the time this write ran come back, which is an outcome no
-        serial order of the two writes produces, and this repository's
-        write is one transaction (see the module docstring).
+        What the phases preserve, because it is the write's contract
+        rather than its shape: a fragment that does not depend on what
+        is stored is parsed before the write lock is asked for, so
+        nothing a caller got wrong costs a lock, and a fragment carrying
+        the unchanged-value marker resolves inside the transaction that
+        replaces the row it resolves against (`_prepare` and
+        `_stage_entity` say why). The columns the kind names are what is
+        written, so the `secrets` column nobody named stays as it was.
         """
-        if descriptor.addressing:
-            name = _identifier(_location(descriptor, *identity[:-1]), identity[-1])
-            identity = (*identity[:-1], name)
-        location = _location(descriptor, *identity)
-        check = _STORAGE[descriptor.name].before_parse
-        if check is not None:
-            check(identity[-1])
-        data = _readable(location, fragment)
-        marks = tuple(_masked_paths(data, descriptor.secret_key))
-        if not marks:
-            entry = _parsed(descriptor, identity, location, data)
-            with self._transaction() as connection:
-                _persist(connection, _read_domain(connection), descriptor, identity, entry)
-            return
+        prepared = _prepare(descriptor, identity, fragment)
         with self._transaction() as connection:
             domain = _read_domain(connection)
-            kept = _keep(descriptor, location, data, marks, _entry(domain, descriptor, identity))
-            entry = _parsed(descriptor, identity, location, kept)
-            _persist(connection, domain, descriptor, identity, entry)
+            staged = _stage_entity(domain, prepared)
+            _refuse_unresolved(domain)
+            _persist(connection, (staged,))
 
     def _delete(self, descriptor: EntityDescriptor, *identity: str) -> None:
         """Remove one entity, by the identity that addresses it and
@@ -468,7 +474,7 @@ class ConfigStore:
             domain.devices.update(binding)
             _refuse_unresolved(domain)
             for normalized, bound in binding.items():
-                _upsert(connection, schema.devices, {"mac": normalized}, {"agents": bound})
+                _device_row(normalized, bound).write(connection)
         # One binding in, one row out, so there is exactly one to
         # describe.
         written, names = next(iter(binding.items()))
@@ -517,7 +523,7 @@ class ConfigStore:
                 )
             domain.devices.update(binding)
             _refuse_unresolved(domain)
-            _upsert(connection, schema.devices, {"mac": written}, {"agents": names})
+            _device_row(written, names).write(connection)
         return BoundDevice(written, tuple(names))
 
     def delete_device(self, mac: str) -> str:
@@ -542,12 +548,7 @@ class ConfigStore:
             domain = _read_domain(connection)
             domain.default_agent = name
             _refuse_unresolved(domain)
-            _upsert(
-                connection,
-                schema.domain_settings,
-                {"key": schema.DEFAULT_AGENT_KEY},
-                {"value": name},
-            )
+            _default_agent_row(name).write(connection)
         return name
 
     def clear_default_agent(self) -> None:
@@ -555,11 +556,7 @@ class ConfigStore:
         configuration rather than a degenerate state. The row is deleted
         rather than nulled, so there is one way to say it."""
         with self._transaction() as connection:
-            connection.execute(
-                delete(schema.domain_settings).where(
-                    schema.domain_settings.c.key == schema.DEFAULT_AGENT_KEY
-                )
-            )
+            _default_agent_row(None).write(connection)
 
     # Secrets
 
@@ -973,29 +970,175 @@ def _parsed(
     return entry
 
 
-def _persist(
-    connection: Connection,
-    domain: DomainConfig,
-    descriptor: EntityDescriptor,
-    identity: Sequence[str],
-    entry: BaseModel,
-) -> None:
-    """The end of every write, under the lock: the entry placed where the
-    configuration would hold it, the reference pass run against the state
-    the write would leave, and the row written.
+# The phases every write runs
+#
+# A write is four steps, and they are separated because the transaction
+# falls between them. PREPARATION is everything about a fragment that
+# can be decided without reading the store, and it happens outside the
+# lock, so nothing a caller got wrong costs one. STAGING resolves what
+# does depend on the store, against the one snapshot the transaction
+# read, and puts the entry where the configuration would hold it.
+# CHECKING is `_refuse_unresolved` against the state every staged entry
+# has been put into, run once. PERSISTENCE writes the rows that moved.
+#
+# Split this way for `apply`, and then used by the single writes too,
+# which is the point: a document that creates an agent and binds a
+# device to it passes through states no per-entity check would accept,
+# so the check has to see the end state and only the end state. A single
+# `set` is the same four steps over one entry, so there is one write
+# path rather than two that can come to validate differently.
 
-    `domain` is passed in rather than read here, because the write that
-    resolves an unchanged-value marker has already read it inside this
-    same transaction and a second read would be a second answer to a
-    question that must have one.
+
+@dataclass(frozen=True)
+class _Prepared:
+    """One entity write, taken as far as it goes without the store.
+
+    `entry` is the parsed model where the fragment did not depend on
+    anything stored, and None where it did: a fragment carrying the
+    unchanged-value marker cannot be validated until the values behind
+    the marks are in hand, and those are read inside the transaction
+    that replaces the row holding them. `marks` and `data` are what
+    staging needs to finish that resolution.
     """
+
+    descriptor: EntityDescriptor
+    identity: tuple[str, ...]
+    location: str
+    data: dict[str, object]
+    marks: tuple[tuple[object, ...], ...]
+    entry: BaseModel | None
+
+
+@dataclass(frozen=True)
+class _Row:
+    """One row a staged entry writes: the table, the columns that address
+    it, and the columns to set.
+
+    `values` of None is a delete, which is what the explicit
+    `default_agent: null` performs: the row is removed rather than
+    nulled, so there is one way to say the setting is unset. Data rather
+    than a call, so that staging can decide what a write would do
+    without doing it, and so that the row shape of a device binding or
+    the default agent has one home whichever verb writes it.
+    """
+
+    table: Table
+    identity: Mapping[str, object]
+    values: Mapping[str, object] | None
+
+    def write(self, connection: Connection) -> None:
+        if self.values is None:
+            connection.execute(
+                delete(self.table).where(
+                    *(self.table.c[column] == value for column, value in self.identity.items())
+                )
+            )
+            return
+        _upsert(connection, self.table, self.identity, self.values)
+
+
+@dataclass(frozen=True)
+class _Staged:
+    """One entry, put into the candidate state: what to answer about it,
+    and the row to write once the whole document survives the check.
+
+    `row` is None where the entry is already what the document says,
+    which is the `unchanged` outcome: the row would be written with the
+    bytes it already holds, so it is not written at all.
+    """
+
+    applied: Applied
+    row: _Row | None
+
+
+def _prepare(
+    descriptor: EntityDescriptor, identity: tuple[str, ...], fragment: object
+) -> _Prepared:
+    """One entity write's preparation phase: everything about the
+    fragment that is not a question about the store.
+
+    The order is every kind's: the name is made usable, then whatever
+    the kind checks before a body is looked at, then the body read as a
+    fragment. The model runs here too where it can, which is whenever
+    the fragment carries no unchanged-value marker, so a fragment a
+    caller got wrong is refused before any lock is asked for.
+    """
+    if descriptor.addressing:
+        name = _identifier(_location(descriptor, *identity[:-1]), identity[-1])
+        identity = (*identity[:-1], name)
+    location = _location(descriptor, *identity)
+    check = _STORAGE[descriptor.name].before_parse
+    if check is not None:
+        check(identity[-1])
+    data = _readable(location, fragment)
+    marks = tuple(_masked_paths(data, descriptor.secret_key))
+    return _Prepared(
+        descriptor=descriptor,
+        identity=identity,
+        location=location,
+        data=data,
+        marks=marks,
+        entry=None if marks else _parsed(descriptor, identity, location, data),
+    )
+
+
+def _stage_entity(domain: DomainConfig, prepared: _Prepared) -> _Staged:
+    """One entity, resolved and staged.
+
+    The marker's resolution happens here rather than in preparation for
+    the reason `_keep` records: the row it resolves against is read
+    inside the transaction that replaces it, so no other writer can
+    change or delete the value between the resolution and the write.
+    Resolving under a lock taken later would let a value that was gone
+    by the time this write ran come back, which is an outcome no serial
+    order of the two writes produces.
+    """
+    descriptor, identity = prepared.descriptor, prepared.identity
+    stored = _entry(domain, descriptor, identity)
+    entry = prepared.entry
+    if entry is None:
+        kept = _keep(descriptor, prepared.location, prepared.data, prepared.marks, stored)
+        entry = _parsed(descriptor, identity, prepared.location, kept)
+    values = _to_row(descriptor, entry)
+    moved = stored is None or _to_row(descriptor, stored) != values
     _place(domain, descriptor, identity, entry)
-    _refuse_unresolved(domain)
-    _upsert(
-        connection,
-        _table(descriptor),
-        _row_identity(descriptor, identity),
-        _to_row(descriptor, entry),
+    return _Staged(
+        applied=Applied(
+            section=descriptor.moved_key, identity=".".join(identity), wrote=moved
+        ),
+        row=(
+            _Row(_table(descriptor), _row_identity(descriptor, identity), values)
+            if moved
+            else None
+        ),
+    )
+
+
+def _persist(connection: Connection, staged: Sequence[_Staged]) -> None:
+    """The end of every write, under the lock and after the check: the
+    rows that moved, written. The ones that did not are not written at
+    all, which is what `unchanged` means."""
+    for entry in staged:
+        if entry.row is not None:
+            entry.row.write(connection)
+
+
+def _device_row(mac: str, agents: Sequence[str]) -> _Row:
+    """The row one device binding is written as. One home, because three
+    verbs write it (bind by MAC, claim by code, apply) and a second
+    spelling would be a second shape for one fact."""
+    return _Row(schema.devices, {"mac": mac}, {"agents": list(agents)})
+
+
+def _default_agent_row(name: str | None) -> _Row:
+    """The row the default agent is written as, and the delete that
+    unsets it. One home for the same reason, and the delete is here
+    rather than beside `clear_default_agent` because it is the same
+    row."""
+    return _Row(
+        schema.domain_settings,
+        {"key": schema.DEFAULT_AGENT_KEY},
+        None if name is None else {"value": name},
     )
 
 
@@ -2029,6 +2172,7 @@ def _refuse_unresolved(domain: DomainConfig) -> None:
 
 
 __all__ = [
+    "Applied",
     "BoundDevice",
     "ConfigStore",
     "check_transportable",
