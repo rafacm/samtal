@@ -311,6 +311,10 @@ modules) is right. Findings condensed but faithful:
    carry BOTH MCP transports; the forward-floor consequence (a
    body carries what the operator wrote, so later default changes
    affect unwritten fields retroactively) must be stated.
+   *Resolution* (`b3da2a25`): exclude_unset with its reasons, the
+   retroactive-default consequence stated, sparse plus
+   fully-written fixtures per kind, both MCP transports.
+
 2. **P1: the squash has no revision-identity or refusal story.**
    Reusing 0001 makes stamped databases silently "at head" and the
    store dies on a missing column; a fresh id makes Alembic raise
@@ -318,39 +322,65 @@ modules) is right. Findings condensed but faithful:
    needs a never-used id, `migration_failure` needs an
    unknown-revision arm answering the reset sentence, and the
    deploy sequence (volume reset with the image bump) is named.
+   *Resolution* (`7631bc52`): the 2001 numbering block, the
+   unknown-revision arm in migration_failure with the reset
+   sentence, the deploy sequence named.
+
 3. **P1: nothing can run `alembic revision --autogenerate` today**
    (env.py refuses without a handed-in connection; no alembic.ini;
    script_location set programmatically), so the command in the
    plan fails and the issue's adopt-autogenerate decision is
    unimplemented. Name the deliverable and where it lives.
+   *Resolution* (`4cf0c24f`): the autogen developer entry point
+   opening a scratch database, env.py keeping its runtime
+   refusal.
+
 4. **P1: the body column's type is never stated.** `Column(JSON)`
    double-encodes a dumped string; `Text` matches
    `model_validate_json`. And the `_untransportable(numbers_only)`
    NaN guard takes a Mapping, not bytes; say which shape guards
    survive for which kinds and which are deleted because
    pydantic's JSON parser refuses NaN at the door.
+   *Resolution* (`c9a09d54` and the guards commit): Text bodies,
+   the guard disposition by kind.
+
 5. **P1: `devices` has no entity model and no descriptor**, its
    rows are read as a bare list, and `_live_binding` selects
    `devices.c.agents` by name on the device hot path, the one
    column-level SQL read in src (falsifying the plan's
    parenthetical). Leave `devices` alone under the same exemption
    as `prompt_fragments` and `domain_settings`.
+   *Resolution* (`c9a09d54`): devices stays at its shape with its
+   hot-path column read, the claim scoped to the four reshaped
+   tables.
+
 6. **P2: `model_dump_json` has no sorted-keys option**, and
    "no extras beyond the model's own" is a null constraint on
    `extra="allow"` `ProviderConfig`. Drop sorted keys or name the
    different pair it would require.
+   *Resolution* (`b3da2a25`): declaration order, sorted keys
+   dropped with the finding's reason.
+
 7. **P2: the suites do not run unchanged.** About twenty sites
    plant or assert entity columns and become body edits, several
    of them no-leak or tolerance pins whose rewrite is a design
    decision; and `test_a_pre_upgrade_string_row_loads...` pins a
    live model tolerance (the McpGrant string form) that belongs in
    the body-parse family, not the deletions.
+   *Resolution* (the F7 commit): the twenty-site inventory with
+   the one rewrite rule, and the McpGrant tolerance moving to the
+   body-parse family.
+
 8. **P2: the mutation claim is false as written.** A new
    `AgentConfig` field moves two committed CI-diffed artifacts
    (domain-config.md, api-openapi.json); state the mutation as
    regenerate-two-artifacts-plus-model, and fix the Goal's "the
    model and the example YAML" (the domain examples live in
    `examples/*.yaml`).
+   *Resolution* (the F8 commit): the mutation regenerates the two
+   reference artifacts by their own commands; the Goal names
+   examples/*.yaml.
+
 9. **P2: the ADR addendum as specified leaves the record
    self-contradictory.** It must retract the two Consequences
    bullets by name, state that it extends #225's reasoning past
@@ -358,9 +388,14 @@ modules) is right. Findings condensed but faithful:
    repository (the example-fragment install suite on a fresh
    database plus set-secret re-encryption), with the infra job as
    the operational half.
+   *Resolution* (the F9 commit): retractions by name, the #225
+   bound crossed explicitly, tested defined in-repo.
+
 10. **P3: the CI assertions have an in-repo twin.**
     `test_db_open.py`'s EXPECTED_TABLES/COLUMNS move with the
     workflow block, and `test_provider_rows_hold_every_declared_model_field`
     is REPLACED by the body round-trip (it is the existing
     statement of the property the body makes automatic), not
     deleted.
+    *Resolution* (the F10 commit): the constants move and the
+    declared-fields guard is replaced by the round trip.
