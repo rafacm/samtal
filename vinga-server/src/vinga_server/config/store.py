@@ -486,11 +486,16 @@ class ConfigStore:
         under one line saying nothing was changed. Any refusal leaves
         the transaction unwritten, this repository's write being one
         transaction (see the module docstring).
+
+        Between the two phases sits the one check a document has that a
+        single write cannot: that no two of its entries address the same
+        thing. `_distinct_entries` says why it belongs there.
         """
         named = _named(_sections(document))
         if len(named) > APPLY_LIMIT:
             raise ConfigError(TOO_MANY_ENTRIES)
         changes = _gathered(_change, named)
+        _distinct_entries(changes)
         with self._transaction() as connection:
             domain = _read_domain(connection)
             staged = _gathered(partial(_stage_change, domain), changes)
@@ -1346,6 +1351,13 @@ _NOT_AN_AGENT_NAME = (
     "null to unset it. Nothing sent is quoted back"
 )
 
+DUPLICATE_ENTRY = (
+    f"{APPLY_LOCATION}: two entries of one section address the same thing once their "
+    f"names are made canonical, such as two spellings of one MAC address or one name "
+    f"written with and without surrounding space, so the document says two things "
+    f"about one entry. Nothing was changed, and nothing of it is quoted back"
+)
+
 _APPLY_REFUSED = "the document was refused whole and nothing was changed:"
 
 # Which sections hold entities, by the key they occupy in the document.
@@ -1443,6 +1455,50 @@ def _change(named: tuple[str, str, object]) -> _Change:
     return _prepare(descriptor, addressed(descriptor, identity), written)
 
 
+
+
+def _distinct_entries(changes: Sequence[_Change]) -> None:
+    """No two entries of a document addressing the same thing.
+
+    A mapping cannot hold one key twice, so a document's own syntax
+    rules out the obvious duplicate and rules out nothing else: a name
+    is made canonical on the way in, and two keys that differ before
+    that are one key after it. `AA-BB-CC-DD-EE-FF` and
+    `aa:bb:cc:dd:ee:ff` are one device; `sam` and ` sam ` are one agent.
+    Left alone, both entries would be staged, both would be answered
+    with an outcome, and the row would hold whichever was written last,
+    which is a result the operator did not choose and could not see they
+    had asked for.
+
+    Asked after preparation, because canonical is what preparation
+    makes: the identity a `_Prepared` carries has been through
+    `_identifier` and a `_DeviceBinding`'s MAC through
+    `normalize_device_bindings`. And asked before the transaction,
+    because it is a question about the document rather than about the
+    store, and nothing about it needs a lock.
+
+    Refused rather than merged, for the reason a claim by code is
+    refused rather than merged: the two entries say different things
+    about one thing and only whoever wrote them knows which is meant.
+    """
+    seen: set[tuple[str, tuple[str, ...]]] = set()
+    for change in changes:
+        addressed = _addresses(change)
+        if addressed in seen:
+            raise ConfigError(DUPLICATE_ENTRY)
+        seen.add(addressed)
+
+
+def _addresses(change: _Change) -> tuple[str, tuple[str, ...]]:
+    """What one prepared entry addresses: its section, and the canonical
+    parameters under it. The two sections that hold one thing rather
+    than entries address it with nothing, which is what makes them
+    trivially distinct: a document cannot name either twice."""
+    if isinstance(change, _Prepared):
+        return (change.descriptor.moved_key, change.identity)
+    if isinstance(change, _DeviceBinding):
+        return ("devices", (change.mac,))
+    return ("default_agent", ())
 
 
 def _bound(written: object) -> list[str]:
@@ -2531,6 +2587,7 @@ def _refuse_unresolved(domain: DomainConfig) -> None:
 
 __all__ = [
     "APPLY_LIMIT",
+    "DUPLICATE_ENTRY",
     "addressed",
     "APPLY_LOCATION",
     "Applied",
