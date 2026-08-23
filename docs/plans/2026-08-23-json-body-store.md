@@ -115,6 +115,20 @@ and discoveries; no deviations says so explicitly.
    named in the implementation doc: the volume is reset together
    with the image bump, never after it. The four old revision
    files, the upgrade tests, and their fixtures are deleted.
+   Autogenerate itself becomes RUNNABLE, which it is not today
+   (env.py refuses without a handed-in connection, there is no
+   alembic.ini, and script_location is set programmatically): a
+   small developer entry point, `python -m
+   vinga_server.db.migrations.autogen "<message>"`, opens a
+   scratch database, upgrades it to head, and calls
+   `command.revision(..., autogenerate=True)` against the live
+   metadata, writing the candidate into the versions directory
+   for review. env.py keeps its runtime refusal on the runtime
+   path and accepts the entry point's connection the same way
+   `upgrade_to_head` hands one in. That module is the deliverable
+   that makes the issue's adopt-autogenerate decision true, and
+   it passes the deletion test by being the only way to run the
+   command at all.
 5. **The ADR addendum is the compatibility record.** Appended to
    `docs/adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md`
    in the addendum style it already carries: the decision, the
