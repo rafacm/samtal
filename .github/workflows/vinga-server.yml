@@ -24,6 +24,28 @@ on:
   # steps are gated on a push to main.
   workflow_dispatch:
 
+# One live run per branch. A pull request that gets a second push
+# before its first run finishes is the ordinary shape of this
+# repository's own pipeline: a PR is opened and its milestone checkbox
+# is ticked a minute later, so two full runs of everything below start
+# on the same branch and only the second one's result is ever read.
+# Cancelling the superseded one is the whole of what this buys, and on
+# a lockfile-changing PR it buys a little more: the two runs raced to
+# save the same new uv cache key, and the loser logged "another job may
+# be creating this cache" and skipped. That is the inter-run sibling of
+# the intra-run race PR #256 fixed with `save-cache: false` on the
+# integration lane, and it goes away when there is no second run.
+#
+# Never on a push to main, which is why the cancellation is an
+# expression rather than a plain `true`. The `image` job publishes to
+# the registry on exactly that event, and a merge cancelled part-way
+# through by the next merge would leave `latest` pointing at whichever
+# build happened to survive. Merges to main run to completion, however
+# many of them queue up.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 defaults:
   run:
     working-directory: vinga-server

@@ -46,7 +46,13 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   which prints it and fails the run; without the repair a worker's
   residual would have vanished silently. And the MCP HTTP suite's
   free-port helper holds its socket for the test rather than releasing
-  the number and assuming nothing takes it.
+  the number and assuming nothing takes it. The workflow also caps the
+  compute thread pools (`OMP_NUM_THREADS` and friends), since
+  onnxruntime sizes its pool to the core count and four workers on four
+  cores would otherwise ask for sixteen threads, and it gained a
+  `concurrency` block so a superseded pull-request run is cancelled
+  instead of racing the run that replaced it. A push to main is never
+  cancelled: that is the event that publishes the image.
 
 - **The event reference names the field behind each `%` position**
   (#241). `vinga-server events reference` and the committed
