@@ -923,12 +923,21 @@ def _set_secret_words(stored: Mapping[str, object]) -> list[str]:
     holding a dot is still one name, and a second spelling of the rule
     here would render a command addressing an entity that does not
     exist.
+
+    `--` after the command's own words, and it is not decoration.
+    Nothing about a name forbids a leading dash: the write path refuses
+    a slash and a control character, and `--from-env` is a legal
+    provider name that a `set-secret` would otherwise read as an option
+    and refuse. The marker is the shape an operator has to use to write
+    such a name in the first place, so the exported command is the
+    command they typed.
     """
     holder = _SECRET_HOLDER[str(stored["kind"])]
     return [
         *PROGRAM.split(),
         "set-secret",
         holder.name,
+        "--",
         *addressed(holder, str(stored["identity"])),
         str(stored["slot"]),
     ]
