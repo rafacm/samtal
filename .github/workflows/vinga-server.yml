@@ -362,6 +362,39 @@ jobs:
           print(f"migrated a fresh conversation store from {installed.parent}")
           PY
 
+      # And the OpenAPI document, from the same installed artifact and
+      # for the same reason. Since #242 the document's own prose lives
+      # in data files under the package rather than in string literals,
+      # so the drift check above no longer proves what a deployment
+      # renders: a checkout makes every file readable whether it was
+      # packaged or not, and a wheel that carried the code without the
+      # prose would pass it and then refuse at import on a deployment.
+      # This renders the document from the wheel with the source tree
+      # off sys.path and diffs it against the committed copy, which is
+      # the only proof a checkout run cannot fake. It reuses the venv
+      # the step above built, so the wheel is built and installed once.
+      - name: Render the OpenAPI document from the built wheel
+        run: |
+          cd "$RUNNER_TEMP/wheel-run"
+          "$RUNNER_TEMP/wheel-venv/bin/python" -P - > "$RUNNER_TEMP/wheel-openapi.json" <<'PY'
+          import pathlib
+          import sys
+
+          import vinga_server
+          from vinga_server.config import docgen
+
+          installed = pathlib.Path(vinga_server.__file__).resolve()
+          if "site-packages" not in installed.parts:
+              sys.exit(f"the source tree was imported, not the wheel: {installed}")
+          sys.stdout.write(docgen.openapi())
+          print(f"rendered the OpenAPI document from {installed.parent}", file=sys.stderr)
+          PY
+          cd "$GITHUB_WORKSPACE/vinga-server"
+          if ! diff -u ../docs/reference/api-openapi.json "$RUNNER_TEMP/wheel-openapi.json"; then
+            echo "::error::the built wheel renders a different OpenAPI document than the committed one; the likely cause is a description file under src/vinga_server/config/api_descriptions/ that the wheel did not carry"
+            exit 1
+          fi
+
   # The image is built and smoke-tested on every push to main and on
   # every manual dispatch, and published only on a push to main.
   # `needs: [unit, integration]` is what makes publishing conditional on
