@@ -63,7 +63,7 @@ from vinga_server.app import create_app
 from vinga_server.config import cli
 from vinga_server.config.boot import load_boot_config
 from vinga_server.config.models import API_MOUNT_PATH
-from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
+from vinga_server.config.secrets import MASK, MASTER_KEY_ENV, generate_key
 from vinga_server.ota import OTA_PATH
 
 # The one variable a fileless boot needs: where the database goes. The
@@ -597,3 +597,64 @@ def test_a_board_is_onboarded_by_the_code_on_its_screen(
     # waiting is no longer waiting for anything.
     assert run("pending") == 0
     assert code not in capsys.readouterr().out
+
+
+# A credential's whole life over the wire
+#
+# The one surface where what crosses the connection matters as much as
+# what comes back: the value is read here, sent as a request body, stored
+# encrypted, and never travels again. Both doors it is entered through
+# are driven, because they are different code paths on this side of the
+# socket and the same one on the other.
+
+
+def test_a_credential_is_stored_masked_and_cleared(
+    deployed: Live, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Two slots on two kinds, entered the two ways the command takes,
+    read back masked, exported as the commands that refill them, and
+    cleared.
+
+    The entity the provider credential lands on is the one no agent
+    references, so a reload never builds it and the value is never asked
+    for by anything but this test.
+    """
+    assert run("set-secret", "provider", "llm", "spare", "api_key", "--from-env", SECRET_ENV) == 0
+    assert capsys.readouterr().out.startswith("wrote ")
+
+    assert run("set-secret", "mcp-server", "weather", "headers.Authorization", stdin=SECRET) == 0
+    assert capsys.readouterr().out.startswith("wrote ")
+
+    assert run("show", "provider", "llm", "spare") == 0
+    entity = capsys.readouterr().out
+    assert f"api_key: {MASK}" in entity
+    assert SECRET not in entity
+
+    assert run("show") == 0
+    everything = capsys.readouterr().out
+    assert SECRET not in everything
+    # The environment reference the stored value displaces is marked
+    # rather than left silent, which is #192's marker seen from the far
+    # end of a connection.
+    assert "used instead of api_key_env: ANTHROPIC_API_KEY" in everything
+
+    assert run("export") == 0
+    exported = capsys.readouterr().out
+    # A credential never travels in a read, so what the document carries
+    # is the command that enters it, and never the mask, which a
+    # creating write would refuse.
+    assert f"{cli.PROGRAM} set-secret provider llm spare api_key" in exported
+    assert f"{cli.PROGRAM} set-secret mcp-server weather headers.Authorization" in exported
+    assert MASK not in exported
+    assert SECRET not in exported
+
+    assert run("clear-secret", "provider", "llm", "spare", "api_key") == 0
+    assert capsys.readouterr().out.startswith("wrote ")
+    assert run("clear-secret", "mcp-server", "weather", "headers.Authorization") == 0
+    assert capsys.readouterr().out.startswith("wrote ")
+
+    assert run("show", "provider", "llm", "spare") == 0
+    cleared = capsys.readouterr().out
+    assert MASK not in cleared
+    # And what the stored value was covering is back in view.
+    assert "api_key_env: ANTHROPIC_API_KEY" in cleared
