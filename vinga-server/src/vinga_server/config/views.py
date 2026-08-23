@@ -51,6 +51,7 @@ from vinga_server.config.models import (
     PROVIDER_STAGES,
     AgentConfig,
     AgentDefaults,
+    FillerConfig,
     McpServerConfig,
     PromptFragmentConfig,
     ProviderConfig,
@@ -216,14 +217,23 @@ def _declared(entry: object, secret_key: Callable[[str], bool]) -> dict[str, obj
     provider's options, which are the implementation's and so cannot be
     declared).
 
-    Declaration order is the display order, and the registry says where
-    a shape departs from it. Order is not presentation here: JSON and
-    YAML both keep the order a mapping was built in, so this is the
-    order an operator reads an entry in and the order the committed
-    bytes of a response have.
+    Declaration order is the display order, and this module is where
+    the two shapes that depart from the display rules say so. Order is
+    not presentation here: JSON and YAML both keep the order a mapping
+    was built in, so this is the order an operator reads an entry in and
+    the order the committed bytes of a response have.
     """
     model = type(entry)
-    shown = entities.always_shown(model)
+    # A field is shown at whatever it holds, and the only thing left out
+    # is a default that means absence (null, an empty list, an empty
+    # mapping), so a default that is a real value is shown at it. The
+    # filler section is the one departure: its phrase list is what the
+    # section is, so an entry with none is a filler that plays nothing,
+    # which is a state to read off the section rather than to infer from
+    # a key that is not there. The empty list is unreachable while the
+    # feature is on, since `FillerConfig` refuses `enabled` without
+    # phrases, so what this shows is the disabled entry as it stands.
+    shown = ("phrases",) if model is FillerConfig else ()
     data: dict[str, object] = {}
     for name in _order(model):
         field = model.model_fields[name]
@@ -238,8 +248,16 @@ def _declared(entry: object, secret_key: Callable[[str], bool]) -> dict[str, obj
 def _order(model: type[BaseModel]) -> list[str]:
     """The field names of one model, in the order a display shows them:
     whatever the shape leads with, and then the rest as the model
-    declares them."""
-    lead = entities.leads_with(model)
+    declares them.
+
+    Declaration order is display order, with one departure, which is the
+    one thing declaration order cannot say: that a field declared last
+    is read first. An agent is its prompt, and the stages it overrides
+    qualify it, so a read of one opens with the prompt; `AgentConfig`
+    declares it after the layer fields it inherits, which is an ordering
+    of the class rather than of the entry.
+    """
+    lead = ("prompt",) if model is AgentConfig else ()
     return [*lead, *(name for name in model.model_fields if name not in lead)]
 
 

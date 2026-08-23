@@ -82,22 +82,6 @@ def test_the_documented_shapes_are_the_two_entity_tiers() -> None:
     assert len(names) == len(set(names)), f"a name is used twice: {', '.join(names)}"
 
 
-def test_every_display_fact_names_a_field_the_shape_declares() -> None:
-    """The two facts a display asks a shape about are field names, and a
-    name that is not one is a rule about nothing: a lead field the model
-    does not have would be reached for and raise, and a field held
-    always-shown after it was renamed would silently stop being shown.
-    Both are the kind of drift the registry exists to end, so they are
-    checked against the model rather than trusted."""
-    for shape in (*entities.ENTITIES, *entities.NESTED):
-        declared = set(shape.model.model_fields)
-        for fact, named in (
-            ("leads_with", shape.leads_with),
-            ("always_shown", shape.always_shown),
-        ):
-            assert declared.issuperset(named), f"{shape.name}.{fact}: {named}"
-
-
 def test_exactly_two_kinds_can_hold_a_stored_secret() -> None:
     """The two-member `EntityKind` is the decision; the descriptor fact
     is the same decision written where a generic write path reads it,
