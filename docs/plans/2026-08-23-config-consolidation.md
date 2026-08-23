@@ -146,7 +146,30 @@ explicitly.
    their only caller, per the deletion test. The wire-shape
    models stay, being the contract. Each name's disposition is
    enumerated in the implementation doc.
-6. **The proof surface.** `uv run vinga-server config openapi`
+7. **The `writes.py` fold keeps its guarantee through the
+   differential pin, and its census is stated honestly.** The
+   module is 13 f-string factories, one constant-returning
+   function, and two branching decisions (`binding_notice`,
+   `secret_notice`, whose docstrings move with their logic to the
+   one place each lands). Seven sentences have two call sites
+   (api and cli-local); the guarantee the module's docstring
+   claims (the break-glass path and the ordinary one cannot
+   describe the same act differently) is ALREADY pinned by
+   `test_a_local_write_acknowledges_what_the_api_acknowledges`,
+   which runs each mutating act both ways and asserts equal
+   output; that test is a differential assertion, not a wording
+   pin, is explicitly exempt from decision 4's retreat, and is
+   named in the module-deletion commit as the surviving home of
+   the rationale. M1 also includes the mechanical import redirect
+   the fold forces: the five notice constants `writes.py`
+   re-exports from `entities.py` are imported by eight test
+   files, five outside the config family
+   (`test_app_lifespan.py`, `test_device_bindings.py` unit and
+   integration, `test_activation.py`, `test_mcp_reload.py`);
+   redirecting those imports to `entities` carries no assertion
+   change, which is what lets M1 land byte-identical with none of
+   M2's wording work.
+8. **The proof surface.** `uv run vinga-server config openapi`
    byte-identical against the committed document at every commit
    of the milestone; `config reference` (domain docgen)
    byte-identical unless decision 2's descriptor shrink removes a
