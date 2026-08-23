@@ -16,15 +16,25 @@ the server.
 Since #120 there is a second database beside this one, and the
 machinery below is written once for both: `open_at`, `database_path`,
 `write_engine`, `existing_engine`, `upgrade_to_head` and
-`migration_failure` take the filename and the migrations directory as
-arguments, and the two functions named for `vinga.db` supply this
-database's values. What a caller of the parameterized half gets is what
-this one has always had, including the `ConfigError` sentences: every
-failure a second database can hit is a failure to write inside
-`server.database.dir`, which is the key both of them live under.
+`migration_failure` take the filename, the migrations directory and
+what that chain has superseded as arguments, and the two functions named
+for `vinga.db` supply this database's values. What a caller of the
+parameterized half gets is what this one has always had, including the
+`ConfigError` sentences: every failure a second database can hit is a
+failure to write inside `server.database.dir`, which is the key both of
+them live under.
+
+The one thing that is not written once for both is what a database
+stamped at a revision its chain no longer has is told. That answer is a
+fact of one chain's own history, so it is supplied by the caller that
+owns the chain rather than assumed here: the domain database hands in
+the revisions its squash deleted and the sentence they earn, and the
+conversations database, which has deleted none, hands in nothing and
+keeps the ordinary migration-failure sentence.
 """
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote
 
@@ -39,10 +49,32 @@ from vinga_server.config.loader import ConfigError, DatabaseBusyError, StorageEr
 
 DATABASE_FILENAME = "vinga.db"
 
-# The revisions the domain chain deleted, named one by one because the
-# set is closed and will never grow: the squash (#243) replaced 0001 to
-# 0004 with a single baseline, and no later change can add to a list of
-# what that squash removed.
+@dataclass(frozen=True)
+class Superseded:
+    """What one chain deleted, and what a database still stamped at one
+    of those is told.
+
+    A fact of one database's own history, which is why it is declared by
+    the caller that owns that history rather than known here. The
+    sentence says to throw a file away, so the kind of database it is
+    about has to be the kind the sentence is true of: telling the owner
+    of a conversations database to re-seed their configuration would be
+    advice about the wrong file, and acting on it would delete recorded
+    conversations that the store is at pains to erase physically when it
+    is asked to.
+
+    `revisions` is closed by construction: it is the list of what a
+    squash removed, and no later change can add to it. `sentence` takes
+    the database's path as `{path}`.
+    """
+
+    revisions: frozenset[str]
+    sentence: str
+
+
+# The domain chain's own answer. The squash (#243) replaced revisions
+# 0001 to 0004 with a single baseline, so those four are named one by
+# one.
 #
 # A closed set rather than "any revision this build cannot find", and
 # the difference is the whole of the arm below. Two databases produce
@@ -51,23 +83,23 @@ DATABASE_FILENAME = "vinga.db"
 # written by a NEWER build and then met by an older image, which is
 # current and must not be touched. Nothing in an unknown revision id
 # says which it is; membership here does.
-_SUPERSEDED_REVISIONS = frozenset({"0001", "0002", "0003", "0004"})
-
-# What a database still stamped at one of those is told. It is the
-# operator-facing whole of "pre-reshape domain databases are
-# unsupported": such a database reaches here rather than being taken for
-# current and failing later on a column that is gone.
 #
+# The sentence is the operator-facing whole of "pre-reshape domain
+# databases are unsupported": such a database reaches here rather than
+# being taken for current and failing later on a column that is gone.
 # The next step is the only thing worth saying, because there is no
 # other: reset the volume and re-seed, which is what the ADR addendum
 # records and what the deploy runs.
-_UNSUPPORTED_REVISION = (
-    "the database at {path} is stamped at a revision this build does not carry, "
-    "which is what a domain database written before the storage reshape looks "
-    "like: its migration chain was replaced by a single baseline and cannot be "
-    "upgraded in place. Reset the database directory and re-seed the "
-    "configuration; docs/adr/2026-08-20-database-upgrades-have-a-compatibility-"
-    "floor.md records the decision and what it costs"
+DOMAIN_SUPERSEDED = Superseded(
+    revisions=frozenset({"0001", "0002", "0003", "0004"}),
+    sentence=(
+        "the database at {path} is stamped at a revision this build does not carry, "
+        "which is what a domain database written before the storage reshape looks "
+        "like: its migration chain was replaced by a single baseline and cannot be "
+        "upgraded in place. Reset the database directory and re-seed the "
+        "configuration; docs/adr/2026-08-20-database-upgrades-have-a-compatibility-"
+        "floor.md records the decision and what it costs"
+    ),
 )
 
 # How long a connection waits for another one's write lock before it
@@ -96,7 +128,9 @@ def open_database(directory: str | Path) -> Engine:
     directory the server cannot write is the server's problem wherever
     it is found. The messages are the same ones this has always
     raised."""
-    return open_at(directory, DATABASE_FILENAME, _MIGRATIONS_DIR)
+    return open_at(
+        directory, DATABASE_FILENAME, _MIGRATIONS_DIR, superseded=DOMAIN_SUPERSEDED
+    )
 
 
 def open_at(
@@ -104,6 +138,7 @@ def open_at(
     filename: str,
     migrations: Path,
     secure_delete: bool = False,
+    superseded: "Superseded | None" = None,
 ) -> Engine:
     """`open_database` for a database named by its caller: create the
     directory, open the file, run its own migration chain to head.
@@ -117,6 +152,13 @@ def open_at(
     it costs a write of zeros over freed pages, which is the price of
     deletion being physical rather than an entry removed from an index,
     and the domain configuration has no right-to-delete to honor.
+
+    `superseded` is what this chain has deleted and what a database
+    still stamped at one of those is told, and it defaults to nothing
+    for the reason `Superseded` gives: a chain that has deleted no
+    revision has no such database to answer, and a sentence about
+    re-seeding a configuration is the wrong advice about any file but
+    one.
     """
     path = database_path(Path(directory), filename)
     engine = write_engine(path, secure_delete=secure_delete)
@@ -132,7 +174,7 @@ def open_at(
         raise
     except Exception as exc:
         engine.dispose()
-        problem = migration_failure(exc, path)
+        problem = migration_failure(exc, path, superseded)
     if problem is not None:
         raise problem
     return engine
@@ -235,7 +277,9 @@ def existing_engine(
     return engine
 
 
-def migration_failure(exc: Exception, path: Path) -> ConfigError:
+def migration_failure(
+    exc: Exception, path: Path, superseded: "Superseded | None" = None
+) -> ConfigError:
     """The lock that did not arrive inside the busy timeout, told from
     everything else. The distinction is the only one a caller answering
     with a status code needs, and it is made on the driver's own message
@@ -254,13 +298,15 @@ def migration_failure(exc: Exception, path: Path) -> ConfigError:
     else.
 
     Narrow on purpose, because the sentence it answers with says to
-    throw a database away. Three things have to hold before it is said,
+    throw a database away. Four things have to hold before it is said,
     and each of them rules out a case that would be told to destroy
-    something it should keep. It has to be a `CommandError`, which a
-    driver failure is not. Its cause has to be Alembic's own
+    something it should keep. The caller has to have handed in a
+    `superseded`, so a database whose chain deleted nothing is never
+    told its chain deleted something. It has to be a `CommandError`,
+    which a driver failure is not. Its cause has to be Alembic's own
     `ResolutionError`, which is the stored revision not being findable,
     rather than an unreadable script directory or a chain with two
-    heads. And the revision it could not find has to be one this chain
+    heads. And the revision it could not find has to be one that chain
     is known to have deleted: a database stamped at a revision from a
     NEWER build, met by an image that was rolled back, produces exactly
     the same `ResolutionError`, and it is current rather than stranded,
@@ -271,8 +317,8 @@ def migration_failure(exc: Exception, path: Path) -> ConfigError:
     file, since Alembic has already found it, and it is never quoted
     back: it is a value in a file nothing here validates.
     """
-    if _stranded(exc):
-        return StorageError(_UNSUPPORTED_REVISION.format(path=path))
+    if superseded is not None and _stranded(exc, superseded):
+        return StorageError(superseded.sentence.format(path=path))
     detail = str(getattr(exc, "orig", "")) or type(exc).__name__
     problem = (
         f"cannot migrate the database at {path}: {detail}; "
@@ -283,9 +329,10 @@ def migration_failure(exc: Exception, path: Path) -> ConfigError:
     return StorageError(problem)
 
 
-def _stranded(exc: Exception) -> bool:
-    """Whether this failure is a database left behind by the squash,
-    which is the one failure answered by throwing the file away.
+def _stranded(exc: Exception, superseded: Superseded) -> bool:
+    """Whether this failure is a database left behind by a squash of
+    this chain, which is the one failure answered by throwing the file
+    away.
 
     The cause chain is walked rather than only its first link, because
     what makes this the right question is Alembic's `ResolutionError`
@@ -299,7 +346,7 @@ def _stranded(exc: Exception) -> bool:
     while cause is not None and id(cause) not in seen:
         seen.add(id(cause))
         if isinstance(cause, ResolutionError):
-            return cause.argument in _SUPERSEDED_REVISIONS
+            return cause.argument in superseded.revisions
         cause = cause.__cause__
     return False
 
@@ -397,6 +444,8 @@ def upgrade_to_head(engine: Engine, migrations: Path = _MIGRATIONS_DIR) -> None:
 __all__ = [
     "BUSY_TIMEOUT_MS",
     "DATABASE_FILENAME",
+    "DOMAIN_SUPERSEDED",
+    "Superseded",
     "database_path",
     "existing_engine",
     "migration_failure",

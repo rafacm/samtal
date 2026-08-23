@@ -250,6 +250,21 @@ def test_a_database_from_the_squashed_chain_says_to_reset(
     assert "Can\'t locate" not in problem
 
 
+def test_the_domain_database_answers_only_for_its_own_deleted_revisions(
+    tmp_path: Path,
+) -> None:
+    """The other direction of the same seam: `0001` is a live revision of
+    the conversations chain and a deleted one of this chain, and what
+    decides is which chain was opened rather than the id alone."""
+    directory = tmp_path / "db"
+    _stamped(directory, "0001")
+
+    with pytest.raises(ConfigError) as caught:
+        open_database(directory)
+
+    assert "Reset the database directory and re-seed" in str(caught.value)
+
+
 def test_a_database_from_a_newer_build_is_not_told_to_delete_itself(
     tmp_path: Path,
 ) -> None:
@@ -275,6 +290,44 @@ def test_a_database_from_a_newer_build_is_not_told_to_delete_itself(
     assert "before the storage reshape" not in problem
     assert "cannot migrate the database" in problem
     assert "server.database.dir" in problem
+
+
+def test_the_conversations_database_is_never_told_the_domain_sentence(
+    tmp_path: Path,
+) -> None:
+    """The two databases share every line of the opening machinery and
+    must not share this one sentence.
+
+    The conversations chain deleted nothing, so no database of its can be
+    stranded by a squash, and the domain's advice is about the other
+    file: it would send whoever met an unreadable conversations database
+    to reset a volume and re-seed a configuration, destroying recorded
+    conversations the store is otherwise careful to erase physically only
+    when asked.
+    """
+    from vinga_server.conversations.store import open_conversations
+
+    directory = tmp_path / "db"
+    engine = open_conversations(directory)
+    try:
+        with engine.begin() as connection:
+            # `0001` is a revision the conversations chain really has, so
+            # this is the domain's superseded set met on the other
+            # database: the id that would trip the arm if the answer were
+            # shared instead of supplied.
+            connection.execute(
+                text("update alembic_version set version_num = '0001_not_this_chain'")
+            )
+    finally:
+        engine.dispose()
+
+    with pytest.raises(ConfigError) as caught:
+        open_conversations(directory)
+
+    problem = str(caught.value)
+    assert "Reset the database directory" not in problem
+    assert "re-seed the configuration" not in problem
+    assert "cannot migrate the database" in problem
 
 
 def test_an_alembic_failure_that_is_not_a_stranded_database_is_not_told_to_reset(
