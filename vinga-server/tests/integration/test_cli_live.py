@@ -267,6 +267,16 @@ def written(directory: Path, name: str, body: object) -> str:
 # nothing is ever connected for them and a reload starts and stops
 # nothing.
 
+# Named rather than written into the document below, because the
+# singleton's own cycle writes it a second time and two spellings of one
+# entity would be two chances to disagree about it.
+AGENT_DEFAULTS: dict[str, object] = {
+    "llm": "brain",
+    "asr": "ears",
+    "tts": "voice",
+    "vad": "gate",
+}
+
 DEPLOYMENT: dict[str, object] = {
     "providers": {
         "llm": {
@@ -284,7 +294,7 @@ DEPLOYMENT: dict[str, object] = {
         "weather": {"transport": "streamable_http", "url": "https://example.invalid/mcp"},
     },
     "prompt_fragments": {"household": {"text": "The bins go out on Tuesday."}},
-    "agent_defaults": {"llm": "brain", "asr": "ears", "tts": "voice", "vad": "gate"},
+    "agent_defaults": AGENT_DEFAULTS,
     "agents": {"sam": {"prompt": "You are Sam.", "prompt_includes": ["household"]}},
 }
 
@@ -344,3 +354,122 @@ def test_the_same_document_twice_changes_nothing(
     assert outcomes and set(outcomes) == {"unchanged"}
     # Nothing was written, so nothing is waiting on a boundary either.
     assert captured.err == ""
+
+
+# One entity's life, per kind
+#
+# The five commanded kinds behave alike by construction (#139 made the
+# reads and the writes derive from the descriptor registry), so what is
+# worth driving over the wire is one entity's whole life once per kind:
+# written from a fragment, read back, exported, written again from the
+# inline pairs that assemble the same mapping, and taken away.
+#
+# The entries are named so that nothing in the deployment references
+# them, which is what lets the delete at the foot of the cycle succeed:
+# a referenced entry is refused, and that refusal is a case of its own
+# further down.
+
+CYCLE: tuple[tuple[str, tuple[str, ...], dict[str, object], tuple[str, ...], bool], ...] = (
+    (
+        "provider",
+        ("llm", "spare-brain"),
+        {"type": "mock", "reply": "Spare."},
+        ("type=mock", "reply=Spare."),
+        True,
+    ),
+    (
+        "mcp-server",
+        ("shed",),
+        {"transport": "stdio", "command": "/bin/echo"},
+        ("transport=stdio", "command=/bin/echo"),
+        True,
+    ),
+    (
+        "prompt-fragment",
+        ("radio",),
+        {"text": "The radio is called Bosse."},
+        ("text=The radio is called Bosse.",),
+        True,
+    ),
+    (
+        "agent",
+        ("spare-agent",),
+        {"prompt": "You are a spare."},
+        ("prompt=You are a spare.",),
+        True,
+    ),
+    # The one entity there is only one of: no identity addresses it and
+    # no verb deletes it, and what it is written with is what the
+    # deployment already holds, because clearing the defaults out from
+    # under an agent that relies on them is a different test's business.
+    (
+        "agent-defaults",
+        (),
+        AGENT_DEFAULTS,
+        ("llm=brain", "asr=ears", "tts=voice", "vad=gate"),
+        False,
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    ("kind", "identity", "fragment", "pairs", "deletable"),
+    CYCLE,
+    ids=[row[0] for row in CYCLE],
+)
+def test_one_entity_is_written_read_exported_and_deleted(
+    deployed: Live,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    kind: str,
+    identity: tuple[str, ...],
+    fragment: dict[str, object],
+    pairs: tuple[str, ...],
+    deletable: bool,
+) -> None:
+    """The whole of one kind's grammar over the wire, in the order an
+    operator meets it.
+
+    The two write forms are asserted against each other rather than
+    against a literal: what `key=value` promises is the store the
+    fragment would have left, and reading the entity back through the
+    same command after each of them is what says so.
+    """
+    path = written(tmp_path, "fragment.yaml", fragment)
+
+    assert run("set", kind, *identity, "-f", path) == 0
+    acknowledged = capsys.readouterr()
+    assert acknowledged.out.startswith("wrote ")
+    # Every write says when it takes effect, and it says it on stderr so
+    # that stdout holds the acknowledgement alone.
+    assert acknowledged.err.strip()
+
+    assert run("show", kind, *identity) == 0
+    shown = document(capsys.readouterr().out)
+    assert fragment.items() <= shown.items()
+
+    assert run("export", kind, *identity) == 0
+    exported = capsys.readouterr().out
+    # The header names the command that writes one back, and the body
+    # under it is the same read `show` renders: export is the writable
+    # projection of the display one, not a second read.
+    assert exported.startswith("# One ")
+    assert f"{cli.PROGRAM} set {kind}" in exported
+    assert document(exported) == shown
+
+    assert run("set", kind, *identity, *pairs) == 0
+    assert capsys.readouterr().out.startswith("wrote ")
+
+    assert run("show", kind, *identity) == 0
+    assert document(capsys.readouterr().out) == shown
+
+    if not deletable:
+        return
+
+    assert run("delete", kind, *identity) == 0
+    assert capsys.readouterr().out.startswith("wrote ")
+
+    assert run("show", kind, *identity) == 1
+    gone = capsys.readouterr()
+    assert gone.out == ""
+    assert "Traceback" not in gone.err
