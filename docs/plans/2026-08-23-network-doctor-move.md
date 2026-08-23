@@ -55,12 +55,31 @@ retire. After the removal, `config doctor` answers the config
 grammar's ordinary invalid-choice sentence through its existing
 ConfigError boundary; nothing new is needed for that.
 
+The dispatch itself gets a no-echo boundary, because the doctor is
+the first command whose ordinary argument can be a secret. Today an
+unrecognized first word falls through to the root argparse parser,
+whose errors echo what was typed, so
+`vinga-server docter https://host/<secret>/` would print the secret
+URL on stderr. `main.py` therefore stops falling through: after the
+word checks, an `argv[1]` that does not start with `-` is an unknown
+command word and answers a fixed sentence naming the known words
+(`config`, `conversations`, `events`, `doctor`) without repeating
+what was typed, exit 2; and the root parser for the remaining
+server-argument shapes gets the conversations-style error override
+(fixed sentences, never argparse's), so no shape echoes. Entry-point
+tests drive `main()` itself: a misspelled `doctor` followed by a
+planted secret-shaped URL asserts the URL appears on no stream, the
+`doctor` word asserts successful dispatch into the new module, and
+`config doctor` asserts the config grammar's refusal.
+
 The honest behavior deltas, all recorded in `CHANGELOG.md`:
 
 - the command's spelling;
 - `ONBOARDING_OFF_FOR_DOCTOR` updates its fix sentence to
   `vinga-server doctor URL`;
-- the doctor's usage errors now come from its own parser (decision 5).
+- the doctor's usage errors now come from its own parser (decision 5);
+- the entry point's unknown-word and root-parser errors become fixed
+  no-echo sentences.
 
 Everything else the doctor prints, refuses and probes is
 byte-identical.
@@ -291,6 +310,13 @@ faithful:
    arguments, so `vinga-server docter https://host/<secret>/`
    prints the secret URL on stderr. The planned tests drive
    `doctor.main()` directly and never cross this path.
+
+   *Resolution* (this commit): decision 1 gains the no-echo dispatch
+   boundary: unknown first words answer a fixed sentence naming the
+   known commands, the root parser's errors become fixed
+   conversations-style sentences, entry-point tests plant a
+   secret-shaped URL behind a misspelled word and assert absence,
+   and the delta joins the changelog list.
 
 2. **P1: the import-weight contract contradicts the eager import
    graph.** `onboarding/__init__.py` eagerly imports `unbound`,
