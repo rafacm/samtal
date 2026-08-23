@@ -2179,7 +2179,7 @@ def _binding_notice(unloaded: Sequence[str] = (), snapshot_only: bool = False) -
     a running server re-reads the rows, and a server serving a
     configuration it was handed re-reads nothing. The one true thing
     left to say is that the write is stored, which is what the sentence
-    says. Written here rather than at the four call sites because this
+    says. Written here rather than at the five call sites because this
     is where a device write's answer is decided, and there is no second
     write path that decides it: the CLI's `--local` device delete has no
     loaded server to ask and answers the live sentence plainly.
