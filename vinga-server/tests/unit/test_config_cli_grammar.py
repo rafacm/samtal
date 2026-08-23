@@ -269,3 +269,160 @@ def test_a_set_help_lists_the_model_it_writes(
         given = docgen.default(info)
         held = "(required)" if given == "required" else f"(default: {given})"
         assert _said(held) in _said(helped), name
+
+
+# The two positions a global option is given in
+#
+# `--config`, `--api-url` and `--local` are accepted before the command
+# word and after it, because both readings are natural: `vinga-server
+# --config path` is how the server takes it, and options after their
+# subcommand is how everything else does. What makes that subtle is the
+# merge: a value given before the command must survive a command that
+# was not given one, which argparse spelled as `default=SUPPRESS` and
+# the Typer layer spells as a per-position fold.
+#
+# Stated separately for the two positions the grammar really has. At the
+# root all of them are accepted before every command. At the leaf the
+# exclusions bind, and they are exclusions with reasons: the three
+# documentation commands render the models and the routes, so they open
+# no database, reach no server and take none of the three, and `ota-url`
+# derives a string from the file half and contacts nothing, so it takes
+# `--config` and nothing that addresses an API.
+#
+# Parameterized over the options the root declares rather than over a
+# list of them, so a fourth global option inherits the matrix by being
+# declared.
+
+ROOT_OPTIONS = frozenset(
+    spelling
+    for parameter in cli.command().params
+    for spelling in parameter.opts
+    if spelling != "--help"
+)
+
+# What each command takes of them where it is not all of them.
+LEAF_EXCLUSIONS: dict[tuple[str, ...], frozenset[str]] = {
+    ("ota-url",): frozenset({"--config"}),
+    ("schema",): frozenset(),
+    ("reference",): frozenset(),
+    ("openapi",): frozenset(),
+}
+
+
+def test_the_root_position_takes_every_global_option() -> None:
+    """Read off the root rather than listed, so a fourth global option
+    joins the matrix below by being declared. The three are named here
+    because they are what exists, and a fourth is a deliberate edit to
+    this line rather than a silent widening."""
+    assert ROOT_OPTIONS == {"--config", "--api-url", "--local"}
+
+
+@pytest.mark.parametrize(
+    "row", cli.COMMANDS, ids=[" ".join(row.words) for row in cli.COMMANDS]
+)
+def test_every_command_takes_the_global_options_in_its_own_position(row) -> None:
+    """The leaf half: a command declares its own copy of each global
+    option the exclusions leave it, and of no other."""
+    declared = {
+        spelling for parameter in _leaf(row.words).params for spelling in parameter.opts
+    }
+
+    assert declared & ROOT_OPTIONS == LEAF_EXCLUSIONS.get(row.words, ROOT_OPTIONS)
+
+
+def _positions(option: str, tmp_path: Path) -> tuple[str, str, str, str]:
+    """Two values for one option, and the address a command reaches when
+    each of them wins.
+
+    `--config` names a file whose `server.port` is what the default
+    address is built from, and `--api-url` is the address, so both are
+    read back the same way: through the base URL the client was built
+    with.
+    """
+    if option == "--config":
+        return (
+            _configured(tmp_path, 9101),
+            _configured(tmp_path, 9102),
+            "http://127.0.0.1:9101/api",
+            "http://127.0.0.1:9102/api",
+        )
+    return (
+        "http://127.0.0.1:9101/api",
+        "http://127.0.0.1:9102/api",
+        "http://127.0.0.1:9101/api",
+        "http://127.0.0.1:9102/api",
+    )
+
+
+def _configured(tmp_path: Path, port: int) -> str:
+    path = tmp_path / f"config-{port}.yaml"
+    path.write_text(f"server:\n  port: {port}\n", encoding="utf-8")
+    return str(path)
+
+
+# The two that carry a value, which are the two that can conflict.
+# `--local` is presence-only and has no value to disagree about, so its
+# cases are the two below this pair.
+VALUE_OPTIONS = ("--config", "--api-url")
+
+
+@pytest.mark.parametrize("option", VALUE_OPTIONS)
+def test_a_value_before_the_command_survives_a_command_that_names_none(
+    run, tmp_path: Path, option: str
+) -> None:
+    """The one the merge exists for: without it the command's own empty
+    copy would overwrite what came before it, and every invocation that
+    named a file up front would read the default one."""
+    before, _, reached, _ = _positions(option, tmp_path)
+
+    assert run(option, before, "list") == 0
+
+    assert run.reached[-1] == reached
+
+
+@pytest.mark.parametrize("option", VALUE_OPTIONS)
+def test_a_value_after_the_command_is_taken_on_its_own(
+    run, tmp_path: Path, option: str
+) -> None:
+    _, after, _, reached = _positions(option, tmp_path)
+
+    assert run("list", option, after) == 0
+
+    assert run.reached[-1] == reached
+
+
+@pytest.mark.parametrize("option", VALUE_OPTIONS)
+def test_a_value_after_the_command_beats_one_before_it(
+    run, tmp_path: Path, option: str
+) -> None:
+    """The nearer position wins, which is the half nothing used to
+    prove: the two coverages that existed were both of a flag."""
+    before, after, _, reached = _positions(option, tmp_path)
+
+    assert run(option, before, "list", option, after) == 0
+
+    assert run.reached[-1] == reached
+
+
+def test_the_flag_before_the_command_survives_a_command_that_does_not_repeat_it(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--local` is presence-only, so what it has instead of a conflict
+    is this: a flag that is not there says nothing, and cannot unsay a
+    flag that is. Read back through the server not being reached, which
+    is what the break-glass path is."""
+    assert run("--local", "show") == 0
+
+    assert run.reached == []
+    assert "bypassing the configuration API" in capsys.readouterr().err
+
+
+def test_the_flag_in_both_positions_is_the_same_flag(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """And the other half of presence-only: given twice it is given, and
+    the preamble is printed once rather than once per position."""
+    assert run("--local", "show", "--local") == 0
+
+    assert run.reached == []
+    assert capsys.readouterr().err.count("bypassing the configuration API") == 1
