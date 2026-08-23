@@ -21,6 +21,7 @@ import struct
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel
 from sqlalchemy import text
 
 from vinga_server.capture import CAPTURE_RATE, CaptureStore
@@ -107,16 +108,35 @@ def planted(store: Any, *statements: Any) -> None:
 
     White-box, deliberately: what these suites are about is a row no
     current write can produce, because the current write is the one
-    whose output is not the thing under test. A row from before a column
-    existed, a row from before a normalization landed, and a row holding
-    a value today's writer would have refused are all rows a running
-    deployment can have, arriving from an upgrade, from another build,
-    or from a file something else corrupted, and reading one safely is
-    the promise being kept.
+    whose output is not the thing under test. A row from before a
+    normalization landed, and a row holding a value today's writer would
+    have refused, are both rows a running deployment can have, arriving
+    from another build or from a file something else corrupted, and
+    reading one safely is the promise being kept.
+
+    Since the entity tables became one body per row (#243) a plant is one
+    of two things, and which one is a decision the test makes. A plant of
+    lawful state, which the repository could have written itself, goes
+    through `body` below so the row is the model's own dump. A plant of a
+    malformed or old-shaped row is a hand-written string, deliberately:
+    what such a test pins is the reader, and a dump would have to be
+    talked into producing the very shape the reader is being asked to
+    survive.
     """
     with store._engine.begin() as connection:
         for statement in statements:
             connection.execute(statement)
+
+
+def body(entry: BaseModel) -> str:
+    """One entity's row body as the repository writes it.
+
+    `exclude_unset`, matching `config.store._to_row`, and for the reason
+    that lives there: `McpServerConfig` refuses a field of the other
+    transport that is present in `model_fields_set`, so a plant that
+    named every field would write rows the loader then refuses.
+    """
+    return entry.model_dump_json(exclude_unset=True)
 
 
 # --- an agent's memory file, made unreadable --------------------------

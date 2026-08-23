@@ -185,7 +185,9 @@ def test_no_boundary_hands_out_pydantics_rendering_of_the_name(
         # A row nothing here wrote, which is how such a name gets stored
         # at all: a hand edit, a restore, a database from somewhere else.
         with engine.begin() as connection:
-            connection.execute(schema.prompt_fragments.insert().values(name=name, text="a"))
+            connection.execute(
+                schema.prompt_fragments.insert().values(name=name, body='{"text": "a"}')
+            )
         with pytest.raises(StorageError) as loaded:
             store.load()
         caught.append(loaded.value)

@@ -658,14 +658,15 @@ def test_a_row_of_the_wrong_shape_is_reported_rather_than_raised(
     engine = open_database(tmp_path / "db")
     try:
         with engine.begin() as connection:
-            connection.execute(update(schema.providers).values(options="not an object"))
+            connection.execute(update(schema.providers).values(body="not json at all"))
     finally:
         engine.dispose()
 
     for argv in (("list",), ("show",), ("show", "provider", "llm", "claude")):
         assert run(*argv) == 1
         captured = capsys.readouterr()
-        assert "options" in captured.err
+        assert "providers.llm.claude" in captured.err
+        assert "cannot be read as configuration" in captured.err
         assert "Traceback" not in captured.err
 
 

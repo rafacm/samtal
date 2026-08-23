@@ -7,6 +7,7 @@ what lets a deployment be built up from nothing in the natural order
 without the first agent and default_agent deadlocking on each other.
 """
 
+import json
 import threading
 from pathlib import Path
 
@@ -137,9 +138,10 @@ def test_a_configuration_round_trips_through_the_rows(store: ConfigStore) -> Non
 
 
 def test_both_mcp_entry_forms_round_trip_through_the_row(store: ConfigStore) -> None:
-    """Each form is stored as itself. The column holds plain JSON, so
-    what a read shows is the fragment a write of it takes back, and the
-    object form gains no key it was not written with."""
+    """Each form is stored as itself. The body is the model's own dump,
+    so what a read shows is the fragment a write of it takes back, and
+    the object form gains no `tools: null` it was not written with:
+    `exclude_unset` carries the difference through the dump."""
     _populate(store)
     written = [
         "home",
@@ -150,8 +152,8 @@ def test_both_mcp_entry_forms_round_trip_through_the_row(store: ConfigStore) -> 
     store.set_mcp_server("shed", {"transport": "stdio", "command": "uvx"})
     store.set_agent("poet", {"prompt": "You are a poet.", "mcp": written})
 
-    row = stored_row(store, select(schema.agents.c.mcp).where(schema.agents.c.name == "poet"))
-    assert row["mcp"] == written
+    row = stored_row(store, select(schema.agents.c.body).where(schema.agents.c.name == "poet"))
+    assert json.loads(row["body"])["mcp"] == written
 
     entry = store.load().domain.agents["poet"]
     assert entry.mcp is not None
@@ -159,9 +161,9 @@ def test_both_mcp_entry_forms_round_trip_through_the_row(store: ConfigStore) -> 
 
 
 def test_an_entrys_guidance_round_trips_byte_for_byte(store: ConfigStore) -> None:
-    """The field is promised verbatim, so what the column holds and what
-    a read gives back are the bytes that were written: the indentation
-    and the trailing newline are somebody's own formatting of a prompt."""
+    """The field is promised verbatim, so what the body holds and what a
+    read gives back are the bytes that were written: the indentation and
+    the trailing newline are somebody's own formatting of a prompt."""
     _populate(store)
     written = "  Ask before unlocking the door.\n\n    The lights are safe.\n"
     store.set_mcp_server(
@@ -170,25 +172,27 @@ def test_an_entrys_guidance_round_trips_byte_for_byte(store: ConfigStore) -> Non
 
     row = stored_row(
         store,
-        select(schema.mcp_servers.c.instructions).where(schema.mcp_servers.c.name == "weather"),
+        select(schema.mcp_servers.c.body).where(schema.mcp_servers.c.name == "weather"),
     )
-    assert row["instructions"] == written
+    assert json.loads(row["body"])["instructions"] == written
     assert store.load().domain.mcp_servers["weather"].instructions == written
     assert store.read_mcp_server("weather").entry.instructions == written
 
 
-def test_a_row_written_before_the_guidance_column_loads_unchanged(
+def test_a_body_written_before_the_guidance_field_loads_unchanged(
     store: ConfigStore,
 ) -> None:
-    """The column is nullable because NULL is the unset the model
-    already means, so a row from a database written before the migration
-    is an entry with no guidance rather than an unreadable row."""
+    """A body carries what the operator wrote and nothing else, so a body
+    written before the field existed simply has no key for it and the
+    entry reads with the field's declared default. Hand-written, because
+    what is pinned is the reader: a dump of today's model would have to
+    be talked into omitting a key it knows about."""
     _populate(store)
     planted(
         store,
         update(schema.mcp_servers)
         .where(schema.mcp_servers.c.name == "home")
-        .values(instructions=None),
+        .values(body='{"transport": "stdio", "command": "uvx", "egress": false}'),
     )
 
     entry = store.load().domain.mcp_servers["home"]
@@ -197,8 +201,9 @@ def test_a_row_written_before_the_guidance_column_loads_unchanged(
 
 
 def test_the_server_guidance_opt_ins_round_trip(store: ConfigStore) -> None:
-    """Both channels' opt-ins are stored in columns of their own, so what
-    a write says about trusting a third party is what a load reads."""
+    """Both channels' opt-ins are in the body as the model declares them,
+    so what a write says about trusting a third party is what a load
+    reads."""
     _populate(store)
     store.set_mcp_server(
         "weather",
@@ -212,25 +217,24 @@ def test_the_server_guidance_opt_ins_round_trip(store: ConfigStore) -> None:
 
     row = stored_row(
         store,
-        select(
-            schema.mcp_servers.c.use_server_instructions,
-            schema.mcp_servers.c.inject_prompts,
-        ).where(schema.mcp_servers.c.name == "weather"),
+        select(schema.mcp_servers.c.body).where(schema.mcp_servers.c.name == "weather"),
     )
-    assert row["use_server_instructions"]
-    assert row["inject_prompts"] == ["house_style", "safety"]
+    stored = json.loads(row["body"])
+    assert stored["use_server_instructions"]
+    assert stored["inject_prompts"] == ["house_style", "safety"]
 
     entry = store.load().domain.mcp_servers["weather"]
     assert entry.use_server_instructions is True
     assert entry.inject_prompts == ["house_style", "safety"]
 
 
-def test_a_row_written_before_the_opt_in_columns_loads_as_opted_out(
+def test_an_entry_that_names_neither_opt_in_loads_as_opted_out(
     store: ConfigStore,
 ) -> None:
-    """The boolean's column is NOT NULL with a database-level default,
-    so a row that predates the migration says false itself; the list
-    beside it is nullable, where NULL is the none the model means."""
+    """Off by default is the model's default, and a body that names
+    neither key reads at it. That is where the trust decision lives now:
+    a body says what the operator wrote, and consuming a third party's
+    words is something they have to have written."""
     _populate(store)
 
     entry = store.load().domain.mcp_servers["home"]
@@ -241,7 +245,7 @@ def test_a_row_written_before_the_opt_in_columns_loads_as_opted_out(
 
 def test_a_fragment_round_trips_byte_for_byte(store: ConfigStore) -> None:
     """A fragment is injected into a prompt as it stands, so what the
-    column holds and what a read gives back are the bytes that were
+    body holds and what a read gives back are the bytes that were
     written, indentation and trailing blank lines included."""
     _populate(store)
     written = "  The bins go out on Tuesday.\n\n    The radio is called Bosse.\n"
@@ -249,11 +253,11 @@ def test_a_fragment_round_trips_byte_for_byte(store: ConfigStore) -> None:
 
     row = stored_row(
         store,
-        select(schema.prompt_fragments.c.text).where(
+        select(schema.prompt_fragments.c.body).where(
             schema.prompt_fragments.c.name == "household"
         ),
     )
-    assert row["text"] == written
+    assert json.loads(row["body"])["text"] == written
     assert store.load().domain.prompt_fragments["household"].text == written
     assert store.read_prompt_fragment("household").entry.text == written
 
@@ -345,8 +349,8 @@ def test_an_include_list_round_trips_write_shaped(store: ConfigStore, layer: str
         table, where = schema.agents, schema.agents.c.name
         identity = "poet"
 
-    row = stored_row(store, select(table.c.prompt_includes).where(where == identity))
-    assert row["prompt_includes"] == written
+    row = stored_row(store, select(table.c.body).where(where == identity))
+    assert json.loads(row["body"])["prompt_includes"] == written
 
     domain = store.load().domain
     entry = domain.agent_defaults if layer == "agent_defaults" else domain.agents["poet"]
@@ -367,19 +371,25 @@ def test_an_empty_include_list_is_stored_apart_from_an_unset_one(
     assert agents["critic"].prompt_includes is None
 
 
-def test_a_row_written_before_the_includes_column_loads_unchanged(
+def test_a_body_written_before_the_includes_field_loads_unchanged(
     store: ConfigStore,
 ) -> None:
-    """The column is nullable because NULL is the inherit the model
-    already means, so a row from a database written before the migration
-    is a layer that includes nothing of its own."""
+    """Unset is inherit, and a body written before the field existed has
+    no key for it, so both layers read as including nothing of their own
+    rather than as unreadable rows. Hand-written for the reason the
+    guidance pin above gives."""
     _populate(store)
     planted(
         store,
-        update(schema.agents).where(schema.agents.c.name == "sam").values(prompt_includes=None),
+        update(schema.agents)
+        .where(schema.agents.c.name == "sam")
+        .values(body='{"prompt": "You are Sam."}'),
         update(schema.agent_defaults)
         .where(schema.agent_defaults.c.id == schema.AGENT_DEFAULTS_ID)
-        .values(prompt_includes=None),
+        .values(
+            body='{"llm": "claude", "asr": "whisper", "tts": "voice", '
+            '"vad": "silero", "mcp": ["home"]}'
+        ),
     )
 
     domain = store.load().domain
@@ -437,27 +447,6 @@ def test_an_unincluded_fragment_deletes(store: ConfigStore) -> None:
         store.delete_prompt_fragment("household")
 
 
-def test_a_pre_upgrade_string_row_loads_and_is_written_back_unchanged(
-    store: ConfigStore,
-) -> None:
-    """Every row written before the object form existed holds a plain
-    list of names, which is why the string form is stored as a string
-    and not normalized into an object: there is no migration to run."""
-    _populate(store)
-    planted(
-        store, update(schema.agents).where(schema.agents.c.name == "sam").values(mcp=["home"])
-    )
-
-    entry = store.load().domain.agents["sam"]
-    assert entry.mcp == ["home"]
-
-    # Written back through the same path the API writes with, which is
-    # where a normalization would have shown up.
-    store.set_agent("sam", {"prompt": "You are Sam.", "mcp": ["home"]})
-    row = stored_row(store, select(schema.agents.c.mcp).where(schema.agents.c.name == "sam"))
-    assert row["mcp"] == ["home"]
-
-
 @pytest.mark.parametrize(
     "grant",
     [
@@ -503,11 +492,12 @@ def test_a_loaded_snapshot_has_no_unresolved_references(store: ConfigStore) -> N
     assert check_completeness(domain) == []
 
 
-def test_the_credential_reference_lives_in_its_own_column(store: ConfigStore) -> None:
-    """api_key_env is a declared model field with a column of its own
-    (PR #95 review finding 1); folding it into the options JSON would
-    contradict options holding exactly the model extras, and a later
-    reader of the raw row would miss it."""
+def test_the_credential_reference_survives_beside_the_options(store: ConfigStore) -> None:
+    """api_key_env is a declared field and `options` is exactly the model
+    extras, so the two are one dump and two different things on the way
+    back out. It used to be two columns, and the risk the split carried
+    was that a reader of the raw row would miss the declared half; the
+    body carries both because the model does."""
     store.set_provider(
         "llm",
         "claude",
@@ -515,8 +505,11 @@ def test_the_credential_reference_lives_in_its_own_column(store: ConfigStore) ->
     )
 
     row = stored_row(store, schema.providers.select())
-    assert row["api_key_env"] == "ANTHROPIC_API_KEY"
-    assert "api_key_env" not in row["options"]
+    assert json.loads(row["body"]) == {
+        "type": "anthropic",
+        "api_key_env": "ANTHROPIC_API_KEY",
+        "model": "claude-sonnet-5",
+    }
 
     loaded = store.load().domain.providers.llm["claude"]
     assert loaded.api_key_env == "ANTHROPIC_API_KEY"
@@ -858,13 +851,20 @@ def test_a_number_that_is_not_finite_is_refused(store: ConfigStore) -> None:
 # could not remove it, because the read failed on the way there.
 
 
+# A body no model will load, hand-written for the reason every
+# adversarial plant here is: what a dump can produce is exactly what the
+# reader is not being tested against. This one parses as JSON and fails
+# the model, which is the half a plain syntax error would not reach.
+UNLOADABLE_BODY = '{"type": ""}'
+
+
 def _corrupt_provider(store: ConfigStore, name: str) -> None:
-    """A row whose JSON column holds something no model will load."""
+    """A row whose body holds something no model will load."""
     planted(
         store,
         update(schema.providers)
         .where(schema.providers.c.name == name)
-        .values(options="not an object"),
+        .values(body=UNLOADABLE_BODY),
     )
 
 
@@ -888,8 +888,8 @@ def test_a_row_that_cannot_be_loaded_is_deletable_for_every_kind(
     store.bind_device("aa:bb:cc:dd:ee:ff", ["sam"])
     planted(
         store,
-        update(schema.mcp_servers).values(env="not an object"),
-        update(schema.agents).values(mcp="not an array"),
+        update(schema.mcp_servers).values(body='{"transport": "nonsense"}'),
+        update(schema.agents).values(body='{"mcp": "not an array"}'),
         update(schema.devices).values(agents="not an array"),
     )
     with pytest.raises(ConfigError):
@@ -941,9 +941,9 @@ def test_a_corrupt_row_something_still_references_is_refused(store: ConfigStore)
     assert "references unresolved" in str(caught.value)
     # Nothing changed: the row is still there, still unreadable, which is
     # the rollback doing its work inside the one transaction.
-    kept = stored_rows(store, select(schema.providers.c.name, schema.providers.c.options))
+    kept = stored_rows(store, select(schema.providers.c.name, schema.providers.c.body))
     assert [row["name"] for row in kept] == ["claude"]
-    assert [row["options"] for row in kept] == ["not an object"]
+    assert [row["body"] for row in kept] == [UNLOADABLE_BODY]
 
 
 def test_a_value_json_cannot_carry_is_refused(store: ConfigStore) -> None:
@@ -1012,15 +1012,27 @@ def test_two_keys_sharing_one_anchor_are_not_recursion(store: ConfigStore) -> No
 
 def test_a_stored_number_that_is_not_finite_cannot_be_read(store: ConfigStore) -> None:
     """A row written before the rule, or by something else: reported as
-    unreadable rather than answered with a value nobody wrote."""
+    unreadable rather than answered with a value nobody wrote.
+
+    NaN has no JSON spelling, so a body holding one is a body somebody
+    wrote by hand or a build wrote with a lenient encoder. Pydantic's
+    parser reads the literal rather than refusing it, and a provider's
+    options are passed through untyped, so without the check the value
+    would load and then serialize as null on every read: a configuration
+    quietly turned into a different one. Nested as well as top level,
+    because an option can be a structure."""
     store.set_provider("llm", "claude", {"type": "anthropic", "temperature": 0.7})
-    planted(store, update(schema.providers).values(options={"temperature": nan}))
+    for written in (
+        '{"type": "anthropic", "temperature": NaN}',
+        '{"type": "anthropic", "nested": {"deep": [Infinity]}}',
+    ):
+        planted(store, update(schema.providers).values(body=written))
 
-    with pytest.raises(StorageError) as caught:
-        store.load()
+        with pytest.raises(StorageError) as caught:
+            store.load()
 
-    assert "not a finite number" in str(caught.value)
-    assert "cannot be read" in str(caught.value)
+        assert "not a finite number" in str(caught.value)
+        assert "cannot be read" in str(caught.value)
 
 
 def test_no_refusal_carries_the_exception_that_caused_it(store: ConfigStore) -> None:
@@ -1174,7 +1186,7 @@ def test_a_row_that_is_not_loadable_is_reported_as_a_config_error(
         store = ConfigStore(engine, keys)
         store.set_provider("llm", "claude", {"type": "anthropic", "model": "claude-sonnet-5"})
         with engine.begin() as connection:
-            connection.execute(update(schema.providers).values(type=""))
+            connection.execute(update(schema.providers).values(body='{"type": ""}'))
 
         with pytest.raises(ConfigError) as caught:
             store.load()
@@ -1185,17 +1197,14 @@ def test_a_row_that_is_not_loadable_is_reported_as_a_config_error(
         engine.dispose()
 
 
+# The columns that are still JSON values rather than a dumped model: the
+# two secrets columns, the device bindings and the domain settings. Those
+# four are what the container-shape guards are still there for, and the
+# four reshaped entity tables are deliberately absent, because a body is
+# a string handed to pydantic's own parser.
 CORRUPTIONS = [
-    ("providers", "options", "not an object"),
     ("providers", "secrets", "not an object"),
-    ("mcp_servers", "args", "not an array"),
-    ("mcp_servers", "env", ["not", "an", "object"]),
-    ("mcp_servers", "headers", "not an object"),
     ("mcp_servers", "secrets", "not an object"),
-    ("agents", "mcp", "not an array"),
-    ("agents", "filler", ["not", "an", "object"]),
-    ("agent_defaults", "mcp", "not an array"),
-    ("agent_defaults", "filler", "not an object"),
     ("devices", "agents", "sam"),
     ("domain_settings", "value", {"not": "a string"}),
 ]
@@ -1226,6 +1235,54 @@ def test_a_json_column_of_the_wrong_shape_is_a_config_error(
     assert column in message
     assert str(written) not in message
     assert caught.value.__cause__ is None
+
+
+# What a body can be wrong in, per kind and per way of being wrong:
+# unparseable at all, parseable and missing what the model requires, and
+# parseable with a nested value of the wrong shape. Hand-written, all of
+# them, because a dump of a valid model is the one thing that cannot
+# produce a body the reader has to survive.
+BAD_BODIES = [
+    ("providers", "not json at all"),
+    ("providers", '{"type": ""}'),
+    ("providers", '["a", "list", "not", "an", "object"]'),
+    ("mcp_servers", '{"transport": "nonsense", "command": "uvx"}'),
+    ("mcp_servers", '{"transport": "stdio", "command": "uvx", "args": "not an array"}'),
+    ("mcp_servers", '{"transport": "stdio", "command": "uvx", "env": ["not", "an", "object"]}'),
+    ("prompt_fragments", '{"text": ""}'),
+    ("prompt_fragments", "{"),
+    ("agents", '{"mcp": "not an array"}'),
+    ("agents", '{"filler": ["not", "an", "object"]}'),
+    ("agent_defaults", '{"tts": ""}'),
+    ("agent_defaults", '{"mcp": "not an array"}'),
+]
+
+
+@pytest.mark.parametrize(("table", "written"), BAD_BODIES)
+def test_a_body_that_will_not_validate_is_a_config_error(
+    store: ConfigStore, table: str, written: str
+) -> None:
+    """A body that will not parse, or will not validate once parsed, is a
+    storage failure named the way an unreadable column was: the entity
+    and the fact, in a sentence rather than a traceback.
+
+    The body itself is never in it, and that is the difference the shape
+    makes. A column that could not be read said which column; a body is
+    the whole entity, so a sentence that quoted the row would quote
+    everything the operator wrote into it."""
+    _populate(store)
+    store.set_prompt_fragment("household", {"text": "The bins go out on Tuesday."})
+
+    planted(store, update(getattr(schema, table)).values(body=written))
+
+    with pytest.raises(StorageError) as caught:
+        store.load()
+
+    message = str(caught.value)
+    assert "cannot be read as configuration" in message
+    assert written not in message
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 def test_a_corrupt_json_column_does_not_stop_a_secret_being_cleared(

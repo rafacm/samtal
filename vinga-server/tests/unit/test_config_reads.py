@@ -19,6 +19,7 @@ import pytest
 from cryptography.fernet import Fernet, MultiFernet
 from sqlalchemy import update
 
+from tests.support.stores import body as dumped
 from tests.support.stores import planted
 from vinga_server.config import entities, views
 from vinga_server.config.entities import (
@@ -212,10 +213,13 @@ def test_a_recorded_provider_carries_no_credential(store: ConfigStore) -> None:
         update(schema.providers)
         .where(schema.providers.c.name == "claude")
         .values(
-            options={
-                "base_url": f"https://user:{SECRET}@host/v1?api_key={OTHER_SECRET}",
-                "connection": {"endpoint": f"https://{SECRET}@host"},
-            }
+            body=dumped(
+                ProviderConfig(
+                    type="anthropic",
+                    base_url=f"https://user:{SECRET}@host/v1?api_key={OTHER_SECRET}",
+                    connection={"endpoint": f"https://{SECRET}@host"},
+                )
+            )
         ),
     )
 
@@ -372,9 +376,9 @@ def test_a_reference_that_is_not_one_comes_back_masked(store: ConfigStore) -> No
     _populate(store)
     planted(
         store,
-        update(schema.providers).where(schema.providers.c.name == "claude").values(
-            api_key_env=PASTED
-        ),
+        update(schema.providers)
+        .where(schema.providers.c.name == "claude")
+        .values(body=dumped(ProviderConfig(type="anthropic", api_key_env=PASTED))),
     )
 
     body = views.provider(store.read_provider("llm", "claude"))["entity"]

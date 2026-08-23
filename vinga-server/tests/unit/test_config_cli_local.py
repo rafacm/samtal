@@ -529,13 +529,13 @@ def test_local_delete_removes_the_row_that_is_keeping_the_server_down(
             connection.execute(
                 update(schema.providers)
                 .where(schema.providers.c.name == "claude")
-                .values(options="not an object")
+                .values(body="not json at all")
             )
     finally:
         engine.dispose()
     # Nothing can read it, which is the state a server meets at boot.
     assert run("--local", "show") == 1
-    assert "options" in capsys.readouterr().err
+    assert "providers.llm.claude" in capsys.readouterr().err
 
     assert run("--local", "delete", "provider", "llm", "claude") == 0
     capsys.readouterr()
@@ -587,7 +587,7 @@ def test_local_show_reaches_a_name_no_new_write_could_create(
         with engine.begin() as connection:
             connection.execute(
                 schema.providers.insert().values(
-                    stage="llm", name="a/b", type="mock", egress=None, options={}, secrets={}
+                    stage="llm", name="a/b", body='{"type": "mock"}', secrets={}
                 )
             )
     finally:
