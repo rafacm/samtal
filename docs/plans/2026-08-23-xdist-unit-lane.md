@@ -31,10 +31,20 @@ and discoveries; no deviations says so explicitly.
    is an ongoing watch, not a pre-merge gate: this PR's own runs
    start the count, the remaining #246 issues' runs continue it,
    and a checkbox stays open on issue #254 until a week of runs
-   has passed, per the issue's own verification list. A flaky
-   parallel lane is reverted by removing two tokens from one line,
-   which is the cheap-revert property that licenses merging on the
-   first green rather than after the week.
+   has passed, per the issue's own verification list. The watch
+   has an owner, a record, and a trigger: the driving session
+   appends each subsequent #246 PR's unit-lane run id and outcome
+   as a running comment on issue #254; a candidate flake is a
+   unit-lane failure that passes on re-run with no code change;
+   the trigger is two candidates inside the week, or any single
+   one that reproduces under `-n` and not serially, and it fires
+   the graded response of decision 2 (`-n 3`, then `-n 2`, then
+   the flag off) with the issue reopened at whichever step ends
+   it. The cheap-revert property (the two appended tokens of
+   decision 1) is what licenses merging on the first green rather
+   than after the week; the operative cost of a wrong call is
+   developer misattribution on an intermittently red lane, which
+   the named trigger bounds at two events.
 
 ## Design decisions this plan makes
 
