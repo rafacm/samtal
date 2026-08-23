@@ -25,20 +25,40 @@ def test_version_1_is_the_bare_payload_both_ways() -> None:
 
 
 def test_version_2_lays_out_the_firmware_struct() -> None:
-    wrapped = wrap(2, OPUS_PAYLOAD, timestamp=0x01020304)
+    """Including the timestamp field, which this server does not fill:
+    the header is the firmware's twenty bytes whatever we put in it, and
+    an outgoing frame carries a literal zero there, which is what every
+    frame this server has ever sent carried."""
+    wrapped = wrap(2, OPUS_PAYLOAD)
     header = (
         (2).to_bytes(2, "big")
         + PAYLOAD_OPUS.to_bytes(2, "big")
         + (0).to_bytes(4, "big")
-        + (0x01020304).to_bytes(4, "big")
+        + (0).to_bytes(4, "big")
         + len(OPUS_PAYLOAD).to_bytes(4, "big")
     )
     assert wrapped == header + OPUS_PAYLOAD
 
 
 def test_version_2_round_trips() -> None:
-    frame = unwrap(2, wrap(2, OPUS_PAYLOAD, timestamp=1234))
-    assert frame == Frame(PAYLOAD_OPUS, OPUS_PAYLOAD, timestamp=1234)
+    assert unwrap(2, wrap(2, OPUS_PAYLOAD)) == Frame(PAYLOAD_OPUS, OPUS_PAYLOAD)
+
+
+def test_a_stock_firmwares_timestamp_is_read_past_and_dropped() -> None:
+    """The compatibility half, which a round trip cannot reach: what
+    this server wraps carries a zero there, and a board running stock
+    firmware stamps a real millisecond count. The frame is built by
+    hand for that reason, and unwrapping it must find the payload
+    rather than trip over a field nobody reads."""
+    incoming = (
+        (2).to_bytes(2, "big")
+        + PAYLOAD_OPUS.to_bytes(2, "big")
+        + (0).to_bytes(4, "big")
+        + (0x01020304).to_bytes(4, "big")
+        + len(OPUS_PAYLOAD).to_bytes(4, "big")
+    ) + OPUS_PAYLOAD
+
+    assert unwrap(2, incoming) == Frame(PAYLOAD_OPUS, OPUS_PAYLOAD)
 
 
 def test_version_3_lays_out_the_firmware_struct() -> None:

@@ -27,11 +27,15 @@ class FramingError(ValueError):
 
 @dataclass(frozen=True)
 class Frame:
-    """One unwrapped binary frame."""
+    """One unwrapped binary frame.
+
+    No timestamp: the version 2 header carries a millisecond field and
+    this server reads nothing from it, so an unwrapped frame does not
+    offer one. The field itself stays on the wire, where the firmware
+    struct puts it."""
 
     payload_type: int
     payload: bytes
-    timestamp: int = 0  # milliseconds, carried by version 2 only
 
 
 def wrap(
@@ -39,13 +43,15 @@ def wrap(
     payload: bytes,
     *,
     payload_type: int = PAYLOAD_OPUS,
-    timestamp: int = 0,
 ) -> bytes:
     """Wrap a payload for sending under the given protocol version."""
     if version == 1:
         return payload
     if version == 2:
-        header = _V2_HEADER.pack(version, payload_type, 0, timestamp, len(payload))
+        # A literal zero in the header's timestamp field, which is what
+        # every frame this server has ever sent carried. The struct is
+        # unchanged, so the bytes are.
+        header = _V2_HEADER.pack(version, payload_type, 0, 0, len(payload))
         return header + payload
     if version == 3:
         return _V3_HEADER.pack(payload_type, 0, len(payload)) + payload
@@ -59,13 +65,16 @@ def unwrap(version: int, data: bytes) -> Frame:
     if version == 2:
         if len(data) < _V2_HEADER.size:
             raise FramingError(f"version 2 frame of {len(data)} bytes is shorter than its header")
-        _, payload_type, _, timestamp, size = _V2_HEADER.unpack_from(data)
+        # The timestamp a stock firmware stamps its frames with is
+        # parsed and dropped: the header has to be read past to reach
+        # the payload, and nothing above this line asks what it said.
+        _, payload_type, _, _, size = _V2_HEADER.unpack_from(data)
         payload = data[_V2_HEADER.size :]
         if len(payload) != size:
             raise FramingError(
                 f"version 2 frame announces {size} payload bytes but carries {len(payload)}"
             )
-        return Frame(payload_type, payload, timestamp)
+        return Frame(payload_type, payload)
     if version == 3:
         if len(data) < _V3_HEADER.size:
             raise FramingError(f"version 3 frame of {len(data)} bytes is shorter than its header")
