@@ -109,12 +109,20 @@ and discoveries; no deviations says so explicitly.
    that found no mechanism, and the week-of-runs watch is what
    would catch a recurrence. A reproduction, if one appears,
    stops the milestone until fixed.
-5. **The fixed-port audit closes the issue's last hazard.** The
-   unit files naming `localhost:<port>` are audited by grep and
-   read: a name in config data is fine, a socket bind to a fixed
-   port is not. The spike's green runs are strong evidence none
-   binds; the audit makes it a stated fact with the file list in
-   the implementation doc.
+5. **The port audit is by what BINDS, not by what is spelled.**
+   `grep -rnE "\.bind\(|ThreadingHTTPServer\(|socket\.socket\(|uvicorn" tests/unit tests/support tests/tools`
+   from `vinga-server/`, every hit dispositioned one of three
+   ways in the implementation doc: a name in config data (fine),
+   a bind on port 0 (fine under workers, the kernel hands each a
+   distinct port), or a bind-and-release free-port assumption
+   (the one genuine parallel hazard). The known third-class site,
+   `unused_url()` in `test_tools_mcp_http.py` (binds port 0,
+   releases it, then asserts nothing listens there), is FIXED
+   rather than accepted: it holds the socket open for the test's
+   duration and closes it at the end, so no other worker or
+   process can take the port meanwhile. Any further third-class
+   hit gets the same treatment or an explicit acceptance
+   sentence.
 6. **The conftest's per-worker duplication is priced, not
    changed.** Env setup, the pydantic default rewrite, and the
    `__pycache__` clearing run once per worker; the clearing's
