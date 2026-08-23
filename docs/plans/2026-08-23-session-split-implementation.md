@@ -637,8 +637,10 @@ The grep decision 6 asks for after M2, over `src/vinga_server/device/session.py`
   `DeviceOutput` boundary method's name and stays.
 
 Across `src` and `tests`, the only surviving mentions of the moved
-method names are the two stale event-baseline labels recorded under
-Discoveries above.
+method names were the two stale event-baseline labels recorded under
+Discoveries above; both were renamed to `DeviceSession._idle_expired`
+in their own commit after the milestone's table-pinned diff, taken
+deliberately rather than smuggled into the table.
 
 Nothing in M2 needs hardware, so no verification step was left
 unverifiable.

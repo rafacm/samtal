@@ -315,7 +315,7 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
     "vinga_server.conversations.store:ConversationStore._prune #2": (
         ("ConversationsPruned", ("event", "sessions")),
     ),
-    "vinga_server.device.session:DeviceSession._watch_for_idle #1": (
+    "vinga_server.device.session:DeviceSession._idle_expired #1": (
         ("SessionIdle", ("device", "duration_s", "event", "idle_s", "session")),
     ),
     "vinga_server.device.session:DeviceSession.run #1": (
