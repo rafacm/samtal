@@ -27,10 +27,19 @@ varied between two runs would turn the lane red on an unrelated change.
 Read-only, and deliberately so: nothing in this module opens the
 database, reads a configuration file, or needs an encryption key. The
 commands in front of it are usable on a machine that has none of those.
-The imports say it now rather than the prose alone: the models, the
-registry and the standard library. The whole-domain model used to be
-declared in the repository, so rendering a document imported SQLAlchemy
-and cryptography to reach one class.
+
+Importing this module no longer reaches the repository either, which is
+a narrower claim than it sounds and is worth stating exactly. The
+whole-domain model used to be declared in `store.py`, so this module's
+import list pulled SQLAlchemy and cryptography in to reach one class;
+it is declared in `models.py` now and this imports it from there. The
+`vinga-server config` commands still pay for both, because `cli.py`
+imports `ConfigStore` for the paths that do open a database. What the
+removed edge buys is that the markdown reference and the JSON Schema
+render with nothing loaded but the models and the registry;
+`openapi()` is the deliberate exception and says so where it is
+defined. `test_config_docgen.py` pins that in a child interpreter, so
+the edge cannot come back unnoticed.
 """
 
 import json
