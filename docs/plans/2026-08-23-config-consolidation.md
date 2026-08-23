@@ -261,61 +261,108 @@ Findings condensed but faithful:
    `Config(DomainConfig)` adding `server`, `memory`,
    `_check_domain` and the accessors; field-order consequence
    stated.
+   *Resolution* (`c640076a`): the subclass shape, its stated
+   consequences, the after-validator constraint, and the real
+   pins.
+
 2. **P1: the merge changes two committed artifacts** (`config
    schema` and the reference's whole-domain table render
    `DomainConfig`) unless the 7-field model survives by name; the
    subclass shape keeps them still, and the move removes docgen's
    store import edge, an incidental win to record.
+   *Resolution* (`c640076a`): the 7-field model survives by name;
+   both artifacts stay still; docgen loses its store edge.
+
 3. **P1: `api-openapi.json` cannot pin decision 1** (neither model
    is a component of the document). The real pins: the reference
    byte-identical, `config schema` byte-identical, and the store's
    write-order suite.
+   *Resolution* (`c640076a`): the reference, config schema, and
+   the write-order suite are named as the pins.
+
 4. **P1: the OpenAPI prose is mostly route DOCSTRINGS FastAPI
    reads, not literals**; `API_DESCRIPTION` interpolates `MASK`
    and `API_OPTIONS_NOTE`, carries literal `{code}`-style braces,
    and its line wrapping is pinned. Scope decision 3 to the
    module-level description constants, leave docstrings in place,
    and state the loader's interpolation contract.
+   *Resolution* (`19b1f77f`): decision 3 scoped to document-prose
+   constants with the three fences and the loud loader.
+
 5. **P1: `responses.py` has no tests-only parts** (every public
    name has a production reader); the stale premise is recorded,
    and the real question is whether `outcomes`/`flags`/
    `RELOAD_SECTIONS` belong in `cli.py`, their only caller.
+   *Resolution* (`a2505396`): the stale premise recorded; the
+   honest moves are the Field-description inlines and the
+   cli-only helpers relocating.
+
 6. **P2: decision 2 names no field dispositions.** 31 store reads
    and 21 api reads of descriptor fields are load-bearing; the
    registry has no generative machinery left post-#210; the one
    real duplication is `route`+`addressing` versus api.py's path
    literals, which the plan never names.
+   *Resolution* (`01f7a7a0`): field-by-field dispositions and the
+   route-versus-literal duplication named and priced.
+
 7. **P2: the honest-seams pre-answer is wrong**: `secret_key` is
    an injected predicate and the masking rule for every displayed
    value; it stays, and the masking path unchanged is the claim to
    make.
+   *Resolution* (`01f7a7a0`): secret_key stated as the injected
+   masking predicate that stays, the masking path unchanged.
+
 8. **P2: the underscore rule collides with the test-surface
    rule.** One rule with no residue: after the retreat no test
    imports a wording constant; survivors keep public names and
    are listed (`PROBLEM_TITLES` at minimum, plus the constants
    non-config suites import).
+   *Resolution* (the finding-8 commit): no-residue privatization
+   with the survivor list.
+
 9. **P2: M1 edits eight test files, five outside the config
    family** (the notice-constant import redirect from writes to
    entities); mechanical, no assertion change, and it is what
    makes the milestone split work.
+   *Resolution* (`c6a84837`): the redirect is named M1 work,
+   mechanical, five files outside the family.
+
 10. **P2: seven folded sentences have two call sites**, and the
     pin that replaces `writes.py`'s single-source guarantee is
     `test_a_local_write_acknowledges_what_the_api_acknowledges`,
     a differential assertion explicitly exempt from the retreat;
     the module docstring's rationale needs a surviving home.
+   *Resolution* (`c6a84837`): the differential test is the
+   surviving guarantee, exempt from the retreat, the census
+   honest.
+
 11. **P2: document prose and runtime refusal bodies are two
     kinds**, and `PROBLEM_DESCRIPTIONS` is both; decision 3 moves
     document prose only and `PROBLEM_DESCRIPTIONS` stays in code.
+   *Resolution* (`19b1f77f`): prose-only movement with
+   PROBLEM_DESCRIPTIONS staying in code.
+
 12. **P2: nothing proves a wheel carries the data files.** Extend
     the wheel step to render the document from the installed
     wheel and diff it; the loader raises a named error at import
     on a missing file.
+   *Resolution* (`3b505b54`): the wheel step renders the document
+   from the installed wheel and diffs it.
+
 13. **P3: two recorded facts go stale** (the DOMAIN_DESCRIPTIONS
     comment; `DomainSnapshot`'s reason changes under the subclass
     shape).
+   *Resolution* (`c640076a`): DomainSnapshot survives with its
+   reason updated; the comment is rewritten in the same commit.
+
 14. **P3: `_read_domain` assigns two fields after construction**,
     which is why the store's model must stay free of
     after-validators; record the constraint.
+   *Resolution* (`c640076a`): the constraint recorded beside the
+   class.
+
 15. **P3: the inventory commands will not run as written** (paths,
     import forms), and the writes.py census is 13 f-string
     factories, one constant, two decisions.
+    *Resolution* (`5b84c09c`): runnable greps covering every
+    import form, and the honest census everywhere.
