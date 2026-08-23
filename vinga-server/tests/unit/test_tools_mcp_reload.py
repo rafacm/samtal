@@ -821,7 +821,8 @@ class SlowStopManager:
     """A manager that takes its time going away, so a reload can be
     cancelled while it is being stopped.
 
-    Everything `McpManager` asks of a manager and nothing else, because
+    Everything a reload asks of an `McpServerManager` and nothing else,
+    because
     what this test is about is what the reload does around a stop that
     is still running. The stop is the only member that has to behave;
     the rest answer the way a connected server that published nothing

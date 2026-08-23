@@ -50,7 +50,7 @@ from vinga_server.events.catalog import McpReloadApplied, McpReloadRefused
 from vinga_server.events.values import Count, McpRefusal, Whole
 
 from . import events
-from .manager import McpConfigError, McpManager, McpServerManager, _managers_for, _stopped
+from .manager import McpConfigError, McpServerManager, _managers_for, _stopped
 from .slice import McpSlice
 
 if TYPE_CHECKING:
@@ -217,12 +217,12 @@ async def apply(
     would call a reload fast on exactly the days it was not.
     """
     configured, candidates = candidate
-    keep: dict[str, McpManager] = {}
+    keep: dict[str, McpServerManager] = {}
     started: list[str] = []
     restarted: list[str] = []
     unchanged: list[str] = []
-    going: list[McpManager] = []
-    arriving: list[McpManager] = []
+    going: list[McpServerManager] = []
+    arriving: list[McpServerManager] = []
     for name, candidate in candidates.items():
         running = servers._managers.get(name)
         if running is not None and running.same_as(candidate):

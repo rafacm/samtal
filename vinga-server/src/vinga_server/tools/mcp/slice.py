@@ -35,10 +35,10 @@ from vinga_server.tools import names
 from .transport import _PROMPT_ONLY_FIELDS, _connection_identity
 
 if TYPE_CHECKING:
-    from .manager import McpManager
+    from .manager import McpServerManager
 
 
-def _shadowed(managers: Mapping[str, "McpManager"]) -> frozenset[str]:
+def _shadowed(managers: Mapping[str, "McpServerManager"]) -> frozenset[str]:
     """Which of these entries have another entry inside their namespace.
 
     A configuration property rather than a published-tool one: `home` is

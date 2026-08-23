@@ -17,7 +17,7 @@ import contextlib
 import logging
 import time
 from contextlib import AsyncExitStack
-from typing import Any, Protocol
+from typing import Any
 
 import mcp.types
 from mcp import ClientSession
@@ -146,95 +146,24 @@ class McpCallFailed(RuntimeError):
     """
 
 
-class McpManager(Protocol):
-    """What a registry needs of one MCP server, and the whole of it.
-
-    A registry is handed its managers rather than making them, and what
-    it then does with each of them is the members below and nothing
-    else. Everything the class under this has besides them (the run,
-    the exit stack, the session, the identity the reload compares by,
-    the abandonment of a task that will not end) is that class's own
-    business, which is what makes this worth writing down: it says what
-    a manager owes the world around it, at the size that world actually
-    reads.
-
-    Taken from what `registry.py` and `reload.py` call, and nothing was
-    added for looking like it belonged. A member nobody calls is a
-    member a stand-in has to answer for nothing.
-    """
-
-    @property
-    def state(self) -> str:
-        """`connected` or `down`, as the status surface says it."""
-
-    @property
-    def reason(self) -> str | None:
-        """Why this server is down, as a token this application owns, or
-        None when nothing has failed."""
-
-    @property
-    def since(self) -> float:
-        """When the current state and reason were recorded."""
-
-    @property
-    def tool_timeout_s(self) -> float:
-        """How long one call to this server may take."""
-
-    @property
-    def shipped_instructions(self) -> str | None:
-        """What this server said about itself when it connected, or None
-        when it said nothing, said too much, or is not connected."""
-
-    @property
-    def shipped_prompts(self) -> tuple[ServerPrompt, ...]:
-        """The prompts this entry named that this server published and
-        this connection could render."""
-
-    def tools(self) -> list[ToolDef]:
-        """This server's tools, under the names the model sees. Empty
-        while the server is down."""
-
-    def listed_at(self, published: str) -> int | None:
-        """Where this server listed one of its published tools, counted
-        from one, or None for a name this connection does not know."""
-
-    def expect(self, allowed: frozenset[str]) -> None:
-        """The tool names the agents' grants name of this entry now."""
-
-    def same_as(self, other: Any) -> bool:
-        """Whether a candidate the reload built is the same world as
-        this one, which is what decides that a connection stands.
-
-        The candidate rather than this protocol, because what the two
-        are compared by is knowledge the implementation has about
-        itself and this interface deliberately does not carry."""
-
-    def ensure_reconnecting(self) -> None:
-        """Start a background reconnect if this server is down and no
-        attempt is already running."""
-
-    async def start(self) -> None:
-        """Connect and list the tools, or record why not. Never raises:
-        a dead server is not a boot failure."""
-
-    async def stop(self, timeout: float | None = None) -> None:
-        """Close the connection, within `timeout` for a caller that has
-        a request open and cannot wait on a far side's manners."""
-
-    async def call(
-        self, published: str, arguments: dict[str, Any]
-    ) -> tuple[str, bool]:
-        """Run one of this server's tools, named as the model was given
-        it, and answer with its text and whether it failed."""
-
-
 class McpServerManager:
     """One configured MCP server: its connection, its tools, and its
     reconnection.
 
-    The `McpManager` above is what a registry sees of one of these.
-    Everything else here is this class's own, which is the reason that
-    protocol is worth stating separately.
+    A registry and a reload touch fourteen members of one of these and
+    nothing else: `state`, `reason`, `since`, `tool_timeout_s`,
+    `shipped_instructions`, `shipped_prompts`, `tools`, `listed_at`,
+    `expect`, `same_as`, `ensure_reconnecting`, `start`, `stop` and
+    `call`. That is what a manager owes the world around it, at the size
+    that world actually reads, and no member is on the list for looking
+    like it belonged: each is there because `registry.py` or `reload.py`
+    calls it.
+
+    Everything else here (the run, the exit stack, the session, the
+    identity a reload compares by, the abandonment of a task that will
+    not end) is this class's own business. Keeping the two apart is a
+    review of those two modules rather than a declaration, which is what
+    it always really was.
     """
 
     def __init__(
@@ -882,7 +811,7 @@ def _forget(task: asyncio.Task[None]) -> None:
         task.exception()
 
 
-async def _stopped(manager: McpManager) -> None:
+async def _stopped(manager: McpServerManager) -> None:
     """One manager taken down as part of a reload, inside its bound and
     never raising: a connection that will not close cleanly is still a
     connection this server is finished with."""

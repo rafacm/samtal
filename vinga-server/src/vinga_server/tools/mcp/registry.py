@@ -34,7 +34,7 @@ from vinga_server.runtime.prompt import GuidanceBlock, ServerInstructions
 from vinga_server.tools import names
 
 from . import events
-from .manager import UNUSED, McpManager, McpServerDown, _managers_for
+from .manager import UNUSED, McpServerDown, McpServerManager, _managers_for
 from .slice import McpSlice, _allowed, _shadowed
 
 
@@ -59,12 +59,12 @@ class McpServers:
     """Every MCP server some agent references, built at startup."""
 
     def __init__(
-        self, managers: Mapping[str, McpManager], configured: McpSlice | None = None
+        self, managers: Mapping[str, McpServerManager], configured: McpSlice | None = None
     ) -> None:
         # Held as the mapping it was given, never copied: the reload's
-        # atomic swap rebinds it whole, and a dict parameter would be
-        # invariant where every implementation of the protocol must fit.
-        self._managers: Mapping[str, McpManager] = managers
+        # atomic swap rebinds it whole, so a copy would be a second
+        # answer to which managers a tool snapshot reaches.
+        self._managers: Mapping[str, McpServerManager] = managers
         self._configured = configured if configured is not None else McpSlice()
         # Which running entries have a more specific entry inside their
         # namespace, and which of their tools have already been reported
@@ -95,7 +95,7 @@ class McpServers:
     def __contains__(self, entry: object) -> bool:
         return entry in self._managers
 
-    def manager_of(self, entry: str) -> McpManager:
+    def manager_of(self, entry: str) -> McpServerManager:
         """The manager behind one entry, or a KeyError for an entry that
         has none.
 
@@ -275,7 +275,7 @@ class McpServers:
             [entry for agent in agents for entry in self._configured.entries_for(agent)]
         )
 
-    def _install(self, keep: dict[str, McpManager], configured: McpSlice) -> None:
+    def _install(self, keep: dict[str, McpServerManager], configured: McpSlice) -> None:
         """The swap, and everything it decides at once: which managers a
         tool snapshot reaches, and which entries an agent's grant
         names. Assigned rather than mutated, and with no await between
