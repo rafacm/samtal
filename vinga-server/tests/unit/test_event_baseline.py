@@ -29,8 +29,10 @@ recorded shapes was a third pin on a catalog `docs/reference/events.md`
 already pins, and every event change cost a regeneration of it. What it
 uniquely held is here instead, live and needing nothing on disk: every
 produced record conforms to a variant its event declares, and `CARRIED`
-below is the one thing a declaration cannot say, which is which of a
-variant's optional fields each PATH actually fills.
+below holds each PATH to the shape it is supposed to produce, which is
+the pair of things no declaration can state: which of an event's
+same-shaped variants this path emits, and which of that variant's
+optional fields it fills.
 
 Nothing here reports a payload value. The drivers work from real
 material, a planted API token among it, so a red lane says channel,
@@ -186,11 +188,24 @@ def test_every_catalog_variant_on_a_scoped_channel_is_produced(
     assert unproduced == []
 
 
-# What each driver's path actually carries: one tuple of field names per
-# record it keeps, in the order it produced them.
+# What each driver's path actually produces: one row per record it
+# keeps, in the order it produced them, naming the VARIANT the record is
+# an emission of and the payload keys it carries.
 #
-# This is the one thing the declarations cannot say and the one thing
-# the committed capture uniquely held. `matches()` above asserts a
+# Both halves are things the declarations cannot say on their own, and
+# both are things the committed capture uniquely held.
+#
+# The variant name is the per-path pin. `matches()` above tries every
+# variant of a record's event, so it says a record is one of the shapes
+# that event may take and never which one this path is supposed to
+# produce. Four events declare siblings whose payload keys are identical
+# and whose sentences are not: `barge_in_suppressed` has three,
+# `session_rejected` three, `ota_check` three, `capture_declined` two. A
+# gate that inverted two of its branches would emit each of two
+# situations under the other's sentence and the other's `reason`, and
+# every check that reads the record alone would stay green.
+#
+# The keys are the per-path exactness `matches()` gives up. It asserts a
 # RANGE, `required <= keys <= declared`, because an event's optional
 # fields are optional per emission: `llm_round` names the configured
 # entry behind a provider the registry built and says nothing about one
@@ -200,280 +215,312 @@ def test_every_catalog_variant_on_a_scoped_channel_is_produced(
 # not move.
 #
 # It is a declaration rather than a recording: updating it is part of
-# changing what a path carries, the same way the reference is
+# changing what a path produces, the same way the reference is
 # regenerated when a variant's fields move. A driver added without a row
 # here fails the check below rather than being silently uncovered.
-CARRIED: dict[str, tuple[tuple[str, ...], ...]] = {
+CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
     "vinga_server.conversations.store:ConversationStore.start #1": (
-        ("event", "path"),
+        ("ConversationsEnabled", ("event", "path")),
     ),
     "vinga_server.conversations.store:ConversationStore.record_event #1": (
-        ("event", "session"),
+        ("ConversationsDropped", ("event", "session")),
     ),
     "vinga_server.conversations.store:ConversationStore._failed #1": (
-        ("event", "failure"),
+        ("WriteFailed", ("event", "failure")),
     ),
     "vinga_server.conversations.store:ConversationStore._prune #1": (
-        ("event", "failure"),
+        ("PruneFailed", ("event", "failure")),
     ),
     "vinga_server.conversations.store:ConversationStore._prune #2": (
-        ("event", "sessions"),
+        ("ConversationsPruned", ("event", "sessions")),
     ),
     "vinga_server.device.session:DeviceSession._watch_for_idle #1": (
-        ("device", "duration_s", "event", "idle_s", "session"),
+        ("SessionIdle", ("device", "duration_s", "event", "idle_s", "session")),
     ),
     "vinga_server.device.session:DeviceSession.run #1": (
-        ("device", "event", "reason", "session"),
+        ("RejectedBadDeviceId", ("device", "event", "reason", "session")),
     ),
     "vinga_server.device.session:DeviceSession.run #2": (
-        ("device", "event", "reason", "session"),
+        ("RejectedAgentNotLoaded", ("device", "event", "reason", "session")),
     ),
     "vinga_server.device.session:DeviceSession.run #3": (
-        ("device", "event", "reason", "session"),
+        ("RejectedNoAgent", ("device", "event", "reason", "session")),
     ),
     "vinga_server.device.session:DeviceSession.run #4": (
-        ("agent", "agents", "client", "device", "event", "protocol", "revision", "session"),
+        ("SessionOpen", ("agent", "agents", "client", "device", "event", "protocol", "revision",
+                         "session")),
     ),
     "vinga_server.device.session:DeviceSession.run #5": (
-        ("device", "duration_s", "event", "session"),
+        ("SessionLimit", ("device", "duration_s", "event", "session")),
     ),
     "vinga_server.device.session:DeviceSession.run #6": (
-        ("device", "duration_s", "event", "reason", "session"),
+        ("SessionClosed", ("device", "duration_s", "event", "reason", "session")),
     ),
     "vinga_server.device.session:DeviceSession.send_audio #1": (
-        ("agent", "device", "event", "session"),
+        ("SpeakingStarted", ("agent", "device", "event", "session")),
     ),
     "vinga_server.runtime.pipeline:PipelineRuntime._watchdog_stream #1": (
-        ("agent", "device", "duration_ms", "event", "model", "provider", "round", "session",
-         "stage", "type"),
-        ("agent", "device", "duration_ms", "event", "round", "session", "stage"),
+        ("LlmRetry", ("agent", "device", "duration_ms", "event", "model", "provider", "round",
+                      "session", "stage", "type")),
+        ("LlmRetry", ("agent", "device", "duration_ms", "event", "round", "session", "stage")),
     ),
     "vinga_server.runtime.pipeline:PipelineRuntime._llm_round_done #1": (
-        ("agent", "device", "duration_ms", "event", "first_token_ms", "input_tokens", "model",
-         "output_tokens", "provider", "round", "session", "stage", "turns", "type"),
-        ("agent", "device", "duration_ms", "event", "first_token_ms", "round", "session", "stage",
-         "turns"),
+        ("LlmRound", ("agent", "device", "duration_ms", "event", "first_token_ms", "input_tokens",
+                      "model", "output_tokens", "provider", "round", "session", "stage", "turns",
+                      "type")),
+        ("LlmRound", ("agent", "device", "duration_ms", "event", "first_token_ms", "round",
+                      "session", "stage", "turns")),
     ),
     "vinga_server.runtime.pipeline:PipelineRuntime._provider_failed #1": (
-        ("agent", "device", "duration_ms", "error", "event", "host", "model", "provider", "session",
-         "stage", "type"),
-        ("agent", "device", "duration_ms", "error", "event", "session", "stage"),
+        ("ProviderFailed", ("agent", "device", "duration_ms", "error", "event", "host", "model",
+                            "provider", "session", "stage", "type")),
+        ("ProviderFailed", ("agent", "device", "duration_ms", "error", "event", "session",
+                            "stage")),
     ),
     "vinga_server.runtime.pipeline:PipelineRuntime._prompt_assembled #1": (
-        ("agent", "characters", "device", "event", "session", "sources"),
+        ("PromptAssembled", ("agent", "characters", "device", "event", "session", "sources")),
     ),
     "vinga_server.runtime.pipeline:PipelineRuntime._reply #1": (
-        ("agent", "device", "duration_s", "event", "session"),
+        ("Heard", ("agent", "device", "duration_s", "event", "session")),
     ),
     "vinga_server.runtime.pipeline:PipelineRuntime._reply #2": (
-        ("agent", "device", "event", "sentences", "session"),
+        ("Replied", ("agent", "device", "event", "sentences", "session")),
     ),
     "vinga_server.runtime.pipeline:PipelineRuntime._speak_reply #1": (
-        ("agent", "device", "event", "sentences", "session"),
+        ("AgentSaid", ("agent", "device", "event", "sentences", "session")),
     ),
     "vinga_server.runtime.pipeline:PipelineRuntime._speak_reply #2": (
-        ("device", "event", "from_agent", "session", "to_agent"),
+        ("Handover", ("device", "event", "from_agent", "session", "to_agent")),
     ),
     "vinga_server.runtime.pipeline:PipelineRuntime._run_one #1": (
-        ("agent", "device", "duration_ms", "event", "is_error", "session", "source", "tool"),
-        ("agent", "device", "duration_ms", "event", "is_error", "session", "source"),
-        ("agent", "device", "duration_ms", "entry", "event", "is_error", "session", "source"),
+        ("BuiltinToolCall", ("agent", "device", "duration_ms", "event", "is_error", "session",
+                             "source", "tool")),
+        ("UnnamedToolCall", ("agent", "device", "duration_ms", "event", "is_error", "session",
+                             "source")),
+        ("McpToolCall", ("agent", "device", "duration_ms", "entry", "event", "is_error", "session",
+                         "source")),
     ),
     "vinga_server.runtime.turntaking:TurnTaking.finish_utterance #1": (
-        ("device", "event", "session", "speech_ms"),
+        ("BargeIn", ("device", "event", "session", "speech_ms")),
     ),
     "vinga_server.runtime.turntaking:TurnTaking._gate_barge_in #1": (
-        ("device", "event", "reason", "session", "speech_ms"),
+        ("BargeInUnderFloor", ("device", "event", "reason", "session", "speech_ms")),
     ),
     "vinga_server.runtime.turntaking:TurnTaking._gate_barge_in #2": (
-        ("device", "event", "session", "speech_ms"),
+        ("BargeInMerged", ("device", "event", "session", "speech_ms")),
     ),
     "vinga_server.runtime.turntaking:TurnTaking._gate_barge_in #3": (
-        ("device", "event", "reason", "session", "speech_ms"),
+        ("BargeInInRefractory", ("device", "event", "reason", "session", "speech_ms")),
     ),
     "vinga_server.runtime.turntaking:TurnTaking._gate_barge_in #4": (
-        ("device", "event", "reason", "session", "speech_ms"),
+        ("BargeInWithoutTranscript", ("device", "event", "reason", "session", "speech_ms")),
     ),
     "vinga_server.runtime.turntaking:TurnTaking._gate_barge_in #5": (
-        ("device", "event", "session", "speaking_ms", "speech_ms"),
+        ("BargeIn", ("device", "event", "session", "speaking_ms", "speech_ms")),
     ),
     "vinga_server.runtime.filler_runner:FillerRunner._fire #1": (
-        ("agent", "device", "event", "reason", "session", "speech_ms"),
+        ("FillerSkippedForSpeech", ("agent", "device", "event", "reason", "session", "speech_ms")),
     ),
     "vinga_server.runtime.filler_runner:FillerRunner._fire #2": (
-        ("agent", "device", "event", "reason", "session"),
+        ("FillerSkippedForBargeIn", ("agent", "device", "event", "reason", "session")),
     ),
     "vinga_server.runtime.filler_runner:FillerRunner._fire #3": (
-        ("agent", "delay_ms", "device", "event", "phrase_index", "session"),
+        ("FillerPlayed", ("agent", "delay_ms", "device", "event", "phrase_index", "session")),
     ),
     "vinga_server.app:_build_composition #1": (
-        ("event", "path"),
+        ("CaptureEnabled", ("event", "path")),
     ),
     "vinga_server.app:_build_composition #2": (
-        ("event", "path"),
+        ("CaptureDisabled", ("event", "path")),
     ),
     "vinga_server.capture:SessionCapture._disable #1": (
-        ("event", "failure", "reason", "session"),
+        ("CaptureFailed", ("event", "failure", "reason", "session")),
     ),
     "vinga_server.capture:SessionCapture._finish_at_limit #1": (
-        ("event", "session"),
+        ("CaptureLimit", ("event", "session")),
     ),
     "vinga_server.capture:CaptureStore.prune #1": (
-        ("event", "sessions"),
+        ("CapturePruned", ("event", "sessions")),
     ),
     "vinga_server.capture:CaptureStore.prune #2": (
-        ("event", "total_mb"),
+        ("CaptureOverBudget", ("event", "total_mb")),
     ),
     "vinga_server.capture:CaptureStore.open #1": (
-        ("event", "failure", "reason", "session"),
+        ("CaptureDirectoryUnusable", ("event", "failure", "reason", "session")),
     ),
     "vinga_server.capture:CaptureStore.open #2": (
-        ("event", "free_mb", "reason", "session"),
+        ("CaptureBelowFloor", ("event", "free_mb", "reason", "session")),
     ),
     "vinga_server.capture:CaptureStore.open #3": (
-        ("event", "failure", "reason", "session"),
+        ("CaptureFilesUnopenable", ("event", "failure", "reason", "session")),
     ),
     "vinga_server.capture:CaptureStore.open #4": (
-        ("event", "path", "session"),
+        ("CaptureStarted", ("event", "path", "session")),
     ),
     "vinga_server.config.api:_SanitizedErrors.__call__ #1": (
-        ("event",),
+        ("ApiError", ("event",)),
     ),
     "vinga_server.config.api:_refusal.handler #1": (
-        ("event",),
+        ("ApiStorageError", ("event",)),
     ),
     "vinga_server.device.bindings:DeviceBindings.open #1": (
-        ("event", "path"),
+        ("BindingsSnapshotOnly", ("event", "path")),
     ),
     "vinga_server.device.bindings:DeviceBindings._warn #1": (
-        ("device", "event", "failure"),
+        ("BindingsUnreadable", ("device", "event", "failure")),
     ),
     "vinga_server.filler:build_agent_fillers #1": (
-        ("agent", "error", "event"),
+        ("FillerDisabled", ("agent", "error", "event")),
     ),
     "vinga_server.onboarding.keys:_log_mismatch #1": (
-        ("attempted_length", "event"),
+        ("OnboardingKeyMismatch", ("attempted_length", "event")),
     ),
     "vinga_server.onboarding.keys:_log_mismatch #2": (
-        ("attempted_length", "event"),
+        ("OnboardingKeyUnshaped", ("attempted_length", "event")),
     ),
     "vinga_server.onboarding.origin:log_banner #1": (
-        ("event", "onboarding", "origin", "origin_source"),
+        ("OnboardingOff", ("event", "onboarding", "origin", "origin_source")),
     ),
     "vinga_server.onboarding.origin:log_banner #2": (
-        ("event", "keyed", "onboarding", "origin", "origin_source"),
+        ("OnboardingOn", ("event", "keyed", "onboarding", "origin", "origin_source")),
     ),
     "vinga_server.ota.poll:activate #1": (
-        ("agents", "device", "event"),
+        ("ActivationComplete", ("agents", "device", "event")),
     ),
     "vinga_server.ota.poll:activate #2": (
-        ("code", "device", "event", "unloaded"),
+        ("ActivationPending", ("code", "device", "event", "unloaded")),
     ),
     "vinga_server.ota.poll:_version_two #1": (
-        ("code", "device", "event", "reason"),
+        ("ActivationRefusedUnreadableBody", ("code", "device", "event", "reason")),
     ),
     "vinga_server.ota.poll:_version_two #2": (
-        ("code", "device", "event", "reason"),
+        ("ActivationRefusedUnknownAlgorithm", ("code", "device", "event", "reason")),
     ),
     "vinga_server.ota.poll:_version_two #3": (
-        ("code", "device", "event", "reason"),
+        ("ActivationRefusedChallengeMismatch", ("code", "device", "event", "reason")),
     ),
     "vinga_server.ota.reply:check_version #1": (
-        ("agents", "board", "client", "code", "device", "event", "firmware", "unloaded"),
+        ("OtaCheckActivating", ("agents", "board", "client", "code", "device", "event", "firmware",
+                                "unloaded")),
     ),
     "vinga_server.ota.reply:check_version #2": (
-        ("agents", "board", "client", "device", "event", "firmware", "unloaded"),
+        ("OtaCheckAgentNotLoaded", ("agents", "board", "client", "device", "event", "firmware",
+                                    "unloaded")),
     ),
     "vinga_server.ota.reply:check_version #3": (
-        ("agents", "board", "client", "device", "event", "firmware", "unloaded"),
+        ("OtaCheckNoAgent", ("agents", "board", "client", "device", "event", "firmware",
+                             "unloaded")),
     ),
     "vinga_server.ota.reply:check_version #4": (
-        ("agents", "board", "client", "device", "event", "firmware", "unloaded"),
+        ("OtaCheckResolved", ("agents", "board", "client", "device", "event", "firmware",
+                              "unloaded")),
     ),
     "vinga_server.ota.reply:_activation #1": (
-        ("device", "event", "reason"),
+        ("ActivationNotOfferedUnreadable", ("device", "event", "reason")),
     ),
     "vinga_server.ota.reply:_activation #2": (
-        ("device", "event", "reason"),
+        ("ActivationNotOfferedRefused", ("device", "event", "reason")),
     ),
     "vinga_server.ota.reply:_bad_request #1": (
-        ("event",),
+        ("OtaRequestRejected", ("event",)),
     ),
     "vinga_server.providers.openai_asr:OpenAiAsr._retry_without_prompt #1": (
-        ("duration_s", "event", "host", "outcome"),
+        ("EchoSkipped", ("duration_s", "event", "host", "outcome")),
     ),
     "vinga_server.providers.openai_asr:OpenAiAsr._retry_without_prompt #2": (
-        ("duration_s", "event", "host", "outcome", "retry_ms"),
+        ("EchoRetryTimedOut", ("duration_s", "event", "host", "outcome", "retry_ms")),
     ),
     "vinga_server.providers.openai_asr:OpenAiAsr._retry_without_prompt #3": (
-        ("duration_s", "event", "host", "outcome", "retry_ms"),
+        ("EchoConfirmed", ("duration_s", "event", "host", "outcome", "retry_ms")),
     ),
     "vinga_server.providers.openai_asr:OpenAiAsr._retry_without_prompt #4": (
-        ("duration_s", "event", "host", "outcome", "retry_ms"),
+        ("EchoConfirmedEmpty", ("duration_s", "event", "host", "outcome", "retry_ms")),
     ),
     "vinga_server.providers.openai_asr:OpenAiAsr._retry_without_prompt #5": (
-        ("duration_s", "event", "host", "outcome", "retry_ms"),
+        ("EchoRecovered", ("duration_s", "event", "host", "outcome", "retry_ms")),
     ),
     "vinga_server.registry:SessionRegistry.drain #1": (
-        ("event", "sessions", "timeout_s"),
+        ("DrainStarted", ("event", "sessions", "timeout_s")),
     ),
     "vinga_server.registry:SessionRegistry.drain #2": (
-        ("cut_mid_reply", "event", "sessions", "timeout_s", "unfinished"),
+        ("DrainIncomplete", ("cut_mid_reply", "event", "sessions", "timeout_s", "unfinished")),
     ),
     "vinga_server.registry:SessionRegistry.drain #3": (
-        ("event", "sessions"),
+        ("DrainFinished", ("event", "sessions")),
     ),
     "vinga_server.tools.mcp.manager:McpServerManager._run #1": (
-        ("duration_ms", "entry", "event", "tools", "transport"),
+        ("McpConnected", ("duration_ms", "entry", "event", "tools", "transport")),
     ),
     "vinga_server.tools.mcp.manager:McpServerManager._run #2": (
-        ("duration_ms", "entry", "event", "reason"),
+        ("McpConnectFailed", ("duration_ms", "entry", "event", "reason")),
     ),
     "vinga_server.tools.mcp.manager:McpServerManager._run #3": (
-        ("entry", "event", "reason"),
+        ("McpStopped", ("entry", "event", "reason")),
     ),
     "vinga_server.tools.mcp.manager:McpServerManager._mark_down #1": (
-        ("entry", "error", "event", "position"),
+        ("McpCallDropped", ("entry", "error", "event", "position")),
     ),
     "vinga_server.tools.mcp.manager:McpServerManager._mark_down #2": (
-        ("entry", "event", "reason"),
+        ("McpDropped", ("entry", "event", "reason")),
     ),
     "vinga_server.tools.mcp.registry:McpServers._reachable #1": (
-        ("entry", "event", "owner", "position"),
+        ("McpToolShadowed", ("entry", "event", "owner", "position")),
     ),
     "vinga_server.tools.mcp.reload:_refused #1": (
-        ("event", "outcome", "reason"),
+        ("McpReloadRefused", ("event", "outcome", "reason")),
     ),
     "vinga_server.tools.mcp.reload:_apply #1": (
-        ("duration_ms", "event", "outcome", "restarted", "started", "stopped", "unchanged"),
+        ("McpReloadApplied", ("duration_ms", "event", "outcome", "restarted", "started", "stopped",
+                              "unchanged")),
     ),
     "vinga_server.tools.memory:MemoryStore.read #1": (
-        ("agent", "error", "event"),
+        ("MemoryUnreadable", ("agent", "error", "event")),
     ),
     "vinga_server.ws:conversation #1": (
-        ("device", "event", "reason"),
+        ("AuthRejected", ("device", "event", "reason")),
     ),
     "vinga_server.ws:conversation #2": (
-        ("device", "event", "reason", "session"),
+        ("RejectedAtCapacity", ("device", "event", "reason", "session")),
     ),
 }
 
 
-def test_every_driver_carries_the_fields_its_path_declares(
+def matched(record: dict[str, Any]) -> str:
+    """Which variant one record is an emission of.
+
+    Exactly one, for every record the drivers keep: the four dimensions
+    and the key range together separate the siblings of every declared
+    event. The other answers are named rather than raised on, so a
+    record that stopped being identifiable is a readable row in the
+    failure above and here.
+    """
+    found = [
+        variant.__name__
+        for variant in variants_of(record["event"])
+        if matches(variant, record)
+    ]
+    if len(found) == 1:
+        return found[0]
+    return " or ".join(found) if found else "no declared variant"
+
+
+def test_every_driver_produces_the_shape_its_path_declares(
     capture: dict[str, list[dict[str, Any]]],
 ) -> None:
-    """The per-path exactness `matches()` gives up, asserted here.
+    """The per-path pin, which is what `matches()` gives up by trying
+    every variant of an event.
 
-    Field names only, which is all a payload key set is, so a red lane
-    is as values-free as the rest of the file.
+    Variant names and field names, which is all a declaration and a
+    payload key set are, so a red lane is as values-free as the rest of
+    the file.
     """
     assert sorted(CARRIED) == sorted(driver.key for driver in DRIVERS)
 
     drifted = [
-        f"{key}: carries {carried}, the table says {CARRIED[key]}"
+        f"{key}: produces {produces}, the table says {CARRIED[key]}"
         for key, records in capture.items()
-        for carried in [tuple(tuple(one["fields"]) for one in records)]
-        if carried != CARRIED[key]
+        for produces in [tuple((matched(one), tuple(one["fields"])) for one in records)]
+        if produces != CARRIED[key]
     ]
 
     assert drifted == []

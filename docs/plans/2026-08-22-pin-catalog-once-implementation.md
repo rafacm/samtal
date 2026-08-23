@@ -75,12 +75,16 @@ corrected since it cited both deleted files. Added:
   `variants_of()` answers `()` for a record naming an event no
   declaration owns, so an undeclared event is a listed failure rather
   than a `KeyError`.
-- `test_every_driver_carries_the_fields_its_path_declares`, holding the
+- `test_every_driver_produces_the_shape_its_path_declares`, holding the
   capture to `CARRIED`: the per-driver table of decision 2, driver key
-  to the tuple of field-name tuples its records carry, asserted exactly,
-  eighty-one drivers and eighty-six records. The table's keys are
-  asserted equal to the driver keys first, so a driver added without a
-  row fails rather than going uncovered.
+  to one row per record, each row the variant the record is an emission
+  of and the payload keys it carries, asserted exactly, eighty-one
+  drivers and eighty-six records. The table's keys are asserted equal to
+  the driver keys first, so a driver added without a row fails rather
+  than going uncovered. The variant column is the PR review round's P1
+  (finding 1 below): `matches()` tries every variant of a record's
+  event, so without it a path that started emitting a same-shaped
+  sibling of its own variant passed every check in the file.
 
 Both report channel, level, template, field names and type names only,
 never a payload value, per the plan's no-leak lens: the drivers work
@@ -89,10 +93,13 @@ docstring closes on the live guarantee and says that rule outright.
 
 **How `CARRIED` was built and checked.** Generated once from the live
 capture, then verified two ways before the committed file was deleted.
-Mechanically: every one of the 86 rows equals the `fields` list the
-committed `event-baseline.json` recorded for the same driver, which is
-the artifact this replaces, and two consecutive generations produced
-identical source. By reading, against the declarations rather than
+Mechanically: every one of the 86 rows' key tuple equals the `fields`
+list the committed `event-baseline.json` recorded for the same driver,
+which is the artifact this replaces, and two consecutive generations
+produced identical source. The variant column added for finding 1 was
+generated the same way, under an assertion that every one of the 86
+records matches EXACTLY one declared variant, which is what makes the
+column well defined. By reading, against the declarations rather than
 against the capture: `DeviceSession.run #4` is exactly `SessionOpen`'s
 required set; `_run_one #1`'s three rows are exactly `BuiltinToolCall`,
 `UnnamedToolCall` and `McpToolCall`'s; `CaptureStore.open #1` and `#2`
@@ -138,8 +145,15 @@ live suite, and the two pin suites' say the same.
    conformance check's template and level comparisons are load-bearing
    for a second reason the mutations do not reach: they are what tells
    apart the variants of one event that carry identical field sets, so
-   the every-variant check can tell that a site stopped constructing one
-   of three otherwise indistinguishable `barge_in_suppressed` variants.
+   `matched()` can say WHICH variant a record is and `CARRIED` can hold
+   a path to producing that one. The first version of this paragraph
+   claimed the every-variant check caught a site that stopped
+   constructing one of three otherwise indistinguishable
+   `barge_in_suppressed` variants, which the review round's finding 1
+   showed to be false in exactly that example: three drivers produce
+   three variants one each, so a swap between two of them leaves all
+   three produced. The per-path variant column is what actually catches
+   it.
 
 3. **`shape()`'s `argument_types` had one more consumer in prose than
    the plan expected**, which is deviation 1's second and third sites.
