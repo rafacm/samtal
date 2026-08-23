@@ -177,9 +177,39 @@ string out, no external reach).
 ### 5. The split: three modules in `device/`, the session keeps the boundary
 
 `DeviceSession`'s public surface (the `DeviceOutput` half, `run`,
-`request_shutdown`) does not change, and no test that drives a
-session changes: the existing session suites are the
-characterization pin for the whole milestone.
+`request_shutdown`) does not change. The session suites are the
+characterization pin for the milestone, and their assertion
+CONTENT does not change; what necessarily changes is the small set
+of deliberate reach-ins that touch the moved names, enumerated
+here so the diff is checkable against a list rather than a hope.
+Compatibility aliases kept solely to make an old reach-in pass are
+forbidden: they would leave the moved state in `DeviceSession` and
+defeat the split. Each migration goes to observable session
+behavior where one exists, else to the new module's public
+interface through the session's one field for it:
+
+- `test_session_barge_in.py` (reads `_pace_start`,
+  `_pace_resume`): reads the pacer's public pause state and clock
+  through `session._pacer`.
+- `test_session_characterization.py` (replaces `_encoder`):
+  replaces the encoder on the pacer, or the whole pacer, whichever
+  keeps the assertion's subject.
+- `test_boundary_contract.py` (reads `_last_activity`): reads the
+  watchdog's public mark time through `session._watchdog`.
+- `test_session_close_reason.py` (replaces `_stop_idle_watchdog`)
+  and `test_conversations_session.py` (replaces
+  `_start_idle_watchdog`): patch the watchdog object's `start`/
+  `stop`, or inject a no-op watchdog, keeping what the test pins
+  (that the close path runs and the reason latches) untouched.
+- `test_conversations_session.py` (`_capture is None`): asserts
+  the session's capture-audio field is None, same meaning, new
+  name.
+- `test_session_events.py` (resets `_pace_start`): resets the
+  clock through the pacer's `restart()`.
+
+The implementation doc records the full migration table (old
+reach-in, new form, what the assertion still pins); any test edit
+in M2's diff outside this table is a review flag.
 
 - **`device/pacing.py`, class `ReplyPacer`.** Owns the encoder and
   every pacing fact: `_encoder`, `_pace_start`, `_pace_count`,
@@ -279,16 +309,13 @@ observable. The two regenerated artifacts diff exactly at the two
 prose sites, verified by reading the diff, and the drift checks
 hold them from then on.
 
-M2: zero assertion changes anywhere. The session suites
-(`test_session.py`, `test_session_limits.py`,
-`test_session_record.py`, `test_session_close_reason.py`,
-`test_conversations_session.py`, `test_tts_lookahead.py`,
-`test_generation_binding.py`, the support hub
-`tests/support/sessions.py`, and the integration drain suite) run
-byte-unchanged before and after the split; any edit to one of them
-in M2's diff is a review flag by construction. `wc -l` of
-`session.py` before and after is recorded in the implementation
-doc.
+M2: no assertion changes its meaning anywhere. The session suites
+run with their assertion content intact; the only permitted edits
+are the reach-in migrations enumerated in decision 5, and any M2
+test edit outside that table is a review flag by construction. The
+hello-timeout patch site retargets per decision 5's watchdog
+bullet. `wc -l` of `session.py` before and after is recorded in
+the implementation doc.
 
 ## Verification
 
@@ -338,9 +365,10 @@ refreshed after any rebase.
   annotation name the class that is really there.
 - [ ] **M2: split the session's three clusters.**
   Decision 5, stacked on M1: `device/pacing.py`,
-  `device/capture_tap.py`, `device/watchdog.py`; the session keeps
-  the boundary, the manifest and the close path; zero test-file
-  changes, which is the milestone's own pin. Design footprint: adds
+  `device/capture_audio.py`, `device/watchdog.py`; the session
+  keeps the boundary, the manifest and the close path; test edits
+  are exactly the enumerated reach-in migrations and nothing else,
+  which is the milestone's own pin. Design footprint: adds
   three modules whose one sentence each is stated in decision 5;
   deepens `device/session.py`, which stops carrying three
   implementations behind one class name.
@@ -373,6 +401,13 @@ with a resolution note here.
    `test_conversations_session.py` replaces `_start_idle_watchdog`
    and asserts `_capture is None`, `test_session_events.py` resets
    `_pace_start`. Compatibility aliases would defeat the split.
+
+   *Resolution* (this commit): the zero-change claim is replaced
+   by an enumerated migration table in decision 5 (each reach-in's
+   new form and what its assertion still pins), aliases are
+   explicitly forbidden, and any M2 test edit outside the table is
+   a review flag; the Tests section and the milestone checklist
+   restate the pin in those terms.
 
 3. **P2: `gate()` could not preserve the sent-frame accounting.**
    The count advances only after send and capture succeed; a
