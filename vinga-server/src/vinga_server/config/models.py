@@ -2069,11 +2069,17 @@ DOMAIN_KEYS: tuple[str, ...] = tuple(DOMAIN_DESCRIPTIONS)
 # about a runnable server, and running it at write time would refuse the
 # first `set agent` into an empty database.
 #
-# The docstring below is a committed byte. `config schema` renders this
-# model's JSON Schema, where a pydantic model's docstring is the
-# schema's `description`, so what is said about the class to a reader of
-# the code is said here in a comment and what is said to a reader of the
-# document is said there.
+# The docstring below is output, and nothing checks it. `config schema`
+# prints this model's JSON Schema, where a pydantic model's docstring
+# becomes the schema's `description`, so editing that docstring changes
+# what the command prints, silently: no committed artifact carries this
+# rendering and no test asserts it, unlike `api-openapi.json` and
+# `domain-config.md`, which CI regenerates and diffs. #242 verified the
+# schema byte for byte by hand at every commit, and made the trip once
+# before splitting the two: what is said about this class to a reader of
+# the code is said here in a comment, and what is said to a reader of
+# the document is said in the docstring. An editor of either should know
+# which one they are writing.
 #
 # Nothing here may become an after-validator, now or later.
 # `store._read_domain` assembles the keyed sections through this model
