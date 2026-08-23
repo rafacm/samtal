@@ -5,9 +5,10 @@ which is the whole reason they are not in `api.py`. Two surfaces know
 these shapes and only one of them may pay for FastAPI: the API declares
 them as its response models, and the CLI renders an answer it received
 over HTTP by validating it against the shape the API said it would send
-rather than against a hand-kept list of the keys it expects. `writes.py`
-records why the CLI must not import the API, and `config schema` and
-`config reference` are the commands that would otherwise pay for it.
+rather than against a hand-kept list of the keys it expects. The CLI
+must not import the API for it: `config schema` and `config reference`
+would then pay for FastAPI on their way to printing a document that has
+nothing to do with it.
 
 "Nothing else" is why one description below writes the mask out as a
 literal rather than reading `secrets.MASK`: this module sits under

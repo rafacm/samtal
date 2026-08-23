@@ -69,6 +69,12 @@ from starlette.types import ASGIApp, Lifespan, Message, Receive, Scope, Send
 
 from vinga_server.config import entities, views
 from vinga_server.config.docgen import API_OPTIONS_NOTE
+from vinga_server.config.entities import (
+    BINDING_NOTICE,
+    BINDING_UNSERVED_NOTICE,
+    RESTART_NOTICE,
+    SNAPSHOT_NOTICE,
+)
 from vinga_server.config.loader import (
     ConfigError,
     DatabaseBusyError,
@@ -110,25 +116,6 @@ from vinga_server.config.responses import (
 )
 from vinga_server.config.secrets import MASK, SecretLocation, load_keys, provider_identity
 from vinga_server.config.store import ConfigStore
-from vinga_server.config.writes import (
-    CLEARED_DEFAULT_AGENT,
-    RESTART_NOTICE,
-    binding_notice,
-    bound_device,
-    cleared_secret,
-    deleted_agent,
-    deleted_device,
-    deleted_mcp_server,
-    deleted_prompt_fragment,
-    deleted_provider,
-    wrote_agent,
-    wrote_agent_defaults,
-    wrote_default_agent,
-    wrote_mcp_server,
-    wrote_prompt_fragment,
-    wrote_provider,
-    wrote_secret,
-)
 from vinga_server.conversations import api as conversations
 from vinga_server.db import open_database
 from vinga_server.events import ServerEvents
@@ -1732,11 +1719,14 @@ def _entity_writes(api: FastAPI) -> None:
     two credential routes for the two kinds that can hold one.
 
     A handler makes one repository call and answers with what it did and
-    when it applies. The sentence is `writes.py`'s, so the API and the
-    CLI's break-glass path cannot come to describe one act differently,
-    and the timing is the kind's own `notice`, which is a descriptor
-    fact because it is about what was written rather than about the
-    route that wrote it.
+    when it applies. The sentence is written here, in the handler, and
+    the timing is the kind's own `notice`, which is a descriptor fact
+    because it is about what was written rather than about the route
+    that wrote it. Seven of these sentences are also written by the
+    CLI's break-glass path, which has no server to ask; what holds the
+    two spellings equal is
+    `test_a_local_write_acknowledges_what_the_api_acknowledges`, which
+    runs each mutating act both ways and asserts one answer.
 
     A fragment is handed to the repository unread (`RawBody`), which is
     the rule the module docstring gives: FastAPI's own validation echoes
@@ -1757,7 +1747,7 @@ def _entity_writes(api: FastAPI) -> None:
         next reload, and the conversations that open after that speak
         through the new one."""
         store.set_provider(stage, name, body)
-        return _acknowledge(wrote_provider(stage, name), _PROVIDER.notice)
+        return _acknowledge(f"provider {stage}.{name}", _PROVIDER.notice)
 
     @api.delete(
         "/providers/{stage}/{name}",
@@ -1768,7 +1758,9 @@ def _entity_writes(api: FastAPI) -> None:
         """Delete one provider, and the secrets stored on it. Refused
         while an agent or the agent defaults still name it."""
         store.delete_provider(stage, name)
-        return _acknowledge(deleted_provider(stage, name), _PROVIDER.notice)
+        return _acknowledge(
+            f"provider {stage}.{name} deleted, with its stored secrets", _PROVIDER.notice
+        )
 
     @api.put(
         "/providers/{stage}/{name}/secrets/{slot}",
@@ -1786,7 +1778,7 @@ def _entity_writes(api: FastAPI) -> None:
         is built, and the next reload builds it again."""
         location = _slot(_PROVIDER, provider_identity(stage, name), slot)
         store.set_secret(location, _secret(body))
-        return _acknowledge(wrote_secret(location.describe()), _PROVIDER.notice)
+        return _acknowledge(f"secret for {location.describe()}", _PROVIDER.notice)
 
     @api.delete(
         "/providers/{stage}/{name}/secrets/{slot}",
@@ -1799,7 +1791,7 @@ def _entity_writes(api: FastAPI) -> None:
         """Remove one stored credential. A slot holding none is a 404."""
         location = _slot(_PROVIDER, provider_identity(stage, name), slot)
         store.clear_secret(location)
-        return _acknowledge(cleared_secret(location.describe()), _PROVIDER.notice)
+        return _acknowledge(f"secret for {location.describe()} cleared", _PROVIDER.notice)
 
     @api.put(
         "/mcp-servers/{name}",
@@ -1811,7 +1803,7 @@ def _entity_writes(api: FastAPI) -> None:
         """Create or replace one MCP server. The running server applies
         it at the next reload, with no restart."""
         store.set_mcp_server(name, body)
-        return _acknowledge(wrote_mcp_server(name), _MCP_SERVER.notice)
+        return _acknowledge(f"mcp-server {name}", _MCP_SERVER.notice)
 
     @api.delete(
         "/mcp-servers/{name}",
@@ -1822,7 +1814,9 @@ def _entity_writes(api: FastAPI) -> None:
         """Delete one MCP server, and the secrets stored on it. The
         running server stops it at the next reload."""
         store.delete_mcp_server(name)
-        return _acknowledge(deleted_mcp_server(name), _MCP_SERVER.notice)
+        return _acknowledge(
+            f"mcp-server {name} deleted, with its stored secrets", _MCP_SERVER.notice
+        )
 
     @api.put(
         "/mcp-servers/{name}/secrets/{slot}",
@@ -1842,7 +1836,7 @@ def _entity_writes(api: FastAPI) -> None:
         is rebuilt with the fresh credential and reconnected."""
         location = _slot(_MCP_SERVER, name, slot)
         store.set_secret(location, _secret(body))
-        return _acknowledge(wrote_secret(location.describe()), _MCP_SERVER.notice)
+        return _acknowledge(f"secret for {location.describe()}", _MCP_SERVER.notice)
 
     @api.delete(
         "/mcp-servers/{name}/secrets/{slot}",
@@ -1854,7 +1848,7 @@ def _entity_writes(api: FastAPI) -> None:
         by rebuilding the entry without it."""
         location = _slot(_MCP_SERVER, name, slot)
         store.clear_secret(location)
-        return _acknowledge(cleared_secret(location.describe()), _MCP_SERVER.notice)
+        return _acknowledge(f"secret for {location.describe()} cleared", _MCP_SERVER.notice)
 
     @api.put(
         "/prompt-fragments/{name}",
@@ -1876,7 +1870,7 @@ def _entity_writes(api: FastAPI) -> None:
         `prompt_includes`, and the `agent_defaults.prompt_includes` that
         every agent naming no list of its own inherits."""
         store.set_prompt_fragment(name, body)
-        return _acknowledge(wrote_prompt_fragment(name), _PROMPT_FRAGMENT.notice)
+        return _acknowledge(f"prompt-fragment {name}", _PROMPT_FRAGMENT.notice)
 
     @api.delete(
         "/prompt-fragments/{name}",
@@ -1887,7 +1881,7 @@ def _entity_writes(api: FastAPI) -> None:
         """Delete one shared prompt fragment. Refused while any layer
         still includes it."""
         store.delete_prompt_fragment(name)
-        return _acknowledge(deleted_prompt_fragment(name), _PROMPT_FRAGMENT.notice)
+        return _acknowledge(f"prompt-fragment {name} deleted", _PROMPT_FRAGMENT.notice)
 
     @api.put(
         "/agents/{name}",
@@ -1900,7 +1894,7 @@ def _entity_writes(api: FastAPI) -> None:
         names has to exist already, which is what the natural creation
         order is about."""
         store.set_agent(name, body)
-        return _acknowledge(wrote_agent(name), _AGENT.notice)
+        return _acknowledge(f"agent {name}", _AGENT.notice)
 
     @api.delete(
         "/agents/{name}",
@@ -1911,7 +1905,7 @@ def _entity_writes(api: FastAPI) -> None:
         """Delete one agent. Refused while a device binding or the
         default agent still names it."""
         store.delete_agent(name)
-        return _acknowledge(deleted_agent(name), _AGENT.notice)
+        return _acknowledge(f"agent {name} deleted", _AGENT.notice)
 
     @api.put(
         "/agent-defaults",
@@ -1924,7 +1918,15 @@ def _entity_writes(api: FastAPI) -> None:
         One entry for the whole deployment, so this is a replace and
         there is nothing to delete."""
         store.set_agent_defaults(body)
-        return _acknowledge(wrote_agent_defaults(), _AGENT_DEFAULTS.notice)
+        return _acknowledge("agent-defaults", _AGENT_DEFAULTS.notice)
+
+
+# What clearing the default agent says it did. The one acknowledgement
+# in this file that is a sentence rather than a naming of what was
+# written, because there is nothing to name: unsetting it is a
+# configuration and not an absence, so the line says what the
+# deployment now is.
+CLEARED_DEFAULT_AGENT = "default agent cleared; the devices map is now the allowlist"
 
 
 def _writes(api: FastAPI) -> None:
@@ -2043,8 +2045,8 @@ def _writes(api: FastAPI) -> None:
         # sent the operator to restart a server that is already serving
         # it.
         return _acknowledge(
-            bound_device(bound.mac, bound.agents),
-            binding_notice(_unloaded(bound.agents, loaded), snapshot_only),
+            f"device {bound.mac} bound to {', '.join(bound.agents)}",
+            _binding_notice(_unloaded(bound.agents, loaded), snapshot_only),
         )
 
     @api.put(
@@ -2083,8 +2085,8 @@ def _writes(api: FastAPI) -> None:
         # that agent unloaded and sent the operator to restart a server
         # that is already serving it.
         return _acknowledge(
-            bound_device(bound.mac, bound.agents),
-            binding_notice(_unloaded(bound.agents, loaded), snapshot_only),
+            f"device {bound.mac} bound to {', '.join(bound.agents)}",
+            _binding_notice(_unloaded(bound.agents, loaded), snapshot_only),
         )
 
     @api.delete(
@@ -2101,7 +2103,8 @@ def _writes(api: FastAPI) -> None:
         next check-in, though a conversation already running is left to
         finish."""
         return _acknowledge(
-            deleted_device(store.delete_device(mac)), binding_notice(snapshot_only=snapshot_only)
+            f"device {store.delete_device(mac)} deleted",
+            _binding_notice(snapshot_only=snapshot_only),
         )
 
     @api.put(
@@ -2127,8 +2130,8 @@ def _writes(api: FastAPI) -> None:
         # reason the device write above says.
         pending.retire_all()
         return _acknowledge(
-            wrote_default_agent(name),
-            binding_notice(_unloaded([name], loaded), snapshot_only),
+            f"default agent {name}",
+            _binding_notice(_unloaded([name], loaded), snapshot_only),
         )
 
     @api.delete(
@@ -2145,7 +2148,7 @@ def _writes(api: FastAPI) -> None:
         the next unbound device to ask is turned away."""
         store.clear_default_agent()
         return _acknowledge(
-            CLEARED_DEFAULT_AGENT, binding_notice(snapshot_only=snapshot_only)
+            CLEARED_DEFAULT_AGENT, _binding_notice(snapshot_only=snapshot_only)
         )
 
 
@@ -2156,6 +2159,34 @@ def _acknowledge(what: str, notice: str = RESTART_NOTICE) -> dict[str, str]:
     reads as conservative rather than as a promise the server cannot
     keep."""
     return {"wrote": what, "notice": notice}
+
+
+def _binding_notice(unloaded: Sequence[str] = (), snapshot_only: bool = False) -> str:
+    """When a device write takes effect, which depends on two things.
+
+    The binding itself is live. The agent it names may not be: a server
+    builds an agent's pipeline when it installs a world, so a binding to
+    an agent written since the last one resolves to nothing until the
+    reload that installs it, and saying "no restart is needed" there
+    would be a promise the device cannot keep for a reason an operator
+    could not guess. `unloaded` is the names this server is not serving,
+    asked of the generation that is current at the moment of the write
+    rather than of the world this process booted, and empty when every
+    one of them is being served and the write is live on its own.
+
+    `snapshot_only` is the server that reads no store at all, and it
+    answers before either of those: what is live about a binding is that
+    a running server re-reads the rows, and a server serving a
+    configuration it was handed re-reads nothing. The one true thing
+    left to say is that the write is stored, which is what the sentence
+    says. Written here rather than at the four call sites because this
+    is where a device write's answer is decided, and there is no second
+    write path that decides it: the CLI's `--local` device delete has no
+    loaded server to ask and answers the live sentence plainly.
+    """
+    if snapshot_only:
+        return SNAPSHOT_NOTICE
+    return BINDING_UNSERVED_NOTICE if unloaded else BINDING_NOTICE
 
 
 def _unloaded(agents: Sequence[str], loaded: Collection[str]) -> list[str]:

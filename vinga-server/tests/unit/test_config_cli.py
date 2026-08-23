@@ -43,18 +43,16 @@ from tests.support.config_cli import document as _document
 from tests.support.config_cli import showing as _showing
 from vinga_server.config import cli
 from vinga_server.config.entities import (
+    BINDING_NOTICE,
+    BINDING_UNSERVED_NOTICE,
     NO_SUCH_AGENT,
     NO_SUCH_DEVICE,
     NO_SUCH_FRAGMENT,
     NO_SUCH_MCP_SERVER,
     NO_SUCH_PROVIDER,
-)
-from vinga_server.config.store import NOT_A_STAGE
-from vinga_server.config.writes import (
-    BINDING_NOTICE,
-    BINDING_UNSERVED_NOTICE,
     RELOAD_NOTICE,
 )
+from vinga_server.config.store import NOT_A_STAGE
 from vinga_server.db import open_database, schema
 
 

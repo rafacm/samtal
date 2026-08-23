@@ -23,7 +23,7 @@ from fastapi.testclient import TestClient
 
 from tests.integration.conftest import booted_in
 from vinga_server.config import Config
-from vinga_server.config.writes import BINDING_NOTICE
+from vinga_server.config.entities import BINDING_NOTICE
 from vinga_server.onboarding import onboarding_key, onboarding_path
 from vinga_server.ota import ACTIVATE_SEGMENT
 

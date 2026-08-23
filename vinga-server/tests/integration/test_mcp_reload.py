@@ -26,8 +26,8 @@ from tests.integration.conftest import FRAME_BYTES, SAMPLE_RATE, speech_pcm, spo
 from tests.support.problems import PROBLEM_KEYS
 from vinga_server.app import RELOAD_REFUSED
 from vinga_server.config import Config
+from vinga_server.config.entities import RELOAD_NOTICE
 from vinga_server.config.models import API_MOUNT_PATH
-from vinga_server.config.writes import RELOAD_NOTICE
 
 STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
 
