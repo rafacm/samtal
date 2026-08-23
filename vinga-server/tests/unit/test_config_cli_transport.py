@@ -425,6 +425,49 @@ def test_reload_gives_the_server_longer_to_answer_than_a_write(
     assert reload_client.timeout.connect == cli.CONNECT_TIMEOUT_S
 
 
+def test_apply_waits_for_the_server_however_long_it_takes(
+    run, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The reload's argument taken to its conclusion where no finite
+    envelope exists.
+
+    An apply is one transaction that loads the whole existing
+    configuration and validates the whole resulting one, and nothing
+    about the request bounds the size of the store it lands in, so there
+    is no number to derive. A bound that expired after the commit would
+    be the exact ambiguity the timeouts exist to prevent, so there is no
+    bound. The connect timeout is untouched: a server that is not there
+    still says so quickly.
+
+    Driven through a real `httpx.Client` over a mock transport for the
+    reason the reload's case is: the fixture's TestClient carries a
+    timeout from another copy of httpx entirely.
+    """
+    assert cli.APPLY_READ_TIMEOUT_S is None
+
+    made: list[httpx.Client] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"entries": []})
+
+    def factory(base_url: str, token: str | None = None) -> httpx.Client:
+        client = httpx.Client(
+            base_url=base_url,
+            transport=httpx.MockTransport(answer),
+            timeout=httpx.Timeout(cli.READ_TIMEOUT_S, connect=cli.CONNECT_TIMEOUT_S),
+        )
+        made.append(client)
+        return client
+
+    monkeypatch.setattr(cli, "build_client", factory)
+
+    assert run("apply", "-f", "-", stdin="{}\n") == 0
+
+    (applied,) = made
+    assert applied.timeout.read is None
+    assert applied.timeout.connect == cli.CONNECT_TIMEOUT_S
+
+
 def test_a_write_that_cannot_take_the_lock_prints_the_retryable_refusal(
     run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
