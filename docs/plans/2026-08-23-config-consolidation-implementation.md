@@ -75,9 +75,9 @@ constant-returning function is the constant it returned,
 `binding_notice` moves to `api.py` as `_binding_notice` and
 `secret_notice` moves whole to `cli.py` as `_secret_notice`, both with
 their docstrings and one of the two with a rewritten last paragraph
-(see the deviations below). `CLEARED_DEFAULT_AGENT` becomes a module
-constant of
-`api.py`, its only reader, beside that file's other sentences. The
+(see the deviations below). `CLEARED_DEFAULT_AGENT` becomes
+`_CLEARED_DEFAULT_AGENT`, a module constant of `api.py`, its only
+reader, beside that file's other sentences. The
 five notice constants the module re-exported are imported from
 `entities.py` now by nine test files. The module docstring's
 single-source rationale moves into
@@ -145,7 +145,7 @@ in it.
 | `deleted_device` | inlined (api and cli) |
 | `wrote_secret`, `cleared_secret` | inlined (api and cli) |
 | `wrote_agent_defaults` + `WROTE_AGENT_DEFAULTS` | collapsed to the literal `"agent-defaults"` at the one call site |
-| `CLEARED_DEFAULT_AGENT` | moved to `api.py` as a module constant |
+| `CLEARED_DEFAULT_AGENT` | moved to `api.py` as the module constant `_CLEARED_DEFAULT_AGENT`, its only reader being the route below it |
 | `binding_notice` | moved to `api.py` as `_binding_notice`, last paragraph rewritten (a deviation, recorded below) |
 | `secret_notice` | moved whole to `cli.py` as `_secret_notice` |
 | `BINDING_NOTICE`, `BINDING_UNSERVED_NOTICE`, `RELOAD_NOTICE`, `RESTART_NOTICE`, `SNAPSHOT_NOTICE` | re-exports; readers redirected to `entities.py`, where they are declared |
@@ -241,7 +241,7 @@ after:
 
 | Module | Before | After |
 | --- | --- | --- |
-| `api.py` | 58 | 59 |
+| `api.py` | 58 | 58 |
 | `boot.py` | 3 | 3 |
 | `cli.py` | 44 | 47 |
 | `diff.py` | 8 | 8 |
@@ -255,9 +255,10 @@ after:
 | `store.py` | 15 | 14 |
 | `views.py` | 20 | 20 |
 | `writes.py` | 18 | **gone** |
-| **Total** | **342** | **320** |
+| **Total** | **342** | **319** |
 
-`api.py` gains `CLEARED_DEFAULT_AGENT`; `cli.py` gains `outcomes`,
+`api.py` holds level, gaining `_CLEARED_DEFAULT_AGENT`, which is
+private and so counts for nothing here; `cli.py` gains `outcomes`,
 `flags` and `RELOAD_SECTIONS`; `models.py` gains `DomainConfig` and
 `store.py` loses its declaration of it.
 
