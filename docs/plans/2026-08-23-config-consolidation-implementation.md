@@ -52,7 +52,14 @@ index that existed only to serve them. Each fact is now a literal in
 `("prompt",) if model is AgentConfig else ()` in `_order`, and
 `("phrases",) if model is FillerConfig else ()` in `_declared`.
 `test_every_display_fact_names_a_field_the_shape_declares` goes with
-them; its whole subject was the two fields.
+them; it was addressed to the two deleted fields. What it bought is
+kept: `test_config_reads.py` asserts that `"prompt"` and `"phrases"`
+are fields their models declare, in the suite that reads the display
+path, with a comment naming the test it inherits from. That half is
+worth the two lines wherever the literals live, because neither
+failure is loud at the point it happens (a renamed `AgentConfig.prompt`
+is a KeyError out of a read path, a renamed `phrases` silently stops
+being shown).
 
 **The responses moves** (`cac7e3f9`). `outcomes`, `flags` and
 `RELOAD_SECTIONS` move to `cli.py` with `_section`, the helper that

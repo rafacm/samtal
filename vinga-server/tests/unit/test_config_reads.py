@@ -595,12 +595,29 @@ def test_a_grant_is_shown_in_the_form_the_row_holds(store: ConfigStore) -> None:
         assert shown["mcp"] == [mcp_entry_fragment(item) for item in entry.mcp]
 
 
+def test_each_display_departure_names_a_field_its_model_declares() -> None:
+    """The two rules `views` states in place, held to the models they
+    are about.
+
+    Inherited from `test_every_display_fact_names_a_field_the_shape_
+    declares`, which held the same two facts while they were fields on
+    the descriptor registry (#242 moved each to its one consumer as a
+    literal). The check is worth the same two lines wherever they live,
+    because neither failure is loud where it happens: `_order` emits
+    `"prompt"` unconditionally for an agent, so a renamed field is a
+    KeyError raised out of a read path rather than a refusal, and a
+    renamed `phrases` would silently stop being shown at its default.
+    """
+    assert "prompt" in AgentConfig.model_fields
+    assert "phrases" in FillerConfig.model_fields
+
+
 def test_a_section_nested_in_an_agent_is_shown_whole(store: ConfigStore) -> None:
     """A default that is a real value is shown at it, so a filler
     section reads as the three-part policy it is rather than as the one
     part that was written. The phrase list is shown even when it is
-    empty, which is the one departure the registry declares and the
-    state a disabled section is in."""
+    empty, which is the one departure `views` declares and the state a
+    disabled section is in."""
     _populate(store)
     store.set_agent("poet", {"prompt": "P", "filler": {"enabled": False}})
 
