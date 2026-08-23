@@ -86,8 +86,29 @@ jobs:
       - name: Type-check the events package
         run: uv run mypy
 
+      # The lane's tests are distributed across worker processes, which
+      # is what takes it from its measured 6m31s to a projected two or
+      # three minutes and puts the critical path next to the integration
+      # lane's rather than three times it.
+      #
+      # `--dist loadfile` sends a whole file to one worker rather than
+      # scattering its tests. Module-scoped fixtures are then paid once
+      # per file by construction, which is what the suite's expensive
+      # ones (the eighty-one-driver emit capture) assume; the default
+      # distribution would rebuild them once per worker that draws a
+      # test out of the same file.
+      #
+      # `auto` and not `4`: today's runner has 4 cores and the two
+      # coincide, and on a larger runner `auto` uses it whole while a
+      # literal would leave it idle.
+      #
+      # If the lane turns intermittently red, the response is graded
+      # before it is reverted: contention on 4 real cores is a headroom
+      # problem, so try `-n 3`, then `-n 2`, and only then remove
+      # ` -n auto --dist loadfile` (which is the whole change) and
+      # reopen #254.
       - name: Unit tests
-        run: uv run pytest tests/unit -v --durations=25
+        run: uv run pytest tests/unit -v --durations=25 -n auto --dist loadfile
 
   # The shorter lane: the integration tests, the four generated-document
   # drift checks, and the wheel migration. The checks ride here because
