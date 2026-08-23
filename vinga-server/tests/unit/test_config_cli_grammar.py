@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 from tests.support.config_cli import SECRET, runner
+from vinga_server.config import cli, docgen
 
 
 @pytest.fixture
@@ -35,12 +36,13 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return runner(tmp_path, monkeypatch)
 
 
-def printed_help(run, capsys: pytest.CaptureFixture[str]) -> str:
-    """The help an operator gets, read where they read it. Whitespace
-    collapsed, because the formatter wraps the line it is printed on and
-    where it wraps is not the contract."""
+def printed_help(run, capsys: pytest.CaptureFixture[str], *words: str) -> str:
+    """The help an operator gets, read where they read it: by asking one
+    command of the grammar for it, which is the only way they ever will.
+    Whitespace collapsed, because the formatter wraps the line it is
+    printed on and where it wraps is not the contract."""
     with pytest.raises(SystemExit) as caught:
-        run("--help")
+        run(*words, "--help")
     assert caught.value.code == 0
     return " ".join(capsys.readouterr().out.split())
 
@@ -175,3 +177,95 @@ def test_a_usage_mistake_says_nothing_of_what_was_typed(
     assert SECRET not in captured.err
     assert SECRET not in captured.out
     assert "Traceback" not in captured.err
+
+
+# The help, held to what generates it
+#
+# The claim the rebuild makes about help is that it is generated rather
+# than written: an option's description is the declaration's, and a
+# fragment field's line is the model's. Both are claims a reader cannot
+# check by reading, because what makes them true is that nobody typed
+# the text twice, so they are enumerated over the whole command tree
+# instead.
+
+
+def _leaf(words: tuple[str, ...]):
+    """One command of the grammar, by the words that name it. Walked
+    down the tree the entry point runs, so what is inspected is what an
+    operator reaches rather than a second construction of it."""
+    found = cli.command()
+    for word in words:
+        found = found.commands[word]
+    return found
+
+
+def _said(text: str) -> str:
+    """One string with every space taken out, which is how a sentence in
+    the help is compared with the sentence it was declared as.
+
+    The formatter wraps, and where it wraps depends on the width of the
+    terminal it is printed to, so no run of spaces in the output is the
+    contract. It also breaks a word at a hyphen, which collapsing
+    whitespace would leave as `set- secret`, and that is the shape this
+    exists for rather than the ordinary wrap.
+    """
+    return "".join(text.split())
+
+
+def _typed(parameter) -> str:
+    """The string an operator sees a parameter as: its longest spelling
+    for an option, the metavar it is written under for an argument."""
+    if parameter.param_type_name == "option":
+        return max(parameter.opts, key=len)
+    return str(parameter.metavar)
+
+
+@pytest.mark.parametrize(
+    "row", cli.COMMANDS, ids=[" ".join(row.words) for row in cli.COMMANDS]
+)
+def test_every_command_describes_every_parameter_it_declares(
+    run, capsys: pytest.CaptureFixture[str], row
+) -> None:
+    """Nothing a command declares is missing from the page an operator
+    reads: every parameter by the name it is typed under, every
+    description it was given, and one `[required]` for each parameter
+    that has to be there.
+
+    The two options whose default is a resolution order rather than a
+    value carry it in their description, which is where a default that
+    is not a literal has to live; `--local` has no default worth
+    printing, since a flag that is not given is a flag that is not
+    given.
+    """
+    helped = printed_help(run, capsys, *row.words)
+    declared = _leaf(row.words).params
+
+    for parameter in declared:
+        assert _typed(parameter) in helped, parameter.name
+        if parameter.help:
+            assert _said(parameter.help) in _said(helped), parameter.name
+
+    assert helped.count("[required]") == sum(1 for one in declared if one.required)
+
+
+@pytest.mark.parametrize(
+    "kind", [row.words[1] for row in cli.COMMANDS if row.words[0] == "set"]
+)
+def test_a_set_help_lists_the_model_it_writes(
+    run, capsys: pytest.CaptureFixture[str], kind: str
+) -> None:
+    """Every field of the model a fragment is validated against, with
+    the type it holds and the value it has when the fragment leaves it
+    out. Read off the model here and rendered from the model there, so a
+    field added to a model appears in the help of the command that
+    writes it without anyone remembering to put it there.
+    """
+    helped = printed_help(run, capsys, "set", kind)
+    model = docgen.entity(kind).model
+
+    for name, info in model.model_fields.items():
+        assert name in helped, name
+        assert _said(docgen.type_name(info.annotation)) in _said(helped), name
+        given = docgen.default(info)
+        held = "(required)" if given == "required" else f"(default: {given})"
+        assert _said(held) in _said(helped), name
