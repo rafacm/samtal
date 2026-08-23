@@ -851,7 +851,7 @@ TURNTAKING = "vinga_server.runtime.turntaking"
 FILLER = "vinga_server.runtime.filler_runner"
 
 SESSION_DRIVERS: tuple[Driver, ...] = (
-    Driver((EDGE, "DeviceSession._watch_for_idle", 1), drive_session_idle, "session_idle"),
+    Driver((EDGE, "DeviceSession._idle_expired", 1), drive_session_idle, "session_idle"),
     Driver((EDGE, "DeviceSession.run", 1), drive_bad_device_id, "session_rejected"),
     Driver((EDGE, "DeviceSession.run", 2), drive_agent_not_loaded, "session_rejected"),
     Driver((EDGE, "DeviceSession.run", 3), drive_no_agent, "session_rejected"),
