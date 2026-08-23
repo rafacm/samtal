@@ -196,3 +196,77 @@ refuses).
   reviewed baseline. Deepens `config/store.py`: a caller adding a
   field stops knowing that columns, migrations, and mappers
   exist.
+
+## Plan review round
+
+External review of commit `0f7d6979`, 2026-08-23. Backend:
+claude CLI 2.1.239, model `claude-opus-5`, read-only tool set
+(interim fallback tier). Verdict as received: NOT READY; findings 1
+to 5 are each a cannot-be-implemented-as-written or an unnamed
+deliverable, 6 to 9 amend the plan's claims about its own proof;
+the shape (one atomic milestone, deepening store.py, no new
+modules) is right. Findings condensed but faithful:
+
+1. **P1: the generic pair cannot round-trip `McpServerConfig`.**
+   `_check_transport_fields` refuses foreign fields present in
+   `model_fields_set`; a plain dump emits `url: null, headers: {}`
+   for a stdio entry and re-validation makes every stdio server
+   unreadable. `exclude_unset=True` is the dump option that
+   preserves the fields-set semantics (and today's
+   written-before-the-column behavior); the fixture inventory must
+   carry BOTH MCP transports; the forward-floor consequence (a
+   body carries what the operator wrote, so later default changes
+   affect unwritten fields retroactively) must be stated.
+2. **P1: the squash has no revision-identity or refusal story.**
+   Reusing 0001 makes stamped databases silently "at head" and the
+   store dies on a missing column; a fresh id makes Alembic raise
+   Can't-locate-revision rendered as migration noise. The baseline
+   needs a never-used id, `migration_failure` needs an
+   unknown-revision arm answering the reset sentence, and the
+   deploy sequence (volume reset with the image bump) is named.
+3. **P1: nothing can run `alembic revision --autogenerate` today**
+   (env.py refuses without a handed-in connection; no alembic.ini;
+   script_location set programmatically), so the command in the
+   plan fails and the issue's adopt-autogenerate decision is
+   unimplemented. Name the deliverable and where it lives.
+4. **P1: the body column's type is never stated.** `Column(JSON)`
+   double-encodes a dumped string; `Text` matches
+   `model_validate_json`. And the `_untransportable(numbers_only)`
+   NaN guard takes a Mapping, not bytes; say which shape guards
+   survive for which kinds and which are deleted because
+   pydantic's JSON parser refuses NaN at the door.
+5. **P1: `devices` has no entity model and no descriptor**, its
+   rows are read as a bare list, and `_live_binding` selects
+   `devices.c.agents` by name on the device hot path, the one
+   column-level SQL read in src (falsifying the plan's
+   parenthetical). Leave `devices` alone under the same exemption
+   as `prompt_fragments` and `domain_settings`.
+6. **P2: `model_dump_json` has no sorted-keys option**, and
+   "no extras beyond the model's own" is a null constraint on
+   `extra="allow"` `ProviderConfig`. Drop sorted keys or name the
+   different pair it would require.
+7. **P2: the suites do not run unchanged.** About twenty sites
+   plant or assert entity columns and become body edits, several
+   of them no-leak or tolerance pins whose rewrite is a design
+   decision; and `test_a_pre_upgrade_string_row_loads...` pins a
+   live model tolerance (the McpGrant string form) that belongs in
+   the body-parse family, not the deletions.
+8. **P2: the mutation claim is false as written.** A new
+   `AgentConfig` field moves two committed CI-diffed artifacts
+   (domain-config.md, api-openapi.json); state the mutation as
+   regenerate-two-artifacts-plus-model, and fix the Goal's "the
+   model and the example YAML" (the domain examples live in
+   `examples/*.yaml`).
+9. **P2: the ADR addendum as specified leaves the record
+   self-contradictory.** It must retract the two Consequences
+   bullets by name, state that it extends #225's reasoning past
+   the bound that addendum drew, and define "tested" inside this
+   repository (the example-fragment install suite on a fresh
+   database plus set-secret re-encryption), with the infra job as
+   the operational half.
+10. **P3: the CI assertions have an in-repo twin.**
+    `test_db_open.py`'s EXPECTED_TABLES/COLUMNS move with the
+    workflow block, and `test_provider_rows_hold_every_declared_model_field`
+    is REPLACED by the body round-trip (it is the existing
+    statement of the property the body makes automatic), not
+    deleted.
