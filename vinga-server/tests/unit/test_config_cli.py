@@ -43,6 +43,7 @@ from tests.support.config_cli import document as _document
 from tests.support.config_cli import showing as _showing
 from tests.support.notices import CHECK_IN, RELOAD, boundaries
 from vinga_server.config import cli
+from vinga_server.config.models import NOT_A_MAC
 from vinga_server.db import open_database, schema
 
 
@@ -238,8 +239,10 @@ def test_a_fragment_an_agent_includes_is_not_deleted_from_under_it(
 # address something nothing wrote, the sentence both verbs answer with,
 # and the value that must not be printed. The names are credential
 # shaped, because a command line is where a paste lands; a device is
-# addressed by a MAC, which cannot be, so its own identity is the
-# sentinel.
+# addressed by a MAC, which a credential-shaped argument never reaches
+# this refusal as, so its own identity is the sentinel here. The
+# argument that is not a MAC at all meets the shape refusal a step
+# earlier, and has a test of its own below.
 UNWRITTEN = [
     (("provider", "llm", SECRET), "providers", SECRET),
     (("provider", "llm", f"{SECRET}.pasted"), "providers", SECRET),
@@ -296,6 +299,56 @@ def test_an_identity_that_addresses_nothing_is_refused_without_printing_it(
         # itself on, not something a server retained.
         written = [r for r in caplog.records if r.name.startswith("vinga_server")]
         assert all(sentinel not in str(record.__dict__) for record in written)
+
+
+# Every command that takes a MAC as an argument, and the ways in it has.
+# `--local` covers the recovery subset, which is show and delete, so
+# `bind-device` has one way in rather than two; the pairs are written out
+# because that is a fact about the command set rather than about this
+# test.
+NOT_MACS = [
+    (("show", "device"), False),
+    (("show", "device"), True),
+    (("delete", "device"), False),
+    (("delete", "device"), True),
+    (("bind-device",), False),
+]
+
+
+@pytest.mark.parametrize(("argv", "local"), NOT_MACS)
+def test_a_mac_that_is_not_a_mac_is_refused_without_printing_it(
+    run,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+    argv: tuple[str, ...],
+    local: bool,
+) -> None:
+    """The shape refusal, a step before any lookup (#205).
+
+    A MAC is an ordinary command-line argument, so it is a place a paste
+    lands like the names above, and `bind-device` in particular takes it
+    beside other arguments an operator is typing from a note. What fails
+    the check is a value nothing here has validated, so the line an
+    operator reads states what a MAC has to be and never what they
+    typed: not on stderr, not on stdout, and not in a record either path
+    retained.
+    """
+    flags = ("--local",) if local else ()
+    trailing = ("sam",) if argv[0] == "bind-device" else ()
+
+    with caplog.at_level(logging.DEBUG):
+        assert run(*flags, *argv, SECRET, *trailing) == 1
+
+    captured = capsys.readouterr()
+    # The leak first and the sentence after it, so a failure here says
+    # which of the two moved. The last line of the stream is the
+    # refusal: `--local` prints its break-glass banner before it.
+    assert SECRET not in captured.err
+    assert SECRET not in captured.out
+    assert captured.err.splitlines()[-1] == NOT_A_MAC
+    assert "Traceback" not in captured.err
+    written = [r for r in caplog.records if r.name.startswith("vinga_server")]
+    assert all(SECRET not in str(record.__dict__) for record in written)
 
 
 @pytest.mark.parametrize("layer", ["agent", "agent-defaults"])

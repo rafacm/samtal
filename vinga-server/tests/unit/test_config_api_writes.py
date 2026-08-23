@@ -28,7 +28,7 @@ from tests.support.notices import CHECK_IN, RELOAD, boundaries
 from tests.support.problems import PROBLEM_KEYS, refused
 from vinga_server import db as db_module
 from vinga_server.config.api import build_api
-from vinga_server.config.models import PROVIDER_STAGES
+from vinga_server.config.models import NOT_A_MAC, PROVIDER_STAGES
 from vinga_server.config.secrets import (
     MASTER_KEY_ENV,
     SecretLocation,
@@ -779,6 +779,43 @@ def test_an_identity_that_cannot_be_addressed_at_all_is_422(client: TestClient) 
     assert all(known in stage_detail for known in PROVIDER_STAGES), stage_detail
     assert mac.status_code == 422
     assert "MAC" in refused(mac.json(), 422)
+
+
+def test_a_mac_that_is_not_a_mac_is_refused_without_it(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The shape refusal, one step before any lookup (#205).
+
+    A device is addressed by a MAC, and the segment carrying it is a
+    place a paste lands like every other: what fails this check is a
+    value nothing here has validated, and it may be the credential
+    itself. So the refusal states what a MAC is and never what arrived.
+
+    All three verbs, because the check runs on the identity rather than
+    on the request: a write, a read and a delete each reach it before
+    the row is looked for, which is why every one of them is 422 rather
+    than the 404 a device that is merely absent gets. The three places
+    the value could still come out are all looked at: the body, the
+    headers, and every record this server retained while answering.
+    """
+    path = f"/devices/{quote(PASTED, safe='')}"
+
+    with caplog.at_level(logging.DEBUG):
+        written = client.put(path, json={"agents": ["sam"]})
+        read = client.get(path)
+        removed = client.delete(path)
+
+    for response in (written, read, removed):
+        # The leak first and the shape after it, so a failure here says
+        # which of the two moved.
+        assert PASTED not in response.text
+        assert PASTED not in str(response.headers)
+        assert response.status_code == 422
+        assert NOT_A_MAC in refused(response.json(), 422)
+    served = [
+        record for record in caplog.records if record.name.startswith("vinga_server")
+    ]
+    assert all(PASTED not in str(record.__dict__) for record in served)
 
 
 def test_a_write_that_cannot_take_the_lock_is_409(
