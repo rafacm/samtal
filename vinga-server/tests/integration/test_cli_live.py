@@ -45,10 +45,12 @@ skips rather than lies when the module was not run whole.
 
 import contextlib
 import io
+import json
 import sys
 import threading
 import time
-from collections.abc import Iterator, Sequence
+import urllib.request
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -62,6 +64,7 @@ from vinga_server.config import cli
 from vinga_server.config.boot import load_boot_config
 from vinga_server.config.models import API_MOUNT_PATH
 from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
+from vinga_server.ota import OTA_PATH
 
 # The one variable a fileless boot needs: where the database goes. The
 # server half of the configuration is otherwise all defaults, which is
@@ -256,6 +259,53 @@ def written(directory: Path, name: str, body: object) -> str:
     path = directory / name
     path.write_text(yaml.safe_dump(body, sort_keys=False), encoding="utf-8")
     return str(path)
+
+
+def check_in(live: Live, mac: str) -> Mapping[str, object]:
+    """One board's OTA check-in, headers and all, the way
+    `test_ota_endpoint.py` makes one.
+
+    The only thing in this lane that is not a CLI command, and it is
+    here because two of the commands need a device: a code is minted by
+    a board asking for one, and `pending` and `add-device` are about
+    what an operator does with the number on its screen. A plain HTTP
+    POST is the whole of what a board does to get there, so the lane can
+    make one without hardware and without the websocket simulator.
+    """
+    request = urllib.request.Request(
+        f"{live.origin}{OTA_PATH}",
+        data=json.dumps(
+            {
+                "version": 2,
+                "mac_address": mac,
+                "uuid": DEVICE_UUID,
+                "application": {"name": "xiaozhi", "version": "2.4.0"},
+                "board": {"type": BOARD},
+            }
+        ).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Device-Id": mac,
+            "Client-Id": DEVICE_UUID,
+            "User-Agent": f"{BOARD}/2.4.0",
+            "Accept-Language": "en-US",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=10) as response:
+        answer: Mapping[str, object] = json.loads(response.read())
+    return answer
+
+
+BOARD = "waveshare-esp32-s3-touch-lcd-1.54"
+
+DEVICE_UUID = "6f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"
+
+# The board an operator already knows the address of, and the one that
+# is only ever a number on a screen.
+KNOWN_MAC = "aa:bb:cc:dd:ee:ff"
+
+WAITING_MAC = "11:22:33:44:55:66"
 
 
 # The deployment this lane configures
@@ -473,3 +523,77 @@ def test_one_entity_is_written_read_exported_and_deleted(
     gone = capsys.readouterr()
     assert gone.out == ""
     assert "Traceback" not in gone.err
+
+
+# The two device commands, and the settings beside them
+#
+# Which of the two an operator wants depends on what they are holding: a
+# MAC they already know, or a board in front of them showing six digits.
+# Only the second needs a device, and over a real server a device is a
+# check-in, which is why this is the one place the lane speaks something
+# other than the CLI.
+
+
+def test_a_board_is_bound_by_the_mac_you_already_know(
+    deployed: Live, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Written in the spelling a sticker carries and read back in the
+    one the configuration holds, which is the normalization the write
+    path does and the wire carries verbatim."""
+    assert run("bind-device", KNOWN_MAC.upper().replace(":", "-"), "sam") == 0
+    bound = capsys.readouterr()
+    assert bound.out.startswith("wrote ")
+    assert bound.err.strip()
+
+    assert run("show", "device", KNOWN_MAC) == 0
+    assert document(capsys.readouterr().out) == {"agents": ["sam"]}
+
+    assert run("delete", "device", KNOWN_MAC) == 0
+    assert capsys.readouterr().out.startswith("wrote ")
+
+    assert run("show", "device", KNOWN_MAC) == 1
+    assert capsys.readouterr().out == ""
+
+
+def test_a_board_is_onboarded_by_the_code_on_its_screen(
+    deployed: Live, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The whole onboarding ceremony against a running server: the
+    default agent, the code, the listing and the claim.
+
+    The two check-ins are what make the settings' claim observable. A
+    binding and the default agent are read as a device asks for them
+    rather than at a restart, so a board checking in after
+    `set-default-agent` is answered as a configured device and mints no
+    code at all, and the same board after `clear-default-agent` is
+    unbound and gets one. Nothing in-process can show that: it is the
+    running server re-reading the database between two requests.
+    """
+    assert run("set-default-agent", "sam") == 0
+    assert capsys.readouterr().out.startswith("wrote ")
+    assert "activation" not in check_in(deployed, WAITING_MAC)
+
+    assert run("clear-default-agent") == 0
+    assert capsys.readouterr().out.startswith("wrote ")
+    activation = check_in(deployed, WAITING_MAC)["activation"]
+    code = str(activation["code"])
+    assert code.isdigit()
+
+    assert run("pending") == 0
+    waiting = capsys.readouterr().out
+    assert code in waiting
+    assert WAITING_MAC in waiting
+    assert BOARD in waiting
+
+    assert run("add-device", code, "sam") == 0
+    claimed = capsys.readouterr()
+    assert claimed.out.startswith("wrote ")
+    assert claimed.err.strip()
+
+    assert run("show", "device", WAITING_MAC) == 0
+    assert document(capsys.readouterr().out) == {"agents": ["sam"]}
+
+    # And the code is retired with the claim, so the board that was
+    # waiting is no longer waiting for anything.
+    assert run("pending") == 0
+    assert code not in capsys.readouterr().out
