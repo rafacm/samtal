@@ -34,7 +34,7 @@ fixed order settles nothing that was ever in doubt.
 """
 
 from collections.abc import Sequence
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from vinga_server.device.boundary import DeviceOutput
 from vinga_server.providers import ToolDef
@@ -42,38 +42,23 @@ from vinga_server.tools import builtin, names
 from vinga_server.tools.mcp import McpServers
 from vinga_server.tools.memory import MemoryStore
 
-
-class ToolClaim(Protocol):
-    """One call as the runtime reserved it, which is all a source is
-    told about it.
-
-    The concrete type is the turn record's `ToolInvocation`: the
-    classification taken the moment the model's calls were known,
-    carrying the name asked for, the arguments asked with, and, for an
-    MCP call, the entry that owned that name at that moment. Declared
-    structurally rather than imported, so that stating what routing
-    reads does not make the tool layer import the conversation record
-    it happens to be.
-    """
-
-    @property
-    def name(self) -> str | None:
-        """The tool the model asked for."""
-
-    @property
-    def arguments(self) -> dict[str, Any] | None:
-        """What it asked with. `None` where the model's arguments never
-        parsed as an object, which is a call the runtime answers itself
-        and no source is ever handed."""
-
-    @property
-    def entry(self) -> str | None:
-        """The MCP entry that owned the name when the call was reserved,
-        and `None` for a call from any other source."""
+if TYPE_CHECKING:
+    # Named for the annotations alone, so that stating what routing
+    # reads does not make the tool layer import the conversations
+    # package at import time.
+    from vinga_server.conversations import records
 
 
 class ToolSource(Protocol):
-    """One source of tools, as a conversation reaches it."""
+    """One source of tools, as a conversation reaches it.
+
+    Every question below but the snapshot is asked about a `claim`, the
+    turn record's `ToolInvocation` as the runtime reserved it: the
+    classification taken the moment the model's calls were known,
+    carrying the name the model asked for, the arguments it asked with,
+    and, for an MCP call, the entry that owned that name at that moment.
+    A call whose arguments never parsed as an object is one the runtime
+    answers itself, so no source is ever handed one."""
 
     def snapshot(self, agent: str) -> Sequence[ToolDef]:
         """What this source offers `agent` right now.
@@ -83,14 +68,14 @@ class ToolSource(Protocol):
         landed mid-conversation are all picked up on the next
         utterance."""
 
-    def owns(self, claim: ToolClaim) -> bool:
+    def owns(self, claim: "records.ToolInvocation") -> bool:
         """Whether this claim is this source's to run.
 
         Names, not outcomes: a source owns a name it publishes even
         when it cannot run it, and says so itself in `dispatch`. A name
         no source claims is the runtime's to refuse."""
 
-    async def dispatch(self, claim: ToolClaim, agent: str) -> tuple[str, bool]:
+    async def dispatch(self, claim: "records.ToolInvocation", agent: str) -> tuple[str, bool]:
         """Run the claimed call as the agent speaking, answering
         `(content, is_error)`.
 
@@ -99,7 +84,7 @@ class ToolSource(Protocol):
         when a model asks for it anyway. Raising is allowed: the runtime
         turns any failure into an error result the model phrases."""
 
-    def timeout_for(self, claim: ToolClaim) -> float:
+    def timeout_for(self, claim: "records.ToolInvocation") -> float:
         """How long the claimed call may take, in seconds."""
 
 
@@ -139,17 +124,17 @@ class BuiltinTools:
         tools.append(builtin.random_number_tool())
         return tools
 
-    def owns(self, claim: ToolClaim) -> bool:
+    def owns(self, claim: "records.ToolInvocation") -> bool:
         return claim.name in names.BUILTIN_TOOL_NAMES
 
-    async def dispatch(self, claim: ToolClaim, agent: str) -> tuple[str, bool]:
+    async def dispatch(self, claim: "records.ToolInvocation", agent: str) -> tuple[str, bool]:
         if claim.name == names.REMEMBER and self._memory is not None:
             return await builtin.remember(self._memory, agent, claim.arguments or {}), False
         if claim.name == names.RANDOM_NUMBER:
             return builtin.random_number(claim.arguments or {}), False
         return f'there is no tool called "{claim.name}"', True
 
-    def timeout_for(self, claim: ToolClaim) -> float:
+    def timeout_for(self, claim: "records.ToolInvocation") -> float:
         return self._timeout_s
 
 
@@ -170,14 +155,14 @@ class DeviceTools:
     def snapshot(self, agent: str) -> Sequence[ToolDef]:
         return self._output.device_tools()
 
-    def owns(self, claim: ToolClaim) -> bool:
+    def owns(self, claim: "records.ToolInvocation") -> bool:
         return any(tool.name == claim.name for tool in self._output.device_tools())
 
-    async def dispatch(self, claim: ToolClaim, agent: str) -> tuple[str, bool]:
+    async def dispatch(self, claim: "records.ToolInvocation", agent: str) -> tuple[str, bool]:
         assert claim.name is not None
         return await self._output.call_device_tool(claim.name, claim.arguments or {})
 
-    def timeout_for(self, claim: ToolClaim) -> float:
+    def timeout_for(self, claim: "records.ToolInvocation") -> float:
         return self._timeout_s
 
 
@@ -200,12 +185,12 @@ class McpTools:
         # reload swaps.
         return self._servers.tools_for_agent(agent)
 
-    def owns(self, claim: ToolClaim) -> bool:
+    def owns(self, claim: "records.ToolInvocation") -> bool:
         # Only a call classified `mcp` carries an entry, so the entry is
         # both the question and the answer.
         return claim.entry is not None
 
-    async def dispatch(self, claim: ToolClaim, agent: str) -> tuple[str, bool]:
+    async def dispatch(self, claim: "records.ToolInvocation", agent: str) -> tuple[str, bool]:
         """Run the call against the entry the reservation named, not
         whoever owns the name by the time this line runs.
 
@@ -219,7 +204,7 @@ class McpTools:
         assert claim.entry is not None and claim.name is not None
         return await self._servers.call(claim.name, claim.arguments or {}, agent, claim.entry)
 
-    def timeout_for(self, claim: ToolClaim) -> float:
+    def timeout_for(self, claim: "records.ToolInvocation") -> float:
         """The entry's own configured timeout, or the default where the
         entry the claim names is no longer running."""
         if claim.entry is not None:
@@ -229,4 +214,4 @@ class McpTools:
         return self._default_timeout_s
 
 
-__all__ = ["BuiltinTools", "DeviceTools", "McpTools", "ToolClaim", "ToolSource"]
+__all__ = ["BuiltinTools", "DeviceTools", "McpTools", "ToolSource"]
