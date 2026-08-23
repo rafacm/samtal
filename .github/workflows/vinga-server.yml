@@ -300,9 +300,15 @@ jobs:
           # The body column on each entity table, which since #243 is
           # where every non-key field of that entity lives. A wheel whose
           # migration built the pre-reshape shape would pass the table
-          # check above and fail at the first read on a deployment. The
-          # same set `tests/unit/test_db_open.py` holds in
-          # EXPECTED_COLUMNS, and the two move together.
+          # check above and fail at the first read on a deployment.
+          #
+          # The body column only, and deliberately less than the suite
+          # asks: this step is about packaging, so what it has to catch
+          # is a wheel carrying the wrong chain. The shape itself is
+          # checked properly in the suite, where `test_db_open.py` holds
+          # each entity table's full column set in EXPECTED_COLUMNS and
+          # `test_the_baseline_builds_exactly_what_the_tables_declare`
+          # compares the migrated database against the metadata whole.
           bodies = {
               "providers",
               "mcp_servers",
