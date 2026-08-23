@@ -32,7 +32,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tests.support.config_cli import chain, document, runner
-from tests.support.problems import problem
+from tests.support.problems import paths
+from tests.support.problems import refused as refusal_body
 from tests.support.stores import body, planted
 from vinga_server import logs
 from vinga_server.config.api import build_api
@@ -226,25 +227,6 @@ def test_a_mask_under_a_key_that_is_not_secret_shaped_is_a_value(
 # A mask with nothing behind it
 
 
-NOTHING_STORED_FIELD = (
-    f'"api_key_env" holds the mask {MASK}, which a write reads as keep the stored '
-    f"value, and nothing is stored there; write the value it should hold, or leave "
-    f"the field out"
-)
-
-NOTHING_STORED_KEY = (
-    f"a key holds the mask {MASK}, which a write reads as keep the stored value, and "
-    f"nothing is stored there; write the value it should hold, or leave the key out. "
-    f"The key is not quoted back"
-)
-
-NOTHING_STORED_IN_ENV = (
-    f"a key in env holds the mask {MASK}, which a write reads as keep the stored "
-    f"value, and nothing is stored there; write the value it should hold, or leave "
-    f"the key out. The key is not quoted back"
-)
-
-
 def test_the_mask_on_an_entity_that_does_not_exist_yet_is_refused(
     client: TestClient, store: ConfigStore
 ) -> None:
@@ -256,11 +238,12 @@ def test_the_mask_on_an_entity_that_does_not_exist_yet_is_refused(
     )
 
     assert response.status_code == 422
-    assert response.json() == problem(
-        422,
-        f"invalid providers.llm.fresh:\n  - {NOTHING_STORED_FIELD}",
-        [("/api_key_env", NOTHING_STORED_FIELD)],
-    )
+    body = response.json()
+    detail = refusal_body(body, 422)
+    assert detail.startswith("invalid providers.llm.fresh:")
+    # The field is declared, so it is named and addressed.
+    assert paths(body) == ["/api_key_env"]
+    assert "api_key_env" in detail
     assert client.get("/providers/llm/fresh").status_code == 404
     with pytest.raises(ConfigError):
         store.read_provider("llm", "fresh")
@@ -281,11 +264,13 @@ def test_the_mask_on_a_path_the_entity_does_not_hold_is_refused(
     )
 
     assert response.status_code == 422
-    assert response.json() == problem(
-        422,
-        f"invalid providers.llm.claude:\n  - {NOTHING_STORED_KEY}",
-        [("", NOTHING_STORED_KEY)],
-    )
+    body = response.json()
+    detail = refusal_body(body, 422)
+    assert detail.startswith("invalid providers.llm.claude:")
+    # The whole fragment, which is the nearest place this repository can
+    # name, and the key the caller wrote is in neither half.
+    assert paths(body) == [""]
+    assert "connection" not in detail
     # And nothing of the refused write landed: the mask is not a value,
     # so it is not in the row either.
     stored = store.read_provider("llm", "claude").entry
@@ -307,11 +292,13 @@ def test_the_mask_in_a_group_of_written_keys_names_the_group(
     )
 
     assert response.status_code == 422
-    assert response.json() == problem(
-        422,
-        f"invalid mcp_servers.home:\n  - {NOTHING_STORED_IN_ENV}",
-        [("/env", NOTHING_STORED_IN_ENV)],
-    )
+    body = response.json()
+    detail = refusal_body(body, 422)
+    assert detail.startswith("invalid mcp_servers.home:")
+    # The group, which this repository declares, and never the key under
+    # it, which the caller wrote.
+    assert paths(body) == ["/env"]
+    assert "API_ACCESS_TOKEN" not in detail
     assert store.read_mcp_server("home").entry.env == {}
 
 
@@ -377,7 +364,8 @@ def test_the_substituted_value_leaks_nowhere(
 
     assert kept.status_code == 200
     assert refused.status_code == 422
-    assert refused.json()["detail"] == f"invalid providers.llm.claude:\n  - {NOTHING_STORED_KEY}"
+    # Two masked keys, one entry: what is named is the fragment, once.
+    assert paths(refused.json()) == [""]
     for response in (read, kept, refused):
         assert PASTED not in response.text
         assert PASTED not in str(dict(response.headers))

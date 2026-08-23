@@ -34,12 +34,12 @@ import vinga_server.app as app_module
 from tests.support.apps import entered_app
 from tests.support.checkin import NORMALIZED, check_in, unbound_config
 from tests.support.configs import config_with_agent
-from tests.support.problems import problem
+from tests.support.notices import CHECK_IN, boundaries
+from tests.support.problems import refused
 from vinga_server.app import StartupFailed, create_app, startup_failure
 from vinga_server.composition import Composition
 from vinga_server.config import Config
-from vinga_server.config.api import UNEXPECTED, ApiRuntime
-from vinga_server.config.entities import BINDING_NOTICE
+from vinga_server.config.api import ApiRuntime
 from vinga_server.config.loader import DatabaseBusyError
 from vinga_server.config.models import API_MOUNT_PATH
 from vinga_server.conversations.store import DATABASE_FILENAME
@@ -501,7 +501,7 @@ def test_a_binding_written_through_the_api_is_live_at_the_next_check_in(
         # The acknowledgement claims the write is live rather than
         # waiting for a restart, which is the promise the check-in below
         # either keeps or breaks.
-        assert answer.json()["notice"] == BINDING_NOTICE
+        assert boundaries(answer.json()["notice"]) == {CHECK_IN}
 
         body = check_in(client, mac=NORMALIZED)
 
@@ -549,4 +549,7 @@ def test_the_mounted_api_holds_the_engine_only_while_the_server_serves(
     late = TestClient(app).get(f"{API_MOUNT_PATH}/config", headers=BEARER)
 
     assert late.status_code == 500
-    assert late.json() == problem(500, UNEXPECTED)
+    # The one refusal shape, saying nothing about what failed: an
+    # application whose lifespan has been left is not a state a caller
+    # can be told anything useful about.
+    assert "log" in refused(late.json(), 500)

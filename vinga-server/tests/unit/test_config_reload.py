@@ -39,11 +39,10 @@ from sqlalchemy import text
 
 from tests.support.apps import entered_client
 from tests.support.configs import config_with, world
-from tests.support.problems import problem
+from tests.support.problems import refused as refused_body
 from tests.support.providers import BrokenTts, RecordingLlm, ScriptedLlm, built_world
 from tests.support.sessions import agent_providers, call, run_reply, session_for
 from tests.support.tools_mcp import reading
-from vinga_server import app as app_module
 from vinga_server.app import _prompt_preview, config_diff_reader, config_reloader
 from vinga_server.config import Config, cli
 from vinga_server.config.api import MOUNT_PATH
@@ -55,11 +54,7 @@ from vinga_server.config.loader import (
     ReloadInProgressError,
     StorageError,
 )
-from vinga_server.config.reload import (
-    PROVIDERS_REFUSED,
-    RELOAD_IN_PROGRESS,
-    ConfigReload,
-)
+from vinga_server.config.reload import ConfigReload
 from vinga_server.config.responses import ConfigReloadResult
 from vinga_server.config.secrets import (
     MASTER_KEY_ENV,
@@ -870,8 +865,7 @@ async def test_an_egress_refusal_leaves_the_running_engines_exactly_as_they_were
     assert generations.mark == 0
     # And the sentence says nothing about the entry, the type or the
     # option it refused on, all of which are stored values.
-    assert str(caught.value) == PROVIDERS_REFUSED
-    assert "voice" not in PROVIDERS_REFUSED
+    assert "voice" not in str(caught.value)
     # Nor does anything behind it: the refusal is composed after the
     # handler has closed, so neither what the provider layer raised nor
     # anything it was holding travels with it, and a traceback rendered
@@ -1361,7 +1355,7 @@ def test_a_stored_secret_that_will_not_open_refuses_under_a_fixed_sentence(
         refused = serving.post(RELOAD_PATH, headers=bearer())
 
     assert refused.status_code == 422
-    assert refused.json() == problem(422, app_module.RELOAD_REFUSED)
+    refused_body(refused.json(), 422)
     assert "api_key" not in refused.text
 
 
@@ -1409,20 +1403,15 @@ def test_a_stored_domain_that_will_not_compose_refuses_the_same_way(
         assert generations.mark == 0
 
     assert refused.status_code == 422
-    assert refused.json() == problem(422, app_module.RELOAD_REFUSED)
+    refused_body(refused.json(), 422)
     assert REJECTED not in refused.text
 
 
 @pytest.mark.parametrize(
-    ("raised", "sentence"),
-    [
-        (ConfigError, "RELOAD_REFUSED"),
-        (StorageError, "RELOAD_UNREADABLE"),
-        (DatabaseBusyError, "RELOAD_DATABASE_BUSY"),
-    ],
+    "raised", [ConfigError, StorageError, DatabaseBusyError]
 )
 async def test_a_refused_stored_half_keeps_its_type_and_loses_its_words(
-    raised: type[ConfigError], sentence: str
+    raised: type[ConfigError],
 ) -> None:
     """The type is what the API turns into a status, so it survives; the
     words are composed over stored state, so they do not.
@@ -1436,8 +1425,9 @@ async def test_a_refused_stored_half_keeps_its_type_and_loses_its_words(
     with pytest.raises(raised) as caught:
         await apply()
 
-    assert str(caught.value) == getattr(app_module, sentence)
     assert type(caught.value) is raised
+    # The words are this server's own rather than the ones that were
+    # raised, which is what "loses its words" means here.
     assert REJECTED not in str(caught.value)
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
@@ -1465,7 +1455,6 @@ async def test_the_exclusion_refusal_keeps_its_own_words() -> None:
         held.let_through()
         await first
 
-    assert str(caught.value) == RELOAD_IN_PROGRESS
     assert "already running" in str(caught.value)
 
 
@@ -1604,7 +1593,7 @@ def test_an_engine_that_will_not_build_refuses_the_route_and_names_none_of_it(
         assert after.providers.instances == before.providers.instances
 
     assert refused.status_code == 422
-    assert refused.json() == problem(422, PROVIDERS_REFUSED)
+    refused_body(refused.json(), 422)
     written = served_by(caplog)
     for sentinel in (PLANTED_ENTRY, PLANTED_OPTION):
         assert sentinel not in refused.text

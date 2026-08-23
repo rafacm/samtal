@@ -23,10 +23,9 @@ import httpx
 from xiaozhi_sdk import XiaoZhiWebsocket
 
 from tests.integration.conftest import FRAME_BYTES, SAMPLE_RATE, speech_pcm, spoken
-from tests.support.problems import PROBLEM_KEYS
-from vinga_server.app import RELOAD_REFUSED
+from tests.support.notices import RELOAD, boundaries
+from tests.support.problems import refused as refusal_body
 from vinga_server.config import Config
-from vinga_server.config.entities import RELOAD_NOTICE
 from vinga_server.config.models import API_MOUNT_PATH
 
 STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
@@ -157,7 +156,7 @@ async def test_a_written_and_granted_server_is_usable_without_a_restart(
             assert written.status_code == 200, written.text
             # And the write said how to apply it, which is what this
             # test then does.
-            assert written.json()["notice"] == RELOAD_NOTICE
+            assert boundaries(written.json()["notice"]) == {RELOAD}
 
             granted = await control.put(
                 "/agents/assistant", json={"prompt": "ASSISTANT", "mcp": [ENTRY]}
@@ -229,12 +228,11 @@ async def test_a_refused_reload_leaves_the_running_servers_alone(
             refused = await control.post("/runtime/config/reload")
 
             assert refused.status_code == 422
-            assert set(refused.json()) == PROBLEM_KEYS
-            assert refused.json()["detail"] == RELOAD_REFUSED
-            # And it names nothing of what it refused on: the stored
-            # half is arbitrary bytes, and the location is available
-            # from a server started over the same store.
-            assert "default_agent" not in refused.json()["detail"]
+            detail = refusal_body(refused.json(), 422)
+            # It names nothing of what it refused on: the stored half is
+            # arbitrary bytes, and the location is available from a
+            # server started over the same store.
+            assert "default_agent" not in detail
             # Nothing was applied, and the instants say so rather than
             # the states: a manager stopped and started again would
             # report `connected` too, and would have moved.

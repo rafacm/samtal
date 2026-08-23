@@ -24,32 +24,18 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from tests.support.problems import PROBLEM_KEYS, problem
+from tests.support.notices import CHECK_IN, RELOAD, boundaries
+from tests.support.problems import PROBLEM_KEYS, refused
 from vinga_server import db as db_module
-from vinga_server.config.api import MALFORMED_REQUEST, build_api
-from vinga_server.config.entities import (
-    BINDING_NOTICE,
-    BINDING_UNSERVED_NOTICE,
-    NO_SUCH_AGENT,
-    NO_SUCH_DEVICE,
-    NO_SUCH_FRAGMENT,
-    NO_SUCH_MCP_SERVER,
-    NO_SUCH_PROVIDER,
-    RELOAD_NOTICE,
-    RESTART_NOTICE,
-)
+from vinga_server.config.api import build_api
+from vinga_server.config.models import PROVIDER_STAGES
 from vinga_server.config.secrets import (
     MASTER_KEY_ENV,
     SecretLocation,
     generate_key,
     load_keys,
 )
-from vinga_server.config.store import (
-    NOT_A_PROVIDER_SLOT,
-    NOT_A_STAGE,
-    NOT_AN_MCP_SLOT,
-    ConfigStore,
-)
+from vinga_server.config.store import ConfigStore
 from vinga_server.db import DATABASE_FILENAME, open_database
 
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
@@ -178,24 +164,25 @@ def test_a_write_says_what_it_did_and_when_it_applies(
     assert response.status_code == 200
     answer = response.json()
     assert set(answer) == {"wrote", "notice"}
-    assert answer["notice"] == _expected_notice(method, path)
-    assert answer["wrote"]
+    assert isinstance(answer["wrote"], str) and answer["wrote"]
+    assert boundaries(answer["notice"]) == _expected_boundaries(method, path)
 
 
-def _expected_notice(method: str, path: str) -> str:
-    """Which of the sentences a write carries, by what it wrote.
+def _expected_boundaries(method: str, path: str) -> frozenset[str]:
+    """Which boundaries a write's notice names, by what it wrote.
 
-    Two answers and no third for the kinds this API writes: the device
-    bindings and the default agent are what the running server re-reads
-    as a device asks, and every other kind is one apply's business. The
-    start sentence is not among them any more, which is the whole of
-    what the last milestone did.
+    Two for the kinds this API writes: the device bindings and the
+    default agent are what the running server re-reads as a device asks,
+    and every other kind is one apply's business. A binding to an agent
+    this application cannot serve names both, since the row is live and
+    the agent it names is not. A start is on no kind at all, which is
+    the whole of what an earlier milestone did.
     """
     if method == "delete" and path.startswith(("/devices/", "/default-agent")):
-        return BINDING_NOTICE
+        return frozenset({CHECK_IN})
     if path.startswith(("/devices/", "/default-agent")):
-        return BINDING_UNSERVED_NOTICE
-    return RELOAD_NOTICE
+        return frozenset({CHECK_IN, RELOAD})
+    return frozenset({RELOAD})
 
 
 # Which of the two notices a write carries
@@ -220,7 +207,7 @@ def test_a_binding_to_a_loaded_agent_needs_no_restart(serving_client: TestClient
 
     answer = serving_client.put("/devices/aa:bb:cc:dd:ee:ff", json={"agents": ["sam"]})
 
-    assert answer.json()["notice"] == BINDING_NOTICE
+    assert boundaries(answer.json()["notice"]) == {CHECK_IN}
 
 
 def test_a_binding_to_an_agent_the_server_has_not_loaded_names_the_restart(
@@ -234,23 +221,21 @@ def test_a_binding_to_an_agent_the_server_has_not_loaded_names_the_restart(
     answer = serving_client.put("/devices/aa:bb:cc:dd:ee:ff", json={"agents": ["poet"]})
 
     assert answer.status_code == 200
-    assert answer.json()["notice"] == BINDING_UNSERVED_NOTICE
-    # And it sends the operator to the reload rather than to a restart,
-    # which is the whole of why this sentence is not the binding one.
-    assert "config reload" in BINDING_UNSERVED_NOTICE
-    assert "restart" not in BINDING_UNSERVED_NOTICE.replace("without a restart", "")
+    # Both boundaries at once, which is the whole of why this is not the
+    # sentence a binding to a served agent carries: the row is live at
+    # the next check-in, and the agent it names arrives with the reload.
+    assert boundaries(answer.json()["notice"]) == {CHECK_IN, RELOAD}
 
 
 def test_the_default_agent_follows_the_same_rule(serving_client: TestClient) -> None:
     _pipeline(serving_client)
     serving_client.put("/agents/poet", json={"prompt": "You are a poet."})
 
-    assert serving_client.put("/default-agent", json={"name": "sam"}).json()["notice"] == (
-        BINDING_NOTICE
-    )
-    assert serving_client.put("/default-agent", json={"name": "poet"}).json()["notice"] == (
-        BINDING_UNSERVED_NOTICE
-    )
+    served = serving_client.put("/default-agent", json={"name": "sam"})
+    unserved = serving_client.put("/default-agent", json={"name": "poet"})
+
+    assert boundaries(served.json()["notice"]) == {CHECK_IN}
+    assert boundaries(unserved.json()["notice"]) == {CHECK_IN, RELOAD}
 
 
 def test_removing_a_binding_is_always_live(serving_client: TestClient) -> None:
@@ -259,10 +244,11 @@ def test_removing_a_binding_is_always_live(serving_client: TestClient) -> None:
     _pipeline(serving_client)
     serving_client.put("/devices/aa:bb:cc:dd:ee:ff", json={"agents": ["sam"]})
 
-    assert serving_client.delete("/devices/aa:bb:cc:dd:ee:ff").json()["notice"] == (
-        BINDING_NOTICE
-    )
-    assert serving_client.delete("/default-agent").json()["notice"] == BINDING_NOTICE
+    unbound = serving_client.delete("/devices/aa:bb:cc:dd:ee:ff")
+    cleared = serving_client.delete("/default-agent")
+
+    assert boundaries(unbound.json()["notice"]) == {CHECK_IN}
+    assert boundaries(cleared.json()["notice"]) == {CHECK_IN}
 
 
 def test_the_notice_is_about_the_row_and_not_about_the_request(
@@ -278,10 +264,9 @@ def test_the_notice_is_about_the_row_and_not_about_the_request(
     answer = serving_client.put("/devices/AA-BB-CC-DD-EE-FF", json={"agents": ["  sam  "]})
 
     assert answer.status_code == 200
-    assert answer.json() == {
-        "wrote": "device aa:bb:cc:dd:ee:ff bound to sam",
-        "notice": BINDING_NOTICE,
-    }
+    answer_body = answer.json()
+    assert answer_body["wrote"] == "device aa:bb:cc:dd:ee:ff bound to sam"
+    assert boundaries(answer_body["notice"]) == {CHECK_IN}
     # And the row really does hold the stripped name, which is what
     # makes the notice the true one.
     assert store.read_device("aa:bb:cc:dd:ee:ff").entry == ["sam"]
@@ -295,34 +280,33 @@ def test_the_default_agent_notice_is_about_the_row_too(
     answer = serving_client.put("/default-agent", json={"name": " sam "})
 
     assert answer.status_code == 200
-    assert answer.json() == {"wrote": "default agent sam", "notice": BINDING_NOTICE}
+    assert answer.json()["wrote"] == "default agent sam"
+    assert boundaries(answer.json()["notice"]) == {CHECK_IN}
     assert store.read_default_agent() == "sam"
 
 
 def test_an_agent_write_carries_the_one_reload_sentence(
     serving_client: TestClient,
 ) -> None:
-    """The whole sentence, on the wire, because an operator acts on it.
-
-    An agent entry used to fall on both sides of the line and carried a
-    sentence of its own that said which fields were which. A reload
-    applies the whole entry now, so the sentence is the one every
-    reloaded kind carries, and what it still has to say is the three
-    clocks: they differ, and a sentence that said "immediately" would be
+    """An agent entry used to fall on both sides of the line and carried
+    a sentence of its own that said which fields were which. A reload
+    applies the whole entry now, so what it says is the one thing every
+    reloaded kind says, and the three clocks it distinguishes are named:
+    they differ, and an acknowledgement that said "immediately" would be
     wrong about all three.
     """
     _pipeline(serving_client)
 
     answer = serving_client.put("/agents/sam", json={"prompt": "You are Sam still."})
 
-    assert answer.json() == {"wrote": "agent sam", "notice": RELOAD_NOTICE}
-    # Read off the constant rather than off the answer, so the clocks
-    # this claims are named are named in the string itself.
-    assert "next activation" in RELOAD_NOTICE
-    assert "next utterance" in RELOAD_NOTICE
-    assert "next conversation" in RELOAD_NOTICE
-    # And nothing in it sends an operator to a start.
-    assert "next server start" not in RELOAD_NOTICE
+    body = answer.json()
+    assert body["wrote"] == "agent sam"
+    assert boundaries(body["notice"]) == {RELOAD}
+    # The three moments a reload reaches a conversation at, which is the
+    # semantic content of this notice and the reason it is longer than
+    # the others.
+    for clock in ("next activation", "next utterance", "next conversation"):
+        assert clock in body["notice"], clock
 
 
 # The third sentence: what a reload applies
@@ -364,7 +348,7 @@ def test_every_mutation_a_reload_applies_names_the_reload(
     answer = serving_client.request(method.upper(), path, json=body)
 
     assert answer.status_code == 200, answer.text
-    assert answer.json()["notice"] == RELOAD_NOTICE
+    assert boundaries(answer.json()["notice"]) == {RELOAD}
 
 
 LAST_MUTATIONS = [
@@ -382,15 +366,14 @@ def test_the_last_two_kinds_name_the_reload_as_well(
     inherits are read through, and the agent set is what a server can be
     asked for. Both were the reason a candidate generation used to keep
     the previous world's copy, and both are one apply's business now, so
-    the sentence they carry is the same one every other kind carries and
-    the start sentence is on no kind at all."""
+    the boundary they name is the one every other kind names and no kind
+    names a start."""
     _pipeline(serving_client)
 
     answer = serving_client.request(method.upper(), path, json=body)
 
     assert answer.status_code == 200, answer.text
-    assert answer.json()["notice"] == RELOAD_NOTICE
-    assert RESTART_NOTICE != RELOAD_NOTICE
+    assert boundaries(answer.json()["notice"]) == {RELOAD}
 
 
 def test_an_empty_database_becomes_a_working_configuration(
@@ -618,16 +601,16 @@ def test_a_refused_reference_is_422_in_the_repository_s_own_words(
 
 
 def test_deleting_something_that_is_not_there_is_404(client: TestClient) -> None:
-    for path, detail in (
-        ("/providers/llm/ghost", NO_SUCH_PROVIDER),
-        ("/mcp-servers/ghost", NO_SUCH_MCP_SERVER),
-        ("/prompt-fragments/ghost", NO_SUCH_FRAGMENT),
-        ("/agents/ghost", NO_SUCH_AGENT),
-        ("/devices/aa:bb:cc:dd:ee:ff", NO_SUCH_DEVICE),
+    for path, section in (
+        ("/providers/llm/ghost", "providers"),
+        ("/mcp-servers/ghost", "mcp_servers"),
+        ("/prompt-fragments/ghost", "prompt_fragments"),
+        ("/agents/ghost", "agents"),
+        ("/devices/aa:bb:cc:dd:ee:ff", "devices"),
     ):
         response = client.delete(path)
         assert response.status_code == 404, path
-        assert response.json() == problem(404, detail)
+        assert refused(response.json(), 404).startswith(f"{section}:"), path
 
 
 # Every addressed section, as the path a read and a delete of something
@@ -643,24 +626,29 @@ def test_deleting_something_that_is_not_there_is_404(client: TestClient) -> None
 # missing, so it is the same paste meeting a different refusal and a
 # different status.
 UNWRITTEN = [
-    (f"/providers/llm/{quote(SECRET, safe='')}", 404, NO_SUCH_PROVIDER, SECRET),
-    (f"/providers/llm/{quote(f'{SECRET}.pasted', safe='')}", 404, NO_SUCH_PROVIDER, SECRET),
-    (f"/mcp-servers/{quote(SECRET, safe='')}", 404, NO_SUCH_MCP_SERVER, SECRET),
-    (f"/prompt-fragments/{quote(SECRET, safe='')}", 404, NO_SUCH_FRAGMENT, SECRET),
-    (f"/prompt-fragments/{quote(f'{SECRET}.pasted', safe='')}", 404, NO_SUCH_FRAGMENT, SECRET),
-    (f"/agents/{quote(SECRET, safe='')}", 404, NO_SUCH_AGENT, SECRET),
-    ("/devices/aa:bb:cc:dd:ee:ff", 404, NO_SUCH_DEVICE, "aa:bb:cc:dd:ee:ff"),
-    (f"/providers/{quote(SECRET, safe='')}/claude", 422, NOT_A_STAGE, SECRET),
+    (f"/providers/llm/{quote(SECRET, safe='')}", 404, "providers", SECRET),
+    (f"/providers/llm/{quote(f'{SECRET}.pasted', safe='')}", 404, "providers", SECRET),
+    (f"/mcp-servers/{quote(SECRET, safe='')}", 404, "mcp_servers", SECRET),
+    (f"/prompt-fragments/{quote(SECRET, safe='')}", 404, "prompt_fragments", SECRET),
+    (
+        f"/prompt-fragments/{quote(f'{SECRET}.pasted', safe='')}",
+        404,
+        "prompt_fragments",
+        SECRET,
+    ),
+    (f"/agents/{quote(SECRET, safe='')}", 404, "agents", SECRET),
+    ("/devices/aa:bb:cc:dd:ee:ff", 404, "devices", "aa:bb:cc:dd:ee:ff"),
+    (f"/providers/{quote(SECRET, safe='')}/claude", 422, "providers", SECRET),
 ]
 
 
-@pytest.mark.parametrize(("path", "status", "detail", "sentinel"), UNWRITTEN)
+@pytest.mark.parametrize(("path", "status", "section", "sentinel"), UNWRITTEN)
 def test_an_identity_that_addresses_nothing_is_refused_without_it(
     client: TestClient,
     caplog: pytest.LogCaptureFixture,
     path: str,
     status: int,
-    detail: str,
+    section: str,
     sentinel: str,
 ) -> None:
     """The read and the delete of an identity nothing wrote, for every
@@ -678,11 +666,11 @@ def test_an_identity_that_addresses_nothing_is_refused_without_it(
 
     for response in (read, removed):
         assert response.status_code == status
-        # The leak first and the wording after it, so a failure here
-        # says which of the two moved.
+        # The leak first and the shape after it, so a failure here says
+        # which of the two moved.
         assert sentinel not in response.text
         assert sentinel not in str(response.headers)
-        assert response.json() == problem(status, detail)
+        assert refused(response.json(), status).startswith(f"{section}:")
     served = [
         record for record in caplog.records if record.name.startswith("vinga_server")
     ]
@@ -695,9 +683,7 @@ def test_a_secret_for_a_slot_holding_none_is_404(client: TestClient) -> None:
     response = client.delete("/providers/llm/claude/secrets/api_key")
 
     assert response.status_code == 404
-    assert response.json() == problem(
-        404, "providers: no secret is stored for that slot"
-    )
+    assert refused(response.json(), 404).startswith("providers:")
 
 
 @pytest.mark.parametrize("slot", ["api_key", SECRET])
@@ -735,19 +721,17 @@ SLOTS = [
         {"type": "anthropic", "model": "m"},
         f"/providers/llm/claude/secrets/{quote(PASTED, safe='')}",
         "providers",
-        NOT_A_PROVIDER_SLOT,
     ),
     (
         "/mcp-servers/home",
         {"transport": "stdio", "command": "uvx"},
         f"/mcp-servers/home/secrets/{quote(PASTED, safe='')}",
         "mcp_servers",
-        NOT_AN_MCP_SLOT,
     ),
 ]
 
 
-@pytest.mark.parametrize(("entity", "body", "path", "section", "detail"), SLOTS)
+@pytest.mark.parametrize(("entity", "body", "path", "section"), SLOTS)
 def test_a_slot_that_is_not_a_credential_slot_is_refused_without_it(
     client: TestClient,
     caplog: pytest.LogCaptureFixture,
@@ -755,7 +739,6 @@ def test_a_slot_that_is_not_a_credential_slot_is_refused_without_it(
     body: dict[str, object],
     path: str,
     section: str,
-    detail: str,
 ) -> None:
     """A slot arrives the way an entity name does, in a URL path, and the
     request it arrives on is the one a credential is pasted into: a slot
@@ -777,11 +760,9 @@ def test_a_slot_that_is_not_a_credential_slot_is_refused_without_it(
         assert PASTED not in response.text
         assert SECRET not in response.text
     assert written.status_code == 422
-    assert written.json() == problem(422, detail)
+    assert refused(written.json(), 422).startswith(f"{section}:")
     assert removed.status_code == 404
-    assert removed.json() == problem(
-        404, f"{section}: no secret is stored for that slot"
-    )
+    assert refused(removed.json(), 404).startswith(f"{section}:")
     served = [
         record for record in caplog.records if record.name.startswith("vinga_server")
     ]
@@ -794,9 +775,10 @@ def test_an_identity_that_cannot_be_addressed_at_all_is_422(client: TestClient) 
     mac = client.put("/devices/not-a-mac", json={"agents": ["sam"]})
 
     assert stage.status_code == 422
-    assert stage.json()["detail"] == NOT_A_STAGE
+    stage_detail = refused(stage.json(), 422)
+    assert all(known in stage_detail for known in PROVIDER_STAGES), stage_detail
     assert mac.status_code == 422
-    assert "is not a MAC address" in mac.json()["detail"]
+    assert "MAC" in refused(mac.json(), 422)
 
 
 def test_a_write_that_cannot_take_the_lock_is_409(
@@ -938,10 +920,8 @@ def test_a_fragment_is_written_and_read_back_byte_for_byte(
     written = client.put("/prompt-fragments/household", json={"text": FRAGMENT})
 
     assert written.status_code == 200, written.text
-    assert written.json() == {
-        "wrote": "prompt-fragment household",
-        "notice": RELOAD_NOTICE,
-    }
+    assert written.json()["wrote"] == "prompt-fragment household"
+    assert boundaries(written.json()["notice"]) == {RELOAD}
     assert client.get("/prompt-fragments/household").json() == {
         "entity": {"text": FRAGMENT},
         "secrets": {},
@@ -965,10 +945,8 @@ def test_a_fragment_is_deleted_unless_something_includes_it(
     client.put("/agents/sam", json={"prompt": "You are Sam."})
     gone = client.delete("/prompt-fragments/household")
 
-    assert gone.json() == {
-        "wrote": "prompt-fragment household deleted",
-        "notice": RELOAD_NOTICE,
-    }
+    assert gone.json()["wrote"] == "prompt-fragment household deleted"
+    assert boundaries(gone.json()["notice"]) == {RELOAD}
     assert client.get("/prompt-fragments/household").status_code == 404
 
 
@@ -1037,11 +1015,12 @@ def test_an_unusable_fragment_name_is_refused_without_quoting_it(
         )
 
     assert response.status_code == 422
-    detail = response.json()["detail"]
-    # Either the name's own rule, or the framework's sanitized refusal
-    # for a body it could not read at all, which never reaches the
-    # repository and names nothing either.
-    assert "[A-Za-z0-9_-]+" in detail or detail == MALFORMED_REQUEST
+    detail = refused(response.json(), 422)
+    # Either the name's own rule, whose character class is the semantic
+    # half of it, or the framework's sanitized refusal for a body it
+    # could not read at all, which never reaches the repository and
+    # names nothing either.
+    assert "[A-Za-z0-9_-]+" in detail or "JSON object body" in detail
     assert SECRET not in response.text
     assert SECRET not in str(response.headers)
     served = [

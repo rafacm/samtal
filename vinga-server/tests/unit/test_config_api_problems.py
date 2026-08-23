@@ -1,24 +1,25 @@
-"""What a refusal says, byte for byte, and which field it says it about.
+"""What a refusal is about, and which field it says it about.
 
-Two claims meet here, which is why they share a file. The sentence a
-refusal carries is the repository's own, and #192 keeps it that way
-while wrapping it in an RFC 9457 problem document: `detail` is the same
-string before and after, so an operator meets one vocabulary whichever
-way they reached the API. Substring assertions cannot hold that claim,
-because indentation, ordering and prefixes all survive them, so the
-sentences below are goldens: the exact bodies of real repository-backed
-PUTs, written out in full.
+Two claims meet here, which is why they share a file. The first is that
+the sentence a refusal carries is the repository's own, unchanged by the
+transport: an operator meets one vocabulary whichever way they reached
+the API. That was held by goldens until #242, which is to say by copies
+of the sentences, so an edit to prose that changed nothing an operator
+does turned this file red. It is held differentially now: the same act
+is driven through the repository directly and over HTTP, and the two
+answers are compared with neither of them written down here. What is
+compared per refusal beside that is structure and semantics: the status,
+the one body shape, the entity the refusal is about, the number of
+problems it decomposes into, and the field each one addresses.
 
-A golden that moves is either a bug or a decision. The one decision
-this milestone makes is recorded on `MCP_TRANSPORT_REFUSAL` below.
-
-The other claim is that the structured half says the same thing as the
+The second claim is that the structured half says the same thing as the
 sentence and adds a place to put it: every emitter answers one shape,
 the `errors` entries and the `detail` lines are one computation seen
 twice, and a pointer addresses the field a form would mark, escaped
 where a key holds a dot or a slash. And under both, the standing one:
 nothing of what was sent comes back, in the sentence, in a pointer, in
-a message, or in the log.
+a message, or in the log. The no-leak assertions are not wording pins
+and did not retreat.
 
 Beside them, the pydantic mechanism the structured half rests on: a
 `ValueError` raised inside a model validator is reachable from
@@ -40,22 +41,18 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel, ValidationError, model_validator
 
 from tests.support.config_cli import runner
-from tests.support.problems import problem
+from tests.support.problems import paths, refused
 from vinga_server import logs
 from vinga_server.config.api import (
-    MALFORMED_REQUEST,
     PROBLEM_DESCRIPTIONS,
     PROBLEM_MEDIA_TYPE,
     PROBLEM_TITLES,
-    UNAUTHORIZED,
-    UNEXPECTED,
     build_api,
 )
 from vinga_server.config.loader import ConfigError
-from vinga_server.config.models import UNRECOGNIZED_KEY_REFUSED, json_pointer
+from vinga_server.config.models import json_pointer
 from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key, load_keys
 from vinga_server.config.store import ConfigStore
-from vinga_server.conversations.api import NO_STORE
 from vinga_server.db import open_database
 
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
@@ -97,114 +94,140 @@ def client(api: FastAPI) -> Iterator[TestClient]:
         yield client
 
 
-# The goldens. Each is the whole `detail` of one real PUT, quoted here
-# in the shape a terminal prints it.
-
-SINGLE_ERROR_REFUSAL = "invalid providers.llm.claude:\n  - type: Field required"
-
-MULTI_ERROR_REFUSAL = (
-    "invalid providers.llm.claude:\n"
-    "  - type: Input should be a valid string\n"
-    "  - api_key_env: Input should be a valid string"
-)
-
-# The three that a model-level validator writes are spelled out as the
-# message and assembled into the sentence, because the same string is
-# also the `errors` entry beside it, and a golden written twice is a
-# golden that can be updated once.
-
-NESTED_SECRET_MESSAGE = (
-    'a key containing "api_key" looks like an inline secret, which is not allowed; '
-    "reference an environment variable instead, in a key of the same name ending in "
-    "_env. The key is not quoted back"
-)
-
-NESTED_SECRET_REFUSAL = f"invalid providers.llm.claude:\n  - {NESTED_SECRET_MESSAGE}"
-
-DECLARED_ENV_MESSAGE = (
-    '"api_key_env" must hold the name of an environment variable, and what it holds '
-    "does not look like one; a pasted value belongs nowhere in this file, so name the "
-    "variable holding it, for example api_key_env: MY_PROVIDER_KEY"
-)
-
-DECLARED_ENV_REFUSAL = f"invalid providers.llm.claude:\n  - {DECLARED_ENV_MESSAGE}"
-
-FILLER_MESSAGE = (
-    "filler.enabled is on with no phrases; add at least one, "
-    'for example "Hmm, let me see..."'
-)
-
-FILLER_REFUSAL = f"invalid agents.sam:\n  - filler: {FILLER_MESSAGE}"
-
-MCP_SECRET_MESSAGE = (
-    'a key in env containing "api_key" looks like an inline secret, which is not '
-    "allowed; reference an environment variable instead, for example "
-    "$MY_SERVER_SECRET. The key is not quoted back"
-)
-
-# The one sentence this milestone changes, and the reason it changes:
-# the transport validator finds several problems and joined them into
-# one line with `; `, which is a line a form cannot decompose. Its
-# problems become one entry each, so the prose becomes one line each,
-# with the same words per problem and in the same order. Recorded in
-# the implementation doc as a deliberate prose change.
-MCP_TRANSPORT_REFUSAL = (
-    "invalid mcp_servers.home:\n"
-    '  - transport "stdio" needs "command"\n'
-    '  - transport "stdio" has no url; that belongs to the other transport\n'
-    f"  - {MCP_SECRET_MESSAGE}"
-)
+# The refusals. Each is one real PUT, the repository call the same
+# fragment reaches the same refusal by, the entity the refusal is about,
+# and the field each of its problems addresses in the order they are
+# reported. What the sentence says is nowhere here, deliberately: it is
+# the repository's, and the test below holds the two paths to it equal
+# without either of them being copied.
 
 
-def test_one_rejected_field_answers_its_golden(client: TestClient) -> None:
-    response = client.put("/providers/llm/claude", json={"model": "m"})
-
-    assert response.status_code == 422
-    assert response.json()["detail"] == SINGLE_ERROR_REFUSAL
-
-
-def test_two_rejected_fields_answer_their_golden(client: TestClient) -> None:
-    """One line per problem, in the order pydantic reports them, under
-    one headline naming the entity."""
-    response = client.put("/providers/llm/claude", json={"type": 5, "api_key_env": 7})
-
-    assert response.status_code == 422
-    assert response.json()["detail"] == MULTI_ERROR_REFUSAL
+class Refusal(NamedTuple):
+    what: str
+    path: str
+    fragment: dict[str, object]
+    write: Callable[[ConfigStore, dict[str, object]], None]
+    entity: str
+    pointers: list[str]
 
 
-def test_a_nested_inline_secret_answers_its_golden(client: TestClient) -> None:
-    """A model-level validator's sentence, which names the path it found
-    and never the value."""
-    response = client.put(
+REFUSALS = [
+    Refusal(
+        "one rejected field",
         "/providers/llm/claude",
-        json={"type": "anthropic", "connection": {"api_key": "sk-live-not-a-real-value"}},
-    )
-
-    assert response.status_code == 422
-    assert response.json()["detail"] == NESTED_SECRET_REFUSAL
-
-
-def test_a_filler_without_phrases_answers_its_golden(client: TestClient) -> None:
-    response = client.put(
-        "/agents/sam", json={"prompt": "You are Sam.", "filler": {"enabled": True}}
-    )
-
-    assert response.status_code == 422
-    assert response.json()["detail"] == FILLER_REFUSAL
-
-
-def test_an_mcp_fragment_breaking_three_rules_answers_its_golden(client: TestClient) -> None:
-    response = client.put(
+        {"model": "m"},
+        lambda store, fragment: store.set_provider("llm", "claude", fragment),
+        "providers.llm.claude",
+        ["/type"],
+    ),
+    Refusal(
+        "two rejected fields",
+        "/providers/llm/claude",
+        {"type": 5, "api_key_env": 7},
+        lambda store, fragment: store.set_provider("llm", "claude", fragment),
+        "providers.llm.claude",
+        ["/type", "/api_key_env"],
+    ),
+    Refusal(
+        "a nested inline secret",
+        "/providers/llm/claude",
+        {"type": "anthropic", "connection": {"api_key": SENTINEL}},
+        lambda store, fragment: store.set_provider("llm", "claude", fragment),
+        "providers.llm.claude",
+        # A provider's options are pass-through, so every key under them
+        # is the caller's and none may be printed. What the refusal
+        # addresses instead is the nearest place this repository can
+        # name, which for an option is the fragment itself.
+        [""],
+    ),
+    Refusal(
+        "a declared reference field holding something else",
+        "/providers/llm/claude",
+        {"type": "anthropic", "api_key_env": SENTINEL},
+        lambda store, fragment: store.set_provider("llm", "claude", fragment),
+        "providers.llm.claude",
+        # The other side of that rule, and why it is not "print
+        # nothing": this is a field the repository declared, so the
+        # pointer addresses it by name.
+        ["/api_key_env"],
+    ),
+    Refusal(
+        "a filler switched on with no phrases",
+        "/agents/sam",
+        {"prompt": "You are Sam.", "filler": {"enabled": True}},
+        lambda store, fragment: store.set_agent("sam", fragment),
+        "agents.sam",
+        # The validator is on the filler block and the block hangs off
+        # the agent, so the pointer is the two of them: what pydantic
+        # located plus what the validator knew.
+        ["/filler/phrases"],
+    ),
+    Refusal(
+        "an MCP fragment breaking three rules at once",
         "/mcp-servers/home",
-        json={
+        {
             "transport": "stdio",
             "url": "https://example.invalid/mcp",
-            "env": {"API_KEY": "not-a-reference"},
+            "env": {"API_KEY": SENTINEL},
         },
-    )
+        lambda store, fragment: store.set_mcp_server("home", fragment),
+        "mcp_servers.home",
+        # One entry per problem, out of a validator that used to join
+        # them into a single sentence at a single location: the missing
+        # field, the combination that has no single field to blame, and
+        # the declared group whose keys are the caller's.
+        ["/command", "", "/env"],
+    ),
+]
+
+REFUSAL_IDS = [case.what for case in REFUSALS]
+
+
+@pytest.mark.parametrize("case", REFUSALS, ids=REFUSAL_IDS)
+def test_a_refusal_names_its_entity_and_addresses_each_problem(
+    client: TestClient, case: Refusal
+) -> None:
+    """422, the one body shape, the entity the fragment was written for,
+    and one problem per rule broken, each addressing the field a form
+    would mark.
+
+    The headline names the entity and every problem gets a line under
+    it, which is what a terminal prints and what makes a multi-problem
+    refusal readable; the words on each line are the repository's."""
+    response = client.put(case.path, json=case.fragment)
 
     assert response.status_code == 422
-    assert response.json()["detail"] == MCP_TRANSPORT_REFUSAL
+    body = response.json()
+    detail = refused(body, 422)
+    assert detail.startswith(f"invalid {case.entity}:")
+    assert paths(body) == case.pointers
+    assert len(detail.splitlines()) == 1 + len(case.pointers)
+    assert SENTINEL not in response.text
+
+
+@pytest.mark.parametrize("case", REFUSALS, ids=REFUSAL_IDS)
+def test_the_api_answers_the_repository_s_own_words(
+    client: TestClient, store: ConfigStore, case: Refusal
+) -> None:
+    """The compatibility claim of #192, held differentially.
+
+    The same fragment is written twice: once through the repository,
+    which is the path the CLI's break-glass mode takes, and once over
+    HTTP. The sentence and the per-field messages are compared against
+    each other rather than against a copy, so an operator meets one
+    vocabulary whichever way they reached the API and nothing here has
+    to be updated when the repository rewords a rule.
+    """
+    with pytest.raises(ConfigError) as caught:
+        case.write(store, case.fragment)
+
+    body = client.put(case.path, json=case.fragment).json()
+
+    assert body["detail"] == str(caught.value)
+    assert body["errors"] == [
+        {"path": problem.path, "message": problem.message}
+        for problem in caught.value.problems
+    ]
 
 
 # The mechanism
@@ -253,9 +276,9 @@ def test_a_repository_refusal_answers_the_one_shape(client: TestClient) -> None:
 
     assert response.status_code == 422
     assert response.headers["content-type"] == PROBLEM_MEDIA_TYPE
-    assert response.json() == problem(
-        422, SINGLE_ERROR_REFUSAL, [("/type", "Field required")]
-    )
+    body = response.json()
+    refused(body, 422)
+    assert paths(body) == ["/type"]
 
 
 def test_the_gate_answers_the_one_shape(api: FastAPI) -> None:
@@ -267,7 +290,10 @@ def test_the_gate_answers_the_one_shape(api: FastAPI) -> None:
     assert response.status_code == 401
     assert response.headers["content-type"] == PROBLEM_MEDIA_TYPE
     assert response.headers["WWW-Authenticate"] == "Bearer"
-    assert response.json() == problem(401, UNAUTHORIZED)
+    # How to authenticate, and no field of the request to blame.
+    body = response.json()
+    assert "Authorization: Bearer" in refused(body, 401)
+    assert paths(body) == []
     assert SENTINEL not in response.text
 
 
@@ -278,7 +304,8 @@ def test_a_body_that_cannot_be_read_answers_the_one_shape(client: TestClient) ->
 
     assert response.status_code == 422
     assert response.headers["content-type"] == PROBLEM_MEDIA_TYPE
-    assert response.json() == problem(422, MALFORMED_REQUEST)
+    # What was expected, and never what arrived.
+    assert "JSON object body" in refused(response.json(), 422)
     assert SENTINEL not in response.text
 
 
@@ -295,7 +322,7 @@ def test_the_last_resort_answers_the_one_shape(api: FastAPI) -> None:
 
     assert response.status_code == 500
     assert response.headers["content-type"] == PROBLEM_MEDIA_TYPE
-    assert response.json() == problem(500, UNEXPECTED)
+    assert "log" in refused(response.json(), 500)
     assert SENTINEL not in response.text
 
 
@@ -307,10 +334,12 @@ def test_an_authenticated_unmatched_path_answers_the_one_shape(client: TestClien
 
     assert response.status_code == 404
     assert response.headers["content-type"] == PROBLEM_MEDIA_TYPE
-    # Asserted rather than assumed: the detail is Starlette's fixed
-    # phrase, and a routing refusal that quoted the path would be
-    # publishing the request.
-    assert response.json() == problem(404, "Not Found")
+    # The framework's own refusal, rendered into this shape: the title
+    # is the status's reason phrase and no field is blamed. That it
+    # quotes no path is the assertion below.
+    body = response.json()
+    refused(body, 404)
+    assert paths(body) == []
     assert SENTINEL not in response.text
 
 
@@ -324,7 +353,7 @@ def test_a_wrong_method_answers_the_one_shape_and_keeps_its_allow(
     assert response.status_code == 405
     assert response.headers["content-type"] == PROBLEM_MEDIA_TYPE
     assert response.headers["allow"] == "GET"
-    assert response.json() == problem(405, "Method Not Allowed")
+    refused(response.json(), 405)
     assert SENTINEL not in response.text
 
 
@@ -336,7 +365,7 @@ def test_a_trailing_slash_path_answers_the_one_shape(client: TestClient) -> None
 
     assert response.status_code == 404
     assert "location" not in response.headers
-    assert response.json() == problem(404, "Not Found")
+    refused(response.json(), 404)
     assert SENTINEL not in response.text
 
 
@@ -352,7 +381,11 @@ def test_a_conversations_refusal_answers_the_same_shape(client: TestClient) -> N
 
     assert response.status_code == 404
     assert response.headers["content-type"] == PROBLEM_MEDIA_TYPE
-    assert response.json() == problem(404, NO_STORE)
+    body = response.json()
+    # The conversation store's own subject, a deployment setting rather
+    # than a field of the request, which is why `errors` is empty.
+    assert "server.conversations.enabled" in refused(body, 404)
+    assert paths(body) == []
     assert SENTINEL not in response.text
 
 
@@ -368,124 +401,39 @@ def test_the_errors_and_the_detail_lines_are_the_same_problems(
     response = client.put("/providers/llm/claude", json={"type": 5, "api_key_env": 7})
 
     body = response.json()
-    assert body["detail"] == MULTI_ERROR_REFUSAL
-    assert body["errors"] == [
-        {"path": "/type", "message": "Input should be a valid string"},
-        {"path": "/api_key_env", "message": "Input should be a valid string"},
-    ]
+    assert paths(body) == ["/type", "/api_key_env"]
     for line, error in zip(body["detail"].splitlines()[1:], body["errors"], strict=True):
         assert line == f"  - {error['path'].removeprefix('/')}: {error['message']}"
 
 
 # Where a model-level validator says its problem is
-
-
-def test_a_nested_inline_secret_names_the_fragment_and_not_the_key(
-    client: TestClient,
-) -> None:
-    """A provider's options are pass-through, so every key under them is
-    the caller's and none of them may be printed. What the refusal names
-    instead is the closed fragment the key matched, which is one of this
-    repository's own six words, and a pointer to the nearest place it can
-    name, which for an option is the fragment itself."""
-    response = client.put(
-        "/providers/llm/claude",
-        json={"type": "anthropic", "connection": {"api_key": SENTINEL}},
-    )
-
-    assert response.status_code == 422
-    assert response.json() == problem(
-        422, NESTED_SECRET_REFUSAL, [("", NESTED_SECRET_MESSAGE)]
-    )
-    assert SENTINEL not in response.text
-
-
-def test_a_declared_field_is_named_in_its_own_refusal(client: TestClient) -> None:
-    """The other side of the same rule, and why it is not "print
-    nothing": `api_key_env` is a field this repository declared, so the
-    refusal names it, and the pointer addresses it."""
-    response = client.put(
-        "/providers/llm/claude", json={"type": "anthropic", "api_key_env": SENTINEL}
-    )
-
-    assert response.status_code == 422
-    assert response.json() == problem(
-        422, DECLARED_ENV_REFUSAL, [("/api_key_env", DECLARED_ENV_MESSAGE)]
-    )
-    assert SENTINEL not in response.text
-
-
-def test_an_mcp_fragment_breaking_two_rules_answers_one_entry_each(
-    client: TestClient,
-) -> None:
-    """The transport rule and the secret rule at once, each with its own
-    field's pointer, out of one validator that used to join them into a
-    single sentence at a single location."""
-    response = client.put(
-        "/mcp-servers/home",
-        json={
-            "transport": "stdio",
-            "url": "https://example.invalid/mcp",
-            "env": {"API_KEY": SENTINEL},
-        },
-    )
-
-    assert response.status_code == 422
-    assert response.json() == problem(
-        422,
-        MCP_TRANSPORT_REFUSAL,
-        [
-            ("/command", 'transport "stdio" needs "command"'),
-            # The one problem about a combination rather than a key: the
-            # empty pointer is the fragment itself, which is what RFC
-            # 6901 gives a problem with no single field to blame.
-            ("", 'transport "stdio" has no url; that belongs to the other transport'),
-            # The group and not the key: `env` is a declared field, and
-            # everything keyed under it is whatever the caller wrote.
-            ("/env", MCP_SECRET_MESSAGE),
-        ],
-    )
-    assert SENTINEL not in response.text
-
-
-def test_a_filler_problem_points_under_the_layer_that_holds_it(
-    client: TestClient,
-) -> None:
-    """The validator is on the filler block, and the block hangs off the
-    agent, so the pointer is the two of them: what pydantic located plus
-    what the validator knew."""
-    response = client.put(
-        "/agents/sam", json={"prompt": "You are Sam.", "filler": {"enabled": True}}
-    )
-
-    assert response.status_code == 422
-    assert response.json() == problem(
-        422, FILLER_REFUSAL, [("/filler/phrases", FILLER_MESSAGE)]
-    )
+#
+# The pointer per case is in the table above. What is left here is the
+# one rule the table cannot express, because it is about two cases at
+# once: an invented key is addressed by the object it was written in and
+# never by itself, whichever depth that object is at.
 
 
 def test_an_unrecognized_key_answers_the_parent_it_was_written_under(
     client: TestClient,
 ) -> None:
     """A key the model does not declare is a key the caller invented, so
-    the refusal says that a key was not recognized and points at the
-    object it was written in, never at the key. At the top of a fragment
-    that object is the fragment, which is the empty pointer."""
+    the refusal points at the object it was written in, never at the
+    key. At the top of a fragment that object is the fragment, which is
+    the empty pointer."""
     top = client.put("/agents/sam", json={"prompt": "You are Sam.", "surprise": 1})
     nested = client.put(
         "/agents/sam", json={"prompt": "You are Sam.", "filler": {"surprise": 1}}
     )
 
-    assert top.json() == problem(
-        422,
-        f"invalid agents.sam:\n  - {UNRECOGNIZED_KEY_REFUSED}",
-        [("", UNRECOGNIZED_KEY_REFUSED)],
-    )
-    assert nested.json() == problem(
-        422,
-        f"invalid agents.sam:\n  - filler: {UNRECOGNIZED_KEY_REFUSED}",
-        [("/filler", UNRECOGNIZED_KEY_REFUSED)],
-    )
+    for response in (top, nested):
+        assert refused(response.json(), 422).startswith("invalid agents.sam:")
+        assert "surprise" not in response.text
+    assert paths(top.json()) == [""]
+    assert paths(nested.json()) == ["/filler"]
+    # And the two say the same thing about the key, since it is one
+    # rule: what differs is where it was written.
+    assert top.json()["errors"][0]["message"] == nested.json()["errors"][0]["message"]
 
 
 def test_the_pointer_escapes_what_the_rfc_says_to_escape() -> None:
@@ -639,22 +587,33 @@ def test_a_credential_planted_as_a_key_is_absent_from_the_exception(
 
 
 def test_the_cli_prints_the_same_sentence_for_a_problem_document(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    store: ConfigStore,
 ) -> None:
-    """The compatibility claim, taken off a real refusal rather than a
-    hand-built one: the command runs against a repository-backed API, the
-    API answers `application/problem+json`, and what reaches the terminal
-    is the golden above, unchanged.
+    """The compatibility claim, taken off two real refusals rather than
+    a hand-built one: the command runs against a repository-backed API,
+    the API answers `application/problem+json`, and what reaches the
+    terminal is what the repository said, unchanged.
+
+    Held against the repository's own refusal for the same act rather
+    than against a copy of the sentence, so that the two are equal by
+    assertion and neither is written down here.
 
     `_payload` accepts any content type holding `json`, and `_answer`
     reads `detail` and ignores the members it does not know, which is why
     no CLI change was needed. This is what holds that.
     """
+    fragment = {"model": "m"}
+    with pytest.raises(ConfigError) as caught:
+        store.set_provider("llm", "claude", fragment)
+
     run = runner(tmp_path, monkeypatch)
 
     assert run("set", "provider", "llm", "claude", "-f", "-", stdin="model: m\n") == 1
 
-    assert capsys.readouterr().err.rstrip("\n") == SINGLE_ERROR_REFUSAL
+    assert capsys.readouterr().err.rstrip("\n") == str(caught.value)
 
 
 # The status vocabulary

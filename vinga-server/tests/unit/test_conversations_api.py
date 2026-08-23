@@ -33,24 +33,16 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tests.support.configs import DEVICE_MAC, DEVICE_UUID, recording_config
-from tests.support.problems import problem
+from tests.support.problems import refused
 from tests.support.sessions import until
 from tests.support.wire import connect, say_something, sentences, shake_hands
 from vinga_server import logs
 from vinga_server.app import create_app
 from vinga_server.config import Config
-from vinga_server.config.api import MOUNT_PATH, UNAUTHORIZED, UNEXPECTED, build_api
+from vinga_server.config.api import MOUNT_PATH, build_api
 from vinga_server.conversations import api as conversations_api
 from vinga_server.conversations import schema
-from vinga_server.conversations.api import (
-    CURSOR_REFUSED,
-    DEVICE_REFUSED,
-    LIMIT_DEFAULT,
-    LIMIT_MAX,
-    LIMIT_REFUSED,
-    NO_STORE,
-    UNKNOWN_SESSION,
-)
+from vinga_server.conversations.api import LIMIT_DEFAULT, LIMIT_MAX
 from vinga_server.conversations.records import ToolInvocation, TurnLeg, TurnRecord
 from vinga_server.conversations.store import ConversationStore, conversations_path
 
@@ -509,7 +501,7 @@ def test_an_unknown_session_is_a_404_on_both_reads(
     for path in ("/conversations/nobody", "/conversations/nobody/turns"):
         response = client.get(path)
         assert response.status_code == 404, path
-        assert response.json() == problem(404, UNKNOWN_SESSION)
+        assert "session" in refused(response.json(), 404), path
 
 
 # What the switches leave behind
@@ -571,7 +563,7 @@ def test_no_route_answers_without_the_token(api: FastAPI, path: str) -> None:
 
     assert response.status_code == 401
     assert response.headers["WWW-Authenticate"] == "Bearer"
-    assert response.json() == problem(401, UNAUTHORIZED)
+    assert "Authorization: Bearer" in refused(response.json(), 401)
 
 
 @pytest.mark.parametrize("path", ROUTES)
@@ -581,25 +573,26 @@ def test_a_deployment_that_never_recorded_answers_404_naming_the_key(
     response = client.get(path)
 
     assert response.status_code == 404
-    assert response.json() == problem(404, NO_STORE)
-    assert "server.conversations.enabled" in NO_STORE
+    # The key that switches recording on, which is the whole of what a
+    # deployment that never recorded needs to be told.
+    assert "server.conversations.enabled" in refused(response.json(), 404)
     # And the read brought no database into existence, which is what
     # keeps an absent section a server that leaves no file behind.
     assert not conversations_path(tmp_path).exists()
 
 
 @pytest.mark.parametrize(
-    ("argument", "value", "refusal"),
+    ("argument", "value"),
     [
-        ("limit", "0", LIMIT_REFUSED),
-        ("limit", str(LIMIT_MAX + 1), LIMIT_REFUSED),
-        ("limit", "-1", LIMIT_REFUSED),
-        ("limit", "1.5", LIMIT_REFUSED),
-        ("limit", SENTINEL, LIMIT_REFUSED),
-        ("cursor", "-1", CURSOR_REFUSED),
-        ("cursor", "9" * 30, CURSOR_REFUSED),
-        ("cursor", SENTINEL, CURSOR_REFUSED),
-        ("device", SENTINEL, DEVICE_REFUSED),
+        ("limit", "0"),
+        ("limit", str(LIMIT_MAX + 1)),
+        ("limit", "-1"),
+        ("limit", "1.5"),
+        ("limit", SENTINEL),
+        ("cursor", "-1"),
+        ("cursor", "9" * 30),
+        ("cursor", SENTINEL),
+        ("device", SENTINEL),
     ],
 )
 def test_a_refused_argument_names_the_rule_and_quotes_nothing(
@@ -609,7 +602,6 @@ def test_a_refused_argument_names_the_rule_and_quotes_nothing(
     capsys: pytest.CaptureFixture[str],
     argument: str,
     value: str,
-    refusal: str,
 ) -> None:
     """What arrived is the caller's, and these are the only values these
     routes are handed outside a path segment. A cursor pasted from the
@@ -620,9 +612,9 @@ def test_a_refused_argument_names_the_rule_and_quotes_nothing(
         response = client.get("/conversations", params={argument: value})
 
     assert response.status_code == 422
-    # The whole body, equal to the fixed sentence: there is nowhere for
-    # what was sent to be, which is a stronger check than looking for it.
-    assert response.json() == problem(422, refusal)
+    # The refusal names the argument whose rule was broken, and nothing
+    # of the value that broke it.
+    assert argument in refused(response.json(), 422)
     assert SENTINEL not in response.text
     assert SENTINEL not in _leaked(caplog)
     captured = capsys.readouterr()
@@ -632,12 +624,18 @@ def test_a_refused_argument_names_the_rule_and_quotes_nothing(
 def test_the_limit_rules_are_the_ones_the_refusal_names(
     tmp_path: Path, client: TestClient
 ) -> None:
-    """The boundary values themselves, since the refusal above is a
-    sentence and this is what it is a sentence about."""
+    """The boundary values themselves, since the refusal above names an
+    argument and this is what the rule behind it is."""
     recorded(tmp_path, sessions=1)
 
-    assert f"1 and {LIMIT_MAX}" in LIMIT_REFUSED
-    assert str(LIMIT_DEFAULT) in LIMIT_REFUSED
+    # The bounds and the default, read off the refusal a broken one
+    # answers with: a document that named other numbers would send a
+    # client to build a request this refuses.
+    over = refused(
+        client.get("/conversations", params={"limit": str(LIMIT_MAX + 1)}).json(), 422
+    )
+    assert f"1 and {LIMIT_MAX}" in over
+    assert str(LIMIT_DEFAULT) in over
     for limit in ("1", str(LIMIT_MAX)):
         assert client.get("/conversations", params={"limit": limit}).status_code == 200
     assert len(_get(client, "/conversations", limit=1)["items"]) == 1
@@ -662,7 +660,7 @@ def test_a_sentinel_in_the_path_reaches_no_body_and_no_log(
 
     for response in responses:
         assert response.status_code == 404
-        assert response.json() == problem(404, UNKNOWN_SESSION)
+        assert "session" in refused(response.json(), 404)
         assert SENTINEL not in response.text
     assert SENTINEL not in _leaked(caplog)
     captured = capsys.readouterr()
@@ -736,7 +734,7 @@ def test_a_failure_reaching_the_file_says_nothing_about_it(
         response = client.get("/conversations")
 
     assert response.status_code == 500
-    assert response.json() == problem(500, UNEXPECTED)
+    assert "log" in refused(response.json(), 500)
     assert SENTINEL not in response.text
     assert SENTINEL not in _leaked(caplog)
     assert any(
@@ -769,4 +767,4 @@ def test_the_reads_hold_no_engine_between_requests(
 
     response = client.get("/conversations")
     assert response.status_code == 404
-    assert response.json() == problem(404, NO_STORE)
+    assert "server.conversations.enabled" in refused(response.json(), 404)

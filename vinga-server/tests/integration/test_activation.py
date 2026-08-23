@@ -22,8 +22,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests.integration.conftest import booted_in
+from tests.support.notices import CHECK_IN, boundaries
 from vinga_server.config import Config
-from vinga_server.config.entities import BINDING_NOTICE
 from vinga_server.onboarding import onboarding_key, onboarding_path
 from vinga_server.ota import ACTIVATE_SEGMENT
 
@@ -113,7 +113,7 @@ async def test_a_board_is_onboarded_by_the_code_it_shows(
             )
             assert claim.status_code == 200, claim.text
             assert claim.json()["wrote"] == f"device {DEVICE_MAC} bound to assistant"
-            assert claim.json()["notice"] == BINDING_NOTICE
+            assert boundaries(claim.json()["notice"]) == {CHECK_IN}
 
             # The board's very next poll, three seconds after the last
             # one, sees it: no power cycle, no button press.

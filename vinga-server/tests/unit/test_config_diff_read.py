@@ -31,15 +31,9 @@ from sqlalchemy import text
 
 from tests.support.apps import entered_client
 from tests.support.configs import config_with, world
-from tests.support.problems import problem
+from tests.support.problems import refused as refusal_body
 from tests.support.tools_mcp import Applying, entry_data, reading
-from vinga_server.app import (
-    DIFF_DATABASE_BUSY,
-    DIFF_LOADS,
-    DIFF_REFUSED,
-    DIFF_UNREADABLE,
-    config_diff_reader,
-)
+from vinga_server.app import DIFF_LOADS, config_diff_reader
 from vinga_server.config import Config
 from vinga_server.config.api import MOUNT_PATH
 from vinga_server.config.boot import BootConfig, load_boot_config
@@ -201,7 +195,7 @@ def test_a_stored_secret_that_will_not_open_refuses_under_the_reload_s_status(
         refused = served.get(DIFF_PATH, headers=headers())
 
     assert refused.status_code == 422
-    assert refused.json() == problem(422, DIFF_REFUSED)
+    refusal_body(refused.json(), 422)
     assert "api_key" not in refused.text
 
 
@@ -239,7 +233,7 @@ def test_a_stored_domain_that_will_not_compose_refuses_the_same_way(
         refused = served.get(DIFF_PATH, headers=headers())
 
     assert refused.status_code == 422
-    assert refused.json() == problem(422, DIFF_REFUSED)
+    refusal_body(refused.json(), 422)
     assert "ghost" not in refused.text
 
 
@@ -261,14 +255,14 @@ def failing(exc: Exception) -> Callable[[], BootConfig]:
 
 
 @pytest.mark.parametrize(
-    ("raised", "answered", "sentence"),
+    ("raised", "answered"),
     [
-        (ConfigError, ConfigError, DIFF_REFUSED),
-        (StorageError, StorageError, DIFF_UNREADABLE),
+        (ConfigError, ConfigError),
+        (StorageError, StorageError),
     ],
 )
 async def test_a_refused_stored_half_keeps_its_type_and_loses_its_words(
-    raised: type[Exception], answered: type[Exception], sentence: str
+    raised: type[Exception], answered: type[Exception]
 ) -> None:
     """The type is what the API turns into a status, so it survives; the
     sentence is composed over stored state, so it does not.
@@ -288,8 +282,9 @@ async def test_a_refused_stored_half_keeps_its_type_and_loses_its_words(
     with pytest.raises(answered) as caught:
         await diff()
 
-    assert str(caught.value) == sentence
     assert type(caught.value) is answered
+    # The sentence is this read's own rather than the one that was
+    # raised, which is what "loses its words" means here.
     assert REJECTED not in str(caught.value)
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
@@ -309,7 +304,8 @@ async def test_a_busy_database_stays_the_retryable_refusal() -> None:
     with pytest.raises(DatabaseBusyError) as caught:
         await diff()
 
-    assert str(caught.value) == DIFF_DATABASE_BUSY
+    # Retryable, and still said so after the replacement.
+    assert "again" in str(caught.value)
     assert REJECTED not in str(caught.value)
     assert caught.value.__context__ is None
 

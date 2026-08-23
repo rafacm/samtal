@@ -23,14 +23,11 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
 from tests.support.apps import entered_client
-from tests.support.problems import problem
+from tests.support.problems import problem, refused
 from vinga_server.app import create_app
 from vinga_server.config import Config, ConfigError, load_file_config
 from vinga_server.config.api import (
-    MALFORMED_REQUEST,
     MOUNT_PATH,
-    UNAUTHORIZED,
-    UNEXPECTED,
     ApiRuntime,
     StoreHandle,
     api_token,
@@ -39,7 +36,6 @@ from vinga_server.config.api import (
     open_store,
     store_dependency,
 )
-from vinga_server.config.entities import NO_SUCH_AGENT
 from vinga_server.config.loader import DatabaseBusyError, StorageError, UnknownEntityError
 from vinga_server.config.store import ConfigStore
 
@@ -87,9 +83,9 @@ def test_a_request_without_a_token_is_refused(client: TestClient) -> None:
 
     assert response.status_code == 401
     assert response.headers["WWW-Authenticate"] == "Bearer"
-    assert response.json() == problem(401, UNAUTHORIZED)
-    # The body says how to authenticate and nothing else.
-    assert "Authorization: Bearer" in UNAUTHORIZED
+    # The body says how to authenticate, which is the whole of what an
+    # unauthenticated caller may be told.
+    assert "Authorization: Bearer" in refused(response.json(), 401)
 
 
 def test_an_unmatched_path_is_refused_before_it_is_routed(client: TestClient) -> None:
@@ -175,7 +171,9 @@ def test_the_token_reaches_no_log_record(
 
 
 REFUSALS = [
-    (UnknownEntityError(NO_SUCH_AGENT), 404),
+    # Planted sentences rather than the repository's own, because what
+    # is under test is that whatever it said comes back unchanged.
+    (UnknownEntityError("agents: no agent of that identity"), 404),
     (DatabaseBusyError("the configuration database is busy"), 409),
     (StorageError("the options column does not hold an object with string keys"), 500),
     (ConfigError("invalid agents.sam: the fragment is wrong"), 422),
@@ -213,7 +211,9 @@ def test_an_unhandled_failure_is_a_generic_500(
         response = TestClient(api).get("/boom", headers=_bearer(TOKEN))
 
     assert response.status_code == 500
-    assert response.json() == problem(500, UNEXPECTED)
+    # The failure is recorded rather than described, and the body says
+    # where to look.
+    assert "log" in refused(response.json(), 500)
     assert SENTINEL not in response.text
 
     # It happened, and what kind of failure it was.
@@ -283,7 +283,8 @@ def test_a_body_that_is_not_the_expected_shape_is_not_quoted_back(api: FastAPI) 
 
     for response in responses:
         assert response.status_code == 422
-        assert response.json() == problem(422, MALFORMED_REQUEST)
+        # What was expected, never what arrived.
+        assert "JSON object body" in refused(response.json(), 422)
         assert SENTINEL not in response.text
 
 
