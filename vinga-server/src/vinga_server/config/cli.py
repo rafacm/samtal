@@ -110,7 +110,12 @@ from vinga_server.config.secrets import (
     load_keys,
     provider_identity,
 )
-from vinga_server.config.store import APPLY_LOCATION, ConfigStore, check_transportable
+from vinga_server.config.store import (
+    APPLY_LOCATION,
+    ConfigStore,
+    addressed,
+    check_transportable,
+)
 from vinga_server.db import open_database
 
 # Imported like anything else since issue #143 split the onboarding
@@ -914,13 +919,19 @@ def _set_secret_words(stored: Mapping[str, object]) -> list[str]:
     """One stored credential's location as the command that fills it.
 
     A location's identity is the dotted join of the parameters that
-    address the entity, so it is split back into them by the count the
-    descriptor states: split at the first separator only, which is what
-    keeps a name holding one still one name.
+    address the entity, and the repository owns the inverse: a name
+    holding a dot is still one name, and a second spelling of the rule
+    here would render a command addressing an entity that does not
+    exist.
     """
     holder = _SECRET_HOLDER[str(stored["kind"])]
-    identity = str(stored["identity"]).split(".", len(holder.addressing) - 1)
-    return [*PROGRAM.split(), "set-secret", holder.name, *identity, str(stored["slot"])]
+    return [
+        *PROGRAM.split(),
+        "set-secret",
+        holder.name,
+        *addressed(holder, str(stored["identity"])),
+        str(stored["slot"]),
+    ]
 
 
 def _exported_entity(kind: entities.EntityDescriptor) -> Callable[[Any], str]:
