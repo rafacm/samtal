@@ -69,7 +69,6 @@ from vinga_server.config.models import (
     is_secret_option,
     is_valid_fragment_name,
     json_pointer,
-    mcp_entry_fragment,
     normalize_device_bindings,
     normalize_mac,
     safe_location,
@@ -811,42 +810,40 @@ def _database_problem(exc: SQLAlchemyError) -> ConfigError:
 
 # Rows and the kinds they hold
 #
-# One kind is one table, one row mapping and one location. The table and
-# the location are the descriptor's, because every surface addresses a
-# kind by them. The row mapping is not: it is written in terms of this
-# module's own row helpers, it is read by this module and by nothing
-# else, and a registry it was hung on would be this module talking to
-# itself through a global. So it lives here, in `_STORAGE` at the foot of
-# the section, typed per kind rather than as a loose callable.
+# One kind is one table, one body column and one location, and all three
+# are the descriptor's: the table and the location because every surface
+# addresses a kind by them, and the body because it is the descriptor's
+# own model dumped and validated back. There is no per-kind row mapping
+# any more. A row is its key columns, its `body`, and, where the kind can
+# hold one, its `secrets`; the pair below is the whole of the translation
+# for all five kinds, and a field added to a model needs nothing here.
 #
-# The default mapping is the model itself: every declared field is a
-# column of the same name, so validating the row against the model is the
-# whole of it. An entry in the table is what a kind pays where its model
-# asks for something a dump cannot say, which the inventory found for
-# three of the five.
+# What a kind still says for itself is the two checks around its own
+# write, which are behavior rather than shape: they are written in terms
+# of this module's refusals, read by this module and by nothing else, and
+# a registry they were hung on would be this module talking to itself
+# through a global. So they live here, in `_STORAGE` at the foot of the
+# section, typed per kind rather than as a loose callable.
 
 
 @dataclass(frozen=True, kw_only=True)
 class _Storage[Entry: BaseModel]:
-    """What one kind does around its own rows, beyond what its model
+    """What one kind checks around its own write, beyond what its model
     already says.
 
-    Four facts, each None for a kind that needs none, and each with the
-    signature its own callers use rather than a shared loose one: how a
-    stored row becomes the entry (`from_row`), how an entry becomes the
-    columns that hold it (`to_row`), what is checked about the name
-    before a body is parsed (`before_parse`), and what is checked about
-    the parsed entry before the write opens (`inside_write`).
+    Two facts, each None for a kind that needs none, and each with the
+    signature its own caller uses rather than a shared loose one: what is
+    checked about the name before a body is parsed (`before_parse`), and
+    what is checked about the parsed entry before the write opens
+    (`inside_write`).
 
-    The two checks take the same arguments as each other in spirit but
-    not in shape, and deliberately: a name check runs before there is an
-    entry to speak of, so it is given the name and nothing else, while an
-    entry check is given the location a refusal will name, the parameters
-    that address the entry, and the entry itself.
+    The two take the same arguments as each other in spirit but not in
+    shape, and deliberately: a name check runs before there is an entry
+    to speak of, so it is given the name and nothing else, while an entry
+    check is given the location a refusal will name, the parameters that
+    address the entry, and the entry itself.
     """
 
-    from_row: Callable[[Row], Entry] | None = None
-    to_row: Callable[[Entry], dict[str, object]] | None = None
     before_parse: Callable[[str], None] | None = None
     inside_write: Callable[[str, tuple[str, ...], Entry], None] | None = None
 
@@ -909,27 +906,54 @@ def _location(descriptor: EntityDescriptor, *identity: str) -> str:
 
 
 def _from_row(descriptor: EntityDescriptor, row: Row) -> BaseModel:
-    """One stored row as its model, through the kind's own mapping where
-    it has one and through the model itself where it does not."""
-    mapping = _STORAGE[descriptor.name].from_row
-    if mapping is not None:
-        return mapping(row)
+    """One stored row as its model: the body validated through the model
+    the kind's descriptor names, at the location the row's own key
+    columns address.
+
+    Every kind, with no arm of its own. What used to be five hand-written
+    readers is the descriptor's model and the body it dumped, which is
+    also what makes the tri-states work without saying so: a field the
+    operator never wrote is absent from the body, so it validates to its
+    declared default, and `model_fields_set` holds exactly what was
+    written. That last part is load-bearing rather than tidy, and
+    `_to_row` says why.
+    """
     identity = tuple(getattr(row, part) for part in descriptor.addressing)
-    return _stored(
-        descriptor.model,
-        _location(descriptor, *identity),
-        {name: getattr(row, name) for name in descriptor.model.model_fields},
-    )
+    return _body(descriptor.model, _location(descriptor, *identity), row.body)
 
 
 def _to_row(descriptor: EntityDescriptor, entry: BaseModel) -> dict[str, object]:
-    """One entry as the columns that hold it, the same way round: the
-    kind's own mapping where it has one, and the model's own dump where
-    it does not."""
-    mapping = _STORAGE[descriptor.name].to_row
-    if mapping is not None:
-        return mapping(entry)
-    return entry.model_dump()
+    """One entry as the columns that hold it: the model dumped as JSON
+    into the body, and nothing else.
+
+    `exclude_unset` and not a plain dump, and the reason is a refusal
+    rather than a preference. `McpServerConfig` rejects a field belonging
+    to the other transport when it is PRESENT in `model_fields_set`, so a
+    plain dump of a stdio entry would write `url: null, headers: {}`, and
+    validating that body back would make every stdio server in the
+    database unreadable. Excluding what was never set keeps the
+    fields-set semantics across the round trip, and it is also what the
+    columns did: a field nobody wrote had no column of its own to be
+    written into.
+
+    `exclude_none` would have done the same job for that one case and is
+    deliberately not used: a provider's options are passed through, so an
+    explicit null inside one is a value an operator wrote and this must
+    not drop it.
+
+    Serialization order is pydantic's declaration order. There is no
+    sorted-keys option on `model_dump_json`, and declaration order is
+    stable across writes of the same model, which is what a diff of two
+    dumps needs.
+
+    The forward consequence is worth stating where the choice is made: a
+    body carries what the operator wrote and nothing they did not, so
+    changing a field's DEFAULT later changes the meaning of every body
+    that never wrote it. That is exactly what an absent column did, and
+    the body-parse fixtures pin a sparse and a fully-written body per
+    kind so it stays visible.
+    """
+    return {"body": entry.model_dump_json(exclude_unset=True)}
 
 
 def _row_identity(descriptor: EntityDescriptor, identity: Sequence[str]) -> dict[str, object]:
@@ -1110,90 +1134,63 @@ def _read_secrets(connection: Connection, keys: MultiFernet | None) -> SecretSto
     return SecretStore(envelopes, keys)
 
 
-def _provider_from_row(row: Row) -> ProviderConfig:
-    # api_key_env is a declared model field with its own column, never
-    # an options key: options holds exactly the model extras.
-    location = f"providers.{row.stage}.{row.name}"
-    data: dict[str, object] = {
-        "type": row.type,
-        "egress": row.egress,
-        **_mapping(location, "options", row.options),
-    }
-    if row.api_key_env is not None:
-        data["api_key_env"] = row.api_key_env
-    return _stored(ProviderConfig, location, data)
+def _body[Model: BaseModel](model: type[Model], location: str, body: object) -> Model:
+    """One stored body through the model that owns its shape.
+
+    The read half of decision 3 of the JSON-body plan. A body that will
+    not validate is a storage failure, exactly as an unreadable column
+    was: the caller did nothing wrong and can do nothing about what is
+    stored. What the refusal may name is the table and the identity,
+    which is the location, and the FIELD paths pydantic reported, which
+    are the model's own vocabulary. Never the body: it holds values an
+    operator wrote, and it is one string rather than a set of columns, so
+    a sentence quoting "the row" would now quote the whole entity.
+
+    That bound is what `_validation_problems` already enforces, and it is
+    why the error is built inside the handler and raised outside it: a
+    ValidationError's `errors()` carry the rejected input, which here is
+    the body itself.
+
+    Unparseable JSON arrives as an ordinary validation error at the top
+    of the model (pydantic reports where the parse stopped, not what it
+    was reading), so it takes this same path rather than one of its own.
+    A body that is not a string at all, which is what a hand-edited row
+    can hold, is reported the same way for the same reason.
+
+    The non-finite check survives the reshape, and it survives because
+    the reading that would have retired it is wrong. Pydantic's JSON
+    parser accepts the `NaN` and `Infinity` literals rather than refusing
+    them: a declared float field with a constraint catches its own
+    (`tool_timeout_s` is `gt=0`, which NaN fails), but a provider's
+    options are passed through untyped, so a stored NaN would load
+    happily and then serialize as `null` on every read and on the next
+    write. That is the silent change of configuration the check exists
+    for, so it is asked here, after validation, of the entry rather than
+    of a decoded mapping. It names where the value sits and never what it
+    is, exactly as it did of a column.
+    """
+    problem: str | None = None
+    entry: Model | None = None
+    try:
+        entry = model.model_validate_json(body)  # type: ignore[arg-type]
+    except ValidationError as exc:
+        problem, _ = _validation_problems(f"{location}: {_UNREADABLE_ROW}", model, exc)
+    if entry is None:
+        raise StorageError(problem)
+    unwritable = _untransportable(entry.model_dump(), numbers_only=True)
+    if unwritable is not None:
+        raise StorageError(f"{location}: {unwritable}; the row cannot be read as configuration")
+    return entry
 
 
-def _mcp_from_row(row: Row) -> McpServerConfig:
-    # Fields belonging to the other transport are left unset rather than
-    # loaded as None or empty: McpServerConfig reads model_fields_set to
-    # tell "my headers are ignored" from "my headers are wrong", so
-    # naming them would make every stdio row fail its own validator.
-    location = f"mcp_servers.{row.name}"
-    data: dict[str, object] = {"transport": row.transport, "tool_timeout_s": row.tool_timeout_s}
-    if row.egress is not None:
-        data["egress"] = row.egress
-    for key, value in (("command", row.command), ("url", row.url)):
-        if value is not None:
-            data[key] = value
-    args = _list(location, "args", row.args)
-    if args:
-        data["args"] = args
-    for key, value in (("env", row.env), ("headers", row.headers)):
-        mapping = _mapping(location, key, value)
-        if mapping:
-            data[key] = mapping
-    # Left unset when the column is NULL, which is what a row written
-    # before the column existed holds and what "no guidance" means.
-    if row.instructions is not None:
-        data["instructions"] = row.instructions
-    # Read rather than defaulted, and read from the column rather than
-    # rescued from NULL: the column is NOT NULL with a database-level
-    # default, so a row written before it existed says false itself.
-    data["use_server_instructions"] = bool(row.use_server_instructions)
-    if row.inject_prompts is not None:
-        data["inject_prompts"] = _list(location, "inject_prompts", row.inject_prompts)
-    return _stored(McpServerConfig, location, data)
-
-
-def _agent_from_row(row: Row) -> AgentConfig:
-    location = f"agents.{row.name}"
-    data = {"prompt": row.prompt or "", **_layer_data(location, row)}
-    return _stored(AgentConfig, location, data)
-
-
-def _defaults_from_row(row: Row) -> AgentDefaults:
-    return _stored(AgentDefaults, "agent_defaults", _layer_data("agent_defaults", row))
-
-
-def _layer_data(location: str, row: Row) -> dict[str, object]:
-    """The override columns agent_defaults and agents share."""
-    data: dict[str, object] = {
-        stage: getattr(row, stage) for stage in PROVIDER_STAGES if getattr(row, stage) is not None
-    }
-    # None means inherit and an empty list opts out, so neither column
-    # can be normalized through the missing-value default: only their
-    # container shape is checked.
-    if row.mcp is not None:
-        data["mcp"] = _list(location, "mcp", row.mcp)
-    if row.filler is not None:
-        data["filler"] = _mapping(location, "filler", row.filler)
-    # The same rule as mcp, and the same reason for reading the column
-    # rather than defaulting it: a row written before this column
-    # existed holds NULL, which is inherit, and an empty list is an
-    # agent that opted out.
-    if row.prompt_includes is not None:
-        data["prompt_includes"] = _list(location, "prompt_includes", row.prompt_includes)
-    return data
-
-
-# The three mappings a model demands are the ones above: the MCP
-# server's per-column omissions, which are what lets its transport
-# validator read `model_fields_set`; the layer's tri-state, where None
-# inherits and an empty list opts out; and the provider's split between
-# its declared fields and the options extras. A prompt fragment names no
-# mapping at all, because its model is the whole of it. Which kind reads
-# through which is `_STORAGE` at the foot of this section.
+# The value columns that are not bodies, and the guards they still need.
+# `devices` and `domain_settings` hold JSON values rather than a dumped
+# model, and the two `secrets` columns hold envelopes no model declares,
+# so SQLite's willingness to put a string where an object belongs is
+# still something a reader has to meet in words. The four reshaped kinds
+# do not come through here: their reader holds a string, and a body that
+# is not an object, or is not JSON at all, is refused by the parser
+# rather than by a container check.
 
 
 def _mapping(location: str, column: str, value: object) -> dict[str, object]:
@@ -1233,66 +1230,6 @@ def _shape_problem(location: str, column: str, expected: str) -> str:
 
 
 # Writing rows
-
-
-def _provider_values(entry: ProviderConfig) -> dict[str, object]:
-    return {
-        "type": entry.type,
-        "api_key_env": entry.api_key_env,
-        "egress": entry.egress,
-        "options": dict(entry.options),
-    }
-
-
-def _mcp_values(entry: McpServerConfig) -> dict[str, object]:
-    return {
-        "transport": entry.transport,
-        "command": entry.command,
-        "args": list(entry.args),
-        "env": dict(entry.env),
-        "url": entry.url,
-        "headers": dict(entry.headers),
-        "egress": entry.egress,
-        "tool_timeout_s": entry.tool_timeout_s,
-        # Written as it was given: this is prompt text an operator wrote,
-        # and its indentation and its blank lines are part of it.
-        "instructions": entry.instructions,
-        "use_server_instructions": entry.use_server_instructions,
-        # None and an empty list are different configurations here as
-        # everywhere else: one is "no prompts named", the other is a
-        # list an operator emptied.
-        "inject_prompts": (
-            list(entry.inject_prompts) if entry.inject_prompts is not None else None
-        ),
-    }
-
-
-def _layer_values(entry: AgentDefaults) -> dict[str, object]:
-    values: dict[str, object] = {stage: getattr(entry, stage) for stage in PROVIDER_STAGES}
-    # None means inherit and a list replaces rather than extends, so an
-    # empty list and a null are different configurations and the column
-    # has to keep them apart.
-    # Each entry as it was written, which is also what makes the column
-    # readable by a server running the code that predates the object
-    # form: a plain string list is still a plain string list.
-    values["mcp"] = (
-        [mcp_entry_fragment(item) for item in entry.mcp] if entry.mcp is not None else None
-    )
-    values["filler"] = entry.filler.model_dump() if entry.filler is not None else None
-    values["prompt_includes"] = (
-        list(entry.prompt_includes) if entry.prompt_includes is not None else None
-    )
-    return values
-
-
-def _agent_values(entry: AgentConfig) -> dict[str, object]:
-    return {"prompt": entry.prompt, **_layer_values(entry)}
-
-
-# The mirror of the mappings above. A prompt fragment names none, so it
-# is written through its model: the one column it has is the text as it
-# was given, whose indentation and blank lines are part of it, and a dump
-# of the model that holds it is exactly that.
 
 
 def _delete_row(
@@ -1583,24 +1520,19 @@ def _check_no_url_credentials(
         _refuse_url_credentials(f"{location}.{key}", value)
 
 
-# What each kind does around its own rows, in one table because the four
-# facts are read by one module and answered per kind. Private and typed:
-# the row mappings are written in terms of this file's helpers, the
-# checks raise this file's refusals, and no surface above it has ever had
-# a reason to name one. A kind absent from a group takes the model's own
-# behavior, which is what the None defaults say.
+# What each kind checks around its own write, in one table because the
+# two facts are read by one module and answered per kind. Private and
+# typed: the checks raise this file's refusals, and no surface above it
+# has ever had a reason to name one. A kind absent from a group runs no
+# check of its own, which is what the None defaults say, and two of the
+# five now run none at all: what used to bring them here was the shape of
+# their columns, and their shape is their model's.
 _STORAGE: dict[str, _Storage] = {
-    "provider": _Storage(
-        from_row=_provider_from_row,
-        to_row=_provider_values,
-        inside_write=_check_no_url_credentials,
-    ),
-    "mcp-server": _Storage(
-        from_row=_mcp_from_row, to_row=_mcp_values, inside_write=_check_entry_name
-    ),
+    "provider": _Storage(inside_write=_check_no_url_credentials),
+    "mcp-server": _Storage(inside_write=_check_entry_name),
     "prompt-fragment": _Storage(before_parse=_check_fragment_name),
-    "agent": _Storage(from_row=_agent_from_row, to_row=_agent_values),
-    "agent-defaults": _Storage(from_row=_defaults_from_row, to_row=_layer_values),
+    "agent": _Storage(),
+    "agent-defaults": _Storage(),
 }
 
 
