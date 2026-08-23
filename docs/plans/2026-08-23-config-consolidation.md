@@ -129,14 +129,20 @@ explicitly.
    the status code, the problem `type`/`title` field structure,
    the presence and type of each documented field, and any
    SEMANTIC token the sentence carries (an entity name, a count, a
-   field path), never the sentence. The ~40 wording constants
-   (`REFUSED_*`-style acknowledgement strings and friends in the
-   config package) return to module-private with a leading
-   underscore where only the module and its tests read them; a
-   constant something outside the package genuinely reads keeps
-   its name and is listed in the implementation doc. The no-leak
-   sentinels are NOT wording pins and do not change: planting a
-   credential and asserting its absence is structure, not wording.
+   field path), never the sentence. The privatization rule has NO
+   residue, per the repository's interface-is-the-test-surface
+   rule: after the retreat, no test imports a wording constant at
+   all; a constant a test still needs is by definition one whose
+   test did not retreat, and it keeps its public name and is
+   listed as a survivor in the implementation doc
+   (`PROBLEM_TITLES` at minimum, which `tests/support/problems.py`
+   maps status to reason phrase with and `problem_response` reads
+   at runtime; plus whatever the non-config suites that import
+   `UNAUTHORIZED`/`UNEXPECTED` retain after their own retreat).
+   An underscored constant with a test reader would be exactly
+   the reach-in AGENTS.md flags, and none is created. The no-leak
+   sentinels are NOT wording pins and do not change; neither is
+   the differential acknowledgement pin of decision 7.
 5. **The issue's `responses.py` premise is stale, and the plan
    records it.** Post-#210, every public name in the module has a
    production reader (verified by the review round against
