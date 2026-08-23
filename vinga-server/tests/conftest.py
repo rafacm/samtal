@@ -54,8 +54,16 @@ sys.dont_write_bytecode = True
 # consulted, and is now never refreshed, which would leave a stale one
 # stale forever. Caches do get written outside pytest, by `uv run
 # vinga-server` or a bare `python -c "import vinga_server..."`, and
-# every tree that predates this file has a full set. So clear them, once,
-# before the first import of anything under test.
+# every tree that predates this file has a full set. So clear them, once
+# per process, before the first import of anything under test.
+#
+# Once per process and not once per run, because under xdist this file
+# is executed by the controller and by every worker, each of them a
+# process of its own. Two of them clearing while a third imports is
+# safe by mechanism rather than by luck: CPython's import machinery
+# falls back to compiling from source when reading a cached `.pyc`
+# raises `OSError`, so a half-deleted cache costs a recompile and can
+# never produce a wrong import.
 #
 # This also covers the one file the flag cannot: pytest writes a
 # conftest's rewritten bytecode *before* it executes the body that sets
@@ -120,6 +128,11 @@ os.environ.setdefault(API_SECRET_ENV, TEST_API_SECRET)
 # only configuration loaded from a file.
 PACKAGED_DATABASE_DIR = Path("/var/lib/vinga")
 
+# One per process, so a parallel run makes as many of these as it has
+# workers plus one, and leaves them all behind. Priced and kept: they
+# are empty unless something wrote a database into one, the isolation
+# is if anything better than a shared directory's, and the only cost is
+# N un-removed temp directories per local run instead of one.
 SHARED_DATABASE_DIR = Path(tempfile.mkdtemp(prefix="vinga-tests-"))
 
 
