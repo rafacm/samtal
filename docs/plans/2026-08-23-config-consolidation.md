@@ -248,7 +248,7 @@ explicitly.
   artifacts prove nothing observable moved. Deepens
   `config/models.py` and `config/store.py`: the store's readers
   stop knowing a second domain model exists.
-- [x] **[M2: the prose to data and the wording retreat.](2026-08-23-config-consolidation-implementation.md#m2-the-prose-to-data-and-the-wording-retreat)** (PR TBD)
+- [x] **[M2: the prose to data and the wording retreat.](2026-08-23-config-consolidation-implementation.md#m2-the-prose-to-data-and-the-wording-retreat)** (PR #264)
   Decisions 3 and 4, stacked on M1: the description files, the
   loader, the per-test retreat, the constants re-privatized.
   Byte-identical OpenAPI again; the test diff is the bulk and is
