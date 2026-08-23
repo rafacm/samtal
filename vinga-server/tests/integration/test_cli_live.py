@@ -658,3 +658,88 @@ def test_a_credential_is_stored_masked_and_cleared(
     assert MASK not in cleared
     # And what the stored value was covering is back in view.
     assert "api_key_env: ANTHROPIC_API_KEY" in cleared
+
+
+# What the running server is asked
+#
+# Three of the four reads below are of the process rather than of the
+# database, which is the whole reason they have no break-glass path and
+# the whole reason they belong here: what answers them is a server that
+# booted on an empty store and has been written to over HTTP ever since,
+# so the difference a reload makes is observable in one session.
+
+
+def test_the_running_server_is_read_after_a_reload(
+    deployed: Live, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The reload, and the two reads that are about the process.
+
+    `prompt` is the pin: the server this lane booted was given an empty
+    domain half, so the agent every other test has been writing to is
+    one it is not serving, and asking for its prompt is refused until a
+    reload installs it. That sequence needs a server with a lifetime,
+    which is what this lane has and the acceptance suites do not.
+    """
+    assert run("prompt", "sam") == 1
+    unserved = capsys.readouterr()
+    assert unserved.out == ""
+    assert "Traceback" not in unserved.err
+
+    assert run("reload") == 0
+    applied = capsys.readouterr().out
+    assert "sam" in applied
+
+    assert run("prompt", "sam") == 0
+    assembled = capsys.readouterr().out
+    assert "You are Sam." in assembled
+    # The fragment the agent includes is part of what the model is
+    # given, which is the difference between this read and `show agent`.
+    assert "The bins go out on Tuesday." in assembled
+
+    assert run("status") == 0
+    running = capsys.readouterr().out
+    # Configured, and connected for nobody: no agent grants either
+    # entry, so the reload started nothing and both are reported as the
+    # entries they are rather than omitted.
+    assert "house" in running
+    assert "weather" in running
+
+    assert run("list") == 0
+    summary = capsys.readouterr().out
+    assert "sam" in summary
+    assert "household" in summary
+    assert SECRET not in summary
+
+
+def test_the_documents_that_reach_nothing_render_in_the_same_environment(
+    deployed: Live, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The four commands that contact no server, run in the environment
+    the rest of the lane runs in.
+
+    They are here for completeness rather than for the wire: what makes
+    them worth a case in this module is that the environment names a
+    running server and a database directory, and these four still open
+    nothing and ask nothing. A command that quietly started needing the
+    API would pass every unit suite and fail here.
+    """
+    assert run("schema") == 0
+    whole = json.loads(capsys.readouterr().out)
+    assert "agents" in whole["properties"]
+
+    assert run("schema", "agent") == 0
+    assert "properties" in json.loads(capsys.readouterr().out)
+
+    assert run("reference") == 0
+    assert "# " in capsys.readouterr().out
+
+    assert run("openapi") == 0
+    served = json.loads(capsys.readouterr().out)
+    assert "/apply" in served["paths"]
+
+    assert run("ota-url") == 0
+    printed = capsys.readouterr()
+    # The URL alone on stdout, so it can be captured; what to do with it
+    # goes to stderr the way every other notice does.
+    assert printed.out.strip().startswith("http")
+    assert printed.err.strip()
