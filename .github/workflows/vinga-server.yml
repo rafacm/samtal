@@ -38,6 +38,28 @@ env:
   # after the build and which keeps `UV_COMPILE_BYTECODE=1` on purpose.
   PYTHONDONTWRITEBYTECODE: "1"
 
+  # One compute thread per library, because the unit lane now runs four
+  # worker processes on a four-core runner and every one of them imports
+  # onnxruntime: pysilero-vad is a core dependency, not an extra, so the
+  # VAD is present in every worker whichever providers a test builds.
+  # These pools size themselves to the machine's core count by default,
+  # which means four workers asking for roughly sixteen threads on four
+  # cores. That oversubscription is descheduling, and descheduling is
+  # exactly what the lane's timing margins cannot absorb (the 20/60/80ms
+  # filler windows, the 0.3s connect and idle bounds, the 1.2s drain).
+  #
+  # Invisible on a development machine, which is why it is set here
+  # rather than discovered: fourteen cores absorb the oversubscription
+  # and the local runs stay green either way.
+  #
+  # Three names for the same intent, since the pools that matter read
+  # different ones: OpenMP's is what onnxruntime and numpy honor
+  # generally, and the other two are named explicitly so a build that
+  # reads only its own is covered too.
+  OMP_NUM_THREADS: "1"
+  ORT_NUM_THREADS: "1"
+  OPENBLAS_NUM_THREADS: "1"
+
 jobs:
   # The suite runs as two lanes that start at the same time rather than
   # one that runs everything in a row: the unit tests are by far the
@@ -103,8 +125,13 @@ jobs:
       # literal would leave it idle.
       #
       # If the lane turns intermittently red, the response is graded
-      # before it is reverted: contention on 4 real cores is a headroom
-      # problem, so try `-n 3`, then `-n 2`, and only then remove
+      # before it is reverted, because contention on 4 real cores is a
+      # headroom problem and the levers that buy headroom come first.
+      # Step 0 is the thread-pool capping in this workflow's `env:`
+      # block: check it is still in force and still covers whatever new
+      # library is competing for cores, since a worker that quietly
+      # spawns four compute threads costs more headroom than a worker
+      # does. Then `-n 3`, then `-n 2`, and only then remove
       # ` -n auto --dist loadfile` (which is the whole change) and
       # reopen #254.
       - name: Unit tests
