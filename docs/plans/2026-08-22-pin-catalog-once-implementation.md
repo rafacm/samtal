@@ -56,7 +56,8 @@ temporary directory prefix is `vinga-drivers-` rather than
 `tests/tools/driver_times.py`'s imports are untouched.
 
 **The suite, live.** `tests/unit/test_event_baseline.py` keeps its
-module-scoped single drive and goes from eight tests to seven. Deleted:
+module-scoped single drive and goes from eight tests to seven, and back
+to eight when the review round's finding 2 added the untyped check. Deleted:
 `test_the_capture_is_the_committed_baseline`,
 `test_the_committed_file_is_what_the_harness_writes` and
 `test_the_baseline_records_shapes_rather_than_values`, whose subject is
@@ -73,8 +74,16 @@ corrected since it cited both deleted files. Added:
   its event on channel, level, template equality and the payload key
   range, through the same `matches()` the every-variant check uses.
   `variants_of()` answers `()` for a record naming an event no
-  declaration owns, so an undeclared event is a listed failure rather
-  than a `KeyError`.
+  declaration owns, so an undeclared event would be a listed failure
+  rather than a `KeyError`; the docstring says plainly that this is
+  defensive and unreachable while the drivers filter on `event`.
+- `test_no_unlisted_record_rides_a_scoped_channel_untyped` (added by
+  the review round's finding 2), holding the run's UNFILTERED records to
+  a closed set of six channel-and-sentence pairs: the untyped
+  diagnostics that survived #210. `driven()` answers a `Run` now, with
+  `kept` per driver and `said` unfiltered, because a claim about what is
+  not one of the eighty-one typed paths cannot be made from a mapping
+  those paths were selected out of.
 - `test_every_driver_produces_the_shape_its_path_declares`, holding the
   capture to `CARRIED`: the per-driver table of decision 2, driver key
   to one row per record, each row the variant the record is an emission

@@ -50,6 +50,7 @@ from tests.tools.event_baseline import (
     DRIVERS,
     NOW,
     SCOPE,
+    Run,
     a_manifest,
     a_turn,
     captured,
@@ -61,11 +62,17 @@ from vinga_server.events.catalog import Variant, catalog, payload_shape
 
 
 @pytest.fixture(scope="module")
-def produced() -> dict[str, list[logging.LogRecord]]:
+def run() -> Run:
     """Driven once for the whole file: every driver opens a database and
     some park a writer thread, so running them per test would pay for
     the same evidence several times over."""
     return driven()
+
+
+@pytest.fixture(scope="module")
+def produced(run: Run) -> dict[str, list[logging.LogRecord]]:
+    """The same run, as each driver's own records."""
+    return run.kept
 
 
 @pytest.fixture(scope="module")
@@ -96,11 +103,17 @@ def test_every_driven_path_produces_the_event_it_emits(
         assert produced == {driver.event}, driver.key
 
 
-def variants_of(event: str | None) -> tuple[type[Variant], ...]:
-    """Every variant declared for one record's event, and none for a
-    record naming an event no declaration owns: that is a record outside
-    the surface rather than a lookup to raise on."""
-    declaration = catalog().get(event or "")
+def variants_of(event: str) -> tuple[type[Variant], ...]:
+    """Every variant declared for one record's event.
+
+    The empty answer is defensive and, today, unreachable: `driven()`
+    keeps only records whose `event` equals a driver's, and every
+    driver names a declared one. It is a `get` rather than a subscript
+    so that a record outside the surface would be a readable row in the
+    failures below rather than a `KeyError` raised inside a
+    comprehension.
+    """
+    declaration = catalog().get(event)
     return () if declaration is None else declaration.variants
 
 
@@ -147,10 +160,14 @@ def test_every_driven_record_conforms_to_a_declared_variant(
     a single declaration edited on its own moves the record with it and
     passes here. What does not pass is a record whose shape belongs to
     no declaration at all: a template or a level moved between two
-    variants of one event, a payload that gained a key nothing declares
-    or lost one every variant requires, or an untyped emit site put back
-    on a scoped channel. Template equality is also what subsumes arity,
-    which is why the retired capture's argument types are not missed.
+    variants of one event, or a payload that gained a key nothing
+    declares or lost one every variant requires. Template equality is
+    also what subsumes arity, which is why the retired capture's
+    argument types are not missed.
+
+    An untyped record is not in scope here and cannot be: it carries no
+    `event` attribute, so the drivers' filter drops it before this sees
+    anything. `UNTYPED` below is where that half lives.
     """
     unmatched = [
         described(key, one)
@@ -186,6 +203,59 @@ def test_every_catalog_variant_on_a_scoped_channel_is_produced(
     ]
 
     assert unproduced == []
+
+
+# Every record the drivers put on a scoped channel that is NOT one of
+# the eighty-one typed paths, by channel and by sentence.
+#
+# These are the untyped diagnostics that survived #210: per-utterance
+# and per-listen lines a session writes, the filler cache's own line,
+# the ASR echo retry, the MCP guidance line, and the reply-failed line
+# beside the typed `provider_failed`. They are not events, they carry no
+# payload, and no tap is offered them.
+#
+# The set is closed here because nothing else closes it any more. The
+# static walk that read the scoped modules for emit sites retired with
+# the last conversion (#210) and this milestone deleted its last
+# remains, so an untyped emit site put back on a scoped channel would
+# otherwise reach a deployment's logs with nothing red anywhere: the
+# drivers' filter drops it, and a record with no `event` is invisible to
+# every check that reads the capture. Asserted in both directions, so a
+# site converted to a declaration is a row removed here rather than a
+# line that outlives what it described.
+UNTYPED: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("vinga_server.session", "session %s: listening (%s mode)"),
+        ("vinga_server.session", "session %s: utterance of %.1f s"),
+        ("vinga_server.session", "session %s: reply failed: %s"),
+        ("vinga_server.filler", "agent %s: cached %d filler clip(s) in its own voice"),
+        (
+            "vinga_server.providers.openai_asr",
+            "openai asr: the transcript came back as the configured prompt, "
+            "retrying %.2f s of audio without it",
+        ),
+        (
+            "vinga_server.tools.mcp",
+            "mcp server %s shipped guidance: %d characters of instructions, and "
+            "prompts at inject_prompts position(s) %s",
+        ),
+    }
+)
+
+
+def test_no_unlisted_record_rides_a_scoped_channel_untyped(run: Run) -> None:
+    """The half the conformance check structurally cannot reach.
+
+    Channels and sentences, which are source text rather than anything a
+    run produced, so this is as values-free as the rest of the file.
+    """
+    found = {
+        (one.name, one.msg)
+        for one in run.said
+        if getattr(one, "event", None) is None
+    }
+
+    assert found == UNTYPED
 
 
 # What each driver's path actually produces: one row per record it

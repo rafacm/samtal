@@ -1589,29 +1589,46 @@ def shape(record: logging.LogRecord) -> dict[str, Any]:
     }
 
 
-def driven() -> dict[str, list[logging.LogRecord]]:
-    """Every driver run, in declaration order, with the records its own
-    path produced.
+@dataclass(frozen=True)
+class Run:
+    """One drive of every path, in the two views a caller may need.
 
-    Filtered to the event each driver says its path emits, for the
-    reason `Driver` gives. Whole records rather than shapes, because a
-    claim about what a payload HOLDS cannot be made from the keys
-    `shape()` keeps; `captured()` takes a run already made, so a suite
-    wanting both pays for one.
+    `kept` is per driver and filtered to the event that driver names,
+    for the reason `Driver` gives. `said` is everything the scoped
+    channels carried while the drivers ran, filtered by nothing, and it
+    is the only view a claim about what is NOT one of the eighty-one
+    typed paths can be made from: an untyped record carries no `event`
+    attribute at all, so it is exactly what `kept` selects out.
     """
-    produced: dict[str, list[logging.LogRecord]] = {}
+
+    kept: dict[str, list[logging.LogRecord]]
+    said: list[logging.LogRecord]
+
+
+def driven() -> Run:
+    """Every driver run, in declaration order, with the records its own
+    path produced and everything else the channels said.
+
+    Whole records rather than shapes, because a claim about what a
+    payload HOLDS cannot be made from the keys `shape()` keeps;
+    `captured()` takes a run already made, so a suite wanting both pays
+    for one.
+    """
+    kept: dict[str, list[logging.LogRecord]] = {}
+    said: list[logging.LogRecord] = []
     for driver in DRIVERS:
         with tempfile.TemporaryDirectory(prefix="vinga-drivers-") as directory:
             with listening() as collector:
                 answer = driver.drive(Path(directory))
                 if inspect.isawaitable(answer):
                     asyncio.run(answer)
-            produced[driver.key] = [
+            said += collector.records
+            kept[driver.key] = [
                 one
                 for one in collector.records
                 if getattr(one, "event", None) == driver.event
             ]
-    return produced
+    return Run(kept=kept, said=said)
 
 
 def captured(
