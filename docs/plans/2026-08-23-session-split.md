@@ -390,7 +390,7 @@ refreshed after any rebase.
 
 ## Milestones
 
-- [x] **[M1: delete the seams with no second side](2026-08-23-session-split-implementation.md#m1-delete-the-seams-with-no-second-side)** (PR TBD).
+- [x] **[M1: delete the seams with no second side](2026-08-23-session-split-implementation.md#m1-delete-the-seams-with-no-second-side)** (PR #268).
   Decisions 1 to 4: six protocols with per-site annotation
   destinations, the v2 timestamp out of `Frame` with the wire
   byte-identical, the `StreamStarted` case with its scripted
