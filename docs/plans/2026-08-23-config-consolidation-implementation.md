@@ -324,3 +324,118 @@ by keyword and never rendered, and no test reads its order either.
   which is decision 1's behavioral pin, green throughout: a write into
   an empty database is still accepted, and completeness is still a
   boot rule.
+
+## PR review round, M1 (PR #263)
+
+External review of the PR diff: claude backend (the codex quota is
+exhausted), claude CLI, model `claude-opus-5`, read-only tool set,
+2026-08-23, [posted on the PR](https://github.com/rafacm/vinga/pull/263).
+Verdict as received: "Mergeable after fix 1; findings 2 to 6 are worth
+folding in but none blocks." One P2 and five P3s. The round verified
+the milestone's load-bearing claims itself and could not break them,
+which is what makes the six findings the whole of what is left. As
+received:
+
+> The seven dual-spelled sentences match byte for byte across `api.py`
+> and `cli.py`, and all seven acts are in `MUTATIONS`, so the
+> differential pin really does replace `writes.py`'s guarantee. The
+> three inlined `EntityDiff` descriptions concatenate to exactly the
+> old constants, so the committed OpenAPI cannot move; the changed
+> docstrings are not route descriptions. `Config.model_fields` order
+> is genuinely inert: the 13 `model_fields` readers are all
+> non-`Config`, and `compose_config` only ever passes already-validated
+> submodels, so pydantic's declaration-order error listing has nothing
+> to reorder. The two display literals match the descriptors they
+> replaced; no unused imports survive; `grep -rnE "config\.writes"` is
+> empty; the line and public-name inventories sum correctly and match
+> the tree.
+
+Every finding has its own commit.
+
+1. **P2: the comment claiming the `DomainConfig` docstring is "a
+   committed byte" promised a guard that does not exist.** No document
+   under `docs/reference/` carries the `config schema` rendering, CI
+   diffs only two generators, and no test asserts a schema's top-level
+   `description`, so an editor who trusts the comment gets no failure
+   from the coupling this milestone tripped over once. Fixed in
+   `12ec040f`, taking the honest-comment option rather than committing
+   a third artifact: the comment now says that nothing checks the
+   rendering, that a docstring edit changes what `config schema` prints
+   silently, and that #242 verified it by hand at every commit. Prose
+   rather than a new regenerate-and-diff file because #241 has just
+   thinned the event catalog's committed pins from three to one on the
+   argument that each costs every change a regeneration and a review
+   surface, and what is at risk here is schema prose rather than a
+   contract; the two artifacts that ARE contracts keep their CI checks.
+   The plan's decision-1 pin list is amended in the same commit to say
+   what is true of the third: verified manually during the milestone,
+   unpinned thereafter, stated at the class.
+
+2. **P3: `_binding_notice`'s docstring said "the four call sites" and
+   there are five, and its last paragraph was rewritten rather than
+   moved whole.** Both true. Fixed in `f2217450`: the count is five,
+   all in `api.py`, and the rewrite is recorded as the milestone's
+   second deviation with what replaced it and why (neither half of the
+   original sentence survives a module that no longer exists). The
+   census row and the narrative say "moved" for this one and keep
+   "moved whole" for `secret_notice`, which did.
+
+3. **P3: the deleted display test's coherence half was lost with the
+   two fields it was addressed to.** `views._order` emits `"prompt"`
+   unconditionally and `_declared` indexes `model.model_fields[name]`,
+   so a renamed `AgentConfig.prompt` is a KeyError out of a read path
+   rather than a targeted failure, and a renamed `FillerConfig.phrases`
+   is quieter still. Fixed in `c41ddb76`: two assertions in
+   `test_config_reads.py`, the suite that reads the display path, with
+   a comment naming the test they inherit from. The neighbouring filler
+   test's docstring stops crediting the registry for a departure
+   `views` declares now.
+
+4. **P3: the docgen import win was overstated and nothing pinned it.**
+   The module edge is genuinely gone, but the `vinga-server config`
+   commands still pay for SQLAlchemy and cryptography, because `cli.py`
+   imports `ConfigStore`; and unlike `entities.py`, whose import set has
+   an allow list, nothing guarded docgen's. Fixed in `2b2dba86`, taking
+   both halves of the suggestion: the claim is scoped to the module in
+   the docstring and in the implementation doc, and
+   `test_config_docgen.py` gains a child interpreter in the shape
+   `test_the_registry_is_whole_on_its_own` uses, which imports `docgen`,
+   renders the reference and the schema, and asserts the allow list and
+   the absence of SQLAlchemy, cryptography, FastAPI and httpx.
+   `openapi()` is not called there, being the deliberate exception that
+   imports the application. Putting `import vinga_server.config.store`
+   back into `docgen` fails it, which was checked rather than assumed.
+
+5. **P3: `CLEARED_DEFAULT_AGENT` was a new public name with no reader
+   outside its own module**, sitting between the two route registrars
+   rather than with the module's sentences. Fixed in `a410a7a0`:
+   `_CLEARED_DEFAULT_AGENT`, moved up beside the claim refusals. Done
+   here rather than left to M2's privatization pass, so that the rename
+   rides with the commit that created the name. The public-name
+   inventory follows: `api.py` holds at 58, and the package total is
+   319 rather than 320.
+
+6. **P3: `docs/architecture/design-guide.md` still pointed at the old
+   home of the relocated fact** (`RELOAD_OUTCOMES` in `responses.py`),
+   in a doc AGENTS.md sends reviewers to. The name was stale before
+   this branch; the file is stale because of this change. Fixed in
+   `e7fd2c08`: the sentence names `outcomes` and `cli.py`. The
+   remaining occurrences of the old name are in dated plan and
+   implementation docs, which record what was true when they were
+   written and are left as they are.
+
+### Verification after the round
+
+All from `vinga-server/`.
+
+- `uv run ruff check .`: clean.
+- `uv run mypy`: clean.
+- `uv run pytest tests/unit -q -n 4 --dist loadfile`: 2857 passed, 20
+  skipped (two more than before the round: findings 3 and 4).
+- `uv run pytest tests/integration -q`: 61 passed.
+- `uv run vinga-server config openapi | diff - ../docs/reference/api-openapi.json`:
+  empty.
+- `uv run vinga-server config reference | diff - ../docs/reference/domain-config.md`:
+  empty.
+- `uv run vinga-server config schema` against the pre-round rendering:
+  empty. Unpinned from here on, which is finding 1's whole subject.
