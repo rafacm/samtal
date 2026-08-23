@@ -46,6 +46,7 @@ cryptography or httpx reaches the user.
 import getpass
 import ipaddress
 import os
+import shlex
 import sys
 import textwrap
 from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -129,6 +130,11 @@ from vinga_server.onboarding.origin import onboarding_url
 # disagree about it any more than they can about the database directory,
 # and the prefix comes from the same constant the server mounts on.
 API_URL_ENV = "VINGA_API_URL"
+
+# How this command group is spelled, which is the name it is registered
+# under and the name every command an export or a notice tells an
+# operator to run begins with.
+PROGRAM = "vinga-server config"
 
 # The client's timeouts, explicit because the defaults would lie. The
 # server holds a write for up to the database's busy timeout (10 s)
@@ -265,9 +271,6 @@ OTA_URL_GUIDANCE = (
 # goes into is `origin.ONBOARDING_OFF`, which is the derivation's own,
 # and the fix is the asking command's.
 ONBOARDING_OFF_FOR_URL = "Turn onboarding on for a URL short enough to type."
-
-
-PROGRAM = "vinga-server config"
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -836,6 +839,113 @@ def _show_everything(document: Mapping[str, object]) -> str:
     underneath it."""
     notes = _all_secret_notes(document)
     return _yaml(document["config"]) + ("\n" + "\n".join(notes) + "\n" if notes else "")
+
+
+# Export
+#
+# The apply-able projection of what a read already answers. There is no
+# new read behind it: #207 made every read derive from the descriptor
+# registry and stay write-shaped, and #192's marker made the display
+# envelope the writable projection, so this is assembly rather than
+# translation. The whole-configuration read is already the document
+# `apply` takes, section for section, and one entity's envelope already
+# carries the fragment `set` takes.
+#
+# What export adds is the two things a document has to say that a read
+# does not. The header says how to reproduce the deployment, in order.
+# And the stored credentials become comment annotations naming the
+# command that enters each of them, because a credential never travels
+# in a read: it is not in the exported bodies at all, and the mask is
+# not a value a creating write would accept, so injecting one would make
+# an export fail to apply onto an empty store, which is the one place it
+# most has to work.
+
+EXPORT_HEADER = f"""\
+# The domain configuration of this deployment, in the shape
+# `{PROGRAM} apply` takes. Reproduce it in two steps, in this order:
+#
+#   1. {PROGRAM} apply -f <this file>
+#   2. the set-secret commands at the foot of this file, if any
+#
+# A stored credential never travels in a read, which is what the second
+# step is for. Applying is additive: a section this document does not
+# name is left alone, and nothing in it deletes.
+"""
+
+EXPORT_SECRETS_HEADING = (
+    "# Stored credentials are not exported. Enter each of them after applying:"
+)
+
+EXPORT_SLOTS_HEADING = (
+    "# Stored credentials are not exported. These slots hold one, and each is entered\n"
+    f"# with `{PROGRAM} set-secret`:"
+)
+
+# Which kind holds a stored secret of each addressable kind, read off
+# the registry: the word a `set-secret` command takes and the parameters
+# that address one entry of it are the descriptor's, so the command an
+# annotation names cannot come to disagree with the command that exists.
+_SECRET_HOLDER: dict[str, entities.EntityDescriptor] = {
+    kind.secret_slots: kind
+    for kind in entities.ENTITIES
+    if kind.secret_slots is not None
+}
+
+
+def _exported(document: Mapping[str, object]) -> str:
+    """The whole stored configuration as one applicable document."""
+    return EXPORT_HEADER + _yaml(document["config"]) + _secret_commands(document["secrets"])
+
+
+def _secret_commands(secrets: Sequence[Mapping[str, object]]) -> str:
+    """Every stored credential as the command that enters it, in the
+    fixed order the store lists its locations in, so two exports of one
+    configuration are the same bytes."""
+    if not secrets:
+        return ""
+    lines = [
+        "#   " + " ".join(shlex.quote(word) for word in _set_secret_words(stored))
+        for stored in secrets
+    ]
+    return "\n".join(["", EXPORT_SECRETS_HEADING, *lines]) + "\n"
+
+
+def _set_secret_words(stored: Mapping[str, object]) -> list[str]:
+    """One stored credential's location as the command that fills it.
+
+    A location's identity is the dotted join of the parameters that
+    address the entity, so it is split back into them by the count the
+    descriptor states: split at the first separator only, which is what
+    keeps a name holding one still one name.
+    """
+    holder = _SECRET_HOLDER[str(stored["kind"])]
+    identity = str(stored["identity"]).split(".", len(holder.addressing) - 1)
+    return [*PROGRAM.split(), "set-secret", holder.name, *identity, str(stored["slot"])]
+
+
+def _exported_entity(kind: entities.EntityDescriptor) -> Callable[[Any], str]:
+    """One entity's fragment, as the command that writes one takes it.
+
+    The header names the kind and the command rather than the entity,
+    because a fragment does not carry where it goes: what a fragment is
+    for is being written somewhere, and the `set` that writes it is
+    where that is chosen.
+    """
+    header = f"# One {kind.title.lower()} ({kind.location}), as written by\n# `{kind.command}`.\n"
+
+    def exported(envelope: Mapping[str, object]) -> str:
+        return header + _yaml(envelope["entity"]) + _stored_slot_note(envelope["secrets"])
+
+    return exported
+
+
+def _stored_slot_note(secrets: Mapping[str, object]) -> str:
+    """The slots of one entity that hold a stored credential, named
+    rather than commanded: a fragment does not say which entity it is
+    for, so neither can the command that fills its slots."""
+    if not secrets:
+        return ""
+    return "\n".join(["", EXPORT_SLOTS_HEADING, *(f"#   {slot}" for slot in secrets)]) + "\n"
 
 
 def _print_entity(envelope: Mapping[str, object]) -> None:
@@ -2085,6 +2195,23 @@ SHOW_ALL = Act(
     local=_stored_config,
 )
 
+EXPORT_ALL = Act(
+    method="GET",
+    path=_config_path,
+    answers=ConfigDocument,
+    render=_printed(_exported),
+)
+
+EXPORT_ENTITY: dict[str, Act] = {
+    kind.name: Act(
+        method="GET",
+        path=_entity_path(kind),
+        answers=Envelope,
+        render=_printed(_exported_entity(kind)),
+    )
+    for kind in entities.ENTITIES
+}
+
 PENDING = Act(method="GET", path=_waiting_path, render=_printed(_pending_listing))
 
 # A read of the running server rather than of the database, so there is
@@ -2798,6 +2925,7 @@ GROUPS: dict[str, str] = {
     "set-secret": "store one credential, encrypted, read from stdin or a variable",
     "clear-secret": "remove one stored credential",
     "show": "everything, or one entity",
+    "export": "the stored configuration as a document apply takes, or one entity's fragment",
 }
 
 
@@ -3009,6 +3137,28 @@ COMMANDS: tuple[Command, ...] = (
         declare=_by_mac,
         help="print devices.<mac>: the agents that board is bound to",
         local_ok=True,
+    ),
+    # The writable projection of the same reads. `show` is the display
+    # one and this is the one that goes back in, which is the whole
+    # difference between them: what this adds to a read is the header
+    # saying how to reproduce the deployment and the credentials named
+    # as the commands that enter them.
+    Command(
+        words=("export",),
+        does=EXPORT_ALL,
+        declare=_whole_or_one,
+        help=GROUPS["export"],
+    ),
+    *(
+        Command(
+            words=("export", kind.name),
+            does=EXPORT_ENTITY[kind.name],
+            declare=_staged if kind.addressing == ("stage", "name") else (
+                _named if kind.addressing else _plain
+            ),
+            help=_about("export", kind),
+        )
+        for kind in entities.ENTITIES
     ),
 )
 
