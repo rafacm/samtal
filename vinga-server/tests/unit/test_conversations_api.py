@@ -33,7 +33,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tests.support.configs import DEVICE_MAC, DEVICE_UUID, recording_config
-from tests.support.problems import refused
+from tests.support.problems import paths, refused
 from tests.support.sessions import until
 from tests.support.wire import connect, say_something, sentences, shake_hands
 from vinga_server import logs
@@ -584,7 +584,12 @@ def test_a_deployment_that_never_recorded_answers_404_naming_the_key(
 @pytest.mark.parametrize(
     ("argument", "value"),
     [
-        ("limit", "0"),
+        # Zero, and spelled with leading zeros on purpose: the value has
+        # to be one the assertion below can look for, and a bare "0"
+        # occurs inside the bounds the sentence names ("200", "50"), so
+        # finding it would prove nothing. Every other value here is
+        # already absent from the sentence it is refused by.
+        ("limit", "000"),
         ("limit", str(LIMIT_MAX + 1)),
         ("limit", "-1"),
         ("limit", "1.5"),
@@ -612,9 +617,15 @@ def test_a_refused_argument_names_the_rule_and_quotes_nothing(
         response = client.get("/conversations", params={argument: value})
 
     assert response.status_code == 422
-    # The refusal names the argument whose rule was broken, and nothing
-    # of the value that broke it.
-    assert argument in refused(response.json(), 422)
+    body = response.json()
+    # The refusal names the argument whose rule was broken.
+    assert argument in refused(body, 422)
+    # And nothing of the value that broke it, in either half. The
+    # structured half names no field at all, which is the honest answer:
+    # what these rules are about is a query argument and not a field of
+    # a body, so there is nowhere in the answer for what was sent to be.
+    assert paths(body) == []
+    assert value not in response.text
     assert SENTINEL not in response.text
     assert SENTINEL not in _leaked(caplog)
     captured = capsys.readouterr()
