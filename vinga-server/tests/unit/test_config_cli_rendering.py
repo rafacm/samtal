@@ -33,17 +33,15 @@ from tests.support.config_cli import chain as _chain
 from tests.support.config_cli import runner
 from tests.support.config_cli import showing as _showing
 from vinga_server.config import Config, cli
+from vinga_server.config.cli import RELOAD_SECTIONS, flags, outcomes
 from vinga_server.config.loader import ConfigError
 from vinga_server.config.responses import (
-    RELOAD_SECTIONS,
     AgentsReload,
     ConfigReloadResult,
     FillersReload,
     McpReloadResult,
     PromptsReload,
     ProvidersReload,
-    flags,
-    outcomes,
 )
 from vinga_server.tools.mcp import McpServers
 

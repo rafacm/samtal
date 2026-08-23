@@ -69,7 +69,6 @@ from vinga_server.config.models import (
     ServerConfig,
 )
 from vinga_server.config.responses import (
-    RELOAD_SECTIONS,
     Acknowledgement,
     AssembledPrompt,
     ConfigDocument,
@@ -77,8 +76,6 @@ from vinga_server.config.responses import (
     Envelope,
     McpServerStatus,
     PendingDevice,
-    flags,
-    outcomes,
 )
 from vinga_server.config.secrets import (
     MASK,
@@ -1237,6 +1234,72 @@ def _block(value: str) -> str:
         character if character.isprintable() or character in "\n\t" else "?"
         for character in value
     )
+
+
+# What a reload's answer can say, read off the shapes it is declared in
+#
+# Three readings of `ConfigReloadResult` and its sections, all of them
+# this renderer's: which sections there are, and within one section
+# which fields are lists of names and which are yes-or-no answers.
+# Written here rather than beside the models because printing is what
+# they are for, and the models are the contract two surfaces share.
+
+
+def outcomes(section: type[BaseModel]) -> tuple[str, ...]:
+    """One reload section's outcome lists, in the order it declares
+    them: every field that is a list of names.
+
+    Presentation, which is why the answer is a tuple and not a set, but
+    presentation of the model's own fields: read off the declaration
+    rather than listed again, so an outcome added to a section is one
+    line on that section and this prints it. What the rule leaves out is
+    every field that is not a list of names, which today is the MCP
+    status mapping and the agent-defaults flag; each of those is
+    rendered where its own shape is understood.
+    """
+    return tuple(
+        name
+        for name, field in section.model_fields.items()
+        if get_origin(field.annotation) is list and get_args(field.annotation) == (str,)
+    )
+
+
+def flags(section: type[BaseModel]) -> tuple[str, ...]:
+    """One reload section's yes-or-no answers, in the order it declares
+    them.
+
+    The sibling of `outcomes` above and the other half of what a section
+    can say: a kind there is one of has nothing to name, so what moved
+    about it is a boolean. Read off the declaration for the same reason,
+    so that a flag added to a section is a flag this prints.
+    """
+    return tuple(
+        name for name, field in section.model_fields.items() if field.annotation is bool
+    )
+
+
+def _section(annotation: object) -> type[BaseModel]:
+    """The model behind one section of the result, whether or not the
+    section is optional. A section that is not filled yet is declared
+    `Model | None`, and what a renderer needs is the model either way."""
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return annotation
+    return next(
+        argument
+        for argument in get_args(annotation)
+        if isinstance(argument, type) and issubclass(argument, BaseModel)
+    )
+
+
+# Which sections one reload answers with and what shape each of them
+# is, read off the result rather than written down beside it: a section
+# added to the model is a section this renders, and a field whose shape
+# the rendering has no rule for is a failing test rather than output
+# that quietly went missing.
+RELOAD_SECTIONS: dict[str, type[BaseModel]] = {
+    name: _section(field.annotation)
+    for name, field in ConfigReloadResult.model_fields.items()
+}
 
 
 def _reload_listing(answer: object) -> str:
