@@ -170,8 +170,8 @@ and discoveries; no deviations says so explicitly.
 - **Closed sets, honest seams.** Not this territory.
 - **Inventories by tooling.** The port audit grep
   (`grep -rn "localhost:" tests/unit`) with its file-by-file
-  disposition in the implementation doc; the CI diff is one line
-  plus the lockfile.
+  disposition in the implementation doc; the diff set is the one
+  decision 1 states whole.
 
 ## Module layout
 
@@ -182,6 +182,11 @@ and discoveries; no deviations says so explicitly.
 - `vinga-server/tests/conftest.py`: the ledger's residual-path
   comment amended per decision 3 if needed; the pycache note per
   decision 6.
+- `AGENTS.md` and `vinga-server/README.md`: one line each in the
+  command blocks giving the parallel invocation
+  (`uv run pytest tests/unit -q -n auto --dist loadfile`) as the
+  way to reproduce the CI lane locally; without it, a red PR's
+  lane is a configuration no documented command reproduces.
 - `docs/plans/` + `CHANGELOG.md` (`### Changed`: the CI unit lane
   runs parallel; local behavior unchanged).
 
