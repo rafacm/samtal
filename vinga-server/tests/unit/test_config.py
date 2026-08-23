@@ -4,12 +4,13 @@ import pytest
 
 from tests.support.configs import load_config_from_data
 from vinga_server.config import Config, ConfigError, load_file_config
-from vinga_server.config.models import DOMAIN_KEYS, normalize_mac
+from vinga_server.config.models import DOMAIN_KEYS, NOT_A_MAC, normalize_mac
 from vinga_server.conversations.store import RETENTION_DAYS_DEFAULT
 
 # Not a real credential, and shaped so a substring check for it cannot
 # match by accident. Written into the input a parser chokes on, since a
-# parser exception keeps what it was reading.
+# parser exception keeps what it was reading, and into the places a
+# configuration file holds a value this loader validates for its shape.
 PARSER_SENTINEL = "sk-test-6e0d4a11-never-a-real-credential"
 
 EXAMPLE_CONFIG = Path(__file__).parents[2] / "config.example.yaml"
@@ -763,8 +764,15 @@ def test_an_unknown_agent_in_a_device_list_is_rejected() -> None:
 
 
 def test_invalid_mac_is_rejected() -> None:
-    with pytest.raises(ConfigError, match="not a MAC address"):
-        load_config_from_data({"devices": {"not-a-mac": ["assistant"]}})
+    """The field it was written under, the rule, and never the key that
+    failed it (#205). A configuration file is a place a paste lands like
+    any other, and this refusal is printed and logged at boot."""
+    with pytest.raises(ConfigError) as caught:
+        load_config_from_data({"devices": {PARSER_SENTINEL: ["assistant"]}})
+
+    refusal = str(caught.value)
+    assert PARSER_SENTINEL not in refusal, refusal
+    assert f"devices: {NOT_A_MAC}" in refusal, refusal
 
 
 def test_colliding_macs_are_rejected() -> None:
@@ -781,8 +789,18 @@ def test_colliding_macs_are_rejected() -> None:
 
 
 def test_normalize_mac_rejects_garbage() -> None:
-    with pytest.raises(ValueError, match="not a MAC address"):
-        normalize_mac("aa:bb:cc:dd:ee")
+    """One sentence for every caller, holding the rule and nothing of
+    what was handed in: this validator serves the configuration store,
+    the OTA check-in, the websocket handshake and the conversations
+    query, so its message reaches surfaces it cannot see (#205)."""
+    for handed_in in ("aa:bb:cc:dd:ee", PARSER_SENTINEL):
+        with pytest.raises(ValueError) as caught:
+            normalize_mac(handed_in)
+        assert str(caught.value) == NOT_A_MAC
+    # And the rule is still stated, which is the whole of what the
+    # sentence is for.
+    assert "six colon-separated hex pairs" in NOT_A_MAC
+    assert "aa:bb:cc:dd:ee:ff" in NOT_A_MAC
 
 
 def test_multiple_problems_reported_together() -> None:

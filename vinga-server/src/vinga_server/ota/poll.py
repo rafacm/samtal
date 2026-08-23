@@ -68,8 +68,8 @@ async def activate(request: Request) -> Response:
     try:
         mac = normalize_mac(device_id)
     except ValueError:
-        # Deliberately not the validator's own sentence, which quotes
-        # what it refused: see DEVICE_ID_PROBLEM.
+        # Deliberately this endpoint's own sentence rather than the
+        # validator's: see DEVICE_ID_PROBLEM.
         return _bad_request(DEVICE_ID_PROBLEM)
 
     comp: Composition = request.app.state.composition

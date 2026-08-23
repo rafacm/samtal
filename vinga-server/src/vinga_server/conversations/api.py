@@ -840,9 +840,12 @@ def _device(value: str | None) -> str | None:
     try:
         return normalize_mac(value)
     except ValueError:
-        # Built here and raised outside the arm: `normalize_mac` quotes
-        # the value back in its own message, and a refusal raised inside
-        # the arm would carry that message as its `__context__`.
+        # Built here and raised outside the arm, the rule this codebase
+        # settled on: a refusal raised inside the arm carries whatever
+        # the caught exception held as its `__context__`. What
+        # `normalize_mac` holds is a fixed sentence now (#205), and the
+        # shape stays because the rule is the repository's rather than
+        # that one validator's.
         problem = ConfigError(_DEVICE_REFUSED)
     raise problem
 
