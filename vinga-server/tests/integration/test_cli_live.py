@@ -46,6 +46,7 @@ skips rather than lies when the module was not run whole.
 import contextlib
 import io
 import json
+import socket
 import sys
 import threading
 import time
@@ -772,3 +773,202 @@ def test_the_store_exports_as_a_document_it_applies_back_unchanged(
 
     assert run("export") == 0
     assert capsys.readouterr().out == exported
+
+
+# One refusal per family, and where each of them is composed
+#
+# A family is a top-level word of the grammar, which is a fact of the
+# registration table rather than a grouping invented here: the row below
+# each family's name is held to that table by
+# `test_every_family_of_the_grammar_has_a_refusal`.
+#
+# What is asserted about each is the sentence, exactly as it arrived. A
+# refusal composed by the API is serialized, sent, parsed and printed
+# before an operator sees it, and every step of that is a place a
+# sentence can be lost, truncated or replaced by a middlebox's page.
+#
+# The `wire` column says where each refusal is composed, and it is
+# load-bearing rather than documentation: the second case below runs
+# every one of these against an address nothing listens on, where a
+# refusal the server composes cannot happen and the transport sentence
+# takes its place, and a refusal this side composes is unchanged.
+
+USAGE = cli.usage_line(cli.SECRET_NEVER_AN_ARGUMENT)
+
+REFUSALS: tuple[tuple[str, tuple[str, ...], str, bool], ...] = (
+    (
+        "set",
+        ("set", "agent", "refused-agent", "prompt=p", "llm=nowhere"),
+        "would leave these references unresolved",
+        True,
+    ),
+    ("delete", ("delete", "agent", "no-such-agent"), "no agent of that name exists", True),
+    (
+        "bind-device",
+        ("bind-device", "not-a-mac", "sam"),
+        "six colon-separated hex pairs",
+        True,
+    ),
+    (
+        "add-device",
+        ("add-device", "000000", "sam"),
+        "no device is waiting with that activation code",
+        True,
+    ),
+    (
+        "apply",
+        ("apply", "-f", "REFUSED_DOCUMENT"),
+        "the top-level keys of an applied document",
+        True,
+    ),
+    ("pending", ("pending", "extra"), USAGE, False),
+    ("status", ("status", "extra"), USAGE, False),
+    (
+        "prompt",
+        ("prompt", "no-such-agent"),
+        "this server is not serving an agent of that name",
+        True,
+    ),
+    ("reload", ("reload", "extra"), USAGE, False),
+    ("ota-url", ("ota-url", "--config", "/nowhere/at/all.yaml"), "config file not found", False),
+    (
+        "set-default-agent",
+        ("set-default-agent", "no-such-agent"),
+        "would leave these references unresolved",
+        True,
+    ),
+    ("clear-default-agent", ("clear-default-agent", "extra"), USAGE, False),
+    (
+        "set-secret",
+        ("set-secret", "provider", "llm", "no-such", "api_key", "--from-env", SECRET_ENV),
+        "no provider of that name exists for that stage",
+        True,
+    ),
+    (
+        "clear-secret",
+        ("clear-secret", "provider", "llm", "no-such", "api_key"),
+        "no secret is stored for that slot",
+        True,
+    ),
+    ("list", ("list", "extra"), USAGE, False),
+    ("schema", ("schema", "nonsense"), "is not a documented entity", False),
+    ("reference", ("reference", "extra"), USAGE, False),
+    ("openapi", ("openapi", "extra"), USAGE, False),
+    (
+        "show",
+        ("show", "provider", "llm", "no-such"),
+        "no provider of that name exists for that stage",
+        True,
+    ),
+    ("export", ("export", "agent", "no-such"), "no agent of that name exists", True),
+)
+
+
+def test_every_family_of_the_grammar_has_a_refusal() -> None:
+    """The refusal table, held to the registration table.
+
+    A family with no refusal here would be a family whose sentences
+    nothing has ever seen cross a connection, and the way that happens
+    is a command added to the grammar rather than a row deleted from
+    this file.
+    """
+    assert {family for family, _, _, _ in REFUSALS} == {row.words[0] for row in cli.COMMANDS}
+
+
+def refusing(argv: Sequence[str], directory: Path) -> tuple[str, ...]:
+    """One refusal's command line, with the document the apply case
+    needs written where it can be found."""
+    return tuple(
+        written(directory, "refused.yaml", {"nonsense_section": {}})
+        if word == "REFUSED_DOCUMENT"
+        else word
+        for word in argv
+    )
+
+
+@pytest.mark.parametrize(
+    ("family", "argv", "sentence", "wire"),
+    REFUSALS,
+    ids=[family for family, _, _, _ in REFUSALS],
+)
+def test_one_refusal_of_each_family_arrives_intact(
+    deployed: Live,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    family: str,
+    argv: tuple[str, ...],
+    sentence: str,
+    wire: bool,
+) -> None:
+    """A refusal is one sentence on stderr and exit 1, whichever end of
+    the connection composed it."""
+    assert run(*refusing(argv, tmp_path)) == 1
+
+    captured = capsys.readouterr()
+    assert sentence in captured.err
+    # Nothing on stdout, so a script reading a command's output reads
+    # nothing rather than half an answer.
+    assert captured.out == ""
+    assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize(
+    ("family", "argv", "sentence", "wire"),
+    REFUSALS,
+    ids=[family for family, _, _, _ in REFUSALS],
+)
+def test_a_refusal_the_server_composes_needs_the_server(
+    deployed: Live,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    family: str,
+    argv: tuple[str, ...],
+    sentence: str,
+    wire: bool,
+) -> None:
+    """The same command lines against an address nothing listens on.
+
+    This is what makes the `wire` column above a fact rather than a
+    note. A refusal the API composes cannot be composed at all when
+    there is no API to reach, so what arrives instead is the transport
+    sentence; a refusal this side composes never gets that far and is
+    the same sentence it was.
+
+    The address is given in the root position, before the command word,
+    which is the position the grammar accepts for every command
+    including the four that reach nothing.
+    """
+    with contextlib.closing(socket.socket()) as sock:
+        sock.bind(("127.0.0.1", 0))
+        nowhere = f"http://127.0.0.1:{sock.getsockname()[1]}{API_MOUNT_PATH}"
+
+    assert run("--api-url", nowhere, *refusing(argv, tmp_path)) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Traceback" not in captured.err
+    if wire:
+        assert "cannot reach the configuration API" in captured.err
+        assert nowhere in captured.err
+    else:
+        assert sentence in captured.err
+        assert "cannot reach the configuration API" not in captured.err
+
+
+def test_a_fragment_that_will_not_parse_never_travels(
+    deployed: Live, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The other end of the refusal spectrum from the table above: a
+    fragment is read, parsed and checked before a connection is opened,
+    so a broken one is refused with the entity it was aimed at still
+    exactly as it was."""
+    broken = tmp_path / "broken.yaml"
+    broken.write_text("prompt: [\n", encoding="utf-8")
+
+    assert run("set", "agent", "sam", "-f", str(broken)) == 1
+    refused = capsys.readouterr()
+    assert "invalid YAML in" in refused.err
+    assert "Traceback" not in refused.err
+
+    assert run("show", "agent", "sam") == 0
+    assert document(capsys.readouterr().out)["prompt"] == "You are Sam."
