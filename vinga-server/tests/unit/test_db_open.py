@@ -27,14 +27,22 @@ EXPECTED_TABLES = {
     "domain_settings",
 }
 
-# The columns a migration after the baseline adds, so a chain that
-# stopped early fails here rather than at the first write on a
-# deployment. The same set the installed-wheel check in CI holds.
+# The body column on each entity table, which is where every non-key
+# field of that entity lives (#243). A chain that did not create them
+# fails here rather than at the first write on a deployment. The same
+# set the installed-wheel check in CI holds, and the two move together.
 EXPECTED_COLUMNS = {
-    "mcp_servers": {"instructions", "use_server_instructions", "inject_prompts"},
-    "agent_defaults": {"prompt_includes"},
-    "agents": {"prompt_includes"},
+    "providers": {"stage", "name", "body", "secrets"},
+    "mcp_servers": {"name", "body", "secrets"},
+    "prompt_fragments": {"name", "body"},
+    "agent_defaults": {"id", "body"},
+    "agents": {"name", "body"},
 }
+
+# The head of the packaged domain chain, which is one revision and no
+# longer a chain at all. A database stamped at anything else is one this
+# build cannot upgrade, and the refusal below is what it gets told.
+HEAD = "2001_json_body_baseline"
 
 
 def _tables(engine) -> set[str]:
@@ -57,7 +65,9 @@ def test_fresh_directory_gains_a_migrated_database(tmp_path: Path) -> None:
     try:
         assert (directory / DATABASE_FILENAME).is_file()
         assert EXPECTED_TABLES <= _tables(engine)
-        assert len(_version(engine)) == 1
+        assert _version(engine) == [HEAD]
+        for table, columns in EXPECTED_COLUMNS.items():
+            assert _columns(engine, table) == columns
     finally:
         engine.dispose()
 
@@ -186,221 +196,46 @@ def test_an_unwritable_directory_names_the_configuration_key(tmp_path: Path) -> 
     assert "server.database.dir" in str(caught.value)
 
 
-def test_provider_rows_hold_every_declared_model_field(tmp_path: Path) -> None:
-    """ProviderConfig's declared fields are excluded from its options
-    property, so each needs a column of its own; a missing one would
-    make the repository silently drop that field on every round trip.
-    api_key_env is the case that bit: the environment-reference
-    credential form every cloud provider uses."""
-    from vinga_server.config.models import ProviderConfig
-    from vinga_server.db.schema import providers
-
-    declared = set(ProviderConfig.model_fields)
-    assert declared <= set(providers.c.keys())
-
-    engine = open_database(tmp_path / "db")
-    try:
-        with engine.connect() as connection:
-            connection.execute(
-                providers.insert().values(
-                    stage="llm",
-                    name="claude",
-                    type="anthropic",
-                    api_key_env="ANTHROPIC_API_KEY",
-                    egress=None,
-                    options={"model": "claude-sonnet-5"},
-                    secrets={},
-                )
-            )
-            connection.commit()
-        with engine.connect() as connection:
-            row = connection.execute(providers.select()).mappings().one()
-        assert row["api_key_env"] == "ANTHROPIC_API_KEY"
-        assert row["options"] == {"model": "claude-sonnet-5"}
-    finally:
-        engine.dispose()
+# The property `test_provider_rows_hold_every_declared_model_field` used
+# to state, that every declared field of `ProviderConfig` has somewhere
+# in the row to live, is inherited by
+# `test_config_bodies.py::test_a_body_round_trips_through_the_mapper_pair`.
+# It is not a check any more but a consequence: the row holds the model's
+# own dump, so a field cannot be missing from it without the dump being
+# missing it too, and the round trip is what says so for every kind
+# rather than for the one that had the most columns.
 
 
-# Upgrading a database somebody is already running
+# The databases this build cannot open
 #
-# Every other test here migrates an empty directory, which proves the
-# scripts run and nothing about what happens to rows that were already
-# there. This one builds the baseline schema, fills it the way a
-# deployment fills it, and takes it to head through every migration that
-# has landed since, loading the result through the repository a server
-# boots on. It grows a case per migration rather than being replaced, so
-# the whole chain is proven at every merge.
-
-SEEDED_MAC = "aa:bb:cc:dd:ee:ff"
+# The domain chain was squashed to one baseline under a revision id
+# nothing was ever stamped with (#243), so a database from the old chain
+# is not silently at head: Alembic cannot find its revision. What an
+# operator meets is the sentence below rather than a traceback, and it is
+# the whole of the operator-facing surface of "these are unsupported".
 
 
-def _at_baseline(directory: Path):
-    """A database at revision 0001 and no further: the schema a
-    deployment that installed before this feature is running."""
-    from alembic import command
-    from alembic.config import Config as AlembicConfig
-    from sqlalchemy import create_engine
-
-    from vinga_server.db import _MIGRATIONS_DIR, DATABASE_FILENAME
-
-    directory.mkdir(parents=True, exist_ok=True)
-    engine = create_engine(f"sqlite+pysqlite:///{directory / DATABASE_FILENAME}")
-    with engine.connect() as connection:
-        config = AlembicConfig()
-        config.set_main_option("script_location", str(_MIGRATIONS_DIR))
-        config.attributes["connection"] = connection
-        command.upgrade(config, "0001")
-        connection.commit()
-    return engine
-
-
-def _seed_baseline_rows(engine) -> None:
-    """One nonempty row per table, written as SQL against the baseline
-    columns rather than through the repository: the repository writes
-    today's columns, and what this test is about is rows that predate
-    them."""
-    import json
-
-    statements = [
-        (
-            "insert into providers (stage, name, type, api_key_env, egress, options, "
-            "secrets) values (:stage, :name, :type, :api_key_env, :egress, :options, "
-            ":secrets)",
-            {
-                "stage": "llm",
-                "name": "claude",
-                "type": "anthropic",
-                "api_key_env": "ANTHROPIC_API_KEY",
-                "egress": None,
-                "options": json.dumps({"model": "claude-sonnet-5"}),
-                "secrets": json.dumps({}),
-            },
-        ),
-        (
-            "insert into mcp_servers (name, transport, command, args, env, url, headers, "
-            "egress, tool_timeout_s, secrets) values (:name, :transport, :command, :args, "
-            ":env, :url, :headers, :egress, :tool_timeout_s, :secrets)",
-            {
-                "name": "home",
-                "transport": "stdio",
-                "command": "uvx",
-                "args": json.dumps(["home-mcp"]),
-                "env": json.dumps({"API_ACCESS_TOKEN": "$HOME_TOKEN"}),
-                "url": None,
-                "headers": json.dumps({}),
-                "egress": False,
-                "tool_timeout_s": 7.5,
-                "secrets": json.dumps({}),
-            },
-        ),
-        (
-            "insert into agent_defaults (id, llm, asr, tts, vad, mcp, filler) values "
-            "('singleton', :llm, :asr, :tts, :vad, :mcp, :filler)",
-            {
-                "llm": "claude",
-                "asr": None,
-                "tts": None,
-                "vad": None,
-                "mcp": json.dumps(["home"]),
-                "filler": None,
-            },
-        ),
-        (
-            "insert into agents (name, prompt, llm, asr, tts, vad, mcp, filler) values "
-            "(:name, :prompt, :llm, :asr, :tts, :vad, :mcp, :filler)",
-            {
-                "name": "sam",
-                "prompt": "You are Sam.",
-                "llm": None,
-                "asr": None,
-                "tts": None,
-                "vad": None,
-                "mcp": None,
-                "filler": json.dumps({"enabled": True, "phrases": ["Hmm..."], "delay_ms": 1800.0}),
-            },
-        ),
-        (
-            "insert into devices (mac, agents) values (:mac, :agents)",
-            {"mac": SEEDED_MAC, "agents": json.dumps(["sam"])},
-        ),
-        (
-            "insert into domain_settings (key, value) values ('default_agent', :value)",
-            {"value": json.dumps("sam")},
-        ),
-    ]
-    with engine.begin() as connection:
-        for statement, parameters in statements:
-            connection.execute(text(statement), parameters)
-
-
-def test_a_seeded_baseline_database_upgrades_to_head_with_every_value_kept(
-    tmp_path: Path,
-) -> None:
-    from vinga_server.config.store import ConfigStore
-
+def test_a_database_stamped_at_an_unknown_revision_says_to_reset(tmp_path: Path) -> None:
+    """Any revision this build does not carry, which is what every
+    database from the 0001 to 0004 chain now is."""
     directory = tmp_path / "db"
-    baseline = _at_baseline(directory)
-    try:
-        _seed_baseline_rows(baseline)
-        assert _version(baseline) == ["0001"]
-    finally:
-        baseline.dispose()
-
-    # What a server does on the first start after the upgrade.
     engine = open_database(directory)
     try:
-        assert _version(engine) != ["0001"]
-        domain = ConfigStore(engine).load().domain
+        with engine.begin() as connection:
+            connection.execute(text("update alembic_version set version_num = '0004'"))
     finally:
         engine.dispose()
 
-    assert domain.providers.llm["claude"].type == "anthropic"
-    assert domain.providers.llm["claude"].api_key_env == "ANTHROPIC_API_KEY"
-    assert domain.providers.llm["claude"].options == {"model": "claude-sonnet-5"}
-    entry = domain.mcp_servers["home"]
-    assert (entry.command, entry.args) == ("uvx", ["home-mcp"])
-    assert entry.env == {"API_ACCESS_TOKEN": "$HOME_TOKEN"}
-    assert (entry.egress, entry.tool_timeout_s) == (False, 7.5)
-    assert domain.agent_defaults.llm == "claude"
-    assert domain.agent_defaults.mcp == ["home"]
-    assert domain.agents["sam"].prompt == "You are Sam."
-    assert domain.agents["sam"].filler is not None
-    assert domain.agents["sam"].filler.phrases == ["Hmm..."]
-    assert domain.devices == {SEEDED_MAC: ["sam"]}
-    assert domain.default_agent == "sam"
-    # And what 0002 added is unset on a row that predates it, which is
-    # the whole of what a nullable additive column promises.
-    assert entry.instructions is None
-    # And what 0003 added is unset in the same way: the seeded rows
-    # include no fragment, and no fragment exists to include.
-    assert domain.prompt_fragments == {}
-    assert domain.agent_defaults.prompt_includes is None
-    assert domain.agents["sam"].prompt_includes is None
-    # And what 0004 added: the opt-in reads false from the database
-    # rather than from a Python-side rescue of NULL, which is what a
-    # NOT NULL column with a database-level default is for, and the
-    # nullable list beside it is unset.
-    assert entry.use_server_instructions is False
-    assert entry.inject_prompts is None
-    # 0003 is additive in the other two shapes as well: a new table,
-    # empty because nothing wrote a fragment, and a nullable column on
-    # each layer table.
-    engine = open_database(directory)
-    try:
-        assert EXPECTED_TABLES <= _tables(engine)
-        for table, added in EXPECTED_COLUMNS.items():
-            assert added <= _columns(engine, table)
-        # The opt-in is false in the row rather than NULL in it, which
-        # is the difference between a database that says the decision
-        # and one whose readers each decide what NULL meant.
-        with engine.connect() as connection:
-            stored = connection.execute(
-                text("select use_server_instructions from mcp_servers where name = 'home'")
-            ).scalar()
-        assert stored is not None
-        assert not stored
-    finally:
-        engine.dispose()
+    with pytest.raises(ConfigError) as caught:
+        open_database(directory)
+
+    problem = str(caught.value)
+    assert "a revision this build does not carry" in problem
+    assert "Reset the database directory and re-seed" in problem
+    # The stored revision is a value in a file nothing here validates, so
+    # it is not quoted back, and neither is Alembic's own sentence.
+    assert "0004" not in problem
+    assert "Can't locate" not in problem
 
 
 def test_the_migrations_ship_inside_the_package() -> None:

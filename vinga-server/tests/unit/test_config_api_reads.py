@@ -24,7 +24,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import update
 
 from tests.support.problems import PROBLEM_KEYS, problem
-from tests.support.stores import planted
+from tests.support.stores import body, planted
 from vinga_server import db as db_module
 from vinga_server.config.api import build_api
 from vinga_server.config.entities import (
@@ -34,6 +34,7 @@ from vinga_server.config.entities import (
     NO_SUCH_MCP_SERVER,
     NO_SUCH_PROVIDER,
 )
+from vinga_server.config.models import ProviderConfig
 from vinga_server.config.secrets import (
     MASK,
     MASTER_KEY_ENV,
@@ -441,13 +442,13 @@ def test_a_row_that_cannot_be_read_is_500(
     """The request was fine and the stored state is not, which is the
     server's problem and not the caller's."""
     _populate(store)
-    planted(store, update(schema.providers).values(options="not an object"))
+    planted(store, update(schema.providers).values(secrets="not an object"))
 
     with caplog.at_level(logging.ERROR):
         response = client.get("/config")
 
     assert response.status_code == 500
-    assert "the options column does not hold an object" in response.json()["detail"]
+    assert "the secrets column does not hold an object" in response.json()["detail"]
     assert "Traceback" not in response.text
 
     # One fixed line, whose only variable part is the class name. Every
@@ -461,16 +462,16 @@ def test_a_row_that_cannot_be_read_is_500(
         assert "unreadable stored state" in record.getMessage()
         for value in record.__dict__.values():
             assert not isinstance(value, BaseException)
-        assert "options column" not in str(record.__dict__)
+        assert "secrets column" not in str(record.__dict__)
 
 
 @pytest.mark.parametrize(
     ("table", "values", "path"),
     [
-        (schema.providers, {"type": ""}, "/providers/llm/claude"),
-        (schema.mcp_servers, {"transport": "nonsense"}, "/mcp-servers/weather"),
-        (schema.agents, {"llm": ""}, "/agents/sam"),
-        (schema.agent_defaults, {"tts": ""}, "/agent-defaults"),
+        (schema.providers, {"body": '{"type": ""}'}, "/providers/llm/claude"),
+        (schema.mcp_servers, {"body": '{"transport": "nonsense"}'}, "/mcp-servers/weather"),
+        (schema.agents, {"body": '{"llm": ""}'}, "/agents/sam"),
+        (schema.agent_defaults, {"body": '{"tts": ""}'}, "/agent-defaults"),
         (schema.devices, {"mac": "not-a-mac"}, "/devices/aa:bb:cc:dd:ee:ff"),
     ],
 )
@@ -496,13 +497,17 @@ def test_a_stored_number_that_is_not_finite_is_500(
 ) -> None:
     """Serializing a stored NaN would answer null, which is a value
     nobody wrote and a different configuration from the stored one. The
-    read says the row cannot be read instead."""
+    read says the row cannot be read instead.
+
+    Hand-written, because `NaN` is a literal only a lenient encoder puts
+    in a body: pydantic's parser reads it back, and a provider's options
+    are passed through untyped, so nothing else would stop it."""
     _populate(store)
     planted(
         store,
         update(schema.providers)
         .where(schema.providers.c.name == "claude")
-        .values(options={"temperature": float("nan")}),
+        .values(body='{"type": "anthropic", "temperature": NaN}'),
     )
 
     response = client.get("/providers/llm/claude")
@@ -608,9 +613,9 @@ def test_a_plaintext_that_got_into_a_row_comes_back_masked(
     _populate(store)
     planted(
         store,
-        update(schema.providers).where(schema.providers.c.name == "claude").values(
-            api_key_env=PASTED
-        ),
+        update(schema.providers)
+        .where(schema.providers.c.name == "claude")
+        .values(body=body(ProviderConfig(type="anthropic", api_key_env=PASTED))),
     )
 
     entity = client.get("/providers/llm/claude")

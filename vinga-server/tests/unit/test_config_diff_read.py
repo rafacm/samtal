@@ -226,7 +226,12 @@ def test_a_stored_domain_that_will_not_compose_refuses_the_same_way(
     engine = open_database(directory)
     try:
         with engine.begin() as connection:
-            connection.execute(text("update agents set llm = 'ghost'"))
+            # Into the body rather than into a column of its own, which
+            # is where every non-key field lives since #243; json_set
+            # leaves the rest of the entry exactly as it was written.
+            connection.execute(
+                text("update agents set body = json_set(body, '$.llm', 'ghost')")
+            )
     finally:
         engine.dispose()
 

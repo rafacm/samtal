@@ -120,23 +120,25 @@ def test_a_refusal_that_is_not_about_a_missing_entity_stays_plain(store: ConfigS
 
 
 def test_a_column_that_cannot_be_read_is_a_storage_error(store: ConfigStore) -> None:
-    """The 500 set: the request was fine, the stored row is not."""
+    """The 500 set: the request was fine, the stored row is not. The
+    columns that can still be the wrong shape are the ones holding a JSON
+    value rather than a dumped model, `secrets` among them."""
     _populate(store)
-    planted(store, update(schema.providers).values(options="not an object"))
+    planted(store, update(schema.providers).values(secrets="not an object"))
 
     with pytest.raises(StorageError) as caught:
         store.load()
 
-    assert "the options column does not hold an object with string keys" in str(caught.value)
+    assert "the secrets column does not hold an object with string keys" in str(caught.value)
 
 
 @pytest.mark.parametrize(
     ("table", "values"),
     [
-        (schema.providers, {"type": ""}),
-        (schema.mcp_servers, {"transport": "nonsense"}),
-        (schema.agents, {"llm": ""}),
-        (schema.agent_defaults, {"tts": ""}),
+        (schema.providers, {"body": '{"type": ""}'}),
+        (schema.mcp_servers, {"body": '{"transport": "nonsense"}'}),
+        (schema.agents, {"body": '{"llm": ""}'}),
+        (schema.agent_defaults, {"body": '{"tts": ""}'}),
         (schema.devices, {"mac": "not-a-mac"}),
     ],
 )
@@ -173,7 +175,7 @@ def test_an_unreadable_row_still_fails_the_boot_as_a_config_error(
     try:
         ConfigStore(engine).set_agent("sam", {"prompt": "hello"})
         with engine.begin() as connection:
-            connection.execute(update(schema.agents).values(llm=""))
+            connection.execute(update(schema.agents).values(body='{"llm": ""}'))
     finally:
         engine.dispose()
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
