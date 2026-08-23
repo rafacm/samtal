@@ -27,9 +27,21 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   declares, and a per-driver table of the fields each of the
   eighty-one paths actually carries holds the optional fields that
   `required <= keys <= declared` cannot. The harness of drivers stays
-  where it was; what it no longer does is write a file. Behavior is
-  untouched: no production code moved, and the reference is
-  byte-identical apart from the argument tables.
+  where it was; what it no longer does is write a file. No behavior
+  moved: nothing about what this server emits, or when, is different.
+
+### Changed
+
+- **The event reference names the field behind each `%` position**
+  (#241). `vinga-server events reference` and the committed
+  `docs/reference/events.md` print an argument as its declared field
+  name followed by its kind, `` `session` (`ID`) `` where the cell used
+  to read `` `ID` ``, and the paragraph explaining how to read a variant
+  says so. That is the whole of the production change in #241, and it is
+  what keeps a reordered `ARGS` tuple a visible diff once the golden
+  inventory that used to pin argument order is gone. The document moved
+  in its argument rows and in that one paragraph; no template, field,
+  token, syntax, grammar or note changed.
 
 ## 2026-08-22
 

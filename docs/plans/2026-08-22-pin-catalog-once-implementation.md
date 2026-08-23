@@ -176,6 +176,17 @@ live suite, and the two pin suites' say the same.
    the plan expected**, which is deviation 1's second and third sites.
    Nothing read it in code.
 
+4. **The milestone is not test-and-data-side only, as its own bullet
+   claimed.** Decision 3 puts the argument's identity inside
+   `events.md`, and the only place that can be written is
+   `src/vinga_server/events_docgen.py`, which is production code and
+   whose output a CLI command prints. Nothing about what the server
+   emits moved, which is what the bullet was reaching for, but the
+   sentence as written contradicted the decision it sat under. The
+   bullet and the changelog say what actually changed now, and the
+   reference's diff is argument rows plus the one paragraph that
+   explains them rather than argument rows alone.
+
 Nothing else deviated. Decisions 1, 2, 4 and 5 landed as written.
 
 ### The successor practice

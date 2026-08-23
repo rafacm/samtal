@@ -199,10 +199,12 @@ reverted by copy-back plus `touch` per AGENTS.md.
 ## Milestones
 
 - [x] **[M1: retire the two JSON pins.](2026-08-22-pin-catalog-once-implementation.md#m1-retire-the-two-json-pins)** (PR #260) One milestone,
-  test-and-data-side only; `main` stays releasable trivially (no
-  production code moves). Deepens nothing and deletes two review
-  surfaces; the one interface change a developer feels is that
-  event work stops requiring two regeneration commands.
+  almost all test-and-data-side; `main` stays releasable trivially. The
+  one production change is the one decision 3 asks for, the docgen's
+  Argument column, which moves what `vinga-server events reference`
+  prints and nothing about what this server emits. Deepens nothing and
+  deletes two review surfaces; the one interface change a developer
+  feels is that event work stops requiring two regeneration commands.
 
 ## Plan review round
 
