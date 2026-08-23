@@ -49,6 +49,20 @@ and discoveries; no deviations says so explicitly.
    (the 81-driver capture, now ~18s) are paid once per file by
    construction; the spike showed default-dist no slower TODAY,
    but loadfile is the principled choice and costs nothing.
+   And a FOURTH hazard joins the issue's three: CPU contention on
+   4 real cores, which the 14-core spike structurally could not
+   exercise (4 workers with ten idle cores is headroom the runner
+   does not have, and each worker also runs server threads, pool
+   workers, and stdio-MCP subprocesses). The exposed set is the
+   timing-margin work #233's M2 deliberately shrank: the
+   20/60/80ms filler windows, the 0.3s connect and idle bounds,
+   the 1.2s drain. A 20ms descheduling flips a filler driver's
+   shape. The plan's honest position: the local runs are a SMOKE
+   CHECK only, and the PR's own CI runs are the first evidence
+   that bears on this hazard; the graded response, tried in order
+   before any revert, is `-n 3` then `-n 2` (contention is a
+   headroom problem, and shrinking the worker count is the lever
+   that matches it), and only then the flag comes off.
 3. **The refusal ledger's residual path is REPAIRED for workers,
    not merely verified.** The per-test delta check runs in-worker
    and fails the owning test, which the spike exercised green. The
