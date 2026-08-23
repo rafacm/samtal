@@ -30,6 +30,7 @@ from urllib.parse import quote
 
 from alembic import command
 from alembic.config import Config as AlembicConfig
+from alembic.script.revision import ResolutionError
 from alembic.util.exc import CommandError
 from sqlalchemy import URL, Engine, create_engine, event, text
 from sqlalchemy.exc import OperationalError
@@ -38,12 +39,24 @@ from vinga_server.config.loader import ConfigError, DatabaseBusyError, StorageEr
 
 DATABASE_FILENAME = "vinga.db"
 
-# What a database stamped at a revision this build does not carry is
-# told. It is the operator-facing whole of "pre-reshape domain
-# databases are unsupported": the domain chain was squashed to one
-# baseline under a revision id nothing was ever stamped with (#243), so
-# a database from the old chain reaches here rather than being taken
-# for current and failing later on a column that is gone.
+# The revisions the domain chain deleted, named one by one because the
+# set is closed and will never grow: the squash (#243) replaced 0001 to
+# 0004 with a single baseline, and no later change can add to a list of
+# what that squash removed.
+#
+# A closed set rather than "any revision this build cannot find", and
+# the difference is the whole of the arm below. Two databases produce
+# the same Alembic failure and want opposite advice: one written before
+# the squash, which cannot be upgraded and has to be replaced, and one
+# written by a NEWER build and then met by an older image, which is
+# current and must not be touched. Nothing in an unknown revision id
+# says which it is; membership here does.
+_SUPERSEDED_REVISIONS = frozenset({"0001", "0002", "0003", "0004"})
+
+# What a database still stamped at one of those is told. It is the
+# operator-facing whole of "pre-reshape domain databases are
+# unsupported": such a database reaches here rather than being taken for
+# current and failing later on a column that is gone.
 #
 # The next step is the only thing worth saying, because there is no
 # other: reset the volume and re-seed, which is what the ADR addendum
@@ -234,18 +247,31 @@ def migration_failure(exc: Exception, path: Path) -> ConfigError:
     which wraps the line in the statement and the parameters bound to
     it.
 
-    One failure is not the driver's at all and is answered on its own.
-    Alembic raises its own `CommandError` when the revision the database
-    is stamped at is not in the chain this build ships, and that
-    exception carries no `orig`, so the sentence above would have
-    reported the class name and nothing else. Told from the rest by the
-    type rather than by Alembic's wording: every `CommandError` a
-    migration to head can raise is the chain and the database
-    disagreeing, and the reset sentence is the answer to all of them.
-    The stored revision itself is not quoted back, being a value in a
-    file nothing here validates.
+    One failure is not the driver's at all and is answered on its own:
+    a database stamped at a revision the squash deleted. Alembic raises
+    its own `CommandError` for it, and that exception carries no `orig`,
+    so the sentence above would have reported the class name and nothing
+    else.
+
+    Narrow on purpose, because the sentence it answers with says to
+    throw a database away. Three things have to hold before it is said,
+    and each of them rules out a case that would be told to destroy
+    something it should keep. It has to be a `CommandError`, which a
+    driver failure is not. Its cause has to be Alembic's own
+    `ResolutionError`, which is the stored revision not being findable,
+    rather than an unreadable script directory or a chain with two
+    heads. And the revision it could not find has to be one this chain
+    is known to have deleted: a database stamped at a revision from a
+    NEWER build, met by an image that was rolled back, produces exactly
+    the same `ResolutionError`, and it is current rather than stranded,
+    so it falls through to the sentence above and its operator rolls
+    forward instead of deleting a live volume.
+
+    The stored revision is read off the cause rather than out of the
+    file, since Alembic has already found it, and it is never quoted
+    back: it is a value in a file nothing here validates.
     """
-    if isinstance(exc, CommandError):
+    if _stranded(exc):
         return StorageError(_UNSUPPORTED_REVISION.format(path=path))
     detail = str(getattr(exc, "orig", "")) or type(exc).__name__
     problem = (
@@ -255,6 +281,27 @@ def migration_failure(exc: Exception, path: Path) -> ConfigError:
     if isinstance(exc, OperationalError) and ("locked" in detail or "busy" in detail):
         return DatabaseBusyError(problem)
     return StorageError(problem)
+
+
+def _stranded(exc: Exception) -> bool:
+    """Whether this failure is a database left behind by the squash,
+    which is the one failure answered by throwing the file away.
+
+    The cause chain is walked rather than only its first link, because
+    what makes this the right question is Alembic's `ResolutionError`
+    being in it at all; which library happened to wrap it is not this
+    module's business to depend on.
+    """
+    if not isinstance(exc, CommandError):
+        return False
+    seen: set[int] = set()
+    cause: BaseException | None = exc.__cause__
+    while cause is not None and id(cause) not in seen:
+        seen.add(id(cause))
+        if isinstance(cause, ResolutionError):
+            return cause.argument in _SUPERSEDED_REVISIONS
+        cause = cause.__cause__
+    return False
 
 
 def database_path(directory: Path, filename: str = DATABASE_FILENAME) -> Path:
