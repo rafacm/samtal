@@ -743,3 +743,32 @@ def test_the_documents_that_reach_nothing_render_in_the_same_environment(
     # goes to stderr the way every other notice does.
     assert printed.out.strip().startswith("http")
     assert printed.err.strip()
+
+
+def test_the_store_exports_as_a_document_it_applies_back_unchanged(
+    deployed: Live, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The round trip, against a store this lane wrote through nine
+    commands rather than through a fixture.
+
+    Three claims in one sequence. What `export` prints is a document
+    `apply` takes, which is what makes it the writable projection rather
+    than a second display. Applying it changes nothing, which is what
+    says the projection is faithful: a field the export spelled that the
+    store does not hold would come back `wrote`. And a second export is
+    the same bytes, which is what makes the document a thing an operator
+    can keep in version control.
+    """
+    assert run("export") == 0
+    exported = capsys.readouterr().out
+    path = tmp_path / "exported.yaml"
+    path.write_text(exported, encoding="utf-8")
+
+    assert run("apply", "-f", str(path)) == 0
+    applied = capsys.readouterr()
+    outcomes = [line.split(": ")[-1] for line in applied.out.splitlines()]
+    assert outcomes and set(outcomes) == {"unchanged"}
+    assert applied.err == ""
+
+    assert run("export") == 0
+    assert capsys.readouterr().out == exported
