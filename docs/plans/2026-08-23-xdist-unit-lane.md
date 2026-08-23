@@ -134,3 +134,64 @@ present and the unit lane at its projected time.
   `main` stays releasable trivially. Deepens nothing; the one
   thing a developer stops paying is five minutes per CI round
   trip.
+
+## Plan review round
+
+External review of commit `git log -2` (the plan commit), 2026-08-23.
+Backend: claude CLI 2.1.239, model `claude-opus-5`, read-only tool
+set (interim fallback tier). Verdict as received: ready after the
+P1/P2 amendments; the direction and decisions are right, but the two
+places the plan claims to run an experiment (the residual ledger,
+the local runs) cannot produce the evidence they are offered as, and
+the port audit aims at the wrong file set. Findings condensed but
+faithful:
+
+1. **P1: the residual ledger is silently DISABLED under xdist, not
+   merely illegible.** The stash is worker-local, xdist unregisters
+   the worker's terminal reporter, and the controller derives exit
+   status from reports, so a refusal attributed to no test
+   disappears entirely. Pre-commit to the repair (worker writes the
+   residual into `config.workeroutput` at sessionfinish; controller
+   collects in `pytest_testnodedown` and prints and fails from its
+   own terminal_summary), put the code in scope, and name how the
+   scratch residual is planted.
+2. **P1: the spike is not CI-like; contention on 4 real cores is a
+   fourth hazard the prescribed local runs cannot exercise.** The
+   timing-margin drivers #233's M2 shrank (the 20/60/80ms filler
+   windows, the 0.3s connect and idle bounds, the 1.2s drain) are
+   the exposed set; a 20ms descheduling flips a driver's shape.
+   Constrain local runs to 4 CPUs or state they are a smoke check
+   and only the PR's CI runs bear on this; add the graded response
+   (`-n 3`/`-n 2` before revert) since contention is a headroom
+   problem.
+3. **P2: the step silently changes `-v` to `-q`**, breaking the
+   two-token revert claim and the one-line inventory; keep `-v` or
+   decide the drop with a reason, and state the real diff set.
+4. **P2: the port audit greps the files that cannot bind and misses
+   every file that does.** Audit by what binds
+   (`\.bind\(|ThreadingHTTPServer\(|socket\.socket\(|uvicorn`),
+   with three dispositions; `unused_url()`'s bind-and-release
+   free-port assumption is the one genuine parallel hazard and
+   needs a verdict.
+5. **P2: the flake hunt drops the recorded context** (an in-flux
+   mid-milestone tree with two concurrent expected failures, the
+   repository's own documented way for a tree to lie), never quotes
+   the failure text, and loadfile reruns explore LESS order space
+   than the serial run that failed. Lead with the stale-bytecode
+   hypothesis; call the likely outcome ACCEPTED, not EXPLAINED.
+6. **P2: the week-of-runs watch has no owner, method, or trigger.**
+   Name the record, the candidate-flake rule, and the revert
+   trigger, and who does the recording.
+7. **P3: the per-worker inventory drops the `mkdtemp` the issue
+   named**; complete it with its disposition (N un-removed temp
+   dirs per local run).
+8. **P3: the pycache race's safety is a mechanism, not four green
+   runs** (import falls back to source on a cache OSError), and the
+   conftest's "once" becomes "once per process".
+9. **P3: three unsourced or inconsistent numbers in the Goal**
+   (`-n 4` vs `auto`; 6.5 underived; 3.6x cherry-picked from the
+   faster contended run). Spell `auto`, derive or drop, quote
+   3.0x to 3.6x.
+10. **P3: no documented command reproduces a CI-only failure**;
+    add the parallel invocation to AGENTS.md and the README's
+    command blocks.
