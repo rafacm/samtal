@@ -8,15 +8,28 @@ already logs land in the decision track with offsets that index into the
 audio, and that the manifest says what the capture was made against.
 """
 
+import asyncio
 import json
 import struct
 import wave
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.support.configs import DEVICE_MAC, DEVICE_UUID, FRAME_BYTES, FRAME_MS, config_with_agent
+from tests.support.configs import (
+    DEVICE_MAC,
+    DEVICE_UUID,
+    FRAME_BYTES,
+    FRAME_MS,
+    config_with_agent,
+    world,
+)
+from tests.support.events import both_formats
+from tests.support.providers import built_world
+from tests.support.sessions import attached_capture, drive_reply
+from tests.support.sockets import LoopingSocket
 from tests.support.wire import (
     collect_reply,
     connect,
@@ -28,7 +41,12 @@ from tests.support.wire import (
 )
 from vinga_server.app import create_app
 from vinga_server.audio.opus import OpusEncoder
-from vinga_server.capture import CAPTURE_RATE
+from vinga_server.capture import CAPTURE_RATE, CaptureStore
+from vinga_server.device import session as session_module
+from vinga_server.device.session import DeviceSession
+from vinga_server.protocol import framing
+from vinga_server.runtime.pipeline import bespoke_runtime_factory
+from vinga_server.tools.mcp import McpServers
 
 
 def capturing_config(tmp_path: Path, **kwargs: object):
@@ -302,3 +320,126 @@ def test_the_two_channels_share_one_timeline(tmp_path: Path, frames: int) -> Non
         f"the reply audio starts at {reply_at:.0f} ms but speaking_started "
         f"says {started['t_ms']:.0f} ms"
     )
+
+
+# Shaped like something an operator would be horrified to find in a log,
+# and planted on both links of an exception chain: what must not reach a
+# retained surface is the whole chain, not only its outermost message.
+CODEC_SENTINEL = "sk-live-3f9a21c7-never-a-real-credential"
+
+UTTERANCE = b"\x00\x00" * 320
+
+
+class CodecUnavailable(RuntimeError):
+    """Stands in for what a media library raises when it cannot open a
+    codec: a class name worth logging, wrapped around a message that is
+    not."""
+
+
+def unopenable_codecs(*args: object, **kwargs: object) -> object:
+    """A `CaptureAudio` that will not build.
+
+    Three codec objects open here, and opening one runs PyAV. The
+    constructor is the only step of starting a capture that can raise
+    for a reason nothing on this side chose, which is what makes it the
+    step worth a regression test.
+    """
+    try:
+        raise OSError(f"libopus: no encoder for {CODEC_SENTINEL}")
+    except OSError as unopenable:
+        raise CodecUnavailable(
+            f"could not build the capture codecs for {CODEC_SENTINEL}"
+        ) from unopenable
+
+
+def capturing_session(tmp_path: Path) -> tuple[DeviceSession, LoopingSocket]:
+    """A session with a capture store, driven through `run`.
+
+    Through `run` rather than through a test client because what is
+    under test is a step inside the guard and what the session holds
+    afterwards, and a client hands back no session to ask.
+    """
+    config = capturing_config(tmp_path)
+    captures = CaptureStore(tmp_path / "captures", 900.0, 2000.0, 0.0)
+    generations = world(config, providers=built_world(config))
+    factory = bespoke_runtime_factory(generations, McpServers({}), None, None)
+    websocket = LoopingSocket()
+    session = DeviceSession(cast(Any, websocket), generations, factory, captures)
+    return session, websocket
+
+
+def manifest_of(tmp_path: Path) -> dict | None:
+    found = list((tmp_path / "captures").glob("*.json"))
+    return json.loads(found[0].read_text()) if found else None
+
+
+async def test_a_capture_whose_codecs_will_not_open_is_released_and_the_session_lives(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Starting a capture runs a media library, and a library that
+    cannot open a codec raises.
+
+    Two things must then be true, and neither was. The capture is
+    attached to the session's events before its codecs are built and the
+    field the close path releases is assigned only after they are, so a
+    failure between the two used to leave an open recording and an
+    attached consumer that nothing ever closed. And the exception left
+    through `run` untouched, which puts a library's own prose, and
+    whatever a chained one carries, in front of whoever is reading the
+    process's output.
+
+    So the capture is released where it failed and the conversation goes
+    on without a recording. That last part is a deliberate change rather
+    than a restoration: a codec failure used to end the session, and
+    recording is best-effort everywhere else in this module, including
+    in the capture store's own decline ("a conversation is worth more
+    than a recording of it").
+    """
+    session, websocket = capturing_session(tmp_path)
+    monkeypatch.setattr(session_module, "CaptureAudio", unopenable_codecs)
+
+    with caplog.at_level("INFO"):
+        task = asyncio.create_task(session.run())
+        for _ in range(500):
+            await asyncio.sleep(0.01)
+            # `_start_capture` has no awaits in it, so a manifest on disk
+            # means the whole of it has run: the capture opened, wrote
+            # this file, and the construction after it either returned or
+            # was handled.
+            if manifest_of(tmp_path) is not None and session.runtime is not None:
+                break
+        else:
+            raise AssertionError("the capture never opened")
+
+        # Both hot paths the capture used to sit in, driven after the
+        # failure: a mic frame in, and a whole reply out.
+        session.listening = True
+        encoder = OpusEncoder()
+        for packet in encoder.encode(speech_pcm(120)):
+            await session._handle_audio(framing.wrap(session.protocol_version, packet))
+        await drive_reply(session, UTTERANCE)
+
+        await websocket.close(1000, "goodbye")
+        await asyncio.wait_for(task, timeout=5)
+
+    # White-box for both reads, per the note on `attached_capture`: what
+    # a released collaborator looks like is that there is nothing left to
+    # ask about it.
+    assert session._capture_audio is None
+    assert attached_capture(session) is None, "the events capture was left attached"
+
+    manifest = manifest_of(tmp_path)
+    assert manifest is not None
+    # The half that says the file was closed rather than abandoned: a
+    # capture stranded at the failure keeps the `False` its start wrote.
+    assert manifest["capture"]["complete"] is True
+
+    written = both_formats(caplog)
+    assert "recording could not start (CodecUnavailable)" in written
+    assert CODEC_SENTINEL not in written
+    assert "Traceback" not in written
+    printed = capsys.readouterr()
+    assert CODEC_SENTINEL not in printed.out + printed.err

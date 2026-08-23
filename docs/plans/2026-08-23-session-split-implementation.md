@@ -644,3 +644,104 @@ deliberately rather than smuggled into the table.
 
 Nothing in M2 needs hardware, so no verification step was left
 unverifiable.
+
+## PR review round (PR #269)
+
+External review of the M2 diff, 2026-08-23. Two findings, verdict
+mergeable after fixes. Both accepted and fixed, each in its own commit;
+the second is a correction to this document's own verification record
+and is recorded with it below.
+
+1. **P1: a capture that cannot build its codecs is stranded open, and
+   the library's own prose leaves through `run`.** `_start_capture`
+   attaches the raw capture to `SessionEvents` before constructing
+   `CaptureAudio` and assigns `_capture_audio` only after the
+   construction returns. A PyAV failure inside the constructor therefore
+   left `_capture_audio` None, and the close path releases the field, so
+   the `finally` neither detached the consumer nor closed the open
+   recording; the exception then left `run` untouched and reached
+   `ws.py` as a library traceback.
+
+   *A regression the split introduced, and named as one.* Before the
+   split the three codecs were built after `self._capture` had been
+   assigned, so the `finally` always had something to release. The move
+   put the assignment last without noticing that it had been carrying
+   the release.
+
+   *Accepted, fixed.* The construction is guarded. On failure the events
+   capture is detached, the `SessionCapture` is closed on the spot
+   (detach first, so a close that fails in its own right still leaves no
+   consumer writing into a capture on its way out), and the failure is
+   reported by `logger.warning` naming `type(exc).__name__` and nothing
+   else, which is the shape `_cleanly` uses forty lines above in the
+   same class, and for the same stated reason: an exception's message on the way out of a
+   session is one of the places a provider's or a device's bytes reach
+   the retained surface, and which exception it was is not actionable
+   anyway.
+
+   *And the conversation continues, which is a deliberate delta rather
+   than a restoration of the pre-split behavior.* Before the split a
+   codec failure ended the session too, by propagating. The round
+   sanctions the better behavior, and the reasoning is already written
+   down one layer away: `CaptureStore.open` declines a directory it
+   cannot use with "a conversation is worth more than a recording of
+   it", and `SessionCapture`'s own docstring says writes are best effort
+   by construction because "a capture that fails must never take a
+   conversation down with it". Codec construction was the one step of
+   starting a capture that had been left out of that rule. It is
+   operator-visible, so `CHANGELOG.md` carries it as a `### Fixed`
+   entry that tells a deployment with capture enabled which line says a
+   session ran without being recorded.
+
+   *One thing deliberately not done.* The two existing "capture did not
+   start" signals are declared events, and the nearer of them,
+   `CaptureDirectoryUnusable`, already reports its cause the same
+   sanitized way, as a `ClassName`; this third sibling could be promoted
+   to one beside it and `CaptureBelowFloor`. It was not, because a new catalog variant
+   moves `docs/reference/events.md`, the driver count and the `CARRIED`
+   table, and this is a fix in a milestone whose claim is that it moves
+   no artifact. The promotion is a follow-up worth taking on its own.
+
+   **The regression test.**
+   `test_a_capture_whose_codecs_will_not_open_is_released_and_the_session_lives`
+   in `tests/unit/test_capture_session.py` replaces `CaptureAudio` with
+   a constructor that raises a `CodecUnavailable` chained from an
+   `OSError`, both messages carrying the same credential-shaped
+   sentinel, so what must not reach a record is the whole chain rather
+   than only the outermost message. It drives a session through `run`
+   with a real `CaptureStore`, then after the failure feeds a real
+   framed Opus packet through `_handle_audio` and a whole reply through
+   `send_audio`, which are the two hot paths the capture used to sit in.
+   It asserts the session ran to a clean close, that `_capture_audio` is
+   None and `attached_capture(session)` is None (a new reader beside
+   `attached_taps` in the test hub, the same white-box shape for the
+   capture slot that `attached_taps` is for the tap list), that the
+   manifest's `capture.complete` is `True` (which is what says the file
+   was closed rather than abandoned: a strand leaves the `False` its
+   start wrote), that the warning line reads
+   `recording could not start (CodecUnavailable)`, and that neither the
+   sentinel nor the word `Traceback` appears in `both_formats(caplog)`
+   or in stdout or stderr.
+
+   *The fix proved load-bearing, both halves separately.* With the whole
+   guard reverted and nothing else changed, the test fails on the leak,
+   the exception reaching the test through `run`:
+
+   ```
+   src/vinga_server/device/session.py:415: in run
+       self._start_capture(manifest)
+   E   tests.unit.test_capture_session.CodecUnavailable: could not build
+       the capture codecs for sk-live-3f9a21c7-never-a-real-credential
+   ```
+
+   With the guard kept but the two release lines removed, so nothing
+   leaks, it fails on the strand instead:
+
+   ```
+   >   assert attached_capture(session) is None, "the events capture was left attached"
+   E   AssertionError: the events capture was left attached
+   E   assert <vinga_server.capture.SessionCapture object at 0x10fa30fe0> is None
+   ```
+
+   The file was restored by copy and `touch`ed after each, per the trap
+   recorded in `AGENTS.md`, and the caches cleared.
