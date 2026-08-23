@@ -189,6 +189,34 @@ live suite, and the two pin suites' say the same.
 
 Nothing else deviated. Decisions 1, 2, 4 and 5 landed as written.
 
+### What the golden pinned and nothing does now
+
+The plan's decision 3 separated the golden's guarantees into the two
+`events.md` already carries (ordered field lists, declared token sets)
+and the one it did not (argument identity, restored by this milestone).
+The PR review round found a third, and it is accepted rather than
+replaced: the golden recorded each value's declared TYPE name, and the
+reference prints a kind and a constraint instead.
+
+The loss is narrow, and it was measured rather than asserted. Across the
+35 value types the declarations carry, exactly two pairs share a kind
+and render the same constraint cell: `Identifier` with `ConfiguredPath`
+(`IDENTIFIER`, empty constraint) and `BoardName` with `ClientId`
+(`DESCRIPTOR`, at most 64 printable characters). Every other type is
+separated in the document by its syntax, its bounds, its token set or
+its `JOINED` flag. So what is unpinned is retyping a field between the
+two members of one of those two pairs, and both members of both pairs
+promise the reader the same thing about the value: the same kind, the
+same admissible shape, the same bound.
+
+The alternative was to print the type name beside the kind in the field
+table, the move `_argument()` makes for arguments. It was not taken
+because the argument case was a real ambiguity a reader meets (two
+positions with the same kind are genuinely indistinguishable in a
+sentence) while this one is a distinction without a documented
+difference, and a type name in every field row would add a column of
+noise to eighty-two variants to pin two pairs.
+
 ### The successor practice
 
 The last three issues used "the baseline SHA is unchanged" as their
