@@ -86,16 +86,32 @@ explicitly.
    reads the fact from the descriptor today only to apply it in
    one place, so the fact moves to that place as a literal with a
    comment naming the entity.
-3. **The OpenAPI prose becomes data beside the code, loaded once.**
-   The ~550 lines of description string literals move to
-   `config/api_descriptions/` as one Markdown-ish text file per
-   route group (or one TOML map; the implementer picks whichever
-   the loader keeps simplest and says why), loaded at import into
-   the same structures `api.py` passes FastAPI today.
-   `api-openapi.json` is byte-identical by construction, and the
-   CI diff plus the committed-artifact test prove it. The loader
-   is a function in `api.py`, not a new module, unless the file
-   count argues otherwise; the deletion test governs.
+3. **Decision 3 moves DOCUMENT PROSE CONSTANTS only, and the
+   boundary is drawn three ways.** First: most of the document's
+   prose is route DOCSTRINGS, which FastAPI reads as the operation
+   descriptions; those stay exactly where they are, because the
+   docstring IS the description and a route whose prose lives in
+   another file is harder to read (the deletion test cuts against
+   moving them). What moves is the module-level document-prose
+   constants (`API_DESCRIPTION` and the `*_DESCRIPTION` family).
+   Second: runtime refusal bodies (`UNAUTHORIZED`,
+   `MALFORMED_REQUEST`, `UNEXPECTED`, the `*_BODY` trio, and the
+   per-route refusal constants) are BEHAVIOR an operator reads and
+   stay in code; `PROBLEM_DESCRIPTIONS`, which is both document
+   prose and a raised detail, stays in code with that dual role
+   stated in its comment. Third: the loader's interpolation
+   contract is explicit, because `API_DESCRIPTION` interpolates
+   `MASK` and `API_OPTIONS_NOTE` and carries literal `{code}` and
+   `{name}` path braces, and its line wrapping is pinned by
+   tests: the data file uses a placeholder syntax that cannot
+   collide with path braces (`$MASK$`-style sigils substituted by
+   the loader from the same constants), the loader raises a named
+   error at import when a file or placeholder is missing (a
+   packaging mistake is a refusal with a sentence, never a
+   contract that silently lost its prose), and
+   `test_the_document_states_the_unchanged_value_marker` is
+   unchanged and keeps closing the drift it was written for.
+   `api-openapi.json` byte-identical proves the move.
 4. **The wording-pin retreat has one rule, applied per test.** A
    test that asserts an exact sentence today asserts after this:
    the status code, the problem `type`/`title` field structure,
