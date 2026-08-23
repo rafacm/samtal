@@ -1,7 +1,7 @@
 """The latency mask, decided without a pipeline behind it.
 
 `FillerRunner` reaches the device through `DeviceOutput` and whoever
-holds the floor through `TurnView`, so both can be scripted and the
+holds the floor with two reads, so both can be scripted and the
 timer driven onto each of its outcomes: the fire that masks a slow
 reply, the reply that spoke first, an agent with no clip of its own,
 the two stand-downs that yield to the user, and the arbitration between
@@ -59,8 +59,8 @@ class FakeTurn:
     """The floor as the fire-time stand-down sees it: how much speech
     the endpointer is holding, and whether the outgoing frames are
     paused for a barge-in confirmation. Both are set by the test and
-    neither is written by the runner, which is the whole of the
-    `TurnView` contract."""
+    neither is written by the runner, which is the whole of what the
+    runner asks of a `TurnTaking`, the class the annotation names."""
 
     def __init__(self, speech_ms: int = 0, paused: bool = False) -> None:
         self.speech = speech_ms
