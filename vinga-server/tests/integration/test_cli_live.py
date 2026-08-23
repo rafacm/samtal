@@ -647,8 +647,10 @@ def test_a_credential_is_stored_masked_and_cleared(
     # A credential never travels in a read, so what the document carries
     # is the command that enters it, and never the mask, which a
     # creating write would refuse.
-    assert f"{cli.PROGRAM} set-secret provider llm spare api_key" in exported
-    assert f"{cli.PROGRAM} set-secret mcp-server weather headers.Authorization" in exported
+    # The marker is part of the exported command since the M2 round's
+    # finding 6: a legal leading-dash identity must survive the argv.
+    assert f"{cli.PROGRAM} set-secret provider -- llm spare api_key" in exported
+    assert f"{cli.PROGRAM} set-secret mcp-server -- weather headers.Authorization" in exported
     assert MASK not in exported
     assert SECRET not in exported
 
