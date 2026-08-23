@@ -29,7 +29,6 @@ from vinga_server.providers import (
     LlmProvider,
     ProviderIdentity,
     ProviderWorld,
-    StreamStarted,
     TextDelta,
     ToolCall,
     ToolChoice,
@@ -73,15 +72,18 @@ async def _built(config: Config, secrets: SecretStore | None) -> ProviderWorld:
 # --- the models -------------------------------------------------------
 
 
-Step = str | list[str | StreamStarted | ToolCall | Usage]
+Step = str | list[str | ToolCall | Usage]
 
 
 class ScriptedLlm(LlmProvider):
     """A model whose every round is written down in advance. A round is
-    a sentence to speak, or a list mixing sentences, the liveness a real
-    adapter announces its first raw chunk with, the tool calls to ask
-    for, and the usage a provider that reports one would end with; the
-    last round repeats if the loop asks for more."""
+    a sentence to speak, or a list mixing sentences, the tool calls to
+    ask for, and the usage a provider that reports one would end with;
+    the last round repeats if the loop asks for more.
+
+    No `StreamStarted`: an adapter yields one first and
+    `_watchdog_stream` consumes it exclusively, so it is not part of
+    what a scripted round can put in front of the tool loop."""
 
     def __init__(self, rounds: Sequence[Step]) -> None:
         self._rounds = list(rounds)

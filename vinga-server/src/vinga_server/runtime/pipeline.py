@@ -1040,12 +1040,6 @@ class PipelineRuntime:
                     functools.partial(providers.llm.stream, system, working, tools, choice),
                 ):
                     match event:
-                        case StreamStarted():
-                            # Liveness, not content. The watchdog
-                            # consumes the one the adapters yield; this
-                            # keeps the loop indifferent should one
-                            # arrive anyway.
-                            continue
                         case TextDelta(text=text):
                             # Speech only, and speech that is not just
                             # whitespace. Both providers assemble tool
