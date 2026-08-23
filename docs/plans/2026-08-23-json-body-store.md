@@ -191,12 +191,28 @@ and discoveries; no deviations says so explicitly.
   now stated in one mapper), and the body-parse fixtures contain
   no real credential shapes.
 - **Pin before reshaping.** The pins that hold through the
-  reshape: the store's whole unit and integration suites (the
-  17k-line config family) run unchanged except where they touch
-  deleted mappers or migrations, and the round-trip test of
-  decision 6 pins the new pair. What is deliberately unpinned:
-  the four old revisions and the upgrade-from-0001 tests, per the
-  squash decision, with the ADR addendum as the record.
+  reshape: the store's unit and integration suites run green on
+  the reshaped store, and the round-trip test of decision 6 pins
+  the new pair. The blast radius inside those suites is larger
+  than the mapper-naming sites and is carried as a named piece of
+  M1: about twenty tests plant or assert ENTITY COLUMNS
+  (`select(schema.agents.c.mcp)`-style reads,
+  `update(...).values(prompt_includes=None)`-style plants, in
+  `test_config_store.py`, `test_config_reads.py`,
+  `test_config_api_reads.py`, `test_config_round_trip.py`,
+  `test_config_cli_local.py`, `test_db_open.py`), each becoming a
+  body edit under ONE stated rewrite rule: a test that plants
+  lawful state plants a dumped model's body; a no-leak or
+  tolerance pin that deliberately plants a MALFORMED or
+  old-shaped row plants a hand-written body string, so the pin
+  keeps pinning the reader rather than the dumper. One test that
+  looks like an upgrade test is not:
+  `test_a_pre_upgrade_string_row_loads_and_is_written_back_unchanged`
+  pins the live McpGrant string-form tolerance and MOVES to the
+  body-parse family rather than dying with the chain. What is
+  deliberately unpinned: the four old revisions and the
+  upgrade-from-0001 tests, per the squash decision, with the ADR
+  addendum as the record.
 - **Closed sets.** Not this issue's territory.
 - **Honest seams.** The mapper pair takes the descriptor and the
   model; nothing injectable changes.
