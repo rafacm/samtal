@@ -7,6 +7,65 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ## 2026-08-23
 
+### Added
+
+- **`vinga-server config apply -f setup.yaml` writes a whole
+  configuration in one transaction** (#194). The document is the domain
+  half in the shape `docs/reference/domain-config.md` documents: its
+  top-level keys are the configuration's own sections, an entity's body
+  is exactly the fragment `config set` takes, and the two settings are
+  in the shape the configuration holds them in (`devices` as a MAC
+  holding its agents, `default_agent` a name or an explicit null). The
+  references are checked once against the configuration the whole
+  document would leave, so one document can create an agent and bind a
+  device to it in the same breath, which no sequence of single writes
+  can: each of those is refused for the state it would leave on its own.
+  Applying is **additive** and never deletes, so a section or an entry
+  the document does not name is left alone; the one entry that takes
+  something away is `default_agent: null`, which is the explicit unset.
+  It is **idempotent**, so the same document twice reports every entry
+  `unchanged` and writes nothing, which is what makes an applied
+  document something to keep in a repository and re-run. And it is
+  **refused whole**: any mistake leaves the store exactly as it was, and
+  the refusal names every mistake at once in the sentences a single
+  write earns. A document may name at most 500 entries, refused before
+  anything is written. The command waits for the server's answer for as
+  long as the transaction takes, deliberately and with no timeout: an
+  apply validates the whole resulting configuration, whose size nothing
+  about the request bounds, and a client that gave up on a write the
+  server then committed would leave nobody able to say what is stored.
+  The API serves it at `POST /api/apply`, which the committed OpenAPI
+  document now carries.
+
+- **`vinga-server config export` prints the stored configuration as a
+  document `apply` takes** (#194), and `vinga-server config export
+  <kind> <identity>` prints one entity as the fragment `config set`
+  takes. This is the writable projection where `config show` is the
+  display one, which is the whole difference between them. **A stored
+  credential never travels in an export**, because a read never carries
+  one: an environment reference is a body value and is exported as
+  itself, and a credential stored in the database is named at the foot
+  of the document as the `vinga-server config set-secret` command that
+  enters it. The supported way to reproduce a deployment is therefore
+  two steps in this order, which the export's own header states: apply
+  the document, then run the set-secret commands it names. Nothing else
+  is needed, and an export applied back onto the store it came from
+  reports every entry unchanged.
+
+- **`vinga-server config set` accepts `key=value` arguments beside
+  `-f`** (#194). `config set provider llm claude type=anthropic
+  model=claude-sonnet-5` writes exactly what the equivalent YAML
+  fragment writes, through the same validation, the same request and the
+  same acknowledgement. A dotted key nests (`filler.enabled=true`), a
+  value reads as one YAML scalar (`0.7`, `true`, `null`, a quoted
+  string), and a value that reads as a list or a mapping is refused:
+  a structure belongs in a fragment, where it can be read. `-f` and the
+  pairs are alternatives and never both. **A credential is still never
+  an argument**, and every `set` help page now says so and why:
+  arguments land in shell history and in the process list, and
+  `config set-secret` reads a credential from stdin or from the variable
+  `--from-env` names.
+
 ### Removed
 
 - **The `random_number` builtin tool is gone** (#245). Every agent used
