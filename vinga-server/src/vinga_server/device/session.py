@@ -626,6 +626,21 @@ class DeviceSession:
         and from the raw capture: which events a session emits is this
         class's business, through the events object it owns, while the
         audio is the one thing recording needs codecs of its own for.
+
+        Building it is also the one step here that runs a media library,
+        and a library that cannot open a codec raises. That is released
+        on the spot rather than left to the close path, because the
+        close path releases the field, and the field is only assigned
+        once the construction has returned: a capture stranded at this
+        line would be an open file and an attached consumer that nothing
+        ever closes.
+
+        The session then carries on without a recording. Recording is
+        best-effort, and it is the promise the rest of this module keeps
+        about a capture too (a frame it cannot read is not a reason to
+        stop capturing); a household that cannot record is not a
+        household that cannot talk. Reported by class, for the reason
+        `_cleanly` gives about exception prose on a retained surface.
         """
         if self._captures is None or self._opened_at is None:
             return
@@ -633,9 +648,21 @@ class DeviceSession:
         if capture is None:
             return
         self._events.attach_capture(capture)
-        self._capture_audio = CaptureAudio(
-            capture, self.protocol_version, OUTPUT_AUDIO.sample_rate
-        )
+        try:
+            self._capture_audio = CaptureAudio(
+                capture, self.protocol_version, OUTPUT_AUDIO.sample_rate
+            )
+        except Exception as exc:  # noqa: BLE001 - a recording is best-effort
+            # Detached before closed, so a close that fails in its own
+            # right still leaves no consumer writing into a capture that
+            # is on its way out.
+            self._events.detach_capture()
+            capture.close()
+            logger.warning(
+                "session %s: recording could not start (%s)",
+                self.session_id,
+                type(exc).__name__,
+            )
 
     def _start_recording(self, manifest: dict[str, Any]) -> None:
         """Begin this session's row in the conversation store, when one

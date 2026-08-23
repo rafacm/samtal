@@ -253,6 +253,19 @@ def attached_taps(session: DeviceSession) -> list[Any]:
     return list(events_of(session)._taps)
 
 
+def attached_capture(session: DeviceSession) -> Any:
+    """The capture this session's events are still writing their
+    decision track into, or None.
+
+    The reading half of `attach_capture` and `detach_capture`, white-box
+    for the reason `attached_taps` gives about its own: nothing in the
+    server asks who is listening. A capture left attached is the same
+    leak in its other shape, an open file being written to by a session
+    that has stopped.
+    """
+    return events_of(session)._capture
+
+
 def stamp_with(session: DeviceSession, clock: Any) -> None:
     """Make this session's events read a clock the test wrote.
 

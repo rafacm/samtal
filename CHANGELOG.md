@@ -64,10 +64,12 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
-- **The device session is four modules instead of one** (#245). Purely
-  internal, with no behavior change: nothing a device sends or receives,
-  nothing a capture records, and nothing the logs say is different, and
-  the session's device-facing boundary is byte for byte the interface it
+- **The device session is four modules instead of one** (#245).
+  Internal, and with one deliberate behavior change, the capture-codec
+  failure above, which the split's own review round asked for. Beyond
+  it: nothing a device sends or receives, nothing a capture records, and
+  nothing the logs say is different, and the session's device-facing
+  boundary is byte for byte the interface it
   was. `device/session.py` used to carry three clusters that had nothing
   to do with each other beyond happening to belong to one connection,
   and each is its own module now. `device/pacing.py` owns the reply
@@ -218,6 +220,23 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   inventory that used to pin argument order is gone. The document moved
   in its argument rows and in that one paragraph; no template, field,
   token, syntax, grammar or note changed.
+
+### Fixed
+
+- **A capture whose codecs will not open no longer ends the
+  conversation** (#245). Starting a recording opens three codec objects
+  through a media library, and a library that cannot open one raises. It
+  used to take the session down with it, and a device would see its
+  conversation end with no explanation. It is now caught where it
+  happens: the half-started capture is released immediately, the session
+  goes on without a recording, and one warning line names the failure by
+  class (`session <id>: recording could not start (<ClassName>)`),
+  carrying nothing the library said. This is the same rule the capture
+  store already applied to a directory it cannot use, a conversation
+  being worth more than a recording of it, applied to the one step that
+  had been left out of it. **A deployment with capture enabled should
+  watch for that line**: it is the only thing that says a session that
+  ran fine was not recorded.
 
 ## 2026-08-22
 
