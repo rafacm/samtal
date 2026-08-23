@@ -69,8 +69,25 @@ and discoveries; no deviations says so explicitly.
    the same halves today's model-shaped columns carry); reading
    validates the body through the entity's model and reattaches
    nothing, since secrets already resolve through their own path.
-   `model_dump_json` with sorted keys and no extras beyond the
-   model's own, so a body diff in a debug session reads stably.
+   The dump is `model_dump_json(exclude_unset=True)`, and that
+   option is load-bearing, not stylistic: `McpServerConfig`'s
+   transport check refuses foreign fields PRESENT IN
+   `model_fields_set`, so a plain dump (which emits `url: null,
+   headers: {}` for a stdio entry) would make every stdio server
+   unreadable on the next load; `exclude_unset` preserves the
+   fields-set semantics and reproduces today's
+   written-before-the-column behavior for defaulted fields.
+   `exclude_none` is NOT used: it would drop an operator's
+   explicit null inside pass-through options. The forward-floor
+   consequence is stated for the record: a body carries what the
+   operator wrote and nothing they did not, so a later change to
+   a field's DEFAULT retroactively changes the meaning of bodies
+   that never wrote it, exactly as the absent column does today;
+   the body-parse fixtures pin both a sparse and a fully-written
+   body per kind so that consequence stays visible. Serialization
+   is pydantic's declaration order, which is stable and
+   reviewable (there is no sorted-keys option; see the review
+   round's finding 6).
 3. **Read validation refuses with the entity named, never body
    bytes.** A body that fails `model_validate_json` raises the
    store's existing error shape naming the table and identity and
