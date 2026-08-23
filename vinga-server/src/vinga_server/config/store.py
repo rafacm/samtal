@@ -21,10 +21,13 @@ small selects, the only readers are a booting server and a CLI
 invocation, and a second connection configuration would be a second
 thing to keep true for a contention these never produce.
 
-Write-time validation is the reference half only. Completeness (a
-runnable server's rules) belongs to boot, because enforcing it here
-would deadlock the natural creation order: providers, MCP servers,
-agents, devices, and default_agent last.
+Write-time validation is the reference half only, and it runs against
+`models.DomainConfig`, the seven domain sections without the file half
+around them. Completeness (a runnable server's rules) belongs to boot,
+which is what `models.Config` adds by subclassing that model: enforcing
+it here would deadlock the natural creation order (providers, MCP
+servers, agents, devices, and default_agent last), so the store
+deliberately validates against the half rather than the whole.
 """
 
 import math
@@ -34,7 +37,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 from cryptography.fernet import MultiFernet
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import Connection, Engine, Row, Table, delete, insert, select, update
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.sql.elements import ColumnElement
@@ -49,21 +52,19 @@ from vinga_server.config.loader import (
     UnknownEntityError,
 )
 from vinga_server.config.models import (
-    DOMAIN_DESCRIPTIONS,
     PROMPT_FRAGMENT_NAME_RULE,
     PROVIDER_STAGES,
     UNRECOGNIZED_KEY_REFUSED,
     AgentConfig,
     AgentDefaults,
+    DomainConfig,
     FieldProblem,
     FieldProblemsError,
     McpServerConfig,
-    NonBlankStr,
     PromptFragmentConfig,
     ProviderConfig,
     ProvidersConfig,
     check_mcp_entry_names,
-    check_prompt_fragment_names,
     check_references,
     is_env_name,
     is_secret_option,
@@ -157,59 +158,6 @@ _NON_STRING_KEY = (
     "with a string, so such a key would silently become one and a reader would be "
     "given a key nobody wrote"
 )
-
-
-class DomainConfig(BaseModel):
-    """The domain half of a configuration, as the database holds it.
-
-    The same entity models the YAML file is validated through, in the
-    same shape, so nothing about a loaded snapshot is a second dialect
-    of the configuration. What it does not hold is secrets: those ride
-    beside it in a SecretStore.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    providers: ProvidersConfig = Field(
-        default_factory=ProvidersConfig, description=DOMAIN_DESCRIPTIONS["providers"]
-    )
-    mcp_servers: dict[NonBlankStr, McpServerConfig] = Field(
-        default_factory=dict, description=DOMAIN_DESCRIPTIONS["mcp_servers"]
-    )
-    prompt_fragments: dict[NonBlankStr, PromptFragmentConfig] = Field(
-        default_factory=dict, description=DOMAIN_DESCRIPTIONS["prompt_fragments"]
-    )
-    agent_defaults: AgentDefaults = Field(
-        default_factory=AgentDefaults, description=DOMAIN_DESCRIPTIONS["agent_defaults"]
-    )
-    agents: dict[NonBlankStr, AgentConfig] = Field(
-        default_factory=dict, description=DOMAIN_DESCRIPTIONS["agents"]
-    )
-    devices: dict[str, list[NonBlankStr]] = Field(
-        default_factory=dict, description=DOMAIN_DESCRIPTIONS["devices"]
-    )
-    default_agent: NonBlankStr | None = Field(
-        default=None, description=DOMAIN_DESCRIPTIONS["default_agent"]
-    )
-
-    @field_validator("mcp_servers")
-    @classmethod
-    def _check_entry_names(
-        cls, value: dict[str, McpServerConfig]
-    ) -> dict[str, McpServerConfig]:
-        return check_mcp_entry_names(value)
-
-    @field_validator("prompt_fragments")
-    @classmethod
-    def _check_fragment_names(
-        cls, value: dict[str, PromptFragmentConfig]
-    ) -> dict[str, PromptFragmentConfig]:
-        return check_prompt_fragment_names(value)
-
-    @field_validator("devices", mode="before")
-    @classmethod
-    def _normalize_device_bindings(cls, value: object) -> object:
-        return normalize_device_bindings(value)
 
 
 @dataclass(frozen=True)

@@ -2001,11 +2001,11 @@ def normalize_device_bindings(value: object) -> object:
     return normalized
 
 
-# What each domain section is, written once because two models carry
-# these fields: the composed Config the server boots from, and the
-# DomainConfig the repository loads a database into. The generated
-# reference and the CLI help both read them from whichever model they
-# render, so a single source is what keeps the two renderings equal.
+# What each domain section is, read by every rendering of the domain
+# half: the generated reference, the JSON Schema a client reads before
+# writing a fragment, and the CLI help. Written here rather than on the
+# model below so that `Setting`, which describes a domain-level field
+# that is not an entity, reads the same prose from the same place.
 DOMAIN_DESCRIPTIONS: dict[str, str] = {
     "providers": (
         "The provider entries agents reference, one group per pipeline stage "
@@ -2061,14 +2061,97 @@ DOMAIN_DESCRIPTIONS: dict[str, str] = {
 DOMAIN_KEYS: tuple[str, ...] = tuple(DOMAIN_DESCRIPTIONS)
 
 
+# The domain half, declared once and subclassed by `Config` below,
+# which adds the file half and the boot-time whole-snapshot validator.
+# The repository validates a write against this class and never against
+# that one, which is why the two are related by inheritance rather than
+# by a second copy of these seven fields: `check_completeness` is a rule
+# about a runnable server, and running it at write time would refuse the
+# first `set agent` into an empty database.
+#
+# The docstring below is a committed byte. `config schema` renders this
+# model's JSON Schema, where a pydantic model's docstring is the
+# schema's `description`, so what is said about the class to a reader of
+# the code is said here in a comment and what is said to a reader of the
+# document is said there.
+#
+# Nothing here may become an after-validator, now or later.
+# `store._read_domain` assembles the keyed sections through this model
+# and then assigns `agent_defaults` and `default_agent` onto the
+# instance it got back, so a model validator would run before those two
+# rows are in place and judge a half-read snapshot that never existed.
+# The rules about a whole domain half are `check_references` and
+# `check_completeness` below, run by the store at write time and by
+# `Config` at boot.
+class DomainConfig(BaseModel):
+    """The domain half of a configuration, as the database holds it.
+
+    The same entity models the YAML file is validated through, in the
+    same shape, so nothing about a loaded snapshot is a second dialect
+    of the configuration. What it does not hold is secrets: those ride
+    beside it in a SecretStore.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    providers: ProvidersConfig = Field(
+        default_factory=ProvidersConfig, description=DOMAIN_DESCRIPTIONS["providers"]
+    )
+    # Named like providers, and referenced by agents the same way. The
+    # entry name becomes the prefix its tools are offered under.
+    mcp_servers: dict[NonBlankStr, McpServerConfig] = Field(
+        default_factory=dict, description=DOMAIN_DESCRIPTIONS["mcp_servers"]
+    )
+    # The shared prompt text agents compose their own with, keyed by the
+    # name a layer's prompt_includes references.
+    prompt_fragments: dict[NonBlankStr, PromptFragmentConfig] = Field(
+        default_factory=dict, description=DOMAIN_DESCRIPTIONS["prompt_fragments"]
+    )
+    agent_defaults: AgentDefaults = Field(
+        default_factory=AgentDefaults, description=DOMAIN_DESCRIPTIONS["agent_defaults"]
+    )
+    agents: dict[NonBlankStr, AgentConfig] = Field(
+        default_factory=dict, description=DOMAIN_DESCRIPTIONS["agents"]
+    )
+    # One device may be bound to several agents; the value is a list of
+    # agent names, the first of them the one a conversation starts on.
+    devices: dict[str, list[NonBlankStr]] = Field(
+        default_factory=dict, description=DOMAIN_DESCRIPTIONS["devices"]
+    )
+    default_agent: NonBlankStr | None = Field(
+        default=None, description=DOMAIN_DESCRIPTIONS["default_agent"]
+    )
+
+    @field_validator("mcp_servers")
+    @classmethod
+    def _check_entry_names(
+        cls, value: dict[str, McpServerConfig]
+    ) -> dict[str, McpServerConfig]:
+        return check_mcp_entry_names(value)
+
+    @field_validator("prompt_fragments")
+    @classmethod
+    def _check_fragment_names(
+        cls, value: dict[str, PromptFragmentConfig]
+    ) -> dict[str, PromptFragmentConfig]:
+        return check_prompt_fragment_names(value)
+
+    @field_validator("devices", mode="before")
+    @classmethod
+    def _normalize_device_bindings(cls, value: object) -> object:
+        return normalize_device_bindings(value)
+
+
 class DomainSnapshot(Protocol):
     """The domain half of a configuration, whatever is holding it.
 
-    The checks below run against the composed Config at boot and against
-    the repository's own model at write time, so they are written
-    against the attributes both of those have rather than against either
-    class. Neither check needs the server half, which is why a snapshot
-    is enough.
+    The checks below are written against the attributes a domain half
+    has rather than against the class above, because what they judge is
+    a set of sections and their references. The store passes a
+    `DomainConfig`, boot passes the `Config` that subclasses it, and the
+    suites that exercise the rules themselves pass a stand-in holding
+    the same seven sections, which is the interface this states. Neither
+    check needs the server half, which is why a snapshot is enough.
     """
 
     providers: ProvidersConfig
@@ -2241,7 +2324,7 @@ class FileConfig(BaseSettings):
     memory: MemoryConfig | None = None
 
 
-class Config(BaseModel):
+class Config(DomainConfig):
     """The whole configuration one server boots on: the file half plus
     the domain half the database holds.
 
@@ -2250,58 +2333,19 @@ class Config(BaseModel):
     methods and its boot-time validator so that everything downstream of
     it reads the configuration exactly as it did when one file held all
     of it.
+
+    A subclass rather than a second declaration of the domain half: the
+    seven sections and their three field validators are `DomainConfig`'s,
+    and what a whole configuration adds is `server`, `memory`, the
+    accessors, and the model validator that judges the snapshot at boot.
+    A subclass declares its own fields after the ones it inherits, so the
+    domain sections come first here and the file half last, which no
+    caller reads: this model is composed by keyword and never rendered,
+    and the reference and the JSON Schema are `DomainConfig`'s.
     """
 
-    model_config = ConfigDict(extra="forbid")
-
     server: ServerConfig = Field(default_factory=ServerConfig)
-    providers: ProvidersConfig = Field(
-        default_factory=ProvidersConfig, description=DOMAIN_DESCRIPTIONS["providers"]
-    )
-    # Named like providers, and referenced by agents the same way. The
-    # entry name becomes the prefix its tools are offered under.
-    mcp_servers: dict[NonBlankStr, McpServerConfig] = Field(
-        default_factory=dict, description=DOMAIN_DESCRIPTIONS["mcp_servers"]
-    )
-    # The shared prompt text agents compose their own with, keyed by the
-    # name a layer's prompt_includes references.
-    prompt_fragments: dict[NonBlankStr, PromptFragmentConfig] = Field(
-        default_factory=dict, description=DOMAIN_DESCRIPTIONS["prompt_fragments"]
-    )
     memory: MemoryConfig | None = None
-    agent_defaults: AgentDefaults = Field(
-        default_factory=AgentDefaults, description=DOMAIN_DESCRIPTIONS["agent_defaults"]
-    )
-    agents: dict[NonBlankStr, AgentConfig] = Field(
-        default_factory=dict, description=DOMAIN_DESCRIPTIONS["agents"]
-    )
-    # One device may be bound to several agents; the value is a list of
-    # agent names, the first of them the one a conversation starts on.
-    devices: dict[str, list[NonBlankStr]] = Field(
-        default_factory=dict, description=DOMAIN_DESCRIPTIONS["devices"]
-    )
-    default_agent: NonBlankStr | None = Field(
-        default=None, description=DOMAIN_DESCRIPTIONS["default_agent"]
-    )
-
-    @field_validator("mcp_servers")
-    @classmethod
-    def _check_entry_names(
-        cls, value: dict[str, McpServerConfig]
-    ) -> dict[str, McpServerConfig]:
-        return check_mcp_entry_names(value)
-
-    @field_validator("prompt_fragments")
-    @classmethod
-    def _check_fragment_names(
-        cls, value: dict[str, PromptFragmentConfig]
-    ) -> dict[str, PromptFragmentConfig]:
-        return check_prompt_fragment_names(value)
-
-    @field_validator("devices", mode="before")
-    @classmethod
-    def _normalize_device_bindings(cls, value: object) -> object:
-        return normalize_device_bindings(value)
 
     @model_validator(mode="after")
     def _check_domain(self) -> "Config":

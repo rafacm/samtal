@@ -27,6 +27,10 @@ varied between two runs would turn the lane red on an unrelated change.
 Read-only, and deliberately so: nothing in this module opens the
 database, reads a configuration file, or needs an encryption key. The
 commands in front of it are usable on a machine that has none of those.
+The imports say it now rather than the prose alone: the models, the
+registry and the standard library. The whole-domain model used to be
+declared in the repository, so rendering a document imported SQLAlchemy
+and cryptography to reach one class.
 """
 
 import json
@@ -48,8 +52,7 @@ from vinga_server.config.entities import (
     Setting,
 )
 from vinga_server.config.entities import ENTITIES as COMMANDED
-from vinga_server.config.models import DOMAIN_DESCRIPTIONS
-from vinga_server.config.store import DomainConfig
+from vinga_server.config.models import DOMAIN_DESCRIPTIONS, DomainConfig
 
 # Every shape this document has a section for, in the order it documents
 # them: the five entity kinds a command writes, then the two that are
