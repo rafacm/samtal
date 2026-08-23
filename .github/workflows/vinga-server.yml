@@ -279,6 +279,10 @@ jobs:
               table: {column["name"] for column in inspector.get_columns(table)}
               for table in tables
           }
+          with engine.connect() as connection:
+              domain_revisions = {
+                  row[0] for row in connection.execute(text("select * from alembic_version"))
+              }
           engine.dispose()
 
           expected = {
@@ -293,18 +297,28 @@ jobs:
           missing = expected - tables
           if missing:
               sys.exit("the wheel's migrations did not create: " + ", ".join(sorted(missing)))
-          # The columns later migrations add, so a wheel that carries
-          # only the baseline script fails here rather than at the first
-          # write on a deployment.
-          added = {
-              "mcp_servers": {"instructions", "use_server_instructions", "inject_prompts"},
-              "agent_defaults": {"prompt_includes"},
-              "agents": {"prompt_includes"},
+          # The body column on each entity table, which since #243 is
+          # where every non-key field of that entity lives. A wheel whose
+          # migration built the pre-reshape shape would pass the table
+          # check above and fail at the first read on a deployment. The
+          # same set `tests/unit/test_db_open.py` holds in
+          # EXPECTED_COLUMNS, and the two move together.
+          bodies = {
+              "providers",
+              "mcp_servers",
+              "prompt_fragments",
+              "agent_defaults",
+              "agents",
           }
-          for table, names in added.items():
-              absent = names - columns[table]
-              if absent:
-                  sys.exit(f"the wheel's migrations did not add {table}: " + ", ".join(sorted(absent)))
+          for table in sorted(bodies):
+              if "body" not in columns[table]:
+                  sys.exit(f"the wheel's migrations gave {table} no body column")
+          # And the head of the packaged domain chain, which is one
+          # revision: the chain was squashed to a single baseline, and a
+          # wheel carrying anything else is one whose databases this
+          # commit's code cannot read.
+          if domain_revisions != {"2001_json_body_baseline"}:
+              sys.exit(f"the wheel's domain chain is at {sorted(domain_revisions)}, not ['2001_json_body_baseline']")
           print(f"migrated a fresh database from {installed.parent}")
 
           # The conversation store, from the same installed artifact.

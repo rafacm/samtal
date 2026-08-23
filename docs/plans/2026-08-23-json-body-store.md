@@ -289,7 +289,7 @@ refuses).
 
 ## Milestones
 
-- [ ] **M1: reshape, squash, and re-floor in one atomic change.**
+- [x] **[M1: reshape, squash, and re-floor in one atomic change.](2026-08-23-json-body-store-implementation.md#m1-reshape-squash-and-re-floor-in-one-atomic-change)**
   (PR TBD) One milestone because two storage layers cannot
   coexist releasably and a half-squashed chain is exactly the
   state the ADR forbids leaving on `main`. The biggest single PR

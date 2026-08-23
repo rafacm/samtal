@@ -9,6 +9,24 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Removed
 
+- **Domain configuration databases written before this build are not
+  upgradeable** (#243). Every entity is now stored as one validated JSON
+  body, which no in-place migration can produce, so the domain migration
+  chain (revisions `0001` to `0004`) is deleted and replaced by a single
+  baseline, `2001_json_body_baseline`. **A deployment carrying an older
+  database must reset its database directory and re-seed the
+  configuration, in the same step as the image bump and never after
+  it.** The revision id is one nothing was ever stamped with, so such a
+  database is never taken for current: opening it refuses with a
+  sentence saying it predates the storage reshape and what to do about
+  it. Encrypted secrets come back from the environment through
+  `vinga-server config set-secret`, as they were written the first time.
+  The conversations database is untouched, keeps its chain and needs no
+  reset. The compatibility decision, what it retracts, and what "tested"
+  means for the reset path are recorded in the 2026-08-23 addendum to
+  `docs/adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md`.
+  The upgrade-from-`0001` tests and their fixtures go with the chain.
+
 - **The event catalog is pinned by one committed artifact instead of
   three** (#241). Two of them are gone: the golden inventory
   (`tests/unit/test_event_golden.py` and
@@ -31,6 +49,29 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   moved: nothing about what this server emits, or when, is different.
 
 ### Changed
+
+- **A domain entity is one JSON body beside its keys, not a column per
+  field** (#243). `providers`, `mcp_servers`, `prompt_fragments`,
+  `agents` and `agent_defaults` each keep the columns that carry
+  identity, keep their encrypted `secrets` column where they have one,
+  and hold everything else in a `body` column: the entity's pydantic
+  model dumped to JSON and validated back through the same model on
+  read. `devices` and `domain_settings` are unchanged. Nothing an
+  operator writes or reads is different, and no configuration key,
+  command, route or field moved. What moved is where a field lives:
+  adding one to an entity is now a change to its model, to its example
+  fragment under `vinga-server/examples/`, and to the two generated
+  reference documents, each rebuilt by its own command. There is no
+  column to add, no migration to write and no mapper arm to update; the
+  five hand-written pairs that translated rows to models are one generic
+  pair. A field that later needs SQL-side filtering earns a column back
+  through `alembic revision --autogenerate`, which is now runnable:
+  `python -m vinga_server.db.migrations.autogen "<message>"` opens a
+  scratch database at head and writes a candidate migration for review.
+  Because the stored form is the model's own dump, the models are the
+  compatibility surface, and real bodies are committed under
+  `vinga-server/tests/unit/data/domain-bodies/` so that a model change
+  which cannot read one fails CI.
 
 - **The CI unit lane runs in parallel** (#254). The workflow's unit step
   gained ` -n auto --dist loadfile` and the dev group gained
