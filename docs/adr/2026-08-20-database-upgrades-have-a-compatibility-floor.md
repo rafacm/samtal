@@ -171,9 +171,11 @@ With no columns and no per-entity mappers, what a stored row means
 is what its pydantic model says, so the promise this record now
 carries forward is that every new model version parses every stored
 body. That is pinned by committed bodies under
-`vinga-server/tests/unit/data/domain-bodies/`, one sparse and one
-fully written per kind and both MCP transports, which the body-parse
-family validates through today's models on every run. A model change
+`vinga-server/tests/unit/data/domain-bodies/`, one body per entity
+kind at each end a kind has (a sparse one leaning on its defaults and
+a written-out one that does not, which for a kind with no optional
+field is the same single body) and both MCP transports, which the
+body-parse family validates through today's models on every run. A model change
 that cannot read one fails CI until either the model tolerates it or
 the fixture is deliberately updated with a compatibility decision
 recorded beside the change. That is the floor a beta will stand on,
