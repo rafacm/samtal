@@ -221,13 +221,19 @@ in M2's diff outside this table is a review flag.
   `tts_start_due()` (the once-per-reply latch `begin_speaking`
   reads), `first_frame(now)` (stamps and answers whether this frame
   is the reply's first, so the session emits `SpeakingStarted` and
-  the pacer never sees an event or an agent name), and
-  `async delay_for_next(now)` folded into
-  `async def gate(self)` (the sleep to cadence plus the resume
-  wait, called once per packet by the session's send loop). The
-  one sentence: the session stops knowing how a reply's cadence,
-  pause bookkeeping and per-reply latches relate; it feeds PCM in,
-  sends what comes out, and asks one gate before each frame.
+  the pacer never sees an event or an agent name), and one complete
+  pacing transaction per packet:
+  `async def transmit(self, packet, deliver)` sleeps to cadence,
+  waits out a pause, awaits `deliver(packet)` (the session's
+  closure that sends the frame and feeds the capture audio), and
+  advances the frame count only after `deliver` returns, so a send
+  that raises leaves the count exactly as today's post-send
+  increment does. The pinned order inside one transaction:
+  first-frame stamp, cadence sleep, pause wait, socket send,
+  capture, count advancement. The one sentence: the session stops
+  knowing how a reply's cadence, pause bookkeeping and per-reply
+  latches relate; it feeds PCM in and hands each packet's delivery
+  to one transaction.
 - **`device/capture_tap.py`, class `CaptureTap`.** Built by
   `_start_capture` only when a capture opens; owns the
   `SessionCapture`, all three codec objects and the protocol
@@ -413,6 +419,12 @@ with a resolution note here.
    The count advances only after send and capture succeed; a
    pre-send gate makes the pacer advance blind or demands an
    unnamed second call.
+
+   *Resolution* (this commit): `gate()` is replaced by
+   `transmit(packet, deliver)`, one transaction owning the pinned
+   order (first-frame stamp, cadence sleep, pause wait, send,
+   capture, count advancement), the count moving only after
+   `deliver` returns.
 
 4. **P2: the idle watchdog's loop needs live inputs the interface
    omitted.** `_watch_for_idle` reevaluates realtime mode and
