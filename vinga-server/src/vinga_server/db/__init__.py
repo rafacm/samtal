@@ -30,12 +30,32 @@ from urllib.parse import quote
 
 from alembic import command
 from alembic.config import Config as AlembicConfig
+from alembic.util.exc import CommandError
 from sqlalchemy import URL, Engine, create_engine, event, text
 from sqlalchemy.exc import OperationalError
 
 from vinga_server.config.loader import ConfigError, DatabaseBusyError, StorageError
 
 DATABASE_FILENAME = "vinga.db"
+
+# What a database stamped at a revision this build does not carry is
+# told. It is the operator-facing whole of "pre-reshape domain
+# databases are unsupported": the domain chain was squashed to one
+# baseline under a revision id nothing was ever stamped with (#243), so
+# a database from the old chain reaches here rather than being taken
+# for current and failing later on a column that is gone.
+#
+# The next step is the only thing worth saying, because there is no
+# other: reset the volume and re-seed, which is what the ADR addendum
+# records and what the deploy runs.
+_UNSUPPORTED_REVISION = (
+    "the database at {path} is stamped at a revision this build does not carry, "
+    "which is what a domain database written before the storage reshape looks "
+    "like: its migration chain was replaced by a single baseline and cannot be "
+    "upgraded in place. Reset the database directory and re-seed the "
+    "configuration; docs/adr/2026-08-20-database-upgrades-have-a-compatibility-"
+    "floor.md records the decision and what it costs"
+)
 
 # How long a connection waits for another one's write lock before it
 # gives up. A CLI write while the server holds the file open is the
@@ -212,7 +232,21 @@ def migration_failure(exc: Exception, path: Path) -> ConfigError:
     "database is locked" and "unable to open database file" are what
     tell an operator which problem this is. Never SQLAlchemy's own text,
     which wraps the line in the statement and the parameters bound to
-    it."""
+    it.
+
+    One failure is not the driver's at all and is answered on its own.
+    Alembic raises its own `CommandError` when the revision the database
+    is stamped at is not in the chain this build ships, and that
+    exception carries no `orig`, so the sentence above would have
+    reported the class name and nothing else. Told from the rest by the
+    type rather than by Alembic's wording: every `CommandError` a
+    migration to head can raise is the chain and the database
+    disagreeing, and the reset sentence is the answer to all of them.
+    The stored revision itself is not quoted back, being a value in a
+    file nothing here validates.
+    """
+    if isinstance(exc, CommandError):
+        return StorageError(_UNSUPPORTED_REVISION.format(path=path))
     detail = str(getattr(exc, "orig", "")) or type(exc).__name__
     problem = (
         f"cannot migrate the database at {path}: {detail}; "
