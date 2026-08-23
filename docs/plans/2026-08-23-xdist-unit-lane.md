@@ -94,21 +94,29 @@ and discoveries; no deviations says so explicitly.
    controller's section prints and the run fails, the repaired
    behavior); both transcripts recorded in the implementation
    doc.
-4. **The flake is hunted within a bounded budget, then explained.**
-   `test_secret_like_option_names_are_rejected[password-password]`
-   failed once in a serial full run on 2026-08-22 (#253's branch)
-   and has passed in every run since, including the spike's four
-   reshuffled parallel runs. The test body is a pure-function
-   refusal check with no visible order dependence. The hunt: read
-   the test's imports and the conftest's pydantic default rewrite
-   for shared mutable state; run the unit lane thrice under
-   `-n 4 --dist loadfile` and once serially with `-p
-   no:cacheprovider`; if it does not reproduce, the issue's
-   "fixed or explained" resolves to EXPLAINED: recorded in the
-   implementation doc as one unreproduced failure with the reads
-   that found no mechanism, and the week-of-runs watch is what
-   would catch a recurrence. A reproduction, if one appears,
-   stops the milestone until fixed.
+4. **The flake is hunted from its recorded context, then, if
+   unreproduced, ACCEPTED.** The record
+   (`2026-08-22-typed-event-enums-implementation.md`) says the
+   failure happened in a PRE-COMMIT full run on an in-flux
+   mid-milestone tree, alongside two expected golden failures,
+   and the failure text was not captured. An in-flux tree is the
+   repository's own documented way for a run to lie about what it
+   executed (the stale-bytecode trap in AGENTS.md), so the
+   LEADING hypothesis is that the run executed a mixture, not
+   that the test is order-dependent; what would confirm it is
+   reproducing the failure only under a mid-edit tree, and what
+   rules order out for xdist purposes is that loadfile preserves
+   intra-file order exactly, so this switch cannot introduce the
+   ordering the serial run already had. The hunt: read the test's
+   imports and the conftest's pydantic default rewrite for shared
+   mutable state (bounded, one pass); no rerun ritual is offered
+   as evidence, since three loadfile runs explore less order
+   space than the run that failed. If nothing reproduces, the
+   issue's "fixed or explained" resolves to ACCEPTED: one
+   unreproduced failure, leading hypothesis stale bytecode on an
+   in-flux tree, no mechanism found in the reads, the
+   week-of-runs watch as the net. A reproduction stops the
+   milestone until fixed.
 5. **The port audit is by what BINDS, not by what is spelled.**
    `grep -rnE "\.bind\(|ThreadingHTTPServer\(|socket\.socket\(|uvicorn" tests/unit tests/support tests/tools`
    from `vinga-server/`, every hit dispositioned one of three
