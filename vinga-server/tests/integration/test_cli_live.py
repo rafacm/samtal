@@ -46,6 +46,7 @@ skips rather than lies when the module was not run whole.
 import contextlib
 import io
 import json
+import os
 import socket
 import sys
 import threading
@@ -64,8 +65,9 @@ from vinga_server.app import create_app
 from vinga_server.config import cli
 from vinga_server.config.boot import load_boot_config
 from vinga_server.config.models import API_MOUNT_PATH
-from vinga_server.config.secrets import MASK, MASTER_KEY_ENV, generate_key
-from vinga_server.config.store import APPLY_LIMIT
+from vinga_server.config.secrets import MASK, MASTER_KEY_ENV, generate_key, load_keys
+from vinga_server.config.store import APPLY_LIMIT, ConfigStore
+from vinga_server.db import DATABASE_FILENAME, open_database
 from vinga_server.ota import OTA_PATH
 
 # The one variable a fileless boot needs: where the database goes. The
@@ -1080,3 +1082,80 @@ def test_an_over_limit_document_is_refused_with_the_store_unmutated(
 
     assert run("show", "--api-url", isolated.api_url) == 0
     assert document(capsys.readouterr().out)["agents"] == {}
+
+
+def test_the_lane_s_server_booted_from_the_environment_alone(
+    deployed: Live, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """No configuration file anywhere, which is decision 9's claim about
+    the quick start.
+
+    The server every case above talked to was composed by
+    `load_boot_config()` with no path and no `VINGA_CONFIG`, so its file
+    half came from the settings machinery reading `VINGA_SERVER__*` and
+    the packaged defaults, and the one variable that was set is where
+    the database goes. Three things say that worked: the variable was
+    not left lying in this process's environment for something else to
+    have supplied, the server answers on its own port, and the database
+    in the directory the variable named is the one holding what this
+    lane wrote through the API.
+    """
+    assert CONFIG_ENV not in os.environ
+
+    with urllib.request.urlopen(f"{deployed.origin}/healthz", timeout=10) as response:
+        assert response.status == 200
+
+    assert (deployed.directory / DATABASE_FILENAME).is_file()
+    engine = open_database(deployed.directory)
+    try:
+        stored = ConfigStore(engine, load_keys()).load()
+    finally:
+        engine.dispose()
+    assert "sam" in stored.domain.agents
+
+    # And the CLI, which resolved this server's address from the
+    # environment too, is reading the same store.
+    assert run("show", "agent", "sam") == 0
+    assert document(capsys.readouterr().out)["prompt"] == stored.domain.agents["sam"].prompt
+
+
+def defined_here() -> set[str]:
+    """Every test this module defines, by name."""
+    return {name for name in globals() if name.startswith("test_")}
+
+
+def test_the_lane_drove_every_command_of_the_registration_table(
+    request: pytest.FixtureRequest,
+) -> None:
+    """The completeness claim, and the reason a command cannot skip this
+    lane quietly.
+
+    The inventory is `cli.COMMANDS`, which is the grammar itself rather
+    than a description of it: a command exists exactly when it has a row
+    there. What is held against it is what actually ran and succeeded,
+    recorded by `run` off each command line, so this cannot be satisfied
+    by adding a name to a list.
+
+    Last in the file because that is the order the tests above ran in,
+    and skipped rather than failed when the module was not run whole: a
+    `-k` selection has driven only what it selected, and failing for
+    that would train a reader to ignore this.
+    """
+    here = Path(__file__)
+    selected = {
+        getattr(item, "originalname", None) or item.name
+        for item in request.session.items
+        if Path(str(item.path)) == here
+    }
+    if defined_here() - selected:
+        pytest.skip("only part of the lane was selected, so only part of it was driven")
+
+    missing = sorted(" ".join(row.words) for row in cli.COMMANDS if row.words not in DRIVEN)
+    assert not missing, (
+        "these commands are registered in cli.COMMANDS and no case in this lane ran "
+        f"them successfully over a real connection: {missing}"
+    )
+
+    # And every group word was reached through one of them, which is the
+    # other half of the tree the table describes.
+    assert set(cli.GROUPS) <= {words[0] for words in DRIVEN}
