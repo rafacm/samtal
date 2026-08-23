@@ -1,0 +1,9 @@
+{
+  "llm": "claude",
+  "asr": "whisper",
+  "tts": "voice",
+  "vad": "silero",
+  "mcp": ["home"],
+  "filler": {"enabled": false, "delay_ms": 1800.0, "phrases": []},
+  "prompt_includes": ["household"]
+}
