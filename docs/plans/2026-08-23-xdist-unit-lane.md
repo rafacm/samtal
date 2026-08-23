@@ -49,20 +49,29 @@ and discoveries; no deviations says so explicitly.
    (the 81-driver capture, now ~18s) are paid once per file by
    construction; the spike showed default-dist no slower TODAY,
    but loadfile is the principled choice and costs nothing.
-3. **The refusal ledger's behavior under workers is verified, not
-   assumed.** #239's ledger arms from `pytest_configure`, which
-   runs in every xdist worker; the per-test delta check runs
-   in-worker and fails the owning test, which the spike exercised
-   green. What the spike did not exercise: the RESIDUAL path (a
-   refusal attributed to no test) under workers, where
-   `pytest_terminal_summary` and `session.exitstatus` live in the
-   worker and the controller aggregates worker exit codes. The
-   milestone plants a residual refusal in a scratch run under
-   `-n 4` and records what the operator actually sees, amending
-   the ledger's summary hook if the signal is swallowed (a
-   worker's nonzero exit fails the run either way; the question is
-   the legibility of WHY, and the answer lands in the ledger's
-   comment).
+3. **The refusal ledger's residual path is REPAIRED for workers,
+   not merely verified.** The per-test delta check runs in-worker
+   and fails the owning test, which the spike exercised green. The
+   residual path (a refusal attributed to no test) is expected to
+   be silently DISABLED under xdist, by mechanism: the stash is
+   worker-local, xdist unregisters the worker's terminal reporter,
+   and the controller derives the run's exit status from test
+   reports, so none of the three process-local pieces reaches the
+   operator and a residual refusal disappears entirely. The repair
+   ships in this milestone as code: the worker side writes the
+   residual descriptions into `config.workeroutput` from
+   `pytest_sessionfinish`; the controller side collects them in
+   `pytest_testnodedown`, prints them from its own
+   `pytest_terminal_summary`, and fails the run there. Serial
+   behavior is unchanged (the workeroutput path is absent and the
+   existing hooks stand). The proof is a planted residual, and the
+   plant is named so the experiment is reproducible: a scratch
+   session-scoped fixture whose TEARDOWN emits a variant the
+   schema refuses, run once serially (the existing section prints
+   and the run fails, today's behavior) and once under `-n 4` (the
+   controller's section prints and the run fails, the repaired
+   behavior); both transcripts recorded in the implementation
+   doc.
 4. **The flake is hunted within a bounded budget, then explained.**
    `test_secret_like_option_names_are_rejected[password-password]`
    failed once in a serial full run on 2026-08-22 (#253's branch)
