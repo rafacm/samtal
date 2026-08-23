@@ -603,6 +603,62 @@ def test_version_2_framing_round_trips() -> None:
     assert rms(audio) > 1000
 
 
+# A declared payload size no frame would carry and no length here is,
+# and an actual payload length chosen the same way. Both are bytes a
+# peer wrote, and the second is only the first restated by whoever
+# compared them, which is why both are hunted below.
+DECLARED_SENTINEL = 987654321
+CARRIED_SENTINEL = 65521
+
+
+def test_a_malformed_binary_frame_is_dropped_without_quoting_its_header(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The binary sibling of the malformed-abort case above, and the
+    same rule: a version 2 header is twenty bytes the far side wrote,
+    so the refusal it causes may name the category and nothing that
+    arrived. The line reporting the drop is kept at warning level, which
+    is a retained surface (`docs/architecture/observability-surfaces.md`).
+
+    The frame announces one payload size and carries another, which is
+    the one refusal that used to render both numbers. The session drops
+    it, counts it, and keeps answering, so the next utterance is
+    transcribed exactly as if nothing had arrived in between."""
+    lying = (
+        (2).to_bytes(2, "big")
+        + framing.PAYLOAD_OPUS.to_bytes(2, "big")
+        + (0).to_bytes(4, "big")
+        + (0).to_bytes(4, "big")
+        + DECLARED_SENTINEL.to_bytes(4, "big")
+    ) + bytes(CARRIED_SENTINEL)
+
+    with caplog.at_level("INFO"):
+        with TestClient(create_app(config_with_agent(asr_text="{ms}"))) as client:
+            with connect(client, version=2) as websocket:
+                shake_hands(websocket, version=2)
+                websocket.send_text(
+                    json.dumps({"type": "listen", "state": "start", "mode": "manual"})
+                )
+                websocket.send_bytes(lying)
+                send_pcm(websocket, speech_pcm(240), OpusEncoder(), version=2)
+                websocket.send_text(json.dumps({"type": "listen", "state": "stop"}))
+                texts, _ = collect_reply(websocket, version=2)
+
+    # The frame contributed no audio and the session carried on.
+    assert 180 <= heard_ms(texts) <= 300
+    written = both_formats(caplog)
+    # The whole of what the line says, read from the module that raises
+    # it rather than spelled again here.
+    dropped = [
+        record.getMessage()
+        for record in caplog.records
+        if "dropped binary frame" in record.getMessage()
+    ]
+    assert [line.split(": ", 2)[2] for line in dropped] == [framing.V2_SIZE_MISMATCH]
+    assert str(DECLARED_SENTINEL) not in written
+    assert str(CARRIED_SENTINEL) not in written
+
+
 def test_frames_sent_while_not_listening_are_dropped() -> None:
     with TestClient(create_app(config_with_agent(asr_text="{ms}"))) as client:
         with connect(client) as websocket:

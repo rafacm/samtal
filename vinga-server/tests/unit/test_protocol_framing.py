@@ -10,6 +10,11 @@ import pytest
 from vinga_server.protocol.framing import (
     PAYLOAD_JSON,
     PAYLOAD_OPUS,
+    SHORT_V2_FRAME,
+    SHORT_V3_FRAME,
+    UNSUPPORTED_VERSION,
+    V2_SIZE_MISMATCH,
+    V3_SIZE_MISMATCH,
     Frame,
     FramingError,
     unwrap,
@@ -17,6 +22,11 @@ from vinga_server.protocol.framing import (
 )
 
 OPUS_PAYLOAD = b"\xfc\xff\xfeopus-packet"
+
+# A payload size no real frame would announce and no length in this
+# suite happens to be, so finding it in a rendered message or a log
+# record can only mean the header's own bytes were quoted back.
+DECLARED_SENTINEL = 987654321
 
 
 def test_version_1_is_the_bare_payload_both_ways() -> None:
@@ -76,22 +86,60 @@ def test_json_payload_type_survives_the_round_trip() -> None:
     assert frame.payload_type == PAYLOAD_JSON
 
 
-@pytest.mark.parametrize("version", [2, 3])
-def test_truncated_headers_are_rejected(version: int) -> None:
-    with pytest.raises(FramingError, match="shorter than its header"):
+@pytest.mark.parametrize(
+    ("version", "sentence"), [(2, SHORT_V2_FRAME), (3, SHORT_V3_FRAME)]
+)
+def test_truncated_headers_are_rejected(version: int, sentence: str) -> None:
+    with pytest.raises(FramingError) as raised:
         unwrap(version, b"\x00")
+    assert str(raised.value) == sentence
 
 
-@pytest.mark.parametrize("version", [2, 3])
-def test_a_lying_payload_size_is_rejected(version: int) -> None:
+@pytest.mark.parametrize(
+    ("version", "sentence"), [(2, V2_SIZE_MISMATCH), (3, V3_SIZE_MISMATCH)]
+)
+def test_a_lying_payload_size_is_rejected(version: int, sentence: str) -> None:
     truncated = wrap(version, OPUS_PAYLOAD)[:-3]
-    with pytest.raises(FramingError, match="announces"):
+    with pytest.raises(FramingError) as raised:
         unwrap(version, truncated)
+    assert str(raised.value) == sentence
 
 
 @pytest.mark.parametrize("version", [0, 4])
 def test_unsupported_versions_are_rejected_both_ways(version: int) -> None:
-    with pytest.raises(FramingError, match="unsupported"):
-        wrap(version, OPUS_PAYLOAD)
-    with pytest.raises(FramingError, match="unsupported"):
-        unwrap(version, OPUS_PAYLOAD)
+    for call in (wrap, unwrap):
+        with pytest.raises(FramingError) as raised:
+            call(version, OPUS_PAYLOAD)
+        # Not even the version asked for: what a session negotiated is
+        # a value a device proposed, and the closed set of versions
+        # this server speaks is written down in `SUPPORTED_VERSIONS`.
+        assert str(raised.value) == UNSUPPORTED_VERSION
+
+
+def test_a_lying_v2_header_is_not_quoted_back_by_the_refusal() -> None:
+    """The refusal a session logs verbatim, hunted for the header field
+    that caused it. `size` is four bytes the far side chose, and the
+    length compared against it is that choice restated, so a message
+    naming either would put a peer's bytes on a retained surface
+    (`docs/architecture/observability-surfaces.md`). Nothing of the
+    frame reaches the exception's message, its `args`, or a chain
+    behind it: the category is the whole answer.
+    """
+    header = (
+        (2).to_bytes(2, "big")
+        + PAYLOAD_OPUS.to_bytes(2, "big")
+        + (0).to_bytes(4, "big")
+        + (0).to_bytes(4, "big")
+        + DECLARED_SENTINEL.to_bytes(4, "big")
+    )
+
+    with pytest.raises(FramingError) as raised:
+        unwrap(2, header + OPUS_PAYLOAD)
+
+    planted = str(DECLARED_SENTINEL)
+    assert str(raised.value) == V2_SIZE_MISMATCH
+    assert planted not in str(raised.value)
+    assert planted not in repr(raised.value.args)
+    # And no cause or context carrying it either: the struct's own
+    # unpack succeeded, and a chain is the other way a value travels.
+    assert raised.value.__cause__ is None and raised.value.__context__ is None
