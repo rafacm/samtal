@@ -143,17 +143,24 @@ value discarded.
 
 ### 3. The `StreamStarted` skip goes, and the invariant moves to the adapters' pin
 
-The `_tool_loop` case is deleted. The scripted mid-list
-`StreamStarted` in `test_session_tools.py:69` is removed from that
-script in the same commit: it exists to exercise the skip, and a
-mid-stream announcement is a thing no adapter emits (each yields it
-once, first, and `_watchdog_stream` consumes exactly that one).
-After the deletion a mid-stream `StreamStarted` falls to the match's
-default arm like any other unexpected event, which is the honest
-behavior for a violated adapter contract. The contract itself is
-already pinned where it lives: the adapter suites assert the
-announcement leads each stream, and `test_session_watchdog.py`
-pins that `_watchdog_stream` consumes it.
+The `_tool_loop` case is deleted, and the declared contract
+tightens with it in the same milestone, because today's contract
+contradicts the deletion: `providers/base.py` tells consumers to
+tolerate `StreamStarted` anywhere, and `_tool_loop`'s default arm
+is not a generic ignore (it appends the event to `calls`, where
+reservation then reads `.name`), so a mid-stream announcement
+after the deletion would be a breakage, not a shrug. M1 therefore:
+rewords `providers/base.py`'s `StreamStarted` docstring to the
+contract that is actually true and enforced ("yielded at most
+once, first, and consumed exclusively by `_watchdog_stream`;
+nothing downstream sees one"); removes the scripted mid-list
+`StreamStarted` from `test_session_tools.py:69` and updates that
+test's tolerate-anywhere prose; and leaves the real pins standing
+where they live, the adapter suites asserting the announcement
+leads each stream and `test_session_watchdog.py` asserting
+`_watchdog_stream` consumes it. The plan makes no claim that the
+existing contract already supported the deletion; it did not, and
+the reword is the fix.
 
 ### 4. `random_number` is removed whole, a recorded behavior change
 
@@ -456,6 +463,12 @@ with a resolution note here.
    contradictory.** `providers/base.py` requires consumers to
    tolerate `StreamStarted` anywhere, and `_tool_loop`'s default
    arm appends to `calls`, where reservation then reads `.name`.
+
+   *Resolution* (this commit): decision 3 now includes the
+   `providers/base.py` reword ("at most once, first, consumed
+   exclusively by `_watchdog_stream`") and the test-prose update in
+   M1, and drops the claim that the old contract supported the
+   deletion.
 
 7. **P2: re-anchoring the stored-record test on `switch_agent`
    abandons the path it protects.** `switch_agent` is special-cased
