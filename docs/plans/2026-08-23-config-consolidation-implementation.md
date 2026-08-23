@@ -65,9 +65,11 @@ changed.
 **The fold** (`8eabf1b2`). `config/writes.py` is deleted. Its thirteen
 f-string factories are written out at their call sites, its
 constant-returning function is the constant it returned,
-`binding_notice` moves whole to `api.py` as `_binding_notice` and
-`secret_notice` moves whole to `cli.py` as `_secret_notice`, each with
-its docstring. `CLEARED_DEFAULT_AGENT` becomes a module constant of
+`binding_notice` moves to `api.py` as `_binding_notice` and
+`secret_notice` moves whole to `cli.py` as `_secret_notice`, both with
+their docstrings and one of the two with a rewritten last paragraph
+(see the deviations below). `CLEARED_DEFAULT_AGENT` becomes a module
+constant of
 `api.py`, its only reader, beside that file's other sentences. The
 five notice constants the module re-exported are imported from
 `entities.py` now by nine test files. The module docstring's
@@ -137,7 +139,7 @@ in it.
 | `wrote_secret`, `cleared_secret` | inlined (api and cli) |
 | `wrote_agent_defaults` + `WROTE_AGENT_DEFAULTS` | collapsed to the literal `"agent-defaults"` at the one call site |
 | `CLEARED_DEFAULT_AGENT` | moved to `api.py` as a module constant |
-| `binding_notice` | moved whole to `api.py` as `_binding_notice` |
+| `binding_notice` | moved to `api.py` as `_binding_notice`, last paragraph rewritten (a deviation, recorded below) |
 | `secret_notice` | moved whole to `cli.py` as `_secret_notice` |
 | `BINDING_NOTICE`, `BINDING_UNSERVED_NOTICE`, `RELOAD_NOTICE`, `RESTART_NOTICE`, `SNAPSHOT_NOTICE` | re-exports; readers redirected to `entities.py`, where they are declared |
 
@@ -177,27 +179,44 @@ so states the interface it actually is.
 
 ### Deviations from the plan
 
-One, and it is a discovery rather than a change of direction.
+Two, both small, and the first is a discovery rather than a change of
+direction.
 
-**The `DomainConfig` docstring is a committed byte.** The plan says
-the no-after-validator constraint is "stated beside the class", and
-the first attempt stated it, along with the subclass rationale, in the
-class docstring. `config schema` printed a different document
+**The `DomainConfig` docstring is `config schema`'s output.** The plan
+says the no-after-validator constraint is "stated beside the class",
+and the first attempt stated it, along with the subclass rationale, in
+the class docstring. `config schema` printed a different document
 immediately: `model_json_schema()` renders a pydantic model's
 docstring as the schema's `description`, so the whole-domain schema
 carries it. The docstring was restored verbatim and all of the added
 rationale moved into a comment block above the `class` statement,
-which is where it now sits, with a note saying why the split exists.
-Nothing else in the milestone came close to moving an artifact.
+which is where it now sits, with a note saying which of the two an
+editor is writing. Nothing else in the milestone came close to moving
+an artifact. Note what this rendering is not: it is not a committed
+artifact, nothing in CI or the suite diffs it, and the comment beside
+the class says so (see the PR review round below, finding 1).
+
+**`binding_notice`'s docstring did not move quite whole.** The plan
+and the census below say the two branching decisions move "whole with
+their docstrings", and `secret_notice` did. `_binding_notice`'s final
+paragraph is rewritten: the original said the answer was written in
+`writes.py` "rather than at the two call sites because this is already
+where a device write's answer is decided", and neither half of that
+sentence survives the fold. There are five call sites, all in
+`api.py`, and the reason for a function rather than five inlined
+branches is that this is where the answer is decided and there is no
+second write path deciding it, the CLI's `--local` device delete
+having no loaded server to ask. The first two paragraphs, which are
+the decision itself, are unchanged.
 
 Everything else landed as written: the subclass shape, the seven-field
 model surviving by name, the store's docstring rewrite, the
 `DOMAIN_DESCRIPTIONS` comment rewrite, the field-by-field registry
 dispositions, the three responses moves, the fold with its two
-decisions moved whole, and the nine-file import redirect with no
-assertion changed. `docgen.py` losing its `store` import is the
-incidental win the plan predicted: rendering a document no longer
-imports SQLAlchemy and cryptography to reach one class.
+decisions moved, and the nine-file import redirect with no assertion
+changed. `docgen.py` losing its `store` import is the incidental win
+the plan predicted: rendering a document no longer imports SQLAlchemy
+and cryptography to reach one class.
 
 ### The inventory
 
