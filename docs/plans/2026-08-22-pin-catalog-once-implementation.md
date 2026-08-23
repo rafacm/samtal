@@ -338,7 +338,7 @@ All from `vinga-server/`.
 
 External review of the PR diff: claude backend (the codex quota is
 exhausted), claude CLI, model `claude-opus-5`, read-only tool set,
-2026-08-23, [posted on the PR](https://github.com/rafacm/vinga/pull/260).
+2026-08-23, [[posted on the PR](https://github.com/rafacm/vinga/pull/260#issuecomment-5383240627)](https://github.com/rafacm/vinga/pull/260).
 Verdict: mergeable after the listed fixes. One P1, three P2s and three
 P3s. What the round faulted was not the deletions, which it confirmed
 sound against the issue's decisions, but the claim that nothing the
