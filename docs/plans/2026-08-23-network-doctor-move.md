@@ -272,6 +272,15 @@ credential, the secret-URL non-echo checks) included; the
 real-describe-handler case moves with the doctor file so a change to
 the OTA handler's prose still cannot pass unnoticed.
 
+One reach-in in the moved file is retained deliberately, resolved
+here per the design guide: the exception-chain test calls
+`_device_url` directly because the property it pins (a refused URL's
+ConfigError carries no `__cause__`/`__context__` holding the
+address) is not observable through `main()`, which consumes the
+exception and prints only its sentence. Promoting `_device_url`
+would create a public name whose only caller is a test, the worse
+trade; the moved test carries a comment saying exactly this.
+
 `tests/unit/test_config_cli_rendering.py` retargets its `_printable`
 and `GLIMPSE_LENGTH` imports to `config.printing`'s public names. The
 support runner (`tests/support/config_cli.py`) is untouched; the
@@ -414,3 +423,9 @@ faithful:
    directly and would keep doing so against `doctor._device_url`;
    the design guide requires every reach-in in a moved-new test
    file to be resolved explicitly.
+
+   *Resolution* (this commit): the tests section resolves it: the
+   chain property is not observable through `main()`, which consumes
+   the exception, and promoting the helper would create a test-only
+   public name; the reach-in stays, with a comment in the moved test
+   saying so.
