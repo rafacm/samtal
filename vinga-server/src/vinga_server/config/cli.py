@@ -47,6 +47,7 @@ import getpass
 import ipaddress
 import os
 import sys
+import textwrap
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -316,12 +317,18 @@ def _parsed(argv: Sequence[str]) -> None:
 # different mistakes, so those are told apart by Click's own fixed
 # words, which are the part of the sentence carrying no value.
 
+# The one this grammar raises for itself as well as translating, so it
+# is a name rather than a cell: a `set` given neither a fragment nor a
+# key=value pair is missing a required argument, and Click cannot see
+# that because either of the two satisfies it.
+MISSING_ARGUMENT = "a required argument is missing"
+
 # Ordered, first match wins, and a subclass comes before the class it
 # extends: `MissingParameter` is a `BadParameter`, and an argument that
 # is absent is not an argument that is wrong.
 _USAGE_PROBLEMS: tuple[tuple[type[BaseException], str], ...] = (
     (NoSuchOption, "that is not an option of this command"),
-    (MissingParameter, "a required argument is missing"),
+    (MissingParameter, MISSING_ARGUMENT),
     (BadOptionUsage, "an option was given without its value"),
     (BadArgumentUsage, "an argument was given in a shape this command does not take"),
     (BadParameter, "an argument was given a value this command does not take"),
@@ -356,12 +363,23 @@ def _usage_problem(exc: ClickException) -> str:
     """
     for shape, sentence in _USAGE_PROBLEMS:
         if isinstance(exc, shape):
-            return f"{sentence}; run with --help for the grammar"
+            return usage_line(sentence)
     stated = exc.format_message()
     for marker, sentence in _USAGE_SHAPES:
         if marker in stated:
-            return f"{sentence}; run with --help for the grammar"
-    return f"{_USAGE_UNKNOWN}; run with --help for the grammar"
+            return usage_line(sentence)
+    return usage_line(_USAGE_UNKNOWN)
+
+
+def usage_line(sentence: str) -> str:
+    """One usage sentence as it is printed, with the tail every one of
+    them carries.
+
+    Named because the boundary is not the only raiser: a mistake in the
+    grammar that Click cannot see, because either of two arguments
+    satisfies it, is still a mistake in the grammar and reads as one.
+    """
+    return f"{sentence}; run with --help for the grammar"
 
 
 # What one command was given
@@ -402,10 +420,11 @@ class Invocation:
     kind: str = ""
 
     # The rest of what a command can carry: the agents a binding names,
-    # the fragment a write reads, the variable a secret is read from,
-    # and the entity a schema is asked for.
+    # the two ways a write's entity is written, the variable a secret is
+    # read from, and the entity a schema is asked for.
     agents: tuple[str, ...] = ()
     file: str = ""
+    pairs: tuple[str, ...] = ()
     from_env: str | None = None
     entity: str | None = None
 
@@ -1243,6 +1262,168 @@ def _fragment(path: str) -> object:
     raise ConfigError(problem)
 
 
+# Inline values
+#
+# `set <kind> [identity] key=value...` assembles the fragment the YAML
+# would, and nothing else: the pairs become a mapping, dotted keys nest,
+# and what comes out enters the exact path a `-f` fragment enters, so
+# the same check, the same request and the same acknowledgement follow.
+#
+# The parser is a no-leak boundary of its own, built the way `_fragment`
+# is and for the same reason: a value typed beside a key is where a
+# paste lands, so every refusal below is a fixed sentence naming what
+# was wrong with the shape and never what was written, the YAML parser's
+# exception is caught without keeping anything it holds, and each
+# refusal is raised after its arm rather than inside it, so no exception
+# chain carries the string that was being parsed.
+#
+# A value is held to one scalar. `yaml.safe_load` will happily read
+# `[a, b]` or `{a: 1}` out of one argument, and the contract is that an
+# inline value is a scalar: a structure belongs in a fragment, where it
+# can be read.
+
+PAIR_NEEDS_EQUALS = (
+    "an inline field is written key=value, and one of these arguments has no =. "
+    "Nothing typed is quoted back"
+)
+
+PAIR_EMPTY_KEY = (
+    "an inline field's key is empty, or has an empty segment between two dots: write "
+    "a.b rather than .a, a. or a..b. Nothing typed is quoted back"
+)
+
+PAIR_DUPLICATE_KEY = (
+    "an inline field's key is given twice, and one write says one thing about a key. "
+    "Nothing typed is quoted back"
+)
+
+PAIR_NESTED_KEY = (
+    "one inline field's key nests inside another's, such as a.b beside a, which says "
+    "two things about the same place. Nothing typed is quoted back"
+)
+
+PAIR_UNPARSEABLE = (
+    "an inline field's value is not valid YAML. Nothing typed is quoted back: a value "
+    "that fails this check is one nothing here has validated"
+)
+
+PAIR_NOT_SCALAR = (
+    "an inline field's value reads as a list or a mapping, and an inline value has to "
+    "be one scalar; write a structure as a fragment with -f. Nothing typed is quoted "
+    "back"
+)
+
+# The two ways of writing an entity are alternatives, so neither and
+# both are each a mistake in the grammar. Neither is the missing
+# argument Click cannot see, because either of the two satisfies it.
+BOTH_INPUTS = (
+    "a write takes either -f with a YAML fragment or key=value arguments, and this "
+    "command was given both"
+)
+
+
+def _written_entity(args: Invocation) -> object:
+    """The entity a write sends, from whichever of the two ways of
+    writing one this command was given."""
+    if args.file and args.pairs:
+        raise ConfigError(usage_line(BOTH_INPUTS))
+    if args.file:
+        return _fragment(args.file)
+    if args.pairs:
+        return _pairs(args.pairs)
+    raise ConfigError(usage_line(MISSING_ARGUMENT))
+
+
+def _pairs(written: Sequence[str]) -> dict[str, object]:
+    """Inline `key=value` arguments as the mapping they assemble.
+
+    Split on the FIRST `=`, so a value holding one is a value: `=` is
+    the separator and not a character the value may not contain. The
+    keys are read and checked against each other before any value is
+    parsed, because a key that is written twice or written inside
+    another is a mistake about the whole set rather than about one pair.
+    """
+    keys = [_pair_key(pair) for pair in written]
+    _distinct(keys)
+    assembled: dict[str, object] = {}
+    for key, pair in zip(keys, written, strict=True):
+        _nest(assembled, key, _scalar(pair.partition("=")[2]))
+    return assembled
+
+
+def _pair_key(pair: str) -> tuple[str, ...]:
+    """One pair's key, as the segments its dots name."""
+    key, equals, _ = pair.partition("=")
+    if not equals:
+        raise ConfigError(PAIR_NEEDS_EQUALS)
+    segments = tuple(key.split("."))
+    if not all(segments):
+        raise ConfigError(PAIR_EMPTY_KEY)
+    return segments
+
+
+def _distinct(keys: Sequence[tuple[str, ...]]) -> None:
+    """No key written twice, and no key written inside another.
+
+    The second is the one worth saying out loud: `a.b=1 a=2` asks for a
+    mapping and a scalar at one place, and whichever of them a parser
+    happened to apply last would be an answer the operator did not
+    choose.
+    """
+    for position, key in enumerate(keys):
+        for other in keys[position + 1 :]:
+            if key == other:
+                raise ConfigError(PAIR_DUPLICATE_KEY)
+            if key[: len(other)] == other or other[: len(key)] == key:
+                raise ConfigError(PAIR_NESTED_KEY)
+
+
+def _scalar(value: str) -> object:
+    """One pair's value, read as YAML reads it and held to a scalar.
+
+    Recorded inside the handler and raised after it, exactly as
+    `_fragment` does: a PyYAML mark holds the whole buffer it was
+    parsing, which here is the value, and an exception raised inside a
+    handler keeps the one being handled as its `__context__`. The
+    exception is not bound to a name either, so nothing of it survives
+    the arm.
+
+    What is not refused here is everything JSON cannot carry, which a
+    scalar can still be: a bare date, `.nan`. Those meet
+    `check_transportable`'s own sentence a step later, which is where
+    that rule lives for a fragment too.
+    """
+    problem: str | None = None
+    parsed: object = None
+    try:
+        parsed = yaml.safe_load(value)
+    except yaml.YAMLError:
+        problem = PAIR_UNPARSEABLE
+    if problem is not None:
+        raise ConfigError(problem)
+    if isinstance(parsed, (Mapping, list, tuple, set, frozenset)):
+        raise ConfigError(PAIR_NOT_SCALAR)
+    return parsed
+
+
+def _nest(under: dict[str, object], key: Sequence[str], value: object) -> None:
+    """One dotted key's value, put where its dots nest it, making the
+    mappings on the way.
+
+    Nothing on the way can be anything but a mapping this made or a
+    place nothing has written yet, because `_distinct` has already
+    refused a key that nests inside another.
+    """
+    head, rest = key[0], key[1:]
+    if not rest:
+        under[head] = value
+        return
+    below = under.setdefault(head, {})
+    if not isinstance(below, dict):  # pragma: no cover - _distinct rules it out
+        raise ConfigError(PAIR_NESTED_KEY)
+    _nest(below, rest, value)
+
+
 def _file(path: str) -> str:
     problem: str | None = None
     try:
@@ -1448,13 +1629,20 @@ def _entity_path(
 def _fragment_body(
     descriptor: entities.EntityDescriptor,
 ) -> Callable[[Invocation], object]:
-    """The fragment a write of this kind carries, refused before it
-    travels if JSON has no way to say what YAML said. Where it is being
-    written is the kind's own section of the configuration document and
-    the identity under it, which is what such a refusal names."""
+    """The entity a write of this kind carries, from a YAML fragment or
+    from inline `key=value` arguments, refused before it travels if JSON
+    has no way to say what YAML said.
+
+    One body for both ways of writing one, which is the whole of what
+    the inline form is: the pairs assemble the mapping the fragment
+    would have held, and everything after that is the same. Where it is
+    being written is the kind's own section of the configuration
+    document and the identity under it, which is what such a refusal
+    names.
+    """
 
     def body(args: Invocation) -> object:
-        fragment = _fragment(args.file)
+        fragment = _written_entity(args)
         location = ".".join((descriptor.moved_key, *_identity(descriptor, args)))
         check_transportable(location, fragment)
         return fragment
@@ -1892,7 +2080,27 @@ LOCAL_HELP = (
     "(show, delete, clear-secret, set-secret), for when the server will not start"
 )
 
-FILE_HELP = "YAML fragment for this entity, or - to read it from stdin"
+FILE_HELP = (
+    "YAML fragment for this entity, or - to read it from stdin; the alternative to "
+    "key=value arguments, and never both"
+)
+
+PAIRS_HELP = (
+    "the entity written inline, one key=value per field; a dotted key nests "
+    "(filler.enabled=true) and a value reads as one YAML scalar. The alternative to "
+    "-f, and never both"
+)
+
+# What the help page of every `set` command opens with. The store
+# already refuses a plaintext credential by the shape of the key it was
+# written under, whichever way the entity was written; what this adds is
+# the reason an inline value is the wrong place for one even when the
+# key would have been accepted.
+SECRET_NOT_A_PAIR = (
+    "A credential is never a key=value argument: arguments land in shell history and "
+    "in the process list. Store one with `vinga-server config set-secret`, which reads "
+    "it from stdin or from the variable --from-env names, and never echoes it."
+)
 
 FROM_ENV_HELP = (
     "read the value from this variable (default: stdin, read without echo at a terminal)"
@@ -1925,6 +2133,18 @@ ConfigOption = Annotated[str | None, typer.Option("--config", metavar="PATH", he
 ApiUrlOption = Annotated[str | None, typer.Option("--api-url", metavar="URL", help=API_URL_HELP)]
 
 LocalOption = Annotated[bool, typer.Option("--local", help=LOCAL_HELP)]
+
+# The two ways a write's entity is given, declared once apiece for the
+# same reason the three globals are: a `set` command says so in two
+# lines and cannot come to spell one of them differently from its
+# siblings. Neither is required on its own, because either satisfies the
+# command; what refuses neither and both is `_written_entity`, which is
+# the only place that can see the pair of them.
+FileOption = Annotated[str, typer.Option("-f", "--file", metavar="PATH", help=FILE_HELP)]
+
+PairsArgument = Annotated[
+    list[str] | None, typer.Argument(metavar="KEY=VALUE", help=PAIRS_HELP)
+]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -2157,54 +2377,76 @@ def _by_mac(row: Command) -> Callable[..., None]:
 
 
 def _written(row: Command) -> Callable[..., None]:
-    """The singleton's write: a fragment and nothing to address it
+    """The singleton's write: an entity and nothing to address it
     with."""
 
     def run(
         context: typer.Context,
-        file: Annotated[str, typer.Option("-f", "--file", metavar="PATH", help=FILE_HELP)],
-        config: ConfigOption = None,
-        api_url: ApiUrlOption = None,
-        local: LocalOption = False,
-    ) -> None:
-        row.perform(_invocation(row, context, config, api_url, local, file=file))
-
-    return run
-
-
-def _named_write(row: Command) -> Callable[..., None]:
-    """One named entity's write, from a fragment."""
-
-    def run(
-        context: typer.Context,
-        name: Annotated[str, typer.Argument(metavar="NAME")],
-        file: Annotated[str, typer.Option("-f", "--file", metavar="PATH", help=FILE_HELP)],
-        config: ConfigOption = None,
-        api_url: ApiUrlOption = None,
-        local: LocalOption = False,
-    ) -> None:
-        row.perform(_invocation(row, context, config, api_url, local, name=name, file=file))
-
-    return run
-
-
-def _staged_write(row: Command) -> Callable[..., None]:
-    """One provider's write, from a fragment."""
-
-    def run(
-        context: typer.Context,
-        stage: Annotated[str, typer.Argument(metavar="STAGE", help=STAGE_HELP)],
-        name: Annotated[str, typer.Argument(metavar="NAME")],
-        file: Annotated[str, typer.Option("-f", "--file", metavar="PATH", help=FILE_HELP)],
+        pairs: PairsArgument = None,
+        file: FileOption = "",
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
         local: LocalOption = False,
     ) -> None:
         row.perform(
-            _invocation(row, context, config, api_url, local, stage=stage, name=name, file=file)
+            _invocation(row, context, config, api_url, local, file=file, pairs=_given(pairs))
         )
 
     return run
+
+
+def _named_write(row: Command) -> Callable[..., None]:
+    """One named entity's write, from a fragment or from inline
+    fields."""
+
+    def run(
+        context: typer.Context,
+        name: Annotated[str, typer.Argument(metavar="NAME")],
+        pairs: PairsArgument = None,
+        file: FileOption = "",
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        local: LocalOption = False,
+    ) -> None:
+        row.perform(
+            _invocation(
+                row, context, config, api_url, local,
+                name=name, file=file, pairs=_given(pairs),
+            )
+        )
+
+    return run
+
+
+def _staged_write(row: Command) -> Callable[..., None]:
+    """One provider's write, from a fragment or from inline fields."""
+
+    def run(
+        context: typer.Context,
+        stage: Annotated[str, typer.Argument(metavar="STAGE", help=STAGE_HELP)],
+        name: Annotated[str, typer.Argument(metavar="NAME")],
+        pairs: PairsArgument = None,
+        file: FileOption = "",
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        local: LocalOption = False,
+    ) -> None:
+        row.perform(
+            _invocation(
+                row, context, config, api_url, local,
+                stage=stage, name=name, file=file, pairs=_given(pairs),
+            )
+        )
+
+    return run
+
+
+def _given(pairs: list[str] | None) -> tuple[str, ...]:
+    """A variadic argument as the seam holds it. Click answers an
+    absent one with None or with an empty tuple depending on the
+    version, and the seam's field is one thing: the pairs that were
+    written."""
+    return tuple(pairs or ())
 
 
 def _provider_secret(row: Command) -> Callable[..., None]:
@@ -2409,12 +2651,33 @@ def _about(verb: str, kind: entities.EntityDescriptor) -> str:
     return f"{verb} {kind.location}"
 
 
+def _set_epilog(name: str) -> str:
+    """What follows a `set` command's help page: the one value that must
+    never be typed as an argument, and then the fields the entity may
+    carry.
+
+    The second half is generated from the same `Field(description=...)`
+    values the reference and the JSON Schema are rendered from, so the
+    three cannot disagree and nobody has to remember to update a help
+    string when a field changes. The first half is wrapped here at the
+    width that half is wrapped at, because the page is printed as it was
+    laid out rather than reflowed.
+    """
+    warning = textwrap.wrap(
+        SECRET_NOT_A_PAIR,
+        width=docgen.HELP_WIDTH,
+        break_long_words=False,
+        break_on_hyphens=False,
+    )
+    return "\n".join([*warning, "", docgen.fragment_help(name)])
+
+
 # The four groups that are only groups, and the one that is also a
 # command. A group's own help is the one fact a leaf row cannot carry,
 # so it is stated here; everything else about the shape of the tree is
 # derived from the words in the table below.
 GROUPS: dict[str, str] = {
-    "set": "create or replace one entity from a YAML fragment",
+    "set": "create or replace one entity, from a YAML fragment or from key=value arguments",
     "delete": "delete one entity",
     "set-secret": "store one credential, encrypted, read from stdin or a variable",
     "clear-secret": "remove one stored credential",
@@ -2431,11 +2694,7 @@ COMMANDS: tuple[Command, ...] = (
                 _named_write if kind.addressing else _written
             ),
             help=_about("create or replace", kind),
-            # Generated from the same Field(description=...) values the
-            # reference and the JSON Schema are rendered from, so the
-            # three cannot disagree and nobody has to remember to update
-            # a help string when a field changes.
-            epilog=docgen.fragment_help(kind.name),
+            epilog=_set_epilog(kind.name),
         )
         for kind in entities.ENTITIES
     ),
