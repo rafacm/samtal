@@ -59,7 +59,10 @@ def test_an_unknown_provider_reference_is_a_reference_problem() -> None:
 
     problems = check_references(snapshot)
 
-    assert problems == ['agents.sam.llm: unknown llm provider "ghost" (defined: claude)']
+    assert problems == [
+        "agents.sam.llm: names no llm provider that exists, and the name is not quoted "
+        "back (defined: claude)"
+    ]
 
 
 def test_an_unknown_mcp_reference_is_a_reference_problem() -> None:
@@ -68,7 +71,8 @@ def test_an_unknown_mcp_reference_is_a_reference_problem() -> None:
     problems = check_references(snapshot)
 
     assert problems == [
-        'agents.sam.mcp: unknown MCP server "home"; no mcp_servers entries are defined'
+        "agents.sam.mcp: entry 1 names no MCP server that exists, and the name is not "
+        "quoted back; no mcp_servers entries are defined"
     ]
 
 
@@ -77,8 +81,14 @@ def test_an_unknown_binding_and_default_are_reference_problems() -> None:
 
     problems = check_references(snapshot)
 
-    assert 'default_agent "nobody" is not a defined agent' in problems
-    assert 'devices.aa:bb:cc:dd:ee:ff: agent "ghost" is not a defined agent' in problems
+    assert (
+        "default_agent: names no agent that exists, and the name is not quoted back; "
+        "no agents are defined"
+    ) in problems
+    assert (
+        "devices.aa:bb:cc:dd:ee:ff: entry 1 names no agent that exists, and the name is "
+        "not quoted back; no agents are defined"
+    ) in problems
 
 
 def test_the_first_agent_is_a_completeness_problem_only() -> None:
