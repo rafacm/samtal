@@ -15,16 +15,16 @@ the reply has not started speaking by the time it expires, the active
 agent's clip goes out through the device's normal paced path and the
 reply's first real sentence queues behind its tail.
 
-The mask yields to whoever holds the floor, which is read through
-`TurnView` and nothing else: two questions and no answers. A user still
-speaking, or a barge-in being confirmed, stands the timer down, because
-a mask that talks over the user is worse than no mask at all.
+The mask yields to whoever holds the floor, which is read as two
+questions and answered with nothing. A user still speaking, or a
+barge-in being confirmed, stands the timer down, because a mask that
+talks over the user is worse than no mask at all.
 """
 
 import asyncio
 import contextlib
 from collections.abc import Sequence
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from vinga_server.audio.resample import Resampler
 from vinga_server.device.boundary import DeviceGone, DeviceOutput
@@ -37,22 +37,11 @@ from vinga_server.events.catalog import (
 from vinga_server.events.values import Count, Identifier, Whole
 from vinga_server.filler import FillerClips
 
-
-class TurnView(Protocol):
-    """What the fire-time stand-down asks of whoever is deciding the
-    floor: how much of what was fed the endpointer classified as speech,
-    and whether the outgoing frames are being held for a barge-in
-    confirmation.
-
-    Two reads and nothing else. The mask yields to the user, so nothing
-    about the floor is this runner's to change, and the read-only shape
-    is what keeps the question out of the device boundary, where only
-    the filler would ever have asked it."""
-
-    def speech_ms(self) -> int: ...
-
-    @property
-    def output_paused(self) -> bool: ...
+if TYPE_CHECKING:
+    # Named for the annotation alone: the runner never needs the floor
+    # module at import time, and keeping it out is what stops the two
+    # from growing a runtime edge nothing asked for.
+    from vinga_server.runtime.turntaking import TurnTaking
 
 
 class FillerCache(Protocol):
@@ -81,7 +70,16 @@ class FillerRunner:
     conversation, which is what keeps the masking a turn was armed under
     from changing under it. Empty means no agent masks its latency.
     `agents` is what the device is bound to, which is what the arming
-    rule asks rather than only the agent talking now."""
+    rule asks rather than only the agent talking now.
+
+    `turn` is whoever is deciding the floor, and the fire-time
+    stand-down asks it two things: how much of what was fed the
+    endpointer classified as speech (`speech_ms`), and whether the
+    outgoing frames are being held for a barge-in confirmation
+    (`output_paused`). Two reads and nothing else. The mask yields to
+    the user, so nothing about the floor is this runner's to change, and
+    reading rather than writing is what keeps the question out of the
+    device boundary, where only the filler would ever have asked it."""
 
     def __init__(
         self,
@@ -89,7 +87,7 @@ class FillerRunner:
         output: DeviceOutput,
         fillers: FillerCache,
         agents: Sequence[str],
-        turn: TurnView,
+        turn: "TurnTaking",
     ) -> None:
         self._events = events
         self.session_id = events.session_id

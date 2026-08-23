@@ -229,8 +229,8 @@ class PipelineRuntime:
     holds the floor is `TurnTaking` ([turntaking.py](turntaking.py)),
     which reaches back into four of this class's methods and nothing
     else; the latency mask is `FillerRunner`
-    ([filler_runner.py](filler_runner.py)), which reads the floor
-    through `TurnView` and never writes it. What stays here is the
+    ([filler_runner.py](filler_runner.py)), which reads the floor with
+    two questions and never writes it. What stays here is the
     orchestration: the reply task, the conversation history, the tool
     loop, agent handover, and the provider observability.
 
@@ -342,10 +342,10 @@ class PipelineRuntime:
         self._turntaking = TurnTaking(events, output, self._server, self)
         self._reply_task: asyncio.Task[None] | None = None
         # This turn's latency mask, if any agent this device is bound to
-        # has one. It reads the floor through `TurnView`, which the
-        # turn-taking side satisfies structurally, so the one field the
-        # two clusters share (whether the outgoing frames are paused)
-        # has one writer and one reader and crosses as a question.
+        # has one. It reads the floor with two questions and answers it
+        # nothing, so the one field the two clusters share (whether the
+        # outgoing frames are paused) has one writer and one reader and
+        # crosses as a question.
         self._filler = FillerRunner(
             events,
             output,
