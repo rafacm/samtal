@@ -329,7 +329,7 @@ by keyword and never rendered, and no test reads its order either.
 
 External review of the PR diff: claude backend (the codex quota is
 exhausted), claude CLI, model `claude-opus-5`, read-only tool set,
-2026-08-23, [posted on the PR](https://github.com/rafacm/vinga/pull/263#issuecomment-5384646103).
+2026-08-23, [[posted on the PR](https://github.com/rafacm/vinga/pull/264#issuecomment-5386806880)](https://github.com/rafacm/vinga/pull/263#issuecomment-5384646103).
 Verdict as received: "Mergeable after fix 1; findings 2 to 6 are worth
 folding in but none blocks." One P2 and five P3s. The round verified
 the milestone's load-bearing claims itself and could not break them,
