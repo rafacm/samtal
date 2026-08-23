@@ -35,11 +35,10 @@ def test_a_usable_entry_name_is_accepted(name: str) -> None:
 def test_a_reserved_or_unusable_entry_name_is_refused(name: str) -> None:
     # Reserved names are what makes collisions unrepresentable: an entry
     # called "self" could shadow a device tool, and one called
-    # "switch_agent" a builtin. `random_number` is not on the list any
-    # more, and what that frees is an entry called `random_number`,
-    # whose tools publish as `random_number__<tool>`. An MCP tool is
-    # always qualified, so no bare tool of that name can appear whatever
-    # a server lists.
+    # "switch_agent" a builtin. There are two builtins now, and a name
+    # that stops being one becomes usable as an entry name; what that
+    # permits is an entry, never a bare tool, since an entry's tools
+    # publish as `<entry>__<tool>` and an MCP tool is always qualified.
     assert not names.is_valid_entry_name(name)
 
 
