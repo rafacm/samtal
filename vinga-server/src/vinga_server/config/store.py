@@ -35,6 +35,7 @@ import re
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
+from functools import partial
 
 from cryptography.fernet import MultiFernet
 from pydantic import BaseModel, ValidationError
@@ -52,6 +53,7 @@ from vinga_server.config.loader import (
     UnknownEntityError,
 )
 from vinga_server.config.models import (
+    DOMAIN_KEYS,
     PROMPT_FRAGMENT_NAME_RULE,
     PROVIDER_STAGES,
     UNRECOGNIZED_KEY_REFUSED,
@@ -442,6 +444,57 @@ class ConfigStore:
             staged = _stage_entity(domain, prepared)
             _refuse_unresolved(domain)
             _persist(connection, (staged,))
+
+    # A whole document
+
+    def apply(self, document: object) -> tuple[Applied, ...]:
+        """Every entry one document names, written in one transaction or
+        not at all.
+
+        The same phases a single write runs, over as many entries as the
+        document holds: prepared outside the lock, staged into ONE
+        candidate domain state inside it, checked ONCE against that
+        state, and persisted. Checking once is the whole reason this is
+        a repository verb rather than a loop of writes above it. A
+        document that creates an agent and binds a device to it in the
+        same breath passes through intermediate states no single write
+        would accept, and a caller looping over the writes would either
+        be refused halfway or leave the store half-applied, which is the
+        outcome a document refused whole exists to rule out.
+
+        Additive, and deliberately: a section or an entry the document
+        does not name is untouched, an empty section adds nothing, and
+        nothing here deletes. Pruning a store down to a document is a
+        different verb with different stakes, secret deletion among
+        them, and it is not this one. The one entry that removes
+        something is `default_agent: null`, which is the explicit clear
+        rather than an absence: leaving the key out says nothing about
+        it at all.
+
+        Idempotent by comparison rather than by blind rewrite. Each
+        entry's row is compared with the one that is stored, through the
+        body a write would produce, and an entry that would write the
+        same bytes is answered `unchanged` with no row written. The same
+        document applied twice is therefore a no-op by construction.
+
+        Refused whole. Every entry is prepared, and then every entry is
+        staged, before anything is raised, so an operator fixing a
+        document meets all of its mistakes at once rather than one per
+        attempt; the refusals are the sentences the single writes earn,
+        under one line saying nothing was changed. Any refusal leaves
+        the transaction unwritten, this repository's write being one
+        transaction (see the module docstring).
+        """
+        named = _named(_sections(document))
+        if len(named) > APPLY_LIMIT:
+            raise ConfigError(TOO_MANY_ENTRIES)
+        changes = _gathered(_change, named)
+        with self._transaction() as connection:
+            domain = _read_domain(connection)
+            staged = _gathered(partial(_stage_change, domain), changes)
+            _refuse_unresolved(domain)
+            _persist(connection, staged)
+        return tuple(entry.applied for entry in staged)
 
     def _delete(self, descriptor: EntityDescriptor, *identity: str) -> None:
         """Remove one entity, by the identity that addresses it and
@@ -1010,6 +1063,31 @@ class _Prepared:
 
 
 @dataclass(frozen=True)
+class _DeviceBinding:
+    """One device entry of an applied document, normalized: the
+    canonical MAC and the names as they will be stored."""
+
+    mac: str
+    agents: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _DefaultAgent:
+    """The default agent an applied document names, or None for the
+    explicit null that clears it. Absence is not one of these: a
+    document that does not mention the key says nothing about it."""
+
+    name: str | None
+
+
+# What one entry of a document is, before the store has been read. Three
+# shapes because the domain half has three: the five entity kinds, whose
+# body is a fragment, and the two settings, which are written with verbs
+# of their own and so arrive as the values they hold.
+type _Change = _Prepared | _DeviceBinding | _DefaultAgent
+
+
+@dataclass(frozen=True)
 class _Row:
     """One row a staged entry writes: the table, the columns that address
     it, and the columns to set.
@@ -1082,6 +1160,23 @@ def _prepare(
     )
 
 
+def _stage_change(domain: DomainConfig, change: _Change) -> _Staged:
+    """One entry of a document, resolved against the snapshot this
+    transaction read and put where the configuration would hold it.
+
+    The domain is mutated rather than copied, which is what makes one
+    check enough: every entry lands in the same candidate state, and
+    what `_refuse_unresolved` is then asked about is the configuration
+    the whole document would leave rather than any state on the way to
+    it.
+    """
+    if isinstance(change, _Prepared):
+        return _stage_entity(domain, change)
+    if isinstance(change, _DeviceBinding):
+        return _stage_device(domain, change)
+    return _stage_default_agent(domain, change)
+
+
 def _stage_entity(domain: DomainConfig, prepared: _Prepared) -> _Staged:
     """One entity, resolved and staged.
 
@@ -1114,6 +1209,38 @@ def _stage_entity(domain: DomainConfig, prepared: _Prepared) -> _Staged:
     )
 
 
+def _stage_device(domain: DomainConfig, binding: _DeviceBinding) -> _Staged:
+    """One device binding, staged onto the same candidate state the
+    entities are staged onto, so that a document binding a board to an
+    agent it also creates resolves."""
+    agents = list(binding.agents)
+    moved = domain.devices.get(binding.mac) != agents
+    domain.devices[binding.mac] = agents
+    return _Staged(
+        applied=Applied(
+            section="devices", identity=binding.mac, wrote=moved, agents=binding.agents
+        ),
+        row=_device_row(binding.mac, agents) if moved else None,
+    )
+
+
+def _stage_default_agent(domain: DomainConfig, setting: _DefaultAgent) -> _Staged:
+    """The default agent, set or explicitly cleared. Named rather than
+    left where it is: a document that carries the key means it, and a
+    document that does not carry it never reaches here."""
+    moved = domain.default_agent != setting.name
+    domain.default_agent = setting.name
+    return _Staged(
+        applied=Applied(
+            section="default_agent",
+            identity="",
+            wrote=moved,
+            agents=() if setting.name is None else (setting.name,),
+        ),
+        row=_default_agent_row(setting.name) if moved else None,
+    )
+
+
 def _persist(connection: Connection, staged: Sequence[_Staged]) -> None:
     """The end of every write, under the lock and after the check: the
     rows that moved, written. The ones that did not are not written at
@@ -1140,6 +1267,204 @@ def _default_agent_row(name: str | None) -> _Row:
         {"key": schema.DEFAULT_AGENT_KEY},
         None if name is None else {"value": name},
     )
+
+
+# An applied document
+#
+# The document is a partial `DomainConfig`: its top-level keys are the
+# sections `DOMAIN_KEYS` names, entity bodies are exactly the fragments
+# `set` takes, and the two settings are in their DOMAIN shape rather
+# than the shape their write routes take, because the document is the
+# configuration rather than a batch of requests. Which sections hold
+# entities and which hold a setting is read off the registry, so a kind
+# added there is a section here.
+#
+# Every refusal about the document as a whole names `document` and
+# quotes nothing: a document arrives from a file an operator wrote, and
+# a fragment inside one can carry a pasted credential exactly as a
+# fragment sent on its own can.
+
+# Where a refusal about the document rather than about one entry of it
+# is located. Named rather than written out, because the CLI checks the
+# same document against the same rule before it travels and the two must
+# say one thing.
+APPLY_LOCATION = "document"
+
+# How many entries one document may carry. Request hygiene rather than a
+# correctness bound: an applied document is one transaction, and one
+# transaction that never ends is what a caller with a generated file can
+# ask for by accident. Refused before anything is prepared, so an
+# over-large document costs a count and not a parse.
+APPLY_LIMIT = 500
+
+TOO_MANY_ENTRIES = (
+    f"{APPLY_LOCATION}: an applied document may name at most {APPLY_LIMIT} entries and "
+    f"this one names more. Nothing was changed, and nothing of it is quoted back; "
+    f"apply it in several documents, or write only the entries that differ"
+)
+
+_NOT_A_DOCUMENT = (
+    f"{APPLY_LOCATION}: an applied document has to be a mapping of the domain "
+    f"configuration's own sections. Nothing sent is quoted back"
+)
+
+_UNKNOWN_SECTION = (
+    f"{APPLY_LOCATION}: the top-level keys of an applied document are the sections of "
+    f"the domain configuration, which are " + ", ".join(DOMAIN_KEYS) + ". Something "
+    "else was written, and it is not quoted back"
+)
+
+_NOT_A_SECTION = "{section}: this section has to be a mapping of entries by name"
+
+_NOT_A_STAGE_GROUP = "providers: each stage holds a mapping of provider entries by name"
+
+_NOT_A_BINDING = (
+    "devices: each entry is a MAC address holding the list of agent names that device "
+    "may reach. Nothing sent is quoted back"
+)
+
+_NOT_AN_AGENT_NAME = (
+    "default_agent: this holds the name of the agent an unbound device reaches, or "
+    "null to unset it. Nothing sent is quoted back"
+)
+
+_APPLY_REFUSED = "the document was refused whole and nothing was changed:"
+
+# Which sections hold entities, by the key they occupy in the document.
+_SECTION_KINDS: dict[str, EntityDescriptor] = {
+    descriptor.moved_key: descriptor for descriptor in entities.ENTITIES
+}
+
+
+def _sections(document: object) -> Mapping[str, object]:
+    """One document's sections, refused if it is not one.
+
+    Every key has to be a section this configuration has. A document is
+    written by hand and applied whole, so a key nobody recognizes is far
+    more likely to be a typo that would silently apply nothing than an
+    additive extra worth tolerating.
+    """
+    if not isinstance(document, Mapping) or not all(isinstance(key, str) for key in document):
+        raise ConfigError(_NOT_A_DOCUMENT)
+    if any(key not in DOMAIN_KEYS for key in document):
+        raise ConfigError(_UNKNOWN_SECTION)
+    return dict(document)
+
+
+def _named(sections: Mapping[str, object]) -> list[tuple[str, str, object]]:
+    """Every entry the document names, as the section it is in, the
+    identity under it, and what was written there.
+
+    In `DOMAIN_KEYS` order, which `models.py` already documents as the
+    write, read and creation order: there is no second list of it here,
+    because a duplicate of an authoritative order is a duplicate that
+    can drift from it. The order is what the outcome listing comes out
+    in, and it is the only order an apply observably has: the check runs
+    once against the finished candidate state, so a document that
+    resolves resolves whichever order its entries were staged in.
+
+    Structural only, and deliberately: this is what the entry count is
+    taken from, so an over-large document is refused before a single
+    fragment is parsed.
+    """
+    named: list[tuple[str, str, object]] = []
+    for section in DOMAIN_KEYS:
+        if section not in sections:
+            continue
+        written = sections[section]
+        if section == "default_agent":
+            named.append((section, "", written))
+        elif section == "agent_defaults":
+            # The singleton's section IS its body, not a mapping of
+            # entries, so it is one entry however much is written in it.
+            named.append((section, "", written))
+        elif section == "providers":
+            named += _provider_entries(written)
+        else:
+            named += [
+                (section, name, body) for name, body in _entries(section, written).items()
+            ]
+    return named
+
+
+def _provider_entries(written: object) -> list[tuple[str, str, object]]:
+    """The providers section, which is two levels deep because a provider
+    is addressed by its stage and its name together."""
+    named: list[tuple[str, str, object]] = []
+    for stage, group in _entries("providers", written).items():
+        if not isinstance(group, Mapping) or not all(isinstance(key, str) for key in group):
+            raise ConfigError(_NOT_A_STAGE_GROUP)
+        named += [(
+            "providers", f"{_stage(stage)}.{name}", body
+        ) for name, body in group.items()]
+    return named
+
+
+def _entries(section: str, written: object) -> Mapping[str, object]:
+    if not isinstance(written, Mapping) or not all(isinstance(key, str) for key in written):
+        raise ConfigError(_NOT_A_SECTION.format(section=section))
+    return dict(written)
+
+
+def _change(named: tuple[str, str, object]) -> _Change:
+    """One entry of a document, prepared: an entity through the same
+    preparation a single `set` runs, a setting through the same
+    normalization its own verb runs."""
+    section, identity, written = named
+    if section == "devices":
+        binding = _binding(identity, _bound(written))
+        mac, agents = next(iter(binding.items()))
+        return _DeviceBinding(mac, tuple(agents))
+    if section == "default_agent":
+        if written is None:
+            return _DefaultAgent(None)
+        if not isinstance(written, str):
+            raise ConfigError(_NOT_AN_AGENT_NAME)
+        return _DefaultAgent(_identifier("default_agent", written))
+    descriptor = _SECTION_KINDS[section]
+    return _prepare(descriptor, tuple(identity.split(".")) if identity else (), written)
+
+
+def _bound(written: object) -> list[str]:
+    if not isinstance(written, list) or not all(isinstance(name, str) for name in written):
+        raise ConfigError(_NOT_A_BINDING)
+    return list(written)
+
+
+def _gathered[Item, Done](
+    step: Callable[[Item], Done], items: Sequence[Item]
+) -> list[Done]:
+    """One phase of an apply, run over every entry before anything is
+    raised.
+
+    A document is refused whole, so it is also reported whole: an
+    operator correcting one would otherwise need as many attempts as
+    their file has mistakes. What comes out is one refusal whose lines
+    are the sentences the single writes earn, with every field problem
+    any of them named carried beside it.
+
+    Recorded inside the handler and raised outside it, the rule this
+    repository raises by: an exception raised while another is being
+    handled keeps that one as its `__context__`, and a validation error
+    holds the whole rejected fragment. The refusals that are not about
+    the request travel out as themselves, because a busy database or an
+    unreadable row is not a mistake in the document and aggregating it
+    into one would say it was.
+    """
+    done: list[Done] = []
+    lines: list[str] = []
+    problems: list[FieldProblem] = []
+    for item in items:
+        try:
+            done.append(step(item))
+        except (UnknownEntityError, DatabaseBusyError, StorageError):
+            raise
+        except ConfigError as exc:
+            lines.append(str(exc))
+            problems += exc.problems
+    if lines:
+        raise ConfigError("\n".join([_APPLY_REFUSED, *lines]), tuple(problems))
+    return done
 
 
 # Reading rows
@@ -2172,9 +2497,12 @@ def _refuse_unresolved(domain: DomainConfig) -> None:
 
 
 __all__ = [
+    "APPLY_LIMIT",
+    "APPLY_LOCATION",
     "Applied",
     "BoundDevice",
     "ConfigStore",
+    "TOO_MANY_ENTRIES",
     "check_transportable",
     "DomainConfig",
     "Entity",
