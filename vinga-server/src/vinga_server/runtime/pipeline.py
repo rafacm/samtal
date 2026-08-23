@@ -74,6 +74,7 @@ from vinga_server.events.values import (
     PromptSources,
     Real,
 )
+from vinga_server.filler import FillerClips
 from vinga_server.generation import Generation, Generations
 from vinga_server.providers import (
     AgentProviders,
@@ -90,7 +91,7 @@ from vinga_server.providers import (
     Usage,
 )
 from vinga_server.runtime import prompt
-from vinga_server.runtime.filler_runner import FillerCache, FillerRunner
+from vinga_server.runtime.filler_runner import FillerRunner
 from vinga_server.runtime.speech import _Synthesis, speak_after
 from vinga_server.runtime.turns import BUILTIN, MCP, TurnUnderway, tool_source
 from vinga_server.runtime.turntaking import TurnTaking
@@ -269,7 +270,7 @@ class PipelineRuntime:
         agent_providers: Mapping[str, AgentProviders],
         mcp_servers: McpServers,
         memory: MemoryStore | None,
-        fillers: FillerCache,
+        fillers: Mapping[str, FillerClips],
         agents: Sequence[str],
         recorder: TurnRecorder | None = None,
     ) -> None:
@@ -349,7 +350,7 @@ class PipelineRuntime:
         self._filler = FillerRunner(
             events,
             output,
-            fillers if fillers is not None else {},
+            fillers,
             agents,
             self._turntaking,
         )
