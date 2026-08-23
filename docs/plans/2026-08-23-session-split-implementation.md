@@ -302,3 +302,119 @@ is regenerated spike material and not CI-checked.
 
 Nothing in M1 needs hardware, so no verification step was left
 unverifiable.
+
+## PR review round (PR #268)
+
+External review of the M1 diff, 2026-08-23. Two P1 findings, verdict
+mergeable after fixes. One fixed, one declined with the evidence
+gathered rather than asserted.
+
+1. **P1: malformed frame values enter an exception chain and a log
+   record.** `framing.py` interpolated the declared payload size and
+   the carried length into `FramingError`, and `device/session.py:934`
+   logs that exception verbatim at warning level, which is a retained
+   surface.
+
+   *Accepted, fixed in `e0a3cb59`.* Every raise now carries a fixed
+   sentence naming its category and interpolating nothing, integer
+   lengths included: `SHORT_V2_FRAME`, `SHORT_V3_FRAME`,
+   `V2_SIZE_MISMATCH`, `V3_SIZE_MISMATCH`, `UNSUPPORTED_VERSION`. They
+   are module constants rather than literals at the raise, so the two
+   suites that pin what reaches a log record read the sentence from the
+   module that raises it and cannot keep a second copy that drifts. The
+   exception type is unchanged, the `framing_error` drop-reason token
+   beside the log call is untouched, and the logging call site itself
+   was not restructured, since `session.py` is M2's territory: what
+   changed is only what the exception renders.
+
+   Two new pins, one per surface.
+   `test_a_lying_v2_header_is_not_quoted_back_by_the_refusal` builds a
+   v2 header announcing `987654321` payload bytes and asserts the
+   exception's `str`, its `args`, and both chain slots carry none of it.
+   `test_a_malformed_binary_frame_is_dropped_without_quoting_its_header`
+   drives the same frame through a real v2 session, carrying `65521`
+   actual payload bytes, and asserts the session keeps answering, the
+   warning line says exactly `framing.V2_SIZE_MISMATCH`, and neither
+   planted number appears anywhere in `both_formats(caplog)`. It sits
+   beside the malformed-abort case it is the binary sibling of, which
+   already held this rule one layer up.
+
+   *The fix proved load-bearing.* With the v2 size-mismatch message
+   reverted to its interpolating form and nothing else changed, both new
+   tests fail, and the captured record shows the leak verbatim:
+
+   ```
+   WARNING vinga_server.session: session <id>: dropped binary frame:
+   version 2 frame announces 987654321 payload bytes but carries 65521
+   ```
+
+   Both planted values on a warning-level record, which is what the
+   finding said and what the sentences remove. The file was then
+   restored by copy and `touch`ed, per the trap recorded in `AGENTS.md`.
+
+2. **P1: rejected tool input is exposed through the conversation HTTP
+   API.** The stored-record test keeps a credential-shaped rejected
+   argument verbatim, `conversations/store.py:785` persists arguments
+   even when `call.is_error`, and `conversations/api.py` serves every
+   invocation column.
+
+   *Declined, with the evidence checked rather than argued.* This is the
+   content-and-telemetry split working as designed, and the same finding
+   was already raised and declined on the same ground in the #82 review
+   round, where the decline was pinned by the very test this milestone
+   re-anchored. Four pieces of evidence:
+
+   - **The behavior predates this branch.** `git log -L 785,785` over
+     `store.py` names exactly one commit in that line's whole history,
+     `b3d4f6f9` (2026-08-15), an ancestor of `main`; `is_error` has
+     never gated the column, which is gated by the deployment's `text`
+     switch and by `malformed`. `INVOCATION_COLUMNS` in `api.py` comes
+     from `a434d15a` (2026-08-16), also on `main`.
+     `git diff --stat 3076407b..HEAD -- src/vinga_server/conversations/`
+     is empty: this branch changes nothing in the conversations package.
+   - **Verbatim storage of a rejected argument was already the pin.** At
+     the merge base the same test, under the same name, asserted
+     `json.loads(call["arguments"]) == {"minimum": SENTINEL, "maximum": 6}`
+     for a call the tool refused, and its docstring already carried the
+     decline's reasoning: "an argument redacted because the tool refused
+     it would hide the evidence of why the tool refused, which is the
+     one question the record exists to answer."
+   - **The docs classify tool arguments as content.**
+     `docs/architecture/observability-surfaces.md`'s tier table:
+     "**Conversation store** (#120, `conversations.db`) | Content as
+     system of record: turns, tool and MCP calls with arguments and
+     results, keyed by session and user", with "access-controlled reads
+     under `/api`". The ADR's decision 2 says the store is "the system
+     of record for content", against decision 1's "No conversation text,
+     no far-side bytes, no exception message text" for the events. The
+     store plan records that text-off "nulls `heard`, `reply`, the
+     legs' text, and the tool name, arguments and result together",
+     which is arguments classed with name and result under one switch.
+     Nothing in `docs/adr/` or `docs/architecture/` requires redacting
+     invalid input inside the content surface: all four masking and
+     scrubbing mentions describe the external practice the ADR was
+     checked against, and "source-side restriction over sink-side
+     scrubbing" is scoped to the events surface, made mechanical by
+     #155.
+   - **The credential-shaped sentinel is not new.**
+     `SENTINEL = "hunter2-not-a-real-credential-9f31c7"` predates the
+     branch, commented "shaped like something an operator would be
+     horrified to find", and the old case passed it as
+     `{"minimum": SENTINEL, "maximum": 6}`. The re-anchor changed which
+     tool refuses it and the shape of the refusal (a string where an
+     integer belongs, now a list where a string belongs), not whether a
+     credential-shaped rejected argument is stored verbatim and asserted
+     to be.
+
+   Nothing found contradicts the decline, and no store, API or
+   assertion was modified for this finding.
+
+### Verification after the review round
+
+From `vinga-server/`, on the amended branch.
+
+- `uv run ruff check .`: **All checks passed!**
+- `uv run mypy`: **Success: no issues found in 4 source files**
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: **2861 passed,
+  20 skipped**, two more than the milestone's, being the two new pins.
+- `uv run pytest tests/integration -q`: **61 passed**.
