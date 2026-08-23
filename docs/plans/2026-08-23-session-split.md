@@ -399,7 +399,7 @@ refreshed after any rebase.
   no new modules; deepens `turntaking.py`, `filler_runner.py`,
   `filler.py`, `source.py` and the mcp package by making each
   annotation name the class that is really there.
-- [ ] **M2: split the session's three clusters.**
+- [x] **[M2: split the session's three clusters](2026-08-23-session-split-implementation.md#m2-split-the-sessions-three-clusters)** (PR TBD).
   Decision 5, stacked on M1: `device/pacing.py`,
   `device/capture_audio.py`, `device/watchdog.py`; the session
   keeps the boundary, the manifest and the close path; test edits
