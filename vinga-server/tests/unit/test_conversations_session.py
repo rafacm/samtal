@@ -448,8 +448,12 @@ def test_a_rejected_tool_argument_is_kept_as_content_and_named_on_no_telemetry(
     tmp_path: Path, caplog: pytest.LogCaptureFixture, spy: list[Emission]
 ) -> None:
     """Where the two surfaces part, driven with an argument a tool threw
-    away: the model asks `random_number` for a bound that is not a
-    number at all, and the value it sent is credential-shaped.
+    away: the model asks `remember` to keep a fact that is not a
+    sentence at all, and the value inside what it sent is
+    credential-shaped. Argument validation refuses before the memory
+    store is touched, so the whole ordinary path is what runs, dispatch
+    through the rendered exception through the `tool_call` event to the
+    stored invocation, and no write happens on the way.
 
     Both halves of the answer are the content-and-telemetry record
     (`docs/adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md`).
@@ -468,13 +472,12 @@ def test_a_rejected_tool_argument_is_kept_as_content_and_named_on_no_telemetry(
     """
     config = recording_config(
         tmp_path,
-        asr_text="roll a die for me",
         llm={
             "type": "mock",
             "reply": "That did not work: {tool_result}.",
-            "tool_when": "roll",
-            "tool_name": "random_number",
-            "tool_arguments": {"minimum": SENTINEL, "maximum": 6},
+            "tool_when": "remember",
+            "tool_name": "remember",
+            "tool_arguments": {"text": [SENTINEL]},
         },
     )
 
@@ -488,14 +491,14 @@ def test_a_rejected_tool_argument_is_kept_as_content_and_named_on_no_telemetry(
     events = read(tmp_path, "select * from events")
 
     # The call happened, was this server's own builtin, and failed.
-    assert (call["source"], call["name"], call["is_error"]) == ("builtin", "random_number", 1)
+    assert (call["source"], call["name"], call["is_error"]) == ("builtin", "remember", 1)
     # The content channel's contract: what the model passed, verbatim,
     # rejected value included.
-    assert json.loads(call["arguments"]) == {"minimum": SENTINEL, "maximum": 6}
+    assert json.loads(call["arguments"]) == {"text": [SENTINEL]}
     # The refusal the model was handed says what to send instead, and
     # quotes no value: it travels back to the model and into this same
     # record, and neither is a reason to echo bytes nobody needs.
-    assert "whole number" in call["result"]
+    assert 'needs a "text" argument' in call["result"]
     assert SENTINEL not in call["result"]
 
     # Telemetry, at the tap and on the file and in both formats. The

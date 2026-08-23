@@ -30,12 +30,16 @@ def test_a_usable_entry_name_is_accepted(name: str) -> None:
 
 @pytest.mark.parametrize(
     "name",
-    ["self", "switch_agent", "remember", "random_number", "home.assistant", "a b", ""],
+    ["self", "switch_agent", "remember", "home.assistant", "a b", ""],
 )
 def test_a_reserved_or_unusable_entry_name_is_refused(name: str) -> None:
     # Reserved names are what makes collisions unrepresentable: an entry
     # called "self" could shadow a device tool, and one called
-    # "switch_agent" a builtin.
+    # "switch_agent" a builtin. `random_number` is not on the list any
+    # more, and what that frees is an entry called `random_number`,
+    # whose tools publish as `random_number__<tool>`. An MCP tool is
+    # always qualified, so no bare tool of that name can appear whatever
+    # a server lists.
     assert not names.is_valid_entry_name(name)
 
 

@@ -305,14 +305,15 @@ PUBLISHED = {
     "tools__inside__secret_word",
 }
 
-# The builtins due in this configuration, which is one of them.
+# The builtins due in this configuration, which is none of them.
 # `switch_agent` is not: each device here is bound to a single agent, so
 # there is nowhere to switch. `remember` is not either: the
-# configuration has no memory section, so no memory store exists.
+# configuration has no memory section, so no memory store exists. Those
+# two are all there are, and both conditions fail here.
 # Spelled as a set the assertions below compare against, so that a
 # conditional builtin appearing where its condition does not hold fails
 # this test rather than passing under a subtraction.
-DUE_BUILTINS = {"random_number"}
+DUE_BUILTINS: set[str] = set()
 
 
 async def test_a_restricted_agent_is_offered_exactly_its_subset(serve, simulate) -> None:

@@ -166,10 +166,11 @@ async def test_switch_agent_is_offered_only_where_there_is_somewhere_to_go() -> 
     await run_reply(one, "hello")
     await run_reply(both, "hello")
 
-    # `random_number` is offered to both, being the builtin under no
-    # condition at all; the conditional one is the difference.
-    assert [tool.name for tool in alone.seen[0][1]] == ["random_number"]
-    assert [tool.name for tool in paired.seen[0][1]] == ["switch_agent", "random_number"]
+    # Both offers whole, so the conditional tool is the entire
+    # difference between them: the device bound to one agent has nowhere
+    # to switch and no memory configured, and is offered nothing.
+    assert [tool.name for tool in alone.seen[0][1]] == []
+    assert [tool.name for tool in paired.seen[0][1]] == ["switch_agent"]
     # The enum carries the device's full bound list, which is what lets
     # the agent answer "who can I talk to?".
     (tool,) = [t for t in paired.seen[0][1] if t.name == "switch_agent"]
@@ -288,7 +289,7 @@ async def test_remembering_is_offered_and_executed_when_memory_is_configured(
     session = session_for(base_config(), POET_MAC, {"poet": script}, memory=store)
 
     assert await run_reply(session, "remember I am vegetarian") == ["I will keep that in mind."]
-    assert [tool.name for tool in script.seen[0][1]] == ["remember", "random_number"]
+    assert [tool.name for tool in script.seen[0][1]] == ["remember"]
     assert "the user is vegetarian" in store.read("poet")
 
     (result,) = [
@@ -297,38 +298,25 @@ async def test_remembering_is_offered_and_executed_when_memory_is_configured(
     assert not result.is_error
 
 
-async def test_a_random_number_is_offered_with_no_configuration_and_drawn_when_asked_for() -> None:
-    """The one builtin under no condition: a device bound to a single
-    agent, with no memory configured, still has it, because a die is
-    neither the deployment's business nor the board's."""
-    script = ScriptedLlm([[call("random_number", minimum=1, maximum=6)], "You got a four."])
-    session = session_for(base_config(), POET_MAC, {"poet": script}, memory=None)
-
-    assert await run_reply(session, "roll a die") == ["You got a four."]
-    assert [tool.name for tool in script.seen[0][1]] == ["random_number"]
-
-    (result,) = [
-        result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
-    ]
-    assert not result.is_error
-    assert 1 <= int(result.content.split(",")[0]) <= 6
-
-
-async def test_a_random_range_that_cannot_be_drawn_from_comes_back_as_an_error() -> None:
+async def test_a_builtin_asked_with_arguments_it_cannot_use_comes_back_as_an_error(
+    tmp_path: Path,
+) -> None:
     """The refusal as the model receives it, which is the shape any
     builtin's bad arguments take: an error result it reads and can call
-    again from, rather than an ended reply."""
-    script = ScriptedLlm(
-        [[call("random_number", minimum=10, maximum=1)], "Let me try that the other way round."]
-    )
-    session = session_for(base_config(), POET_MAC, {"poet": script}, memory=None)
-    await run_reply(session, "pick a number between ten and one")
+    again from, rather than an ended reply. `remember` is offered here
+    and its argument validation refuses before the store is touched, so
+    what is under test is the loop's rendering rather than any store."""
+    store = MemoryStore(tmp_path)
+    script = ScriptedLlm([[call("remember", text=None)], "Let me put that another way."])
+    session = session_for(base_config(), POET_MAC, {"poet": script}, memory=store)
+    await run_reply(session, "remember nothing in particular")
 
     (result,) = [
         result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
     ]
     assert result.is_error
-    assert "no greater than" in result.content
+    assert 'needs a "text" argument' in result.content
+    assert store.read("poet") == ""
 
 
 async def test_a_remembered_fact_is_in_the_next_replys_prompt(tmp_path: Path) -> None:
