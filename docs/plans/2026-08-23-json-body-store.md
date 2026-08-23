@@ -57,11 +57,19 @@ and discoveries; no deviations says so explicitly.
    `Text`, not `JSON`: SQLAlchemy's JSON type would json.dumps
    the already-dumped string into a double-encoded literal,
    defeating both stable diffs and any future `json_extract`;
-   `Text` is what `model_validate_json` reads. `devices`,
-   `prompt_fragments`, and `domain_settings` are ALREADY at the
-   target shape (a key and one value column) and DO NOT MOVE:
+   `Text` is what `model_validate_json` reads. `prompt_fragments`
+   MOVES with the other entities (key `name`, body `Text` holding
+   the dumped `PromptFragmentConfig`): it is a full
+   descriptor-backed entity riding the same generic arms as the
+   other four, and exempting it while deleting those arms would
+   leave the fifth entity unmapped, which the delta review caught;
+   uniformity here is what lets decision 8 delete the per-entity
+   branches whole rather than keep a two-way mapper. `devices` and
+   `domain_settings` are ALREADY at the target shape (a key and
+   one value column) and DO NOT MOVE:
    `devices` has no entity model or descriptor (its rows read as
-   a bare list into `dict[str, list[NonBlankStr]]`), and
+   a bare list into `dict[str, list[NonBlankStr]]`; it is a
+   setting, not an entity), and
    `_live_binding`'s select of `devices.c.agents` on the device
    lookup path is the one column-level SQL read in `src`, which
    stays exactly as it is. The no-SQL-reads claim is therefore
@@ -399,3 +407,22 @@ modules) is right. Findings condensed but faithful:
     deleted.
     *Resolution* (the F10 commit): the constants move and the
     declared-fields guard is replaced by the round trip.
+
+## Delta review round
+
+A focused re-review of the amended plan (same backend and model)
+verified all ten resolutions against the code, added two
+implementation notes (the unknown-revision arm matches Alembic's
+`CommandError` itself, `orig` being empty; the column-planting
+inventory is 31 sites across seven files), and found ONE new
+problem the amendments introduced: decisions 1 and 8 contradicted
+each other over `prompt_fragments`, a full descriptor-backed
+entity the exemption left unmapped once the generic arms it rides
+were deleted. Verdict as received: "resolve which of decisions 1
+and 8 governs `prompt_fragments`, and the plan is implementable as
+written."
+
+*Resolution*: `prompt_fragments` moves with the entities (decision
+1 as now amended); uniformity is what lets decision 8 delete the
+per-entity branches whole. The two notes are folded into decisions
+4 and the pin lens.
