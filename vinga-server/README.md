@@ -524,8 +524,8 @@ rather than extending it, so `mcp: []` is how an agent opts out of tools
 its siblings have. Each server's tools are offered under its entry name
 (`home__turn_on_light`), which is why an entry name has to be a plain
 `[A-Za-z0-9_-]+` name and cannot be `self` or a builtin's name
-(`switch_agent`, `remember`). Both transports the
-specification defines are supported:
+(`switch_agent`, `remember`). Both transports the specification
+defines are supported:
 
 ```bash
 vinga-server config set mcp-server home -f - <<'YAML'
@@ -710,9 +710,9 @@ restrict tool names to `[A-Za-z0-9_-]`.
 
 **Builtins** are `switch_agent`, offered when the device is bound to
 more than one agent, and `remember`, offered when memory is configured.
-A successful `switch_agent` ends the
-current agent's reply: the new agent greets the user in its own prompt
-and its own voice, with the conversation so far carried over.
+A successful `switch_agent` ends the current agent's reply: the new
+agent greets the user in its own prompt and its own voice, with the
+conversation so far carried over.
 `remember` appends one fact to the agent's memory file:
 
 ```yaml
