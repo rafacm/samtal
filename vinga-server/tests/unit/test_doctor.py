@@ -786,9 +786,14 @@ def test_a_credential_in_the_answer_s_query_is_not_read_back_out_either(
 
     assert doctor.main(["https://voice.example/x/ABCDEFGH/"]) == 0
 
-    printed = capsys.readouterr().out
-    assert PASTED not in printed
-    assert "wss://voice.example/xiaozhi/v1/" in printed
+    captured = capsys.readouterr()
+    both = captured.out + captured.err
+    assert PASTED not in both
+    # The parameter itself and not only its value: what is taken out is
+    # the whole credential, and a URL still carrying an empty `token=`
+    # would say this command had only masked one.
+    assert "token" not in both
+    assert "wss://voice.example/xiaozhi/v1/" in captured.out
 
 
 @pytest.mark.parametrize(
