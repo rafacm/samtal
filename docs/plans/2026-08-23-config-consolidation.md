@@ -231,7 +231,7 @@ explicitly.
 
 ## Milestones
 
-- [ ] **M1: merge, fold, and shrink the structures.** (PR TBD)
+- [x] **[M1: merge, fold, and shrink the structures.](2026-08-23-config-consolidation-implementation.md#m1-merge-fold-and-shrink-the-structures)** (PR TBD)
   Decisions 1, 2, 5, and 6: the DomainConfig merge, the writes.py
   fold with its differential pin, the responses moves, the
   entities shrink. M1's REAL test census, per the delta review:
