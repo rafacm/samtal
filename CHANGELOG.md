@@ -35,8 +35,8 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 - **The CI unit lane runs in parallel** (#254). The workflow's unit step
   gained ` -n auto --dist loadfile` and the dev group gained
   `pytest-xdist`, taking the longest lane from its measured 6m31s to a
-  projected two or three minutes and the critical path down to roughly
-  what the integration lane already costs. `loadfile` keeps a whole file
+  measured 2m25s and leaving the critical path on the integration lane,
+  which now finishes last at 4m54s. `loadfile` keeps a whole file
   on one worker, so module-scoped fixtures stay paid once per file and
   intra-file order is exactly what it was. Local runs are unchanged and
   serial; `uv run pytest tests/unit -q -n auto --dist loadfile` is in

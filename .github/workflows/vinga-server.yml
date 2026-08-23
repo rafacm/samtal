@@ -87,9 +87,9 @@ jobs:
         run: uv run mypy
 
       # The lane's tests are distributed across worker processes, which
-      # is what takes it from its measured 6m31s to a projected two or
-      # three minutes and puts the critical path next to the integration
-      # lane's rather than three times it.
+      # is what took it from its measured 6m31s to a measured 2m25s (run
+      # 32610208370, the first run of this change) and put the critical
+      # path on the integration lane instead.
       #
       # `--dist loadfile` sends a whole file to one worker rather than
       # scattering its tests. Module-scoped fixtures are then paid once
