@@ -142,12 +142,20 @@ and discoveries; no deviations says so explicitly.
    hit gets the same treatment or an explicit acceptance
    sentence.
 6. **The conftest's per-worker duplication is priced, not
-   changed.** Env setup, the pydantic default rewrite, and the
-   `__pycache__` clearing run once per worker; the clearing's
-   `ignore_errors=True` race was tolerated by four spike runs and
-   stays as is, with the audit note moving into the conftest
-   comment so the next reader knows it was considered under
-   workers.
+   changed, with the mechanism stated.** Env setup, the pydantic
+   default rewrite, the shared `mkdtemp` directory, and the
+   `__pycache__` clearing each run once per worker plus once on
+   the controller. The `mkdtemp` duplication is harmless and
+   mildly isolation-improving; its price is N un-removed temp
+   directories per local run instead of one, said in the conftest
+   comment. The clearing's cross-worker race (one worker clearing
+   while another imports) is safe by MECHANISM, not by the
+   spike's four green runs: CPython's import machinery falls back
+   to compiling from source when reading a cached `.pyc` raises
+   `OSError`, so a half-deleted cache costs a recompile, never a
+   wrong import. The comment's "once, before the first import"
+   is corrected to "once per process", since that is what is now
+   true.
 
 ## The standing review lenses, pre-answered
 
