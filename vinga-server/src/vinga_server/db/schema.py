@@ -1,32 +1,63 @@
 """The tables holding the domain half of the configuration.
 
-Typed columns carry identity and the references between entities; JSON
-columns carry the nested structures the pydantic models already own
-(provider options, filler sections, args, env, headers, binding lists).
+One entity is one row, and the row holds three kinds of thing. The
+columns that carry identity, because a key has to be selectable and
+unique. The `body`, which is the entity's pydantic model dumped as
+JSON and validated back through the same model on read: every field
+the model declares, and for a pass-through model every extra beside
+them, lives there and nowhere else. And, on the two kinds that can
+hold one, the `secrets` column, which never carries anything the model
+knows about.
+
+No non-key model field has a column of its own. That is the point
+rather than an omission: a field used to mean a column, a migration
+and two hand-written mapper arms, and the four of them had to agree
+about a tri-state or a default that only one of them stated. Adding a
+field is now a change to the model, to the entity's example fragment
+under `examples/`, and to the two generated reference artifacts, each
+rebuilt by its own command.
+
+A field can earn a column back, and the way it earns one is by needing
+SQL. The first field something has to filter, join or index on gets a
+column through `alembic revision --autogenerate` (runnable through
+`vinga_server.db.migrations.autogen`), which reads the metadata below
+and writes the candidate migration; the body keeps holding it, and the
+column is a derived index rather than a second home for the value.
+Nothing needs one today: the four reshaped tables are read whole and
+assembled in Python.
+
+The body is `Text` and not `JSON`. A `JSON` column would encode the
+already-dumped string a second time, storing a quoted literal that no
+`json_extract` can see into and that reads back as a string rather
+than an object; `Text` is what `model_validate_json` is handed.
+
+`devices` and `domain_settings` are already at this shape and do not
+move. Neither has an entity model to validate a body through: a device
+row is a bare list of agent names and a setting row is a scalar, both
+read as JSON values rather than as a dumped model, and the device
+lookup path selects `devices.c.agents` by name on a connection that
+never migrates.
 
 Referential integrity lives in the repository rather than in SQLite
 foreign keys: validation is single-sourced in the model/repository
-layer, the layer the REST API will use too, and SQLite's foreign key
+layer, the layer the REST API uses too, and SQLite's foreign key
 enforcement is a per-connection pragma that would duplicate half of
 those checks in a second, weaker place.
 
-Encrypted secrets never sit in the model-shaped columns. Each
-secret-bearing entity has its own `secrets` JSON column mapping a
-credential slot to an envelope, so replacing an entity does not touch
-its stored secrets and a loaded row still validates through the
-existing pydantic models unchanged.
+Encrypted secrets never sit in a body. Each secret-bearing entity has
+its own `secrets` JSON column mapping a credential slot to an
+envelope, so replacing an entity does not touch its stored secrets and
+a body written by a fragment that cannot carry ciphertext cannot erase
+one.
 """
 
 from sqlalchemy import (
     JSON,
-    Boolean,
     CheckConstraint,
     Column,
-    Float,
     MetaData,
     Table,
     Text,
-    false,
 )
 
 # Named constraints and indexes, so a later migration can address them.
@@ -55,18 +86,10 @@ providers = Table(
     # providers.
     Column("stage", Text, primary_key=True),
     Column("name", Text, primary_key=True),
-    Column("type", Text, nullable=False),
-    # The environment-reference credential form, carried over verbatim.
-    # A declared model field, so it is excluded from options (which
-    # holds exactly the model extras) and needs its own column, or a
-    # repository written against these definitions would silently drop
-    # every provider's credential reference.
-    Column("api_key_env", Text, nullable=True),
-    # The operator's egress assertion. Null means unstated, which is
-    # what most types want, so it cannot be a boolean with a default.
-    Column("egress", Boolean, nullable=True),
-    # The pass-through options, exactly today's extras.
-    Column("options", JSON, nullable=False, default=dict),
+    # The dumped ProviderConfig: its declared fields and the
+    # pass-through options together, which is what the model itself
+    # holds and so what a reader of the row gets back.
+    Column("body", Text, nullable=False),
     # Option name to secret envelope, empty by default.
     Column("secrets", JSON, nullable=False, default=dict),
 )
@@ -75,67 +98,31 @@ mcp_servers = Table(
     "mcp_servers",
     metadata,
     Column("name", Text, primary_key=True),
-    Column("transport", Text, nullable=False),
-    Column("command", Text, nullable=True),
-    Column("args", JSON, nullable=False, default=list),
-    # Values in env and headers are literal strings or today's $VAR
-    # reference strings, never envelopes. An encrypted value lives in
-    # the secrets column below under its dotted path, which is what
-    # keeps this half of the row loadable into McpServerConfig as is.
-    Column("env", JSON, nullable=False, default=dict),
-    Column("url", Text, nullable=True),
-    Column("headers", JSON, nullable=False, default=dict),
-    Column("egress", Boolean, nullable=True),
-    Column("tool_timeout_s", Float, nullable=False),
-    # The operator's guidance about using this server's tools, injected
-    # into the prompt of every agent granted the entry. Nullable, since
-    # NULL is the unset the model already means, and a row written
-    # before the column existed reads as having none.
-    Column("instructions", Text, nullable=True),
-    # Whether the guidance the server ships about itself is injected.
-    # NOT NULL with a database-level default rather than a Python-side
-    # rescue of NULL: a row written before the column existed then reads
-    # false from the database itself, which is what the opt-in means.
-    Column(
-        "use_server_instructions",
-        Boolean,
-        nullable=False,
-        server_default=false(),
-        default=False,
-    ),
-    # The published prompts this entry injects, by the names the server
-    # lists them under. Nullable, since NULL is the "none" the model
-    # already means.
-    Column("inject_prompts", JSON, nullable=True),
+    # The dumped McpServerConfig. Values in its env and headers are
+    # literal strings or today's $VAR reference strings, never
+    # envelopes: an encrypted value lives in the secrets column below
+    # under its dotted path, which is what keeps the body loadable into
+    # McpServerConfig as is.
+    Column("body", Text, nullable=False),
     # Dotted path (env.API_TOKEN, headers.Authorization) to envelope.
     Column("secrets", JSON, nullable=False, default=dict),
 )
 
-# The shared blocks of prompt text agents include by name. Two columns
-# and nothing else: the name a layer references, and the text, held as
-# it was written because that is what the model is given.
+# The shared blocks of prompt text agents include by name: the name a
+# layer references, and the dumped PromptFragmentConfig holding the
+# text as it was written, because that is what the model is given.
 prompt_fragments = Table(
     "prompt_fragments",
     metadata,
     Column("name", Text, primary_key=True),
-    Column("text", Text, nullable=False),
+    Column("body", Text, nullable=False),
 )
 
 agent_defaults = Table(
     "agent_defaults",
     metadata,
     Column("id", Text, primary_key=True),
-    Column("llm", Text, nullable=True),
-    Column("asr", Text, nullable=True),
-    Column("tts", Text, nullable=True),
-    Column("vad", Text, nullable=True),
-    # Null means inherit nothing; a list replaces rather than extends,
-    # so an empty list and a null are different configurations.
-    Column("mcp", JSON, nullable=True),
-    Column("filler", JSON, nullable=True),
-    # The fragment names this layer's prompt carries, under the same
-    # rule as mcp above: null is inherit and an empty list opts out.
-    Column("prompt_includes", JSON, nullable=True),
+    Column("body", Text, nullable=False),
     CheckConstraint(f"id = '{AGENT_DEFAULTS_ID}'", name="singleton"),
 )
 
@@ -143,14 +130,7 @@ agents = Table(
     "agents",
     metadata,
     Column("name", Text, primary_key=True),
-    Column("prompt", Text, nullable=False, default=""),
-    Column("llm", Text, nullable=True),
-    Column("asr", Text, nullable=True),
-    Column("tts", Text, nullable=True),
-    Column("vad", Text, nullable=True),
-    Column("mcp", JSON, nullable=True),
-    Column("filler", JSON, nullable=True),
-    Column("prompt_includes", JSON, nullable=True),
+    Column("body", Text, nullable=False),
 )
 
 # An entity table rather than bare binding rows, so the per-device
