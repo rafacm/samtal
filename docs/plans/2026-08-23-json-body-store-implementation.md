@@ -155,7 +155,19 @@ deletion the plan authorized on a false premise was declined, and the
 guard survives for the body kinds in the least inventive form available,
 asked of the validated entry inside `_body` instead of of a decoded
 mapping inside `_stored`. Behaviour is what it was, including the
-wording. The rest of decision 3's disposition holds as written: the
+wording, on the read path.
+
+One consequence on the write path is worth recording, because "behaviour
+is what it was" is not quite true there: `_to_row`'s `model_dump_json`
+serializes a non-finite float to `null` silently, where the old JSON
+column stored the `NaN` literal for the read guard to catch on the way
+back. `check_transportable` refuses such a fragment before it ever
+reaches `_to_row`, so nothing a caller can write takes that path, which
+makes this a loss of defense in depth rather than a change of behaviour.
+It is named here so that a future change loosening `check_transportable`
+knows what used to stand behind it.
+
+The rest of decision 3's disposition holds as written: the
 Mapping-shaped `_stored` path is off the body kinds entirely (it
 survives for `_live_binding`, which assembles two JSON values into
 `DomainConfig`), and `_mapping`, `_list` and `_shape_problem` survive
