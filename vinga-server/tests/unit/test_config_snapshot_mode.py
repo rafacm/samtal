@@ -88,9 +88,12 @@ def test_the_comparison_refuses_rather_than_claim_the_world_is_pending(
     answer = client.get(DIFF)
 
     assert answer.status_code == 409
-    # The fact this mode turns on, in the refusal: this server's world
-    # came from somewhere other than the store beside it.
-    assert "store" in refusal_body(answer.json(), 409)
+    # This refusal and not the other 409 this read can answer, which is
+    # a held write lock: that one clears on its own and says to make the
+    # request again, and only this one says making it again will not
+    # help. A check for the word "store" cannot tell them apart, since
+    # the busy sentence says the stored half could not be read.
+    assert "will not help" in refusal_body(answer.json(), 409)
 
 
 def test_the_apply_refuses_rather_than_install_another_servers_world(
@@ -99,11 +102,10 @@ def test_the_apply_refuses_rather_than_install_another_servers_world(
     answer = client.post(RELOAD)
 
     assert answer.status_code == 409
-    detail = refusal_body(answer.json(), 409)
-    assert "store" in detail
     # The one 409 in this API that making the request again will not
-    # clear, and it says so rather than inviting a retry loop.
-    assert "will not help" in detail
+    # clear, and it says so rather than inviting a retry loop. It is
+    # also what tells this refusal from the held write lock beside it.
+    assert "will not help" in refusal_body(answer.json(), 409)
 
 
 def test_a_device_write_says_it_is_stored_and_waits_for_a_start(
