@@ -350,11 +350,10 @@ def test_a_device_bound_to_an_agent_this_server_is_not_serving_names_the_reload(
 # So this is the completeness half, and it is complete in the plan's own
 # terms: every event, every variant, every template byte for byte, every
 # argument position with the field it renders, its kind, nullability,
-# constraint and note,
-# every payload field with its kind, requiredness, nullability,
-# constraint and note, every declared token inside those constraints,
-# every syntax, bound and grammar, and every prose note the catalog
-# carries. Read off the declarations rather than off the generator's own
+# constraint and note, every payload field with its kind, requiredness,
+# nullability, constraint and note, every declared token inside those
+# constraints, every syntax, bound and grammar, and every prose note the
+# catalog carries. Read off the declarations rather than off the generator's own
 # helpers, so each assertion is a second opinion about a cell rather
 # than the same string computed twice.
 
