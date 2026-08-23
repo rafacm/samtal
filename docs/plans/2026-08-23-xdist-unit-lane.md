@@ -227,6 +227,10 @@ faithful:
    collects in `pytest_testnodedown` and prints and fails from its
    own terminal_summary), put the code in scope, and name how the
    scratch residual is planted.
+   *Resolution* (`63982e03`): the repair ships as code with the
+   workeroutput mechanism and a reproducible planted-teardown
+   proof in both modes.
+
 2. **P1: the spike is not CI-like; contention on 4 real cores is a
    fourth hazard the prescribed local runs cannot exercise.** The
    timing-margin drivers #233's M2 shrank (the 20/60/80ms filler
@@ -236,34 +240,63 @@ faithful:
    and only the PR's CI runs bear on this; add the graded response
    (`-n 3`/`-n 2` before revert) since contention is a headroom
    problem.
+   *Resolution* (`4ed55d2b`): contention is the fourth hazard,
+   the exposed timing margins are named, local runs are a smoke
+   check, and the graded n3/n2 response precedes any revert.
+
 3. **P2: the step silently changes `-v` to `-q`**, breaking the
    two-token revert claim and the one-line inventory; keep `-v` or
    decide the drop with a reason, and state the real diff set.
+   *Resolution* (`9f023bbd`): -v stays, the step changes by
+   exactly the two appended tokens, and the whole diff set is
+   stated.
+
 4. **P2: the port audit greps the files that cannot bind and misses
    every file that does.** Audit by what binds
    (`\.bind\(|ThreadingHTTPServer\(|socket\.socket\(|uvicorn`),
    with three dispositions; `unused_url()`'s bind-and-release
    free-port assumption is the one genuine parallel hazard and
    needs a verdict.
+   *Resolution* (`6532bcfa`): the audit targets bind calls with
+   three dispositions and unused_url holds its socket open.
+
 5. **P2: the flake hunt drops the recorded context** (an in-flux
    mid-milestone tree with two concurrent expected failures, the
    repository's own documented way for a tree to lie), never quotes
    the failure text, and loadfile reruns explore LESS order space
    than the serial run that failed. Lead with the stale-bytecode
    hypothesis; call the likely outcome ACCEPTED, not EXPLAINED.
+   *Resolution* (`d0b61ce5`): the hunt starts from the recorded
+   in-flux-tree context with stale bytecode leading, rerun rituals
+   are dropped as evidence, and unreproduced resolves to ACCEPTED.
+
 6. **P2: the week-of-runs watch has no owner, method, or trigger.**
    Name the record, the candidate-flake rule, and the revert
    trigger, and who does the recording.
+   *Resolution* (the F6 commit): owner, record, candidate rule,
+   and the two-event trigger firing the graded response.
+
 7. **P3: the per-worker inventory drops the `mkdtemp` the issue
    named**; complete it with its disposition (N un-removed temp
    dirs per local run).
+   *Resolution* (the F7/F8 commit): mkdtemp completed with its
+   disposition.
+
 8. **P3: the pycache race's safety is a mechanism, not four green
    runs** (import falls back to source on a cache OSError), and the
    conftest's "once" becomes "once per process".
+   *Resolution* (the F7/F8 commit): the import-fallback mechanism
+   stated and the comment corrected to once per process.
+
 9. **P3: three unsourced or inconsistent numbers in the Goal**
    (`-n 4` vs `auto`; 6.5 underived; 3.6x cherry-picked from the
    faster contended run). Spell `auto`, derive or drop, quote
    3.0x to 3.6x.
+   *Resolution* (the F9 commit): auto throughout, measured times
+   quoted, 3.0x to 3.6x.
+
 10. **P3: no documented command reproduces a CI-only failure**;
     add the parallel invocation to AGENTS.md and the README's
     command blocks.
+    *Resolution* (the F10 commit): both command blocks gain the
+    parallel invocation.
