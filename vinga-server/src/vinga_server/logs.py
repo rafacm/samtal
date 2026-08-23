@@ -15,7 +15,9 @@ tracebacks nothing here has sanitized. See `quiet_vendor_libraries`
 below, which is called from here and, without a level, from the two
 places a deployment starts at, because one of them never reaches this
 function and the other reaches it after the boot configuration has
-already been read out of a database.
+already been read out of a database. `quieted` beside it is the same
+mechanism for the length of one call, which is what a command whose
+argument is a secret needs of the library that would narrate it.
 
 Call sites need no wrapper. Anything passed as `extra=` on an ordinary
 logging call becomes a top-level field of the JSON object, found by
@@ -30,7 +32,8 @@ structured-logging dependency would cost more than it saves.
 import datetime as dt
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Iterable, Iterator, Mapping
+from contextlib import contextmanager
 from typing import Any
 
 from vinga_server.config.models import ServerConfig
@@ -131,6 +134,38 @@ def quiet_vendor_libraries(level: int | None = None) -> None:
         logger = logging.getLogger(name)
         against = logger.getEffectiveLevel() if level is None else level
         logger.setLevel(max(against, floor))
+
+
+@contextmanager
+def quieted(names: Iterable[str], level: int) -> Iterator[None]:
+    """Hold these loggers at `level` or above for the length of a block,
+    and put back exactly what each of them had.
+
+    The scoped sibling of `quiet_vendor_libraries`, and the same
+    mechanism for the same reason: a level on a named logger, raised and
+    never lowered, so a deployment that had already silenced one keeps
+    the silence it asked for.
+
+    What differs is the span rather than the kind. The floors above are
+    standing, and are about how loud an operator turned a library up.
+    This is about one call whose arguments are a secret, where the
+    library's ordinary INFO line is precisely the record that must not
+    exist: `doctor.py` names the loggers and says which call.
+
+    What is restored is each logger's own level rather than its
+    effective one, so a logger that was inheriting goes back to
+    inheriting. Logger levels are process state, and so is this: it is
+    for a command line tool doing one thing at a time, and two threads
+    calling it over the same names would restore each other's.
+    """
+    held = [(logging.getLogger(name), logging.getLogger(name).level) for name in names]
+    for logger, _ in held:
+        logger.setLevel(max(logger.getEffectiveLevel(), level))
+    try:
+        yield
+    finally:
+        for logger, was in held:
+            logger.setLevel(was)
 
 
 class JsonFormatter(logging.Formatter):
