@@ -1235,7 +1235,12 @@ def test_the_config_group_no_longer_answers_this_command(
 ) -> None:
     """The old spelling, removed with no alias: it meets the config
     grammar's ordinary refusal for a word that is not one of its
-    commands."""
+    commands.
+
+    Which since the Typer rebuild says so without repeating the word.
+    The refusal used to be argparse's `invalid choice: 'doctor'`, and
+    the URL a mistyped command is followed by is exactly what this
+    entry point exists never to echo."""
     from vinga_server import main as entrypoint
 
     monkeypatch.setattr(
@@ -1248,5 +1253,6 @@ def test_the_config_group_no_longer_answers_this_command(
     assert left.value.code == 1
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "invalid choice" in captured.err
+    assert "that is not a command" in captured.err
+    assert "doctor" not in captured.err
     assert SECRET_SEGMENT not in captured.err

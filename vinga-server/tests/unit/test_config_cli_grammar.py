@@ -5,12 +5,14 @@ the parse: a subcommand nobody has, a missing positional, an unknown
 flag, an argument too many, and `--help`, which is the one invocation
 that is not a failure.
 
-The exit code is the contract under all of it. argparse exits 2 from
-inside `parse_args`, which would make a typed command the single failure
-that bypasses both the documented codes and the sanitized boundary, so
-the group catches it and exits 1 like everything else. And a refusal for
-an extra argument must not echo the argument: the mistake it covers is
-typing the secret after the slot.
+The exit code is the contract under all of it. Click's own error path
+prints the mistake and exits 2, which would make a typed command the
+single failure that bypasses both the documented codes and the sanitized
+boundary, so the group runs Click with that path off and answers every
+usage error itself, exiting 1 like everything else. And a refusal must
+never echo what was typed: Click quotes an unknown command, repeats a
+bad value and offers a did-you-mean built from an unknown option, and
+the mistake all of that covers is typing the secret after the slot.
 
 The two help-text assertions are here because the help is part of the
 grammar rather than a rendering of an answer. Each pins a phrase an
@@ -35,7 +37,7 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 def printed_help(run, capsys: pytest.CaptureFixture[str]) -> str:
     """The help an operator gets, read where they read it. Whitespace
-    collapsed, because argparse wraps the line it is printed on and
+    collapsed, because the formatter wraps the line it is printed on and
     where it wraps is not the contract."""
     with pytest.raises(SystemExit) as caught:
         run("--help")
@@ -68,9 +70,9 @@ def test_the_two_ways_to_bind_a_board_say_which_is_which(
 def test_a_mistake_in_the_grammar_exits_one_like_every_other_failure(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """argparse exits 2 from inside parse_args, which would make an
-    unknown command the one failure that bypasses the documented exit
-    codes and the sanitized boundary."""
+    """Click's standalone mode exits 2 from inside the parse, which
+    would make an unknown command the one failure that bypasses the
+    documented exit codes and the sanitized boundary."""
     for argv in (
         ("nonsense",),
         (),
@@ -88,7 +90,7 @@ def test_an_extra_argument_is_refused_without_echoing_it(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The mistake this covers is typing the secret after the slot,
-    which is where argparse would otherwise echo it back."""
+    which is where Click would otherwise echo it back."""
     assert run("set-secret", "provider", "llm", "claude", "api_key", SECRET) == 1
 
     captured = capsys.readouterr()
@@ -102,4 +104,4 @@ def test_asking_for_help_is_not_a_failure(run, capsys: pytest.CaptureFixture[str
         run("--help")
 
     assert caught.value.code == 0
-    assert "usage: vinga-server config" in capsys.readouterr().out
+    assert "Usage: vinga-server config" in capsys.readouterr().out
