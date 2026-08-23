@@ -1,0 +1,475 @@
+"""One document, applied whole: what it writes, what it leaves alone,
+and what it refuses.
+
+The repository half of `config apply`. What makes this a verb of the
+repository rather than a loop above it is the transaction: a document
+that creates an agent and binds a device to it in the same breath passes
+through states no single write would accept, so the reference check runs
+once against the state the whole document would leave, and any refusal
+leaves nothing behind.
+
+Three properties carry the file. Applying is additive, so a section the
+document does not name is untouched and nothing here deletes. Applying
+is idempotent by comparison rather than by rewrite, so the same document
+twice is a no-op with an outcome listing that says so. And a refusal is
+whole and reported whole: every mistake at once, in the sentences the
+single writes earn, with the store afterwards exactly what it was.
+
+The creation order is exercised where it is observable, which is not
+here: an apply validates once against the finished candidate, so a
+complete document resolves whichever order its entries were staged in.
+What the order can be held to is the outcome listing, and the edges
+themselves are driven through sequential single writes at the foot of
+this file, where the wrong order is refused.
+"""
+
+from pathlib import Path
+
+import pytest
+from cryptography.fernet import Fernet, MultiFernet
+
+from vinga_server.config import ConfigError
+from vinga_server.config.models import DOMAIN_KEYS
+from vinga_server.config.secrets import MASK, SecretLocation, generate_key
+from vinga_server.config.store import APPLY_LIMIT, ConfigStore
+from vinga_server.db import open_database
+
+# Not a real credential, and shaped so a substring check for it cannot
+# match by accident.
+SECRET = "sk-test-4f8b2c9e-never-a-real-credential"
+
+
+@pytest.fixture
+def keys() -> MultiFernet:
+    return MultiFernet([Fernet(generate_key())])
+
+
+@pytest.fixture
+def store(tmp_path: Path, keys: MultiFernet):
+    engine = open_database(tmp_path / "db")
+    try:
+        yield ConfigStore(engine, keys)
+    finally:
+        engine.dispose()
+
+
+# A whole deployment in one document, in the shape the domain half has:
+# the settings in their DOMAIN shape (`devices` as a MAC holding its
+# agents, `default_agent` a name) rather than the shape their own write
+# routes take, because a document is the configuration and not a batch
+# of requests.
+DEPLOYMENT: dict[str, object] = {
+    "providers": {
+        "llm": {"claude": {"type": "anthropic", "model": "claude-sonnet-5"}},
+        "asr": {"whisper": {"type": "faster_whisper", "model": "small"}},
+        "tts": {"voice": {"type": "piper", "model": "es"}},
+        "vad": {"silero": {"type": "silero"}},
+    },
+    "mcp_servers": {"home": {"transport": "stdio", "command": "uvx"}},
+    "prompt_fragments": {"household": {"text": "The bins go out on Tuesday."}},
+    "agent_defaults": {
+        "llm": "claude",
+        "asr": "whisper",
+        "tts": "voice",
+        "vad": "silero",
+        "mcp": ["home"],
+    },
+    "agents": {"sam": {"prompt": "You are Sam.", "prompt_includes": ["household"]}},
+    "devices": {"AA-BB-CC-DD-EE-FF": ["sam"]},
+    "default_agent": "sam",
+}
+
+
+def _outcomes(store: ConfigStore, document: object) -> list[tuple[str, str, bool]]:
+    return [(one.section, one.identity, one.wrote) for one in store.apply(document)]
+
+
+def test_one_document_writes_a_whole_deployment(store: ConfigStore) -> None:
+    """The acceptance case, and the one a loop of single writes could
+    not do: the agent, the device bound to it and the default agent
+    naming it all arrive together, and every intermediate state on the
+    way would have been refused by a per-entity check."""
+    applied = store.apply(DEPLOYMENT)
+
+    assert all(one.wrote for one in applied)
+    snapshot = store.load()
+    assert snapshot.domain.providers.llm["claude"].type == "anthropic"
+    assert snapshot.domain.mcp_servers["home"].command == "uvx"
+    assert snapshot.domain.prompt_fragments["household"].text.startswith("The bins")
+    assert snapshot.domain.agent_defaults.mcp == ["home"]
+    assert snapshot.domain.agents["sam"].prompt == "You are Sam."
+    assert snapshot.domain.devices == {"aa:bb:cc:dd:ee:ff": ["sam"]}
+    assert snapshot.domain.default_agent == "sam"
+
+
+def test_the_outcome_listing_comes_out_in_the_document_order(store: ConfigStore) -> None:
+    """`DOMAIN_KEYS` is already documented as the write, read and
+    creation order, and apply iterates it rather than a second list of
+    it. The listing is the only order an apply observably has, which is
+    what makes it the thing to assert: the check runs once against the
+    finished candidate, so a complete document resolves whichever order
+    its entries were staged in.
+
+    The document below is written in the reverse of that order, so a
+    listing that came out in the caller's order rather than the
+    configuration's would fail here.
+    """
+    reversed_document = {key: DEPLOYMENT[key] for key in reversed(DOMAIN_KEYS)}
+
+    sections = [one.section for one in store.apply(reversed_document)]
+
+    assert sections == [
+        "providers",
+        "providers",
+        "providers",
+        "providers",
+        "mcp_servers",
+        "prompt_fragments",
+        "agent_defaults",
+        "agents",
+        "devices",
+        "default_agent",
+    ]
+    # And the sections themselves are `DOMAIN_KEYS` in its own order,
+    # read off it rather than written down twice.
+    assert list(dict.fromkeys(sections)) == list(DOMAIN_KEYS)
+
+
+def test_a_provider_is_named_by_its_stage_and_name_together(store: ConfigStore) -> None:
+    """A provider is addressed by two parameters everywhere else, and
+    an outcome names it the same way, so a listing can be read against
+    the document it came from."""
+    applied = store.apply({"providers": {"llm": {"claude": {"type": "mock"}}}})
+
+    assert [(one.section, one.identity) for one in applied] == [("providers", "llm.claude")]
+
+
+# Idempotence
+
+
+def test_the_same_document_twice_is_a_no_op(store: ConfigStore) -> None:
+    """Comparison rather than blind rewrite: the second apply writes
+    nothing, because every entry's row would be written with the bytes
+    it already holds."""
+    store.apply(DEPLOYMENT)
+
+    again = store.apply(DEPLOYMENT)
+
+    assert [one.wrote for one in again] == [False] * len(again)
+    assert store.load().domain.agents["sam"].prompt == "You are Sam."
+
+
+def test_only_the_entries_that_differ_are_written(store: ConfigStore) -> None:
+    store.apply(DEPLOYMENT)
+    changed = {**DEPLOYMENT, "agents": {"sam": {"prompt": "You are someone else."}}}
+
+    applied = store.apply(changed)
+
+    assert {(one.section, one.identity) for one in applied if one.wrote} == {
+        ("agents", "sam")
+    }
+    assert store.load().domain.agents["sam"].prompt == "You are someone else."
+
+
+def test_an_unchanged_singleton_is_reported_rather_than_rewritten(
+    store: ConfigStore,
+) -> None:
+    """The agent defaults are a section that IS a body rather than a
+    mapping of entries, so an empty one is the empty entry and an empty
+    store already holds it."""
+    applied = store.apply({"agent_defaults": {}})
+
+    assert [(one.section, one.wrote) for one in applied] == [("agent_defaults", False)]
+
+
+# Additive
+
+
+def test_a_section_the_document_does_not_name_is_untouched(store: ConfigStore) -> None:
+    """Omission is additive, which is the rule that makes a partial
+    document safe to apply: what is not mentioned is not an instruction
+    to remove it."""
+    store.apply(DEPLOYMENT)
+
+    store.apply({"prompt_fragments": {"house_style": {"text": "Be brief."}}})
+
+    snapshot = store.load()
+    assert sorted(snapshot.domain.prompt_fragments) == ["house_style", "household"]
+    assert snapshot.domain.agents["sam"].prompt == "You are Sam."
+    assert snapshot.domain.devices == {"aa:bb:cc:dd:ee:ff": ["sam"]}
+    assert snapshot.domain.default_agent == "sam"
+
+
+def test_an_empty_document_and_an_empty_section_add_nothing(store: ConfigStore) -> None:
+    store.apply(DEPLOYMENT)
+
+    assert store.apply({}) == ()
+    assert store.apply({"agents": {}, "providers": {}}) == ()
+
+    assert sorted(store.load().domain.agents) == ["sam"]
+
+
+def test_an_explicit_null_default_agent_clears_it(store: ConfigStore) -> None:
+    """The one entry of a document that takes something away, and it is
+    explicit: leaving the key out says nothing about the setting at
+    all."""
+    store.apply(DEPLOYMENT)
+
+    applied = store.apply({"default_agent": None})
+
+    assert [(one.section, one.wrote) for one in applied] == [("default_agent", True)]
+    assert store.read_default_agent() is None
+    # And clearing what is already clear is the unchanged outcome.
+    assert [one.wrote for one in store.apply({"default_agent": None})] == [False]
+
+
+def test_an_absent_default_agent_is_left_alone(store: ConfigStore) -> None:
+    store.apply(DEPLOYMENT)
+
+    applied = store.apply({"agents": {"sam": {"prompt": "You are Sam."}}})
+
+    assert [one.section for one in applied] == ["agents"]
+    assert store.read_default_agent() == "sam"
+
+
+# Refused whole
+
+
+def test_an_unresolvable_document_is_refused_whole_and_writes_nothing(
+    store: ConfigStore,
+) -> None:
+    """The rollback, proven by reading the store back rather than by
+    trusting the transaction: the provider and the fragment in this
+    document are perfectly good, and neither of them lands, because the
+    agent beside them names an engine nothing defines."""
+    document = {
+        "providers": {"llm": {"claude": {"type": "mock"}}},
+        "prompt_fragments": {"household": {"text": "The bins go out on Tuesday."}},
+        "agents": {"sam": {"prompt": "You are Sam.", "asr": "ghost"}},
+    }
+
+    with pytest.raises(ConfigError) as caught:
+        store.apply(document)
+
+    assert 'unknown asr provider "ghost"' in str(caught.value)
+    snapshot = store.load()
+    assert snapshot.domain.providers.llm == {}
+    assert snapshot.domain.prompt_fragments == {}
+    assert snapshot.domain.agents == {}
+
+
+def test_a_reference_refusal_is_the_sentence_a_single_write_earns(
+    store: ConfigStore,
+) -> None:
+    """The wording is the single write's, unchanged: one reference pass
+    produces one refusal whichever verb asked for it, so an operator
+    reading an apply reads the sentence they would have read from a
+    `set`."""
+    fragment = {"prompt": "You are Sam.", "llm": "ghost"}
+
+    with pytest.raises(ConfigError) as applied:
+        store.apply({"agents": {"sam": fragment}})
+    with pytest.raises(ConfigError) as written:
+        store.set_agent("sam", fragment)
+
+    assert str(applied.value) == str(written.value)
+
+
+def test_every_bad_fragment_is_reported_at_once(store: ConfigStore) -> None:
+    """A document is refused whole, so it is reported whole: an operator
+    correcting one would otherwise need as many attempts as their file
+    has mistakes. Each line is the sentence that single write earns, and
+    the field problems travel beside them."""
+    with pytest.raises(ConfigError) as caught:
+        store.apply({"providers": {"llm": {"first": {}, "second": {}}}})
+
+    message = str(caught.value)
+    assert message.splitlines()[0] == "the document was refused whole and nothing was changed:"
+    assert "invalid providers.llm.first:" in message
+    assert "invalid providers.llm.second:" in message
+    assert [problem.path for problem in caught.value.problems] == ["/type", "/type"]
+
+
+def test_a_refused_document_never_quotes_what_it_was_sent(store: ConfigStore) -> None:
+    """A document is a file an operator wrote, so a fragment inside one
+    carries a pasted credential exactly as a fragment sent on its own
+    does. Nothing on the refusal, and nothing behind it."""
+    document = {
+        "providers": {"llm": {"claude": {"type": "anthropic", "api_key": SECRET}}},
+        "agents": {"sam": {"prompt": SECRET, "llm": SECRET}},
+    }
+
+    with pytest.raises(ConfigError) as caught:
+        store.apply(document)
+
+    assert SECRET not in _chain(caught.value)
+    assert SECRET not in str(caught.value.problems)
+
+
+def test_a_mask_with_nothing_behind_it_is_refused_in_a_document(
+    store: ConfigStore,
+) -> None:
+    """The unchanged-value marker reaches an applied document because
+    apply runs the same phases a single write runs, so a mask on an
+    entity a document creates has nothing to keep, exactly as it has
+    nothing to keep on a PUT that creates one."""
+    with pytest.raises(ConfigError) as caught:
+        store.apply({"providers": {"llm": {"fresh": {"type": "mock", "api_key_env": MASK}}}})
+
+    assert "api_key_env" in str(caught.value)
+    assert store.load().domain.providers.llm == {}
+
+
+def test_a_mask_in_a_document_keeps_what_is_stored(store: ConfigStore) -> None:
+    """And the other half: a document holding a read's own body keeps
+    the value the display would not show, which is what makes an
+    exported document applicable back onto the store it came from."""
+    store.set_provider("llm", "claude", {"type": "anthropic", "api_key_env": "lowercase_name"})
+
+    applied = store.apply(
+        {"providers": {"llm": {"claude": {"type": "anthropic", "api_key_env": MASK}}}}
+    )
+
+    assert [one.wrote for one in applied] == [False]
+    assert store.read_provider("llm", "claude").entry.api_key_env == "lowercase_name"
+
+
+# The shape of the document itself
+
+
+DOCUMENTS_REFUSED = [
+    ("a document that is not a mapping", ["providers"], "document:"),
+    ("a top-level key that is not a section", {"provider": {}}, "document:"),
+    ("a section that is not a mapping", {"agents": ["sam"]}, "agents:"),
+    ("a provider stage holding a list", {"providers": {"llm": ["claude"]}}, "providers:"),
+    ("a stage that is not a stage", {"providers": {"ghost": {"a": {}}}}, "providers:"),
+    ("a binding that is not a list", {"devices": {"aa:bb:cc:dd:ee:ff": "sam"}}, "devices:"),
+    ("a default agent that is not a name", {"default_agent": 7}, "default_agent:"),
+]
+
+
+@pytest.mark.parametrize(
+    ("document", "named"),
+    [(document, named) for _, document, named in DOCUMENTS_REFUSED],
+    ids=[what for what, _, _ in DOCUMENTS_REFUSED],
+)
+def test_a_document_of_the_wrong_shape_names_where_and_nothing_else(
+    store: ConfigStore, document: object, named: str
+) -> None:
+    """One line naming where the shape is wrong and nothing of what was
+    written there. A refusal about the document as a whole stands alone;
+    one about a single entry is a line of the aggregate, because a
+    document is reported whole."""
+    with pytest.raises(ConfigError) as caught:
+        store.apply(document)
+
+    assert any(line.startswith(named) for line in str(caught.value).splitlines())
+    assert store.load().domain.agents == {}
+
+
+def test_a_document_naming_more_entries_than_the_limit_is_refused_unmutated(
+    store: ConfigStore,
+) -> None:
+    """Request hygiene, refused before anything is prepared: an applied
+    document is one transaction, and one transaction that never ends is
+    what a generated file can ask for by accident. The sentence names
+    the limit and quotes nothing."""
+    store.apply({"providers": {"llm": {"claude": {"type": "mock"}}}})
+    over = {
+        "agents": {f"agent-{number}": {"prompt": "p"} for number in range(APPLY_LIMIT + 1)}
+    }
+
+    with pytest.raises(ConfigError) as caught:
+        store.apply(over)
+
+    assert str(caught.value).startswith("document:")
+    assert str(APPLY_LIMIT) in str(caught.value)
+    assert store.load().domain.agents == {}
+    # And exactly the limit goes through, so the bound is the one the
+    # sentence names.
+    at_limit = {"agents": {f"agent-{number}": {"prompt": "p"} for number in range(APPLY_LIMIT)}}
+    assert len(store.apply(at_limit)) == APPLY_LIMIT
+
+
+# The creation order, where it is observable
+#
+# An apply cannot demonstrate it: the check runs once against the
+# finished candidate state, so a complete document resolves whichever
+# order its entries were staged in, and a test that applied a document
+# in the wrong order would pass. Where the order bites is a sequence of
+# single writes, which is what an operator without a document does, and
+# what `DOMAIN_KEYS` documents as the creation order. One case per
+# reference edge, each asserting that the write before the referent
+# exists is refused and the write after it is not.
+
+REFERENCE_EDGES = [
+    (
+        "an agent's provider",
+        lambda store: store.set_agent("sam", {"prompt": "p", "llm": "claude"}),
+        lambda store: store.set_provider("llm", "claude", {"type": "mock"}),
+    ),
+    (
+        "an agent's MCP server",
+        lambda store: store.set_agent("sam", {"prompt": "p", "mcp": ["home"]}),
+        lambda store: store.set_mcp_server("home", {"transport": "stdio", "command": "uvx"}),
+    ),
+    (
+        "an agent's prompt fragment",
+        lambda store: store.set_agent("sam", {"prompt": "p", "prompt_includes": ["household"]}),
+        lambda store: store.set_prompt_fragment("household", {"text": "The bins."}),
+    ),
+    (
+        "a device's agent",
+        lambda store: store.bind_device("aa:bb:cc:dd:ee:ff", ["sam"]),
+        lambda store: store.set_agent("sam", {"prompt": "p"}),
+    ),
+    (
+        "the default agent",
+        lambda store: store.set_default_agent("sam"),
+        lambda store: store.set_agent("sam", {"prompt": "p"}),
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("write", "referent"),
+    [(write, referent) for _, write, referent in REFERENCE_EDGES],
+    ids=[what for what, _, _ in REFERENCE_EDGES],
+)
+def test_a_single_write_is_refused_before_what_it_references_exists(
+    store: ConfigStore, write, referent
+) -> None:
+    with pytest.raises(ConfigError):
+        write(store)
+
+    referent(store)
+    write(store)
+
+
+def _chain(exc: BaseException) -> str:
+    """Everything an exception carries, including what a chain walker
+    would find behind it."""
+    parts: list[str] = []
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        parts += [repr(current), str(current)]
+        current = current.__cause__ or current.__context__
+    return "\n".join(parts)
+
+
+def test_a_secret_stored_on_an_entity_survives_applying_it_again(
+    store: ConfigStore,
+) -> None:
+    """An apply writes the model-shaped half and never the secrets
+    column, exactly as a `set` does: a document reapplied over an entity
+    that has a credential stored on it leaves the credential where it
+    is."""
+    store.apply({"providers": {"llm": {"claude": {"type": "mock"}}}})
+    where = SecretLocation.provider("llm", "claude", "api_key")
+    store.set_secret(where, SECRET)
+
+    store.apply({"providers": {"llm": {"claude": {"type": "mock", "model": "m"}}}})
+
+    assert store.load().secrets.secret(where) == SECRET
