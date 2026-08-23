@@ -294,9 +294,13 @@ All from `vinga-server/`: `uv run ruff check .`,
 `uv run pytest tests/unit -q`, `uv run pytest tests/integration -q`,
 and the generated-document drift checks. The committed artifacts
 (`docs/reference/api-openapi.json`, the config reference,
-`docs/reference/events.md`, `config schema`) are expected
-byte-identical, and that is asserted by the existing drift checks
-plus a `git diff --stat` eyeball on the PR.
+`docs/reference/events.md`) are expected byte-identical, which the
+existing drift checks assert. `config schema` has no drift check (CI
+never runs it; the consolidation plan left it manually verified), so
+it is pinned by hand: capture `uv run vinga-server config schema` on
+the base commit before the move, byte-diff the post-move output
+against the capture, and record the command and result in the
+implementation doc.
 
 Inventories by tooling: `grep -n` for each censused name in
 `config/cli.py` must come back empty after the move;
@@ -399,6 +403,11 @@ faithful:
    verification.** CI's drift checks cover the references and the
    OpenAPI document but never run `config schema`, and a
    `git diff --stat` cannot see changed command output.
+
+   *Resolution* (this commit): the verification section stops
+   claiming CI covers it and pins `config schema` by hand: a capture
+   on the base commit, a byte-diff after the move, both recorded in
+   the implementation doc.
 
 5. **P3: the mechanical test move carries over a private
    reach-in.** The exception-chain test calls `cli._device_url`
