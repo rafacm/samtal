@@ -133,9 +133,13 @@ review, since structural typing never enforced it either.
 `Frame` loses its `timestamp` field and `wrap` its parameter; the
 v2 header struct is unchanged and `wrap` packs a literal 0 where it
 always packed a default 0, so every wire byte is identical. v2
-`unwrap` discards the parsed value. The two framing-test assertions
-that touched the field are updated in the same commit, and the
-byte-level `wrap` expectations in that suite stand as the wire pin.
+`unwrap` discards the parsed value. Two pins replace the two
+deleted assertions, because a default-wrap round trip exercises
+only zero and incoming stock-firmware v2 frames carry nonzero
+timestamps: outgoing v2 frames contain a literal zero in the
+unchanged header bytes, and a manually constructed incoming v2
+frame carrying a nonzero timestamp unwraps successfully with the
+value discarded.
 
 ### 3. The `StreamStarted` skip goes, and the invariant moves to the adapters' pin
 
@@ -442,6 +446,11 @@ with a resolution note here.
 5. **P2: the framing amendment deleted the only nonzero-timestamp
    compatibility pin.** A default-wrap round trip exercises only
    zero; incoming stock-firmware v2 frames carry nonzero values.
+
+   *Resolution* (this commit): decision 2 names the two required
+   pins: outgoing literal zero in the unchanged header, and a
+   hand-built incoming v2 frame with a nonzero timestamp that
+   unwraps with the value discarded.
 
 6. **P2: deleting the skip alone leaves the provider contract
    contradictory.** `providers/base.py` requires consumers to
