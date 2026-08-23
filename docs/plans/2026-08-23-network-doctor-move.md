@@ -275,3 +275,51 @@ counts refreshed after any rebase.
   `config/cli.py` (which stops carrying a second product); `main.py`
   gains one dispatch line pair. `main` stays releasable at the
   milestone boundary by construction, since there is only one.
+
+## Plan review round
+
+External review of commit `dda0fe17`, 2026-08-23. Backend: codex
+CLI 0.149.0, model `gpt-5.6-sol`, read-only sandbox; the first
+codex round since the quota reset (every prior round of the #246
+batch ran on the claude fallback). Runtime 8m28s. Verdict as
+received: ready after the P1/P2 amendments. Findings condensed but
+faithful:
+
+1. **P1: a misspelled top-level command bypasses the doctor's
+   no-leak parser.** `main.py` word-dispatches exact matches and
+   falls through to plain argparse, which echoes unrecognized
+   arguments, so `vinga-server docter https://host/<secret>/`
+   prints the secret URL on stderr. The planned tests drive
+   `doctor.main()` directly and never cross this path.
+
+2. **P1: the import-weight contract contradicts the eager import
+   graph.** `onboarding/__init__.py` eagerly imports `unbound`,
+   which imports `device.bindings`, which imports `config.store`
+   and `vinga_server.db`, so a doctor that imports
+   `onboarding.origin` at module level cannot keep those out of
+   `sys.modules`. The installed entry point also imports `app`
+   before dispatch, so the claim must not read as a statement about
+   deployed startup weight. The planned test also omitted
+   `config.api`, which the contract names.
+
+3. **P1: the proposed no-leak module preserves a query-credential
+   leak.** `_without_userinfo` keeps the query string and
+   `_reported_websocket` prints its result, so a far side reporting
+   `wss://host/ws?token=<secret>` publishes the secret on stdout.
+   `config/models.py` already recognizes secret-shaped query
+   parameters as URL credentials (`url_credential`,
+   `without_url_credential`); moving the narrower helper
+   byte-identically would bless the weaker rule as the one home,
+   and the doctor suite tests userinfo credentials but no query
+   credential.
+
+4. **P2: the config-schema byte-identity claim has no
+   verification.** CI's drift checks cover the references and the
+   OpenAPI document but never run `config schema`, and a
+   `git diff --stat` cannot see changed command output.
+
+5. **P3: the mechanical test move carries over a private
+   reach-in.** The exception-chain test calls `cli._device_url`
+   directly and would keep doing so against `doctor._device_url`;
+   the design guide requires every reach-in in a moved-new test
+   file to be resolved explicitly.
