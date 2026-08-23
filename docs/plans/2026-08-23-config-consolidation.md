@@ -125,12 +125,17 @@ explicitly.
    its name and is listed in the implementation doc. The no-leak
    sentinels are NOT wording pins and do not change: planting a
    credential and asserting its absence is structure, not wording.
-5. **`responses.py` splits by consumer.** Models that define wire
-   shapes the OpenAPI document renders stay (they are the
-   contract); helpers and structures whose only readers are tests
-   fold into those tests or die; anything `cli.py` reads keeps a
-   public name. The split is enumerated in the implementation doc
-   with each name's disposition.
+5. **The issue's `responses.py` premise is stale, and the plan
+   records it.** Post-#210, every public name in the module has a
+   production reader (verified by the review round against
+   `cli.py` and `api.py` line by line); nothing is tests-only.
+   The real moves the file supports: the three `*_DESCRIPTION`
+   constants whose only readers are the `Field(description=...)`
+   calls three lines below inline into those calls, and
+   `outcomes`, `flags`, and `RELOAD_SECTIONS` move to `cli.py`,
+   their only caller, per the deletion test. The wire-shape
+   models stay, being the contract. Each name's disposition is
+   enumerated in the implementation doc.
 6. **The proof surface.** `uv run vinga-server config openapi`
    byte-identical against the committed document at every commit
    of the milestone; `config reference` (domain docgen)
