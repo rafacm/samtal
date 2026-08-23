@@ -56,6 +56,7 @@ from tests.tools.event_baseline import (
     captured,
     driven,
     payload,
+    shape,
 )
 from vinga_server.conversations.store import ConversationStore
 from vinga_server.events.catalog import Variant, catalog, payload_shape
@@ -149,12 +150,17 @@ def described(key: str, record: dict[str, Any]) -> str:
     )
 
 
-def test_every_driven_record_conforms_to_a_declared_variant(
-    capture: dict[str, list[dict[str, Any]]],
-) -> None:
+def test_every_driven_record_conforms_to_a_declared_variant(run: Run) -> None:
     """The direction the every-variant check below does not cover: it
     asks whether each DECLARATION was produced, and this asks whether
     each RECORD was declared.
+
+    Over every typed record the runs produced, which is three times the
+    eighty-six the drivers keep: a session driver crosses a dozen
+    neighbouring paths on its way to its own decision, and those records
+    are in no table and read by nothing else. That wider population is
+    what this holds and `CARRIED` cannot, since a table of per-driver
+    rows only ever sees the driver's own event.
 
     Channel, level and template are derived from the variant at emit, so
     a single declaration edited on its own moves the record with it and
@@ -170,10 +176,14 @@ def test_every_driven_record_conforms_to_a_declared_variant(
     anything. `UNTYPED` below is where that half lives.
     """
     unmatched = [
-        described(key, one)
-        for key, records in capture.items()
+        described(key, record)
+        for key, records in run.said.items()
         for one in records
-        if not any(matches(variant, one) for variant in variants_of(one["event"]))
+        for record in [shape(one)]
+        if record["event"] is not None
+        and not any(
+            matches(variant, record) for variant in variants_of(record["event"])
+        )
     ]
 
     assert unmatched == []
@@ -251,7 +261,8 @@ def test_no_unlisted_record_rides_a_scoped_channel_untyped(run: Run) -> None:
     """
     found = {
         (one.name, one.msg)
-        for one in run.said
+        for records in run.said.values()
+        for one in records
         if getattr(one, "event", None) is None
     }
 

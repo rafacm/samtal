@@ -72,7 +72,15 @@ corrected since it cited both deleted files. Added:
   whether each declaration was produced, this asks whether each record
   was declared. It matches every produced record against the variants of
   its event on channel, level, template equality and the payload key
-  range, through the same `matches()` the every-variant check uses.
+  range, through the same `matches()` the every-variant check uses. The
+  review round's finding 3 widened its population from the eighty-six
+  records the drivers keep to every typed record their runs produced,
+  264 of them: a session driver crosses a dozen neighbouring paths on
+  the way to its own decision, and those records are in no table and
+  read by nothing else. That is what gives this check a failure of its
+  own, which the kept population could not: any disagreement in a KEPT
+  record is also a `CARRIED` row change, since `matched()` answers "no
+  declared variant" for exactly the records this test lists.
   `variants_of()` answers `()` for a record naming an event no
   declaration owns, so an undeclared event would be a listed failure
   rather than a `KeyError`; the docstring says plainly that this is
@@ -196,6 +204,14 @@ against it, and the file was restored by copy-back plus `touch` per
 | A record matching no declared variant: `SessionOpen`'s payload gains an undeclared key | `events/__init__.py`, `_construct`'s `payload=` | RED: conformance, every-variant-produced and the carried-key table. |
 | A half-quartet `llm_round`: the entry fields dropped from the path that fills them | `events/assembly.py`, `llm_rounded`'s `_entry_fields` call | RED: the carried-key table alone. Conformance stays GREEN, which is the point of the table: `required <= keys <= declared` admits the shrunken record. |
 | Control: a level changed in the catalog alone (`SessionOpen.LEVEL` to `DEBUG`) | `events/catalog.py` | GREEN, all seven. The record derives from the declaration, so both sides move together. This is why the first two mutations are planted at the derivation. |
+
+Three more from the PR review round, against the eight-test suite:
+
+| Mutation | Where | Result |
+| --- | --- | --- |
+| A site constructing its own sibling: `BargeInInRefractory` and `BargeInWithoutTranscript` swapped between the two gate branches that build them, so each of two situations is reported under the other's sentence and the other's `reason` | `runtime/turntaking.py:263,301` | RED: the carried-shape table ALONE, naming both drivers and the variant each now produces. The suite as it stood before the round was entirely green under this mutation, verified rather than argued: the key-only table generated under the swap is byte-identical to the one the PR committed. This is finding 1. |
+| One of several producers of a variant broken: `PromptAssembled` gains an undeclared key when the agent is the tutor, whose two prompt assemblies are neighbours of the handover drivers and are kept by nobody | `events/__init__.py`, `_construct`'s `payload=` | RED: conformance ALONE. The carried table cannot see it (the record is in no driver's kept set) and every-variant cannot (the poet's assembly still produces the variant). This is the isolating proof finding 3 asked for. |
+| The reviewer's own mutation: `RejectedAgentNotLoaded` gains an undeclared key while its two `session_rejected` siblings keep producing | `events/__init__.py`, `_construct`'s `payload=` | RED: conformance, every-variant-produced and the carried table. Not isolating, because that variant has exactly one driver: breaking its only producer leaves the declaration unproduced. Recorded as run. |
 
 ### The repo-wide inventory
 

@@ -1591,44 +1591,52 @@ def shape(record: logging.LogRecord) -> dict[str, Any]:
 
 @dataclass(frozen=True)
 class Run:
-    """One drive of every path, in the two views a caller may need.
+    """One drive of every path: everything the scoped channels said
+    while each driver ran, and the half of it that driver owns.
 
-    `kept` is per driver and filtered to the event that driver names,
-    for the reason `Driver` gives. `said` is everything the scoped
-    channels carried while the drivers ran, filtered by nothing, and it
-    is the only view a claim about what is NOT one of the eighty-one
-    typed paths can be made from: an untyped record carries no `event`
-    attribute at all, so it is exactly what `kept` selects out.
+    `said` is filtered by nothing, which is what a claim about anything
+    OTHER than the eighty-one typed paths has to be made from. It holds
+    two populations `kept` does not: the neighbouring paths a driver
+    crosses on its way to its own decision, three times as many records
+    as the drivers keep, and the untyped records, which carry no `event`
+    attribute at all and are therefore exactly what the filter removes.
     """
 
-    kept: dict[str, list[logging.LogRecord]]
-    said: list[logging.LogRecord]
+    said: dict[str, list[logging.LogRecord]]
+
+    @property
+    def kept(self) -> dict[str, list[logging.LogRecord]]:
+        """Each driver's own records: the ones carrying the event that
+        driver names, for the reason `Driver` gives.
+
+        Derived from `said` rather than collected beside it, so the two
+        cannot come to disagree about what one run produced.
+        """
+        wanted = {driver.key: driver.event for driver in DRIVERS}
+        return {
+            key: [one for one in records if getattr(one, "event", None) == wanted[key]]
+            for key, records in self.said.items()
+        }
 
 
 def driven() -> Run:
-    """Every driver run, in declaration order, with the records its own
-    path produced and everything else the channels said.
+    """Every driver run, in declaration order, with everything the
+    scoped channels said while it ran.
 
     Whole records rather than shapes, because a claim about what a
     payload HOLDS cannot be made from the keys `shape()` keeps;
     `captured()` takes a run already made, so a suite wanting both pays
     for one.
     """
-    kept: dict[str, list[logging.LogRecord]] = {}
-    said: list[logging.LogRecord] = []
+    said: dict[str, list[logging.LogRecord]] = {}
     for driver in DRIVERS:
         with tempfile.TemporaryDirectory(prefix="vinga-drivers-") as directory:
             with listening() as collector:
                 answer = driver.drive(Path(directory))
                 if inspect.isawaitable(answer):
                     asyncio.run(answer)
-            said += collector.records
-            kept[driver.key] = [
-                one
-                for one in collector.records
-                if getattr(one, "event", None) == driver.event
-            ]
-    return Run(kept=kept, said=said)
+            said[driver.key] = list(collector.records)
+    return Run(said=said)
 
 
 def captured(
