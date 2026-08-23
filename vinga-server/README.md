@@ -524,7 +524,7 @@ rather than extending it, so `mcp: []` is how an agent opts out of tools
 its siblings have. Each server's tools are offered under its entry name
 (`home__turn_on_light`), which is why an entry name has to be a plain
 `[A-Za-z0-9_-]+` name and cannot be `self` or a builtin's name
-(`switch_agent`, `remember`, `random_number`). Both transports the
+(`switch_agent`, `remember`). Both transports the
 specification defines are supported:
 
 ```bash
@@ -709,8 +709,8 @@ dots replaced (`self_audio_speaker_set_volume`), because both LLM APIs
 restrict tool names to `[A-Za-z0-9_-]`.
 
 **Builtins** are `switch_agent`, offered when the device is bound to
-more than one agent, `remember`, offered when memory is configured, and
-`random_number`, offered always. A successful `switch_agent` ends the
+more than one agent, and `remember`, offered when memory is configured.
+A successful `switch_agent` ends the
 current agent's reply: the new agent greets the user in its own prompt
 and its own voice, with the conversation so far carried over.
 `remember` appends one fact to the agent's memory file:
@@ -726,17 +726,6 @@ the oldest dropped first. Memory is keyed by agent and not by device: a
 agent is one entity across rooms. Leave the section out and there is
 no `remember` tool and no injection.
 
-`random_number` draws one whole number between two bounds, both
-included, from the operating system's entropy. It is there because a
-language model cannot do this: asked to roll a die it writes whichever
-digit its distribution favours, writes the same one again next time,
-and sounds entirely convinced either way. Both bounds are optional and
-default to a die (1 to 6), so a model that asks for nothing gets one,
-and each is held between -1000000 and 1000000; a range that runs
-backwards or leaves those bounds is refused in words the model reads
-and can call again from, the way any builtin refuses arguments it
-cannot use.
-
 No builtin is granted the way an MCP server is. Each appears under a
 structural condition instead, and the conditions are not agent-shaped.
 `switch_agent`'s is the device's: it exists exactly when the board is
@@ -745,10 +734,7 @@ strand a conversation on whichever agent has no way back, which is the
 receptionist handoff the tool was written for. `remember`'s is the
 deployment's: memory is configured or it is not, and where it is, the
 injection into the system prompt is unconditional, so an agent with the
-tool withheld would recall for ever and never learn. `random_number`
-has no condition at all: it is configured by nothing and reaches
-nothing, and there is no fact about a deployment or a board that would
-make chance apply to one agent and not another. Tools with sound
+tool withheld would recall for ever and never learn. Tools with sound
 structural rules do not need a grant model on top of them; the day a
 builtin arrives whose availability is genuinely per-agent policy, the
 grant edge the `mcp` list already carries is where it lands.

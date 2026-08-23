@@ -7,8 +7,8 @@
 #
 # The entry name is what its tools are prefixed with in the merged tool
 # list (`weather__forecast`), so it must be a plain [A-Za-z0-9_-]+ name
-# and cannot be `self` or a builtin's name (`switch_agent`, `remember`,
-# `random_number`).
+# and cannot be `self` or a builtin's name (`switch_agent`,
+# `remember`).
 #
 # This is the only HTTP transport there is. An endpoint that speaks the
 # deprecated SSE transport instead is configured as a stdio server
