@@ -243,9 +243,11 @@ def test_a_local_write_acknowledges_what_the_api_acknowledges(
 #
 # The nine cases are the whole `--local` mutating subset as the grammar
 # stands: five deletes, and set-secret and clear-secret on each kind of
-# entity a secret lives on. That completeness is kept by review, not by
-# machinery: the grammar is imperative parser construction, so a new
-# `local_ok=True` command that skips this list fails nothing.
+# entity a secret lives on. That completeness used to be kept by review
+# alone, because the grammar was imperative parser construction and a
+# new `local_ok=True` command that skipped this list failed nothing. It
+# is machinery now: `local_ok` is a column of the registration table,
+# and the derivation below holds both lists to it.
 
 
 @pytest.mark.parametrize(
@@ -330,6 +332,47 @@ READS = [
     (_a_bound_device, ("show", "device", "aa:bb:cc:dd:ee:ff")),
     (_everything, ("show",)),
 ]
+
+
+def _commanded(argv: tuple[str, ...]) -> tuple[str, ...]:
+    """The words of an invocation that name its command, which is the
+    longest prefix of it that the grammar registers. Read off the table
+    rather than counted, because a command is one word or two and which
+    it is, is not something a case here should have to know."""
+    registered = {row.words for row in cli.COMMANDS}
+    for length in range(len(argv), 0, -1):
+        if argv[:length] in registered:
+            return argv[:length]
+    raise AssertionError(f"not a command of this grammar: {' '.join(argv)}")
+
+
+def _mutates(row: cli.Command) -> bool:
+    """Whether the command writes something, which is what decides which
+    of the two lists above has to cover it: a read is compared as a
+    document and a write as an acknowledgement."""
+    return isinstance(row.does, cli.Act) and row.does.method != "GET"
+
+
+def test_the_two_lists_cover_the_whole_break_glass_subset() -> None:
+    """What used to be kept by review: every command `--local` covers is
+    run both ways by one of the two differential suites above.
+
+    Derived from the grammar's own registration table, where `local_ok`
+    is a column, so a command added to the recovery subset without a
+    case here fails this rather than passing quietly. It is deliberately
+    an equality and not a containment: a case naming a command the
+    subset no longer covers is the same drift from the other side.
+    """
+    covered_writes = {_commanded(argv) for _, argv, _ in MUTATIONS}
+    covered_reads = {_commanded(argv) for _, argv in READS}
+
+    writes = {row.words for row in cli.COMMANDS if row.local_ok and _mutates(row)}
+    reads = {row.words for row in cli.COMMANDS if row.local_ok and not _mutates(row)}
+
+    assert writes, "no command declares itself a break-glass write, so this is vacuous"
+    assert reads, "no command declares itself a break-glass read, so this is vacuous"
+    assert covered_writes == writes
+    assert covered_reads == reads
 
 
 @pytest.mark.parametrize(("seed", "argv"), READS, ids=[" ".join(argv) for _, argv in READS])
