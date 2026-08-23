@@ -21,11 +21,13 @@ can report that they have never met before, and which of the two ways to
 bind a board takes a MAC and which takes an activation code.
 """
 
+import logging
 from pathlib import Path
 
 import pytest
 
-from tests.support.config_cli import SECRET, runner
+from tests.support.config_cli import SECRET, chain, runner
+from tests.support.events import both_formats
 from vinga_server.config import cli, docgen
 
 
@@ -199,15 +201,24 @@ PLANTED: list[tuple[str, tuple[str, ...], str]] = [
     ids=[shape for shape, _, _ in PLANTED],
 )
 def test_a_usage_mistake_says_nothing_of_what_was_typed(
-    run, capsys: pytest.CaptureFixture[str], argv: tuple[str, ...], sentence: str
+    run,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+    argv: tuple[str, ...],
+    sentence: str,
 ) -> None:
     """Every shape the boundary names, refused in this grammar's words.
 
     The sentence is this module's and the value is nowhere: not on
-    stderr, where the refusal is printed, and not on stdout, which a
-    command that got this far has written nothing to.
+    stderr, where the refusal is printed, not on stdout, which a command
+    that got this far has written nothing to, and not in the log, in
+    either of the two renderings a deployment keeps it in. The log is
+    asserted because "nowhere" is the claim: nothing here writes a
+    record today, and a boundary that started logging what it refused
+    would be exactly the change this is addressed to.
     """
-    assert run(*argv) == 1, argv
+    with caplog.at_level(logging.DEBUG):
+        assert run(*argv) == 1, argv
 
     captured = capsys.readouterr()
     assert sentence in captured.err
@@ -215,6 +226,99 @@ def test_a_usage_mistake_says_nothing_of_what_was_typed(
     assert SECRET not in captured.err
     assert SECRET not in captured.out
     assert "Traceback" not in captured.err
+    assert SECRET not in caplog.text
+    assert SECRET not in both_formats(caplog)
+
+
+def _refusal(argv: tuple[str, ...]) -> cli.ConfigError:
+    """The refusal one command line earns, as the exception rather than
+    as the sentence `main` prints.
+
+    A deliberate reach past the entry point, and the only place the
+    claim below can be made: `main` catches this exception by design and
+    answers with a sentence and an exit code, so no caller-facing
+    surface ever holds it, and what is being asserted is what a chain
+    walker would find on it.
+    """
+    with pytest.raises(cli.ConfigError) as caught:
+        cli._parsed(list(argv))
+    return caught.value
+
+
+@pytest.mark.parametrize(
+    "argv", [argv for _, argv, _ in PLANTED], ids=[shape for shape, _, _ in PLANTED]
+)
+def test_a_refusal_carries_nothing_of_the_command_line_on_its_chain(
+    run, argv: tuple[str, ...]
+) -> None:
+    """The half no assertion about a stream can make.
+
+    A Click exception holds the context it was raised from and that
+    context holds the argument list, so a refusal raised inside the
+    handler would carry the whole command line on `__context__` while
+    printing this grammar's own sentence. Both slots are empty, and
+    nothing in the chain says the credential.
+    """
+    refusal = _refusal(argv)
+
+    assert refusal.__cause__ is None
+    assert refusal.__context__ is None
+    assert SECRET not in chain(refusal)
+
+
+# The shapes the real grammar cannot produce
+#
+# The boundary translates five Click classes and falls back for
+# everything else, and two of those classes plus the fallback have no
+# route through this grammar: nothing here is a typed choice, so Click
+# never refuses a value, and nothing raises `BadArgumentUsage`. A branch
+# that cannot be exercised is exactly the branch that leaks the day it
+# becomes reachable, so these are driven at the boundary itself, with a
+# credential in the message each of them would have carried.
+#
+# The base `UsageError` is reached through a subclass `cli` imports
+# rather than through a second import of Typer's private copy of Click:
+# one place breaking on a Typer upgrade is enough.
+USAGE_ERROR = cli.NoSuchOption.__base__
+
+CONSTRUCTED = [
+    (
+        "a value the command does not take",
+        cli.BadParameter(f"Invalid value for 'STAGE': '{SECRET}' is not one of 'llm', 'asr'."),
+        "an argument was given a value this command does not take",
+    ),
+    (
+        "an argument in a shape it does not take",
+        cli.BadArgumentUsage(f"Got unexpected extra arguments ({SECRET})"),
+        "an argument was given in a shape this command does not take",
+    ),
+    (
+        "a usage error whose words are new",
+        USAGE_ERROR(f"Some later Click says something else about {SECRET}."),
+        "the command line could not be parsed",
+    ),
+    (
+        "a Click failure that is not a usage error",
+        cli.ClickException(f"something else went wrong with {SECRET}"),
+        "the command line could not be parsed",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("raised", "sentence"),
+    [(raised, sentence) for _, raised, sentence in CONSTRUCTED],
+    ids=[shape for shape, _, _ in CONSTRUCTED],
+)
+def test_a_shape_the_grammar_cannot_produce_is_translated_too(
+    raised: Exception, sentence: str
+) -> None:
+    """The boundary's own answer, asked directly, because these four
+    have no command line that produces them."""
+    said = cli._usage_problem(raised)
+
+    assert said == f"{sentence}; run with --help for the grammar"
+    assert SECRET not in said
 
 
 # The help, held to what generates it
