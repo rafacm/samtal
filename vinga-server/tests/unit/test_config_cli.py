@@ -532,6 +532,86 @@ def test_malformed_yaml_is_refused_without_echoing_the_line(
     assert "Traceback" not in captured.err
 
 
+# Every source this CLI hands a YAML parser, and every way one can fail
+#
+# Two ways in, a fragment and a whole document, each from a file or from
+# stdin, and one boundary under all of them. The cases below are the two
+# the boundary exists for.
+#
+# A TAG is the leak the parser writes for you: PyYAML answers a tag it
+# has no constructor for by quoting the tag, and a tag is a run of
+# characters an operator typed, so `!<credential> value` is a document
+# whose refusal used to carry the credential. The pasted value on the
+# line beside it covers the shape that was already safe, so a change
+# that fixed one and broke the other fails here.
+#
+# And a CONSTRUCTION failure is the one that was not a refusal at all.
+# `yaml.safe_load` documents `YAMLError`, and its constructors raise the
+# ordinary exceptions on a scalar out of range, so an integer of five
+# thousand digits left as a ValueError with a traceback carrying the
+# whole source.
+
+UNREADABLE = [
+    ("a tag naming what nothing constructs", f"!{SECRET} value\n"),
+    ("a scalar the constructor refuses", f"model: {'1' * 5000}\nnote: {SECRET}\n"),
+    ("an unterminated quote", f"prompt: '{SECRET}\n"),
+    ("a date nothing has", f"when: 2026-99-99\nnote: {SECRET}\n"),
+]
+
+# The two commands that read a YAML source, and what each calls it.
+READERS = [
+    ("a fragment", ("set", "agent", "sam", "-f", "-")),
+    ("a document", ("apply", "-f", "-")),
+]
+
+
+@pytest.mark.parametrize(
+    "argv", [argv for _, argv in READERS], ids=[what for what, _ in READERS]
+)
+@pytest.mark.parametrize(
+    "source", [source for _, source in UNREADABLE], ids=[what for what, _ in UNREADABLE]
+)
+def test_a_source_that_will_not_parse_says_nothing_of_what_it_held(
+    run,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+    argv: tuple[str, ...],
+    source: str,
+) -> None:
+    with caplog.at_level(logging.DEBUG):
+        assert run(*argv, stdin=source) == 1
+
+    captured = capsys.readouterr()
+    assert "invalid YAML" in captured.err
+    assert SECRET not in captured.err
+    assert SECRET not in captured.out
+    assert "Traceback" not in captured.err
+    assert all(SECRET not in str(record.__dict__) for record in caplog.records)
+
+
+@pytest.mark.parametrize(
+    "source", [source for _, source in UNREADABLE], ids=[what for what, _ in UNREADABLE]
+)
+def test_a_source_that_will_not_parse_carries_no_parser_exception(
+    tmp_path: Path, source: str
+) -> None:
+    """White-box for the chain, which is not printed and so cannot be
+    asserted through the runner: a PyYAML mark holds the whole buffer it
+    was parsing, and one of these failures is not a PyYAML exception at
+    all, so what has to be true of the refusal is that nothing walking
+    it finds either."""
+    written = tmp_path / "unreadable.yaml"
+    written.write_text(source, encoding="utf-8")
+
+    with pytest.raises(cli.ConfigError) as caught:
+        cli._fragment(str(written))
+
+    assert "invalid YAML" in str(caught.value)
+    assert SECRET not in _chain(caught.value)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+
+
 def test_a_number_that_is_not_finite_is_refused(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -917,6 +997,13 @@ def test_both_ways_at_once_is_refused(
 # is exactly where a paste lands, which is what makes this the same
 # no-leak boundary `_fragment` is.
 
+# The headline a source that will not parse earns, which the boundary
+# follows with where the parser stopped and the shared tail. Asserted as
+# the headline rather than as the whole sentence because the position
+# moves with the input, and the position is the only thing about the
+# failure the refusal carries.
+_UNREADABLE_VALUE = f"invalid YAML in {cli.PAIR_SOURCE}"
+
 MALFORMED = [
     ("no separator at all", (SECRET,), cli.PAIR_NEEDS_EQUALS),
     ("an empty key", (f"={SECRET}",), cli.PAIR_EMPTY_KEY),
@@ -924,7 +1011,10 @@ MALFORMED = [
     ("a leading dot", (f".a={SECRET}",), cli.PAIR_EMPTY_KEY),
     ("the same key twice", (f"model={SECRET}", f"model={SECRET}"), cli.PAIR_DUPLICATE_KEY),
     ("a key nested inside another", (f"a.b={SECRET}", f"a={SECRET}"), cli.PAIR_NESTED_KEY),
-    ("a value that will not parse", (f"model='{SECRET}",), cli.PAIR_UNPARSEABLE),
+    ("a value that will not parse", (f"model='{SECRET}",), _UNREADABLE_VALUE),
+    # Not a YAMLError at all: CPython refuses to parse an integer of
+    # more than 4300 digits, and PyYAML lets that ValueError through.
+    ("a value the parser cannot construct", (f"model={'1' * 5000}",), _UNREADABLE_VALUE),
     ("a value that is a list", (f"model=[{SECRET}]",), cli.PAIR_NOT_SCALAR),
     ("a value that is a mapping", (f"model={{a: {SECRET}}}",), cli.PAIR_NOT_SCALAR),
 ]
