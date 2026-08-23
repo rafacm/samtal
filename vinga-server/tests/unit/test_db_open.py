@@ -353,6 +353,42 @@ def test_an_alembic_failure_that_is_not_a_stranded_database_is_not_told_to_reset
     assert "Delete that file" not in str(plain)
 
 
+def test_the_baseline_builds_exactly_what_the_tables_declare(tmp_path: Path) -> None:
+    """The chain and `db/schema.py` agree, asked of the whole shape
+    rather than of a list somebody remembered to update.
+
+    This is the gate the squash removed. The chain is one file with no
+    successor, so a column added to `schema.py` without a migration used
+    to be invisible: the tables all exist, the body columns are all
+    there, the head is still one revision, and the first write on a
+    deployment fails on a column that was never created. Nothing else
+    here pins column types, nullability, the primary keys or the
+    singleton check constraint either.
+
+    `compare_metadata` is the same comparison `alembic revision
+    --autogenerate` makes, which the plan makes the sanctioned way to
+    earn a column back, so this asks the migration machinery whether it
+    would have anything to write. An empty answer is the whole
+    assertion: if it is not empty, the difference it reports is the
+    migration that is missing.
+    """
+    from alembic.autogenerate import compare_metadata
+    from alembic.migration import MigrationContext
+
+    from vinga_server.db import schema
+
+    engine = open_database(tmp_path / "db")
+    try:
+        with engine.connect() as connection:
+            difference = compare_metadata(
+                MigrationContext.configure(connection), schema.metadata
+            )
+    finally:
+        engine.dispose()
+
+    assert difference == []
+
+
 def test_the_migrations_ship_inside_the_package() -> None:
     """Discovery from an installed wheel is proved in CI, which installs
     one and migrates from it. This is the cheap half: the scripts are
