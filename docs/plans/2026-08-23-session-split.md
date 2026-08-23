@@ -250,16 +250,29 @@ in M2's diff outside this table is a review flag.
   knowing how a reply's cadence, pause bookkeeping and per-reply
   latches relate; it feeds PCM in and hands each packet's delivery
   to one transaction.
-- **`device/capture_tap.py`, class `CaptureTap`.** Built by
-  `_start_capture` only when a capture opens; owns the
-  `SessionCapture`, all three codec objects and the protocol
-  version; interface `microphone(data)`, `reply(packet)`,
-  `close()`. The session holds `self._tap: CaptureTap | None`,
+- **`device/capture_audio.py`, class `CaptureAudio`.** Named so
+  because `CaptureTap` already means something else
+  (`events.CaptureTap`, the adapter that writes event emissions to
+  a capture) and "tap" keeps that meaning. Built only when a
+  capture opens; owns the three codec objects, the protocol
+  version, and the close of the `SessionCapture` it is handed;
+  interface `microphone(data)`, `reply(packet)`, `close()`. The
+  session holds `self._capture_audio: CaptureAudio | None`,
   compares `is not None`, and its two hot-path calls become one
   line each. The fail-open rules (a frame the capture cannot read
   is not a reason to stop capturing) move with their docstrings.
-  The one sentence: the session stops knowing that recording needs
-  its own decode path with its own codecs.
+  The lifecycle stays whole and its order is pinned here: on
+  start, the session opens the `SessionCapture` from its manifest,
+  attaches it to `SessionEvents` (the decision track is the
+  session's, through the events object it owns), then constructs
+  `CaptureAudio` around it; on shutdown, the session emits
+  `session_closed`, detaches the events capture, calls
+  `CaptureAudio.close()` (which closes the `SessionCapture`), and
+  clears the field, in that order, exactly today's. The existing
+  `attached_taps(session) == []` and complete-manifest assertions
+  keep their meaning through the decision-5 migration table. The
+  one sentence: the session stops knowing that recording needs its
+  own decode path with its own codecs.
 - **`device/watchdog.py`, both watchdogs.** The issue names two and
   the module owns two. `IdleWatchdog` owns the task,
   `_last_activity`, and the countdown arithmetic of
@@ -313,7 +326,7 @@ PR; M2 changes no behavior.
 - `tools/builtin.py`, `tools/names.py`, `tools/source.py`,
   `config/models.py`: decision 4, with both committed artifacts
   regenerated.
-- `device/pacing.py`, `device/capture_tap.py`,
+- `device/pacing.py`, `device/capture_audio.py`,
   `device/watchdog.py`: new, per decision 5; `device/session.py`
   shrinks to the handshake, the wire, the manifest, the close
   path, and delegation to the three.
@@ -491,8 +504,18 @@ with a resolution note here.
    clears, in that order, and the proposed interface said nothing
    about any of it.
 
+   *Resolution* (this commit): decision 5's bullet now states the
+   whole lifecycle and pins the order (open, attach the decision
+   track, construct the audio owner; emit `session_closed`,
+   detach, close, clear), with the session keeping the events
+   attachment and the audio owner keeping the capture's close.
+
 9. **P3: `CaptureTap` collides with `events.CaptureTap`,** the
    existing adapter that writes event emissions to a capture.
+
+   *Resolution* (this commit): the module is
+   `device/capture_audio.py` and the class `CaptureAudio`; "tap"
+   keeps meaning the event adapter.
 
 10. **P3: the reservation claim was wrong.** MCP tools are always
     published qualified (`<entry>__<tool>`); what the freed name
