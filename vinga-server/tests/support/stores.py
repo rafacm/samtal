@@ -25,6 +25,8 @@ from pydantic import BaseModel
 from sqlalchemy import text
 
 from vinga_server.capture import CAPTURE_RATE, CaptureStore
+from vinga_server.config import entities
+from vinga_server.config import store as config_store
 from vinga_server.conversations.store import open_conversations
 from vinga_server.tools.memory import MemoryStore
 
@@ -129,14 +131,28 @@ def planted(store: Any, *statements: Any) -> None:
 
 
 def body(entry: BaseModel) -> str:
-    """One entity's row body as the repository writes it.
+    """One entity's row body, produced by the repository's own writer.
 
-    `exclude_unset`, matching `config.store._to_row`, and for the reason
-    that lives there: `McpServerConfig` refuses a field of the other
-    transport that is present in `model_fields_set`, so a plant that
-    named every field would write rows the loader then refuses.
+    Delegates rather than restating, and the delegation is the point.
+    `config.store._to_row` owns the `exclude_unset` decision, which is
+    load-bearing (`McpServerConfig` refuses a field of the other
+    transport that is present in `model_fields_set`), and a copy of that
+    decision here would be a second home for the one rule the round-trip
+    test in `test_config_bodies.py` claims to pin. With a copy, removing
+    `exclude_unset` from the shipped writer left that family green.
+
+    The reach past the underscore is deliberate and is the smaller of two
+    evils: the alternative is that the pair the suites say they pin is
+    not the pair that ships. The descriptor is found by the entry's model,
+    which is what `_to_row` keys on and the one thing a caller has in
+    hand; an exact match rather than an `isinstance` one, because
+    `AgentConfig` is an `AgentDefaults` and the two are different kinds.
     """
-    return entry.model_dump_json(exclude_unset=True)
+    descriptor = next(
+        (kind for kind in entities.ENTITIES if kind.model is type(entry)), None
+    )
+    assert descriptor is not None, f"{type(entry).__name__} is not an entity model"
+    return str(config_store._to_row(descriptor, entry)["body"])
 
 
 # --- an agent's memory file, made unreadable --------------------------

@@ -183,10 +183,13 @@ def test_a_body_round_trips_through_the_mapper_pair(
     from the row would be a field missing from the model's own dump.
 
     Both halves run through the store rather than beside it, so what is
-    pinned is the pair the repository actually uses. The second write is
-    where `exclude_unset` earns its place: dumping every field would
-    write `url: null` onto a stdio entry, and the second load would
-    refuse the entry its own writer had just produced.
+    pinned is the pair the repository actually uses: the read is a real
+    `store.load()`, and the dump `stores.body` performs is `_to_row`
+    itself rather than a support-module copy of its decision. The second
+    write is where `exclude_unset` earns its place, and removing it from
+    `_to_row` fails eight of these: dumping every field writes `url:
+    null` onto a stdio entry, and the second load refuses the entry its
+    own writer had just produced.
     """
     written = path.read_text(encoding="utf-8")
     _plant(store, descriptor, written)
