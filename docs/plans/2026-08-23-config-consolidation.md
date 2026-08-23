@@ -71,9 +71,10 @@ explicitly.
    permanently, because `_read_domain` assigns `agent_defaults`
    and `default_agent` after construction, a constraint now
    stated beside the class. The pins for this decision are the
-   reference document byte-identical, `config schema` output
-   byte-identical, and the store's write-order suite; the OpenAPI
-   document cannot see either model and pins nothing here.
+   reference document byte-identical, `config schema` verified
+   manually during the milestone and unpinned thereafter, a fact
+   stated at the class, and the store's write-order suite; the
+   OpenAPI document cannot see either model and pins nothing here.
 2. **The fan-out is kept, and the registry shrink is a field-by-
    field disposition, not a slogan.** Post-#210 the registry holds
    no generative machinery (the route factory died in that batch);
