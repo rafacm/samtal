@@ -1360,6 +1360,26 @@ DUPLICATE_ENTRY = (
 
 _APPLY_REFUSED = "the document was refused whole and nothing was changed:"
 
+
+class _Aggregated(ConfigError):
+    """Every mistake one phase of an apply found, as one refusal.
+
+    Its own type so that the phases compose. A phase that runs another
+    inside it (the structural one, which aggregates a document's
+    sections and, inside that, the providers section's stage groups)
+    catches this and folds `lines` in, where an ordinary `ConfigError`
+    would be folded in whole and put a second headline under the first.
+
+    Private, because nothing above the repository tells one from the
+    refusal it is: it is a `ConfigError` with the same sentence and the
+    same field problems, so the API maps it to the same status and the
+    CLI prints it the same way.
+    """
+
+    def __init__(self, lines: Sequence[str], problems: Sequence[FieldProblem] = ()) -> None:
+        super().__init__("\n".join([_APPLY_REFUSED, *lines]), problems)
+        self.lines: tuple[str, ...] = tuple(lines)
+
 # Which sections hold entities, by the key they occupy in the document.
 _SECTION_KINDS: dict[str, EntityDescriptor] = {
     descriptor.moved_key: descriptor for descriptor in entities.ENTITIES
@@ -1396,38 +1416,61 @@ def _named(sections: Mapping[str, object]) -> list[tuple[str, str, object]]:
     Structural only, and deliberately: this is what the entry count is
     taken from, so an over-large document is refused before a single
     fragment is parsed.
+
+    Aggregating, like the two phases after it and for the same reason: a
+    document is refused whole, so a document with two malformed sections
+    is a document whose operator should be told about two malformed
+    sections. Nested, since the providers section aggregates its stage
+    groups inside this, and `_gathered` is what makes the nesting fold
+    into one refusal rather than into a headline under a headline.
     """
-    named: list[tuple[str, str, object]] = []
-    for section in DOMAIN_KEYS:
-        if section not in sections:
-            continue
-        written = sections[section]
-        if section in ("default_agent", "agent_defaults"):
-            # The two sections that hold one thing rather than entries:
-            # the default agent is a name, and the singleton's section IS
-            # its body, so each is one entry however much is written in
-            # it and neither has an identity under the section.
-            named.append((section, "", written))
-        elif section == "providers":
-            named += _provider_entries(written)
-        else:
-            named += [
-                (section, name, body) for name, body in _entries(section, written).items()
-            ]
-    return named
+    return [
+        entry
+        for entries in _gathered(
+            partial(_section_entries, sections),
+            [section for section in DOMAIN_KEYS if section in sections],
+        )
+        for entry in entries
+    ]
+
+
+def _section_entries(
+    sections: Mapping[str, object], section: str
+) -> list[tuple[str, str, object]]:
+    """Every entry one section of a document names."""
+    written = sections[section]
+    if section in ("default_agent", "agent_defaults"):
+        # The two sections that hold one thing rather than entries: the
+        # default agent is a name, and the singleton's section IS its
+        # body, so each is one entry however much is written in it and
+        # neither has an identity under the section.
+        return [(section, "", written)]
+    if section == "providers":
+        return _provider_entries(written)
+    return [(section, name, body) for name, body in _entries(section, written).items()]
 
 
 def _provider_entries(written: object) -> list[tuple[str, str, object]]:
     """The providers section, which is two levels deep because a provider
-    is addressed by its stage and its name together."""
-    named: list[tuple[str, str, object]] = []
-    for stage, group in _entries("providers", written).items():
-        if not isinstance(group, Mapping) or not all(isinstance(key, str) for key in group):
-            raise ConfigError(_NOT_A_STAGE_GROUP)
-        named += [(
-            "providers", f"{_stage(stage)}.{name}", body
-        ) for name, body in group.items()]
-    return named
+    is addressed by its stage and its name together, and which therefore
+    aggregates its own groups: two stages written the wrong way are two
+    things to say."""
+    return [
+        entry
+        for entries in _gathered(_stage_entries, list(_entries("providers", written).items()))
+        for entry in entries
+    ]
+
+
+def _stage_entries(group: tuple[str, object]) -> list[tuple[str, str, object]]:
+    """One provider stage's entries. The stage is checked before the
+    shape under it, so that a word that is not a stage is refused as
+    one rather than as a group of the wrong shape."""
+    stage, entries = group
+    _stage(stage)
+    if not isinstance(entries, Mapping) or not all(isinstance(key, str) for key in entries):
+        raise ConfigError(_NOT_A_STAGE_GROUP)
+    return [("providers", f"{stage}.{name}", body) for name, body in entries.items()]
 
 
 def _entries(section: str, written: object) -> Mapping[str, object]:
@@ -1522,10 +1565,18 @@ def _gathered[Item, Done](
     Recorded inside the handler and raised outside it, the rule this
     repository raises by: an exception raised while another is being
     handled keeps that one as its `__context__`, and a validation error
-    holds the whole rejected fragment. The refusals that are not about
-    the request travel out as themselves, because a busy database or an
-    unreadable row is not a mistake in the document and aggregating it
-    into one would say it was.
+    holds the whole rejected fragment. What is recorded is the lines and
+    the field problems, which are the sanitized halves, rather than the
+    exception. The refusals that are not about the request travel out as
+    themselves, because a busy database or an unreadable row is not a
+    mistake in the document and aggregating it into one would say it
+    was.
+
+    Composes with itself, which is what `_Aggregated` is for: the
+    structural phase runs one of these inside another, and an aggregate
+    caught here is folded in line by line rather than nested, so a
+    document has one headline however many phases deep the mistake was
+    found.
     """
     done: list[Done] = []
     lines: list[str] = []
@@ -1535,11 +1586,14 @@ def _gathered[Item, Done](
             done.append(step(item))
         except (UnknownEntityError, DatabaseBusyError, StorageError):
             raise
+        except _Aggregated as exc:
+            lines += exc.lines
+            problems += exc.problems
         except ConfigError as exc:
             lines.append(str(exc))
             problems += exc.problems
     if lines:
-        raise ConfigError("\n".join([_APPLY_REFUSED, *lines]), tuple(problems))
+        raise _Aggregated(lines, tuple(problems))
     return done
 
 
