@@ -222,8 +222,16 @@ model surviving by name, the store's docstring rewrite, the
 dispositions, the three responses moves, the fold with its two
 decisions moved, and the nine-file import redirect with no assertion
 changed. `docgen.py` losing its `store` import is the incidental win
-the plan predicted: rendering a document no longer imports SQLAlchemy
-and cryptography to reach one class.
+the plan predicted, at its true size: importing `docgen` no longer
+reaches the repository, so the markdown reference and the JSON Schema
+render with nothing loaded but the models and the registry. The
+`vinga-server config` commands still pay for SQLAlchemy and
+cryptography, because `cli.py` imports `ConfigStore` for the paths
+that open a database, and the plan's parenthesis about the class those
+two arrived for is about the module edge rather than about the
+commands. `test_config_docgen.py` pins the module claim in a child
+interpreter, in the shape `test_config_entities.py` holds the
+registry's own import set to, so it cannot regress silently.
 
 ### The inventory
 

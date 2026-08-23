@@ -9,6 +9,8 @@ that are actually there, in both directions.
 """
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -33,6 +35,77 @@ def run(monkeypatch: pytest.MonkeyPatch):
         return cli.main(list(argv))
 
     return _run
+
+
+# The two documents this module renders from the models alone, rendered
+# in a child interpreter that has imported nothing else, which is what
+# says the claim in the module docstring is about the import graph and
+# not about intent. `-B` for the reason `test_config_entities.py` gives:
+# a child that writes bytecode back hands the next command the stale
+# cache `conftest.py` just cleared.
+_ALONE = "\n".join(
+    (
+        "import json",
+        "import sys",
+        "",
+        "import vinga_server.config.docgen as docgen",
+        "",
+        "rendered = len(docgen.reference()) + len(docgen.schema())",
+        "print(json.dumps({",
+        '    "loaded": sorted(n for n in sys.modules if n.startswith("vinga_server")),',
+        '    "heavy": sorted(',
+        '        n for n in ("sqlalchemy", "cryptography", "fastapi", "httpx")',
+        "        if n in sys.modules",
+        "    ),",
+        '    "rendered": rendered,',
+        "}))",
+    )
+)
+
+# What rendering the reference and the schema is allowed to load. Named
+# one by one rather than matched on a prefix, for the reason the
+# registry's own allow list is: each absent module is a separate way for
+# these commands to stop being runnable where they are meant to run.
+ALLOWED_IMPORTS = frozenset(
+    {
+        "vinga_server",
+        "vinga_server.config",
+        "vinga_server.config.docgen",
+        "vinga_server.config.entities",
+        "vinga_server.config.loader",
+        "vinga_server.config.models",
+        "vinga_server.runtime",
+        "vinga_server.runtime.prompt",
+        "vinga_server.tools",
+        "vinga_server.tools.names",
+    }
+)
+
+
+def test_the_reference_and_the_schema_render_from_the_models_alone() -> None:
+    """Importing `docgen` reaches the models and the registry and stops
+    there, and both documents it renders from them come out.
+
+    The repository is the module that must stay out. It is where the
+    whole-domain model used to be declared, which made rendering a
+    document import SQLAlchemy and cryptography to reach one class
+    (#242 moved the declaration to `models.py`). A prose claim about an
+    import graph is one a later import silently retracts, so this drives
+    a child interpreter that has imported nothing else, the shape
+    `test_config_entities.py` holds the registry to.
+
+    `openapi()` is deliberately not called here: it imports the
+    application, says so where it is defined, and is the exception this
+    is the rule for.
+    """
+    finished = subprocess.run(
+        [sys.executable, "-B", "-c", _ALONE], capture_output=True, text=True, check=True
+    )
+    alone = json.loads(finished.stdout)
+
+    assert frozenset(alone["loaded"]) == ALLOWED_IMPORTS
+    assert alone["heavy"] == []
+    assert alone["rendered"] > 0
 
 
 def _properties(schema: dict) -> list[tuple[str, str, dict]]:
