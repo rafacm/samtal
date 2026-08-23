@@ -64,6 +64,33 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **A mistake in a `vinga-server config` command line no longer repeats
+  what was typed** (#194). Every shape of usage error now answers with a
+  fixed sentence of the grammar's own, and an unrecognized shape answers
+  with a deliberately vague one, which is the rule the `conversations`
+  and `doctor` grammars already kept. The one that was leaking is a word
+  that is not a command: it used to be answered with `invalid choice:
+  'doctor'`, quoting it back, and a mistyped command at this entry point
+  is followed by whatever was about to be handed a command that takes
+  secrets. Nothing else about a refusal changed: an unrecognized extra
+  argument still says that a secret is never given as one, and every
+  sentence the API or the repository answers with is passed through as it
+  always was.
+
+- **The `vinga-server config` grammar is built on Typer** (#194).
+  Internal, with no change to the commands, their arguments, their
+  output or their exit codes: the same verbs, the same positionals, the
+  same `-f` writes, the same `--config`, `--api-url` and `--local`
+  accepted before the command word and after it. What changed underneath
+  is that a command is a row in one table rather than a paragraph of
+  parser construction, which is what the inline `key=value` writes,
+  `apply` and `export` are built on next. Two visible edges of the
+  library change: the help's usage line reads `Usage:` where it read
+  `usage:`, and every command's help page now lists its options with
+  their descriptions, with each `set` command's fragment fields carrying
+  the type and the default the generated reference has always shown
+  beside them.
+
 - **The device session is four modules instead of one** (#245).
   Internal, and with one deliberate behavior change, the capture-codec
   failure above, which the split's own review round asked for. Beyond
