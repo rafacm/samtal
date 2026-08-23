@@ -334,7 +334,7 @@ def test_an_unknown_server_reference_names_the_layer_that_holds_it(
     )
     with pytest.raises(ValidationError, match=location) as excinfo:
         config_with(**overrides)
-    assert 'unknown MCP server "nope"' in str(excinfo.value)
+    assert "names no MCP server that exists" in str(excinfo.value)
 
 
 def test_each_entry_form_serializes_as_itself() -> None:

@@ -481,7 +481,7 @@ def test_a_grant_naming_an_unknown_server_is_refused_over_http(client: TestClien
     )
 
     assert response.status_code == 422
-    assert 'unknown MCP server "ghost"' in response.json()["detail"]
+    assert "names no MCP server that exists" in response.json()["detail"]
 
 
 def test_a_put_replaces_an_entity_and_keeps_its_stored_secret(
@@ -597,7 +597,7 @@ def test_a_refused_reference_is_422_in_the_repository_s_own_words(
     response = client.put("/agents/sam", json={"llm": "ghost"})
 
     assert response.status_code == 422
-    assert 'unknown llm provider "ghost"' in response.json()["detail"]
+    assert "names no llm provider that exists" in response.json()["detail"]
 
 
 def test_deleting_something_that_is_not_there_is_404(client: TestClient) -> None:
@@ -1265,3 +1265,72 @@ def test_applying_is_gated(client: TestClient) -> None:
     )
 
     assert response.status_code == 401
+
+
+# The same reference edges over HTTP, and over the CLI beside it
+#
+# The sentence is the repository's and travels unchanged, so what these
+# add is the surfaces around it: a 422 body, its headers, and every log
+# record either side kept. Each document below is valid apart from the
+# one reference that will not resolve, so the reference pass is what
+# refuses it rather than the model in front of that.
+
+REFERENCE_LEAKS = [
+    ("an agent's provider", {"agents": {"a": {"prompt": "p", "llm": SECRET}}}),
+    ("an agent's MCP server", {"agents": {"a": {"prompt": "p", "mcp": [SECRET]}}}),
+    (
+        "an agent's prompt fragment",
+        {"agents": {"a": {"prompt": "p", "prompt_includes": [SECRET]}}},
+    ),
+    ("a device's agent", {"devices": {"aa:bb:cc:dd:ee:ff": [SECRET]}}),
+    ("the default agent", {"default_agent": SECRET}),
+]
+
+
+@pytest.mark.parametrize(
+    "document",
+    [document for _, document in REFERENCE_LEAKS],
+    ids=[what for what, _ in REFERENCE_LEAKS],
+)
+def test_an_applied_reference_that_will_not_resolve_quotes_no_name(
+    client: TestClient, caplog: pytest.LogCaptureFixture, document: object
+) -> None:
+    _pipeline(client)
+
+    with caplog.at_level(logging.DEBUG):
+        response = client.post("/apply", json=document)
+
+    assert response.status_code == 422
+    detail = refused(response.json(), 422)
+    assert detail.startswith("the change was refused")
+    assert "not quoted back" in detail
+    assert SECRET not in response.text
+    assert SECRET not in str(response.headers)
+    assert SECRET not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        ("/agents/sam", {"prompt": "p", "llm": SECRET}),
+        ("/agent-defaults", {"tts": SECRET}),
+        ("/devices/aa:bb:cc:dd:ee:ff", {"agents": [SECRET]}),
+        ("/default-agent", {"name": SECRET}),
+    ],
+    ids=["an agent's provider", "the defaults' provider", "a binding", "the default"],
+)
+def test_a_single_write_quotes_no_name_it_could_not_resolve_either(
+    client: TestClient, caplog: pytest.LogCaptureFixture, path: str, body: object
+) -> None:
+    """The wording is the shared semantics', so a single write says what
+    an applied document says: one kind of mistake, one vocabulary,
+    whichever verb reached it."""
+    _pipeline(client)
+
+    with caplog.at_level(logging.DEBUG):
+        response = client.request("PUT", path, json=body)
+
+    assert response.status_code == 422
+    assert SECRET not in response.text
+    assert SECRET not in str(response.headers)
+    assert SECRET not in caplog.text

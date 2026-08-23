@@ -301,7 +301,7 @@ def test_an_unresolvable_document_is_refused_whole_and_writes_nothing(
     with pytest.raises(ConfigError) as caught:
         store.apply(document)
 
-    assert 'unknown asr provider "ghost"' in str(caught.value)
+    assert "agents.sam.asr: names no asr provider that exists" in str(caught.value)
     snapshot = store.load()
     assert snapshot.domain.providers.llm == {}
     assert snapshot.domain.prompt_fragments == {}
@@ -523,3 +523,80 @@ def test_a_secret_stored_on_an_entity_survives_applying_it_again(
     store.apply({"providers": {"llm": {"claude": {"type": "mock", "model": "m"}}}})
 
     assert store.load().secrets.secret(where) == SECRET
+
+
+# Every reference edge, with a credential where the name goes
+#
+# The refusals a broken reference earns are the ones a document is most
+# likely to earn: a document is written by hand, an entity is written
+# beside its references, and a reference is a bare word, which is what a
+# credential is too. So each edge is driven here with a planted
+# credential as the name that will not resolve, and the fragment holding
+# it is otherwise VALID: a fragment refused in preparation never reaches
+# the reference pass at all, which is how the first version of this
+# suite tested nothing.
+#
+# The path and the names that do exist are what the refusals may carry,
+# because a deployment wrote both. The name that did not resolve is what
+# they may not, and it is what these look for.
+
+REFERENCE_LEAKS = [
+    ("an agent's provider", {"agents": {"a": {"prompt": "p", "llm": SECRET}}}),
+    ("an agent's MCP server", {"agents": {"a": {"prompt": "p", "mcp": [SECRET]}}}),
+    (
+        "an agent's MCP grant",
+        {"agents": {"a": {"prompt": "p", "mcp": [{"server": SECRET, "tools": ["t"]}]}}},
+    ),
+    (
+        "an agent's prompt fragment",
+        {"agents": {"a": {"prompt": "p", "prompt_includes": [SECRET]}}},
+    ),
+    ("the agent defaults' provider", {"agent_defaults": {"tts": SECRET}}),
+    ("a device's agent", {"devices": {"aa:bb:cc:dd:ee:ff": [SECRET]}}),
+    ("the default agent", {"default_agent": SECRET}),
+]
+
+
+@pytest.fixture
+def populated(store: ConfigStore) -> ConfigStore:
+    """A store with one of everything, so that the hint a refusal
+    carries has something to list and the fragments below are valid."""
+    store.apply(DEPLOYMENT)
+    return store
+
+
+@pytest.mark.parametrize(
+    "document",
+    [document for _, document in REFERENCE_LEAKS],
+    ids=[what for what, _ in REFERENCE_LEAKS],
+)
+def test_an_unresolved_reference_never_quotes_the_name(
+    populated: ConfigStore, document: object
+) -> None:
+    with pytest.raises(ConfigError) as caught:
+        populated.apply(document)
+
+    message = str(caught.value)
+    assert "names no" in message
+    assert "not quoted back" in message
+    assert SECRET not in _chain(caught.value)
+    assert SECRET not in str(caught.value.problems)
+
+
+@pytest.mark.parametrize(
+    "document",
+    [document for _, document in REFERENCE_LEAKS],
+    ids=[what for what, _ in REFERENCE_LEAKS],
+)
+def test_the_reference_pass_is_reached_at_all(
+    populated: ConfigStore, document: object
+) -> None:
+    """The guard on the two cases above and on the surfaces beside them.
+    A fragment that fails its model is refused in preparation, and its
+    refusal is a different sentence with a different rule about what it
+    may quote, so a case that never reached the reference pass would be
+    asserting the wrong boundary's promise."""
+    with pytest.raises(ConfigError) as caught:
+        populated.apply(document)
+
+    assert str(caught.value).startswith("the change was refused")

@@ -316,7 +316,7 @@ async def test_a_refused_stored_half_keeps_its_type_and_loses_its_words(
     diff = config_diff_reader(
         world(NO_ENTRIES),
         McpServers.build(NO_ENTRIES),
-        failing(raised(f'agents.assistant.llm: unknown llm provider "{REJECTED}"')),
+        failing(raised("agents.assistant.llm: names no llm provider that exists")),
     )
 
     with pytest.raises(answered) as caught:

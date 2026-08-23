@@ -974,7 +974,7 @@ def test_the_diff_answers_every_kind_with_its_own_regime(directory: Path) -> Non
     [
         (RunningConfigMovedError("the running configuration changed"), 409),
         (DatabaseBusyError("the configuration database is busy"), 409),
-        (ConfigError('agents.assistant.llm: unknown llm provider "ghost"'), 422),
+        (ConfigError("agents.assistant.llm: names no llm provider that exists"), 422),
         (StorageError("the stored configuration cannot be read"), 500),
     ],
 )

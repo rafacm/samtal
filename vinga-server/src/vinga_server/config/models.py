@@ -16,7 +16,7 @@ which no model here ever carries.
 
 import os
 import re
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from contextvars import ContextVar
 from pathlib import Path
 from types import UnionType
@@ -2190,6 +2190,21 @@ class DomainSnapshot(Protocol):
     default_agent: str | None
 
 
+def defined(what: str, names: Collection[str]) -> str:
+    """What could have been meant, which is the names this deployment
+    has.
+
+    The half of a reference refusal that may be quoted, and the reason
+    the other half does not have to be: a name that did not resolve was
+    written by whoever wrote the entity, and the names that DID resolve
+    were written by this deployment. One helper because five refusals
+    say it and a fifth spelling would be a fifth shape for one fact.
+    """
+    return (
+        f" (defined: {', '.join(sorted(names))})" if names else f"; no {what} are defined"
+    )
+
+
 def check_references(snapshot: DomainSnapshot) -> list[str]:
     """Every reference in the snapshot resolving: agents and
     agent_defaults to providers and MCP servers, device bindings to
@@ -2200,19 +2215,39 @@ def check_references(snapshot: DomainSnapshot) -> list[str]:
     at the write is what forces the natural creation order (providers,
     MCP servers, agents, devices) rather than discovering the mistake at
     the next restart.
+
+    Not one of these refusals quotes the name it could not resolve, and
+    that is the whole shape of them. A reference is written beside
+    prompt text and provider options, so it is a place a paste lands as
+    much as any other; the sentence travels out as a CLI line, an HTTP
+    422 body and a boot log; and the charset rules do not close it,
+    since a credential can be written in [A-Za-z0-9_-]. So each names
+    the FIELD PATH, which says which entry to look at, and the names
+    that do exist, which say what could have been meant, and both of
+    those are written by this deployment rather than by the request.
+    `prompt_includes` was given that shape when it was added (#178) and
+    the other four have joined it, so that one kind of mistake has one
+    vocabulary however it was reached.
     """
     problems: list[str] = []
 
     if snapshot.default_agent is not None and snapshot.default_agent not in snapshot.agents:
         problems.append(
-            f'default_agent "{snapshot.default_agent}" is not a defined agent'
-            + (f" (defined: {', '.join(sorted(snapshot.agents))})" if snapshot.agents else "")
+            "default_agent: names no agent that exists, and the name is not quoted "
+            "back" + defined("agents", snapshot.agents)
         )
 
+    # The MAC is the path here and is quoted: it is not a name somebody
+    # chose, it is the canonical form of an address the binding was
+    # normalized to, and a value that is not one never gets this far.
+    # What the entry holds is a name, so it is named by its position.
     for mac, bound in snapshot.devices.items():
-        for agent in bound:
+        for position, agent in enumerate(bound, start=1):
             if agent not in snapshot.agents:
-                problems.append(f'devices.{mac}: agent "{agent}" is not a defined agent')
+                problems.append(
+                    f"devices.{mac}: entry {position} names no agent that exists, and "
+                    f"the name is not quoted back" + defined("agents", snapshot.agents)
+                )
 
     # Each layer's own references are checked where they are written,
     # so a wrong default is reported once as agent_defaults.llm rather
@@ -2226,47 +2261,31 @@ def check_references(snapshot: DomainSnapshot) -> list[str]:
                 continue
             available = getattr(snapshot.providers, stage)
             if ref not in available:
-                hint = (
-                    f" (defined: {', '.join(sorted(available))})"
-                    if available
-                    else f"; no providers.{stage} entries are defined"
+                problems.append(
+                    f"{source}.{stage}: names no {stage} provider that exists, and the "
+                    f"name is not quoted back"
+                    + defined(f"providers.{stage} entries", available)
                 )
-                problems.append(f'{source}.{stage}: unknown {stage} provider "{ref}"{hint}')
         # Both entry forms name a server, so both are checked here: an
         # allow list on a server that does not exist is the same broken
         # reference as a bare name that does not.
-        for entry in layer.mcp or []:
+        for position, entry in enumerate(layer.mcp or [], start=1):
             server = as_mcp_grant(entry).server
             if server not in snapshot.mcp_servers:
-                hint = (
-                    f" (defined: {', '.join(sorted(snapshot.mcp_servers))})"
-                    if snapshot.mcp_servers
-                    else "; no mcp_servers entries are defined"
+                problems.append(
+                    f"{source}.mcp: entry {position} names no MCP server that exists, "
+                    f"and the name is not quoted back"
+                    + defined("mcp_servers entries", snapshot.mcp_servers)
                 )
-                problems.append(f'{source}.mcp: unknown MCP server "{server}"{hint}')
         # An include is checked here rather than deferred the way a
         # grant's tool allow list is: the referent is a row in this same
         # database, so nothing about it waits for a live connection.
-        #
-        # The one below is the only reference refusal in this function
-        # that does not quote what it could not resolve, and the
-        # difference is deliberate. A fragment name is written beside
-        # prompt text, an operator pastes things there, and this sentence
-        # travels out as a CLI line, an HTTP 422 body and a boot log. The
-        # charset rule does not close that on its own, since a credential
-        # can be written in [A-Za-z0-9_-]. So the position says which
-        # entry to look at, and the fragments that do exist say what
-        # could have been meant, both of them written by this deployment.
         for position, include in enumerate(layer.prompt_includes or [], start=1):
             if include not in snapshot.prompt_fragments:
-                hint = (
-                    f" (defined: {', '.join(sorted(snapshot.prompt_fragments))})"
-                    if snapshot.prompt_fragments
-                    else "; no prompt_fragments entries are defined"
-                )
                 problems.append(
                     f"{source}.prompt_includes: entry {position} names no prompt "
-                    f"fragment that exists, and the name is not quoted back{hint}"
+                    f"fragment that exists, and the name is not quoted back"
+                    + defined("prompt_fragments entries", snapshot.prompt_fragments)
                 )
 
     return problems

@@ -495,7 +495,7 @@ def test_a_refused_write_exits_one_with_the_reason(
     assert run("set", "agent", "sam", "-f", "-", stdin="llm: ghost\n") == 1
 
     captured = capsys.readouterr()
-    assert 'unknown llm provider "ghost"' in captured.err
+    assert "agents.sam.llm: names no llm provider that exists" in captured.err
     assert "Traceback" not in captured.err
     assert captured.out == ""
 
@@ -1147,7 +1147,7 @@ def test_a_refused_document_prints_every_mistake_and_writes_nothing(
     assert run("apply", "-f", "-", stdin=refused) == 1
 
     captured = capsys.readouterr()
-    assert 'unknown llm provider "ghost"' in captured.err
+    assert "agents.sam.llm: names no llm provider that exists" in captured.err
     assert captured.out == ""
     assert "Traceback" not in captured.err
     assert run("show", "provider", "llm", "claude") == 1
@@ -1204,3 +1204,50 @@ def test_apply_is_not_in_the_break_glass_subset(
     assert run("--local", "apply", "-f", "-", stdin=DOCUMENT) == 1
 
     assert "recovery subset only" in capsys.readouterr().err
+
+
+# The reference edges as an operator meets them
+#
+# The third surface: the sentence the repository wrote, printed. The
+# documents below are valid apart from the one reference that will not
+# resolve, so what refuses them is the reference pass rather than the
+# model in front of it, and what an operator reads is the line and not
+# the name they pasted into it.
+
+REFERENCE_LEAKS = [
+    ("an agent's provider", f"agents:\n  a: {{prompt: p, llm: {SECRET}}}\n"),
+    ("an agent's MCP server", f"agents:\n  a: {{prompt: p, mcp: [{SECRET}]}}\n"),
+    (
+        "an agent's prompt fragment",
+        f"agents:\n  a: {{prompt: p, prompt_includes: [{SECRET}]}}\n",
+    ),
+    ("a device's agent", f"devices:\n  aa:bb:cc:dd:ee:ff: [{SECRET}]\n"),
+    ("the default agent", f"default_agent: {SECRET}\n"),
+]
+
+
+@pytest.mark.parametrize(
+    "document",
+    [document for _, document in REFERENCE_LEAKS],
+    ids=[what for what, _ in REFERENCE_LEAKS],
+)
+def test_an_applied_reference_is_refused_without_printing_the_name(
+    run,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+    document: str,
+) -> None:
+    _an_agent(run)
+    capsys.readouterr()
+
+    with caplog.at_level(logging.DEBUG):
+        assert run("apply", "-f", "-", stdin=document) == 1
+
+    captured = capsys.readouterr()
+    assert captured.err.startswith("the change was refused")
+    assert "not quoted back" in captured.err
+    assert SECRET not in captured.err
+    assert SECRET not in captured.out
+    assert "Traceback" not in captured.err
+    served = [r for r in caplog.records if r.name.startswith("vinga_server")]
+    assert all(SECRET not in str(record.__dict__) for record in served)

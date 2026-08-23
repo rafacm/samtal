@@ -471,7 +471,7 @@ def test_a_grant_on_an_unknown_server_is_refused_at_the_write(store: ConfigStore
     # The object form goes through the reference check the string form
     # does, which is what forces the natural creation order.
     _populate(store)
-    with pytest.raises(ConfigError, match='unknown MCP server "ghost"'):
+    with pytest.raises(ConfigError, match="agents.poet.mcp: entry 1 names no MCP server"):
         store.set_agent("poet", {"prompt": "P", "mcp": [{"server": "ghost", "tools": ["a"]}]})
 
 
@@ -542,33 +542,35 @@ def test_clearing_the_default_agent_is_reachable(store: ConfigStore) -> None:
 
 
 def test_an_unknown_provider_reference_is_refused(store: ConfigStore) -> None:
-    with pytest.raises(ConfigError, match='unknown llm provider "ghost"'):
+    with pytest.raises(ConfigError, match="agents.sam.llm: names no llm provider"):
         store.set_agent("sam", {"llm": "ghost"})
 
     assert store.load().domain.agents == {}
 
 
 def test_an_unknown_mcp_reference_is_refused(store: ConfigStore) -> None:
-    with pytest.raises(ConfigError, match='unknown MCP server "home"'):
+    with pytest.raises(
+        ConfigError, match="agent_defaults.mcp: entry 1 names no MCP server"
+    ):
         store.set_agent_defaults({"mcp": ["home"]})
 
 
 def test_binding_a_device_to_an_unknown_agent_is_refused(store: ConfigStore) -> None:
-    with pytest.raises(ConfigError, match='agent "ghost" is not a defined agent'):
+    with pytest.raises(ConfigError, match="entry 1 names no agent that exists"):
         store.bind_device("aa:bb:cc:dd:ee:ff", ["ghost"])
 
     assert store.load().domain.devices == {}
 
 
 def test_an_unknown_default_agent_is_refused(store: ConfigStore) -> None:
-    with pytest.raises(ConfigError, match='default_agent "ghost" is not a defined agent'):
+    with pytest.raises(ConfigError, match="default_agent: names no agent that exists"):
         store.set_default_agent("ghost")
 
 
 def test_deleting_a_referenced_provider_is_refused(store: ConfigStore) -> None:
     _populate(store)
 
-    with pytest.raises(ConfigError, match="unknown llm provider"):
+    with pytest.raises(ConfigError, match="names no llm provider that exists"):
         store.delete_provider("llm", "claude")
 
     assert "claude" in store.load().domain.providers.llm
@@ -577,7 +579,7 @@ def test_deleting_a_referenced_provider_is_refused(store: ConfigStore) -> None:
 def test_deleting_a_referenced_mcp_server_is_refused(store: ConfigStore) -> None:
     _populate(store)
 
-    with pytest.raises(ConfigError, match="unknown MCP server"):
+    with pytest.raises(ConfigError, match="names no MCP server that exists"):
         store.delete_mcp_server("home")
 
 
@@ -585,7 +587,9 @@ def test_deleting_an_agent_a_device_is_bound_to_is_refused(store: ConfigStore) -
     _populate(store)
     store.clear_default_agent()
 
-    with pytest.raises(ConfigError, match='devices.aa:bb:cc:dd:ee:ff: agent "sam"'):
+    with pytest.raises(
+        ConfigError, match="devices.aa:bb:cc:dd:ee:ff: entry 1 names no agent that exists"
+    ):
         store.delete_agent("sam")
 
 
@@ -593,7 +597,7 @@ def test_deleting_the_default_agent_is_refused(store: ConfigStore) -> None:
     _populate(store)
     store.delete_device("aa:bb:cc:dd:ee:ff")
 
-    with pytest.raises(ConfigError, match='default_agent "sam" is not a defined agent'):
+    with pytest.raises(ConfigError, match="default_agent: names no agent that exists"):
         store.delete_agent("sam")
 
     # Unbound and undefaulted, the same agent goes.

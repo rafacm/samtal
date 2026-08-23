@@ -471,7 +471,7 @@ def test_the_variables_that_carry_a_value_are_left_alone(
 
 
 def test_default_agent_must_be_defined() -> None:
-    with pytest.raises(ConfigError, match='default_agent "ghost" is not a defined agent'):
+    with pytest.raises(ConfigError, match="default_agent: names no agent that exists"):
         load_config_from_data({"default_agent": "ghost"})
 
 
@@ -501,7 +501,9 @@ def test_device_bound_to_unknown_agent() -> None:
         "default_agent": "assistant",
         "devices": {"aa:bb:cc:dd:ee:ff": ["ghost"]},
     }
-    with pytest.raises(ConfigError, match=r'devices\.aa:bb:cc:dd:ee:ff: agent "ghost"'):
+    with pytest.raises(
+        ConfigError, match=r"devices\.aa:bb:cc:dd:ee:ff: entry \d+ names no agent that exists"
+    ):
         load_config_from_data(data)
 
 
@@ -512,7 +514,9 @@ def test_agent_referencing_unknown_provider_lists_defined_ones() -> None:
         "default_agent": "assistant",
     }
     with pytest.raises(
-        ConfigError, match=r'assistant\.llm: unknown llm provider "claud" \(defined: claude\)'
+        ConfigError,
+        match=r"assistant\.llm: names no llm provider that exists, and the name is not "
+        r"quoted back \(defined: claude\)",
     ):
         load_config_from_data(data)
 
@@ -546,7 +550,10 @@ def test_a_wrong_agent_default_is_reported_once_against_its_own_layer() -> None:
     with pytest.raises(ConfigError) as excinfo:
         load_config_from_data(data)
     message = str(excinfo.value)
-    assert 'agent_defaults.llm: unknown llm provider "claud" (defined: claude)' in message
+    assert (
+        "agent_defaults.llm: names no llm provider that exists, and the name is not "
+        "quoted back (defined: claude)"
+    ) in message
     assert "agents.poet" not in message
 
 
@@ -759,7 +766,9 @@ def test_an_unknown_agent_in_a_device_list_is_rejected() -> None:
         "default_agent": "poet",
         "devices": {"aa:bb:cc:dd:ee:ff": ["poet", "ghost"]},
     }
-    with pytest.raises(ConfigError, match=r'devices\.aa:bb:cc:dd:ee:ff: agent "ghost"'):
+    with pytest.raises(
+        ConfigError, match=r"devices\.aa:bb:cc:dd:ee:ff: entry \d+ names no agent that exists"
+    ):
         load_config_from_data(data)
 
 
@@ -812,7 +821,7 @@ def test_multiple_problems_reported_together() -> None:
     with pytest.raises(ConfigError) as excinfo:
         load_config_from_data(data)
     message = str(excinfo.value)
-    assert 'default_agent "also-nobody" is not a defined agent' in message
-    assert 'agent "nobody"' in message
-    assert 'unknown llm provider "ghost"' in message
+    assert "default_agent: names no agent that exists" in message
+    assert "devices.aa:bb:cc:dd:ee:ff: entry 1 names no agent that exists" in message
+    assert "names no llm provider that exists" in message
 
