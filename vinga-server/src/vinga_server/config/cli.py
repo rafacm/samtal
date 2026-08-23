@@ -94,14 +94,14 @@ from vinga_server.config.store import ConfigStore, check_transportable
 from vinga_server.db import open_database
 
 # Imported like anything else since issue #143 split the onboarding
-# package. These two modules read the configuration models and the
-# standard library and nothing else, so `config reference` and `config
-# openapi` still load nothing but the models and the routes. Both were
-# deferred until then, because the module that held them also held a
-# router over the OTA handlers and so pulled in a whole conversation's
-# worth of machinery.
-from vinga_server.onboarding.keys import onboarding_key, onboarding_path
-from vinga_server.onboarding.origin import Origin, public_origin
+# package. The derivation reads the configuration models, the key
+# module beside it and the standard library, and it is the one thing
+# this module wants from that package: a second implementation of it is
+# the one mistake that could send an operator to a URL this server does
+# not serve. It was deferred until #143, because the module that held
+# it also held a router over the OTA handlers and so pulled in a whole
+# conversation's worth of machinery.
+from vinga_server.onboarding.origin import onboarding_url
 
 # Where the API is, when nothing says otherwise: the loopback address of
 # this machine, on the port the server half of the configuration names,
@@ -216,17 +216,9 @@ OTA_URL_GUIDANCE = (
     "talking as soon as they connect."
 )
 
-# Said when there is no short URL to print, with the fix the command
-# that asked for one needs. The configured `ota_path` segment is named
-# and never quoted: it is a credential, and the derived key is the one
-# recorded exception to that rule.
-ONBOARDING_OFF = (
-    "device onboarding is off (server.onboarding.enabled is false), so this "
-    "configuration serves no short URL. Devices are configured at the path "
-    "server.ota_path names, on {origin} ({provenance}), and that segment is not printed "
-    "here, since it is this deployment's secret. {fix}"
-)
-
+# What this command does about onboarding being off. The sentence it
+# goes into is `origin.ONBOARDING_OFF`, which is the derivation's own,
+# and the fix is the asking command's.
 ONBOARDING_OFF_FOR_URL = "Turn onboarding on for a URL short enough to type."
 
 ONBOARDING_OFF_FOR_DOCTOR = (
@@ -339,7 +331,7 @@ def _ota_url(args: argparse.Namespace) -> None:
     it, and where its origin came from, go to stderr the way every
     other notice does.
     """
-    url, origin = _onboarding_url(_server_config(args), ONBOARDING_OFF_FOR_URL)
+    url, origin = onboarding_url(_server_config(args), ONBOARDING_OFF_FOR_URL)
     print(url)
     sys.stdout.flush()
     print(OTA_URL_GUIDANCE, file=sys.stderr)
@@ -365,7 +357,7 @@ def _doctor(args: argparse.Namespace) -> None:
         url = _device_url(args.url, "the URL given to doctor")
         shown = SUPPLIED_ENDPOINT
     else:
-        derived, _ = _onboarding_url(_server_config(args), ONBOARDING_OFF_FOR_DOCTOR)
+        derived, _ = onboarding_url(_server_config(args), ONBOARDING_OFF_FOR_DOCTOR)
         url = _device_url(derived, "the onboarding URL this configuration derives")
         shown = url
     response = _probed(url, shown)
@@ -726,37 +718,6 @@ def _server_config(args: argparse.Namespace) -> ServerConfig:
     without one the field defaults and the VINGA_ environment are the
     whole answer."""
     return load_file_config(args.config).server
-
-
-def _onboarding_url(server: ServerConfig, fix: str) -> tuple[str, Origin]:
-    """The short URL this configuration serves, and where its origin
-    came from.
-
-    Nothing here is a second implementation of anything: the key comes
-    from `onboarding.onboarding_key` and the origin from
-    `onboarding.public_origin`, which are what the server mounts the
-    route with and what the startup banner prints. `fix` is what to do
-    when onboarding is off, which differs by the command that asked.
-    """
-    origin = public_origin(server)
-    if not server.onboarding.enabled:
-        raise ConfigError(
-            ONBOARDING_OFF.format(origin=origin.url, provenance=origin.provenance, fix=fix)
-        )
-    key = onboarding_key(server)
-    # The one state the server itself cannot be in, since it refuses the
-    # boot: auth is on, no key is pinned, and the variable the secret
-    # would come from holds nothing. It is told apart from the keyless
-    # case by the two fields that decide it, so no secret is read here.
-    if key is None and server.auth.enabled and server.onboarding.key is None:
-        raise ConfigError(
-            f"{server.auth.secret_env} is not set, and the onboarding URL's key is "
-            f"derived from it. It is the same variable the server is started with: exec "
-            f"into the running container, where it is already in the environment, or "
-            f"export it here. A deployment that pinned a key under "
-            f"server.onboarding.key needs no secret to print its URL."
-        )
-    return f"{origin.url}{onboarding_path(key)}", origin
 
 
 def _device_url(url: str, source: str) -> str:
