@@ -208,15 +208,24 @@ characterization pin for the whole milestone.
   is not a reason to stop capturing) move with their docstrings.
   The one sentence: the session stops knowing that recording needs
   its own decode path with its own codecs.
-- **`device/watchdog.py`, class `IdleWatchdog`.** Owns the task,
+- **`device/watchdog.py`, both watchdogs.** The issue names two and
+  the module owns two. `IdleWatchdog` owns the task,
   `_last_activity`, and the countdown arithmetic of
-  `_watch_for_idle`; interface `start()`, `stop()`, `mark()`. The
-  session keeps the policy: the idle event emission and the
-  `request_shutdown` call stay in a session-owned `_on_idle`
-  callback the watchdog invokes, so the watchdog is timing and the
-  session is what idleness means. The hello timeout is not a
-  watchdog and does not move (`HELLO_TIMEOUT_S` stays, and the
-  `test_session.py` patch site with it).
+  `_watch_for_idle`. Its constructor takes narrow dependencies,
+  never the session: the timeout, a read-only defer predicate the
+  session builds from its realtime flag and `runtime.replying()`
+  (the loop reevaluates both every iteration), and the async
+  `on_idle` callback that keeps the policy in the session (the idle
+  event emission and the `request_shutdown` call), so the watchdog
+  is timing and the session is what idleness means. Interface:
+  `start()`, `stop()`, `mark()`. The first-contact watchdog moves
+  too: `HELLO_TIMEOUT_S` re-homes to `watchdog.py` beside a
+  `first_contact()` helper wrapping `asyncio.timeout`, read at call
+  time through the module so the existing `test_session.py` patch
+  site retargets to `watchdog.HELLO_TIMEOUT_S` and still bites;
+  the session keeps hello parsing and the protocol-error close
+  policy. Mode changes and a reply crossing the deadline stay
+  pinned at the session surface by the existing idle suites.
 
 The manifest builders (`_manifest`, `_provider_manifest`) and the
 conversation-store recording (`_start_recording`,
