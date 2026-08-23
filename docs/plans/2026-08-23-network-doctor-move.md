@@ -94,12 +94,27 @@ body. It owns the whole cluster from the census above.
 The one sentence: callers, and the operator, stop having to know that
 diagnosing an endpoint has anything to do with the configuration
 surface; the module owns the probe, the describe-parse and the four
-verdicts, and reaches none of the database machinery. Its imports are
-`httpx`, `config.loader` (ConfigError, `load_file_config`),
-`config.printing` (decision 4), and `onboarding.origin` (decision 3).
-Importing it must not import `config.cli`, `config.store`,
-`config.api` or `vinga_server.db`; the verification section pins
-this.
+verdicts, and reaches none of the database machinery. Its
+module-level imports are `httpx`, `config.loader` (ConfigError,
+`load_file_config`) and `config.printing` (decision 4). The
+`onboarding.origin` import is function-local to the no-URL branch,
+with a comment saying why: the onboarding package's `__init__`
+eagerly imports `unbound`, which imports `device.bindings`, which
+imports `config.store` and `vinga_server.db`, so a module-level
+import would pull the database machinery into every doctor
+invocation, URL argument or not.
+
+The import-weight contract is deliberately narrow: it is a statement
+about `import vinga_server.doctor` alone, not about the installed
+entry point, which imports `app` and its whole graph before any
+dispatch; changing that is not this issue's work. The pin is a
+subprocess test asserting that after `import vinga_server.doctor`,
+none of `vinga_server.config.cli`, `vinga_server.config.store`,
+`vinga_server.config.api` and `vinga_server.db` is in `sys.modules`.
+Beside it, a behavioral pin: a doctor probe of a supplied URL, run
+with the working directory and config pointing at an empty tmp path,
+creates no database file, which is the property the import discipline
+exists to keep.
 
 Not `onboarding/doctor.py`: the onboarding package is boot-path
 server code whose `__init__` imports every submodule, and a CLI
@@ -245,9 +260,10 @@ stderr.
 New pins, per decision 5: one for each client seam's construction
 policy. A new import-weight test pins decision 2 by asserting that
 importing `vinga_server.doctor` leaves `vinga_server.config.cli`,
-`vinga_server.config.store` and `vinga_server.db` out of
-`sys.modules` (run in a subprocess so the unit lane's own imports
-cannot mask it).
+`vinga_server.config.store`, `vinga_server.config.api` and
+`vinga_server.db` out of `sys.modules` (run in a subprocess so the
+unit lane's own imports cannot mask it), and the behavioral pin
+beside it asserts a probe creates no database file.
 
 ## Verification
 
@@ -327,6 +343,14 @@ faithful:
    before dispatch, so the claim must not read as a statement about
    deployed startup weight. The planned test also omitted
    `config.api`, which the contract names.
+
+   *Resolution* (this commit): the `onboarding.origin` import
+   becomes function-local to the no-URL branch with the import-graph
+   reason in a comment; the contract is restated as being about
+   `import vinga_server.doctor` alone, with the entry point's eager
+   graph named as out of scope; the subprocess test asserts all four
+   forbidden modules; and a behavioral pin asserts a probe creates
+   no database file.
 
 3. **P1: the proposed no-leak module preserves a query-credential
    leak.** `_without_userinfo` keeps the query string and
