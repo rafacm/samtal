@@ -30,10 +30,10 @@ from vinga_server.config.api import (
     build_api,
     mount_api,
 )
+from vinga_server.config.entities import BINDING_NOTICE, BINDING_UNSERVED_NOTICE
 from vinga_server.config.loader import DatabaseBusyError
 from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
 from vinga_server.config.store import ConfigStore
-from vinga_server.config.writes import BINDING_NOTICE, BINDING_UNSERVED_NOTICE
 from vinga_server.db import open_database
 from vinga_server.onboarding import CODE_TTL_S, PendingDevices
 

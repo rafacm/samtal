@@ -109,9 +109,10 @@ NO_SUCH_DEVICE = "devices: no device with that MAC is bound"
 # When a write takes effect. Five sentences, because there are five
 # answers, and each is a fact of what was written rather than of the
 # route or the command that wrote it: the descriptors below name one
-# each, `writes.py` chooses between them where the answer depends on
-# something a kind cannot know, and both write paths print whichever
-# came back.
+# each, and the two write paths choose between them where the answer
+# depends on something a kind cannot know (`api._binding_notice`, which
+# asks whether the agent a binding names is being served, and
+# `cli._secret_notice`, which asks which kind a credential hangs on).
 
 # The whole of what a running server still reads once and never again,
 # which is the file half: the port, the directories, the limits, the

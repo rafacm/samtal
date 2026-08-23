@@ -199,24 +199,23 @@ def test_the_registry_is_whole_on_its_own() -> None:
     whole package is loaded.
 
     The second half is the one that was false until #210: `store.py`,
-    `views.py`, `cli.py` and `writes.py` installed forty-four callables
-    and five sentences onto these descriptors at their own import,
-    through a `fill` that reached past the frozen dataclass with
-    `object.__setattr__`. A reader could not tell what a descriptor held
-    without knowing what had been imported, and `docgen` rendered the
-    committed reference from a registry four other modules were still
-    allowed to write to.
+    `views.py`, `cli.py` and the since-deleted `writes.py` installed
+    forty-four callables and five sentences onto these descriptors at
+    their own import, through a `fill` that reached past the frozen
+    dataclass with `object.__setattr__`. A reader could not tell what a
+    descriptor held without knowing what had been imported, and `docgen`
+    rendered the committed reference from a registry four other modules
+    were still allowed to write to.
 
-    The five consumers are imported here by name rather than relied on
-    to be loaded by whatever else the run collected, since which of them
-    a single-file run has imported is exactly the thing that used to
+    The consumers are imported here by name rather than relied on to be
+    loaded by whatever else the run collected, since which of them a
+    single-file run has imported is exactly the thing that used to
     decide what a descriptor held.
     """
     import vinga_server.config.api  # noqa: F401
     import vinga_server.config.cli  # noqa: F401
     import vinga_server.config.store  # noqa: F401
     import vinga_server.config.views  # noqa: F401
-    import vinga_server.config.writes  # noqa: F401
 
     alone = _registry_imported_alone()
 

@@ -61,6 +61,11 @@ import yaml
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from vinga_server.config import docgen, entities, views
+from vinga_server.config.entities import (
+    BINDING_NOTICE,
+    RELOAD_NOTICE,
+    RESTART_NOTICE,
+)
 from vinga_server.config.loader import CONFIG_ENV_VAR, ConfigError, load_file_config
 from vinga_server.config.models import (
     API_MOUNT_PATH,
@@ -79,23 +84,12 @@ from vinga_server.config.responses import (
 )
 from vinga_server.config.secrets import (
     MASK,
+    EntityKind,
     SecretLocation,
     load_keys,
     provider_identity,
 )
 from vinga_server.config.store import ConfigStore, check_transportable
-from vinga_server.config.writes import (
-    BINDING_NOTICE,
-    RESTART_NOTICE,
-    cleared_secret,
-    deleted_agent,
-    deleted_device,
-    deleted_mcp_server,
-    deleted_prompt_fragment,
-    deleted_provider,
-    secret_notice,
-    wrote_secret,
-)
 from vinga_server.db import open_database
 
 # Imported like anything else since issue #143 split the onboarding
@@ -1616,8 +1610,9 @@ def _acknowledged(acknowledgement: Mapping[str, object]) -> None:
 # in the configuration document and when a write of it takes effect are
 # data on its descriptor, and the builders below read them straight off
 # it. What a break-glass act does is not: it is a named `ConfigStore`
-# method and a named sentence from `writes.py`, so those rows are
-# written out one per kind and reached through the two tables above.
+# method and the sentence the API answers that same act with, so those
+# rows are written out one per kind and reached through the two tables
+# above.
 #
 # What is written entirely by hand is what a descriptor does not
 # describe at all: the devices and the default agent are settings
@@ -1662,10 +1657,13 @@ def _act(args: argparse.Namespace) -> None:
 
     The acknowledgement and the notice reach the same renderer either
     way. Over HTTP they are what the API answered. Locally they are
-    built by the act's own `local`, from the two homes the API's route
-    builds its answer from: the sentence is `writes.py`'s, and the
-    timing is the kind's `notice`, which is a descriptor fact because it
-    is about what was written rather than about the path that wrote it.
+    built by the act's own `local`, saying what the API's route says for
+    the same act: the sentence written out beside it, and the timing
+    taken from the kind's `notice`, which is a descriptor fact because
+    it is about what was written rather than about the path that wrote
+    it. `test_a_local_write_acknowledges_what_the_api_acknowledges` runs
+    each of these acts both ways and asserts one answer, which is what
+    keeps the two spellings of a sentence from drifting apart.
     """
     act: Act = args.act
     if args.local:
@@ -1726,10 +1724,10 @@ def _fragment_body(
 # version needed `ConfigStore`'s methods hung on the registry as unbound
 # callables, which is the store publishing its own interface through a
 # global for one caller's convenience. What that caller wanted was the
-# typed method, and it can have it by name. The two halves of the answer
-# still have one home each: the sentence is `writes.py`'s, which is what
-# keeps this path and the API saying one thing, and the timing is the
-# kind's own `notice`.
+# typed method, and it can have it by name. Of the two halves of the
+# answer, the timing is still read from the kind's own `notice`, and
+# the sentence is written out here as the route writes it out there,
+# held equal by the differential test `_act` above names.
 
 _PROVIDER = entities.descriptor("provider")
 _MCP_SERVER = entities.descriptor("mcp-server")
@@ -1741,20 +1739,26 @@ _AGENT_DEFAULTS = entities.descriptor("agent-defaults")
 def _deleting_provider(args: argparse.Namespace) -> Any:
     with _store(args) as store:
         store.delete_provider(args.stage, args.name)
-    return {"wrote": deleted_provider(args.stage, args.name), "notice": _PROVIDER.notice}
+    return {
+        "wrote": f"provider {args.stage}.{args.name} deleted, with its stored secrets",
+        "notice": _PROVIDER.notice,
+    }
 
 
 def _deleting_mcp_server(args: argparse.Namespace) -> Any:
     with _store(args) as store:
         store.delete_mcp_server(args.name)
-    return {"wrote": deleted_mcp_server(args.name), "notice": _MCP_SERVER.notice}
+    return {
+        "wrote": f"mcp-server {args.name} deleted, with its stored secrets",
+        "notice": _MCP_SERVER.notice,
+    }
 
 
 def _deleting_prompt_fragment(args: argparse.Namespace) -> Any:
     with _store(args) as store:
         store.delete_prompt_fragment(args.name)
     return {
-        "wrote": deleted_prompt_fragment(args.name),
+        "wrote": f"prompt-fragment {args.name} deleted",
         "notice": _PROMPT_FRAGMENT.notice,
     }
 
@@ -1762,7 +1766,7 @@ def _deleting_prompt_fragment(args: argparse.Namespace) -> Any:
 def _deleting_agent(args: argparse.Namespace) -> Any:
     with _store(args) as store:
         store.delete_agent(args.name)
-    return {"wrote": deleted_agent(args.name), "notice": _AGENT.notice}
+    return {"wrote": f"agent {args.name} deleted", "notice": _AGENT.notice}
 
 
 def _showing_provider(args: argparse.Namespace) -> Any:
@@ -1898,7 +1902,7 @@ def _deleting_device(args: argparse.Namespace) -> Any:
         # The row the repository deleted names itself, so this path
         # normalizes nothing of its own either.
         deleted = store.delete_device(args.mac)
-    return {"wrote": deleted_device(deleted), "notice": BINDING_NOTICE}
+    return {"wrote": f"device {deleted} deleted", "notice": BINDING_NOTICE}
 
 
 def _showing_device(args: argparse.Namespace) -> Any:
@@ -1964,9 +1968,26 @@ CLEAR_DEFAULT_AGENT = Act(
 
 # A stored credential is addressed under the entity that holds it, in
 # the slot it fills, which is why these two rows are not an entity's.
-# One command covers both kinds, so it asks `secret_notice` which
+# One command covers both kinds, so it asks `_secret_notice` below which
 # sentence follows the entity the credential is stored on; the API says
 # the same by having four secret routes, each statically one of them.
+
+
+def _secret_notice(kind: EntityKind) -> str:
+    """When a stored credential takes effect, which follows the entity it
+    is stored on, and is now the same answer for both of them.
+
+    The reload rebuilds the MCP entries with their credentials and the
+    provider entries with theirs, so a rotation on either is applied by
+    it: a credential is read as the thing that uses it is made, and a
+    reload makes both again (#191). Kept as a question rather than
+    collapsed into one sentence, because what decides it is still the
+    entity kind and a third kind would arrive with its own answer. The
+    API says the same by having four secret routes, two per kind, each
+    statically one of these sentences; one CLI command covers both
+    kinds, so it asks here.
+    """
+    return RELOAD_NOTICE if kind in ("mcp_server", "provider") else RESTART_NOTICE
 
 
 def _secret_body(args: argparse.Namespace) -> object:
@@ -1979,14 +2000,20 @@ def _storing_secret(args: argparse.Namespace) -> Any:
     # The one recovery command that needs a key: it encrypts.
     with _store(args, keyed=True) as store:
         store.set_secret(location, secret)
-    return {"wrote": wrote_secret(location.describe()), "notice": secret_notice(location.kind)}
+    return {
+        "wrote": f"secret for {location.describe()}",
+        "notice": _secret_notice(location.kind),
+    }
 
 
 def _clearing_secret(args: argparse.Namespace) -> Any:
     location = _secret_location(args)
     with _store(args) as store:
         store.clear_secret(location)
-    return {"wrote": cleared_secret(location.describe()), "notice": secret_notice(location.kind)}
+    return {
+        "wrote": f"secret for {location.describe()} cleared",
+        "notice": _secret_notice(location.kind),
+    }
 
 
 SET_SECRET = Act(

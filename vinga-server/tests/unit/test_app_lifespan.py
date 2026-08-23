@@ -39,9 +39,9 @@ from vinga_server.app import StartupFailed, create_app, startup_failure
 from vinga_server.composition import Composition
 from vinga_server.config import Config
 from vinga_server.config.api import UNEXPECTED, ApiRuntime
+from vinga_server.config.entities import BINDING_NOTICE
 from vinga_server.config.loader import DatabaseBusyError
 from vinga_server.config.models import API_MOUNT_PATH
-from vinga_server.config.writes import BINDING_NOTICE
 from vinga_server.conversations.store import DATABASE_FILENAME
 from vinga_server.db import open_database
 from vinga_server.device.bindings import DeviceBindings

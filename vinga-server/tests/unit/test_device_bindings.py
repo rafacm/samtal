@@ -27,8 +27,8 @@ from tests.support.registry import BINDINGS_DEVICE_MAC as DEVICE_MAC
 from vinga_server import logs
 from vinga_server.app import create_app
 from vinga_server.config import Config
+from vinga_server.config.entities import BINDING_NOTICE, BINDING_UNSERVED_NOTICE
 from vinga_server.config.models import API_MOUNT_PATH
-from vinga_server.config.writes import BINDING_NOTICE, BINDING_UNSERVED_NOTICE
 from vinga_server.db import open_database, read_engine, schema
 from vinga_server.device.bindings import DeviceBindings
 from vinga_server.ws import WEBSOCKET_PATH

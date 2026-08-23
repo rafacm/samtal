@@ -107,7 +107,10 @@ class SecretLocation:
         return cls(kind="mcp_server", identity=name, slot=slot)
 
     def describe(self) -> str:
-        """How the location reads in an error message."""
+        """How the location reads in a sentence an operator sees: the
+        kind, the entity, and the slot. A refusal names it this way, and
+        so does the acknowledgement a secret write answers with, which is
+        why it is one string rather than a format each caller picks."""
         return f"{self.kind} {self.identity} {self.slot}"
 
 

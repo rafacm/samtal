@@ -19,7 +19,7 @@ import pytest
 
 from tests.integration.conftest import spoken
 from vinga_server.config import Config
-from vinga_server.config.writes import BINDING_NOTICE
+from vinga_server.config.entities import BINDING_NOTICE
 from vinga_server.db import DATABASE_FILENAME
 from vinga_server.ota import OTA_PATH
 

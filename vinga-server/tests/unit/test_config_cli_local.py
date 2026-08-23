@@ -44,9 +44,8 @@ from tests.support.config_cli import (
 )
 from tests.support.config_cli import document as _document
 from vinga_server.config import cli
-from vinga_server.config.entities import NO_SUCH_PROVIDER
+from vinga_server.config.entities import BINDING_NOTICE, NO_SUCH_PROVIDER
 from vinga_server.config.secrets import MASK, MASTER_KEY_ENV
-from vinga_server.config.writes import BINDING_NOTICE
 from vinga_server.db import open_database, schema
 
 # A credential shaped like a variable name: it gets past the models'
@@ -187,6 +186,23 @@ def test_a_local_write_acknowledges_what_the_api_acknowledges(
     """The act run both ways against equivalent state: the line on
     stdout is the same line, and the notice under it is the same notice,
     with the preamble the only thing between them.
+
+    This is where the single-source guarantee lives now. There are two
+    write paths and only one of them is ordinary: the API, which the CLI
+    is a client of, and the CLI's `--local` recovery subset, which opens
+    the database directly when there is no server to ask. Both answer in
+    the same words, and seven of those sentences are written out twice,
+    once beside each path's handler. A module holding them once was the
+    other way to keep them equal, and it cost every reader of a handler
+    a jump to a file of one-line f-strings; this test is the cheaper
+    half of that trade and always was the load-bearing half, because a
+    shared factory could not have caught the two paths choosing
+    different notices for one act. What must not be able to happen is
+    the break-glass path and the ordinary one coming to describe the
+    same act differently, and that is exactly what an equality on real
+    output holds. It is a differential assertion and not a wording pin:
+    nothing here names a sentence, so rewording an acknowledgement on
+    both sides passes and rewording it on one does not.
 
     Equivalent is established rather than assumed. A write naming only
     an entity's model-shaped columns leaves its stored secrets where
