@@ -282,3 +282,90 @@ sees in an 80-column terminal was read by hand during the rebuild and
 is not pinned; decision 8's marker-delimited reference, which renders
 at a fixed width with no terminal detection, is M4's and is where that
 becomes a check rather than a reading.
+
+## PR review round, M1 (PR #271)
+
+External review of the PR diff, 2026-08-23. Verdict as received:
+mergeable after fixes. Three findings, one P1 and two P2, each fixed in
+its own commit. All three were about the same thing from three sides:
+a claim this milestone makes that its tests could not have caught being
+false.
+
+### 1. P1: `--help` carried Typer's exception out on its chain
+
+`_parsed` turned Click's exit request into `SystemExit` from inside the
+handler, with `raise ... from None`. That sets `__suppress_context__`,
+which stops a traceback being printed and leaves `__context__` exactly
+where it was, so the Typer exception rode out behind the exit, holding
+the context it was raised from and therefore the argument list. The
+module's whole no-leak discipline is about what a chain walker finds
+rather than about what is displayed, so the suppression was cosmetic.
+
+Fixed in `363f299e`: the exit code is recorded in the arm and raised
+after the block, which is the pattern every refusal here already raises
+by. Four cases pin it, at the root, at a leaf, at the one group word
+that is also a command, and at a command that reaches nothing: exit 0
+with `__cause__` and `__context__` both None. With the raise moved back
+inside the arm all four fail.
+
+### 2. P2: the planted-secret suite did not reach three branches
+
+The boundary translates five Click classes and falls back for anything
+else. Two of those classes and the fallback have no route through this
+grammar, so three branches were unexercised, and every assertion the
+suite made was about a stream, which meant the sanitized raise could
+move back inside the Click handler with the suite still green.
+
+Fixed in `bc341fc0`, three ways. The six reachable shapes assert the
+credential is absent from the log too, in both renderings a deployment
+keeps (`tests/support/events.both_formats`). The same six assert the
+refusal's own chain: both slots empty, and nothing in the chain says
+the credential, read through `tests/support/config_cli.chain`. And the
+four shapes the grammar cannot produce (`BadParameter`,
+`BadArgumentUsage`, a base `UsageError` whose words are new, and a
+`ClickException` that is not a usage error) are driven at
+`_usage_problem` itself, each constructed carrying a credential in the
+message Click would have written.
+
+Two reach-ins, both decided rather than drifted into. `cli._parsed` is
+reached because `main` catches this exception by design and answers
+with a sentence and an exit code, so no caller-facing surface ever
+holds it and the claim cannot otherwise be stated. `cli._usage_problem`
+is reached because a branch with no command line that produces it is
+exactly the branch that leaks the day it becomes reachable. The
+constructed exceptions are built from the names `cli` itself imports,
+so a Typer upgrade breaks one place rather than two.
+
+With the sanitized raise moved back inside the handler, all six chain
+cases fail, each naming the Click exception found behind the sentence.
+
+### 3. P2: `--from-env` did not say what it was the alternative to
+
+Its default is behavior: with no `--from-env` the secret is read from
+stdin, without echo at a terminal. The help said nothing about it,
+Typer prints no default for the `None` that stands for not given, and
+the help test checked descriptions and required markers only, so an
+option that read as having no alternative passed.
+
+Fixed in `c474c9de`. The help says it in the shape the two sibling
+options already use, and the tree-enumerating test holds every option
+that takes a value and does not have to be given to stating a default;
+flags are excluded, because a flag that is not given is a flag that is
+not given. The same commit gives the `set` help test decision 4's third
+column: each field's description, not only its type and its default. A
+type and a default with no sentence beside them say what a key holds
+without saying what it is. With `--from-env`'s default removed and the
+descriptions dropped from the generated listing, seven cases fail.
+
+### Verification after the round
+
+All from `vinga-server/`.
+
+- `uv run ruff check .`: `All checks passed!`
+- `uv run mypy`: `Success: no issues found in 4 source files`
+- `uv run pytest tests/unit -q -n auto --dist loadfile`:
+  `2973 passed, 20 skipped in 42.91s` (14 more than before the round:
+  4 from finding 1, 10 from finding 2).
+- `uv run pytest tests/integration -q`: `61 passed in 198.43s (0:03:18)`
+- The four drift checks: all clean, `domain-config.md` still unmoved.
+- `uv sync --frozen`: `Checked 99 packages in 1ms`
