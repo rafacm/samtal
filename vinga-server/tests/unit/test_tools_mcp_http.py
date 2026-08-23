@@ -18,7 +18,8 @@ import json
 import logging
 import socket
 import threading
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import httpx
@@ -97,13 +98,22 @@ async def running(config: McpServerConfig, name: str = "tools") -> McpServerMana
     return manager
 
 
-def unused_url() -> str:
-    """A URL on a port nothing is listening on. Bound and released, so
-    the number was free a moment ago and nothing of ours took it."""
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        port = probe.getsockname()[1]
-    return f"http://127.0.0.1:{port}/mcp"
+@contextmanager
+def unused_url() -> Iterator[str]:
+    """A URL on a port nothing is listening on, for the length of a
+    block.
+
+    The port is HELD rather than probed and released. A bound socket
+    that never listens refuses every connection exactly as an unbound
+    port does, which is the property the tests here want, and holding it
+    is what makes the property true for longer than an instant: with the
+    suite distributed across worker processes, a released number is one
+    another worker's `port=0` server can be handed, and a test asserting
+    that nothing answers would then be talking to it.
+    """
+    with socket.socket() as held:
+        held.bind(("127.0.0.1", 0))
+        yield f"http://127.0.0.1:{held.getsockname()[1]}/mcp"
 
 
 async def test_a_started_server_offers_its_tools_under_its_entry_name(
@@ -135,15 +145,16 @@ async def test_a_url_nobody_answers_does_not_fail_the_start(
 ) -> None:
     # The stdio suite's dead-command case, over HTTP: liveness is
     # forgiven, so the manager logs, publishes nothing, and stays down.
-    with caplog.at_level(logging.WARNING, logger=MANAGER_LOGGER):
-        manager = await running(http_entry(unused_url()))
-    try:
-        assert not manager.up
-        assert manager.tools() == []
-        with pytest.raises(McpServerDown):
-            await manager.call("tools__secret_word", {})
-    finally:
-        await manager.stop()
+    with unused_url() as url:
+        with caplog.at_level(logging.WARNING, logger=MANAGER_LOGGER):
+            manager = await running(http_entry(url))
+        try:
+            assert not manager.up
+            assert manager.tools() == []
+            with pytest.raises(McpServerDown):
+                await manager.call("tools__secret_word", {})
+        finally:
+            await manager.stop()
 
     # The logging half of "logs and stays down", which the state
     # assertions above cannot see. Pinned to this server's own logger and
@@ -420,8 +431,8 @@ async def test_a_url_nobody_answers_is_down_for_the_transport(
     to anything, so a refused connection raises on the first request of
     the handshake rather than on the way in; the marker says
     initialization and the truth is that nothing answered."""
-    with caplog.at_level(logging.INFO, logger=MANAGER_LOGGER):
-        manager = await running(http_entry(unused_url()))
+    with unused_url() as url, caplog.at_level(logging.INFO, logger=MANAGER_LOGGER):
+        manager = await running(http_entry(url))
         await manager.stop()
 
     assert fields_of(one_event(caplog, "mcp_down"))["reason"] == TRANSPORT_FAILED
