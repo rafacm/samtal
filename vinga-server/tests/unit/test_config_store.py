@@ -17,17 +17,10 @@ from sqlalchemy import select, update
 
 from tests.support.stores import planted, stored_row, stored_rows
 from vinga_server.config import ConfigError
-from vinga_server.config.entities import (
-    NO_SUCH_AGENT,
-    NO_SUCH_DEVICE,
-    NO_SUCH_FRAGMENT,
-    NO_SUCH_MCP_SERVER,
-    NO_SUCH_PROVIDER,
-)
 from vinga_server.config.loader import StorageError, UnknownEntityError
-from vinga_server.config.models import mcp_entry_fragment
+from vinga_server.config.models import PROVIDER_STAGES, mcp_entry_fragment
 from vinga_server.config.secrets import MASK, SecretLocation, generate_key
-from vinga_server.config.store import NOT_A_STAGE, ConfigStore, verify_secrets
+from vinga_server.config.store import ConfigStore, verify_secrets
 from vinga_server.db import open_database, schema
 
 # Not a real credential, and shaped so a substring check for it cannot
@@ -278,7 +271,7 @@ def test_a_fragment_that_is_not_there_is_named_by_its_section_only(
         with pytest.raises(UnknownEntityError) as caught:
             call()
 
-        assert str(caught.value) == NO_SUCH_FRAGMENT
+        assert str(caught.value).startswith("prompt_fragments:")
         assert SECRET not in _chain(caught.value)
 
 
@@ -610,19 +603,23 @@ def test_deleting_the_default_agent_is_refused(store: ConfigStore) -> None:
 
 
 def test_an_unfreed_entity_is_refused_by_its_section(store: ConfigStore) -> None:
-    """A delete of something that is not there is refused in the
-    section's own fixed sentence, which never repeats the identity that
-    was asked for (#132)."""
-    for call, sentence in (
-        (lambda: store.delete_provider("llm", "ghost"), NO_SUCH_PROVIDER),
-        (lambda: store.delete_mcp_server("ghost"), NO_SUCH_MCP_SERVER),
-        (lambda: store.delete_prompt_fragment("ghost"), NO_SUCH_FRAGMENT),
-        (lambda: store.delete_agent("ghost"), NO_SUCH_AGENT),
-        (lambda: store.delete_device("aa:bb:cc:dd:ee:ff"), NO_SUCH_DEVICE),
+    """A delete of something that is not there is refused by the section
+    it would have been in, and never repeats the identity that was asked
+    for (#132)."""
+    ghost = "ghost"
+    ghost_mac = "aa:bb:cc:dd:ee:ff"
+    for call, section, identity in (
+        (lambda: store.delete_provider("llm", ghost), "providers", ghost),
+        (lambda: store.delete_mcp_server(ghost), "mcp_servers", ghost),
+        (lambda: store.delete_prompt_fragment(ghost), "prompt_fragments", ghost),
+        (lambda: store.delete_agent(ghost), "agents", ghost),
+        (lambda: store.delete_device(ghost_mac), "devices", ghost_mac),
     ):
         with pytest.raises(ConfigError) as caught:
             call()
-        assert str(caught.value) == sentence
+        refusal = str(caught.value)
+        assert refusal.startswith(f"{section}:"), refusal
+        assert identity not in refusal, refusal
 
 
 def test_an_invalid_fragment_is_refused_without_quoting_it(store: ConfigStore) -> None:
@@ -686,9 +683,15 @@ def test_a_nested_reference_key_must_still_name_a_variable(store: ConfigStore) -
 
 
 def test_an_unknown_stage_and_an_empty_name_are_refused(store: ConfigStore) -> None:
+    """The stage refusal names the four stages, which are constants of
+    this server, and never the word that was sent, which is a path
+    segment nothing has validated (#132)."""
     with pytest.raises(ConfigError) as caught:
         store.set_provider("speech", "x", {"type": "mock"})
-    assert str(caught.value) == NOT_A_STAGE
+    refusal = str(caught.value)
+    assert refusal.startswith("providers:")
+    assert all(stage in refusal for stage in PROVIDER_STAGES), refusal
+    assert "speech" not in refusal, refusal
     with pytest.raises(ConfigError, match="the name is empty"):
         store.set_agent("  ", {})
     with pytest.raises(ConfigError, match="not a MAC address"):

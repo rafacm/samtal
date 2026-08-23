@@ -9,7 +9,9 @@ wording load-bearing, so the refusals carry types instead.
 
 All three subclass ConfigError, so nothing that catches ConfigError
 changes; these tests pin the subtype where the status code depends on
-it, and pin that the messages did not move.
+it, and the section a refusal is about, which is the half an operator
+acts on. The sentence around that is the repository's to choose and is
+deliberately not pinned here.
 
 The busy case is forced rather than hoped for: a real lock is held by a
 second connection while the busy timeout is short, once inside the
@@ -26,13 +28,6 @@ from sqlalchemy import update
 
 from tests.support.stores import planted
 from vinga_server import db as db_module
-from vinga_server.config.entities import (
-    NO_SUCH_AGENT,
-    NO_SUCH_DEVICE,
-    NO_SUCH_FRAGMENT,
-    NO_SUCH_MCP_SERVER,
-    NO_SUCH_PROVIDER,
-)
 from vinga_server.config.loader import (
     ConfigError,
     DatabaseBusyError,
@@ -71,34 +66,39 @@ def test_every_typed_refusal_is_still_a_config_error() -> None:
 
 
 def test_a_missing_entity_is_an_unknown_entity_error(store: ConfigStore) -> None:
-    """The 404 set, each in the fixed sentence its section answers with:
-    the section and the fact, and never the identity that was asked for
-    (#132). The two secret paths meet the same sentences, since what is
-    not there is the entity the slot would hang on."""
+    """The 404 set, each naming the section it is about and never the
+    identity that was asked for (#132). The two secret paths land in the
+    same set, since what is not there is the entity the slot would hang
+    on."""
     _populate(store)
+    gone = "gone"
+    gone_mac = "aa:bb:cc:dd:ee:ff"
     cases = [
-        (lambda: store.delete_provider("llm", "gone"), NO_SUCH_PROVIDER),
-        (lambda: store.delete_mcp_server("gone"), NO_SUCH_MCP_SERVER),
-        (lambda: store.delete_prompt_fragment("gone"), NO_SUCH_FRAGMENT),
-        (lambda: store.delete_agent("gone"), NO_SUCH_AGENT),
-        (lambda: store.delete_device("aa:bb:cc:dd:ee:ff"), NO_SUCH_DEVICE),
+        (lambda: store.delete_provider("llm", gone), "providers", gone),
+        (lambda: store.delete_mcp_server(gone), "mcp_servers", gone),
+        (lambda: store.delete_prompt_fragment(gone), "prompt_fragments", gone),
+        (lambda: store.delete_agent(gone), "agents", gone),
+        (lambda: store.delete_device(gone_mac), "devices", gone_mac),
+        # The slot that holds no secret, which is the one case in this
+        # set where the entity exists and the credential does not.
+        (lambda: store.clear_secret(CLAUDE), "providers", "api_key"),
         (
-            lambda: store.clear_secret(CLAUDE),
-            "providers: no secret is stored for that slot",
+            lambda: store.set_secret(SecretLocation.provider("llm", gone, "api_key"), "x"),
+            "providers",
+            gone,
         ),
         (
-            lambda: store.set_secret(SecretLocation.provider("llm", "gone", "api_key"), "x"),
-            NO_SUCH_PROVIDER,
-        ),
-        (
-            lambda: store.set_secret(SecretLocation.mcp_server("gone", "env.TOKEN"), "x"),
-            NO_SUCH_MCP_SERVER,
+            lambda: store.set_secret(SecretLocation.mcp_server(gone, "env.TOKEN"), "x"),
+            "mcp_servers",
+            gone,
         ),
     ]
-    for call, message in cases:
+    for call, section, identity in cases:
         with pytest.raises(UnknownEntityError) as caught:
             call()
-        assert str(caught.value) == message
+        refusal = str(caught.value)
+        assert refusal.startswith(f"{section}:"), refusal
+        assert identity not in refusal, refusal
 
 
 def test_a_refusal_that_is_not_about_a_missing_entity_stays_plain(store: ConfigStore) -> None:

@@ -22,13 +22,6 @@ from sqlalchemy import update
 from tests.support.stores import body as dumped
 from tests.support.stores import planted
 from vinga_server.config import entities, views
-from vinga_server.config.entities import (
-    NO_SUCH_AGENT,
-    NO_SUCH_DEVICE,
-    NO_SUCH_FRAGMENT,
-    NO_SUCH_MCP_SERVER,
-    NO_SUCH_PROVIDER,
-)
 from vinga_server.config.loader import ConfigError, UnknownEntityError
 from vinga_server.config.models import (
     AgentConfig,
@@ -97,23 +90,29 @@ def test_every_kind_reads_back_what_was_written(store: ConfigStore) -> None:
 
 
 def test_reading_something_that_is_not_there_does_not_name_it(store: ConfigStore) -> None:
-    """The 404 set, in one fixed sentence per section: one vocabulary
-    whichever way an operator reached the read, and never the identity
-    they asked for, which is a value nothing here has validated (#132).
+    """The 404 set: the type the API answers 404 to, the section the
+    refusal is about, and never the identity that was asked for, which
+    is a value nothing here has validated (#132).
 
-    Equality rather than a substring, so a sentence that grew the
-    identity back on the end would fail here."""
+    What is asserted is the section and the absence, not the sentence.
+    The section is the semantic half an operator needs, since it is what
+    tells them which listing to look in; the wording around it is the
+    repository's to choose."""
+    absent = "ghost"
+    absent_mac = "aa:bb:cc:dd:ee:ff"
     cases = [
-        (lambda: store.read_provider("llm", "ghost"), NO_SUCH_PROVIDER),
-        (lambda: store.read_mcp_server("ghost"), NO_SUCH_MCP_SERVER),
-        (lambda: store.read_prompt_fragment("ghost"), NO_SUCH_FRAGMENT),
-        (lambda: store.read_agent("ghost"), NO_SUCH_AGENT),
-        (lambda: store.read_device("aa:bb:cc:dd:ee:ff"), NO_SUCH_DEVICE),
+        (lambda: store.read_provider("llm", absent), "providers", absent),
+        (lambda: store.read_mcp_server(absent), "mcp_servers", absent),
+        (lambda: store.read_prompt_fragment(absent), "prompt_fragments", absent),
+        (lambda: store.read_agent(absent), "agents", absent),
+        (lambda: store.read_device(absent_mac), "devices", absent_mac),
     ]
-    for call, message in cases:
+    for call, section, identity in cases:
         with pytest.raises(UnknownEntityError) as caught:
             call()
-        assert str(caught.value) == message
+        refusal = str(caught.value)
+        assert refusal.startswith(f"{section}:"), refusal
+        assert identity not in refusal, refusal
 
 
 def test_a_read_that_addresses_nothing_addressable_stays_plain(store: ConfigStore) -> None:
