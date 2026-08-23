@@ -420,17 +420,28 @@ def _value(value: object) -> str:
 def fragment_help(name: str) -> str:
     """The fields a fragment for this entity may carry, for the epilog
     of the command that takes one. Generated rather than written, so the
-    help and the reference cannot disagree."""
+    help and the reference cannot disagree.
+
+    Three things per field, which are the three a person writing a
+    fragment has to know: what the key is called, what it may hold, and
+    what it holds when the fragment leaves it out. The first two columns
+    are the reference's own `Type` and `Default` cells, computed by the
+    same two functions above, so a help page and a table row cannot come
+    to describe one field differently. The description under them is its
+    first sentence, which is what fits; the whole of it is one
+    `config schema` away, and the last line says so.
+    """
     candidate = entity(name)
-    width = max(len(field_name) for field_name in candidate.model.model_fields)
     lines = [f"fragment fields for {candidate.title.lower()} ({candidate.location}):", ""]
     for field_name, info in candidate.model.model_fields.items():
-        lead = f"  {field_name.ljust(width)}  "
+        given = default(info)
+        held = "required" if given == "required" else f"default: {given}"
+        lines.append(f"  {field_name}: {type_name(info.annotation)}  ({held})")
         lines += textwrap.wrap(
             _sentence(info.description),
             width=HELP_WIDTH,
-            initial_indent=lead,
-            subsequent_indent=" " * len(lead),
+            initial_indent="    ",
+            subsequent_indent="    ",
             break_long_words=False,
             break_on_hyphens=False,
         )
