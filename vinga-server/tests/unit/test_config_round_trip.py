@@ -482,8 +482,8 @@ def _seed(run) -> None:
 # lists its locations sorted, so that two exports of one configuration
 # are the same bytes whatever order the credentials were entered in.
 _SET_SECRETS = [
-    ["set-secret", "mcp-server", "home", "headers.Authorization"],
-    ["set-secret", "provider", "asr", "whisper", "api_key"],
+    ["set-secret", "mcp-server", "--", "home", "headers.Authorization"],
+    ["set-secret", "provider", "--", "asr", "whisper", "api_key"],
 ]
 
 
@@ -495,8 +495,10 @@ def _enter_secrets(run, commands: list[list[str]]) -> None:
 
 def _located(words: list[str]) -> tuple[str, str, str]:
     """One `set-secret` command as the location it addresses, which is
-    how a test knows which credential to feed it."""
-    kind, *identity, slot = words[1:]
+    how a test knows which credential to feed it. The `--` is dropped
+    the way the parser drops it: it separates the command's own words
+    from the identity, and is not part of either."""
+    kind, _marker, *identity, slot = words[1:]
     return (kind.replace("-", "_"), ".".join(identity), slot)
 
 
@@ -611,3 +613,57 @@ def test_an_entity_with_no_stored_credential_exports_without_an_annotation(
     exported = capsys.readouterr().out
     assert "Stored credentials" not in exported
     assert yaml.safe_load(exported)["prompt"] == "You are Sam."
+
+
+# A name that begins with a dash
+#
+# Nothing about a name forbids one: the write path refuses a slash and a
+# control character and nothing else, so `--from-env` is a legal
+# provider name and `--local` is a legal slot. What such a name needs is
+# Click's `--`, which ends the options and makes the rest positional,
+# and which an operator has to type to write the name in the first
+# place. The export renders the command it would take, so the command it
+# renders carries the marker too.
+#
+# The case below EXECUTES the exported argv rather than reading it: what
+# is being pinned is that the line an operator pastes works, and a
+# rendering that merely looked right is exactly what this replaces.
+
+DASHED_NAME = "--from-env"
+DASHED_SLOT = "api_key"
+
+
+def test_an_exported_command_runs_for_a_name_that_begins_with_a_dash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run = runner(tmp_path, monkeypatch)
+    # Written with the marker, because that is the only way to write it.
+    assert run("set", "provider", "--", "llm", DASHED_NAME, "type=mock") == 0
+    assert run("set-secret", "provider", "--", "llm", DASHED_NAME, DASHED_SLOT,
+               stdin="sk-test-dashed-never-a-real-credential\n") == 0
+    capsys.readouterr()
+
+    assert run("export") == 0
+    exported = capsys.readouterr().out
+
+    (command,) = _exported_secret_commands(exported)
+    assert command == ["set-secret", "provider", "--", "llm", DASHED_NAME, DASHED_SLOT]
+    # And it runs, which is the whole of what an exported command is for.
+    assert run(*command, stdin="sk-test-dashed-never-a-real-credential\n") == 0
+    assert "wrote secret" in capsys.readouterr().out
+
+
+def test_the_same_command_without_the_marker_does_not_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The guard on the case above: without the marker the grammar reads
+    the name as an option and refuses, which is what the export used to
+    render."""
+    run = runner(tmp_path, monkeypatch)
+    run("set", "provider", "--", "llm", DASHED_NAME, "type=mock")
+    run("set-secret", "provider", "--", "llm", DASHED_NAME, DASHED_SLOT, stdin="s3cret\n")
+    capsys.readouterr()
+
+    assert run("set-secret", "provider", "llm", DASHED_NAME, DASHED_SLOT, stdin="s3cret\n") == 1
+
+    assert "run with --help for the grammar" in capsys.readouterr().err
