@@ -1251,3 +1251,44 @@ def test_an_applied_reference_is_refused_without_printing_the_name(
     assert "Traceback" not in captured.err
     served = [r for r in caplog.records if r.name.startswith("vinga_server")]
     assert all(SECRET not in str(record.__dict__) for record in served)
+
+
+VALIDATOR_LEAKS = [
+    (
+        "a binding naming one agent twice",
+        f"devices:\n  aa:bb:cc:dd:ee:ff: [{SECRET}, {SECRET}]\n",
+        "more than one position",
+    ),
+    (
+        "an entry name that is not a tool prefix",
+        f"mcp_servers:\n  {SECRET}.pasted: {{transport: stdio, command: uvx}}\n",
+        "must match [A-Za-z0-9_-]+",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("document", "rule"),
+    [(document, rule) for _, document, rule in VALIDATOR_LEAKS],
+    ids=[what for what, _, _ in VALIDATOR_LEAKS],
+)
+def test_an_applied_validator_is_refused_without_printing_the_value(
+    run,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+    document: str,
+    rule: str,
+) -> None:
+    """The two validators a document reaches that are not the reference
+    pass, as an operator meets them: the rule and the position, and not
+    the word they pasted."""
+    with caplog.at_level(logging.DEBUG):
+        assert run("apply", "-f", "-", stdin=document) == 1
+
+    captured = capsys.readouterr()
+    assert rule in captured.err
+    assert SECRET not in captured.err
+    assert SECRET not in captured.out
+    assert "Traceback" not in captured.err
+    served = [r for r in caplog.records if r.name.startswith("vinga_server")]
+    assert all(SECRET not in str(record.__dict__) for record in served)

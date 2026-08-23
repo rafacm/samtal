@@ -756,7 +756,9 @@ def test_an_agent_listed_twice_for_one_device_is_rejected() -> None:
         "default_agent": "poet",
         "devices": {"aa:bb:cc:dd:ee:ff": ["poet", "poet"]},
     }
-    with pytest.raises(ConfigError, match='agent "poet" is listed more than once'):
+    with pytest.raises(
+        ConfigError, match=r"one agent is named at more than one position \(1, 2\)"
+    ):
         load_config_from_data(data)
 
 
