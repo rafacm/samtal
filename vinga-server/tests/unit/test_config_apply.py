@@ -479,6 +479,39 @@ def test_the_same_entry_written_once_is_not_a_duplicate(store: ConfigStore) -> N
     ]
 
 
+def test_every_malformed_section_is_reported_at_once(store: ConfigStore) -> None:
+    """The structural phase aggregates like the two after it, and for
+    the same reason: a document is refused whole, so a document with
+    four malformed sections is one whose operator should be told about
+    four. The providers section aggregates its own stage groups inside
+    that, and the whole of it comes out under one headline rather than
+    under a headline per level."""
+    with pytest.raises(ConfigError) as caught:
+        store.apply(
+            {
+                "providers": {"llm": ["nope"], "asr": "nope", "ghost": {"x": {}}},
+                "prompt_fragments": "nope",
+                "agents": ["nope"],
+                "devices": ["nope"],
+            }
+        )
+
+    lines = str(caught.value).splitlines()
+    assert lines[0] == "the document was refused whole and nothing was changed:"
+    assert lines.count(lines[0]) == 1
+    # Two malformed stage groups, one word that is not a stage at all,
+    # and one line per malformed section, in the document's own order.
+    assert lines[1:] == [
+        "providers: each stage holds a mapping of provider entries by name",
+        "providers: each stage holds a mapping of provider entries by name",
+        "providers: the stage has to be one of asr, llm, tts, vad",
+        "prompt_fragments: this section has to be a mapping of entries by name",
+        "agents: this section has to be a mapping of entries by name",
+        "devices: this section has to be a mapping of entries by name",
+    ]
+    assert store.load().domain.agents == {}
+
+
 def test_a_document_naming_more_entries_than_the_limit_is_refused_unmutated(
     store: ConfigStore,
 ) -> None:
