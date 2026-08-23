@@ -198,30 +198,6 @@ class DocumentedShape:
     purpose: str
     notes: tuple[str, ...] = ()
 
-    # Which of the model's fields a display puts first, before the rest
-    # in the order the model declares them.
-    #
-    # Almost always empty, because declaration order is display order: a
-    # shape that listed its own fields here would be a second copy of
-    # the model's list, which is the drift this registry exists to end.
-    # What it is for is the one thing declaration order cannot say, that
-    # a field declared last is read first. A subclass declares its own
-    # fields after the ones it inherits, so an agent's prompt, which is
-    # what makes it that agent, would arrive after the overrides that
-    # qualify it.
-    leads_with: tuple[str, ...] = ()
-
-    # Which of the model's fields a display shows even when they hold
-    # their declared default.
-    #
-    # Almost always empty, because the display rule already answers it:
-    # a field is shown at whatever it holds, and the only thing left out
-    # is a default that means absence (null, an empty list, an empty
-    # mapping), so a default that is a real value is shown at it. This
-    # is where a shape says it departs from that, and the departure has
-    # to earn its line.
-    always_shown: tuple[str, ...] = ()
-
 
 @dataclass(frozen=True, kw_only=True)
 class NestedShape(DocumentedShape):
@@ -474,11 +450,6 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         ),
         command="vinga-server config set agent <name> -f fragment.yaml",
         examples=("agent.yaml",),
-        # The prompt is the agent, and the stages it overrides qualify
-        # it, so a read opens with it. `AgentConfig` declares it after
-        # the layer fields it inherits, which is an ordering of the
-        # class rather than of the entry.
-        leads_with=("prompt",),
         notes=(
             "An agent's name is also the key its remembered facts are stored under, "
             "so renaming an agent orphans its memory: the old file stays on disk and "
@@ -565,13 +536,6 @@ NESTED: tuple[NestedShape, ...] = (
             "them, and cached, so the clip costs nothing at the moment it "
             "masks and keeps working when the TTS provider is the thing being slow."
         ),
-        # The phrase list is what the section is: an entry with none is
-        # a filler that plays nothing, which is a state to read off the
-        # section rather than to infer from a key that is not there. The
-        # empty list is also unreachable while the feature is on, since
-        # the model refuses `enabled` without phrases, so what this
-        # shows is the disabled entry as it stands.
-        always_shown=("phrases",),
     ),
 )
 
@@ -613,10 +577,6 @@ _BY_NAME: dict[str, EntityDescriptor] = {entry.name: entry for entry in ENTITIES
 
 _SETTINGS_BY_NAME: dict[str, Setting] = {entry.name: entry for entry in SETTINGS}
 
-_BY_MODEL: dict[type[BaseModel], DocumentedShape] = {
-    shape.model: shape for shape in (*ENTITIES, *NESTED)
-}
-
 
 def descriptor(name: str) -> EntityDescriptor:
     """One commanded kind, by the name its command, its route and its
@@ -633,34 +593,6 @@ def setting(name: str) -> Setting:
     fact for the rest.
     """
     return _SETTINGS_BY_NAME[name]
-
-
-def leads_with(model: type[BaseModel]) -> tuple[str, ...]:
-    """Which of one model's fields a display puts before the rest.
-
-    Addressed by the model, and answering with nothing for one the
-    registry does not carry, for the reasons `always_shown` below gives:
-    these are the two questions a display asks about a shape that the
-    shape's own field list cannot answer, and they are asked in the same
-    place and the same way.
-    """
-    shape = _BY_MODEL.get(model)
-    return shape.leads_with if shape is not None else ()
-
-
-def always_shown(model: type[BaseModel]) -> tuple[str, ...]:
-    """Which of one model's fields a display shows even when they hold
-    their declared default.
-
-    Addressed by the model rather than by a kind's name, because this is
-    what the display path asks as it walks into a section nested inside
-    an entry, where the name it came in under is the field's and not a
-    kind's. A model the registry does not carry answers with nothing,
-    which is the rule rather than an absence of one: the display rule
-    decides what a field shows, and a shape says only where it departs.
-    """
-    shape = _BY_MODEL.get(model)
-    return shape.always_shown if shape is not None else ()
 
 
 __all__ = [
@@ -685,8 +617,6 @@ __all__ = [
     "EntityDescriptor",
     "NestedShape",
     "Setting",
-    "always_shown",
     "descriptor",
-    "leads_with",
     "setting",
 ]
