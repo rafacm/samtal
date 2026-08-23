@@ -168,10 +168,11 @@ and discoveries; no deviations says so explicitly.
   suite's own guarantees are the pins and they run identically
   under workers (the spike's four green runs, then this PR's).
 - **Closed sets, honest seams.** Not this territory.
-- **Inventories by tooling.** The port audit grep
-  (`grep -rn "localhost:" tests/unit`) with its file-by-file
-  disposition in the implementation doc; the diff set is the one
-  decision 1 states whole.
+- **Inventories by tooling.** The port audit grep of decision 5
+  (`grep -rnE "\.bind\(|ThreadingHTTPServer\(|socket\.socket\(|uvicorn" tests/unit tests/support tests/tools`),
+  with every hit dispositioned in the implementation doc as a name in
+  config data, a bind on port 0, or a bind-and-release free-port
+  assumption; the diff set is the one decision 1 states whole.
 
 ## Module layout
 
