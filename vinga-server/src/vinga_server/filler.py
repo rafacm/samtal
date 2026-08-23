@@ -28,13 +28,18 @@ a text-to-speech engine.
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import TYPE_CHECKING
 
 from vinga_server.config import Config
 from vinga_server.events import ServerEvents
 from vinga_server.events.catalog import FillerDisabled
 from vinga_server.events.values import ClassName, Identifier
-from vinga_server.providers import AgentProviders, ProviderWorld
+from vinga_server.providers import AgentProviders
+
+if TYPE_CHECKING:
+    # Named for the annotation alone: `generation` imports `FillerClips`
+    # from here, so a runtime import would close the cycle.
+    from vinga_server.generation import Generation
 
 logger = logging.getLogger(__name__)
 
@@ -53,28 +58,6 @@ class FillerClips:
     phrases: tuple[str, ...]
     clips: tuple[bytes, ...]
     sample_rate: int
-
-
-class Served(Protocol):
-    """The world a new one may keep clips from: what it was configured
-    with, the engines it was speaking through, and the clips it holds.
-
-    A protocol rather than `generation.Generation`, which is the one
-    thing that satisfies it: the generation is where a world's
-    configuration, its engines and its clips are one object, and this
-    module is imported by it. Declaring the three reads is also the
-    whole of what reuse needs, so a test supplies them without building
-    a world.
-    """
-
-    @property
-    def config(self) -> Config: ...
-
-    @property
-    def fillers(self) -> Mapping[str, FillerClips]: ...
-
-    @property
-    def providers(self) -> ProviderWorld: ...
 
 
 @dataclass(frozen=True)
@@ -124,10 +107,15 @@ def _voiced_by(
 
 
 def _kept(
-    previous: Served | None, config: Config, providers: AgentProviders, agent: str
+    previous: "Generation | None", config: Config, providers: AgentProviders, agent: str
 ) -> FillerClips | None:
     """The clip a new world may keep for one agent, or None when there
     is one to make.
+
+    Three reads of the previous world and no more: what it was
+    configured with, the engines it was speaking through, and the clips
+    it holds. The generation is where those three are one object, which
+    is why it is what a world composed from another one is handed.
 
     None covers three cases that are one decision: there is no previous
     world, the previous world had no clip for this agent (nothing was
@@ -148,7 +136,7 @@ def _kept(
 async def build_agent_fillers(
     config: Config,
     agent_providers: Mapping[str, AgentProviders],
-    previous: Served | None = None,
+    previous: "Generation | None" = None,
 ) -> Fillers:
     """The clips for every agent whose configuration enables one, made
     again only where they had to be.
@@ -233,4 +221,4 @@ async def build_agent_fillers(
     )
 
 
-__all__ = ["FillerClips", "Fillers", "Served", "build_agent_fillers"]
+__all__ = ["FillerClips", "Fillers", "build_agent_fillers"]
