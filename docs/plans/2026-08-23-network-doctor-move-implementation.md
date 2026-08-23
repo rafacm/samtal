@@ -218,3 +218,57 @@ All from `vinga-server/`, on the final tree.
 The wheel-migration step is CI's own and was not run locally; nothing
 in this milestone touches a migration, a packaged data file or the
 package metadata.
+
+## PR review round, M1 (PR #266)
+
+External review of the PR diff: codex backend (first codex PR round
+since the quota reset), codex CLI 0.149.0, model `gpt-5.6-sol`,
+read-only sandbox, 2026-08-23, runtime 6m01s, posted on the PR
+(comment 5387241568). Verdict as received: mergeable after the
+listed fixes. Two P1 and two P2, every finding fixed with its own
+commit and a revert-or-mutate proof:
+
+1. **P1: the doctor logged the secret OTA URL at INFO.** httpx's
+   INFO record carries method, URL and status, so a supplied legacy
+   OTA URL put its secret path segment in a log record even though
+   every verdict hides it. Fixed in `008da7e4`: `logs.py` gains
+   `quieted(names, level)`, the scoped sibling of
+   `quiet_vendor_libraries` (raise-never-lower, restored in a
+   finally), and `_probed` runs inside it for `httpx` and
+   `httpcore`. Proof: with the boundary removed, the new caplog test
+   fails with the real record. Severity note recorded honestly: the
+   shipped CLI path attaches no handler, so today the record is
+   created and goes nowhere; it would land the moment anything adds
+   a handler, which is why the fix stands. Discovery worth keeping:
+   the dev venv carries `httpx2` (Starlette's TestClient imports
+   it), which neither `REQUEST_LOGGERS` nor `VENDOR_LOG_FLOORS`
+   covers; correct today since nothing in `src/` imports it, a trap
+   if it ever becomes a runtime dependency.
+
+2. **P1: a failing `client.close()` escaped the sanitizing
+   boundary.** The close ran in the outer finally, outside the
+   handler, so an OSError from it left as a library traceback,
+   possibly secret-bearing, and could replace an already-sanitized
+   failure. Fixed in `c11e8376`: `_close_failed` keeps only the
+   class name, the caller raises after the block (`__cause__` and
+   `__context__` both None), and `problem = problem or
+   _close_failed(...)` makes the earlier failure win. Three tests;
+   proof by putting the close back in the finally.
+
+3. **P2: the root parser's no-echo override had no regression
+   test.** Fixed in `0a03d307`: two entry-point tests drive shapes
+   that reach the root parser with a planted secret-shaped URL;
+   swapping the override back to plain argparse fails them with the
+   literal echo. Premise correction recorded: argparse's
+   missing-value sentence carries no value, so that test pins the
+   sentence being ours; the unrecognized-argument test is the one
+   that bites.
+
+4. **P2: the query-credential tests checked one stream each.**
+   Fixed in `7c2b6a66`: both assert over `captured.out +
+   captured.err` and hunt the parameter as well as the sentinel; the
+   transport test's needle is `?token=`/`token=<SECRET>` because
+   that refusal's own prose speaks of the bearer token.
+
+A fifth commit, `9574a79f`, adds the two operator-visible fixes
+(the quieted probe log, the sanitized close) to the changelog entry.
