@@ -223,6 +223,22 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Fixed
 
+- **A value that is not a MAC address is no longer repeated back**
+  (#205). The refusal used to be `"<what you typed>" is not a MAC
+  address; expected six colon-separated hex pairs, ...`, and it went out
+  as a configuration API body, as a line on the CLI's stderr, and into
+  the boot refusal for a configuration file. That value arrived in a URL
+  path segment or on a command line, which is where a paste lands, so it
+  could be a credential typed one argument early. It is now one fixed
+  sentence, `a MAC address is six colon-separated hex pairs, for example
+  aa:bb:cc:dd:ee:ff`, which still says what a MAC has to be and carries
+  nothing of what was sent. This is the same treatment the entity, stage
+  and credential-slot refusals were given (#132), applied to the one
+  refusal that fires before any lookup. Nothing about a device changes:
+  a MAC is accepted in exactly the forms it was, dashes and upper case
+  included. The OTA check-in and the conversations query already
+  answered with fixed sentences of their own and are unchanged.
+
 - **A capture whose codecs will not open no longer ends the
   conversation** (#245). Starting a recording opens three codec objects
   through a media library, and a library that cannot open one raises. It
