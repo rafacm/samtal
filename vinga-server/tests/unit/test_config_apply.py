@@ -140,6 +140,19 @@ def test_a_provider_is_named_by_its_stage_and_name_together(store: ConfigStore) 
     assert [(one.section, one.identity) for one in applied] == [("providers", "llm.claude")]
 
 
+def test_a_name_holding_a_dot_is_still_one_name(store: ConfigStore) -> None:
+    """A provider's identity is its stage and its name joined by a dot,
+    and nothing about a name forbids one, so the identity is split back
+    into the parameters the kind is addressed by rather than at every
+    dot it happens to hold."""
+    applied = store.apply({"providers": {"llm": {"claude.v2": {"type": "mock"}}}})
+
+    assert [(one.section, one.identity) for one in applied] == [
+        ("providers", "llm.claude.v2")
+    ]
+    assert store.read_provider("llm", "claude.v2").entry.type == "mock"
+
+
 # Idempotence
 
 

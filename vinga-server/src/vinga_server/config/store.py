@@ -1390,11 +1390,11 @@ def _named(sections: Mapping[str, object]) -> list[tuple[str, str, object]]:
         if section not in sections:
             continue
         written = sections[section]
-        if section == "default_agent":
-            named.append((section, "", written))
-        elif section == "agent_defaults":
-            # The singleton's section IS its body, not a mapping of
-            # entries, so it is one entry however much is written in it.
+        if section in ("default_agent", "agent_defaults"):
+            # The two sections that hold one thing rather than entries:
+            # the default agent is a name, and the singleton's section IS
+            # its body, so each is one entry however much is written in
+            # it and neither has an identity under the section.
             named.append((section, "", written))
         elif section == "providers":
             named += _provider_entries(written)
@@ -1440,7 +1440,18 @@ def _change(named: tuple[str, str, object]) -> _Change:
             raise ConfigError(_NOT_AN_AGENT_NAME)
         return _DefaultAgent(_identifier("default_agent", written))
     descriptor = _SECTION_KINDS[section]
-    return _prepare(descriptor, tuple(identity.split(".")) if identity else (), written)
+    return _prepare(descriptor, _addressed(descriptor, identity), written)
+
+
+def _addressed(descriptor: EntityDescriptor, identity: str) -> tuple[str, ...]:
+    """One entry's identity back as the parameters the kind is addressed
+    by. Split at the first separator only, and only as many times as the
+    kind has parameters, which is what keeps a name holding a dot still
+    one name: `providers.llm.claude.v2` is the `claude.v2` of the `llm`
+    stage, and nothing about a name forbids the dot."""
+    if not descriptor.addressing:
+        return ()
+    return tuple(identity.split(".", len(descriptor.addressing) - 1))
 
 
 def _bound(written: object) -> list[str]:
