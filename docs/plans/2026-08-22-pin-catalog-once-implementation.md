@@ -277,7 +277,9 @@ Three more from the PR review round, against the eight-test suite:
 - Before: 450 lines.
 - After: 426 lines, of which 33 are this milestone's own new writing
   (this document and the changelog entry), naming the deleted artifacts
-  as history rather than as pins.
+  as history rather than as pins. The PR review round's own writing
+  takes it to 438 the same way; nothing in the live tree moved after the
+  after-grep was taken.
 
 Survivors, every one in the plan's expected categories:
 
@@ -318,7 +320,8 @@ All from `vinga-server/`.
   the project's mypy configuration covers).
 - `uv run pytest tests/unit -q`: 2797 passed, 20 skipped, in 4m24s.
   `tests/unit/test_event_baseline.py` alone is 7 passed in 19.8 s,
-  which is the plan's net seven.
+  which is the plan's net seven. (The review round below makes it
+  eight.)
 - `uv run pytest tests/integration -q`: 61 passed in 2m57s.
 - `uv run vinga-server events reference > ../docs/reference/events.md`,
   run twice after the docgen change: the first run's output is what is
@@ -330,3 +333,96 @@ All from `vinga-server/`.
   holds. No template, field, token, syntax, grammar or note moved.
 - The four mutation proofs and the control, in the table above.
 - The repo-wide grep, before and after, in the section above.
+
+## PR review round, M1 (PR #260)
+
+External review of the PR diff: claude backend (the codex quota is
+exhausted), claude CLI, model `claude-opus-5`, read-only tool set,
+2026-08-23, [posted on the PR](https://github.com/rafacm/vinga/pull/260).
+Verdict: mergeable after the listed fixes. One P1, three P2s and three
+P3s. What the round faulted was not the deletions, which it confirmed
+sound against the issue's decisions, but the claim that nothing the
+retired capture uniquely held was lost: one per-path guarantee was being
+dropped silently, and the implementation doc argued it was safe using
+the example that disproves it. Each finding has its own commit.
+
+1. **P1: the per-path template pin was gone, so a site that starts
+   constructing a SIBLING variant of the same event passed the whole
+   suite.** `matches()` tries every variant of a record's event, and
+   four events declare siblings whose payload keys are identical and
+   whose sentences are not: `barge_in_suppressed` three,
+   `session_rejected` three, `ota_check` three, `capture_declined` two.
+   Inverting two gate branches would report each of two situations under
+   the other's sentence and the other's `reason` token, with all seven
+   tests green. Fixed in `9a58c8f8`: `CARRIED` holds a pair per record,
+   the variant the record is an emission of and the keys it carries,
+   named by a new `matched()`; exactly one variant matches every one of
+   the 86 records, which is what makes the column well defined. Proved
+   by the swap mutation, which is red on the new column and, verified
+   rather than argued, leaves the old key-only table byte-identical.
+
+2. **P2: the conformance docstring claimed a failure mode the harness
+   filters out.** An untyped record carries no `event` attribute, so the
+   drivers' filter drops it before the capture exists, and nothing else
+   covered it either once this milestone deleted the last remains of the
+   #210 static walk. Fixed in `bbe8123d`, taking the keep option rather
+   than the delete option: `driven()` answers a `Run` whose `said` is
+   unfiltered, and a new check holds it to a closed set of
+   channel-and-sentence pairs. The suggested predicate, "every record on
+   a scoped channel carries an `event`", turned out to be false in the
+   tree: this server writes six untyped diagnostics on scoped channels
+   today (36 records across the run), so the honest form is the closed
+   set, asserted in both directions. `variants_of`'s empty answer says
+   plainly that it is defensive and unreachable.
+
+3. **P2: no mutation isolated the conformance check.** True, and the
+   reason was structural: held to the records the drivers keep, every
+   failure it can report is also a `CARRIED` row change, because
+   `matched()` answers "no declared variant" for exactly those records.
+   Fixed in `072eabd8` by giving it a population of its own rather than
+   by finding a cleverer mutation: it is held to every typed record the
+   runs produced, 264 rather than 86, since a session driver crosses a
+   dozen neighbouring paths on the way to its own decision and those
+   records are in no table. The isolating mutation is now available and
+   was run: an undeclared key on the tutor's prompt assembly, a
+   neighbour of the handover drivers that no driver keeps, is red here
+   and green everywhere else. The reviewer's own suggested mutation was
+   run too and is recorded as not isolating, for the reason the table
+   gives.
+
+4. **P2: the changelog stated two things that are not true of the
+   diff**, "no production code moved" and "byte-identical apart from the
+   argument tables"; the plan's milestone bullet repeated the first and
+   the deviations section did not record it. Fixed in `c8428fbc`: the
+   honest claim is that no BEHAVIOR moved, the docgen change has its own
+   `### Changed` entry naming the cell, the command and the paragraph,
+   the bullet says what actually changed, and deviation 4 records it.
+
+5. **P3: the golden also pinned declared TYPE names.** Accepted
+   explicitly in `eb7a8b08` rather than replaced, with the loss
+   measured: of 35 carried value types, exactly two pairs share a kind
+   and render the same constraint cell.
+
+6. **P3: deviation 1's inventory undercounted the sweep.** Corrected in
+   `2b354f96` from four sites to nine, each named, plus the three
+   passages inside the harness that the docstring rewrite covered.
+
+7. **P3: a comment left ragged by the reflow.** Rewrapped in
+   `0dc6aaab`.
+
+### Verification after the round
+
+All from `vinga-server/`.
+
+- `uv run ruff check .`: clean.
+- `uv run mypy`: clean.
+- `uv run pytest tests/unit -q`: 2798 passed, 20 skipped, in 4m19s
+  (one more test than before the round).
+- `uv run pytest tests/integration -q`: 61 passed in 2m56s.
+- `uv run vinga-server events reference`, run twice against the
+  committed file: no difference either time. This round changed no
+  declaration and no generator, so the reference is untouched by it.
+- `tests/unit/test_event_baseline.py`: 8 passed, the seventh and eighth
+  being the untyped closed set and the widened conformance check.
+- The three added mutations, in the table above, each reverted by
+  copy-back plus `touch` with `git status` checked clean afterwards.
