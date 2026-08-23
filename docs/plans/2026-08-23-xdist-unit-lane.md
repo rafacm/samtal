@@ -137,7 +137,7 @@ present and the unit lane at its projected time.
 
 ## Plan review round
 
-External review of commit `git log -2` (the plan commit), 2026-08-23.
+External review of commit `ff678db2`, 2026-08-23.
 Backend: claude CLI 2.1.239, model `claude-opus-5`, read-only tool
 set (interim fallback tier). Verdict as received: ready after the
 P1/P2 amendments; the direction and decisions are right, but the two
