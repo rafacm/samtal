@@ -334,7 +334,7 @@ counts refreshed after any rebase.
 
 ## Milestones
 
-- [x] **[M1: the doctor moves whole.](2026-08-23-network-doctor-move-implementation.md#m1-the-doctor-moves-whole)** (PR TBD)
+- [x] **[M1: the doctor moves whole.](2026-08-23-network-doctor-move-implementation.md#m1-the-doctor-moves-whole)** (PR #266)
   One milestone, because every piece above is one rebase-safe move
   whose halves are not independently releasable: the module, the
   dispatch, the derivation and printing homes, the seam split, the
