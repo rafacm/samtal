@@ -478,6 +478,14 @@ CLAIM_REFUSED = (
     "`vinga-server config list` to see the agents that exist."
 )
 
+# What clearing the default agent says it did. The one acknowledgement
+# this file writes that is a sentence rather than a naming of what was
+# written, because there is nothing to name: unsetting the default is a
+# configuration and not an absence, so the line says what the deployment
+# now is. Underscored because its only reader is the route below: a
+# public name is what a module offers, and this one offers nothing.
+_CLEARED_DEFAULT_AGENT = "default agent cleared; the devices map is now the allowlist"
+
 # How the document describes each refusal a route can answer with. The
 # sentence a caller actually receives is the repository's own; these say
 # what the status means.
@@ -1921,14 +1929,6 @@ def _entity_writes(api: FastAPI) -> None:
         return _acknowledge("agent-defaults", _AGENT_DEFAULTS.notice)
 
 
-# What clearing the default agent says it did. The one acknowledgement
-# in this file that is a sentence rather than a naming of what was
-# written, because there is nothing to name: unsetting it is a
-# configuration and not an absence, so the line says what the
-# deployment now is.
-CLEARED_DEFAULT_AGENT = "default agent cleared; the devices map is now the allowlist"
-
-
 def _writes(api: FastAPI) -> None:
     """Every write the API serves.
 
@@ -2148,7 +2148,7 @@ def _writes(api: FastAPI) -> None:
         the next unbound device to ask is turned away."""
         store.clear_default_agent()
         return _acknowledge(
-            CLEARED_DEFAULT_AGENT, _binding_notice(snapshot_only=snapshot_only)
+            _CLEARED_DEFAULT_AGENT, _binding_notice(snapshot_only=snapshot_only)
         )
 
 
