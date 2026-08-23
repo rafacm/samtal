@@ -975,3 +975,142 @@ def test_a_malformed_pair_carries_no_parser_exception(
     assert SECRET not in _chain(caught.value)
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
+
+
+# The whole configuration in one command
+#
+# `apply` is the only write that carries several entities, and the only
+# one whose answer is a list. What it prints is one line per entry in
+# the configuration's own section order, and then the boundaries the
+# entries that were written are waiting on, each distinct one once.
+
+DOCUMENT = """\
+providers:
+  llm:
+    claude: {type: anthropic, model: m}
+agents:
+  sam: {prompt: You are Sam., llm: claude}
+devices:
+  AA-BB-CC-DD-EE-FF: [sam]
+default_agent: sam
+"""
+
+
+def test_apply_writes_a_whole_deployment_from_one_file(
+    run, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The acceptance case for the verb: an empty database becomes a
+    working configuration in one command, including the two orderings a
+    sequence of single writes has to get right by hand."""
+    document = tmp_path / "setup.yaml"
+    document.write_text(DOCUMENT, encoding="utf-8")
+
+    assert run("apply", "-f", str(document)) == 0
+
+    written = capsys.readouterr()
+    assert written.out.splitlines() == [
+        "providers.llm.claude: wrote",
+        "agents.sam: wrote",
+        "devices.aa:bb:cc:dd:ee:ff: wrote",
+        "default_agent: wrote",
+    ]
+    assert boundaries(written.err) == {CHECK_IN, RELOAD}
+    assert run("show") == 0
+    shown = _document(capsys.readouterr().out)
+    assert shown["agents"]["sam"]["prompt"] == "You are Sam."
+    assert shown["devices"] == {"aa:bb:cc:dd:ee:ff": ["sam"]}
+    assert shown["default_agent"] == "sam"
+
+
+def test_apply_reads_a_document_from_stdin(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert run("apply", "-f", "-", stdin=DOCUMENT) == 0
+
+    assert "agents.sam: wrote" in capsys.readouterr().out
+
+
+def test_the_same_document_twice_changes_nothing_and_says_so(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Idempotence is what makes an applied document a thing to keep in
+    a repository and run, so it is what the second run has to say: every
+    row already what the document names, and no boundary to wait on."""
+    run("apply", "-f", "-", stdin=DOCUMENT)
+    capsys.readouterr()
+
+    assert run("apply", "-f", "-", stdin=DOCUMENT) == 0
+
+    again = capsys.readouterr()
+    assert {line.split(": ")[-1] for line in again.out.splitlines()} == {"unchanged"}
+    assert again.err == ""
+
+
+def test_a_refused_document_prints_every_mistake_and_writes_nothing(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Refused whole, reported whole, and the store afterwards is what
+    it was: the provider in this document is perfectly good and does not
+    land either."""
+    refused = "providers:\n  llm:\n    claude: {type: anthropic}\nagents:\n  sam: {llm: ghost}\n"
+
+    assert run("apply", "-f", "-", stdin=refused) == 1
+
+    captured = capsys.readouterr()
+    assert 'unknown llm provider "ghost"' in captured.err
+    assert captured.out == ""
+    assert "Traceback" not in captured.err
+    assert run("show", "provider", "llm", "claude") == 1
+    assert capsys.readouterr().err.startswith("providers:")
+
+
+def test_an_empty_document_says_it_applied_nothing(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert run("apply", "-f", "-", stdin="{}\n") == 0
+
+    assert capsys.readouterr().out.startswith("the document names no section")
+
+
+def test_a_document_json_cannot_carry_is_refused_before_it_travels(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The same rule a fragment meets, under the location the repository
+    names a refusal about the whole document with."""
+    assert run(
+        "apply", "-f", "-", stdin="providers:\n  llm:\n    claude: {type: a, when: 2026-01-01}\n"
+    ) == 1
+
+    captured = capsys.readouterr()
+    assert captured.err.startswith("invalid document:")
+    assert "JSON has no way to write" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_a_refused_document_never_echoes_what_was_written(
+    run, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
+) -> None:
+    """A document is a file an operator wrote, so a fragment inside one
+    is where a paste lands exactly as a fragment sent on its own is."""
+    written = f"providers:\n  llm:\n    claude: {{type: anthropic, api_key: {SECRET}}}\n"
+
+    with caplog.at_level(logging.DEBUG):
+        assert run("apply", "-f", "-", stdin=written) == 1
+
+    captured = capsys.readouterr()
+    assert "looks like an inline secret" in captured.err
+    assert SECRET not in captured.err
+    assert SECRET not in captured.out
+    served = [r for r in caplog.records if r.name.startswith("vinga_server")]
+    assert all(SECRET not in str(record.__dict__) for record in served)
+
+
+def test_apply_is_not_in_the_break_glass_subset(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Recovery does not need batches: the subset is the four commands
+    that look at what is stored, take out what will not load and repair
+    a credential."""
+    assert run("--local", "apply", "-f", "-", stdin=DOCUMENT) == 1
+
+    assert "recovery subset only" in capsys.readouterr().err

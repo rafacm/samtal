@@ -94,6 +94,7 @@ from vinga_server.config.models import (
 from vinga_server.config.printing import parsed_url, printable, shown_url
 from vinga_server.config.responses import (
     Acknowledgement,
+    AppliedDocument,
     AssembledPrompt,
     ConfigDocument,
     ConfigReloadResult,
@@ -108,7 +109,7 @@ from vinga_server.config.secrets import (
     load_keys,
     provider_identity,
 )
-from vinga_server.config.store import ConfigStore, check_transportable
+from vinga_server.config.store import APPLY_LOCATION, ConfigStore, check_transportable
 from vinga_server.db import open_database
 
 # Imported like anything else since issue #143 split the onboarding
@@ -150,6 +151,27 @@ READ_TIMEOUT_S = 30.0
 # server then applied would recreate the exact ambiguity the whole
 # feature exists to remove: nobody would know what is running.
 RELOAD_READ_TIMEOUT_S = 60.0
+
+# And what `apply` waits, which is the sentence above taken to its
+# conclusion where no finite envelope exists.
+#
+# An apply is one transaction, and the transaction loads the whole
+# existing configuration and validates the whole resulting one, whose
+# size nothing about the request bounds: the document may be small and
+# the store it lands in large. So there is no number to derive. What a
+# finite bound would buy is the exact thing every timeout here exists to
+# prevent, a client that gave up on a write the server then committed,
+# leaving nobody able to say what is stored.
+#
+# So the client waits for the answer, however long the transaction
+# takes. The connect timeout stays bounded, because a server that is not
+# there must still say so quickly, and the two bounds the server applies
+# before it mutates anything (the document's entry count and its body
+# size) are where an unbounded request is refused. What is left is
+# transport death mid-wait, which is the exposure every write already
+# has, and the recovery is the same: read the store back with `export`
+# or `show`.
+APPLY_READ_TIMEOUT_S: float | None = None
 
 # Printed on stderr by every --local invocation, reads included. There
 # is no reliable way to tell whether a server is running against the same
@@ -215,6 +237,11 @@ NOTHING_CONFIGURED = (
     "this server has no MCP servers configured. An entry is written with "
     "`vinga-server config set mcp-server`, and an agent reaches it by naming it in "
     "its mcp list"
+)
+
+NOTHING_APPLIED = (
+    "the document names no section of the configuration, so nothing was applied. An applied\n"
+    "document's top-level keys are the sections of the domain configuration"
 )
 
 NOTHING_PENDING = (
@@ -519,13 +546,16 @@ def _call(
     method: str,
     path: str,
     body: object = _NOTHING,
-    read_timeout_s: float = READ_TIMEOUT_S,
+    read_timeout_s: float | None = READ_TIMEOUT_S,
 ) -> object:
     """One request, and its answer as this client understands it.
 
     `read_timeout_s` is how long this one endpoint may take to answer,
-    which for all but the reload is the same bound the client is built
-    with. Set on the client rather than passed with the request: a
+    which for all but the reload and the apply is the same bound the
+    client is built with; None is no bound at all, which is what one
+    endpoint has and `APPLY_READ_TIMEOUT_S` says why.
+
+    Set on the client rather than passed with the request: a
     per-request timeout is what httpx would want, and Starlette's
     TestClient refuses one outright, which would take the seam the whole
     acceptance suite runs through with it. Each call builds a client,
@@ -1507,6 +1537,39 @@ def _database_dir(args: Invocation) -> Path:
 # Output
 
 
+def _applied(answer: Mapping[str, object]) -> None:
+    """One applied document read out: what each entry did, and then the
+    boundaries the ones that were written are waiting on.
+
+    One line per entry on stdout, in the order the answer lists them,
+    which is the configuration's own section order. The notices go to
+    stderr the way a single write's does, and each distinct one once: a
+    document that wrote nine entities is waiting on one reload, not on
+    nine, and printing the sentence nine times would say otherwise.
+    """
+    entries = answer["entries"]
+    if not entries:
+        print(NOTHING_APPLIED)
+        return
+    for entry in entries:
+        print(f"{_entry_name(entry)}: {entry['outcome']}")
+    # Flushed first, so the notices land after the lines they are about
+    # rather than ahead of them: stderr is unbuffered and stdout is not.
+    sys.stdout.flush()
+    for notice in dict.fromkeys(
+        str(entry["notice"]) for entry in entries if entry["notice"] is not None
+    ):
+        print(notice, file=sys.stderr)
+
+
+def _entry_name(entry: Mapping[str, object]) -> str:
+    """Where one applied entry is, as an operator reads their own
+    document: the section, and the identity under it where the section
+    holds entries rather than one thing."""
+    section, identity = entry["section"], entry["identity"]
+    return f"{section}.{identity}" if identity else str(section)
+
+
 def _acknowledged(acknowledgement: Mapping[str, object]) -> None:
     """One write acknowledged: what it did, and when it takes effect.
 
@@ -1559,8 +1622,9 @@ class Act:
     body: Callable[[Invocation], object] | None = None
 
     # How long this one endpoint may take to answer. Every act but the
-    # reload takes the default, whose bound is the database's.
-    read_timeout_s: float = READ_TIMEOUT_S
+    # reload and the apply takes the default, whose bound is the
+    # database's; None is no bound, which is one act's answer.
+    read_timeout_s: float | None = READ_TIMEOUT_S
 
     # The shape the API says it answers this act with, and the sentence
     # a body that is not one meets. None where the renderer reads its
@@ -2046,6 +2110,34 @@ RELOAD = Act(
 )
 
 
+# The one write that carries the whole configuration rather than one
+# entry of it. The document is checked for what JSON cannot carry before
+# it travels, exactly as a fragment is and against the same rule, under
+# the location the repository names a refusal about the document as a
+# whole with.
+
+
+def _apply_path(args: Invocation) -> str:
+    return _path("apply")
+
+
+def _document_body(args: Invocation) -> object:
+    document = _fragment(args.file)
+    check_transportable(APPLY_LOCATION, document)
+    return document
+
+
+APPLY = Act(
+    method="POST",
+    path=_apply_path,
+    body=_document_body,
+    read_timeout_s=APPLY_READ_TIMEOUT_S,
+    answers=AppliedDocument,
+    refusal=UNREADABLE_WRITE,
+    render=_applied,
+)
+
+
 # The grammar
 #
 # One row per command: where it sits in the command tree, what it does,
@@ -2083,6 +2175,11 @@ LOCAL_HELP = (
 FILE_HELP = (
     "YAML fragment for this entity, or - to read it from stdin; the alternative to "
     "key=value arguments, and never both"
+)
+
+DOCUMENT_HELP = (
+    "YAML document to apply, or - to read it from stdin: the sections of the domain "
+    "configuration, with the entities in each written as they are for set"
 )
 
 PAIRS_HELP = (
@@ -2441,6 +2538,25 @@ def _staged_write(row: Command) -> Callable[..., None]:
     return run
 
 
+def _applied_document(row: Command) -> Callable[..., None]:
+    """The whole configuration in one file. No inline fields here: a
+    document is several entities and the sections around them, which is
+    what a file is for."""
+
+    def run(
+        context: typer.Context,
+        file: Annotated[
+            str, typer.Option("-f", "--file", metavar="PATH", help=DOCUMENT_HELP)
+        ],
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        local: LocalOption = False,
+    ) -> None:
+        row.perform(_invocation(row, context, config, api_url, local, file=file))
+
+    return run
+
+
 def _given(pairs: list[str] | None) -> tuple[str, ...]:
     """A variadic argument as the seam holds it. Click answers an
     absent one with None or with an empty tuple depending on the
@@ -2734,6 +2850,20 @@ COMMANDS: tuple[Command, ...] = (
         help=(
             "bind the device showing this activation code, which is the six digits on "
             "its screen; use bind-device when you know the MAC instead"
+        ),
+    ),
+    # The one write that carries the whole configuration. Its own row
+    # rather than a flag on `set`, because what it takes is a document
+    # and what it promises is one transaction over all of it.
+    Command(
+        words=("apply",),
+        does=APPLY,
+        declare=_applied_document,
+        help=(
+            "write a whole document: every entity, binding and setting it names, in one "
+            "transaction, refused whole if anything in it will not resolve. Applying is "
+            "additive and never deletes, and the same document twice changes nothing. "
+            "This waits for the server's answer however long the transaction takes"
         ),
     ),
     Command(
