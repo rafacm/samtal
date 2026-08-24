@@ -70,6 +70,44 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Removed
 
+- **`vinga-server conversations purge`, the local session-record
+  erasure** (#282). The command deleted whole sessions from
+  `conversations.db` by `--session`, `--device` or `--before`, going
+  straight to the file named by `server.database.dir` with no server
+  involved, and it is gone with everything only it had: its parser row
+  and selectors, its `--config` flag, the three caveats in its help, the
+  report it printed when a reader deferred the truncating checkpoint,
+  and `store.purge()` behind them. The census is what says that was safe
+  to take whole. The CLI was `purge()`'s only caller; retention reaches
+  the same deletion through `_delete_sessions`, which stays, with the
+  checkpoint and the rest of the shared core. Two arguments on
+  `existing_engine` existed for the command alone and went with it,
+  leaving one read-only shape. `vinga-server conversations schema` is
+  untouched and is now the group's only command: it renders the
+  reference off the table declarations and opens nothing, which is what
+  lets it survive the move.
+
+  It goes for the reason `--local` went the same day: the store is
+  moving to a real database, where the file the command opened does not
+  exist, and any CLI access that needs local access to that file has to
+  be retired before the move rather than ported through it.
+
+  What a deployment has in the meantime is stated rather than left to be
+  discovered. Automatic retention is untouched and still prunes whole
+  sessions older than `server.conversations.retention_days`, row and
+  children together, at startup and at each session close, physically
+  and with the log truncated, exactly as before. Manual erasure comes
+  back as an act of the conversations API, with a CLI verb in front of
+  it (#190), which is where the command's deletion semantics and its
+  caveats are recorded. Until that lands there is no way to erase one
+  named session, and a deployment that must erase now stops the server
+  and deletes the conversations database file with its `-wal` and `-shm`
+  sidecars, which takes every session rather than the one that was asked
+  about. That is said in those words in the server README, in
+  `config.example.yaml`, and in the generated
+  [`docs/reference/conversations-schema.md`](docs/reference/conversations-schema.md),
+  whose deletion section is the one committed artifact this moves.
+
 - **`vinga-server config --local`, the break-glass path** (#281). The
   flag opened the configuration database on the server's own disk for
   four commands (`show`, `delete`, `set-secret`, `clear-secret`), and it

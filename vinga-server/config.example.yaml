@@ -267,9 +267,10 @@ server:
   #
   # Under the flag, two independent storage switches decide what a row
   # keeps, and every combination is supported. Read it with SQL over a
-  # WAL-safe copy, delete from it with `vinga-server conversations
-  # purge`, and see docs/reference/conversations-schema.md for the
-  # columns.
+  # WAL-safe copy, and see docs/reference/conversations-schema.md for the
+  # columns. Retention below is what deletes; there is no command that
+  # erases one named session yet, so a deployment that has to erase now
+  # stops the server and deletes the file.
   # conversations:
   #   enabled: false
   #   # Store the structured events and every measured number (durations,

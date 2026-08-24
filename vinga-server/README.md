@@ -2103,11 +2103,11 @@ combinations are supported configurations:
 | off | on | what was said, with no events rows and the numbers null: the transparency-first setting |
 | off | off | the session spine and the shape of each turn, and nothing else |
 
-Session rows land in every enabled configuration, because retention,
-purging and every read key on them, and their timestamps survive both
-switches for the same reason. Each session row also records which way
-the switches were set for it, so a null column is distinguishable from
-a column that was never stored.
+Session rows land in every enabled configuration, because retention and
+every read key on them, and their timestamps survive both switches for
+the same reason. Each session row also records which way the switches
+were set for it, so a null column is distinguishable from a column that
+was never stored.
 
 **The switches are deployment-wide, and they are the only privacy
 control this release has.** Until per-user controls exist, enabling text
@@ -2116,8 +2116,8 @@ which is the same statement the capture section makes about audio.
 Attributing a session on a shared device to one member needs voiceprint
 identification, which does not exist here yet, so the deletion unit that
 is enforceable today is the session, and the session id is surfaced
-everywhere: on the events, on the capture triplet's filenames, and as
-the purge command's selector.
+everywhere: on the events, on the capture triplet's filenames, and on
+every row the store keeps.
 
 Retention is 90 days by default: whole sessions older than the window
 are deleted, row and children together, at startup and at each session
@@ -2125,38 +2125,34 @@ close, and a line says how many went. `retention_days: 0` keeps
 everything, which is a deliberate choice rather than a default, because
 a store with no policy retains forever.
 
-Deletion on demand is one command, and it works with no server running,
-because deletion has to work exactly when the server is broken or gone:
+**Deletion on demand is not something this release has a command for.**
+🚧 Erasing one named session is coming back as an act of the API, with a
+CLI verb in front of it. The command that used to do it went straight to
+the store's file, which is not a thing a command can keep doing once the
+store is a database somewhere else.
 
-```console
-$ vinga-server conversations purge --session 3ab9e1a12f584dd8a6cae5c1f8e618b2
-$ vinga-server conversations purge --device aa:bb:cc:dd:ee:ff --before 2026-08-01
-```
+Until it lands, retention above is what deletes, and a deployment that
+has to erase something now stops the server and deletes
+`conversations.db` (with its `-wal` and `-shm` sidecars). That takes
+every session rather than the one that was asked about, which is the
+honest shape of the gap.
 
-Selectors combine with AND, and at least one is required. Purging a
-session that is still running ends its recording: the writer finds the
-row gone and stops writing for that session, so what is said afterwards
-is not recorded. Capture files are a separate instrument and are never
-touched; the session id is the correlation key for whoever needs to
-remove the matching triplet.
-
-A purge deletes what is recorded, and a session that has only just
-started may not be in the file yet: the writer commits the session row
-moments after the conversation opens, so a purge arriving inside that
-window reports deleting nothing and the row lands behind it. Run it
-again if the counts came back zero for a session you know exists. This
-is a queue-latency window rather than a durable state: everything the
-session then records is ordinary rows, deletable by the same command.
+Whichever way rows go, they go a session at a time, row and children
+together. A session that is still running when its row goes stops being
+recorded: the writer finds the row gone and stops writing for that
+session, so what is said afterwards is not recorded. Capture files are a
+separate instrument and are never touched by any of this; the session id
+is the correlation key for whoever needs to remove the matching triplet.
 
 Deletion is physical rather than query-level. The database runs with
 `PRAGMA secure_delete=ON`, so a freed page is overwritten with zeros
-instead of lingering in the freelist, and both retention and purge
-finish with `PRAGMA wal_checkpoint(TRUNCATE)` so the deleted frames do
-not survive in the write-ahead log. Two limits, stated rather than
-implied: a checkpoint a reader is blocking does not fail the deletion,
-which is committed either way, and the truncation is retried at the next
-quiet moment (the purge command says so when it leaves one owed); and
-copies that have already left the file are yours to manage.
+instead of lingering in the freelist, and retention finishes with
+`PRAGMA wal_checkpoint(TRUNCATE)` so the deleted frames do not survive
+in the write-ahead log. Two limits, stated rather than implied: a
+checkpoint a reader is blocking does not fail the deletion, which is
+committed either way, and the truncation is retried at the next quiet
+moment, which is the server's next write; and copies that have already
+left the file are yours to manage.
 
 **Read it with SQL over a WAL-safe copy, never a plain `cp` of a live
 file.** The database runs in WAL mode, where a copy on its own can miss
