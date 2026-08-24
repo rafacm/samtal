@@ -70,7 +70,9 @@ async def test_a_provider_that_fails_to_construct_names_the_entry(
         raise OSError(f"no space left on device while writing {sentinel}")
 
     monkeypatch.setattr(
-        registry, "_factories", lambda: {"asr": {"faster_whisper": explode}}
+        registry,
+        "_registrations",
+        lambda: {"asr": {"faster_whisper": registry.Registration(explode)}},
     )
     with pytest.raises(ProviderError) as excinfo:
         await build_entry("asr", "swedish", provider_config(type="faster_whisper"))
@@ -98,7 +100,9 @@ async def test_a_provider_error_raised_by_a_factory_is_left_exactly_as_it_is(
     def refuse(label: str, config: ProviderConfig) -> object:
         raise ProviderError(f'{label}: type "piper" needs the piper extra')
 
-    monkeypatch.setattr(registry, "_factories", lambda: {"tts": {"piper": refuse}})
+    monkeypatch.setattr(
+        registry, "_registrations", lambda: {"tts": {"piper": registry.Registration(refuse)}}
+    )
     with pytest.raises(ProviderError) as excinfo:
         await build_entry("tts", "voice", provider_config(type="piper"))
     assert str(excinfo.value) == 'providers.tts.voice: type "piper" needs the piper extra'
@@ -120,7 +124,9 @@ async def test_the_failing_entry_is_named_among_several_of_one_type(
         return MockAsr(text="hello")
 
     monkeypatch.setattr(
-        registry, "_factories", lambda: {"asr": {"faster_whisper": only_swedish_fails}}
+        registry,
+        "_registrations",
+        lambda: {"asr": {"faster_whisper": registry.Registration(only_swedish_fails)}},
     )
     for language in ("en", "es"):
         await build_entry(

@@ -40,6 +40,7 @@ from vinga_server.providers import (
 from vinga_server.providers import world as provider_world
 from vinga_server.providers.base import Operations
 from vinga_server.providers.mock import MockTts, MockVad
+from vinga_server.providers.options import FasterWhisperOptions
 
 # --- what a build owns -------------------------------------------------
 
@@ -512,6 +513,7 @@ def test_loading_a_local_model_says_nothing_about_what_it_was_configured_with(
             ProviderConfig.model_validate(
                 {"type": "faster_whisper", "model": PLANTED_OPTION, "device": "cpu"}
             ),
+            FasterWhisperOptions(model=PLANTED_OPTION, device="cpu"),
         )
 
     # Said, because an operator waiting on a first start is what it is
@@ -559,7 +561,9 @@ async def test_faster_whisper_lets_go_of_its_engine(
 
     monkeypatch.setattr(faster_whisper, "WhisperModel", FakeModel)
     provider = faster_whisper.build(
-        "providers.asr.ears", ProviderConfig.model_validate({"type": "faster_whisper"})
+        "providers.asr.ears",
+        ProviderConfig.model_validate({"type": "faster_whisper"}),
+        FasterWhisperOptions(),
     )
     assert provider._engine is not None
 
