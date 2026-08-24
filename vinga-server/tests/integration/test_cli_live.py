@@ -70,7 +70,7 @@ import pytest
 import uvicorn
 import yaml
 
-from tests.support.config_cli import document
+from tests.support.config_cli import document, registered
 from vinga_server.app import create_app
 from vinga_server.config import ConfigError, cli, docgen, entities
 from vinga_server.config.boot import load_boot_config
@@ -227,33 +227,12 @@ def isolated(tmp_path: Path) -> Iterator[Live]:
 # it, so the coverage list cannot say a command was driven that was not:
 # the only way into this set is a command that ran and succeeded.
 
-_BY_WORDS = {row.words: row for row in cli.COMMANDS}
-
-_FIRST_WORDS = {row.words[0] for row in cli.COMMANDS}
+# Which row a command line names is `tests.support.config_cli.registered`,
+# imported above: this lane, the wheel lane and the spelling census all
+# ask it, and a second implementation of longest-prefix matching would
+# be the pending bug the design guide names.
 
 DRIVEN: set[tuple[str, ...]] = set()
-
-
-def registered(argv: Sequence[str]) -> tuple[str, ...] | None:
-    """Which row of `cli.COMMANDS` this command line names.
-
-    The words are found rather than assumed to be first, because the
-    three global options are accepted before the command as well as
-    after it. A two-word row wins over the one-word row it sits under,
-    which is how `show device` is told from `show`.
-
-    Read off the table, never a list of it: a command added to the
-    grammar is addressed here the day it is added.
-    """
-    for index, word in enumerate(argv):
-        if word not in _FIRST_WORDS:
-            continue
-        pair = tuple(argv[index : index + 2])
-        if pair in _BY_WORDS:
-            return pair
-        if (word,) in _BY_WORDS:
-            return (word,)
-    return None
 
 
 def run(*argv: str, stdin: str | None = None) -> int:

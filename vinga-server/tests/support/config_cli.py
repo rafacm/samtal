@@ -22,6 +22,7 @@ for that.
 import contextlib
 import io
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -151,6 +152,50 @@ def runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     _run.runtime = runtime
     _run.clients = clients
     return _run
+
+
+# Which row of the grammar a command line names
+#
+# Three readers ask it and none of them may answer it themselves: the
+# live lane records what it drove against the registration table, the
+# wheel lane maps the same table onto commands it runs as a subprocess,
+# and the spelling census holds every quoted invocation to naming
+# something that exists. Two implementations of longest-prefix matching
+# would be one pending bug, and the bug is silent: a matcher that cannot
+# see a row reports full coverage of a tree with a hole in it.
+#
+# Longest prefix and not a fixed word count, because the tree is not one
+# depth. `provider secret set` is three words and `provider` is one, and
+# a matcher that took two would attribute the first to the second and
+# mark the wrong row driven.
+
+_BY_WORDS: dict[tuple[str, ...], cli.Command] = {row.words: row for row in cli.COMMANDS}
+
+_FIRST_WORDS = {row.words[0] for row in cli.COMMANDS}
+
+_DEEPEST = max(len(row.words) for row in cli.COMMANDS)
+
+
+def registered(argv: Sequence[str]) -> tuple[str, ...] | None:
+    """Which row of `cli.COMMANDS` this command line names, or None.
+
+    The words are found rather than assumed to be first, because the
+    global options are accepted before the command word as well as after
+    it. From there the longest registered prefix wins, which is how
+    `provider secret set` is told from `provider` and `show device` from
+    `show`.
+
+    Read off the table, never a list of it: a command added to the
+    grammar is addressed here the day it is added.
+    """
+    for index, word in enumerate(argv):
+        if word not in _FIRST_WORDS:
+            continue
+        for length in range(min(_DEEPEST, len(argv) - index), 0, -1):
+            candidate = tuple(argv[index : index + length])
+            if candidate in _BY_WORDS:
+                return candidate
+    return None
 
 
 def logged(caplog: pytest.LogCaptureFixture) -> str:
