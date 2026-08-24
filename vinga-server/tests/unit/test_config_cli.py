@@ -18,13 +18,13 @@ or a traceback out. That per-kind behavior is what #139 made
 descriptor-driven, and this file is where the claim that all five kinds
 behave alike is kept.
 
-Five neighbours hold the rest of the surface, split off by #139 along
+Four neighbours hold the rest of the surface, split off by #139 along
 the boundaries the production split produced, each named for the concern
 it keeps: `test_config_cli_transport.py` (where a command is sent and
 what it will not be sent over), `test_config_cli_rendering.py` (the four
 answers the running server is asked for), `test_config_cli_secrets.py`
-(a credential's whole life), `test_config_cli_grammar.py` (the parse and
-its exit codes) and `test_config_cli_local.py` (the break-glass path).
+(a credential's whole life) and `test_config_cli_grammar.py` (the parse
+and its exit codes).
 """
 
 import logging
@@ -260,7 +260,6 @@ UNWRITTEN = [
 
 
 @pytest.mark.parametrize(("addressed", "section", "sentinel"), UNWRITTEN)
-@pytest.mark.parametrize("local", [False, True])
 def test_an_identity_that_addresses_nothing_is_refused_without_printing_it(
     run,
     capsys: pytest.CaptureFixture[str],
@@ -268,28 +267,23 @@ def test_an_identity_that_addresses_nothing_is_refused_without_printing_it(
     addressed: tuple[str, ...],
     section: str,
     sentinel: str,
-    local: bool,
 ) -> None:
-    """Every section, both verbs, and both ways in (#132).
+    """Every section and both verbs (#132).
 
-    The recovery path opens the database itself and has to name the same
-    section as the client, so `--local` is driven beside the ordinary
-    path. An identity that addresses nothing was typed rather than
-    stored, so neither the read nor the delete repeats it: not on
-    stderr, not on stdout, and not in a record either of them retained.
-    That covers a name nothing wrote and a stage that is not a stage,
-    which are the two ways a segment can address nothing.
+    An identity that addresses nothing was typed rather than stored, so
+    neither the read nor the delete repeats it: not on stderr, not on
+    stdout, and not in a record either of them retained. That covers a
+    name nothing wrote and a stage that is not a stage, which are the
+    two ways a segment can address nothing.
     """
-    flags = ("--local",) if local else ()
     for verb in ("show", "delete"):
         with caplog.at_level(logging.DEBUG):
-            assert run(*flags, verb, *addressed) == 1
+            assert run(verb, *addressed) == 1
 
         captured = capsys.readouterr()
         # The leak first and the section after it, so a failure here
         # says which of the two moved. The last line of the stream is
-        # the refusal: `--local` prints its break-glass banner before
-        # it, which is why this reads the tail rather than all of it.
+        # the refusal.
         assert sentinel not in captured.err
         assert sentinel not in captured.out
         assert captured.err.splitlines()[-1].startswith(f"{section}:")
@@ -302,27 +296,20 @@ def test_an_identity_that_addresses_nothing_is_refused_without_printing_it(
         assert all(sentinel not in str(record.__dict__) for record in written)
 
 
-# Every command that takes a MAC as an argument, and the ways in it has.
-# `--local` covers the recovery subset, which is show and delete, so
-# `bind-device` has one way in rather than two; the pairs are written out
-# because that is a fact about the command set rather than about this
-# test.
+# Every command that takes a MAC as an argument.
 NOT_MACS = [
-    (("show", "device"), False),
-    (("show", "device"), True),
-    (("delete", "device"), False),
-    (("delete", "device"), True),
-    (("bind-device",), False),
+    ("show", "device"),
+    ("delete", "device"),
+    ("bind-device",),
 ]
 
 
-@pytest.mark.parametrize(("argv", "local"), NOT_MACS)
+@pytest.mark.parametrize("argv", NOT_MACS, ids=[" ".join(argv) for argv in NOT_MACS])
 def test_a_mac_that_is_not_a_mac_is_refused_without_printing_it(
     run,
     capsys: pytest.CaptureFixture[str],
     caplog: pytest.LogCaptureFixture,
     argv: tuple[str, ...],
-    local: bool,
 ) -> None:
     """The shape refusal, a step before any lookup (#205).
 
@@ -331,19 +318,18 @@ def test_a_mac_that_is_not_a_mac_is_refused_without_printing_it(
     beside other arguments an operator is typing from a note. What fails
     the check is a value nothing here has validated, so the line an
     operator reads states what a MAC has to be and never what they
-    typed: not on stderr, not on stdout, and not in a record either path
+    typed: not on stderr, not on stdout, and not in a record it
     retained.
     """
-    flags = ("--local",) if local else ()
     trailing = ("sam",) if argv[0] == "bind-device" else ()
 
     with caplog.at_level(logging.DEBUG):
-        assert run(*flags, *argv, SECRET, *trailing) == 1
+        assert run(*argv, SECRET, *trailing) == 1
 
     captured = capsys.readouterr()
     # The leak first and the sentence after it, so a failure here says
     # which of the two moved. The last line of the stream is the
-    # refusal: `--local` prints its break-glass banner before it.
+    # refusal.
     assert SECRET not in captured.err
     assert SECRET not in captured.out
     assert captured.err.splitlines()[-1] == NOT_A_MAC
@@ -1222,17 +1208,6 @@ def test_a_refused_document_never_echoes_what_was_written(
     assert SECRET not in captured.out
     served = [r for r in caplog.records if r.name.startswith("vinga_server")]
     assert all(SECRET not in str(record.__dict__) for record in served)
-
-
-def test_apply_is_not_in_the_break_glass_subset(
-    run, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """Recovery does not need batches: the subset is the four commands
-    that look at what is stored, take out what will not load and repair
-    a credential."""
-    assert run("--local", "apply", "-f", "-", stdin=DOCUMENT) == 1
-
-    assert "recovery subset only" in capsys.readouterr().err
 
 
 # The reference edges as an operator meets them

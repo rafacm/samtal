@@ -1,9 +1,9 @@
 """What every `vinga-server config` suite runs a command with.
 
 The config command group's tests were one file until #139 split them
-along the boundaries that issue produced, and six suites now drive the
+along the boundaries that issue produced, and five suites now drive the
 same entry point: the acceptance spine, the transport client, the
-runtime renderings, the secrets, the grammar, and the break-glass path.
+runtime renderings, the secrets, and the grammar.
 What they share is the scaffolding, and it lives here rather than in
 whichever of them happened to be written first.
 

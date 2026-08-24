@@ -18,15 +18,13 @@ bearer token rides on every request and grants everything the API can
 do, so a plain http:// connection to anything but a loopback address is
 not made at all.
 
-`--local` is the break-glass path, for a database whose server will not
-start. It covers four commands (show, delete, clear-secret, set-secret),
-opens the database directly, and says so on stderr every time, which is
-not something to discover. When a change made that way is observed is
-the write's own answer rather than the preamble's: the boot-time
-snapshot is the default story, and the exceptions the server side makes
-are the exceptions here too, so a `--local` device delete says the
-device meets it at its next check-in and a `--local` MCP write names the
-reload. Each is the sentence the API answers that same act with.
+There is no second way in. Every command that touches the domain
+configuration is a request, so this module opens no database, loads no
+encryption key and knows nothing about how a row is stored. A
+deployment whose server will not start is recovered by booting one on
+an empty database and applying a kept `export`, which is the procedure
+`docs/reference/cli.md` writes out; surgical access to the file itself
+is ordinary SQLite tooling and not this grammar's business.
 
 One command stands outside all of this, because onboarding a board
 happens before there is anything to configure. `ota-url` derives the
@@ -49,8 +47,7 @@ import os
 import shlex
 import sys
 import textwrap
-from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any, get_args, get_origin
@@ -82,11 +79,6 @@ from typer._click.exceptions import (
 from typer.core import TyperCommand, TyperGroup
 
 from vinga_server.config import docgen, entities, views
-from vinga_server.config.entities import (
-    BINDING_NOTICE,
-    RELOAD_NOTICE,
-    RESTART_NOTICE,
-)
 from vinga_server.config.loader import CONFIG_ENV_VAR, ConfigError, load_file_config
 from vinga_server.config.models import (
     API_MOUNT_PATH,
@@ -105,20 +97,8 @@ from vinga_server.config.responses import (
     McpServerStatus,
     PendingDevice,
 )
-from vinga_server.config.secrets import (
-    MASK,
-    EntityKind,
-    SecretLocation,
-    load_keys,
-    provider_identity,
-)
-from vinga_server.config.store import (
-    APPLY_LOCATION,
-    ConfigStore,
-    addressed,
-    check_transportable,
-)
-from vinga_server.db import open_database
+from vinga_server.config.secrets import MASK, provider_identity
+from vinga_server.config.store import APPLY_LOCATION, addressed, check_transportable
 
 # Imported like anything else since issue #143 split the onboarding
 # package. The derivation reads the configuration models, the key
@@ -185,26 +165,6 @@ RELOAD_READ_TIMEOUT_S = 60.0
 # has, and the recovery is the same: read the store back with `export`
 # or `show`.
 APPLY_READ_TIMEOUT_S: float | None = None
-
-# Printed on stderr by every --local invocation, reads included. There
-# is no reliable way to tell whether a server is running against the same
-# file (a pid file lies after a crash and a lock probe races the answer),
-# and a wrong refusal would wedge the recovery path in exactly the
-# situation it exists for. Saying what this is, is the honest substitute.
-LOCAL_NOTICE = (
-    "--local is the break-glass path: it reads and writes the database directly, "
-    "bypassing the configuration API. Each write says separately when it takes "
-    "effect, the same answer the API gives for the same act."
-)
-
-# What --local does not cover, said by naming what it does. The subset is
-# the recovery one: look at what is stored, take out what will not load,
-# and repair a credential.
-LOCAL_SUBSET = (
-    "--local covers the recovery subset only: show, delete, clear-secret and "
-    "set-secret. Every other command goes through the configuration API, which needs "
-    "a running server."
-)
 
 # Said when the API answered something this client cannot read as an
 # answer. The body is deliberately not quoted: what a proxy, a gateway
@@ -422,25 +382,23 @@ def usage_line(sentence: str) -> str:
 # What one command was given
 #
 # The seam between the grammar and everything under it. Every act
-# addresses its resource, builds its body and takes its break-glass path
-# from one of these, and the fields are the whole vocabulary the grammar
-# has: the three options accepted on either side of the command word,
-# and the arguments that address one entry. Stated as a type rather than
-# as a bag of attributes, so what a command can be asked is readable in
-# one place and an act that reads a field nobody sets is a name that is
-# not there.
+# addresses its resource and builds its body from one of these, and the
+# fields are the whole vocabulary the grammar has: the two options
+# accepted on either side of the command word, and the arguments that
+# address one entry. Stated as a type rather than as a bag of
+# attributes, so what a command can be asked is readable in one place
+# and an act that reads a field nobody sets is a name that is not there.
 
 
 @dataclass(frozen=True, kw_only=True)
 class Invocation:
     """One command's arguments, resolved."""
 
-    # The three global options, after the merge below: each is what the
+    # The two global options, after the merge below: each is what the
     # command position said when it said anything, and what the root
     # position said otherwise.
     config: str | None = None
     api_url: str | None = None
-    local: bool = False
 
     # What addresses one entry, under the names the descriptors'
     # `addressing` tuples use, which are the URL's path parameters and
@@ -596,8 +554,8 @@ RECIPES_INTRO = (
 
 COMMANDS_INTRO = (
     "Every command of the group, with the page its own `--help` prints. A command "
-    "takes `--config`, `--api-url` and `--local` before the command word as well as "
-    "after it, and a value given before it survives a command that was not given one."
+    "takes `--config` and `--api-url` before the command word as well as after it, "
+    "and a value given before it survives a command that was not given one."
 )
 
 
@@ -766,8 +724,8 @@ def _sent(
         problem = (
             f"cannot reach the configuration API at {base_url}: the request did not "
             f"complete. Check that the server is running and that this is the address "
-            f"it serves. To repair a database with no server to ask, use --local, which "
-            f"covers show, delete, clear-secret and set-secret."
+            f"it serves. A deployment whose server will not start at all is recovered "
+            f"by booting one on an empty database and applying a kept export."
         )
     raise ConfigError(problem)
 
@@ -884,8 +842,7 @@ def _token(file_config: FileConfig) -> str:
             f"{name} is not set, and every request to the configuration API carries its "
             f"value as a bearer token. It is the same variable the server was started "
             f"with: exec into the running container and it is already in the "
-            f"environment. To repair a database whose server will not start, use "
-            f"--local, which covers show, delete, clear-secret and set-secret."
+            f"environment."
         )
     return token
 
@@ -1836,44 +1793,6 @@ def _read_secret(args: Invocation) -> str:
     return secret
 
 
-def _secret_location(args: Invocation) -> SecretLocation:
-    if args.kind == "provider":
-        return SecretLocation.provider(args.stage, args.name, args.slot)
-    return SecretLocation.mcp_server(args.name, args.slot)
-
-
-# The database, for the recovery subset only
-
-
-@contextmanager
-def _store(args: Invocation, keyed: bool = False) -> Iterator[ConfigStore]:
-    """The repository, opened directly. Reached only through --local,
-    whose four commands are the ones an operator needs when the server
-    they would otherwise ask will not start.
-
-    The keys are loaded only for the one command that needs them.
-    `set-secret` encrypts, so it cannot work without a usable key and
-    says so; `show`, `delete` and `clear-secret` treat ciphertext as
-    opaque and never open it, and a key that will not load is one of the
-    exact conditions this path exists to repair. Loading it for them
-    would take the recovery tool away in the situation it is for, which
-    is the same reason `open_database` does not verify secrets.
-    """
-    engine = open_database(_database_dir(args))
-    try:
-        yield ConfigStore(engine, load_keys() if keyed else None)
-    finally:
-        engine.dispose()
-
-
-def _database_dir(args: Invocation) -> Path:
-    """Where the server keeps its domain configuration, read through the
-    settings machinery the server reads it with, so the two cannot
-    disagree. No configuration file has to exist: without one the field
-    default and the VINGA_ environment are the whole answer."""
-    return load_file_config(args.config).server.database.dir
-
-
 # Output
 
 
@@ -1913,10 +1832,9 @@ def _entry_name(entry: Mapping[str, object]) -> str:
 def _acknowledged(acknowledgement: Mapping[str, object]) -> None:
     """One write acknowledged: what it did, and when it takes effect.
 
-    The one place either is printed, whichever path the write took, so
-    the break-glass path and the ordinary one cannot come to describe
-    one act differently. Which sentence each is, is the act's row above;
-    this is where they are read out.
+    Both are the API's own words, carried through unchanged: what an act
+    did and which boundary it lands at are decided where the write
+    happens, and this is where they are read out.
     """
     print(f"wrote {acknowledgement['wrote']}")
     # Flushed first, so the notice lands after the line it is about
@@ -1929,21 +1847,13 @@ def _acknowledged(acknowledgement: Mapping[str, object]) -> None:
 #
 # One row per thing a command does: where the act is on the API and how
 # this command's arguments address it, what it sends, what it is
-# answered with, how that answer is printed, and, for the four commands
-# `--local` covers, the same act against the database instead. The
-# dispatcher below is the only reader of a row, so an act's two paths
-# are written beside each other and cannot come to describe one act
-# differently, which is the class of drift #134 was.
+# answered with, and how that answer is printed. The dispatcher below is
+# the only reader of a row.
 #
-# The five commanded kinds' rows are half built and half written out,
-# split along what a kind is against what a kind does. Where a kind is
-# on the API, what addresses one entry of it, which section it occupies
-# in the configuration document and when a write of it takes effect are
-# data on its descriptor, and the builders below read them straight off
-# it. What a break-glass act does is not: it is a named `ConfigStore`
-# method and the sentence the API answers that same act with, so those
-# rows are written out one per kind and reached through the two tables
-# above.
+# The five commanded kinds' rows are built rather than written out.
+# Where a kind is on the API, what addresses one entry of it and which
+# section it occupies in the configuration document are data on its
+# descriptor, and the builders below read them straight off it.
 #
 # What is written entirely by hand is what a descriptor does not
 # describe at all: the devices and the default agent are settings
@@ -1974,32 +1884,16 @@ class Act:
     answers: object | None = None
     refusal: str = UNREADABLE_READ
 
-    # What is printed, given the answer, whichever path produced it.
+    # What is printed, given the answer.
     render: Callable[[Any], None]
-
-    # The break-glass path: the same act against the database, answering
-    # what the API would have answered for it. Present for exactly the
-    # four commands `--local` covers and for nothing else, which is the
-    # same fact `local_ok` states on the command's row.
-    local: Callable[[Invocation], Any] | None = None
 
 
 def _act(args: Invocation, act: Act) -> None:
-    """One act, run whichever way it was reached.
+    """One act: one request, and its answer printed.
 
-    The acknowledgement and the notice reach the same renderer either
-    way. Over HTTP they are what the API answered. Locally they are
-    built by the act's own `local`, saying what the API's route says for
-    the same act: the sentence written out beside it, and the timing
-    taken from the kind's `notice`, which is a descriptor fact because
-    it is about what was written rather than about the path that wrote
-    it. `test_a_local_write_acknowledges_what_the_api_acknowledges` runs
-    each of these acts both ways and asserts one answer, which is what
-    keeps the two spellings of a sentence from drifting apart.
+    The acknowledgement and the notice are the API's, read as the shape
+    the act says it is answered with and handed to the act's renderer.
     """
-    if args.local:
-        act.render(act.local(args))
-        return
     answer = _call(
         args,
         act.method,
@@ -2054,109 +1948,6 @@ def _fragment_body(
     return body
 
 
-# The break-glass paths, written out per kind: one entry read or one row
-# deleted through the repository's own verb for that kind, answered with
-# what the API answers the same act with.
-#
-# Per kind rather than through the descriptor, because the generic
-# version needed `ConfigStore`'s methods hung on the registry as unbound
-# callables, which is the store publishing its own interface through a
-# global for one caller's convenience. What that caller wanted was the
-# typed method, and it can have it by name. Of the two halves of the
-# answer, the timing is still read from the kind's own `notice`, and
-# the sentence is written out here as the route writes it out there,
-# held equal by the differential test `_act` above names.
-
-_PROVIDER = entities.descriptor("provider")
-_MCP_SERVER = entities.descriptor("mcp-server")
-_PROMPT_FRAGMENT = entities.descriptor("prompt-fragment")
-_AGENT = entities.descriptor("agent")
-_AGENT_DEFAULTS = entities.descriptor("agent-defaults")
-
-
-def _deleting_provider(args: Invocation) -> Any:
-    with _store(args) as store:
-        store.delete_provider(args.stage, args.name)
-    return {
-        "wrote": f"provider {args.stage}.{args.name} deleted, with its stored secrets",
-        "notice": _PROVIDER.notice,
-    }
-
-
-def _deleting_mcp_server(args: Invocation) -> Any:
-    with _store(args) as store:
-        store.delete_mcp_server(args.name)
-    return {
-        "wrote": f"mcp-server {args.name} deleted, with its stored secrets",
-        "notice": _MCP_SERVER.notice,
-    }
-
-
-def _deleting_prompt_fragment(args: Invocation) -> Any:
-    with _store(args) as store:
-        store.delete_prompt_fragment(args.name)
-    return {
-        "wrote": f"prompt-fragment {args.name} deleted",
-        "notice": _PROMPT_FRAGMENT.notice,
-    }
-
-
-def _deleting_agent(args: Invocation) -> Any:
-    with _store(args) as store:
-        store.delete_agent(args.name)
-    return {"wrote": f"agent {args.name} deleted", "notice": _AGENT.notice}
-
-
-def _showing_provider(args: Invocation) -> Any:
-    with _store(args) as store:
-        read = store.read_provider(args.stage, args.name)
-    return views.provider(read)
-
-
-def _showing_mcp_server(args: Invocation) -> Any:
-    with _store(args) as store:
-        read = store.read_mcp_server(args.name)
-    return views.mcp_server(read)
-
-
-def _showing_prompt_fragment(args: Invocation) -> Any:
-    with _store(args) as store:
-        read = store.read_prompt_fragment(args.name)
-    return views.prompt_fragment(read)
-
-
-def _showing_agent(args: Invocation) -> Any:
-    with _store(args) as store:
-        read = store.read_agent(args.name)
-    return views.agent(read)
-
-
-def _showing_agent_defaults(args: Invocation) -> Any:
-    with _store(args) as store:
-        read = store.read_agent_defaults()
-    return views.agent_defaults(read)
-
-
-# Which of them each kind's row is built with. Keyed by the same names
-# the registry uses, so a kind added there without one here is a
-# KeyError at import rather than a command that quietly has no
-# break-glass path.
-_LOCAL_DELETE: dict[str, Callable[[Invocation], Any]] = {
-    "provider": _deleting_provider,
-    "mcp-server": _deleting_mcp_server,
-    "prompt-fragment": _deleting_prompt_fragment,
-    "agent": _deleting_agent,
-}
-
-_LOCAL_SHOW: dict[str, Callable[[Invocation], Any]] = {
-    "provider": _showing_provider,
-    "mcp-server": _showing_mcp_server,
-    "prompt-fragment": _showing_prompt_fragment,
-    "agent": _showing_agent,
-    "agent-defaults": _showing_agent_defaults,
-}
-
-
 SET_ENTITY: dict[str, Act] = {
     kind.name: Act(
         method="PUT",
@@ -2178,7 +1969,6 @@ DELETE_ENTITY: dict[str, Act] = {
         answers=Acknowledgement,
         refusal=UNREADABLE_WRITE,
         render=_acknowledged,
-        local=_LOCAL_DELETE[kind.name],
     )
     for kind in entities.ENTITIES
     if kind.has_delete
@@ -2190,7 +1980,6 @@ SHOW_ENTITY: dict[str, Act] = {
         path=_entity_path(kind),
         answers=Envelope,
         render=_print_entity,
-        local=_LOCAL_SHOW[kind.name],
     )
     for kind in entities.ENTITIES
 }
@@ -2226,36 +2015,12 @@ def _default_agent_name(args: Invocation) -> object:
     return {"name": args.name}
 
 
-def _deleting_device(args: Invocation) -> Any:
-    """The break-glass unbind. A running server reads the devices table,
-    so the removal reaches the device at its next check-in whether the
-    row was deleted through the API or, as here, underneath it, which is
-    the notice this answers with.
-
-    Plainly that notice, and not the one the API computes: the sentence
-    the API answers a device write with depends on whether it has the
-    named agent loaded, and this path has no loaded server to ask.
-    """
-    with _store(args) as store:
-        # The row the repository deleted names itself, so this path
-        # normalizes nothing of its own either.
-        deleted = store.delete_device(args.mac)
-    return {"wrote": f"device {deleted} deleted", "notice": BINDING_NOTICE}
-
-
-def _showing_device(args: Invocation) -> Any:
-    with _store(args) as store:
-        read = store.read_device(args.mac)
-    return views.device(read)
-
-
 DELETE_DEVICE = Act(
     method="DELETE",
     path=_device_path,
     answers=Acknowledgement,
     refusal=UNREADABLE_WRITE,
     render=_acknowledged,
-    local=_deleting_device,
 )
 
 SHOW_DEVICE = Act(
@@ -2263,7 +2028,6 @@ SHOW_DEVICE = Act(
     path=_device_path,
     answers=Envelope,
     render=_print_entity,
-    local=_showing_device,
 )
 
 BIND_DEVICE = Act(
@@ -2306,52 +2070,13 @@ CLEAR_DEFAULT_AGENT = Act(
 
 # A stored credential is addressed under the entity that holds it, in
 # the slot it fills, which is why these two rows are not an entity's.
-# One command covers both kinds, so it asks `_secret_notice` below which
-# sentence follows the entity the credential is stored on; the API says
-# the same by having four secret routes, each statically one of them.
-
-
-def _secret_notice(kind: EntityKind) -> str:
-    """When a stored credential takes effect, which follows the entity it
-    is stored on, and is now the same answer for both of them.
-
-    The reload rebuilds the MCP entries with their credentials and the
-    provider entries with theirs, so a rotation on either is applied by
-    it: a credential is read as the thing that uses it is made, and a
-    reload makes both again (#191). Kept as a question rather than
-    collapsed into one sentence, because what decides it is still the
-    entity kind and a third kind would arrive with its own answer. The
-    API says the same by having four secret routes, two per kind, each
-    statically one of these sentences; one CLI command covers both
-    kinds, so it asks here.
-    """
-    return RELOAD_NOTICE if kind in ("mcp_server", "provider") else RESTART_NOTICE
+# One command covers both kinds, and which sentence follows the entity a
+# credential is stored on is the API's answer: it has four secret
+# routes, each statically one of them.
 
 
 def _secret_body(args: Invocation) -> object:
     return {"secret": _read_secret(args)}
-
-
-def _storing_secret(args: Invocation) -> Any:
-    location = _secret_location(args)
-    secret = _read_secret(args)
-    # The one recovery command that needs a key: it encrypts.
-    with _store(args, keyed=True) as store:
-        store.set_secret(location, secret)
-    return {
-        "wrote": f"secret for {location.describe()}",
-        "notice": _secret_notice(location.kind),
-    }
-
-
-def _clearing_secret(args: Invocation) -> Any:
-    location = _secret_location(args)
-    with _store(args) as store:
-        store.clear_secret(location)
-    return {
-        "wrote": f"secret for {location.describe()} cleared",
-        "notice": _secret_notice(location.kind),
-    }
 
 
 SET_SECRET = Act(
@@ -2361,7 +2086,6 @@ SET_SECRET = Act(
     answers=Acknowledgement,
     refusal=UNREADABLE_WRITE,
     render=_acknowledged,
-    local=_storing_secret,
 )
 
 CLEAR_SECRET = Act(
@@ -2370,7 +2094,6 @@ CLEAR_SECRET = Act(
     answers=Acknowledgement,
     refusal=UNREADABLE_WRITE,
     render=_acknowledged,
-    local=_clearing_secret,
 )
 
 
@@ -2391,11 +2114,6 @@ def _printed(listing: Callable[[Any], str]) -> Callable[[Any], None]:
 
 def _config_path(args: Invocation) -> str:
     return _path("config")
-
-
-def _stored_config(args: Invocation) -> Any:
-    with _store(args) as store:
-        return views.config(store.load())
 
 
 def _running_path(args: Invocation) -> str:
@@ -2422,7 +2140,6 @@ SHOW_ALL = Act(
     path=_config_path,
     answers=ConfigDocument,
     render=_printed(_show_everything),
-    local=_stored_config,
 )
 
 EXPORT_ALL = Act(
@@ -2444,21 +2161,20 @@ EXPORT_ENTITY: dict[str, Act] = {
 
 PENDING = Act(method="GET", path=_waiting_path, render=_printed(_pending_listing))
 
-# A read of the running server rather than of the database, so there is
-# no local row for it: what a database says about an entry is what `show
-# mcp-server` prints, and a stopped server has no state to report.
+# A read of the running server rather than of the database: what a
+# database says about an entry is what `show mcp-server` prints, and a
+# stopped server has no state to report.
 STATUS = Act(method="GET", path=_running_path, render=_printed(_status_listing))
 
-# The other read of the running server, and for the same reason no local
-# row: the persona is stored and the guidance is stored, but what they
-# add up to is a property of the process that loaded them.
+# The other read of the running server: the persona is stored and the
+# guidance is stored, but what they add up to is a property of the
+# process that loaded them.
 PROMPT = Act(method="GET", path=_assembled_path, render=_printed(_prompt_listing))
 
 # The one act that changes what a server is doing without writing
 # anything, and it prints both halves of the answer: what the reload
 # applied, and what every configured MCP entry is doing now that it has
-# been done. No local row either, with more force than the two above:
-# there is nothing to reload when there is no server.
+# been done.
 RELOAD = Act(
     method="POST",
     path=_reload_path,
@@ -2498,19 +2214,13 @@ APPLY = Act(
 # The grammar
 #
 # One row per command: where it sits in the command tree, what it does,
-# whether the break-glass path covers it, and how it declares its
-# arguments. The table is the whole of the grammar and the loop at the
-# foot of this module is the only reader of a row, so adding a command
-# is a row rather than a paragraph of parser construction.
-#
-# `local_ok` is a column here for the same reason an act's two paths are
-# one row above: it used to be installed imperatively on a subparser,
-# where nothing could read it back, and the differential suite's claim
-# to cover the whole break-glass subset was kept by review alone. A
-# column is a fact a test can hold that suite to.
+# and how it declares its arguments. The table is the whole of the
+# grammar and the loop at the foot of this module is the only reader of
+# a row, so adding a command is a row rather than a paragraph of parser
+# construction.
 
 
-# What each of the three global options says, and the two positions they
+# What each of the two global options says, and the two positions they
 # are accepted in. Both readings are natural: `vinga-server --config
 # path` is how the server takes it, and options after their subcommand
 # is how everything else does.
@@ -2522,11 +2232,6 @@ CONFIG_HELP = (
 API_URL_HELP = (
     f"base URL of the configuration API (default: ${API_URL_ENV}, then "
     f"http://127.0.0.1:<server.port>{API_MOUNT_PATH})"
-)
-
-LOCAL_HELP = (
-    "read and write the database directly instead of the API: the recovery subset "
-    "(show, delete, clear-secret, set-secret), for when the server will not start"
 )
 
 FILE_HELP = (
@@ -2578,24 +2283,21 @@ SCHEMA_TYPE_HELP = "with STAGE, the provider type whose options to print"
 DESCRIPTION = (
     "Read and write the domain half of the configuration: providers, "
     "MCP servers, agents, devices and their secrets. Commands go through the "
-    "configuration API on the running server; --local is the recovery path."
+    "configuration API on the running server."
 )
 
 # The declared copy of each option, as one annotation apiece, so a
-# command that takes them says so in three lines and cannot come to
-# spell one of them differently from its siblings.
+# command that takes them says so in two lines and cannot come to spell
+# one of them differently from its siblings.
 #
-# `None` and `False` are the not-given values, and they are answers
-# rather than sentinels of convenience: neither option can be typed as
-# None, and `--local` has no negative spelling, so the merge below
-# reproduces argparse's `default=SUPPRESS` dance exactly. A sentinel
-# object of this module's own would read back as its repr in the help,
-# which is the one place these defaults are published.
+# `None` is the not-given value, and it is an answer rather than a
+# sentinel of convenience: neither option can be typed as None, so the
+# merge below reproduces argparse's `default=SUPPRESS` dance exactly. A
+# sentinel object of this module's own would read back as its repr in
+# the help, which is the one place these defaults are published.
 ConfigOption = Annotated[str | None, typer.Option("--config", metavar="PATH", help=CONFIG_HELP)]
 
 ApiUrlOption = Annotated[str | None, typer.Option("--api-url", metavar="URL", help=API_URL_HELP)]
-
-LocalOption = Annotated[bool, typer.Option("--local", help=LOCAL_HELP)]
 
 # The two ways a write's entity is given, declared once apiece for the
 # same reason the three globals are: a `set` command says so in two
@@ -2612,7 +2314,7 @@ PairsArgument = Annotated[
 
 @dataclass(frozen=True, kw_only=True)
 class Globals:
-    """The three options, as far as the positions so far have resolved
+    """The two options, as far as the positions so far have resolved
     them.
 
     The root callback builds the first answer and every position under
@@ -2625,20 +2327,13 @@ class Globals:
 
     config: str | None = None
     api_url: str | None = None
-    local: bool = False
 
-    def merged(self, *, config: str | None, api_url: str | None, local: bool) -> "Globals":
+    def merged(self, *, config: str | None, api_url: str | None) -> "Globals":
         """The same options with one more position's copies folded in,
-        each winning only where it was given.
-
-        `--local` accumulates rather than overrides, because it is
-        presence-only: a flag that is not there says nothing, and cannot
-        unsay a flag that is.
-        """
+        each winning only where it was given."""
         return Globals(
             config=self.config if config is None else config,
             api_url=self.api_url if api_url is None else api_url,
-            local=self.local or local,
         )
 
 
@@ -2651,9 +2346,8 @@ class Command:
     # groups named in `GROUPS`.
     words: tuple[str, ...]
 
-    # What it does. An act is a request to the configuration API, or the
-    # same act against the database where `--local` covers it; the four
-    # commands that reach neither carry their own function instead.
+    # What it does. An act is a request to the configuration API; the
+    # commands that reach no API carry their own function instead.
     does: "Act | Callable[[Invocation], None]"
 
     # How its arguments are declared, which is a function Typer reads a
@@ -2669,9 +2363,6 @@ class Command:
     # What follows that page, for the commands that take a fragment: the
     # fields the fragment may carry, rendered from the models.
     epilog: str | None = None
-
-    # Whether `--local` covers it.
-    local_ok: bool = False
 
     def perform(self, args: Invocation) -> None:
         """What this command does, once its arguments are in hand."""
@@ -2704,20 +2395,19 @@ def _root(
     context: typer.Context,
     config: ConfigOption = None,
     api_url: ApiUrlOption = None,
-    local: LocalOption = False,
 ) -> None:
-    """The three options in the position before the command word.
+    """The two options in the position before the command word.
 
     Their answer is put on the context rather than passed, because the
     positions under this one add to it: a group callback folds its own
     copies in and a command folds its own in after that, and each of
     them reads one object.
     """
-    context.obj = Globals(config=config, api_url=api_url, local=local)
+    context.obj = Globals(config=config, api_url=api_url)
 
 
 def _resolved(context: typer.Context) -> Globals:
-    """What the positions above this one made of the three options.
+    """What the positions above this one made of the two options.
 
     Answered as an empty `Globals` when there is nothing there, which is
     what a command reached without the root callback having run would
@@ -2733,31 +2423,19 @@ def _invocation(
     context: typer.Context,
     config: str | None = None,
     api_url: str | None = None,
-    local: bool = False,
     **addressed: Any,
 ) -> Invocation:
-    """One command's arguments, with the three global options resolved
-    and the break-glass gate passed.
+    """One command's arguments, with the two global options resolved.
 
-    The three come in as this command's own copies, which is one of the
+    The two come in as this command's own copies, which is one of the
     positions they are accepted in; what the positions above it made of
     them is on the context, and the merge is what lets a value given
     before the command survive a command that was not given one.
-
-    The gate is here rather than in `main` because membership of the
-    recovery subset is a fact of the command and the row states it. It
-    runs before the command does anything at all, which is what keeps a
-    refused `--local set` from reading a fragment off stdin first.
     """
-    resolved = _resolved(context).merged(config=config, api_url=api_url, local=local)
-    if resolved.local:
-        if not row.local_ok:
-            raise ConfigError(LOCAL_SUBSET)
-        print(LOCAL_NOTICE, file=sys.stderr)
+    resolved = _resolved(context).merged(config=config, api_url=api_url)
     return Invocation(
         config=resolved.config,
         api_url=resolved.api_url,
-        local=resolved.local,
         # Which kind a command that covers several of them was asked
         # about is its last word, which is the same string the registry
         # keys that kind under.
@@ -2784,9 +2462,8 @@ def _plain(row: Command) -> Callable[..., None]:
         context: typer.Context,
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
-        local: LocalOption = False,
     ) -> None:
-        row.perform(_invocation(row, context, config, api_url, local))
+        row.perform(_invocation(row, context, config, api_url))
 
     return run
 
@@ -2799,9 +2476,8 @@ def _named(row: Command) -> Callable[..., None]:
         name: Annotated[str, typer.Argument(metavar="NAME")],
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
-        local: LocalOption = False,
     ) -> None:
-        row.perform(_invocation(row, context, config, api_url, local, name=name))
+        row.perform(_invocation(row, context, config, api_url, name=name))
 
     return run
 
@@ -2816,9 +2492,8 @@ def _staged(row: Command) -> Callable[..., None]:
         name: Annotated[str, typer.Argument(metavar="NAME")],
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
-        local: LocalOption = False,
     ) -> None:
-        row.perform(_invocation(row, context, config, api_url, local, stage=stage, name=name))
+        row.perform(_invocation(row, context, config, api_url, stage=stage, name=name))
 
     return run
 
@@ -2832,9 +2507,8 @@ def _by_mac(row: Command) -> Callable[..., None]:
         mac: Annotated[str, typer.Argument(metavar="MAC")],
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
-        local: LocalOption = False,
     ) -> None:
-        row.perform(_invocation(row, context, config, api_url, local, mac=mac))
+        row.perform(_invocation(row, context, config, api_url, mac=mac))
 
     return run
 
@@ -2849,10 +2523,9 @@ def _written(row: Command) -> Callable[..., None]:
         file: FileOption = "",
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
-        local: LocalOption = False,
     ) -> None:
         row.perform(
-            _invocation(row, context, config, api_url, local, file=file, pairs=_given(pairs))
+            _invocation(row, context, config, api_url, file=file, pairs=_given(pairs))
         )
 
     return run
@@ -2869,11 +2542,10 @@ def _named_write(row: Command) -> Callable[..., None]:
         file: FileOption = "",
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
-        local: LocalOption = False,
     ) -> None:
         row.perform(
             _invocation(
-                row, context, config, api_url, local,
+                row, context, config, api_url,
                 name=name, file=file, pairs=_given(pairs),
             )
         )
@@ -2892,11 +2564,10 @@ def _staged_write(row: Command) -> Callable[..., None]:
         file: FileOption = "",
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
-        local: LocalOption = False,
     ) -> None:
         row.perform(
             _invocation(
-                row, context, config, api_url, local,
+                row, context, config, api_url,
                 stage=stage, name=name, file=file, pairs=_given(pairs),
             )
         )
@@ -2916,9 +2587,8 @@ def _applied_document(row: Command) -> Callable[..., None]:
         ],
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
-        local: LocalOption = False,
     ) -> None:
-        row.perform(_invocation(row, context, config, api_url, local, file=file))
+        row.perform(_invocation(row, context, config, api_url, file=file))
 
     return run
 
@@ -2945,11 +2615,10 @@ def _provider_secret(row: Command) -> Callable[..., None]:
         ] = None,
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
-        local: LocalOption = False,
     ) -> None:
         row.perform(
             _invocation(
-                row, context, config, api_url, local,
+                row, context, config, api_url,
                 stage=stage, name=name, slot=slot, from_env=from_env,
             )
         )
@@ -2969,11 +2638,10 @@ def _mcp_secret(row: Command) -> Callable[..., None]:
         ] = None,
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
-        local: LocalOption = False,
     ) -> None:
         row.perform(
             _invocation(
-                row, context, config, api_url, local, name=name, slot=slot, from_env=from_env
+                row, context, config, api_url, name=name, slot=slot, from_env=from_env
             )
         )
 
@@ -2990,10 +2658,9 @@ def _provider_slot(row: Command) -> Callable[..., None]:
         slot: Annotated[str, typer.Argument(metavar="SLOT", help=PROVIDER_SLOT_HELP)],
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
-        local: LocalOption = False,
     ) -> None:
         row.perform(
-            _invocation(row, context, config, api_url, local, stage=stage, name=name, slot=slot)
+            _invocation(row, context, config, api_url, stage=stage, name=name, slot=slot)
         )
 
     return run
@@ -3008,9 +2675,8 @@ def _mcp_slot(row: Command) -> Callable[..., None]:
         slot: Annotated[str, typer.Argument(metavar="SLOT", help=MCP_SLOT_HELP)],
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
-        local: LocalOption = False,
     ) -> None:
-        row.perform(_invocation(row, context, config, api_url, local, name=name, slot=slot))
+        row.perform(_invocation(row, context, config, api_url, name=name, slot=slot))
 
     return run
 
@@ -3025,10 +2691,9 @@ def _bound_by_mac(row: Command) -> Callable[..., None]:
         agents: Annotated[list[str], typer.Argument(metavar="AGENT")],
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
-        local: LocalOption = False,
     ) -> None:
         row.perform(
-            _invocation(row, context, config, api_url, local, mac=mac, agents=tuple(agents))
+            _invocation(row, context, config, api_url, mac=mac, agents=tuple(agents))
         )
 
     return run
@@ -3049,10 +2714,9 @@ def _bound_by_code(row: Command) -> Callable[..., None]:
         agents: Annotated[list[str], typer.Argument(metavar="AGENT")],
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
-        local: LocalOption = False,
     ) -> None:
         row.perform(
-            _invocation(row, context, config, api_url, local, code=code, agents=tuple(agents))
+            _invocation(row, context, config, api_url, code=code, agents=tuple(agents))
         )
 
     return run
@@ -3127,12 +2791,11 @@ def _whole_or_one(row: Command) -> Callable[..., None]:
         context: typer.Context,
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
-        local: LocalOption = False,
     ) -> None:
         if context.invoked_subcommand is not None:
-            context.obj = _resolved(context).merged(config=config, api_url=api_url, local=local)
+            context.obj = _resolved(context).merged(config=config, api_url=api_url)
             return
-        row.perform(_invocation(row, context, config, api_url, local))
+        row.perform(_invocation(row, context, config, api_url))
 
     return run
 
@@ -3201,8 +2864,7 @@ COMMANDS: tuple[Command, ...] = (
             does=DELETE_ENTITY[kind.name],
             declare=_staged if kind.addressing == ("stage", "name") else _named,
             help=_about("delete", kind),
-            local_ok=True,
-        )
+            )
         for kind in entities.ENTITIES
         if kind.has_delete
     ),
@@ -3211,7 +2873,6 @@ COMMANDS: tuple[Command, ...] = (
         does=DELETE_DEVICE,
         declare=_by_mac,
         help="delete devices.<mac>, so the board it names reaches the default agent",
-        local_ok=True,
     ),
     # Two ways to bind a board, and which one an operator wants depends
     # on what they are holding: a MAC they already know, or a device in
@@ -3253,9 +2914,8 @@ COMMANDS: tuple[Command, ...] = (
         declare=_plain,
         help="the devices showing an activation code, and the code each is showing",
     ),
-    # A read of the running server rather than of the database, and the
-    # reason neither this nor the next takes --local: there is no state
-    # to report when there is no server to ask.
+    # A read of the running server rather than of the database: there is
+    # no state to report when there is no server to ask.
     Command(
         words=("status",),
         does=STATUS,
@@ -3318,33 +2978,29 @@ COMMANDS: tuple[Command, ...] = (
         does=SET_SECRET,
         declare=_provider_secret,
         help="store a credential on providers.<stage>.<name>",
-        local_ok=True,
     ),
     Command(
         words=("set-secret", "mcp-server"),
         does=SET_SECRET,
         declare=_mcp_secret,
         help="store a credential on mcp_servers.<name>",
-        local_ok=True,
     ),
     Command(
         words=("clear-secret", "provider"),
         does=CLEAR_SECRET,
         declare=_provider_slot,
         help="remove a stored credential from providers.<stage>.<name>",
-        local_ok=True,
     ),
     Command(
         words=("clear-secret", "mcp-server"),
         does=CLEAR_SECRET,
         declare=_mcp_slot,
         help="remove a stored credential from mcp_servers.<name>",
-        local_ok=True,
     ),
     Command(words=("list",), does=LIST, declare=_plain, help="a summary tree"),
-    # Read-only and local: these three render the models and the API's
-    # own routes, so they take no --config, open no database, reach no
-    # server and need no encryption key. Keep it that way: the
+    # Read-only and offline: these three render the models and the
+    # API's own routes, so they take no --config, open no database,
+    # reach no server and need no encryption key. Keep it that way: the
     # documentation lane runs `config reference` and `config openapi`
     # from a plain sync, with no database, no key and no token anywhere.
     Command(
@@ -3379,7 +3035,6 @@ COMMANDS: tuple[Command, ...] = (
         does=SHOW_ALL,
         declare=_whole_or_one,
         help=GROUPS["show"],
-        local_ok=True,
     ),
     *(
         Command(
@@ -3389,8 +3044,7 @@ COMMANDS: tuple[Command, ...] = (
                 _named if kind.addressing else _plain
             ),
             help=_about("print", kind),
-            local_ok=True,
-        )
+            )
         for kind in entities.ENTITIES
     ),
     Command(
@@ -3398,7 +3052,6 @@ COMMANDS: tuple[Command, ...] = (
         does=SHOW_DEVICE,
         declare=_by_mac,
         help="print devices.<mac>: the agents that board is bound to",
-        local_ok=True,
     ),
     # The writable projection of the same reads. `show` is the display
     # one and this is the one that goes back in, which is the whole
@@ -3489,4 +3142,4 @@ def command() -> TyperGroup:
     return grammar
 
 
-__all__ = ["COMMANDS", "RESTART_NOTICE", "build_client", "command", "main"]
+__all__ = ["COMMANDS", "build_client", "command", "main"]

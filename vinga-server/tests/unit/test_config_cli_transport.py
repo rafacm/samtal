@@ -240,7 +240,9 @@ def test_a_missing_token_is_named_before_any_request_is_sent(
 
     captured = capsys.readouterr()
     assert API_SECRET_ENV in captured.err
-    assert "--local" in captured.err
+    # And where to find it, which is the environment the server itself
+    # was started with.
+    assert "exec into the running container" in captured.err
     assert run.reached == []
 
 
@@ -291,7 +293,7 @@ def test_a_server_that_cannot_be_reached_says_so_and_names_the_recovery_path(
 
     captured = capsys.readouterr()
     assert "cannot reach the configuration API at http://127.0.0.1:1" in captured.err
-    assert "--local" in captured.err
+    assert "applying a kept export" in captured.err
     assert "Traceback" not in captured.err
 
 

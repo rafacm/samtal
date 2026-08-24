@@ -118,7 +118,13 @@ def test_it_opens_no_socket_no_database_and_needs_no_token(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The point of the command: it answers before there is a server to
-    ask, on a machine that may have no route to one."""
+    ask, on a machine that may have no route to one.
+
+    The database half is read off the directory rather than off a
+    patched opener: since the CLI stopped being a second way into the
+    database it holds no opener to patch, and a directory that was never
+    created is the stronger statement of the same claim.
+    """
 
     def refuse(*args: object, **kwargs: object) -> object:
         raise AssertionError("ota-url reached for something it must not need")
@@ -126,7 +132,6 @@ def test_it_opens_no_socket_no_database_and_needs_no_token(
     directory = tmp_path / "never-created"
     monkeypatch.setenv("VINGA_SERVER__DATABASE__DIR", str(directory))
     monkeypatch.setattr(cli, "build_client", refuse)
-    monkeypatch.setattr(cli, "open_database", refuse)
     monkeypatch.setattr(socket, "socket", refuse)
 
     assert cli.main(["ota-url"]) == 0
