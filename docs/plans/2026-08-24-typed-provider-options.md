@@ -215,10 +215,14 @@ no bodies decision is needed in this batch.
 ### 5. The artifacts learn a per-type axis, minimally
 
 - `docgen.schema("provider")` keeps rendering the envelope;
-  `config schema provider <type>` becomes valid for a type with a
-  model and renders that model's JSON Schema (the argument grammar
-  already takes one optional entity word; it gains the optional
-  second). `entity_names()` is untouched.
+  `config schema provider <stage> <type>` becomes valid for a
+  type with a model and renders that model's JSON Schema. The
+  selector carries the stage because the registry is stage-keyed
+  and already holds duplicate type names (`openai` in ASR and
+  TTS, `mock` everywhere); a test uses one of the existing
+  duplicates so the axis cannot regress, and the reference and
+  help headings group by stage then type. `entity_names()` is
+  untouched.
 - The reference's provider section gains one options table per
   typed type, rendered by the same `_table`, under a heading
   naming the type; the `| ... |` passthrough row survives for the
@@ -231,9 +235,23 @@ no bodies decision is needed in this batch.
   fields through the same deepened renderer M1 of #194 built
   (name, type, default, description); the "any other key" trailer
   narrows to the untyped types.
+- The OpenAPI document gets the STRUCTURAL half, not prose alone:
+  each typed model (nested sub-models included) is injected into
+  `components.schemas` through the same injection path the other
+  documented models ride (`api.py`'s component injection), named
+  `<Stage><Type>Options` (`AsrFasterWhisperOptions`), and
+  connected to the provider write contract by a documented
+  mapping: the provider PUT's description names, per typed
+  stage-and-type, the component that states its options, since
+  the PUT deliberately takes RawBody and cannot carry a
+  discriminated request schema without repeating the api's
+  refusal-shaping rationale. Tests assert typed leaf fields and
+  their descriptions are REACHABLE from the provider PUT: the
+  description names each component, and each named component
+  exists with the leaves.
 - Artifact churn per milestone, read and recorded:
-  `domain-config.md`, `api-openapi.json` (the info description's
-  contract paragraph plus, in M1, nothing structural),
+  `domain-config.md`, `api-openapi.json` (the injected components
+  and the description mapping, plus the contract paragraph),
   `cli.md` (both regions), `examples/README.md` prose. `events.md`
   and `conversations-schema.md` must not move.
 
@@ -324,6 +342,12 @@ resolution note here.
    and models held in a side table would be absent from
    components and undiscoverable from the write route.
 
+   *Resolution* (this commit): decision 5 injects each typed
+   model into `components.schemas` through the existing injection
+   path, named `<Stage><Type>Options`, connected to the provider
+   PUT by a documented mapping in its description, with tests
+   asserting the leaves are reachable from the PUT.
+
 2. **P1: the escape hatch never made passthrough take effect.**
    The current builder refuses every leftover and assembles
    requests from a fixed dictionary, so removing `finish()`
@@ -368,6 +392,10 @@ resolution note here.
 6. **P2: `config schema provider <type>` cannot represent the
    stage axis.** `openai` exists in ASR and TTS and `mock` in
    every stage.
+
+   *Resolution* (this commit): the selector is
+   `config schema provider <stage> <type>`, headings group by
+   stage then type, and a test uses an existing duplicate.
 
 7. **P2: nested models need explicit serialization and recursive
    documentation.** Engines and JSON take dictionaries;
