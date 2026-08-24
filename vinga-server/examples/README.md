@@ -43,11 +43,15 @@ name is left alone, and the same document twice changes nothing.
   and into `vinga-server config schema`. That is the contract: which
   fields exist, what type each one is, what it defaults to.
 - The **provider-type options** (everything a provider entry carries
-  beyond `type`, `api_key_env` and `egress`) are passed through to the
-  provider implementation, so no schema can describe them. Until typed
-  option models land (#88), these files are where they are documented,
-  and where the measured numbers and the field findings behind each
-  default are kept.
+  beyond `type`, `api_key_env` and `egress`) are declared type by type.
+  A type with an option model has its options checked when the entry is
+  written, refused by name, and printed by `vinga-server config schema
+  provider <stage> <type>`; in the `asr` stage the `faster_whisper` type
+  is declared that way. Every other type still passes its options
+  through to the implementation, so no schema can describe those. Until
+  the rest are typed (#88), these files are where they are documented,
+  and either way these files are where the measured numbers and the
+  field findings behind each default are kept.
 
 ## Secrets
 

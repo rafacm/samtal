@@ -114,10 +114,61 @@ def entity_names() -> list[str]:
 # JSON Schema
 
 
-def schema(name: str | None = None) -> str:
-    """The JSON Schema of one entity kind, or of the whole domain
-    configuration when nothing is named."""
+def schema(name: str | None = None, stage: str = "", type_name: str = "") -> str:
+    """The JSON Schema of one entity kind, of one provider type's
+    options, or of the whole domain configuration when nothing is named.
+
+    The options selector carries the stage as well as the type, and that
+    is not verbosity: the registry is keyed by stage first and already
+    holds one type name in two stages (`openai` is an ASR type and a TTS
+    type, `mock` is all four), so a type name alone addresses nothing in
+    particular.
+
+    The registry is imported inside that branch rather than at the top
+    of the module, and the constraint it is protecting is stated in the
+    module docstring: rendering the reference and the whole-domain
+    schema must load the models and the descriptor registry and nothing
+    else, which `test_config_docgen.py` holds in a child interpreter.
+    Asking for one type's options is a different question and pays for
+    the table that answers it.
+    """
+    if stage or type_name:
+        return _options_schema(name, stage, type_name)
     model = DomainConfig if name in (None, DOMAIN) else entity(str(name)).model
+    return json.dumps(model.model_json_schema(), indent=2, ensure_ascii=False) + "\n"
+
+
+# What a selector that named no declared model says. The stage and the
+# type are not quoted back, the rule every refusal about an identity
+# follows (#132): what exists is the useful half, and what was typed is
+# the half the person typing it can already see.
+NO_SUCH_OPTIONS = (
+    "no provider type declares an options model for that stage and type. The ones "
+    "that do are: {declared}. Every other type passes its options through, so its "
+    "fragment under examples/ is where they are documented"
+)
+
+OPTIONS_ARE_A_PROVIDERS = (
+    "a stage and a type name one provider type's options, so they go with "
+    "`schema provider`, and both of them are needed"
+)
+
+
+def _options_schema(name: str | None, stage: str, type_name: str) -> str:
+    """One provider type's options as JSON Schema, which is what a
+    client reads before writing the fragment that carries them."""
+    from vinga_server.config.loader import ConfigError
+    from vinga_server.providers.registry import declared_options, registration
+
+    if name != "provider" or not stage or not type_name:
+        raise ConfigError(OPTIONS_ARE_A_PROVIDERS)
+    found = registration(stage, type_name)
+    model = found.options if found is not None else None
+    if model is None:
+        declared = ", ".join(
+            f"{one} {other}" for one, other, _ in declared_options()
+        )
+        raise ConfigError(NO_SUCH_OPTIONS.format(declared=declared))
     return json.dumps(model.model_json_schema(), indent=2, ensure_ascii=False) + "\n"
 
 

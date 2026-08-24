@@ -465,6 +465,11 @@ class Invocation:
     from_env: str | None = None
     entity: str | None = None
 
+    # And the provider type a schema is asked about, which goes with the
+    # `stage` above: the two together name one type's options, since the
+    # registry holds one type name in more than one stage.
+    type_name: str = ""
+
 
 # The commands that reach no API
 #
@@ -498,10 +503,12 @@ def _ota_url(args: Invocation) -> None:
 
 
 def _schema(args: Invocation) -> None:
-    """The JSON Schema of one entity kind, or of the whole domain
-    configuration. Reads the models and nothing else: no database, no
-    configuration file, no encryption key, no server."""
-    print(docgen.schema(args.entity), end="")
+    """The JSON Schema of one entity kind, of one provider type's
+    options when a stage and a type follow `provider`, or of the whole
+    domain configuration. Reads the models and the registry and nothing
+    else: no database, no configuration file, no encryption key, no
+    server."""
+    print(docgen.schema(args.entity, args.stage, args.type_name), end="")
 
 
 def _reference(args: Invocation) -> None:
@@ -2560,6 +2567,14 @@ PROVIDER_SLOT_HELP = "the option it fills, such as api_key"
 
 MCP_SLOT_HELP = "env.<KEY> or headers.<KEY>"
 
+# The two that follow `schema provider`. A provider type is addressed by
+# its stage and its name together everywhere else in this command group,
+# and its options are addressed the same way for the same reason: one
+# type name lives in more than one stage.
+SCHEMA_STAGE_HELP = "with TYPE, the options of one provider type: llm, asr, tts or vad"
+
+SCHEMA_TYPE_HELP = "with STAGE, the provider type whose options to print"
+
 DESCRIPTION = (
     "Read and write the domain half of the configuration: providers, "
     "MCP servers, agents, devices and their secrets. Commands go through the "
@@ -3059,7 +3074,13 @@ def _from_the_file_half(row: Command) -> Callable[..., None]:
 
 
 def _of_an_entity(row: Command) -> Callable[..., None]:
-    """The schema command, which names one entity kind or none."""
+    """The schema command, which names one entity kind or none, and one
+    provider type's options when a stage and a type follow it.
+
+    Three positionals rather than a flag, because they read as what they
+    are: `schema provider asr faster_whisper` is the same
+    stage-then-name order every provider command is addressed in.
+    """
 
     def run(
         context: typer.Context,
@@ -3069,8 +3090,16 @@ def _of_an_entity(row: Command) -> Callable[..., None]:
                 metavar="ENTITY", help=", ".join(docgen.entity_names()) + " (default: domain)"
             ),
         ] = None,
+        stage: Annotated[
+            str,
+            typer.Argument(metavar="STAGE", help=SCHEMA_STAGE_HELP),
+        ] = "",
+        type_name: Annotated[
+            str,
+            typer.Argument(metavar="TYPE", help=SCHEMA_TYPE_HELP),
+        ] = "",
     ) -> None:
-        row.perform(_invocation(row, context, entity=entity))
+        row.perform(_invocation(row, context, entity=entity, stage=stage, type_name=type_name))
 
     return run
 
