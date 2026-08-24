@@ -27,7 +27,9 @@ answers the running server is asked for), `test_config_cli_secrets.py`
 and its exit codes).
 """
 
+import io
 import logging
+import sys
 from pathlib import Path
 
 import pytest
@@ -1482,3 +1484,61 @@ def test_an_applied_validator_is_refused_without_printing_the_value(
     assert "Traceback" not in captured.err
     served = [r for r in caplog.records if r.name.startswith("vinga_server")]
     assert all(SECRET not in str(record.__dict__) for record in served)
+
+
+# A pipe asked for at a terminal
+#
+# `-f -` reads standard input, and the read used to be unconditional, so
+# a person who typed it at a prompt met a cursor and no explanation.
+# That is the prompt rule broken from the other side: never require a
+# prompt, and never read one without asking whether there is anybody
+# there.
+
+
+class _Terminal(io.StringIO):
+    """A stdin that says it is a terminal, which is what the read
+    branches on."""
+
+    def isatty(self) -> bool:
+        return True
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ("apply", "-f", "-"),
+        ("provider", "set", "llm", "claude", "-f", "-"),
+    ],
+    ids=["a document", "a fragment"],
+)
+def test_reading_a_document_from_a_terminal_says_so_rather_than_hanging(
+    run,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    argv: tuple[str, ...],
+) -> None:
+    """One sentence with the usage tail, and exit 1, which is what every
+    other mistake in the grammar answers with. Nothing is read, so the
+    case cannot hang: a test that hung would take the lane with it."""
+    monkeypatch.setattr(sys, "stdin", _Terminal(""))
+    capsys.readouterr()
+
+    assert run(*argv) == 1
+
+    captured = capsys.readouterr()
+    assert captured.err == cli.usage_line(cli.STDIN_AT_A_TERMINAL) + "\n"
+    assert captured.out == ""
+
+
+def test_a_pipe_is_read_exactly_as_it_was(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The licensed half: what changed is the terminal case, and a pipe,
+    a redirect and a heredoc all read as they always did."""
+    assert run(
+        "provider", "set", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n"
+    ) == 0
+    capsys.readouterr()
+
+    assert run("provider", "show", "llm", "claude") == 0
+    assert _document(capsys.readouterr().out) == {"type": "anthropic", "model": "m"}

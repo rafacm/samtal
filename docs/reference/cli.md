@@ -375,7 +375,8 @@ Options:
   --no-input     never prompt: a destructive command refuses rather than asking,
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
-  --help         Show this message and exit.
+  --version      print the installed version and exit
+  -h, --help     Show this message and exit.
 
 Commands:
   provider         read and write providers.<stage>.<name>
@@ -420,7 +421,7 @@ Usage: vinga provider [OPTIONS] COMMAND [ARGS]...
   read and write providers.<stage>.<name>
 
 Options:
-  --help  Show this message and exit.
+  -h, --help  Show this message and exit.
 
 Commands:
   set     create or replace providers.<stage>.<name>
@@ -457,7 +458,7 @@ Options:
   --no-input       never prompt: a destructive command refuses rather than
                    asking, and a secret is read from stdin or --from-env
                    (default: prompt at a terminal)
-  --help           Show this message and exit.
+  -h, --help       Show this message and exit.
 
 A credential is never a key=value argument: arguments land in shell history
 and in the process list. Store one with `vinga <kind> secret set`, which reads
@@ -587,7 +588,7 @@ Options:
   --no-input     never prompt: a destructive command refuses rather than asking,
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
-  --help         Show this message and exit.
+  -h, --help     Show this message and exit.
 ```
 
 ### `vinga provider export`
@@ -611,7 +612,7 @@ Options:
   --no-input     never prompt: a destructive command refuses rather than asking,
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
-  --help         Show this message and exit.
+  -h, --help     Show this message and exit.
 ```
 
 ### `vinga provider delete`
@@ -635,7 +636,7 @@ Options:
   --no-input     never prompt: a destructive command refuses rather than asking,
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
-  --help         Show this message and exit.
+  -h, --help     Show this message and exit.
 ```
 
 ### `vinga provider secret`
@@ -646,7 +647,7 @@ Usage: vinga provider secret [OPTIONS] COMMAND [ARGS]...
   credentials stored on providers.<stage>.<name>
 
 Options:
-  --help  Show this message and exit.
+  -h, --help  Show this message and exit.
 
 Commands:
   set    store a credential on providers.<stage>.<name>
@@ -677,7 +678,7 @@ Options:
   --no-input      never prompt: a destructive command refuses rather than
                   asking, and a secret is read from stdin or --from-env
                   (default: prompt at a terminal)
-  --help          Show this message and exit.
+  -h, --help      Show this message and exit.
 ```
 
 ### `vinga provider secret clear`
@@ -702,7 +703,7 @@ Options:
   --no-input     never prompt: a destructive command refuses rather than asking,
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
-  --help         Show this message and exit.
+  -h, --help     Show this message and exit.
 ```
 
 ### `vinga mcp-server`
@@ -713,7 +714,7 @@ Usage: vinga mcp-server [OPTIONS] COMMAND [ARGS]...
   read and write mcp_servers.<name>
 
 Options:
-  --help  Show this message and exit.
+  -h, --help  Show this message and exit.
 
 Commands:
   set     create or replace mcp_servers.<name>
@@ -749,7 +750,7 @@ Options:
   --no-input       never prompt: a destructive command refuses rather than
                    asking, and a secret is read from stdin or --from-env
                    (default: prompt at a terminal)
-  --help           Show this message and exit.
+  -h, --help       Show this message and exit.
 
 A credential is never a key=value argument: arguments land in shell history
 and in the process list. Store one with `vinga <kind> secret set`, which reads
@@ -811,7 +812,7 @@ Options:
   --no-input     never prompt: a destructive command refuses rather than asking,
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
-  --help         Show this message and exit.
+  -h, --help     Show this message and exit.
 ```
 
 ### `vinga mcp-server export`
@@ -834,7 +835,7 @@ Options:
   --no-input     never prompt: a destructive command refuses rather than asking,
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
-  --help         Show this message and exit.
+  -h, --help     Show this message and exit.
 ```
 
 ### `vinga mcp-server delete`
@@ -857,7 +858,7 @@ Options:
   --no-input     never prompt: a destructive command refuses rather than asking,
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
-  --help         Show this message and exit.
+  -h, --help     Show this message and exit.
 ```
 
 ### `vinga mcp-server secret`
@@ -868,7 +869,7 @@ Usage: vinga mcp-server secret [OPTIONS] COMMAND [ARGS]...
   credentials stored on mcp_servers.<name>
 
 Options:
-  --help  Show this message and exit.
+  -h, --help  Show this message and exit.
 
 Commands:
   set    store a credential on mcp_servers.<name>
@@ -898,7 +899,7 @@ Options:
   --no-input      never prompt: a destructive command refuses rather than
                   asking, and a secret is read from stdin or --from-env
                   (default: prompt at a terminal)
-  --help          Show this message and exit.
+  -h, --help      Show this message and exit.
 ```
 
 ### `vinga mcp-server secret clear`
@@ -922,7 +923,7 @@ Options:
   --no-input     never prompt: a destructive command refuses rather than asking,
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
-  --help         Show this message and exit.
+  -h, --help     Show this message and exit.
 ```
 
 ### `vinga prompt-fragment`
@@ -933,7 +934,7 @@ Usage: vinga prompt-fragment [OPTIONS] COMMAND [ARGS]...
   read and write prompt_fragments.<name>
 
 Options:
-  --help  Show this message and exit.
+  -h, --help  Show this message and exit.
 
 Commands:
   set     create or replace prompt_fragments.<name>
@@ -968,7 +969,7 @@ Options:
   --no-input       never prompt: a destructive command refuses rather than
                    asking, and a secret is read from stdin or --from-env
                    (default: prompt at a terminal)
-  --help           Show this message and exit.
+  -h, --help       Show this message and exit.
 
 A credential is never a key=value argument: arguments land in shell history
 and in the process list. Store one with `vinga <kind> secret set`, which reads
@@ -1006,7 +1007,7 @@ Options:
   --no-input     never prompt: a destructive command refuses rather than asking,
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
-  --help         Show this message and exit.
+  -h, --help     Show this message and exit.
 ```
 
 ### `vinga prompt-fragment export`
@@ -1029,7 +1030,7 @@ Options:
   --no-input     never prompt: a destructive command refuses rather than asking,
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
-  --help         Show this message and exit.
+  -h, --help     Show this message and exit.
 ```
 
 ### `vinga prompt-fragment delete`
@@ -1052,7 +1053,7 @@ Options:
   --no-input     never prompt: a destructive command refuses rather than asking,
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
-  --help         Show this message and exit.
+  -h, --help     Show this message and exit.
 ```
 
 ### `vinga agent`
@@ -1063,7 +1064,7 @@ Usage: vinga agent [OPTIONS] COMMAND [ARGS]...
   read and write agents.<name>
 
 Options:
-  --help  Show this message and exit.
+  -h, --help  Show this message and exit.
 
 Commands:
   set      create or replace agents.<name>
@@ -1101,7 +1102,7 @@ Options:
   --no-input       never prompt: a destructive command refuses rather than
                    asking, and a secret is read from stdin or --from-env
                    (default: prompt at a terminal)
-  --help           Show this message and exit.
+  -h, --help       Show this message and exit.
 
 A credential is never a key=value argument: arguments land in shell history
 and in the process list. Store one with `vinga <kind> secret set`, which reads
@@ -1161,7 +1162,7 @@ Options:
   --no-input     never prompt: a destructive command refuses rather than asking,
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
-  --help         Show this message and exit.
+  -h, --help     Show this message and exit.
 ```
 
 ### `vinga agent export`
@@ -1184,7 +1185,7 @@ Options:
   --no-input     never prompt: a destructive command refuses rather than asking,
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
-  --help         Show this message and exit.
+  -h, --help     Show this message and exit.
 ```
 
 ### `vinga agent delete`
@@ -1207,7 +1208,7 @@ Options:
   --no-input     never prompt: a destructive command refuses rather than asking,
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
-  --help         Show this message and exit.
+  -h, --help     Show this message and exit.
 ```
 
 ### `vinga agent preview`
@@ -1232,7 +1233,7 @@ Options:
   --no-input     never prompt: a destructive command refuses rather than asking,
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
-  --help         Show this message and exit.
+  -h, --help     Show this message and exit.
 ```
 
 ### `vinga agent-defaults`
@@ -1243,7 +1244,7 @@ Usage: vinga agent-defaults [OPTIONS] COMMAND [ARGS]...
   read and write agent_defaults
 
 Options:
-  --help  Show this message and exit.
+  -h, --help  Show this message and exit.
 
 Commands:
   set     create or replace agent_defaults
@@ -1276,7 +1277,7 @@ Options:
   --no-input       never prompt: a destructive command refuses rather than
                    asking, and a secret is read from stdin or --from-env
                    (default: prompt at a terminal)
-  --help           Show this message and exit.
+  -h, --help       Show this message and exit.
 
 A credential is never a key=value argument: arguments land in shell history
 and in the process list. Store one with `vinga <kind> secret set`, which reads
@@ -1331,7 +1332,7 @@ Options:
   --no-input     never prompt: a destructive command refuses rather than asking,
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
-  --help         Show this message and exit.
+  -h, --help     Show this message and exit.
 ```
 
 ### `vinga agent-defaults export`
@@ -1351,7 +1352,7 @@ Options:
   --no-input     never prompt: a destructive command refuses rather than asking,
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
-  --help         Show this message and exit.
+  -h, --help     Show this message and exit.
 ```
 
 ### `vinga device`
@@ -1362,7 +1363,7 @@ Usage: vinga device [OPTIONS] COMMAND [ARGS]...
   read and write devices.<mac>, which agents a board reaches
 
 Options:
-  --help  Show this message and exit.
+  -h, --help  Show this message and exit.
 
 Commands:
   bind     bind a device by the MAC you already know, to one or more agents
@@ -1392,7 +1393,7 @@ Options:
   --no-input     never prompt: a destructive command refuses rather than asking,
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
-  --help         Show this message and exit.
+  -h, --help     Show this message and exit.
 ```
 
 ### `vinga device show`
@@ -1415,7 +1416,7 @@ Options:
   --no-input     never prompt: a destructive command refuses rather than asking,
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
-  --help         Show this message and exit.
+  -h, --help     Show this message and exit.
 ```
 
 ### `vinga device delete`
@@ -1438,7 +1439,7 @@ Options:
   --no-input     never prompt: a destructive command refuses rather than asking,
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
-  --help         Show this message and exit.
+  -h, --help     Show this message and exit.
 ```
 
 ### `vinga device pending`
@@ -1449,7 +1450,7 @@ Usage: vinga device pending [OPTIONS] COMMAND [ARGS]...
   the boards waiting to be claimed, and claiming one
 
 Options:
-  --help  Show this message and exit.
+  -h, --help  Show this message and exit.
 
 Commands:
   list   the devices showing an activation code, and the code each is showing
@@ -1474,7 +1475,7 @@ Options:
   --no-input     never prompt: a destructive command refuses rather than asking,
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
-  --help         Show this message and exit.
+  -h, --help     Show this message and exit.
 ```
 
 ### `vinga device pending claim`
@@ -1499,7 +1500,7 @@ Options:
   --no-input     never prompt: a destructive command refuses rather than asking,
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
-  --help         Show this message and exit.
+  -h, --help     Show this message and exit.
 ```
 
 ### `vinga default-agent`
@@ -1510,7 +1511,7 @@ Usage: vinga default-agent [OPTIONS] COMMAND [ARGS]...
   the agent an unbound device reaches
 
 Options:
-  --help  Show this message and exit.
+  -h, --help  Show this message and exit.
 
 Commands:
   set    the agent an unbound device reaches
@@ -1537,7 +1538,7 @@ Options:
   --no-input     never prompt: a destructive command refuses rather than asking,
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
-  --help         Show this message and exit.
+  -h, --help     Show this message and exit.
 ```
 
 ### `vinga default-agent clear`
@@ -1557,7 +1558,7 @@ Options:
   --no-input     never prompt: a destructive command refuses rather than asking,
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
-  --help         Show this message and exit.
+  -h, --help     Show this message and exit.
 ```
 
 ### `vinga apply`
@@ -1582,7 +1583,7 @@ Options:
   --no-input       never prompt: a destructive command refuses rather than
                    asking, and a secret is read from stdin or --from-env
                    (default: prompt at a terminal)
-  --help           Show this message and exit.
+  -h, --help       Show this message and exit.
 ```
 
 ### `vinga list`
@@ -1602,7 +1603,7 @@ Options:
   --no-input     never prompt: a destructive command refuses rather than asking,
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
-  --help         Show this message and exit.
+  -h, --help     Show this message and exit.
 ```
 
 ### `vinga show`
@@ -1622,7 +1623,7 @@ Options:
   --no-input     never prompt: a destructive command refuses rather than asking,
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
-  --help         Show this message and exit.
+  -h, --help     Show this message and exit.
 ```
 
 ### `vinga export`
@@ -1642,7 +1643,7 @@ Options:
   --no-input     never prompt: a destructive command refuses rather than asking,
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
-  --help         Show this message and exit.
+  -h, --help     Show this message and exit.
 ```
 
 ### `vinga diff`
@@ -1663,7 +1664,7 @@ Options:
   --no-input     never prompt: a destructive command refuses rather than asking,
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
-  --help         Show this message and exit.
+  -h, --help     Show this message and exit.
 ```
 
 ### `vinga status`
@@ -1685,7 +1686,7 @@ Options:
   --no-input     never prompt: a destructive command refuses rather than asking,
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
-  --help         Show this message and exit.
+  -h, --help     Show this message and exit.
 ```
 
 ### `vinga reload`
@@ -1706,7 +1707,7 @@ Options:
   --no-input     never prompt: a destructive command refuses rather than asking,
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
-  --help         Show this message and exit.
+  -h, --help     Show this message and exit.
 ```
 
 ### `vinga ota-url`
@@ -1720,7 +1721,7 @@ Usage: vinga ota-url [OPTIONS]
 Options:
   --config PATH  path to the YAML config file naming server.port and
                  server.api.secret_env (default: $VINGA_CONFIG)
-  --help         Show this message and exit.
+  -h, --help     Show this message and exit.
 ```
 
 ### `vinga schema`
@@ -1737,7 +1738,7 @@ Arguments:
   TYPE    with STAGE, the provider type whose options to print
 
 Options:
-  --help  Show this message and exit.
+  -h, --help  Show this message and exit.
 ```
 
 ### `vinga reference`
@@ -1748,7 +1749,7 @@ Usage: vinga reference [OPTIONS]
   the markdown reference, generated from the models
 
 Options:
-  --help  Show this message and exit.
+  -h, --help  Show this message and exit.
 ```
 
 ### `vinga openapi`
@@ -1759,7 +1760,7 @@ Usage: vinga openapi [OPTIONS]
   the configuration API's OpenAPI document, generated from its routes
 
 Options:
-  --help  Show this message and exit.
+  -h, --help  Show this message and exit.
 ```
 
 ### `vinga cli-reference`
@@ -1771,6 +1772,6 @@ Usage: vinga cli-reference [OPTIONS]
   fragments, and every command's own help page
 
 Options:
-  --help  Show this message and exit.
+  -h, --help  Show this message and exit.
 ```
 <!-- end generated: cli reference -->
