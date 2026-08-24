@@ -222,7 +222,35 @@ class VadParameters(BaseModel):
     )
 
 
-# The options whose absence had more than one spelling.
+def _without_blank_spellings(data: object, unwritten: frozenset[str]) -> object:
+    """One fragment with the listed options' blank spellings removed, so
+    that writing one of them means nobody wrote the option.
+
+    The mechanism both converted types need, in one place because it is
+    one rule. Which keys a type lists is the type's own fact, read off
+    the reader it replaced; what happens to a blank one is not.
+
+    Dropping the key rather than substituting the value is what keeps
+    one statement of each default: what a field holds when nobody wrote
+    it is the field's own `default`, said once. It also keeps
+    `model_fields_set` honest, which the nested sections depend on: an
+    empty one must not travel to an engine or into a request body, and
+    `exclude_unset` is what stops it.
+
+    Deliberately not in any published schema. What a schema states is
+    what an operator should write, and `device: ""` is not that; it is a
+    spelling that used to work and still does.
+    """
+    if not isinstance(data, Mapping):
+        return data
+    return {
+        key: value
+        for key, value in data.items()
+        if key not in unwritten or value not in (None, "")
+    }
+
+
+# The faster_whisper options whose absence had more than one spelling.
 #
 # Four ended the reader's ladder with `or <default>`, so an empty string
 # and an explicit null both fell through to the default, and
@@ -230,7 +258,7 @@ class VadParameters(BaseModel):
 # mapping for a key that was not there. Listed rather than marked per
 # field because what they have in common is a fact about the reader they
 # replace, not a fact about any of them.
-_BLANK_IS_UNWRITTEN = frozenset(
+_WHISPER_BLANK_IS_UNWRITTEN = frozenset(
     {"model", "device", "compute_type", "language_detect", "vad_parameters"}
 )
 
@@ -261,25 +289,11 @@ class FasterWhisperOptions(BaseModel):
         this batch prices a break at zero only where the break is a
         typo being caught.
 
-        Dropping the key rather than substituting the value is what
-        keeps one statement of each default: what a field holds when
-        nobody wrote it is the field's own `default`, said once, and
-        this makes those spellings mean nobody wrote it. It also keeps
-        `model_fields_set` honest, which is what `vad_parameters`
-        depends on: an empty section must not travel to the engine, and
-        `exclude_unset` is what stops it.
-
-        Deliberately not in the published schema. What the schema states
-        is what an operator should write, and `device: ""` is not that;
-        it is a spelling that used to work and still does.
+        What a blank means, and why it is dropped rather than
+        substituted, is on `_without_blank_spellings`, which is the same
+        rule the second converted type reads its own list through.
         """
-        if not isinstance(data, Mapping):
-            return data
-        return {
-            key: value
-            for key, value in data.items()
-            if key not in _BLANK_IS_UNWRITTEN or value not in (None, "")
-        }
+        return _without_blank_spellings(data, _WHISPER_BLANK_IS_UNWRITTEN)
 
     model: StrictStr = Field(
         default="small",
@@ -430,6 +444,21 @@ class VoiceSettings(BaseModel):
     )
 
 
+# The elevenlabs option whose absence had more than one spelling, and it
+# is one rather than five.
+#
+# The list is read off the reader this model replaces, exactly as the
+# whisper one is, and that reader was written differently: `model` and
+# `output_format` were `string(key, default)` with no `or <default>`
+# after them, so a blank was never a way of writing nothing there. It
+# travelled, which for `model` meant an empty model id in the request
+# and for `output_format` meant a refusal from the format rule.
+# `voice_settings` is the exception, and it is the same call
+# `vad_parameters` went through: `mapping()` answered `{}` for a key
+# that was not there, so a null section was a section nobody wrote.
+_ELEVENLABS_BLANK_IS_UNWRITTEN = frozenset({"voice_settings"})
+
+
 class ElevenlabsOptions(BaseModel):
     """The options the `elevenlabs` TTS type accepts.
 
@@ -443,6 +472,17 @@ class ElevenlabsOptions(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _blank_reads_as_unwritten(cls, data: object) -> object:
+        """`voice_settings: null` is a section nobody wrote, which is
+        what `mapping()` made it and what the builder then acted on: it
+        put the key in the request body only when the mapping was
+        truthy, so a null section and a missing one produced the same
+        request. That still holds, and `exclude_unset` is now what holds
+        it."""
+        return _without_blank_spellings(data, _ELEVENLABS_BLANK_IS_UNWRITTEN)
 
     voice_id: Nonblank = Field(
         description=(
