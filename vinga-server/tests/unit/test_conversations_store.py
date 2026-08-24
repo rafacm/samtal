@@ -572,7 +572,7 @@ def test_each_switch_combination_nulls_its_own_half(
     (invocation,) = rows(tmp_path, "tool_invocations")
     legs = json.loads(turn["legs"])
 
-    # The spine, in every configuration: retention and purging key on it.
+    # The spine, in every configuration: retention and every read key on it.
     assert session["started_at"] and session["closed_at"]
     assert session["close_reason"] == "limit"
     assert (session["metrics"], session["text"]) == (int(metrics), int(text_storage))

@@ -9,8 +9,8 @@ this file. And a store that is already there is migrated either way,
 because recording being off is not the same as what was recorded being
 unreadable.
 
-The store's own behaviour (the markers, the bound, retention, purge) has
-its own suites next door. This one is about the wiring.
+The store's own behaviour (the markers, the bound, retention) has its
+own suites next door. This one is about the wiring.
 """
 
 import sqlite3
@@ -100,7 +100,7 @@ def test_an_enabled_boot_says_it_is_recording(
 ) -> None:
     # A warning, like capture's, because it means this server is keeping
     # what is said to it, and it names the file so an operator knows
-    # which one to purge or to back up.
+    # which one to back up.
     with caplog.at_level("INFO"):
         with TestClient(create_app(recording_config(tmp_path))):
             pass

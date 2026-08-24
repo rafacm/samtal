@@ -14,10 +14,10 @@ The pieces, in the order they are met:
   hands over per completed turn, and the recorder seam it hands them
   through.
 - `store.py`: the writer thread, its queue, the per-session sink a
-  device session attaches, retention and the purge helper.
+  device session attaches, and retention.
 - `docgen.py`: the reference renderer behind
   `docs/reference/conversations-schema.md`.
-- `cli.py`: `vinga-server conversations purge` and `... schema`.
+- `cli.py`: `vinga-server conversations schema`.
 
 Off unless a deployment asks for it. `server.conversations.enabled` is
 what builds any of this: absent or off, nothing here is constructed, no
@@ -55,7 +55,6 @@ from vinga_server.conversations.store import (
     conversations_path,
     migrate_existing,
     open_conversations,
-    purge,
     read_conversations,
 )
 
@@ -72,6 +71,5 @@ __all__ = [
     "conversations_path",
     "migrate_existing",
     "open_conversations",
-    "purge",
     "read_conversations",
 ]

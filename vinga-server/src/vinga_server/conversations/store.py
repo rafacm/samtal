@@ -24,15 +24,16 @@ arbitrary:
   carries every session, so a marker commits exactly its own session's
   accumulated batch inside one short `BEGIN IMMEDIATE` transaction, and
   no write lock is held across the interval between two turns where a
-  purge or a backup could be waiting on it. A page opened mid
-  conversation reads everything up to the last completed turn.
-- **Absence of the session row is a tombstone.** Deletion is a second
-  writer (retention here, the purge command in another process), so
-  every marker transaction begins by confirming its session still
-  exists. If it does not, the batch and the session's state are
-  discarded and nothing further is written for it, which is what makes
-  a purge of a running session final rather than a race the next turn
-  undoes.
+  backup could be waiting on it. A page opened mid conversation reads
+  everything up to the last completed turn.
+- **Absence of the session row is a tombstone.** Retention deletes whole
+  sessions on `started_at` and asks nothing about whether the
+  conversation ended, so a session long enough to fall outside the
+  window can be taken while it is still talking. Every marker
+  transaction therefore begins by confirming its session still exists.
+  If it does not, the batch and the session's state are discarded and
+  nothing further is written for it, which is what makes the deletion of
+  a running session final rather than a race the next turn undoes.
 
 Storage policy lives here rather than in the pipeline: the runtime hands
 over the full record and the writer nulls the content columns when text
@@ -71,9 +72,7 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import ColumnElement, Engine, delete, select
-from sqlalchemy.exc import OperationalError
 
-from vinga_server.config.loader import ConfigError, DatabaseBusyError, StorageError
 from vinga_server.conversations.records import ToolInvocation, TurnLeg, TurnRecord
 from vinga_server.conversations.schema import events as events_table
 from vinga_server.conversations.schema import sessions, tool_invocations, turns
@@ -166,16 +165,10 @@ _UNKNOWN_WARNED_MAX = 64
 # to the next quiet moment exists to avoid.
 CHECKPOINT_WAIT_MS = 250
 
-# What the purge command waits instead. Longer, because a CLI process
-# has no next marker to retry at: this is its only chance before it
-# exits, and it reports the deferral when it does not get one.
-PURGE_CHECKPOINT_WAIT_MS = 1_000
-
 
 def conversations_path(directory: str | Path) -> Path:
     """Where the file is, without creating anything: the question a
-    caller asks before deciding whether there is a store to read or to
-    purge."""
+    caller asks before deciding whether there is a store to read."""
     return Path(directory) / DATABASE_FILENAME
 
 
@@ -195,7 +188,7 @@ def open_conversations(directory: str | Path) -> Engine:
     conversations database to reset a volume and re-seed a
     configuration, which is advice about the other file, and acting on
     it would destroy exactly the recorded conversations `secure_delete`
-    above exists to erase only when somebody asks."""
+    above exists to erase completely when retention takes them."""
     return open_at(directory, DATABASE_FILENAME, _MIGRATIONS_DIR, secure_delete=True)
 
 
@@ -280,30 +273,6 @@ class _Stop:
     """The sentinel `stop()` puts behind everything already queued, so
     the drain is the writer's ordinary loop reaching the end rather than
     a second code path."""
-
-
-@dataclass(frozen=True)
-class Deletion:
-    """What a purge removed, and whether the log went with it."""
-
-    sessions: int
-    turns: int
-    tool_invocations: int
-    events: int
-    # False when a reader blocked the truncating checkpoint. The rows
-    # are gone either way; the frames holding their bytes are not, until
-    # a checkpoint gets its moment.
-    truncated: bool = True
-
-    def counts(self) -> dict[str, int]:
-        """The four numbers a caller prints, in the order it prints
-        them."""
-        return {
-            "sessions": self.sessions,
-            "turns": self.turns,
-            "tool_invocations": self.tool_invocations,
-            "events": self.events,
-        }
 
 
 @dataclass
@@ -693,8 +662,8 @@ class ConversationStore:
 
     def _session_row(self, opening: Open) -> dict[str, Any]:
         """The session spine, written in every enabled configuration:
-        retention, purging and the read API all key on it, and the two
-        switch columns are what make a null elsewhere readable."""
+        retention and the read API both key on it, and the two switch
+        columns are what make a null elsewhere readable."""
         manifest = opening.manifest
         device = manifest.get("device")
         device = device if isinstance(device, dict) else {}
@@ -878,101 +847,6 @@ class SessionSink:
         )
 
 
-def purge(
-    directory: str | Path,
-    session: str | None = None,
-    device: str | None = None,
-    before: dt.date | None = None,
-) -> dict[str, int]:
-    """Delete sessions from the file, with no server involved.
-
-    Selectors combine with AND, and at least one is the caller's to
-    enforce: a purge with none would be a truncation wearing the same
-    command name. The deletion is one `BEGIN IMMEDIATE` transaction, so
-    it is safe beside a running server (the writer's transactions
-    serialize with it and a busy database yields the retryable error
-    rather than half applying), and it finishes with a truncating
-    checkpoint so the deleted frames do not survive in the write-ahead
-    log.
-
-    Purging a session that is still running ends its recording: the
-    writer finds the row gone at its next marker and stops writing for
-    that session. Capture files are a separate instrument and are never
-    touched.
-
-    The answer says whether the write-ahead log was truncated as well as
-    what was deleted. A reader holding the log open defers the
-    truncation, and a CLI process has no next marker to retry at, so the
-    caller is told rather than left to assume: the deletion is committed
-    either way, and the frames go at the next checkpoint that gets its
-    moment.
-    """
-    criteria: list[ColumnElement[bool]] = []
-    if session is not None:
-        criteria.append(sessions.c.session == session)
-    if device is not None:
-        criteria.append(sessions.c.device == device)
-    if before is not None:
-        # Midnight UTC of the named day, so `--before 2026-08-15` keeps
-        # everything that started on the fifteenth.
-        boundary = dt.datetime.combine(before, dt.time.min, dt.UTC)
-        criteria.append(sessions.c.started_at < boundary.isoformat())
-    if not criteria:
-        # A guard against the caller, not against the operator: the CLI
-        # refuses this before it gets here, and a purge with no selector
-        # would be a truncation wearing the same command name.
-        raise ValueError("a purge needs at least one selector")
-    engine = existing_engine(conversations_path(directory), immediate=True, secure_delete=True)
-    truncated = False
-    # Built inside the handler and raised outside it, the shape
-    # `db.open_database` uses: raising in the arm would leave the
-    # library's exception reachable through __context__ from the one
-    # that travels out, and `from None` sets __suppress_context__
-    # without clearing the reference.
-    problem: ConfigError | None = None
-    counts: dict[str, int] = {}
-    try:
-        with engine.begin() as connection:
-            counts = _delete_sessions(connection, criteria)
-    except Exception as exc:  # noqa: BLE001 - classified, never re-raised
-        problem = _refusal(exc)
-    else:
-        truncated = _checkpoint(engine, PURGE_CHECKPOINT_WAIT_MS)
-    finally:
-        engine.dispose()
-    if problem is not None:
-        raise problem
-    return Deletion(**counts, truncated=truncated)
-
-
-def _refusal(exc: BaseException) -> ConfigError:
-    """A failed deletion, as the sentence the CLI prints.
-
-    The lock that did not clear inside the busy timeout is told from
-    everything else on the driver's own message, the same distinction
-    `db.migration_failure` makes and for the same reason: it is the only
-    one a caller can answer differently.
-
-    Unlike that one, neither sentence carries the driver's line. A purge
-    is given a session, a device or a date on its command line, and a
-    SQLAlchemy error holds the statement it failed on together with the
-    parameters bound to it, so an interpolated detail is a selector
-    printed back to a terminal and into whatever collects its output.
-    The kind of failure and where to look are what the operator needs;
-    the value they just typed is not.
-    """
-    detail = str(getattr(exc, "orig", ""))
-    if isinstance(exc, OperationalError) and ("locked" in detail or "busy" in detail):
-        return DatabaseBusyError(
-            "the conversation store is busy and the purge was not applied; "
-            "nothing was deleted, so run the command again"
-        )
-    return StorageError(
-        "cannot delete from the conversation store; server.database.dir names "
-        "the directory it lives in, and the file has to be readable and writable"
-    )
-
-
 def _delete_sessions(
     connection: Any, criteria: list[ColumnElement[bool]]
 ) -> dict[str, int]:
@@ -1051,7 +925,6 @@ __all__ = [
     "STOP_TIMEOUT_S",
     "Close",
     "ConversationStore",
-    "Deletion",
     "Event",
     "Open",
     "SessionSink",
@@ -1059,6 +932,5 @@ __all__ = [
     "conversations_path",
     "migrate_existing",
     "open_conversations",
-    "purge",
     "read_conversations",
 ]
