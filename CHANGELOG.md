@@ -101,10 +101,14 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   it (#190), which is where the command's deletion semantics and its
   caveats are recorded. Until that lands there is no way to erase one
   named session, and a deployment that must erase now stops the server
-  and deletes the conversations database file with its `-wal` and `-shm`
-  sidecars, which takes every session rather than the one that was asked
-  about. That is said in those words in the server README, in
-  `config.example.yaml`, and in the generated
+  and deletes three files rather than one: `conversations.db`, and the
+  `conversations.db-wal` and `conversations.db-shm` sidecars beside it.
+  All three, because a committed row's bytes live in the write-ahead log
+  until a checkpoint folds them back, so removing the database alone
+  leaves what was meant to be erased in the file next to it. That takes
+  every session rather than the one that was asked about. It is said in
+  those words in the server README, in `config.example.yaml`, and in the
+  generated
   [`docs/reference/conversations-schema.md`](docs/reference/conversations-schema.md),
   whose deletion section is the one committed artifact this moves.
 
