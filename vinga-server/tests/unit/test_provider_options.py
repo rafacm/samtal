@@ -33,14 +33,13 @@ import pytest
 from pydantic import BaseModel
 
 from vinga_server.config.loader import ConfigError
-from vinga_server.config.models import ProviderConfig
+from vinga_server.config.models import PROVIDER_STAGES, ProviderConfig
 from vinga_server.config.provider_options import (
-    DECLARED_OPTIONS,
+    PROVIDER_TYPES,
     FasterWhisperOptions,
     OptionsRefused,
     VadParameters,
     checked_options,
-    declared_options,
     options_model,
 )
 from vinga_server.providers import ProviderError, registry
@@ -268,34 +267,41 @@ def test_a_refusal_names_no_key_and_no_value_anywhere_in_its_chain() -> None:
     assert refusal.__context__ is None
 
 
-def test_every_declared_pair_names_a_registered_type() -> None:
-    """The one direction the derivation cannot check itself.
+def test_the_registry_is_the_table_resolved() -> None:
+    """The derivation, asserted as one: every entry of the table has a
+    registration, every registration comes from an entry, and the model
+    on it is the one the entry declares.
 
-    The registry reads its `options` out of `DECLARED_OPTIONS`, so a
-    type that has a factory and no model is an ordinary untyped type and
-    nothing is wrong. The other way round is wrong and silent: a key
-    naming a stage or a type the registry does not have declares a
-    contract nothing dispatches on, and every surface would document
-    options no entry can carry. A typo in either half of a key looks
-    exactly like that.
+    This replaces a test that used to bridge two mappings. That test was
+    the receipt for a topology written twice; there is one table now, so
+    what is left to check is that nothing was dropped or invented while
+    resolving it.
     """
-    missing = [
-        f"{stage} {type_name}"
-        for (stage, type_name) in DECLARED_OPTIONS
-        if registry.registration(stage, type_name) is None
-    ]
+    resolved = registry._registrations()
 
-    assert not missing, f"declared options for types no registry entry has: {missing}"
+    assert {stage: sorted(types) for stage, types in resolved.items()} == {
+        stage: sorted(types) for stage, types in PROVIDER_TYPES.items()
+    }
+    for stage, types in PROVIDER_TYPES.items():
+        for type_name, declared in types.items():
+            assert resolved[stage][type_name].options is declared.options
 
 
-def test_the_registry_carries_the_model_it_was_declared_with() -> None:
-    """And the derivation itself, which is one line and worth one
-    assertion: what the table dispatches on is the declaration rather
-    than a copy of it."""
-    for stage, type_name, model in declared_options():
-        found = registry.registration(stage, type_name)
-        assert found is not None
-        assert found.options is model
+def test_the_table_covers_the_pipeline_and_nothing_else() -> None:
+    """The stages a provider can be written under are the pipeline's,
+    and a table keyed by a fifth would declare types no agent can
+    reference."""
+    assert set(PROVIDER_TYPES) == set(PROVIDER_STAGES)
+
+
+def test_a_factory_is_named_rather_than_imported() -> None:
+    """What keeps the table light, stated as a property of its entries
+    rather than as a comment: every factory is two strings and an
+    attribute lookup deferred to construction time."""
+    for types in PROVIDER_TYPES.values():
+        for declared in types.values():
+            assert isinstance(declared.module, str)
+            assert declared.path.startswith("vinga_server.providers.")
 
 
 def test_a_type_with_no_model_is_not_checked_at_all() -> None:

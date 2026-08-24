@@ -1,4 +1,4 @@
-"""What each provider type accepts, stated once as a model.
+"""The provider types: what builds each one, and what it accepts.
 
 A provider entry's options are everything it carries beyond `type`,
 `api_key_env` and `egress`, and until this module existed they were
@@ -10,20 +10,25 @@ place, and the write path, the builder, the JSON Schema and the
 refusals all read it from that place (#88).
 
 Three things live here and nothing else. The model CLASSES; the
-`DECLARED_OPTIONS` mapping, which is the one statement of which stage's
-type has which model; and the SANITIZER, the one function that turns a
-stage, a type and a mapping into either a validated instance or a
-value-free refusal, so the write path, the read-back and the build path
-consult one implementation rather than three.
+`PROVIDER_TYPES` table, which is the one statement of which types exist,
+where each one is built and which of them declares a model; and the
+SANITIZER, the one function that turns a stage, a type and a mapping
+into either a validated instance or a value-free refusal, so the write
+path, the read-back and the build path consult one implementation rather
+than three.
 
-It is one topology and everything derives from it, including the
-provider registry, whose `Registration` reads its options model out of
-this mapping when the table is built. That is the direction, and it goes
-this way rather than the other because of what this module is allowed to
-weigh. Pydantic and `config.models`, and nothing else: no provider
-package, no engine, no database driver, no cryptography. Three committed
-pins depend on that, and each of them is a promise this repository makes
-about where its code can run.
+One topology, and everything derives from it: `providers/registry.py`
+builds its registrations by resolving this table's factory names, the
+documentation renders its per-type sections out of the same entries, and
+the refusal that lists a stage's known types counts the same keys. There
+is no second mapping to hold against this one and no test bridging two.
+
+It weighs pydantic and `config.models` and nothing else: no provider
+package, no engine, no database driver, no cryptography. A factory is
+named rather than imported, which is what lets the topology live at an
+address the documentation can afford. Three committed pins depend on
+that, and each of them is a promise this repository makes about where
+its code can run.
 
 - The reference and the JSON Schema render from the models alone, in a
   child interpreter with no database and no key
@@ -39,9 +44,9 @@ A home inside the provider package could satisfy none of the three: the
 package's `__init__` re-exports the whole provider layer, so importing
 one pydantic module from it pulls in the engine base classes, the
 provider world and, through the secret store, cryptography. Hence this
-address. What lives on the provider side is the half that is genuinely
-the provider layer's: which factory builds a type, and the reading of a
-validated instance inside a builder.
+address. What lives on the provider side is what genuinely runs there:
+resolving a name into a callable, putting an entry's secrets in force,
+constructing, and the reading of a validated instance inside a builder.
 
 Field descriptions carry the example fragment's factual sentence, which
 is what makes the schema and the reference say what the fragment says.
@@ -51,6 +56,7 @@ standing documentation decision.
 """
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -286,22 +292,95 @@ class OptionsRefused(Exception):
         super().__init__(sentence)
 
 
-# Which stage's type declares which model, and the one place that is
-# written down.
+# The provider types, and the one place they are written down
 #
-# Keyed by the pair because the provider registry is: `openai` is an ASR
-# type and a TTS type, `mock` is all four, and a type name on its own
-# addresses nothing in particular. The registry builds its own table's
-# `options` out of this rather than repeating it, so there is one
-# statement of the topology and one direction of derivation; a key here
-# naming a stage-and-type the registry does not have is caught by a
-# one-way test rather than by silence.
+# Two facts per type, and they are the two every surface in this
+# repository asks about one: where the thing that builds it lives, and
+# what it accepts. Both live here, in one table, because the alternative
+# has now been tried twice and failed the same way each time. A factory
+# table in the provider package with an options mapping beside it is two
+# stage-and-type topologies held together by a test, which is the design
+# guide's pending bug; putting the models here and leaving the factories
+# there was the same shape with a shorter bridge. So there is one table,
+# and both halves of a type are one entry of it.
 #
-# Empty for a stage with no declared type, which is every stage but one
-# while the conversion runs type by type (#88).
-DECLARED_OPTIONS: dict[tuple[str, str], type[BaseModel]] = {
-    ("asr", "faster_whisper"): FasterWhisperOptions,
+# What makes that possible without dragging an engine behind it is that
+# a factory is NAMED here rather than imported: `module` and `attribute`
+# are strings, resolved by `providers/registry.py` at the moment a
+# provider is constructed, which is the same laziness the per-type
+# factory functions used to spell out one closure at a time. Importing
+# this module therefore costs pydantic and `config.models`, exactly as
+# it did when it held models alone, and the three pins that depend on
+# that are undisturbed.
+_IMPLEMENTATIONS = "vinga_server.providers"
+
+
+@dataclass(frozen=True)
+class ProviderType:
+    """One provider type: what builds it, and what it accepts.
+
+    `module` is a name under `vinga_server.providers` and `attribute` is
+    the callable in it, so nothing is imported until something is built.
+    `extra` is the optional dependency whose absence has to be explained
+    rather than raised as an ImportError from the middle of a request,
+    and None for a type the core install can always build. `options` is
+    the model the type declares, and None for one that declares none,
+    which is the ordinary case while the conversion runs type by type
+    (#88).
+    """
+
+    module: str
+    attribute: str = "build"
+    options: type[BaseModel] | None = None
+    extra: str | None = None
+
+    @property
+    def path(self) -> str:
+        """The importable name of the module holding the factory."""
+        return f"{_IMPLEMENTATIONS}.{self.module}"
+
+
+# Keyed by stage and then by type because that is how a provider is
+# addressed: `openai` is an ASR type and a TTS type, `mock` is all four,
+# and a type name on its own addresses nothing in particular.
+PROVIDER_TYPES: dict[str, dict[str, ProviderType]] = {
+    "llm": {
+        "mock": ProviderType("mock", "build_llm"),
+        "anthropic": ProviderType("anthropic_llm"),
+        "openai_compatible": ProviderType("openai_llm"),
+    },
+    "asr": {
+        "mock": ProviderType("mock", "build_asr"),
+        "faster_whisper": ProviderType(
+            "faster_whisper", options=FasterWhisperOptions, extra="faster-whisper"
+        ),
+        # No extra to guard, for the reason the openai TTS type has none:
+        # the openai client is a core dependency and transcription is a
+        # method on it.
+        "openai": ProviderType("openai_asr"),
+    },
+    "tts": {
+        "mock": ProviderType("mock", "build_tts"),
+        # No extra to guard: the provider speaks the API over httpx,
+        # which the core install already carries.
+        "elevenlabs": ProviderType("elevenlabs_tts"),
+        # No extra to guard: the openai client is a core dependency,
+        # carried for the openai_compatible LLM type, and speech is a
+        # method on it.
+        "openai": ProviderType("openai_tts"),
+        "piper": ProviderType("piper_tts", extra="piper"),
+    },
+    "vad": {
+        "mock": ProviderType("mock", "build_vad"),
+        "silero": ProviderType("silero"),
+    },
 }
+
+
+def provider_type(stage: str, type_name: str) -> ProviderType | None:
+    """What the table says about one stage's type, or None for a stage
+    or a type it does not have."""
+    return PROVIDER_TYPES.get(stage, {}).get(type_name)
 
 
 def options_model(stage: str, type_name: str) -> type[BaseModel] | None:
@@ -311,7 +390,8 @@ def options_model(stage: str, type_name: str) -> type[BaseModel] | None:
     A type with no model is the ordinary case while the conversion runs
     type by type: the caller falls back to what it did before.
     """
-    return DECLARED_OPTIONS.get((stage, type_name))
+    declared = provider_type(stage, type_name)
+    return declared.options if declared is not None else None
 
 
 def declared_options() -> tuple[tuple[str, str, type[BaseModel]], ...]:
@@ -326,11 +406,10 @@ def declared_options() -> tuple[tuple[str, str, type[BaseModel]], ...]:
     insertion order.
     """
     return tuple(
-        (stage, type_name, DECLARED_OPTIONS[(stage, type_name)])
+        (stage, type_name, declared.options)
         for stage in PROVIDER_STAGES
-        for type_name in sorted(
-            declared for one, declared in DECLARED_OPTIONS if one == stage
-        )
+        for type_name, declared in sorted(PROVIDER_TYPES.get(stage, {}).items())
+        if declared.options is not None
     )
 
 
@@ -396,15 +475,17 @@ def validated(
 
 
 __all__ = [
-    "DECLARED_OPTIONS",
+    "PROVIDER_TYPES",
     "NUMBERS_RULE",
     "NUMBER_RULE",
     "FasterWhisperOptions",
     "OptionsRefused",
     "VadParameters",
     "checked_options",
+    "ProviderType",
     "component_name",
     "declared_options",
     "options_model",
+    "provider_type",
     "validated",
 ]

@@ -1,13 +1,12 @@
 """Constructing providers from their configuration entries.
 
-Each stage maps type names to a `Registration`: the factory that builds
-the type, and the options model it declares, read out of
-`config/provider_options.py` rather than restated here. Heavyweight
-implementations
-import their engine inside the factory, so the core install only pays
-for what the configuration references, and a missing optional
-dependency becomes an error naming the extra to install rather than an
-ImportError from the middle of a request.
+Every provider type is written down once, in
+`config/provider_options.py`: where its factory lives and what it
+accepts. This module turns that into `Registration`s, resolving a
+factory name into a callable at the moment a provider is built, so the
+core install only pays for the engines a configuration references and a
+missing optional dependency becomes an error naming the extra to
+install rather than an ImportError from the middle of a request.
 
 Construction only. What owns the objects, checks them and lets go of
 them again is `providers/world.py`, which is the half that cannot run in
@@ -17,15 +16,17 @@ it (#191).
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from importlib import import_module
+from types import ModuleType
 
 from pydantic import BaseModel
 
 from vinga_server.config import ConfigError
 from vinga_server.config.models import ProviderConfig
 from vinga_server.config.provider_options import (
-    DECLARED_OPTIONS,
-    FasterWhisperOptions,
+    PROVIDER_TYPES,
     OptionsRefused,
+    ProviderType,
     validated,
 )
 from vinga_server.config.secrets import (
@@ -142,23 +143,23 @@ Factory = Callable[..., object]
 
 @dataclass(frozen=True)
 class Registration:
-    """What one stage's type name is: how it is built, and what it
-    accepts.
+    """What one stage's type name is, on this side of the boundary: a
+    callable that builds it, and the model it accepts.
 
-    One topology, in one direction. `options` is not written out beside
-    the factory: it is READ, when the table below is built, out of
-    `config.provider_options.DECLARED_OPTIONS`, which is where a type's
-    contract is declared. Two mappings that must agree about which types
-    exist would be one mapping with a bug pending, so the second is
-    derived from the first and a key declaring options for a type this
-    table does not have is caught by a test rather than by silence.
+    Derived rather than declared. Both halves come out of one entry of
+    `config.provider_options.PROVIDER_TYPES`, which is where the types
+    are written down: this resolves that entry's factory name into
+    something callable and carries its model along unchanged. There is
+    no second table here to hold against that one, which is the whole
+    point of the shape: two stage-and-type mappings that must agree
+    about which types exist are one mapping with a bug pending, and a
+    test bridging them is the bug's receipt rather than its cure.
 
-    Which way round is decided by weight rather than by taste. The
-    models are documented by surfaces that must load neither an engine
-    nor a database driver (`config/provider_options.py` says which), and
-    reaching this module means importing the provider package. So the
-    declaration lives where the light readers can reach it, and the
-    factory, which is the genuinely provider-side half, lives here.
+    Which side owns what follows from what each side may weigh. The
+    types are documented by surfaces that must load neither an engine
+    nor a database driver, and reaching this module means importing the
+    provider package, so the table lives where the light readers can
+    reach it and the resolving happens here, where the engines are.
 
     The factory comes in two shapes, and which one is which is decided
     by `options` rather than by a flag: a type that declares a model is
@@ -174,115 +175,61 @@ class Registration:
     options: type[BaseModel] | None = None
 
 
-def _silero(label: str, config: ProviderConfig) -> object:
-    from vinga_server.providers import silero
+def _resolved(type_name: str, declared: ProviderType) -> Factory:
+    """One table entry's factory name as something callable.
 
-    return silero.build(label, config)
+    The import happens when a provider is built and not before, which is
+    the laziness the per-type factory functions used to spell out one
+    closure each: the core install pays for the engine a configuration
+    references and for no other.
 
+    A missing optional dependency is explained rather than raised. What
+    reaches an operator names the extra to install, and it names it from
+    the table's own `extra` rather than from a sentence written per
+    type, so a type that gains an extra gains the message. The refusal
+    is raised after the handler has closed and chains nothing: an
+    ImportError from a partially installed environment carries the
+    module search path and a traceback through somebody else's package,
+    and this sentence is printed to an operator as it is.
+    """
 
-def _faster_whisper(
-    label: str, config: ProviderConfig, options: FasterWhisperOptions
-) -> object:
-    try:
-        from vinga_server.providers import faster_whisper
-    except ImportError as exc:
-        raise ProviderError(
-            f'{label}: type "faster_whisper" needs the faster-whisper extra; '
-            f"install it with: uv sync --extra faster-whisper"
-        ) from exc
-    return faster_whisper.build(label, config, options)
+    def factory(label: str, config: ProviderConfig, *rest: object) -> object:
+        missing: str | None = None
+        module: ModuleType | None = None
+        try:
+            module = import_module(declared.path)
+        except ImportError:
+            if declared.extra is None:
+                # Nothing to explain: a core module that will not import
+                # is a packaging fault, and the generic wrapper below
+                # names the class without repeating what it said.
+                raise
+            missing = declared.extra
+        if module is None:
+            raise ProviderError(
+                f'{label}: type "{type_name}" needs the {missing} extra; '
+                f"install it with: uv sync --extra {missing}"
+            )
+        return getattr(module, declared.attribute)(label, config, *rest)
 
-
-def _openai_asr(label: str, config: ProviderConfig) -> object:
-    # No extra to guard, for the reason the openai TTS type has none:
-    # the openai client is a core dependency and transcription is a
-    # method on it.
-    from vinga_server.providers import openai_asr
-
-    return openai_asr.build(label, config)
-
-
-def _anthropic(label: str, config: ProviderConfig) -> object:
-    from vinga_server.providers import anthropic_llm
-
-    return anthropic_llm.build(label, config)
-
-
-def _openai_compatible(label: str, config: ProviderConfig) -> object:
-    from vinga_server.providers import openai_llm
-
-    return openai_llm.build(label, config)
-
-
-def _elevenlabs(label: str, config: ProviderConfig) -> object:
-    # No extra to guard: the provider speaks the API over httpx, which
-    # the core install already carries.
-    from vinga_server.providers import elevenlabs_tts
-
-    return elevenlabs_tts.build(label, config)
-
-
-def _openai_tts(label: str, config: ProviderConfig) -> object:
-    # No extra to guard: the openai client is a core dependency, carried
-    # for the openai_compatible LLM type, and speech is a method on it.
-    from vinga_server.providers import openai_tts
-
-    return openai_tts.build(label, config)
-
-
-def _piper(label: str, config: ProviderConfig) -> object:
-    try:
-        from vinga_server.providers import piper_tts
-    except ImportError as exc:
-        raise ProviderError(
-            f'{label}: type "piper" needs the piper extra; '
-            f"install it with: uv sync --extra piper"
-        ) from exc
-    return piper_tts.build(label, config)
+    return factory
 
 
 def _registrations() -> dict[str, dict[str, Registration]]:
-    # Imported here rather than at module top because the implementation
-    # modules import the OptionsReader above; the table itself is tiny.
-    # `provider_options` is imported at module scope instead, which is
-    # what that module being pydantic and nothing else buys: the
-    # declaration is readable from here without this module being
-    # readable from there.
-    from vinga_server.providers import mock
+    """The table this module builds from, derived whole.
 
-    return {
-        "llm": {
-            "mock": _for("llm", "mock", mock.build_llm),
-            "anthropic": _for("llm", "anthropic", _anthropic),
-            "openai_compatible": _for("llm", "openai_compatible", _openai_compatible),
-        },
-        "asr": {
-            "mock": _for("asr", "mock", mock.build_asr),
-            "faster_whisper": _for("asr", "faster_whisper", _faster_whisper),
-            "openai": _for("asr", "openai", _openai_asr),
-        },
-        "tts": {
-            "mock": _for("tts", "mock", mock.build_tts),
-            "elevenlabs": _for("tts", "elevenlabs", _elevenlabs),
-            "openai": _for("tts", "openai", _openai_tts),
-            "piper": _for("tts", "piper", _piper),
-        },
-        "vad": {
-            "mock": _for("vad", "mock", mock.build_vad),
-            "silero": _for("vad", "silero", _silero),
-        },
-    }
-
-
-def _for(stage: str, type_name: str, factory: Factory) -> Registration:
-    """One entry of the table: the factory written here, and the options
-    model read out of the declaration.
-
-    The derivation, in the one line that performs it. A type appears in
-    this table because it can be built, and it validates because its
-    contract is declared; neither fact is stated twice.
+    Rebuilt per call, as it has always been: it is a dozen closures over
+    strings, nothing is imported to make one, and a test that needs a
+    type of its own replaces this function rather than mutating a
+    global.
     """
-    return Registration(factory, DECLARED_OPTIONS.get((stage, type_name)))
+    return {
+        stage: {
+            type_name: Registration(_resolved(type_name, declared), declared.options)
+            for type_name, declared in types.items()
+        }
+        for stage, types in PROVIDER_TYPES.items()
+    }
 
 
 def registration(stage: str, type_name: str) -> Registration | None:
