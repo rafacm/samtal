@@ -341,14 +341,62 @@ REACHABLE_NOWHERE_SHOWN = "https://127.0.0.1:1/api"
 
 
 def test_an_accepted_url_keeps_its_query_credential_only_for_the_request() -> None:
-    """The seam the two failures below read: what is reached and what
-    may be shown are two strings, and only one of them holds the
-    credential."""
+    """The seam the two failures below read: what a request is built
+    from and what may be shown are different strings, and only the first
+    holds the credential."""
     address = cli._permitted(REACHABLE_NOWHERE, "--api-url")
 
-    assert address.reached == REACHABLE_NOWHERE
+    assert address.base == "https://127.0.0.1:1/api"
+    assert address.query == f"token={SECRET}"
     assert address.shown == REACHABLE_NOWHERE_SHOWN
     assert SECRET not in address.shown
+    # The composition, at the seam: the endpoint's path first and the
+    # query after it, rather than the endpoint's name appended to the
+    # credential's value.
+    assert address.endpoint("/agents/sam") == f"/agents/sam?token={SECRET}"
+
+
+def test_an_address_with_no_query_composes_a_path_and_nothing_else() -> None:
+    address = cli._permitted("https://config.example.invalid/api/", "--api-url")
+
+    assert address.base == "https://config.example.invalid/api"
+    assert address.query == ""
+    assert address.endpoint("/agents/sam") == "/agents/sam"
+
+
+def test_a_query_carrying_base_sends_the_path_and_the_query_it_was_given(
+    run, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """What the fields above amount to over a real client: the request
+    line, which is the only place the composition can be checked
+    honestly.
+
+    An identity carrying a slash is addressed as one percent-encoded
+    segment, and it stays one here: what is reattached is a query, and
+    it is reattached after the whole path rather than inside it.
+    """
+    asked: list[httpx.Request] = []
+    built: list[str] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        asked.append(request)
+        return httpx.Response(200, json={"entries": []})
+
+    def factory(base_url: str, token: str) -> httpx.Client:
+        built.append(base_url)
+        return httpx.Client(base_url=base_url, transport=httpx.MockTransport(answer))
+
+    monkeypatch.setattr(cli, "build_client", factory)
+
+    assert run("--api-url", REACHABLE_NOWHERE, "apply", "-f", "-", stdin="{}\n") == 0
+
+    (sent,) = asked
+    assert sent.url.path == "/api/apply"
+    assert sent.url.query == f"token={SECRET}".encode()
+    # And the base the client was built on carried no query of its own,
+    # which is what stopped the endpoint's name landing inside the
+    # credential's value.
+    assert built == ["https://127.0.0.1:1/api"]
 
 
 def test_a_transport_failure_after_an_accepted_url_names_it_sanitized(
