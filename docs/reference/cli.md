@@ -529,6 +529,33 @@ options for asr type faster_whisper:
   vad_parameters.min_silence_duration_ms: int | null  (default: null)
     How much silence ends a speech segment, in milliseconds.
 
+options for tts type elevenlabs:
+
+  voice_id: str  (required)
+    Voice id from your ElevenLabs voice library: the id, not the display name,
+    and account-specific even for the stock voices.
+  model: str  (default: "eleven_flash_v2_5")
+    The synthesis model.
+  output_format: str  (default: "pcm_24000")
+    Audio asked of the API.
+  language_code: str | null  (default: null)
+    Pin the spoken language (ISO 639-1) instead of letting the model infer it
+    from the text.
+  voice_settings: VoiceSettings  (default: {})
+    Voice tuning, passed to the API as given.
+  timeout_s: float  (default: 30.0)
+    Seconds before a synthesis request is abandoned.
+  voice_settings.stability: float | null  (default: null)
+    Higher is more monotone and more predictable.
+  voice_settings.similarity_boost: float | null  (default: null)
+    Higher holds the synthesis closer to the reference voice.
+  voice_settings.style: float | null  (default: null)
+    Style exaggeration, applied to voices that carry one.
+  voice_settings.speed: float | null  (default: null)
+    A multiplier around 1.0, which the API caps at 0.7 to 1.2.
+  voice_settings.use_speaker_boost: bool | null  (default: null)
+    Sharpens the resemblance to the reference speaker, and costs latency.
+
 Any other key is an option for a type that declares none of its own;
 see vinga-server/examples/ for those types' options.
 

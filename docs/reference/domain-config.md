@@ -147,14 +147,14 @@ vinga-server config set provider <stage> <name> -f fragment.yaml
 | ... | | | Passed through to the provider implementation. |
 
 A provider entry carries whatever options its `type` takes. The types that
-declare an option model, as stage and type, are: asr faster_whisper. Their
-options are checked when the entry is written and refused by name, they are
-printed by `vinga-server config schema provider <stage> <type>`, and the
-reference lists their fields under the provider section. Every other type has
-its options passed through rather than declared, so no schema can list those,
-and until the rest are typed (#88) they are documented in the example
-fragments below, which is also where the measured numbers behind each default
-are kept.
+declare an option model, as stage and type, are: asr faster_whisper, tts
+elevenlabs. Their options are checked when the entry is written and refused by
+name, they are printed by `vinga-server config schema provider <stage>
+<type>`, and the reference lists their fields under the provider section.
+Every other type has its options passed through rather than declared, so no
+schema can list those, and until the rest are typed (#88) they are documented
+in the example fragments below, which is also where the measured numbers
+behind each default are kept.
 
 Examples:
 
@@ -196,6 +196,31 @@ Fields of `vad_parameters`:
 | --- | --- | --- | --- |
 | `min_silence_duration_ms` | `int \| null` | `null` | How much silence ends a speech segment, in milliseconds. Any other key written here is passed to the engine's VAD unread, which is what this section is for. |
 | ... | | | Passed through to the provider implementation. |
+
+#### `tts` options for `type: elevenlabs`
+
+`providers.tts.<name>`
+
+The options the `elevenlabs` TTS type accepts.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `voice_id` | `str` | `required` | Voice id from your ElevenLabs voice library: the id, not the display name, and account-specific even for the stock voices. |
+| `model` | `str` | `"eleven_flash_v2_5"` | The synthesis model. The default is the low-latency one (~75 ms to first byte, 32 languages); eleven_multilingual_v2 sounds better and answers slower, which a conversation feels. |
+| `output_format` | `str` | `"pcm_24000"` | Audio asked of the API. Only the pcm_<rate> formats work here, since the stage streams raw PCM; the default matches the rate devices are spoken at, so nothing is resampled. pcm_44100 and up need a paid ElevenLabs tier. |
+| `language_code` | `str \| null` | `null` | Pin the spoken language (ISO 639-1) instead of letting the model infer it from the text. |
+| `voice_settings` | `VoiceSettings` | `{}` | Voice tuning, passed to the API as given. Only what the fragment sets is sent. |
+| `timeout_s` | `float` | `30.0` | Seconds before a synthesis request is abandoned. |
+
+Fields of `voice_settings`:
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `stability` | `float \| null` | `null` | Higher is more monotone and more predictable. |
+| `similarity_boost` | `float \| null` | `null` | Higher holds the synthesis closer to the reference voice. |
+| `style` | `float \| null` | `null` | Style exaggeration, applied to voices that carry one. |
+| `speed` | `float \| null` | `null` | A multiplier around 1.0, which the API caps at 0.7 to 1.2. |
+| `use_speaker_boost` | `bool \| null` | `null` | Sharpens the resemblance to the reference speaker, and costs latency. |
 
 ### MCP server
 

@@ -395,9 +395,9 @@ class VoiceSettings(BaseModel):
     had a model: `read_voice_settings` listed exactly these and refused
     anything else, on the stated grounds that a typo the API silently
     ignores is a knob that never took effect. The door stays shut here
-    for that reason, and this is the difference from `VadParameters`
-    above, whose keys are read by an engine that documents more of them
-    than vinga does.
+    for that reason, and that is the difference from `VadParameters`,
+    the other nested model, whose keys are read by an engine that takes
+    more of them than vinga documents.
 
     What travels is what was written: the mapping is dumped with
     `exclude_unset=True` into the request body, so an operator's explicit
