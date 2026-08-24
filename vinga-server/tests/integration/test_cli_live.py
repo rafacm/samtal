@@ -1471,11 +1471,16 @@ def test_a_fragment_that_will_not_parse_never_travels(
     assert run(*argv) == 1
     refused = capsys.readouterr()
     assert refused.err == (
-        f"invalid YAML in {broken} at line 3, column 1. Nothing of what it holds is "
-        f"quoted back: a source that will not parse is one nothing here has validated, "
-        f"and what a parser says about one repeats the tag or the key it stopped on\n"
+        f"invalid YAML in {cli.FILE_SOURCE} at line 3, column 1. Nothing of what it "
+        f"holds is quoted back: a source that will not parse is one nothing here has "
+        f"validated, and what a parser says about one repeats the tag or the key it "
+        f"stopped on\n"
     )
     assert refused.out == ""
+    # The path is typed, so it is not in the sentence either (#289): the
+    # file is called what this module calls it, and where the parser
+    # stopped is a line and a column inside it.
+    assert str(broken) not in refused.err
     assert (
         leaked(
             PLANTED,

@@ -153,16 +153,52 @@ def runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return _run
 
 
+def logged(caplog: pytest.LogCaptureFixture) -> str:
+    """Every record this server wrote while a command ran, rendered as
+    anything reading them would.
+
+    The message, the arguments behind it and the exception info a
+    traceback would be built from, because a value that reached a record
+    as an argument is a value the formatter puts back into the line. Only
+    this server's own channels: httpx logs the request line of every
+    request it makes, and what the HTTP client says about a URL it was
+    handed is not something a command here chose to write.
+    """
+    return "\n".join(
+        f"{record.getMessage()}\n{record.args!r}\n{record.exc_info!r}"
+        for record in caplog.records
+        if record.name.startswith("vinga_server")
+    )
+
+
 def chain(exc: BaseException) -> str:
     """Everything an exception carries, including what a chain walker
-    would find behind it."""
+    would find behind it: its text, its arguments, what its own
+    attributes hold, and the same again for every cause and context."""
     parts: list[str] = []
     seen: set[int] = set()
     current: BaseException | None = exc
     while current is not None and id(current) not in seen:
         seen.add(id(current))
-        parts += [repr(current), str(current)]
+        parts += [repr(current), str(current), repr(current.args), _held(current)]
         current = current.__cause__ or current.__context__
+    return "\n".join(parts)
+
+
+def _held(exc: BaseException) -> str:
+    """What one exception's attributes hold, and what theirs hold.
+
+    Two levels rather than one, because the lesson that made this
+    necessary is a PyYAML mark: the exception's repr says nothing, its
+    `problem_mark` attribute is an object, and that object's `buffer` is
+    the whole source being parsed. A walk that stopped at the repr would
+    miss exactly what it is looking for.
+    """
+    parts: list[str] = []
+    for value in vars(exc).values():
+        parts.append(repr(value))
+        if hasattr(value, "__dict__"):
+            parts += [repr(inner) for inner in vars(value).values()]
     return "\n".join(parts)
 
 

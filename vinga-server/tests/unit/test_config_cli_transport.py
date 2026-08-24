@@ -33,6 +33,7 @@ from fastapi.testclient import TestClient
 import vinga_server.tools.mcp as mcp_module
 from tests.support.config_cli import API_SECRET_ENV, SECRET, TOKEN, runner
 from tests.support.config_cli import chain as _chain
+from tests.support.config_cli import logged as _logged
 from vinga_server import db as db_module
 from vinga_server.config import cli
 from vinga_server.config.api import MOUNT_PATH, build_api
@@ -339,22 +340,6 @@ REACHABLE_NOWHERE = f"https://127.0.0.1:1/api?token={SECRET}"
 REACHABLE_NOWHERE_SHOWN = "https://127.0.0.1:1/api"
 
 
-def _written(caplog: pytest.LogCaptureFixture) -> str:
-    """Every record this server wrote, rendered as anything reading them
-    would.
-
-    Only this server's channels, for the reason `tests/support/events.py`
-    gives: httpx logs the request line of every request it makes, and
-    what the HTTP client says about a URL it was handed is not something
-    this CLI chose to write anywhere.
-    """
-    return "\n".join(
-        f"{record.getMessage()}\n{record.args!r}\n{record.exc_info!r}"
-        for record in caplog.records
-        if record.name.startswith("vinga_server")
-    )
-
-
 def test_an_accepted_url_keeps_its_query_credential_only_for_the_request() -> None:
     """The seam the two failures below read: what is reached and what
     may be shown are two strings, and only one of them holds the
@@ -393,7 +378,7 @@ def test_a_transport_failure_after_an_accepted_url_names_it_sanitized(
     assert SECRET not in both
     assert "?token=" not in both
     assert "Traceback" not in captured.err
-    assert SECRET not in _written(caplog)
+    assert SECRET not in _logged(caplog)
 
 
 def test_an_unreadable_answer_from_an_accepted_url_names_it_sanitized(
@@ -428,7 +413,7 @@ def test_an_unreadable_answer_from_an_accepted_url_names_it_sanitized(
     assert f"the configuration API at {REACHABLE_NOWHERE_SHOWN} answered 502" in captured.err
     assert SECRET not in both
     assert "?token=" not in both
-    assert SECRET not in _written(caplog)
+    assert SECRET not in _logged(caplog)
 
 
 def test_neither_failure_carries_the_credential_in_its_chain() -> None:

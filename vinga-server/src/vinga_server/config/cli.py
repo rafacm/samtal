@@ -1624,12 +1624,23 @@ def _stopped_at(exc: BaseException) -> str:
     return f" at line {mark.line + 1}, column {mark.column + 1}"
 
 
+# What a source that will not parse is called. Two names of this
+# module's own, and neither is the path: `-f` takes one file, so the
+# path adds nothing an operator does not have on the line they just
+# typed, and a path is typed, which makes it the last place a refusal
+# may repeat (#289). Where the parser stopped is a line and a column,
+# which is what locates the mistake inside the file.
+FILE_SOURCE = "the fragment file"
+
+STDIN_SOURCE = "the fragment on stdin"
+
+
 def _fragment(path: str) -> object:
     """One entity's YAML fragment or one whole document, from a file or
     from stdin. Parsed here and validated by the models in the
     repository, which is where the rule that a secret-bearing key may
     only name an environment variable already lives."""
-    source = "the fragment on stdin" if path == "-" else path
+    source = STDIN_SOURCE if path == "-" else FILE_SOURCE
     return _parsed_yaml(_stdin() if path == "-" else _file(path), source)
 
 
@@ -1783,19 +1794,98 @@ def _nest(under: dict[str, object], key: Sequence[str], value: object) -> None:
     _nest(below, rest, value)
 
 
+# What a fragment file that cannot be read says. One fixed sentence per
+# failure, and none of them holds the path, the operating system's
+# wording or a byte of the file (#289).
+#
+# The path is typed, and this CLI's whole no-leak posture is about what
+# was typed: a fragment lives next to the deployment it configures, and
+# `-f` is one option away from the secret paths. The library's own
+# `strerror` is not passed through for the reason Click's sentences are
+# not: a message this code did not write is a message it cannot promise
+# carries no value.
+FILE_NOT_FOUND = (
+    "there is no file at the path -f names. It is not quoted back: a refusal here "
+    "names the rule rather than what was typed"
+)
+
+FILE_NOT_READABLE = (
+    "the file -f names cannot be read: check that it is a file this user may read, "
+    "rather than a directory or one belonging to somebody else. Neither the path nor "
+    "the system's own wording is quoted back"
+)
+
+FILE_NOT_TEXT = (
+    "the file -f names is not UTF-8 text, so there is no YAML in it to read. Nothing "
+    "it holds is quoted back, and nothing of it is decoded far enough to be: a file "
+    "that fails to decode is as likely to be a key or an archive as a mistyped "
+    "fragment"
+)
+
+FILE_UNREADABLE = (
+    "the file -f names could not be read. Neither the path nor the system's own "
+    "wording is quoted back"
+)
+
+# Ordered, first match wins, and a subclass comes before the class it
+# extends. The decoding family is here because `UnicodeDecodeError` is a
+# `ValueError` rather than an `OSError`: the read succeeds and the
+# decoding is what fails, which is why it used to leave as a traceback,
+# and the exception it leaves as holds the buffer it could not decode.
+# Caught as the whole family, which is what `docgen`'s reader of the
+# example fragments catches for the same reason.
+_FILE_PROBLEMS: tuple[tuple[type[BaseException], str], ...] = (
+    (FileNotFoundError, FILE_NOT_FOUND),
+    (NotADirectoryError, FILE_NOT_FOUND),
+    (IsADirectoryError, FILE_NOT_READABLE),
+    (PermissionError, FILE_NOT_READABLE),
+    (UnicodeError, FILE_NOT_TEXT),
+    (OSError, FILE_UNREADABLE),
+)
+
+# What the arm catches, read off the table rather than written beside
+# it: a shape the table answers and the arm does not catch is a
+# traceback, which is the half of #289 that was not about echoing.
+_FILE_FAILURES = tuple(shape for shape, _ in _FILE_PROBLEMS)
+
+
 def _file(path: str) -> str:
+    """One fragment file's text, or the fixed sentence for a file that
+    will not give any.
+
+    The sentence is chosen by the class of the failure, which is the
+    reading that cannot be fooled by wording, and is raised after the
+    arm rather than inside it: the exception being handled holds the
+    path and, for a file that will not decode, the bytes it was
+    decoding, and an exception raised inside a handler keeps that one on
+    its `__context__` for anything walking the chain to find.
+    """
     problem: str | None = None
     try:
         return Path(path).read_text(encoding="utf-8")
-    except FileNotFoundError:
-        problem = f"fragment file not found: {path}"
-    except OSError as exc:
-        problem = f"cannot read fragment file {path}: {exc.strerror}"
+    except _FILE_FAILURES as exc:
+        problem = next(
+            sentence for shape, sentence in _FILE_PROBLEMS if isinstance(exc, shape)
+        )
     raise ConfigError(problem)
 
 
 def _stdin() -> str:
     return sys.stdin.read()
+
+
+# What a `--from-env` naming nothing says, and what it deliberately does
+# not say: which name it was given (#289). A variable name is typed on
+# the command line, and the mistake that produces this refusal most
+# often is typing the secret itself where the name belongs, which is the
+# one value this whole command exists never to see. The rule is named
+# instead, since that is what tells an operator what to look at.
+FROM_ENV_NOT_SET = (
+    "--from-env names a variable that is not set in this environment, or is set to an "
+    "empty value. The name is not quoted back: what follows --from-env is typed, and "
+    "typing the secret there instead of the variable holding it is the mistake this "
+    "refusal meets most. Check the spelling, and that the variable is exported"
+)
 
 
 def _read_secret(args: Invocation) -> str:
@@ -1806,9 +1896,7 @@ def _read_secret(args: Invocation) -> str:
     if args.from_env:
         secret = os.environ.get(args.from_env, "")
         if not secret:
-            raise ConfigError(
-                f"--from-env names {args.from_env}, but it is not set in the environment"
-            )
+            raise ConfigError(FROM_ENV_NOT_SET)
         return secret
 
     if sys.stdin is not None and sys.stdin.isatty():
