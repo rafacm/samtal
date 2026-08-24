@@ -416,6 +416,43 @@ jobs:
             exit 1
           fi
 
+      # And the CLI reference, from the same installed artifact, for a
+      # reason of its own: its recipes are read out of the example
+      # fragments, which are a directory beside `src/` that the build
+      # copies into the package. A wheel without them would render a
+      # reference with no recipes in it, or refuse outright, and either
+      # way an operator who installed the CLI as a tool would meet it
+      # first. Rendered outside the checkout with `-P`, so the tree the
+      # wheel was built from cannot stand in for what it shipped.
+      - name: Render the CLI reference from the built wheel
+        run: |
+          cd "$RUNNER_TEMP/wheel-run"
+          "$RUNNER_TEMP/wheel-venv/bin/python" -P - > "$RUNNER_TEMP/wheel-cli-reference.md" <<'PY'
+          import pathlib
+          import sys
+
+          import vinga_server
+          from vinga_server.config import cli, docgen
+
+          installed = pathlib.Path(vinga_server.__file__).resolve()
+          if "site-packages" not in installed.parts:
+              sys.exit(f"the source tree was imported, not the wheel: {installed}")
+          examples = pathlib.Path(str(docgen.EXAMPLE_DIR)).resolve()
+          if not examples.is_relative_to(installed.parent):
+              sys.exit(f"the recipes were read from outside the wheel: {examples}")
+          sys.stdout.write(cli.cli_reference())
+          print(f"rendered the CLI reference from {installed.parent}", file=sys.stderr)
+          PY
+          cd "$GITHUB_WORKSPACE/vinga-server"
+          awk '1;/^<!-- generated: cli reference -->$/{exit}' ../docs/reference/cli.md > "$RUNNER_TEMP/wheel-cli.md"
+          echo >> "$RUNNER_TEMP/wheel-cli.md"
+          cat "$RUNNER_TEMP/wheel-cli-reference.md" >> "$RUNNER_TEMP/wheel-cli.md"
+          echo '<!-- end generated: cli reference -->' >> "$RUNNER_TEMP/wheel-cli.md"
+          if ! diff -u ../docs/reference/cli.md "$RUNNER_TEMP/wheel-cli.md"; then
+            echo "::error::the built wheel renders a different CLI reference than the committed one; the likely cause is the example fragments under vinga-server/examples/ not being carried into the wheel"
+            exit 1
+          fi
+
   # The image is built and smoke-tested on every push to main and on
   # every manual dispatch, and published only on a push to main.
   # `needs: [unit, integration]` is what makes publishing conditional on

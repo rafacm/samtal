@@ -46,6 +46,8 @@ import json
 import re
 import textwrap
 from dataclasses import dataclass
+from importlib import resources
+from importlib.resources.abc import Traversable
 from pathlib import Path
 from types import NoneType, UnionType
 from typing import Annotated, Literal, Union, get_args, get_origin
@@ -483,15 +485,32 @@ def _sentence(description: str | None) -> str:
 # moved or an entity name the file no longer uses.
 #
 # What this reads is a directory rather than the models, which is the
-# one thing separating it from everything above. The example fragments
-# sit beside the package rather than inside it, because they are edited
-# and copied by hand and a fragment nobody can find is worth nothing;
-# that makes this the one rendering here that needs the repository
-# around it, and `MISSING_EXAMPLES` is what it says when it is not.
+# one thing separating it from everything above.
+#
+# The build carries that directory into the package, so an installed
+# artifact renders the same recipes a checkout does. The installed copy
+# is what this prefers and a checkout is the fallback, which is the
+# order that makes the shipped command the one being exercised: a wheel
+# missing its fragments has to fail rather than quietly find the tree it
+# was built from. Neither is a second home. `vinga-server/examples/` is
+# the directory anybody edits, and the packaged copy is derived from it
+# at build time the way the package itself is derived from `src/`.
 
-# Where the example fragments are, relative to this file: the package is
-# under `src/`, and `examples/` is beside `src/`.
-EXAMPLE_DIR = Path(__file__).resolve().parents[3] / "examples"
+# Where the example fragments are, in the two places an installation can
+# put them: inside the package where the build put them, or beside
+# `src/` where a checkout keeps them.
+_PACKAGED = "examples"
+
+
+def _example_dir() -> Traversable:
+    """The directory the recipes are read out of."""
+    packaged = resources.files("vinga_server") / _PACKAGED
+    if packaged.is_dir():
+        return packaged
+    return Path(__file__).resolve().parents[3] / _PACKAGED
+
+
+EXAMPLE_DIR: Traversable = _example_dir()
 
 # The subdirectory holding complete apply documents rather than one
 # entity's fragment. A tier of its own: a preset is owned by the shape
@@ -500,9 +519,9 @@ EXAMPLE_DIR = Path(__file__).resolve().parents[3] / "examples"
 PRESET_DIR = "presets"
 
 MISSING_EXAMPLES = (
-    "the example fragments are not beside this installation, so the command recipes "
-    "cannot be rendered; run this from a checkout of the repository, where "
-    "vinga-server/examples/ is"
+    "this installation carries no example fragments, so the command recipes cannot be "
+    "rendered; they are packaged with the server, and an installation without them is "
+    "incomplete rather than configured"
 )
 
 # What a rendering that cannot read one of its own sources says.
@@ -648,7 +667,7 @@ _TOPICS: tuple[tuple[str, str, str, str], ...] = (
 )
 
 
-def _quoted(program: str) -> list[tuple[Path, str]]:
+def _quoted(program: str) -> list[tuple[Traversable, str]]:
     """Every command an example file quotes, as (file, arguments), in
     the order the recipes run them in.
 
@@ -661,7 +680,7 @@ def _quoted(program: str) -> list[tuple[Path, str]]:
 
         raise ConfigError(MISSING_EXAMPLES)
     files = [
-        *sorted((EXAMPLE_DIR / PRESET_DIR).glob("*.yaml")),
+        *_documents(EXAMPLE_DIR / PRESET_DIR),
         *(
             EXAMPLE_DIR / filename
             for candidate in COMMANDED
@@ -677,7 +696,25 @@ def _quoted(program: str) -> list[tuple[Path, str]]:
     ]
 
 
-def _read(path: Path) -> str:
+def _documents(directory: Traversable) -> list[Traversable]:
+    """The YAML files in one directory, by name.
+
+    Listed and filtered rather than globbed, and sorted by name rather
+    than by the entry itself, because what this walks is a resource
+    directory: `Traversable` is the contract an installed package
+    answers, and it has neither a glob nor an ordering of its own.
+    Sorting is what makes the rendering deterministic, which is the
+    whole reason the committed page can be diffed.
+    """
+    if not directory.is_dir():
+        return []
+    return sorted(
+        (entry for entry in directory.iterdir() if entry.name.endswith(".yaml")),
+        key=lambda entry: entry.name,
+    )
+
+
+def _read(path: Traversable) -> str:
     """One example file's text, or the fixed sentence for one that will
     not read.
 
@@ -709,7 +746,7 @@ def _read(path: Path) -> str:
     raise ConfigError(problem)
 
 
-def _topic(source: Path, argv: str) -> str:
+def _topic(source: Traversable, argv: str) -> str:
     """Which topic one quoted command belongs to.
 
     Read off the command itself rather than off the file it was found
