@@ -273,10 +273,12 @@ def verify_secrets(secrets: SecretStore) -> None:
     """Every stored secret opens under the configured keys, or the
     server refuses to start naming the entity and the slot.
 
-    Startup only, and deliberately not part of opening the database: a
-    missing key, a wrong key or a corrupt token is exactly when the CLI
-    is the recovery tool, and a check that ran on open would take the
-    recovery tool away along with the server.
+    Startup only, and deliberately not part of opening the database.
+    Opening a file is not judging what is in it, and whether a
+    configuration may be served is a policy about starting, so it is
+    decided once here. What a boot refuses this way it refuses naming
+    the entity and the slot; a database that would not open at all is
+    one nothing can migrate, read or repair through this server.
 
     Exhaustive rather than lazy, because the alternative is discovering
     a rotation mistake on the first conversation that needs the third
@@ -307,9 +309,10 @@ class ConfigStore:
     # Reading one entity
     #
     # Existence is semantics, so it is decided here and not by each
-    # caller: `config show`, the API's GET and the recovery path all meet
-    # the same refusal in the same words, and a caller that answers with
-    # a status code can tell it from the others by its type. What each
+    # caller: every read of one entity meets the same refusal in the
+    # same words, whether it was reached over the API or through this
+    # repository directly, and a caller that answers with a status code
+    # can tell it from the others by its type. What each
     # read returns beside the entity is its stored-secret slots, which is
     # the one fact a masked read exists to convey and the one thing the
     # model-shaped half can never carry.

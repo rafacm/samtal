@@ -8,10 +8,13 @@ there is no init command to forget.
 
 It deliberately does no more than that. Verifying that every stored
 ciphertext decrypts under the configured keys is a server-startup check
-(`verify_secrets`), kept out of here: a missing key, a wrong key, or a
-corrupt token is exactly when the CLI is the recovery tool, and a
-database that refused to open would take the recovery tool away with
-the server.
+(`verify_secrets`), kept out of here for two reasons. Opening a file is
+not judging what is in it: whether a configuration may be served is a
+policy about starting, so it is decided once where a start is decided.
+And an opener that refused would fail worse than the boot does. A boot
+refuses naming the entity and the slot; a database that would not open
+is one nothing can migrate, read or repair through this server at
+all.
 
 Since #120 there is a second database beside this one, and the
 machinery below is written once for both: `open_at`, `database_path`,
