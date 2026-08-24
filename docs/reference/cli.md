@@ -4,22 +4,33 @@
 configuration: the providers, the MCP servers, the prompt fragments, the
 agent defaults, the agents, the device bindings and the default agent.
 It is a client of the configuration API rather than a second way into
-the database, so a refusal reads the same whichever way it was reached,
-and every command needs a server to be running. An empty database is a
-valid state for that server to be running on, which is what makes
+the database, so a refusal reads the same whichever way it was reached.
+That is the normal path and almost every command is on it, which means
+almost every command needs a server to be running. An empty database is
+a valid state for that server to be running on, which is what makes
 configuring a deployment from nothing possible at all.
+
+Two sets of commands are the exceptions, and both have a section of
+their own below. `--local` covers four of them and opens the database
+directly, for a deployment whose server will not start. The other five
+(`schema`, `reference`, `openapi`, `cli-reference` and `ota-url`) reach
+neither: four render documents out of the models, the routes and the
+command tree, and the fifth derives a URL from the file half. Those five
+open no database, need no key and contact nothing at all.
 
 What each field means is
 [`domain-config.md`](domain-config.md), generated from the models. What
 the API answers is [`api-openapi.json`](api-openapi.json), generated
 from the routes. This page is about the command line in front of both.
 
-It is written in two halves. Everything above the first marker below is
-written by hand. Everything between the markers is generated from the
-command tree and from the commented fragments in
+It is written in two halves. Everything above the `cli reference` marker
+below is written by hand. Everything inside that marker pair is
+generated from the command tree and from the commented fragments in
 [`vinga-server/examples/`](../../vinga-server/examples/), and
 regenerated and diffed by CI, so no command page and no recipe on this
-page can describe a grammar this server does not have.
+page can describe a grammar this server does not have. The recipes
+carry a marker pair of their own inside it, checked against the
+fragments separately.
 
 ## Installing it
 
