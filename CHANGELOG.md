@@ -40,14 +40,20 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   refused every option it did not read, so a server-specific parameter
   could not be configured at all; it now travels into the outgoing
   request body, so `top_p: 0.9` on the entry reaches the endpoint
-  alongside the model and the messages. The fields vinga composes for
-  every request (`model`, `max_tokens`, `messages`, `stream`,
-  `stream_options`, `tools`, `tool_choice`) are the exception and are
-  refused when the entry is written, naming the one that was written:
-  a key by one of those names would rewrite the request rather than
-  configure the server. What the hatch does not open is a way past
+  alongside the model and the messages. Five names cannot be passed
+  through, because vinga composes them for every request: `messages`,
+  `stream`, `stream_options`, `tools` and `tool_choice`. A key by one of
+  those is refused when the entry is written, naming the one that was
+  written, since it would rewrite the request rather than configure the
+  server; `model` and `max_tokens` are composed too and are not on that
+  list, because they are declared options of the type and a key by
+  either name is the option itself. The published schema says all of
+  this: the component excludes exactly those five names and its
+  description lists them. What the hatch does not open is a way past
   anything else: a passthrough key that looks like a secret, or holds a
-  URL with a credential in it, is refused exactly as it was.
+  URL with a credential in it, is refused exactly as it was, and a
+  refusal about an undeclared key names the entry and the rule rather
+  than the key.
 - **A declared type's options are documented in all four places the
   configuration is documented** (#88, M1). `vinga-server config schema
   provider asr faster_whisper` prints the contract as JSON Schema;

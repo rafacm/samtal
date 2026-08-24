@@ -5324,7 +5324,7 @@
       },
       "LlmOpenaiCompatibleOptions": {
         "additionalProperties": true,
-        "description": "The options the `openai_compatible` LLM type accepts, and the one\ndoor in this file that stays open to an operator: a key this model\ndoes not declare is kept and forwarded into the outgoing request.\n\nThe type exists to reach a server this repository has never seen.\nOllama, LM Studio, llama.cpp, vLLM and every gateway in front of one\nspeak the chat-completions dialect and each takes parameters no\nother does, so a model that enumerated the dialect would be a list\nof one vendor's fields presented as the contract of all of them.\nThat is the reason `extra=\"allow\"` is here and nowhere else among\nthe closed types.\n\nAn accepted key takes EFFECT, which is the half that makes the hatch\nworth having. The extras ride into the request body as the API's own\nescape door takes them, merged UNDER the fields listed in\n`RESERVED_REQUEST_FIELDS`: `top_p` reaches the server, and nothing\nwritten here can rewrite the conversation, the model, the stream or\nthe tools the session is about to answer. A passthrough key by one\nof those names is refused when the entry is written, with the name\nsaid out loud.\n\nWhat the hatch does not open is a way past the rules every provider\nentry is held to. An extra is still walked for an inline secret and\nstill refused if it is a URL carrying a credential, because those\nrules read the fragment rather than the model.",
+        "description": "The options the `openai_compatible` LLM type accepts, and the one\ndoor in this file that stays open to an operator: a key this model\ndoes not declare is kept and forwarded into the outgoing request.\n\nThe type exists to reach a server this repository has never seen.\nOllama, LM Studio, llama.cpp, vLLM and every gateway in front of one\nspeak the chat-completions dialect and each takes parameters no\nother does, so a model that enumerated the dialect would be a list\nof one vendor's fields presented as the contract of all of them.\nThat is the reason `extra=\"allow\"` is here and nowhere else among\nthe closed types.\n\nAn accepted key takes EFFECT, which is the half that makes the hatch\nworth having. The extras ride into the request body as the API's own\nescape door takes them, merged UNDER the fields this type composes\nfor every request: `top_p` reaches the server, and nothing written\nhere can rewrite the conversation, the model, the stream or the\ntools the session is about to answer. A passthrough key naming one\nof those is refused when the entry is written, with the name said\nout loud, and the sentence below this one says which names those\nare.\n\nWhat the hatch does not open is a way past the rules every provider\nentry is held to. An extra is still walked for an inline secret and\nstill refused if it is a URL carrying a credential, because those\nrules read the fragment rather than the model.\n\nAny key not listed here is passed through to the endpoint as a top-level field of the chat completions request body. These names cannot be passed through, because this type composes them for every request: messages, stream, stream_options, tool_choice, tools.",
         "properties": {
           "base_url": {
             "description": "The endpoint's OpenAI-compatible base URL, such as http://localhost:11434/v1 for a local Ollama; pointing it at api.openai.com works too. Required, because it is what decides which server this entry speaks to and whether session data leaves the host.",
@@ -5343,6 +5343,17 @@
             "description": "The cap on one reply's length, in tokens. Spoken replies are short, so this bounds a runaway rather than a conversation.",
             "title": "Max Tokens",
             "type": "integer"
+          }
+        },
+        "propertyNames": {
+          "not": {
+            "enum": [
+              "messages",
+              "stream",
+              "stream_options",
+              "tool_choice",
+              "tools"
+            ]
           }
         },
         "required": [

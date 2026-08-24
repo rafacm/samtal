@@ -740,6 +740,47 @@ def test_this_types_two_required_names_publish_the_blank_rule_too() -> None:
             refuse(OPENAI, model=value)
 
 
+def test_the_published_schema_says_which_names_a_key_may_not_take() -> None:
+    """The door, said in the vocabulary a document has for a door.
+
+    `additionalProperties: true` says a key may be written and stops
+    there, so a client generating from it would write `messages` and
+    meet a refusal the document never mentioned. `propertyNames` is what
+    constrains what a key may be CALLED, which is the shape this rule
+    has, and the prose beside it says the same thing to a person.
+
+    The set is exact rather than the whole of `RESERVED_REQUEST_FIELDS`,
+    and the difference is the finding: two of those seven are options
+    this model declares, so a key by one of those names is the option
+    rather than a passthrough. Publishing them as forbidden would tell a
+    client that `model` may not be written, which is the opposite of
+    true, since it is required.
+    """
+    from vinga_server.config import docgen
+
+    refused_names = list(OpenaiCompatibleOptions.refused_passthrough())
+    assert refused_names == ["messages", "stream", "stream_options", "tool_choice", "tools"]
+
+    published = [
+        json.loads(docgen.schema("provider", "llm", "openai_compatible")),
+        json.loads(docgen.openapi())["components"]["schemas"]["LlmOpenaiCompatibleOptions"],
+    ]
+
+    for schema in published:
+        assert schema["propertyNames"] == {"not": {"enum": refused_names}}
+        # The same set in words, because a reference is read by people
+        # and a keyword is read by generators.
+        for name in refused_names:
+            assert name in schema["description"]
+
+    # And the document is not describing a different rule from the one
+    # that runs: every name it excludes is refused, and the two it does
+    # not exclude are the options themselves.
+    for name in refused_names:
+        assert refuse(OPENAI, **{name: "whatever"}).problems[0].path == f"/{name}"
+    assert openai_compatible(model="qwen3:8b", max_tokens=64).max_tokens == 64
+
+
 # Where a refusal points
 #
 # Options are flat siblings of `type` in the fragment that is actually

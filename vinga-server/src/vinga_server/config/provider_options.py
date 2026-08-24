@@ -66,6 +66,7 @@ from pydantic import (
     BeforeValidator,
     ConfigDict,
     Field,
+    GetJsonSchemaHandler,
     StrictBool,
     StrictInt,
     StrictStr,
@@ -73,6 +74,8 @@ from pydantic import (
     WithJsonSchema,
     model_validator,
 )
+from pydantic.json_schema import JsonSchemaValue
+from pydantic_core import CoreSchema
 
 from vinga_server.config.models import (
     PROVIDER_STAGES,
@@ -634,12 +637,13 @@ class OpenaiCompatibleOptions(BaseModel):
 
     An accepted key takes EFFECT, which is the half that makes the hatch
     worth having. The extras ride into the request body as the API's own
-    escape door takes them, merged UNDER the fields listed in
-    `RESERVED_REQUEST_FIELDS`: `top_p` reaches the server, and nothing
-    written here can rewrite the conversation, the model, the stream or
-    the tools the session is about to answer. A passthrough key by one
-    of those names is refused when the entry is written, with the name
-    said out loud.
+    escape door takes them, merged UNDER the fields this type composes
+    for every request: `top_p` reaches the server, and nothing written
+    here can rewrite the conversation, the model, the stream or the
+    tools the session is about to answer. A passthrough key naming one
+    of those is refused when the entry is written, with the name said
+    out loud, and the sentence below this one says which names those
+    are.
 
     What the hatch does not open is a way past the rules every provider
     entry is held to. An extra is still walked for an inline secret and
@@ -648,6 +652,48 @@ class OpenaiCompatibleOptions(BaseModel):
     """
 
     model_config = ConfigDict(extra="allow")
+
+    @classmethod
+    def refused_passthrough(cls) -> tuple[str, ...]:
+        """The reserved names a key written here could actually take.
+
+        `RESERVED_REQUEST_FIELDS` states which fields the request
+        composes; two of them are options this model declares, so a key
+        by one of those names is the option rather than a passthrough
+        and cannot collide with anything. What is left is the set a
+        fragment can break, and it is derived rather than written down
+        twice: the validator refuses exactly these, the published schema
+        excludes exactly these, and the sentence the schema carries
+        names exactly these.
+        """
+        return tuple(sorted(RESERVED_REQUEST_FIELDS - set(cls.model_fields)))
+
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls, core_schema: CoreSchema, handler: GetJsonSchemaHandler
+    ) -> JsonSchemaValue:
+        """The open door, said in the vocabulary a document has for one.
+
+        `additionalProperties: true` says a key may be written and stops
+        there, so a client generating from it would write `messages` and
+        meet a refusal the document never mentioned. `propertyNames`
+        constrains what a key may be CALLED, which is the shape this
+        rule has: every name is legal except the ones the request
+        composes for itself. The prose says the same thing in words,
+        from the same tuple, because a reader of the reference sees the
+        description and a code generator sees the keyword.
+        """
+        schema = handler(core_schema)
+        refused = list(cls.refused_passthrough())
+        schema["propertyNames"] = {"not": {"enum": refused}}
+        schema["description"] = (
+            f"{schema.get('description', '')}\n\n"
+            f"Any key not listed here is passed through to the endpoint as a "
+            f"top-level field of the chat completions request body. These names "
+            f"cannot be passed through, because this type composes them for every "
+            f"request: {', '.join(refused)}."
+        ).strip()
+        return schema
 
     @model_validator(mode="after")
     def _no_request_field_is_passed_through(self) -> "OpenaiCompatibleOptions":
@@ -658,7 +704,7 @@ class OpenaiCompatibleOptions(BaseModel):
         model-level validator's error is located at the model, and this
         is the one place that knows which key it was about.
         """
-        taken = sorted(set(self.model_extra or {}) & RESERVED_REQUEST_FIELDS)
+        taken = sorted(set(self.model_extra or {}) & set(self.refused_passthrough()))
         if taken:
             raise FieldProblemsError(
                 [

@@ -247,6 +247,36 @@ def test_an_open_doors_fragment_documents_only_real_options() -> None:
     assert set(written) - declared == {"top_p"}
 
 
+def test_the_open_doors_fragment_names_the_keys_it_may_not_take() -> None:
+    """The prose that drifted, held to the constant it is prose about.
+
+    This file is where an operator reads what the escape hatch takes,
+    and the one thing it has to get right is the exception: the names
+    vinga composes for every request, which a fragment may not pass
+    through. That sentence is hand-written, it named a key this file no
+    longer documents once already, and nothing read it.
+
+    Derived from the model rather than copied here, so the sentence and
+    the refusal cannot come apart: a name added to the request is a name
+    this fails on until the fragment says so.
+    """
+    from vinga_server.config.provider_options import OpenaiCompatibleOptions
+
+    text = (EXAMPLES / "llm-openai-compatible.yaml").read_text(encoding="utf-8")
+    refused = OpenaiCompatibleOptions.refused_passthrough()
+    assert refused, "no name is refused, so this check is vacuous"
+
+    missing = [name for name in refused if name not in text]
+    assert not missing, f"llm-openai-compatible.yaml does not name: {', '.join(missing)}"
+
+    # And the count in the sentence is the count in the model, which is
+    # the half the mistake this replaces got wrong: it said the request
+    # composes seven names and listed two of them as written above,
+    # when one of those had been taken out of the file and the other is
+    # an option a fragment must write rather than an exclusion.
+    assert f"{len(refused)} names" in text.replace("Five", "5")
+
+
 def test_every_fragment_is_listed_in_the_examples_readme() -> None:
     """The README's table is how a reader finds these, so a new file
     that is not in it is invisible."""
