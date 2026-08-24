@@ -90,6 +90,25 @@ def test_the_reference_says_what_deletion_means_in_the_file() -> None:
     assert "Capture files are a" in flat(rendered)
 
 
+def test_the_manual_erasure_names_every_file_that_holds_the_words() -> None:
+    """The one destructive instruction this document gives, and the way
+    it goes wrong is silent.
+
+    A committed row's bytes are in the write-ahead log until a checkpoint
+    folds them back, so an operator who deletes `conversations.db` alone
+    has left what they meant to erase in the file beside it, with nothing
+    to tell them. The instruction is only correct while it names all
+    three files, which is why each is asserted by name rather than the
+    paragraph being read for its sense."""
+    flattened = flat(docgen.reference())
+
+    for name in ("conversations.db", "conversations.db-wal", "conversations.db-shm"):
+        assert name in flattened, f"the manual erasure does not name {name}"
+    # And says why, so the third file is not read as a typo for the
+    # second and dropped by whoever tidies the sentence next.
+    assert "The log is not a cache of the database" in flattened
+
+
 def test_the_reference_gives_the_wal_safe_copy_recipe() -> None:
     """A plain `cp` of a database in WAL mode without its sidecar is a
     database missing its most recent commits, which is exactly the

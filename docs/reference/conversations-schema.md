@@ -61,14 +61,18 @@ reached the store's file directly and that is not a thing a command can do
 once the store is a database elsewhere; erasing a named session returns as an
 act of the API, with a CLI verb in front of it (#190). Until then the window
 above is the whole of the deletion policy, and a deployment that has to erase
-something now stops the server and deletes the conversations database file,
-which takes every session rather than the one that was asked about. Whichever
-way rows go, the deletion the window takes is of a session at a time, row and
-children together: a session that is still running when its row goes stops
-being recorded, because the writer finds the row gone at its next turn.
-Capture files are a separate instrument and are never touched by any of it;
-the session id is the correlation key for whoever needs to remove the matching
-triplet.
+something now stops the server and deletes three files rather than one:
+`conversations.db`, and the `conversations.db-wal` and `conversations.db-shm`
+sidecars beside it. The log is not a cache of the database. It is where a
+committed row's bytes live until a checkpoint folds them back, so a deployment
+that removed the database alone would leave what it meant to erase sitting in
+the file next to it. That takes every session rather than the one that was
+asked about. Whichever way rows go, the deletion the window takes is of a
+session at a time, row and children together: a session that is still running
+when its row goes stops being recorded, because the writer finds the row gone
+at its next turn. Capture files are a separate instrument and are never
+touched by any of it; the session id is the correlation key for whoever needs
+to remove the matching triplet.
 
 Deletion is physical, not query-level. The database is opened with `PRAGMA
 secure_delete=ON`, so a freed page is overwritten with zeros instead of

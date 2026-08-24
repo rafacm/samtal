@@ -2132,10 +2132,13 @@ the store's file, which is not a thing a command can keep doing once the
 store is a database somewhere else.
 
 Until it lands, retention above is what deletes, and a deployment that
-has to erase something now stops the server and deletes
-`conversations.db` (with its `-wal` and `-shm` sidecars). That takes
-every session rather than the one that was asked about, which is the
-honest shape of the gap.
+has to erase something now stops the server and deletes three files
+rather than one: `conversations.db`, and the `conversations.db-wal` and
+`conversations.db-shm` sidecars beside it. The log is not a cache of the
+database: a committed row's bytes live there until a checkpoint folds
+them back, so removing the database alone leaves what was meant to be
+erased sitting in the file next to it. That takes every session rather
+than the one that was asked about, which is the honest shape of the gap.
 
 Whichever way rows go, they go a session at a time, row and children
 together. A session that is still running when its row goes stops being
