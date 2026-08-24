@@ -170,29 +170,71 @@ unauthenticated `/healthz` (outside the API mount) already serves
 curl. Machinery beyond that waits for a real skew incident or 1.0,
 recorded as the deliberate floor.
 
+### 4b. The reserved `diff` seat is filled
+
+#193's endpoint (`GET /runtime/config/diff`) landed with the
+runtime-config cluster and the CLI seat reserved for it was never
+filled; the issue assigns the verb to the standalone client once
+#193 lands, which it did. M1 adds the `diff` command: the typed
+response shapes the committed document already carries, the act,
+a renderer in the house listing style, registration and help,
+with live-lane, wheel-lane and refusal coverage and the reference
+regenerated.
+
 ### 5. The wheel-grade lane, with the leak surface kept
 
-A new integration module upgrades the live lane the way #265
-assigns: build the wheel, `uv venv` a clean environment, install
-the BARE wheel (no extras), and drive the actual `vinga` binary as
-a SUBPROCESS against the live server. The server stays IN-PROCESS
-(the existing `serving()` thread), which keeps `Watched`'s
-log-record leak assertions alive; only the CLI crosses a process
-boundary, which is exactly the half the wheel grade is about. The
-test process still imports `cli.COMMANDS` for the
-inventory-derived completeness map while executing through the
-subprocess; coverage is the registration table both ways, the
-pattern `test_cli_live.py` set. The lane also proves the thin
-install negatively: in the clean venv, importing
-`vinga_server.config.cli` succeeds while `import fastapi`,
-`import sqlalchemy` and `import cryptography` fail, and a
-`--local` invocation answers the fixed install-the-extra sentence.
-Runtime budget: one wheel build and one venv per module, subprocess
-per command; if the full inventory pushes the lane past a couple
-of minutes, a representative-per-family subset runs per-PR with
-the full sweep kept cheap enough to stay (measured and recorded).
+The standalone command inventory is EXPLICIT, because two
+commands cannot run thin: the remote verbs (including the new
+`diff`) plus `schema`, `reference` and `cli-reference` run from
+the bare install; `openapi` (which reaches `config.api` and so
+FastAPI) and `ota-url` (whose onboarding package init imports
+FastAPI) are server-gated, present in the grammar but answering
+the fixed install-the-extra sentence from a thin install, and the
+lane exercises both refusals. The wheel completeness assertion
+runs against this explicit inventory, both ways.
+
+The lane itself: build the wheel, `uv venv` a clean environment,
+install the BARE wheel (no extras), and drive the actual `vinga`
+binary as a SUBPROCESS against the live server. The server stays
+IN-PROCESS (the existing `serving()` thread), which keeps
+`Watched`'s log-record leak assertions alive; only the CLI
+crosses a process boundary, which is exactly the half the wheel
+grade is about. Provenance is proven, not presumed: the lane runs
+from a temporary directory outside the checkout, scrubs
+`PYTHONPATH` and its relatives, and asserts the resolved package
+file sits inside the clean venv before any command runs, the
+existing wheel steps' pattern. The test process still imports
+`cli.COMMANDS` for the inventory map while executing through the
+subprocess. FULL registered-inventory coverage is mandatory; the
+runtime is managed by one shared wheel build and venv and fixture
+reuse, never by a representative subset, and the measured runtime
+is recorded.
+
+The tier proof is a closure, not three probes: the installed
+distribution set is asserted against an explicit allowed closure
+derived from the pyproject tiers, positively (every intended
+client dependency present) and negatively (every serve-only
+distribution and top-level module absent), so a heavy default
+install cannot pass by dodging named imports.
+
+And the client's contract is checked against the DOCUMENT, not
+only against the code both sides share: a test reads
+`docs/reference/api-openapi.json` as data, importing no
+`config.api`, and holds every Act's method, path template and
+response model fields to the document's operations and component
+schemas both ways, so client and server cannot drift together
+unnoticed.
 
 ### 6. Docs
+
+The `[serve]` migration sweeps every documented install and sync
+site, inventoried: AGENTS.md's commands section, both READMEs'
+install lines and provider-extra examples
+(`vinga-server[faster-whisper,piper]` becomes
+`vinga-server[serve,faster-whisper,piper]` where serving is
+meant), the Dockerfile, every CI `uv sync` site with its chosen
+tier, and the config.deploy prose; one documented server
+installation path is exercised in CI.
 
 `cli.md`'s installation head rewrites around the real story:
 `uv tool install vinga-server` / `uvx --from` for a checkout,
