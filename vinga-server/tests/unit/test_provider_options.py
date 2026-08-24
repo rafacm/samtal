@@ -77,8 +77,16 @@ def accept(**options: object) -> FasterWhisperOptions:
 # value is. The two that are easy to get wrong in a rewrite are the ones
 # Python is relaxed about: a bool is an int, and "5" converts to one.
 PARITY: list[tuple[str, object, bool]] = [
-    # string options: a string and nothing else.
+    # string options: a string and nothing else, plus the two spellings
+    # of absence the reader's `or <default>` used to swallow.
     ("model", "medium", True),
+    ("model", "", True),
+    ("model", None, True),
+    ("device", "", True),
+    ("device", None, True),
+    ("compute_type", "", True),
+    ("language_detect", "", True),
+    ("vad_parameters", None, True),
     ("model", 5, False),
     ("model", True, False),
     ("language", "sv", True),
@@ -139,6 +147,46 @@ def test_the_model_takes_what_the_reader_took(
         accept(**{name: value})
         return
     refuse(**{name: value})
+
+
+# The spellings of absence the reader swallowed, and what they read as
+#
+# Four options ended the ladder with `or <default>` and `vad_parameters`
+# was read through a call that answered {} for a missing key, so an
+# empty string and an explicit null were both ways of writing nothing.
+# A deployment that wrote one boots today, so it boots after this: the
+# parity rows above say they are accepted, and these say what they mean.
+
+BLANK_DEFAULTED = [
+    ("model", "small"),
+    ("device", "cpu"),
+    ("compute_type", "int8"),
+    ("language_detect", "every_utterance"),
+]
+
+
+@pytest.mark.parametrize(("name", "expected"), BLANK_DEFAULTED, ids=[n for n, _ in BLANK_DEFAULTED])
+@pytest.mark.parametrize("written", ["", None], ids=["empty", "null"])
+def test_a_blank_option_reads_as_the_default(
+    name: str, expected: object, written: object
+) -> None:
+    options = accept(**{name: written})
+
+    assert getattr(options, name) == expected
+    # And as UNWRITTEN, not as the default written out, which is what
+    # keeps one statement of each default and what `exclude_unset`
+    # depends on elsewhere.
+    assert name not in options.model_fields_set
+
+
+def test_a_null_vad_section_reads_as_no_section() -> None:
+    """The fifth spelling, whose consequence is not a value but a key
+    the engine never sees: `mapping()` answered `{}` for a missing key
+    and the builder passed `vad_parameters` only when it was truthy."""
+    options = accept(vad_parameters=None)
+
+    assert options.vad_parameters.model_dump(exclude_unset=True) == {}
+    assert "vad_parameters" not in options.model_fields_set
 
 
 def test_a_scalar_temperature_becomes_a_ladder_of_one() -> None:
