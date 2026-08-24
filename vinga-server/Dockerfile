@@ -77,6 +77,12 @@ RUN useradd --uid 1000 --home-dir /data --no-create-home vinga \
 
 COPY --from=builder /app/.venv /app/.venv
 
+# The entrypoint wrapper, copied while this stage is still root so that
+# it lands root-owned and executable. It is three lines and one
+# decision, documented in the file: whether there is a configuration
+# file to name.
+COPY docker-entrypoint.sh /usr/local/bin/vinga-entrypoint
+
 # Which build this is. There is no `.git` in the image and no git to
 # read it with, and OCI labels are image metadata a process cannot read
 # its own copy of, so the only route in is a build argument becoming an
@@ -89,9 +95,15 @@ ARG VINGA_REVISION=unknown
 # mounted volume, the one place an unprivileged user with a read-only
 # root filesystem can write. The model default (/var/lib/vinga) is the
 # generic one and is neither created nor writable here.
+#
+# VINGA_CONFIG is deliberately not here. The server half needs no file,
+# and naming one that may not exist made the mount mandatory: a named
+# file that is not there is refused, which is right for an operator who
+# named it and wrong for an image that named it on their behalf. The
+# entrypoint below names /config/config.yaml when it is mounted and says
+# nothing when it is not.
 ENV PATH=/app/.venv/bin:$PATH \
     HOME=/data \
-    VINGA_CONFIG=/config/config.yaml \
     VINGA_SERVER__DATABASE__DIR=/data/db \
     VINGA_SERVER__LOG_FORMAT=json \
     VINGA_REVISION=$VINGA_REVISION
@@ -109,4 +121,9 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # Exec form, so SIGTERM reaches the server rather than a shell: it is
 # what lets the shutdown drain run at all. Give `docker stop` a -t above
 # server.drain_s.
-ENTRYPOINT ["vinga-server"]
+#
+# The wrapper copied above ends in `exec`, so the server replaces it as
+# PID 1 and the signal still arrives; anything after the image name is
+# still the server's own command line, so `docker run ... config --local
+# show` reads as it always has.
+ENTRYPOINT ["/usr/local/bin/vinga-entrypoint"]

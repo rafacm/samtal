@@ -11,7 +11,9 @@
 # script beside it, config.deploy.example.sh, which carries the same
 # measured values and the reasoning behind each one.
 #
-# The published image already reads its config from /config/config.yaml,
+# The published image already reads a config mounted at
+# /config/config.yaml (mounting one is optional; without it the server
+# half comes from the defaults and VINGA_SERVER__* alone),
 # keeps its database on the /data volume
 # (VINGA_SERVER__DATABASE__DIR=/data/db), sends every model cache there
 # too (HOME=/data), and defaults its logs to the json format, so none of
