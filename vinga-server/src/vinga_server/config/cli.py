@@ -437,11 +437,15 @@ def usage_line(sentence: str) -> str:
 class Invocation:
     """One command's arguments, resolved."""
 
-    # The two global options, after the merge below: each is what the
+    # The global options, after the merge below: each is what the
     # command position said when it said anything, and what the root
-    # position said otherwise.
+    # position said otherwise. The two booleans are resolved to plain
+    # booleans exactly once, by that merge, so nothing below this seam
+    # has to know that "not given" was ever a third answer.
     config: str | None = None
     api_url: str | None = None
+    force: bool = False
+    no_input: bool = False
 
     # What addresses one entry, under the names the descriptors'
     # `addressing` tuples use, which are the URL's path parameters and
@@ -2180,6 +2184,58 @@ FROM_ENV_NOT_SET = (
 )
 
 
+# What a destructive verb asks, and the two sentences it answers with
+#
+# Every one of the three is a fixed constant carrying no address and no
+# other value from the command line. That is a real usability cost, paid
+# knowingly: a prompt that cannot say which entry it means is worse to
+# read than one that can. It is paid because the address is built from
+# `stage`, `name`, `mac`, `code` and `slot`, all typed, and a mistyped
+# command is exactly where a credential lands in an address field, which
+# is the mistake these sentences exist not to repeat. The answer to
+# "which entry is this" is a `show` before the delete, not a sentence
+# that quotes back what was typed.
+#
+# The question goes to stderr rather than to stdout, which is where
+# every other thing about a run goes and what keeps `> file` clean; it
+# is asked only when stdin is a terminal, so the non-terminal path is
+# complete without it.
+CONFIRMATION = (
+    "This deletes what the command addresses, and nothing in this grammar puts it "
+    "back: an export taken beforehand is the only copy. Type y to go ahead: "
+)
+
+DECLINED = "nothing was deleted, because the confirmation was not answered with y"
+
+NO_INPUT_REFUSED = (
+    "a destructive command asks for a confirmation at a terminal, and --no-input "
+    "disables every prompt. Run it again with --force, which answers the question "
+    "this would have asked"
+)
+
+
+def _permitted_to_destroy(args: Invocation) -> None:
+    """Whether a destructive verb may go ahead, asked at a terminal.
+
+    Five answers and one rule under them: never block a pipe, and never
+    take the only door away. `--force` answers the question, so it
+    proceeds whatever else was given; `--no-input` takes the asking away
+    and refuses, because a confirmation has no second way to be
+    answered, which is exactly why `set-secret` is not refused by the
+    same flag: a secret has three doors and disabling one leaves two.
+    A stream that is not a terminal has nobody to ask, so it proceeds.
+    """
+    if args.force:
+        return
+    if sys.stdin is None or not sys.stdin.isatty():
+        return
+    if args.no_input:
+        raise ConfigError(NO_INPUT_REFUSED)
+    print(CONFIRMATION, end="", file=sys.stderr, flush=True)
+    if sys.stdin.readline().strip().lower() != "y":
+        raise ConfigError(DECLINED)
+
+
 def _read_secret(args: Invocation) -> str:
     """The secret itself, from a named environment variable or from
     stdin. Never from an argument: arguments land in shell history and
@@ -2191,7 +2247,7 @@ def _read_secret(args: Invocation) -> str:
             raise ConfigError(FROM_ENV_NOT_SET)
         return secret
 
-    if sys.stdin is not None and sys.stdin.isatty():
+    if sys.stdin is not None and sys.stdin.isatty() and not args.no_input:
         secret = getpass.getpass("Secret (not echoed): ")
     else:
         secret = _stdin()
@@ -2693,6 +2749,16 @@ FROM_ENV_HELP = (
     "read the value from this variable (default: stdin, read without echo at a terminal)"
 )
 
+FORCE_HELP = (
+    "answer the confirmation a destructive command asks at a terminal, so it does not "
+    "ask (default: it asks)"
+)
+
+NO_INPUT_HELP = (
+    "never prompt: a destructive command refuses rather than asking, and a secret is "
+    "read from stdin or --from-env (default: prompt at a terminal)"
+)
+
 STAGE_HELP = ", ".join(PROVIDER_STAGES)
 
 PROVIDER_SLOT_HELP = "the option it fills, such as api_key"
@@ -2726,6 +2792,15 @@ ConfigOption = Annotated[str | None, typer.Option("--config", metavar="PATH", he
 
 ApiUrlOption = Annotated[str | None, typer.Option("--api-url", metavar="URL", help=API_URL_HELP)]
 
+# The two prompt-control options, and `bool | None` is the load-bearing
+# part rather than a nicety. They ride `Globals` like the two above, so
+# an absent copy at the command position must not overwrite what the
+# root position said; an ordinary boolean default would arrive as False
+# and make `vinga --no-input agent delete kids` prompt.
+ForceOption = Annotated[bool | None, typer.Option("--force", help=FORCE_HELP)]
+
+NoInputOption = Annotated[bool | None, typer.Option("--no-input", help=NO_INPUT_HELP)]
+
 # The two ways a write's entity is given, declared once apiece for the
 # same reason the three globals are: a `set` command says so in two
 # lines and cannot come to spell one of them differently from its
@@ -2754,13 +2829,30 @@ class Globals:
 
     config: str | None = None
     api_url: str | None = None
+    force: bool | None = None
+    no_input: bool | None = None
 
-    def merged(self, *, config: str | None, api_url: str | None) -> "Globals":
+    def merged(
+        self,
+        *,
+        config: str | None,
+        api_url: str | None,
+        force: bool | None = None,
+        no_input: bool | None = None,
+    ) -> "Globals":
         """The same options with one more position's copies folded in,
-        each winning only where it was given."""
+        each winning only where it was given.
+
+        The two booleans fold on `is not None` for the reason the two
+        strings fold on `is None`: what is being preserved is the
+        distinction between "said false" and "said nothing", and a
+        plain boolean has only one of those.
+        """
         return Globals(
             config=self.config if config is None else config,
             api_url=self.api_url if api_url is None else api_url,
+            force=self.force if force is None else force,
+            no_input=self.no_input if no_input is None else no_input,
         )
 
 
@@ -2800,8 +2892,18 @@ class Command:
     # fields the fragment may carry, rendered from the models.
     epilog: str | None = None
 
+    # Whether this verb's effect cannot be undone by running another
+    # command with information the operator still has. A delete destroys
+    # the body; a `set` does not, as long as an `export` exists, which is
+    # why replacement writes and rebindings are not here. A fact on the
+    # registration rather than a list beside it, so the confirmation is
+    # driven by the same table everything else about a command is.
+    destroys: bool = False
+
     def perform(self, args: Invocation) -> None:
         """What this command does, once its arguments are in hand."""
+        if self.destroys:
+            _permitted_to_destroy(args)
         if isinstance(self.does, Act):
             _act(args, self.does)
             return
@@ -2831,6 +2933,8 @@ def _root(
     context: typer.Context,
     config: ConfigOption = None,
     api_url: ApiUrlOption = None,
+    force: ForceOption = None,
+    no_input: NoInputOption = None,
 ) -> None:
     """The two options in the position before the command word.
 
@@ -2839,7 +2943,9 @@ def _root(
     copies in and a command folds its own in after that, and each of
     them reads one object.
     """
-    context.obj = Globals(config=config, api_url=api_url)
+    context.obj = Globals(
+        config=config, api_url=api_url, force=force, no_input=no_input
+    )
 
 
 def _resolved(context: typer.Context) -> Globals:
@@ -2859,6 +2965,8 @@ def _invocation(
     context: typer.Context,
     config: str | None = None,
     api_url: str | None = None,
+    force: bool | None = None,
+    no_input: bool | None = None,
     **addressed: Any,
 ) -> Invocation:
     """One command's arguments, with the two global options resolved.
@@ -2868,10 +2976,14 @@ def _invocation(
     them is on the context, and the merge is what lets a value given
     before the command survive a command that was not given one.
     """
-    resolved = _resolved(context).merged(config=config, api_url=api_url)
+    resolved = _resolved(context).merged(
+        config=config, api_url=api_url, force=force, no_input=no_input
+    )
     return Invocation(
         config=resolved.config,
         api_url=resolved.api_url,
+        force=bool(resolved.force),
+        no_input=bool(resolved.no_input),
         # Which kind a command that covers several of them was asked
         # about, declared on the row: see `Command.kind`.
         kind=row.kind,
@@ -2897,8 +3009,10 @@ def _plain(row: Command) -> Callable[..., None]:
         context: typer.Context,
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
+        force: ForceOption = None,
+        no_input: NoInputOption = None,
     ) -> None:
-        row.perform(_invocation(row, context, config, api_url))
+        row.perform(_invocation(row, context, config, api_url, force, no_input))
 
     return run
 
@@ -2911,8 +3025,10 @@ def _named(row: Command) -> Callable[..., None]:
         name: Annotated[str, typer.Argument(metavar="NAME")],
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
+        force: ForceOption = None,
+        no_input: NoInputOption = None,
     ) -> None:
-        row.perform(_invocation(row, context, config, api_url, name=name))
+        row.perform(_invocation(row, context, config, api_url, force, no_input, name=name))
 
     return run
 
@@ -2927,8 +3043,14 @@ def _staged(row: Command) -> Callable[..., None]:
         name: Annotated[str, typer.Argument(metavar="NAME")],
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
+        force: ForceOption = None,
+        no_input: NoInputOption = None,
     ) -> None:
-        row.perform(_invocation(row, context, config, api_url, stage=stage, name=name))
+        row.perform(
+            _invocation(
+                row, context, config, api_url, force, no_input, stage=stage, name=name
+            )
+        )
 
     return run
 
@@ -2942,8 +3064,10 @@ def _by_mac(row: Command) -> Callable[..., None]:
         mac: Annotated[str, typer.Argument(metavar="MAC")],
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
+        force: ForceOption = None,
+        no_input: NoInputOption = None,
     ) -> None:
-        row.perform(_invocation(row, context, config, api_url, mac=mac))
+        row.perform(_invocation(row, context, config, api_url, force, no_input, mac=mac))
 
     return run
 
@@ -2958,9 +3082,14 @@ def _written(row: Command) -> Callable[..., None]:
         file: FileOption = "",
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
+        force: ForceOption = None,
+        no_input: NoInputOption = None,
     ) -> None:
         row.perform(
-            _invocation(row, context, config, api_url, file=file, pairs=_given(pairs))
+            _invocation(
+                row, context, config, api_url, force, no_input,
+                file=file, pairs=_given(pairs),
+            )
         )
 
     return run
@@ -2977,10 +3106,12 @@ def _named_write(row: Command) -> Callable[..., None]:
         file: FileOption = "",
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
+        force: ForceOption = None,
+        no_input: NoInputOption = None,
     ) -> None:
         row.perform(
             _invocation(
-                row, context, config, api_url,
+                row, context, config, api_url, force, no_input,
                 name=name, file=file, pairs=_given(pairs),
             )
         )
@@ -2999,10 +3130,12 @@ def _staged_write(row: Command) -> Callable[..., None]:
         file: FileOption = "",
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
+        force: ForceOption = None,
+        no_input: NoInputOption = None,
     ) -> None:
         row.perform(
             _invocation(
-                row, context, config, api_url,
+                row, context, config, api_url, force, no_input,
                 stage=stage, name=name, file=file, pairs=_given(pairs),
             )
         )
@@ -3022,8 +3155,10 @@ def _applied_document(row: Command) -> Callable[..., None]:
         ],
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
+        force: ForceOption = None,
+        no_input: NoInputOption = None,
     ) -> None:
-        row.perform(_invocation(row, context, config, api_url, file=file))
+        row.perform(_invocation(row, context, config, api_url, force, no_input, file=file))
 
     return run
 
@@ -3050,10 +3185,12 @@ def _provider_secret(row: Command) -> Callable[..., None]:
         ] = None,
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
+        force: ForceOption = None,
+        no_input: NoInputOption = None,
     ) -> None:
         row.perform(
             _invocation(
-                row, context, config, api_url,
+                row, context, config, api_url, force, no_input,
                 stage=stage, name=name, slot=slot, from_env=from_env,
             )
         )
@@ -3073,10 +3210,13 @@ def _mcp_secret(row: Command) -> Callable[..., None]:
         ] = None,
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
+        force: ForceOption = None,
+        no_input: NoInputOption = None,
     ) -> None:
         row.perform(
             _invocation(
-                row, context, config, api_url, name=name, slot=slot, from_env=from_env
+                row, context, config, api_url, force, no_input,
+                name=name, slot=slot, from_env=from_env,
             )
         )
 
@@ -3093,9 +3233,14 @@ def _provider_slot(row: Command) -> Callable[..., None]:
         slot: Annotated[str, typer.Argument(metavar="SLOT", help=PROVIDER_SLOT_HELP)],
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
+        force: ForceOption = None,
+        no_input: NoInputOption = None,
     ) -> None:
         row.perform(
-            _invocation(row, context, config, api_url, stage=stage, name=name, slot=slot)
+            _invocation(
+                row, context, config, api_url, force, no_input,
+                stage=stage, name=name, slot=slot,
+            )
         )
 
     return run
@@ -3110,8 +3255,14 @@ def _mcp_slot(row: Command) -> Callable[..., None]:
         slot: Annotated[str, typer.Argument(metavar="SLOT", help=MCP_SLOT_HELP)],
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
+        force: ForceOption = None,
+        no_input: NoInputOption = None,
     ) -> None:
-        row.perform(_invocation(row, context, config, api_url, name=name, slot=slot))
+        row.perform(
+            _invocation(
+                row, context, config, api_url, force, no_input, name=name, slot=slot
+            )
+        )
 
     return run
 
@@ -3126,9 +3277,14 @@ def _bound_by_mac(row: Command) -> Callable[..., None]:
         agents: Annotated[list[str], typer.Argument(metavar="AGENT")],
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
+        force: ForceOption = None,
+        no_input: NoInputOption = None,
     ) -> None:
         row.perform(
-            _invocation(row, context, config, api_url, mac=mac, agents=tuple(agents))
+            _invocation(
+                row, context, config, api_url, force, no_input,
+                mac=mac, agents=tuple(agents),
+            )
         )
 
     return run
@@ -3149,9 +3305,14 @@ def _bound_by_code(row: Command) -> Callable[..., None]:
         agents: Annotated[list[str], typer.Argument(metavar="AGENT")],
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
+        force: ForceOption = None,
+        no_input: NoInputOption = None,
     ) -> None:
         row.perform(
-            _invocation(row, context, config, api_url, code=code, agents=tuple(agents))
+            _invocation(
+                row, context, config, api_url, force, no_input,
+                code=code, agents=tuple(agents),
+            )
         )
 
     return run
@@ -3319,6 +3480,7 @@ def _entity_rows(kind: entities.EntityDescriptor) -> tuple[Command, ...]:
                 does=DELETE_ENTITY[kind.name],
                 declare=addressed_read,
                 help=_about("delete", kind),
+                destroys=True,
             )
         )
     return tuple(rows)
@@ -3342,6 +3504,7 @@ COMMANDS: tuple[Command, ...] = (
         does=CLEAR_SECRET,
         declare=_provider_slot,
         help="remove a stored credential from providers.<stage>.<name>",
+        destroys=True,
     ),
     Command(
         words=("mcp-server", "secret", "set"),
@@ -3356,6 +3519,7 @@ COMMANDS: tuple[Command, ...] = (
         does=CLEAR_SECRET,
         declare=_mcp_slot,
         help="remove a stored credential from mcp_servers.<name>",
+        destroys=True,
     ),
     # The read of the running server that belongs to one agent: what is
     # stored is `agent show`, and what a new session would be sent is
@@ -3401,6 +3565,7 @@ COMMANDS: tuple[Command, ...] = (
         does=DELETE_DEVICE,
         declare=_by_mac,
         help="delete devices.<mac>, so the board it names reaches the default agent",
+        destroys=True,
     ),
     Command(
         words=("device", "pending", "list"),
@@ -3432,6 +3597,7 @@ COMMANDS: tuple[Command, ...] = (
         does=CLEAR_DEFAULT_AGENT,
         declare=_plain,
         help="unset it, leaving the devices map as the allowlist",
+        destroys=True,
     ),
     # The flat verbs: their subject is the whole deployment, or nothing
     # stored at all. Inventing a noun to put in front of them would

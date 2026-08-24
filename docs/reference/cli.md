@@ -370,6 +370,11 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
   --help         Show this message and exit.
 
 Commands:
@@ -447,6 +452,11 @@ Options:
                    server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL    base URL of the configuration API (default: $VINGA_API_URL,
                    then http://127.0.0.1:<server.port>/api)
+  --force          answer the confirmation a destructive command asks at a
+                   terminal, so it does not ask (default: it asks)
+  --no-input       never prompt: a destructive command refuses rather than
+                   asking, and a secret is read from stdin or --from-env
+                   (default: prompt at a terminal)
   --help           Show this message and exit.
 
 A credential is never a key=value argument: arguments land in shell history
@@ -572,6 +582,11 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
   --help         Show this message and exit.
 ```
 
@@ -591,6 +606,11 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
   --help         Show this message and exit.
 ```
 
@@ -610,6 +630,11 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
   --help         Show this message and exit.
 ```
 
@@ -647,6 +672,11 @@ Options:
                   server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL   base URL of the configuration API (default: $VINGA_API_URL,
                   then http://127.0.0.1:<server.port>/api)
+  --force         answer the confirmation a destructive command asks at a
+                  terminal, so it does not ask (default: it asks)
+  --no-input      never prompt: a destructive command refuses rather than
+                  asking, and a secret is read from stdin or --from-env
+                  (default: prompt at a terminal)
   --help          Show this message and exit.
 ```
 
@@ -667,6 +697,11 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
   --help         Show this message and exit.
 ```
 
@@ -709,6 +744,11 @@ Options:
                    server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL    base URL of the configuration API (default: $VINGA_API_URL,
                    then http://127.0.0.1:<server.port>/api)
+  --force          answer the confirmation a destructive command asks at a
+                   terminal, so it does not ask (default: it asks)
+  --no-input       never prompt: a destructive command refuses rather than
+                   asking, and a secret is read from stdin or --from-env
+                   (default: prompt at a terminal)
   --help           Show this message and exit.
 
 A credential is never a key=value argument: arguments land in shell history
@@ -766,6 +806,11 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
   --help         Show this message and exit.
 ```
 
@@ -784,6 +829,11 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
   --help         Show this message and exit.
 ```
 
@@ -802,6 +852,11 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
   --help         Show this message and exit.
 ```
 
@@ -838,6 +893,11 @@ Options:
                   server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL   base URL of the configuration API (default: $VINGA_API_URL,
                   then http://127.0.0.1:<server.port>/api)
+  --force         answer the confirmation a destructive command asks at a
+                  terminal, so it does not ask (default: it asks)
+  --no-input      never prompt: a destructive command refuses rather than
+                  asking, and a secret is read from stdin or --from-env
+                  (default: prompt at a terminal)
   --help          Show this message and exit.
 ```
 
@@ -857,6 +917,11 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
   --help         Show this message and exit.
 ```
 
@@ -898,6 +963,11 @@ Options:
                    server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL    base URL of the configuration API (default: $VINGA_API_URL,
                    then http://127.0.0.1:<server.port>/api)
+  --force          answer the confirmation a destructive command asks at a
+                   terminal, so it does not ask (default: it asks)
+  --no-input       never prompt: a destructive command refuses rather than
+                   asking, and a secret is read from stdin or --from-env
+                   (default: prompt at a terminal)
   --help           Show this message and exit.
 
 A credential is never a key=value argument: arguments land in shell history
@@ -931,6 +1001,11 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
   --help         Show this message and exit.
 ```
 
@@ -949,6 +1024,11 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
   --help         Show this message and exit.
 ```
 
@@ -967,6 +1047,11 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
   --help         Show this message and exit.
 ```
 
@@ -1011,6 +1096,11 @@ Options:
                    server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL    base URL of the configuration API (default: $VINGA_API_URL,
                    then http://127.0.0.1:<server.port>/api)
+  --force          answer the confirmation a destructive command asks at a
+                   terminal, so it does not ask (default: it asks)
+  --no-input       never prompt: a destructive command refuses rather than
+                   asking, and a secret is read from stdin or --from-env
+                   (default: prompt at a terminal)
   --help           Show this message and exit.
 
 A credential is never a key=value argument: arguments land in shell history
@@ -1066,6 +1156,11 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
   --help         Show this message and exit.
 ```
 
@@ -1084,6 +1179,11 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
   --help         Show this message and exit.
 ```
 
@@ -1102,6 +1202,11 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
   --help         Show this message and exit.
 ```
 
@@ -1122,6 +1227,11 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
   --help         Show this message and exit.
 ```
 
@@ -1161,6 +1271,11 @@ Options:
                    server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL    base URL of the configuration API (default: $VINGA_API_URL,
                    then http://127.0.0.1:<server.port>/api)
+  --force          answer the confirmation a destructive command asks at a
+                   terminal, so it does not ask (default: it asks)
+  --no-input       never prompt: a destructive command refuses rather than
+                   asking, and a secret is read from stdin or --from-env
+                   (default: prompt at a terminal)
   --help           Show this message and exit.
 
 A credential is never a key=value argument: arguments land in shell history
@@ -1211,6 +1326,11 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
   --help         Show this message and exit.
 ```
 
@@ -1226,6 +1346,11 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
   --help         Show this message and exit.
 ```
 
@@ -1262,6 +1387,11 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
   --help         Show this message and exit.
 ```
 
@@ -1280,6 +1410,11 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
   --help         Show this message and exit.
 ```
 
@@ -1298,6 +1433,11 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
   --help         Show this message and exit.
 ```
 
@@ -1329,6 +1469,11 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
   --help         Show this message and exit.
 ```
 
@@ -1349,6 +1494,11 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
   --help         Show this message and exit.
 ```
 
@@ -1382,6 +1532,11 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
   --help         Show this message and exit.
 ```
 
@@ -1397,6 +1552,11 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
   --help         Show this message and exit.
 ```
 
@@ -1417,6 +1577,11 @@ Options:
                    server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL    base URL of the configuration API (default: $VINGA_API_URL,
                    then http://127.0.0.1:<server.port>/api)
+  --force          answer the confirmation a destructive command asks at a
+                   terminal, so it does not ask (default: it asks)
+  --no-input       never prompt: a destructive command refuses rather than
+                   asking, and a secret is read from stdin or --from-env
+                   (default: prompt at a terminal)
   --help           Show this message and exit.
 ```
 
@@ -1432,6 +1597,11 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
   --help         Show this message and exit.
 ```
 
@@ -1447,6 +1617,11 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
   --help         Show this message and exit.
 ```
 
@@ -1462,6 +1637,11 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
   --help         Show this message and exit.
 ```
 
@@ -1478,6 +1658,11 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
   --help         Show this message and exit.
 ```
 
@@ -1495,6 +1680,11 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
   --help         Show this message and exit.
 ```
 
@@ -1511,6 +1701,11 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
   --help         Show this message and exit.
 ```
 
