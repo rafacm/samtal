@@ -1670,11 +1670,9 @@ def _entity_writes(api: FastAPI) -> None:
     when it applies. The sentence is written here, in the handler, and
     the timing is the kind's own `notice`, which is a descriptor fact
     because it is about what was written rather than about the route
-    that wrote it. Seven of these sentences are also written by the
-    CLI's break-glass path, which has no server to ask; what holds the
-    two spellings equal is
-    `test_a_local_write_acknowledges_what_the_api_acknowledges`, which
-    runs each mutating act both ways and asserts one answer.
+    that wrote it. There is one spelling of each of them, because there
+    is one write path: the CLI is a client of these routes and prints
+    what they answered.
 
     A fragment is handed to the repository unread (`RawBody`), which is
     the rule the module docstring gives: FastAPI's own validation echoes
@@ -2023,8 +2021,8 @@ def _writes(api: FastAPI) -> None:
         # may still claim by the code it was showing. Housekeeping
         # rather than a guarantee: a claim itself refuses to bind a
         # device that is already configured, which is what covers a
-        # write made where this table cannot be reached, such as the
-        # CLI's --local path or a second process.
+        # write made where this table cannot be reached, such as a
+        # second process.
         pending.retire(bound.mac)
         # Both the line and the notice are built from what the row
         # holds, never from what the request sent: a name arriving with
@@ -2256,8 +2254,7 @@ def _binding_notice(unloaded: Sequence[str] = (), snapshot_only: bool = False) -
     left to say is that the write is stored, which is what the sentence
     says. Written here rather than at the five call sites because this
     is where a device write's answer is decided, and there is no second
-    write path that decides it: the CLI's `--local` device delete has no
-    loaded server to ask and answers the live sentence plainly.
+    write path that decides it.
     """
     if snapshot_only:
         return SNAPSHOT_NOTICE

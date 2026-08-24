@@ -161,10 +161,10 @@ class DeviceBindings:
     One per app, built by the composition root and disposed with it.
     Every lookup is its own read transaction: there is no cache, because
     the call rate is a device's boot check-in and its connect, and
-    because a cache would need an invalidation path from the two write
-    paths (the API and `--local`) that the second of them could not
-    reach at all. If a fleet ever makes this measurable, this class is
-    the only place that has to change.
+    because a cache would need an invalidation path from every writer of
+    the rows, which anything holding the file open can be. If a fleet
+    ever makes this measurable, this class is the only place that has to
+    change.
     """
 
     def __init__(self, generations: "Generations", engine: Engine | None) -> None:

@@ -188,9 +188,8 @@ def _usage_problem(message: str) -> str:
 def _parser() -> argparse.ArgumentParser:
     """The whole grammar: one optional URL and --config.
 
-    No subcommands, no --api-url and no --local, because this command
-    reaches no API and no database and offering the flags would say it
-    had.
+    No subcommands and no --api-url, because this command reaches no
+    API and no database and offering the flag would say it had.
     """
     parser = _Parser(
         prog="vinga-server doctor",

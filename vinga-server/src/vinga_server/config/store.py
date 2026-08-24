@@ -1816,9 +1816,8 @@ def _delete_row(
     whole domain first meant validating every row before deleting any,
     so a row that cannot be loaded (a hand-edited JSON column, a value
     its model refuses) could not be deleted at all: the load failed on
-    the way to removing the very thing that was failing. That turns the
-    break-glass path into one that cannot open the glass, in exactly the
-    situation it exists for.
+    the way to removing the very thing that was failing, so the one row
+    keeping a deployment down was the one row nothing could remove.
 
     So the row goes first, by identity, and what is validated afterwards
     is the configuration that remains. Both happen inside the one BEGIN
@@ -1838,7 +1837,7 @@ def _delete_row(
     server can always load what is stored) is broken by that other row,
     not by this deletion, and refusing here would only mean that one
     unreadable row makes every other entity undeletable, which is the
-    deadlock the break-glass path exists to avoid.
+    deadlock this ordering exists to avoid.
     """
     deleted = connection.execute(delete(table).where(*where))
     if deleted.rowcount == 0:
@@ -2127,8 +2126,8 @@ def _stored_option_types(
     configuration its own write path would no longer accept. The refusal
     names the entry and the fields, never the values, exactly as an
     unreadable body does, and the way out of it is the one an unreadable
-    row has always had: `vinga-server config --local delete provider
-    <stage> <name>`.
+    row has: delete the entry, which goes by identity and so needs
+    nothing about the row understood.
     """
     problem: str | None = None
     try:

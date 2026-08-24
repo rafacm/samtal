@@ -18,9 +18,9 @@ the machine-readable way to write the same entities: a fragment below is
 the body of a `PUT`, validated in the same one place whichever way it
 arrived. The API's own contract is [`api-openapi.json`](api-openapi.json),
 generated from its routes under the same regenerate-and-diff check as
-this document. `vinga-server config --local` writes the database
-directly for the recovery subset (`show`, `delete`, `clear-secret`,
-`set-secret`), which is the way in when the server will not start.
+this document. A deployment whose server will not start is recovered by
+booting one on an empty database and applying a kept `config export`,
+which the command reference writes out step by step.
 
 ## How the pieces fit
 
