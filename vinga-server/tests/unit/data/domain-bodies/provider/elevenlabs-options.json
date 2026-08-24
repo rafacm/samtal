@@ -1,0 +1,10 @@
+{
+  "type": "elevenlabs",
+  "api_key_env": "ELEVENLABS_API_KEY",
+  "voice_id": "21m00Tcm4TlvDq8ikWAM",
+  "model": "eleven_multilingual_v2",
+  "output_format": "pcm_16000",
+  "language_code": "sv",
+  "voice_settings": {"stability": 0.5, "similarity_boost": 0.75, "speed": 1.0},
+  "timeout_s": 30
+}
