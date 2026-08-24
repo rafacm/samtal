@@ -60,7 +60,18 @@ ORDER = ("provider", "mcp-server", "prompt-fragment", "agent-defaults", "agent")
 # for a plain LAN deployment appears as a commented `# key:` line with
 # the reasoning above it, so a commented line is coverage and a
 # sentence of prose that happens to use the word is not.
-KEY_LINE = re.compile(r"^(?P<indent> *)(?P<key>[A-Za-z_][A-Za-z0-9_]*):(?: |$)")
+#
+# Lower case is what tells the two apart, and it is a rule about this
+# repository rather than about YAML: every key any model here declares
+# is snake_case, and a sentence of prose starts with a capital. The
+# fragments open a paragraph with `Default: <value>` and `API: <what it
+# is>` often enough that the wider pattern read those as documented
+# keys, and the case below, which uncomments a whole fragment and
+# installs it, then submitted `Default` as an option and was told it is
+# not one. Narrowing here rather than rewording the prose: the rule the
+# comment above states is the one intended, and documentation is written
+# for the reader rather than around the scan.
+KEY_LINE = re.compile(r"^(?P<indent> *)(?P<key>[a-z_][a-z0-9_]*):(?: |$)")
 COMMENT_LINE = re.compile(r"^(?P<indent> *)# ?(?P<rest>.*)$")
 
 

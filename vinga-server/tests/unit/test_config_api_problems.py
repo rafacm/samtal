@@ -188,6 +188,39 @@ REFUSALS = [
         ["/beam_size"],
     ),
     Refusal(
+        "a declared nested option of a typed provider type",
+        "/providers/tts/voice",
+        {
+            "type": "elevenlabs",
+            "voice_id": "voice-1",
+            "voice_settings": {"stability": SENTINEL},
+        },
+        lambda store, fragment: store.set_provider("tts", "voice", fragment),
+        "providers.tts.voice",
+        # Two declared names deep, which is the shape the first typed
+        # type could not show: its nested section forwards what it does
+        # not declare, so nothing under it is ever refused. This one's
+        # is closed, so a field inside it is a name the repository chose
+        # and the pointer walks to it. The value is a credential and is
+        # nowhere.
+        ["/voice_settings/stability"],
+    ),
+    Refusal(
+        "an undeclared key inside a typed type's nested options",
+        "/providers/tts/voice",
+        {
+            "type": "elevenlabs",
+            "voice_id": "voice-1",
+            "voice_settings": {"stabilty": 0.5},
+        },
+        lambda store, fragment: store.set_provider("tts", "voice", fragment),
+        "providers.tts.voice",
+        # And the fallback one level down: a key the caller invented
+        # inside a section the repository declared addresses the deepest
+        # declared parent, which is the section rather than the fragment.
+        ["/voice_settings"],
+    ),
+    Refusal(
         "a filler switched on with no phrases",
         "/agents/sam",
         {"prompt": "You are Sam.", "filler": {"enabled": True}},
@@ -563,6 +596,16 @@ PLANTED_KEYS = [
         "/providers/asr/ears",
         {"type": "faster_whisper", KEY_SENTINEL: 1},
         lambda store, fragment: store.set_provider("asr", "ears", fragment),
+    ),
+    PlantedKey(
+        "an invented key inside a typed type's nested options",
+        "/providers/tts/voice",
+        {
+            "type": "elevenlabs",
+            "voice_id": "voice-1",
+            "voice_settings": {KEY_SENTINEL: 1},
+        },
+        lambda store, fragment: store.set_provider("tts", "voice", fragment),
     ),
     PlantedKey(
         "a secret-shaped key in an MCP server's env",

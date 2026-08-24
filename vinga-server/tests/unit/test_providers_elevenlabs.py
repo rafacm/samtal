@@ -1,9 +1,17 @@
 """The ElevenLabs TTS provider against a mock transport.
 
 No extra to skip on and no network: httpx is a core dependency, so the
-whole provider (options, request shape, streaming, failures) runs here.
-What a unit test cannot judge is how the real voice sounds and what the
-round trip costs, which is the PR's real-API verification step.
+whole provider (request shape, streaming, failures) runs here. What a
+unit test cannot judge is how the real voice sounds and what the round
+trip costs, which is the PR's real-API verification step.
+
+What the type ACCEPTS is no longer asked here key by key. It is
+`ElevenlabsOptions`, and its own suite is `test_provider_options.py`,
+where the parity table holds it to what the reader before it took. What
+stays here is the half that is this provider's rather than the model's:
+the two things the builder computes from a validated instance (the rate
+the format produces, the credential the options cannot hold), and every
+refusal a build can still raise.
 """
 
 import asyncio
@@ -13,9 +21,11 @@ import pytest
 
 from tests.support.llm_sdk import Falsey
 from vinga_server.config.models import ProviderConfig
+from vinga_server.config.provider_options import ElevenlabsOptions
 from vinga_server.providers import ProviderCallError, ProviderCallTimeout, build_entry
 from vinga_server.providers.base import ProviderError
 from vinga_server.providers.elevenlabs_tts import ElevenLabsTts
+from vinga_server.providers.kit import DEFAULT_TIMEOUT_S
 
 # Not a real credential, and shaped so a substring check for it cannot
 # match by accident. It stands in for what the API can echo back into
@@ -75,8 +85,24 @@ def chain(exc: BaseException) -> str:
 
 
 async def test_a_missing_voice_id_fails_the_build() -> None:
-    with pytest.raises(ProviderError, match='"voice_id" is required'):
+    """The subject the reader's `required_string` had, through the model:
+    the entry names the field that is missing, and it never reaches a
+    client."""
+    with pytest.raises(ProviderError, match="voice_id") as caught:
         await build_tts(type="elevenlabs", api_key_env="ELEVEN_KEY")
+    assert "providers.tts.voice" in str(caught.value)
+
+
+async def test_the_default_timeout_is_the_one_the_kit_gives_a_request() -> None:
+    """The one fact this type states in two places and may not disagree
+    with itself about.
+
+    `ElevenlabsOptions` cannot import the kit: the kit speaks httpx, and
+    the module the options live in is held to loading no client library.
+    So the number is written there and pinned against the kit's constant
+    from this side, which may import both.
+    """
+    assert ElevenlabsOptions.model_validate({"voice_id": "v"}).timeout_s == DEFAULT_TIMEOUT_S
 
 
 async def test_a_missing_api_key_env_fails_the_build() -> None:
@@ -91,11 +117,15 @@ async def test_an_unset_api_key_variable_fails_the_build(monkeypatch: pytest.Mon
 
 
 async def test_an_unknown_option_fails_the_build(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The subject `finish()` had. What is said about the key changed: it
+    is not repeated back, because a key an operator invented is as good a
+    place to have pasted a credential as a value is."""
     monkeypatch.setenv("ELEVEN_KEY", "secret")
-    with pytest.raises(ProviderError, match="unknown option"):
+    with pytest.raises(ProviderError, match="unrecognized key") as caught:
         await build_tts(
-            type="elevenlabs", voice_id="voice-1", api_key_env="ELEVEN_KEY", voice="lessac"
+            type="elevenlabs", voice_id="voice-1", api_key_env="ELEVEN_KEY", speaker="lessac"
         )
+    assert "speaker" not in str(caught.value)
 
 
 async def test_the_sample_rate_comes_from_the_output_format(
@@ -122,38 +152,58 @@ async def test_the_default_output_format_matches_the_device_rate(
 
 
 async def test_a_non_pcm_output_format_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`parse_sample_rate`'s subject, through the model's own validator.
+    The rule is still named; the format that broke it is not quoted back
+    any more."""
     monkeypatch.setenv("ELEVEN_KEY", "secret")
-    with pytest.raises(ProviderError, match="pcm_<rate>"):
+    with pytest.raises(ProviderError, match="pcm_<rate>") as caught:
         await build_tts(
             type="elevenlabs",
             voice_id="voice-1",
             api_key_env="ELEVEN_KEY",
             output_format="mp3_44100_128",
         )
+    assert "output_format" in str(caught.value)
+    assert "mp3_44100_128" not in str(caught.value)
 
 
 async def test_an_unknown_voice_setting_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The subject `read_voice_settings` had, kept: a typo in a voice
+    setting is a knob that never took effect, and the API would ignore it
+    silently.
+
+    What is said about it is the repository's standing rule rather than
+    the hand check's list: the refusal points at the section the key was
+    written under and does not repeat the key itself.
+    """
     monkeypatch.setenv("ELEVEN_KEY", "secret")
-    with pytest.raises(ProviderError, match="unknown voice_settings key"):
+    with pytest.raises(ProviderError, match="unrecognized key") as caught:
         await build_tts(
             type="elevenlabs",
             voice_id="voice-1",
             api_key_env="ELEVEN_KEY",
             voice_settings={"stabilty": 0.5},
         )
+    assert "voice_settings" in str(caught.value)
+    assert "stabilty" not in str(caught.value)
 
 
 async def test_a_voice_setting_of_the_wrong_type_is_refused(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A declared nested field is named by its own path, which is the
+    half of the rule that is not silence: the repository chose the name
+    `stability`, so it may print it."""
     monkeypatch.setenv("ELEVEN_KEY", "secret")
-    with pytest.raises(ProviderError, match='voice_settings "stability" must be a number'):
+    with pytest.raises(ProviderError, match="must be a number") as caught:
         await build_tts(
             type="elevenlabs",
             voice_id="voice-1",
             api_key_env="ELEVEN_KEY",
             voice_settings={"stability": "high"},
         )
+    assert "voice_settings.stability" in str(caught.value)
+    assert "high" not in str(caught.value)
 
 
 async def test_the_type_marks_egress_and_rejects_a_declaration(

@@ -10,10 +10,11 @@ which needs a model file to be true. The engine plumbing stays in
 
 Three things are pinned here.
 
-Coercion parity, because the type had a hand-written reader before it
-had a model, and a rewrite that quietly widened what a deployment may
-write would be a compatibility change nobody decided on. The table below
-is that reader's accepted-and-rejected set, call by call.
+Coercion parity, because every converted type had a hand-written reader
+before it had a model, and a rewrite that quietly widened what a
+deployment may write would be a compatibility change nobody decided on.
+The tables below are those readers' accepted-and-rejected sets, call by
+call, one per type.
 
 The refusal's shape, because naming the field is the whole point of the
 issue and naming anything else is the thing this repository does not do:
@@ -36,9 +37,11 @@ from vinga_server.config.loader import ConfigError
 from vinga_server.config.models import PROVIDER_STAGES, ProviderConfig
 from vinga_server.config.provider_options import (
     PROVIDER_TYPES,
+    ElevenlabsOptions,
     FasterWhisperOptions,
     OptionsRefused,
     VadParameters,
+    VoiceSettings,
     checked_options,
     options_model,
 )
@@ -54,29 +57,59 @@ ENTRY = "providers.asr.ears"
 
 HEADLINE = f"invalid {ENTRY}:"
 
+# The types under test, as the pair that addresses one, and what a
+# fragment of each has to carry before any other option can be judged: a
+# case about `model` must not fail because a required field was missing
+# somewhere else.
+WHISPER = ("asr", "faster_whisper")
 
-def refuse(**options: object) -> OptionsRefused:
+ELEVENLABS = ("tts", "elevenlabs")
+
+BASE: dict[tuple[str, str], dict[str, object]] = {
+    WHISPER: {},
+    ELEVENLABS: {"voice_id": "voice-1"},
+}
+
+
+def refuse(pair: tuple[str, str] = WHISPER, **options: object) -> OptionsRefused:
     """The refusal one set of options produces, or a failure saying it
     was accepted."""
     with pytest.raises(OptionsRefused) as caught:
-        checked_options(HEADLINE, "asr", "faster_whisper", options)
+        checked_options(HEADLINE, *pair, {**BASE[pair], **options})
     return caught.value
 
 
-def accept(**options: object) -> FasterWhisperOptions:
-    entry = checked_options(HEADLINE, "asr", "faster_whisper", options)
+def accept(pair: tuple[str, str] = WHISPER, **options: object) -> BaseModel:
+    entry = checked_options(HEADLINE, *pair, {**BASE[pair], **options})
+    assert entry is not None
+    return entry
+
+
+def whisper(**options: object) -> FasterWhisperOptions:
+    entry = accept(WHISPER, **options)
     assert isinstance(entry, FasterWhisperOptions)
     return entry
 
 
-# What the type accepts, and what it refuses
+def elevenlabs(**options: object) -> ElevenlabsOptions:
+    entry = accept(ELEVENLABS, **options)
+    assert isinstance(entry, ElevenlabsOptions)
+    return entry
+
+
+# What each type accepts, and what it refuses
 #
 # One row per option per rule, read off the `OptionsReader` calls the
-# builder made before the model existed: `string`, `integer`, `boolean`,
-# `number`, `numbers` and `mapping`, each with its own idea of what a
-# value is. The two that are easy to get wrong in a rewrite are the ones
-# Python is relaxed about: a bool is an int, and "5" converts to one.
-PARITY: list[tuple[str, object, bool]] = [
+# builder made before the model existed: `string`, `required_string`,
+# `integer`, `boolean`, `number`, `numbers` and `mapping`, each with its
+# own idea of what a value is. The two that are easy to get wrong in a
+# rewrite are the ones Python is relaxed about: a bool is an int, and
+# "5" converts to one.
+#
+# One table per converted type, joined below with the pair that
+# addresses it, so a type's rows read as its own reader did and the case
+# that runs them is one case.
+WHISPER_PARITY: list[tuple[str, object, bool]] = [
     # string options: a string and nothing else, plus the two spellings
     # of absence the reader's `or <default>` used to swallow.
     ("model", "medium", True),
@@ -136,17 +169,84 @@ PARITY: list[tuple[str, object, bool]] = [
     ("beem_size", 5, False),
 ]
 
-PARITY_IDS = [f"{name}={value!r}-{'ok' if good else 'no'}" for name, value, good in PARITY]
+ELEVENLABS_PARITY: list[tuple[str, object, bool]] = [
+    # the required string: present and with something in it, which is
+    # what `required_string` demanded of it.
+    ("voice_id", "voice-2", True),
+    ("voice_id", "", False),
+    ("voice_id", "   ", False),
+    ("voice_id", None, False),
+    ("voice_id", 5, False),
+    # string options: a string and nothing else. An explicit null where
+    # a default sits is the tightening this conversion makes, and here
+    # it replaces an assertion error rather than a quiet default.
+    ("model", "eleven_multilingual_v2", True),
+    ("model", 5, False),
+    ("model", None, False),
+    ("language_code", "sv", True),
+    ("language_code", None, True),
+    ("language_code", 5, False),
+    # the format, which has a shape as well as a type.
+    ("output_format", "pcm_16000", True),
+    ("output_format", "pcm_44100", True),
+    ("output_format", "mp3_44100_128", False),
+    ("output_format", "pcm_", False),
+    ("output_format", 24000, False),
+    ("output_format", None, False),
+    # a number: an int or a float, never a bool, never a string. Null
+    # was refused by the reader too, since `number` measured whatever it
+    # popped rather than falling back on it.
+    ("timeout_s", 15, True),
+    ("timeout_s", 12.5, True),
+    ("timeout_s", "15", False),
+    ("timeout_s", True, False),
+    ("timeout_s", None, False),
+    # the nested mapping, which has to be one.
+    ("voice_settings", {}, True),
+    ("voice_settings", {"stability": 0.5, "use_speaker_boost": True}, True),
+    ("voice_settings", [], False),
+    ("voice_settings", "0.5", False),
+    ("voice_settings", None, False),
+    # and its five keys, each with the rule the hand check gave it. A
+    # null under one of them was skipped by that check and travelled, so
+    # it still does.
+    ("voice_settings", {"stability": 1}, True),
+    ("voice_settings", {"stability": None}, True),
+    ("voice_settings", {"stability": "high"}, False),
+    ("voice_settings", {"stability": True}, False),
+    ("voice_settings", {"similarity_boost": 0.75}, True),
+    ("voice_settings", {"style": 0.2}, True),
+    ("voice_settings", {"speed": 1.1}, True),
+    ("voice_settings", {"speed": "fast"}, False),
+    ("voice_settings", {"use_speaker_boost": False}, True),
+    ("voice_settings", {"use_speaker_boost": 1}, False),
+    ("voice_settings", {"use_speaker_boost": "yes"}, False),
+    # a key the section does not have, which is the refusal
+    # `read_voice_settings` existed for.
+    ("voice_settings", {"stabilty": 0.5}, False),
+    # and the key that is not an option of this type at all.
+    ("speaker", "lessac", False),
+]
+
+PARITY: list[tuple[tuple[str, str], str, object, bool]] = [
+    *((WHISPER, *row) for row in WHISPER_PARITY),
+    *((ELEVENLABS, *row) for row in ELEVENLABS_PARITY),
+]
+
+PARITY_IDS = [
+    f"{pair[1]}.{name}={value!r}-{'ok' if good else 'no'}"
+    for pair, name, value, good in PARITY
+]
 
 
-@pytest.mark.parametrize(("name", "value", "accepted"), PARITY, ids=PARITY_IDS)
+@pytest.mark.parametrize(("pair", "name", "value", "accepted"), PARITY, ids=PARITY_IDS)
 def test_the_model_takes_what_the_reader_took(
-    name: str, value: object, accepted: bool
+    pair: tuple[str, str], name: str, value: object, accepted: bool
 ) -> None:
     if accepted:
-        accept(**{name: value})
+        accept(pair, **{name: value})
         return
-    refuse(**{name: value})
+    refuse(pair, **{name: value})
 
 
 # The spellings of absence the reader swallowed, and what they read as
@@ -192,16 +292,16 @@ def test_a_null_vad_section_reads_as_no_section() -> None:
 def test_a_scalar_temperature_becomes_a_ladder_of_one() -> None:
     """The one coercion the reader performed, kept: the engine takes a
     sequence and an operator writes a number."""
-    assert accept(temperature=0.4).temperature == [0.4]
-    assert accept(temperature=[0.0, 0.2]).temperature == [0.0, 0.2]
-    assert accept().temperature is None
+    assert whisper(temperature=0.4).temperature == [0.4]
+    assert whisper(temperature=[0.0, 0.2]).temperature == [0.0, 0.2]
+    assert whisper().temperature is None
 
 
 def test_the_defaults_are_the_ones_the_builder_had() -> None:
     """The values a fragment that sets nothing gets. They are read by the
     builder rather than by the engine, so a change here changes what
     every existing deployment is running."""
-    options = accept()
+    options = whisper()
 
     assert options.model == "small"
     assert options.language is None
@@ -223,12 +323,12 @@ def test_only_what_the_fragment_set_reaches_the_engines_vad() -> None:
     was written: an explicit null travels, an injected default does not,
     and a section nobody wrote is nothing rather than a mapping of
     Nones."""
-    assert accept().vad_parameters.model_dump(exclude_unset=True) == {}
-    assert accept(vad_parameters={}).vad_parameters.model_dump(exclude_unset=True) == {}
-    assert accept(
+    assert whisper().vad_parameters.model_dump(exclude_unset=True) == {}
+    assert whisper(vad_parameters={}).vad_parameters.model_dump(exclude_unset=True) == {}
+    assert whisper(
         vad_parameters={"min_silence_duration_ms": 500}
     ).vad_parameters.model_dump(exclude_unset=True) == {"min_silence_duration_ms": 500}
-    assert accept(
+    assert whisper(
         vad_parameters={"min_silence_duration_ms": None}
     ).vad_parameters.model_dump(exclude_unset=True) == {"min_silence_duration_ms": None}
 
@@ -237,7 +337,7 @@ def test_the_engines_own_vad_keys_still_travel() -> None:
     """The hatch this one nested model keeps open. faster-whisper's VAD
     takes more keys than the example documents, they have always been
     forwarded unread, and a deployment that wrote one must still boot."""
-    options = accept(vad_parameters={"speech_pad_ms": 30, "threshold": 0.4})
+    options = whisper(vad_parameters={"speech_pad_ms": 30, "threshold": 0.4})
 
     assert options.vad_parameters.model_dump(exclude_unset=True) == {
         "speech_pad_ms": 30,
@@ -254,6 +354,96 @@ def test_an_unknown_detection_mode_names_the_modes() -> None:
     assert "language_detect" in sentence
     assert "every_utterance" in sentence
     assert "once" in sentence
+
+
+# What the elevenlabs type is, beside its parity
+#
+# The two rules its builder used to hold by hand, and the nested section
+# that was the last hand-rolled options ladder in the provider package.
+
+
+def test_the_elevenlabs_defaults_are_the_ones_the_builder_had() -> None:
+    """What a fragment that sets nothing but a voice gets. Read by the
+    builder rather than by the API, so a change here changes what every
+    existing deployment is sending."""
+    options = elevenlabs()
+
+    assert options.model == "eleven_flash_v2_5"
+    assert options.output_format == "pcm_24000"
+    assert options.sample_rate == 24000
+    assert options.language_code is None
+    assert options.timeout_s == 30.0
+    assert options.voice_settings.model_dump(exclude_unset=True) == {}
+
+
+def test_the_rate_is_read_off_the_format_the_validator_admitted() -> None:
+    """`parse_sample_rate` did both jobs; the field's validator does the
+    refusing now and this does the reading, which is why it can be a
+    property with no failure of its own."""
+    assert elevenlabs(output_format="pcm_16000").sample_rate == 16000
+    assert elevenlabs(output_format="pcm_44100").sample_rate == 44100
+
+
+def test_a_format_this_stage_cannot_stream_is_refused_by_its_rule() -> None:
+    """The subject the builder's own check had. The rule is named and the
+    format is not, which is the one thing that changed: an output format
+    is a value, and a value refused for its shape is where a paste
+    lands."""
+    refusal = refuse(ELEVENLABS, output_format="mp3_44100_128")
+    (problem,) = refusal.problems
+
+    assert problem.path == "/output_format"
+    assert "pcm_<rate>" in str(refusal)
+    assert "mp3_44100_128" not in str(refusal)
+
+
+def test_only_what_the_fragment_set_reaches_the_request_body() -> None:
+    """The nested model crosses a boundary, and what crosses it is what
+    was written: an explicit null travels, an injected default does not,
+    and a section nobody wrote is nothing rather than five nulls the API
+    would have to interpret."""
+    assert elevenlabs(voice_settings={}).voice_settings.model_dump(exclude_unset=True) == {}
+    assert elevenlabs(
+        voice_settings={"stability": 0.4, "speed": 1.1}
+    ).voice_settings.model_dump(exclude_unset=True) == {"stability": 0.4, "speed": 1.1}
+    assert elevenlabs(
+        voice_settings={"style": None}
+    ).voice_settings.model_dump(exclude_unset=True) == {"style": None}
+
+
+def test_an_unknown_voice_setting_is_refused() -> None:
+    """`read_voice_settings`'s own subject, kept through the model: a
+    typo the API would ignore is a knob that never took effect.
+
+    The pointer is the section rather than the key, which is
+    `safe_location`'s rule meeting a closed door: the repository declared
+    `voice_settings`, so it may name it, and it did not declare what was
+    written inside, so it may not repeat that.
+    """
+    refusal = refuse(ELEVENLABS, voice_settings={"stabilty": 0.5})
+    (problem,) = refusal.problems
+
+    assert problem.path == "/voice_settings"
+    assert problem.message == "an unrecognized key is not permitted"
+    assert "stabilty" not in str(refusal)
+
+
+def test_a_declared_voice_setting_is_addressed_by_its_own_path() -> None:
+    """And the other half of that rule: a name this repository chose is
+    printed, at the path a fragment writes it at."""
+    (problem,) = refuse(ELEVENLABS, voice_settings={"stability": "high"}).problems
+
+    assert problem.path == "/voice_settings/stability"
+    assert problem.message == "must be a number"
+
+
+def test_the_voice_settings_door_is_shut_and_the_vad_one_is_not() -> None:
+    """The two nested models differ in exactly one setting, and it is the
+    difference between a vendor's fixed five and an engine's open
+    tuning. Asserted together so that changing either is a deliberate
+    act."""
+    assert VoiceSettings.model_config["extra"] == "forbid"
+    assert VadParameters.model_config["extra"] == "allow"
 
 
 # Where a refusal points
@@ -299,6 +489,34 @@ def test_a_refusal_names_no_key_and_no_value_anywhere_in_its_chain() -> None:
     exception is printed.
     """
     refusal = refuse(**{SECRET: SECRET, "model": {"nested": SECRET}})
+
+    rendered = "\n".join(
+        [
+            str(refusal),
+            repr(refusal),
+            repr(refusal.__cause__),
+            repr(refusal.__context__),
+            *(f"{problem.path} {problem.message}" for problem in refusal.problems),
+        ]
+    )
+
+    assert SECRET not in rendered
+    assert refusal.__cause__ is None
+    assert refusal.__context__ is None
+
+
+def test_a_refusal_about_a_nested_section_carries_nothing_of_it_either() -> None:
+    """The same plant one level down, where the second converted type
+    put a closed door.
+
+    A nested model refuses twice over, once for a key it does not have
+    and once for a value of the wrong shape, and pydantic reports both
+    with the rejected input attached. Both are looked for here, in the
+    same five places.
+    """
+    refusal = refuse(
+        ELEVENLABS, voice_settings={SECRET: SECRET, "stability": SECRET}
+    )
 
     rendered = "\n".join(
         [
