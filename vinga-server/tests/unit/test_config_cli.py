@@ -41,6 +41,7 @@ from tests.support.config_cli import (
 )
 from tests.support.config_cli import chain as _chain
 from tests.support.config_cli import document as _document
+from tests.support.config_cli import logged as _logged
 from tests.support.config_cli import showing as _showing
 from tests.support.notices import CHECK_IN, RELOAD, boundaries
 from vinga_server.config import cli
@@ -112,12 +113,146 @@ def test_a_fragment_can_come_from_a_file(
     assert _document(capsys.readouterr().out) == {"type": "anthropic", "model": "m"}
 
 
-def test_a_missing_fragment_file_is_named(run, capsys: pytest.CaptureFixture[str]) -> None:
-    assert run("set", "agent", "sam", "-f", "/nowhere/at/all.yaml") == 1
+# A fragment file that gives no fragment
+#
+# Four ways one can fail and one sentence each, chosen by the class of
+# the failure. None of them holds the path, the library's `strerror` or
+# a byte of the file (#289): the path is typed, `-f` is one option away
+# from the secret commands, and a file that will not decode is as likely
+# to be key material as a mistyped document.
+#
+# Every case plants the sentinel where the value would be. In the path
+# for the three that never open the file, and inside the file for the
+# one that opens it and cannot read it as text.
+
+
+def test_a_missing_fragment_file_names_the_rule_and_never_the_path(
+    run, tmp_path: Path, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
+) -> None:
+    missing = tmp_path / f"{SECRET}.yaml"
+
+    with caplog.at_level(logging.DEBUG):
+        assert run("set", "agent", "sam", "-f", str(missing)) == 1
 
     captured = capsys.readouterr()
-    assert "fragment file not found" in captured.err
+    assert cli.FILE_NOT_FOUND in captured.err
+    assert SECRET not in captured.err
+    assert SECRET not in captured.out
+    assert str(missing) not in captured.err
     assert "Traceback" not in captured.err
+    assert SECRET not in _logged(caplog)
+
+
+def test_a_fragment_file_that_will_not_open_says_so_in_this_module_s_words(
+    run, tmp_path: Path, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
+) -> None:
+    """A directory where a file belongs, which is the failure every
+    filesystem answers the same way; the operating system's own wording
+    for it is not passed through, because a sentence this code did not
+    write is a sentence it cannot promise carries no value."""
+    directory = tmp_path / f"{SECRET}.yaml"
+    directory.mkdir()
+
+    with caplog.at_level(logging.DEBUG):
+        assert run("set", "agent", "sam", "-f", str(directory)) == 1
+
+    captured = capsys.readouterr()
+    assert cli.FILE_NOT_READABLE in captured.err
+    assert SECRET not in captured.err
+    assert SECRET not in captured.out
+    assert "Is a directory" not in captured.err
+    assert "Traceback" not in captured.err
+    assert SECRET not in _logged(caplog)
+
+
+def test_a_fragment_file_this_user_may_not_read_says_the_same(
+    run, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The other half of that sentence, and the half a test cannot
+    always produce: a user who can read anything reads this too."""
+    denied = tmp_path / f"{SECRET}.yaml"
+    denied.write_text("prompt: A\n", encoding="utf-8")
+    denied.chmod(0o000)
+    try:
+        denied.read_text(encoding="utf-8")
+    except PermissionError:
+        pass
+    else:
+        pytest.skip("this user reads a file with no permission bits, so nothing is denied")
+
+    assert run("set", "agent", "sam", "-f", str(denied)) == 1
+
+    captured = capsys.readouterr()
+    assert cli.FILE_NOT_READABLE in captured.err
+    assert SECRET not in captured.err
+    assert "Permission denied" not in captured.err
+
+
+def test_a_fragment_file_that_is_not_text_is_refused_rather_than_thrown(
+    run, tmp_path: Path, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
+) -> None:
+    """The half of #289 that was not about echoing: `UnicodeDecodeError`
+    is a `ValueError` rather than an `OSError`, so a file that is not
+    UTF-8 used to leave as a traceback, and the exception it left as
+    holds the buffer it could not decode.
+
+    The sentinel is inside the file, on the line above the bytes that
+    break the decoding, which is where an operator's would be: a
+    secrets file pointed at by mistake holds the credential already.
+    """
+    binary = tmp_path / "keys.bin"
+    binary.write_bytes(f"prompt: {SECRET}\n".encode() + b"\xff\xfe\x80\x00")
+
+    with caplog.at_level(logging.DEBUG):
+        assert run("set", "agent", "sam", "-f", str(binary)) == 1
+
+    captured = capsys.readouterr()
+    assert cli.FILE_NOT_TEXT in captured.err
+    assert SECRET not in captured.err
+    assert SECRET not in captured.out
+    assert "Traceback" not in captured.err
+    assert "utf-8" not in captured.err.replace("UTF-8", "")
+    assert SECRET not in _logged(caplog)
+
+
+def test_no_fragment_file_refusal_carries_the_file_or_the_path_in_its_chain(
+    tmp_path: Path,
+) -> None:
+    """White-box for the chain, the way the parser's refusals are
+    checked below: what an operating-system error holds is the path it
+    was given, what a decode error holds is the bytes it was given, and
+    neither is printed, so neither can be asserted through the runner.
+    """
+    binary = tmp_path / f"{SECRET}.bin"
+    binary.write_bytes(f"prompt: {SECRET}\n".encode() + b"\xff\xfe\x80\x00")
+    directory = tmp_path / f"{SECRET}.d"
+    directory.mkdir()
+
+    for path in (tmp_path / f"{SECRET}.missing", binary, directory):
+        with pytest.raises(cli.ConfigError) as caught:
+            cli._file(str(path))
+
+        assert SECRET not in _chain(caught.value), path
+        assert caught.value.__cause__ is None, path
+        assert caught.value.__context__ is None, path
+
+
+def test_a_fragment_file_that_will_not_parse_is_not_named_either(
+    run, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The sibling of the three above, on the path that opens the file
+    and reads it: what the parser could not read is located by a line
+    and a column, and the file is called what this module calls it
+    rather than what it was typed as."""
+    broken = tmp_path / f"{SECRET}.yaml"
+    broken.write_text("prompt: A\nmcp: [\n", encoding="utf-8")
+
+    assert run("set", "agent", "sam", "-f", str(broken)) == 1
+
+    captured = capsys.readouterr()
+    assert f"invalid YAML in {cli.FILE_SOURCE} at line" in captured.err
+    assert SECRET not in captured.err
+    assert str(broken) not in captured.err
 
 
 def test_every_mutating_command_says_when_the_write_applies(

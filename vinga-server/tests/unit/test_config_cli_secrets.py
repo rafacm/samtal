@@ -32,7 +32,10 @@ import pytest
 import yaml
 
 from tests.support.config_cli import OTHER_SECRET, SECRET, runner
+from tests.support.config_cli import chain as _chain
+from tests.support.config_cli import logged as _logged
 from vinga_server.config import cli
+from vinga_server.config.loader import ConfigError
 from vinga_server.config.secrets import MASK, MASTER_KEY_ENV
 
 
@@ -125,8 +128,48 @@ def test_a_secret_can_come_from_a_named_variable(
         "set-secret", "provider", "llm", "claude", "api_key", "--from-env", "VINGA_TEST_KEY"
     ) == 1
     captured = capsys.readouterr()
-    assert "VINGA_TEST_KEY" in captured.err
+    assert "--from-env names a variable that is not set" in captured.err
     assert SECRET not in captured.err
+
+
+def test_a_variable_that_is_not_set_names_the_rule_and_never_the_name(
+    run, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
+) -> None:
+    """The name after `--from-env` is typed, and the mistake that
+    produces this refusal most often is typing the secret itself there:
+    one word early, and the value lands where the variable's name
+    belongs. So the refusal names the rule, and the sentinel here is
+    planted as the name (#289).
+
+    The variable is not set under any spelling, which is what makes the
+    refusal fire; that it is set nowhere is the point, since the secret
+    typed by mistake is a value no environment holds.
+    """
+    run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
+    capsys.readouterr()
+
+    with caplog.at_level(logging.DEBUG):
+        assert run("set-secret", "provider", "llm", "claude", "api_key", "--from-env", SECRET) == 1
+
+    captured = capsys.readouterr()
+    assert "--from-env names a variable that is not set" in captured.err
+    assert SECRET not in captured.err
+    assert SECRET not in captured.out
+    assert SECRET not in _logged(caplog)
+
+
+def test_that_refusal_carries_the_name_in_no_chain_either(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """White-box for the chain, the way the URL refusals are checked: a
+    chain is not printed, and is reachable only from where the refusal
+    is raised."""
+    with pytest.raises(ConfigError) as caught:
+        cli._read_secret(cli.Invocation(from_env=SECRET))
+
+    assert SECRET not in _chain(caught.value)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 def test_an_interactive_terminal_is_read_without_echo(
