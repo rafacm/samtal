@@ -121,6 +121,13 @@ know. The method and its worked examples from merged vinga code are in
 - Two structures that must agree are one structure with a bug pending. Derive
   the second from the first.
 
+Commands are held to a standard of their own, in
+[`docs/architecture/cli-guide.md`](docs/architecture/cli-guide.md): noun
+first and verb second, positionals are identity addressing in the API's own
+order, system-level verbs stay flat, and each practice is stated with an
+example and a counterexample from the merged CLI. Read it before adding a
+command, a noun, a verb or a flag.
+
 ## Documentation process
 
 - When a plan is accepted, commit it to `docs/plans/` as one Markdown file
