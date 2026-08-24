@@ -1,0 +1,86 @@
+# A whole deployment that runs on this host and reaches no vendor:
+# local transcription, a local model behind an OpenAI-shaped endpoint, a
+# local voice, and the endpointer that runs on every audio frame anyway.
+# One document, written in one transaction:
+#
+#   vinga-server config apply -f examples/presets/local-stack.yaml
+#
+# Applying orders the writes for you. A write whose references do not
+# resolve is refused, and a document is refused whole rather than half
+# applied, so there is no creation order to get right here: the
+# providers, the defaults naming them and the agent inheriting them all
+# arrive together. Applying is additive and never deletes, so a section
+# this document does not name is left alone and the same document twice
+# changes nothing.
+#
+# Nothing here holds a credential. A keyless local runner needs none,
+# and an endpoint that authenticates names the variable holding its key
+# with `api_key_env`; the models refuse anything else.
+#
+# There are deliberately no devices and no default agent below. Which
+# board talks to which agent is the one thing a preset cannot know, and
+# it is one command afterwards. Bind one board, by the MAC on its
+# sticker:
+#
+#   vinga-server config bind-device aa:bb:cc:dd:ee:ff assistant
+#
+# or point every board that is bound to nothing at one agent:
+#
+#   vinga-server config set-default-agent assistant
+#
+# Every field below is documented in docs/reference/domain-config.md,
+# and examples/ holds a commented fragment per provider type with the
+# measured numbers behind each default.
+
+providers:
+  llm:
+    # Any endpoint that speaks the OpenAI chat completions API: Ollama,
+    # llama.cpp, vLLM. From inside the container image the host is not
+    # localhost, so point this at host.docker.internal there.
+    local:
+      type: openai_compatible
+      base_url: http://localhost:11434/v1
+      model: qwen3:8b
+      # openai_compatible cannot know its own egress, since base_url
+      # decides it. False is the operator asserting the endpoint stays
+      # on this machine, which is what server.local_only asks for.
+      egress: false
+
+  asr:
+    # Weights download at the first start, so that boot takes minutes
+    # and later ones seconds.
+    whisper:
+      type: faster_whisper
+      model: small
+      # Cuts both latency and hallucinations on silence-padded
+      # utterances.
+      vad_filter: true
+
+  tts:
+    # A voice is a provider entry, so two agents that should sound
+    # different name two entries. Voice names come from the Piper
+    # collection and download at the first start.
+    voice:
+      type: piper
+      voice: en_US-lessac-medium
+
+  vad:
+    ears:
+      type: silero
+
+# What every agent uses unless it names something else. A prompt is
+# deliberately not here: a prompt is what makes an agent that agent.
+agent_defaults:
+  llm: local
+  asr: whisper
+  tts: voice
+  vad: ears
+
+agents:
+  assistant:
+    # State the reply language explicitly: models otherwise pick one by
+    # their training bias.
+    prompt: >
+      You are a helpful voice assistant. Keep replies short, plain, and
+      speakable: one or two sentences, no lists, no markdown. Always
+      reply in the language the user spoke.

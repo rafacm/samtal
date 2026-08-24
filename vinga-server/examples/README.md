@@ -1,27 +1,40 @@
-# Example fragments
+# Example fragments and presets
 
-One file per entity or provider type, each the body of a single entity
-in the shape `vinga-server config set` takes it. These are examples to
-copy and edit, not a configuration the server reads: the domain half of
-the configuration lives in the database, and a fragment is how one
-entity gets written into it.
+Two tiers of file, for the two shapes a document can have.
 
-Installing one needs a running server: `vinga-server config` writes
+A **fragment** is the body of a single entity, in the shape
+`vinga-server config set` takes it: one file per entity or provider
+type. A **preset**, under [`presets/`](presets/), is a whole deployment
+in one document, in the shape `vinga-server config apply` takes it:
+several kinds at once, written in one transaction. Neither is a
+configuration the server reads. The domain half of the configuration
+lives in the database, and these are what get written into it.
+
+Either way it needs a running server: `vinga-server config` writes
 through the configuration API the server mounts, which
-[the server README](../README.md#the-configuration-api) describes. A
-write applies at the next server start: the configuration is read once
-at boot, so installing a fragment into a running deployment means
-restarting it afterwards.
+[the server README](../README.md#the-configuration-api) describes. An
+empty database is a valid state for that server to be running on.
 
-Every file names its own command in its header, so installing one is
-copy, edit, run:
+Every file names its own command in its header, so using one is copy,
+edit, run:
 
 ```bash
+vinga-server config apply -f examples/presets/local-stack.yaml
 vinga-server config set provider llm claude -f examples/llm-anthropic.yaml
 ```
 
+Those headers are also where the recipes in
+[`docs/reference/cli.md`](../../docs/reference/cli.md) come from: they
+are read out of these files rather than written beside them, and the
+whole list is run against a live server on every build.
+
 The entity's name is an argument, not part of the fragment, which is why
-the same `agent.yaml` can be installed twice under two names.
+the same `agent.yaml` can be installed twice under two names. A preset
+carries its entities' names in the document instead, because a document
+says where each of its entries goes.
+
+Applying is additive and never deletes: a section a document does not
+name is left alone, and the same document twice changes nothing.
 
 ## What is documented where
 
@@ -58,6 +71,11 @@ the reference it displaces.
 
 ## The files
 
+| File | Applies |
+| --- | --- |
+| `presets/local-stack.yaml` | a whole deployment that reaches no vendor |
+| `presets/cloud-stack.yaml` | a whole deployment on vendor APIs |
+
 | File | Installs |
 | --- | --- |
 | `llm-anthropic.yaml` | `providers.llm`, Claude over the vendor API |
@@ -76,4 +94,5 @@ the reference it displaces.
 
 Devices and the default agent have no fragments: they are written with
 `config bind-device` and `config set-default-agent`, which take
-arguments rather than a document.
+arguments rather than a document. A preset carries neither, because
+which board reaches which agent is the one thing a preset cannot know.
