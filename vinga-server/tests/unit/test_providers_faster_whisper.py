@@ -233,3 +233,8 @@ async def test_without_the_extra_the_error_names_it() -> None:
     with pytest.raises(ProviderError) as excinfo:
         await build_entry("asr", "ears", ProviderConfig.model_validate({"type": "faster_whisper"}))
     assert "uv sync --extra faster-whisper" in str(excinfo.value)
+    # And the ImportError does not travel with it. It carries the module
+    # search path and a traceback through somebody else's package, and
+    # this sentence is printed to an operator as it is.
+    assert excinfo.value.__cause__ is None
+    assert excinfo.value.__context__ is None

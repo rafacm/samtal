@@ -188,9 +188,9 @@ def _resolved(type_name: str, declared: ProviderType) -> Factory:
     the table's own `extra` rather than from a sentence written per
     type, so a type that gains an extra gains the message. The refusal
     is raised after the handler has closed and chains nothing: an
-    ImportError from a partially installed environment carries the
-    module search path and a traceback through somebody else's package,
-    and this sentence is printed to an operator as it is.
+    ImportError carries the module search path and a traceback through
+    somebody else's package, and this sentence is printed to an operator
+    as it is.
     """
 
     def factory(label: str, config: ProviderConfig, *rest: object) -> object:
@@ -308,27 +308,33 @@ def construct_provider(
     # entries that differ only in a pinned language and a voice.
     #
     # ProviderError passes through untouched, so the messages the rest
-    # of this module composes keep their exact wording, and `from exc`
-    # keeps the traceback for whoever wants it. ConfigError passes
-    # through for the same reason and one more: a stored credential that
-    # will not decrypt is a configuration problem whose message already
-    # names the entity and the slot to set again, and wrapping it as a
-    # failure to build a provider would bury that under the wrong
-    # heading.
+    # of this module composes keep their exact wording. ConfigError
+    # passes through for the same reason and one more: a stored
+    # credential that will not decrypt is a configuration problem whose
+    # message already names the entity and the slot to set again, and
+    # wrapping it as a failure to build a provider would bury that under
+    # the wrong heading.
     #
-    # What the library said is deliberately not in the sentence. This
-    # message is printed to an operator as it is (it is a boot failure,
-    # and the entry point answers one with a single line), and the text
-    # arriving here is whatever a third-party client raised while being
-    # handed this entry's options: an SDK that cannot reach its endpoint
-    # quotes the URL, one that will not authenticate quotes what it was
-    # given, and a copy of either into a printed line puts it wherever
-    # that line is kept. The same rule the device bindings' failed reads
-    # follow (`device/bindings.py`): the class name is said, the message
-    # is not, and the exception itself is this one's `__cause__` for
-    # whoever has a debugger. Options are validated by our own reader and
-    # raise `ProviderError` above, so the case this loses nothing on is
-    # the common one.
+    # What the library said is deliberately not in the sentence, and
+    # neither is the library's exception. This message is printed to an
+    # operator as it is (it is a boot failure, and the entry point
+    # answers one with a single line), and what arrives here is whatever
+    # a third-party client raised while being handed this entry's
+    # options: an SDK that cannot reach its endpoint quotes the URL, one
+    # that will not authenticate quotes what it was given, and either
+    # reaches a stream through the message, through a rendered traceback
+    # or through anything that walks a chain.
+    #
+    # The class name alone survives, captured inside the handler, and
+    # the refusal is raised after the handler has closed so that it
+    # carries neither a cause nor a context. That reverses this line's
+    # own earlier decision, which kept the original as `__cause__` "for
+    # whoever has a debugger" (#188): the discipline every refusal in
+    # the configuration package has been held to since is that a chain
+    # is a rendering surface like any other, and a debugger reads the
+    # log, which records the class and the entry.
+    failed: str | None = None
+    provider: object | None = None
     try:
         with provider_secrets_in_force(ProviderSecrets(stage, name, secrets)):
             provider = (
@@ -339,12 +345,14 @@ def construct_provider(
     except (ProviderError, ConfigError):
         raise
     except Exception as exc:
+        failed = type(exc).__name__
+    if failed is not None:
         raise ProviderError(
             f"{label}: the {config.type} provider would not build "
-            f"({type(exc).__name__}). What it said is not repeated here, because a "
+            f"({failed}). What it said is not repeated here, because a "
             f"library failing to start can quote the endpoint or the credential this "
             f"entry names; check this entry's options and the service it points at"
-        ) from exc
+        )
     if not isinstance(provider, Provider):
         # Unwritable from a factory in this package, and refused rather
         # than assumed: everything downstream owns what it is handed,
