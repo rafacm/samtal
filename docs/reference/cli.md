@@ -485,6 +485,18 @@ fragment fields for provider (providers.<stage>.<name>):
     name (openai_compatible, and the openai ASR and TTS types, whose base_url
     may be local or a vendor).
 
+options for llm type openai_compatible:
+
+  base_url: str  (required)
+    The endpoint's OpenAI-compatible base URL, such as
+    http://localhost:11434/v1 for a local Ollama; pointing it at
+    api.openai.com works too.
+  model: str  (required)
+    The model to ask for, in the endpoint's own vocabulary (qwen3:8b on
+    Ollama, an OpenAI model id on api.openai.com).
+  max_tokens: int  (default: 1024)
+    The cap on one reply's length, in tokens.
+
 options for asr type faster_whisper:
 
   model: str  (default: "small")

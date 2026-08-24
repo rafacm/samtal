@@ -9,6 +9,16 @@ base_url: http://localhost:11434/v1
 
 model: qwen3:8b
 
+# Any other key is sent to the endpoint as part of the request, and this
+# is the one provider type that works that way. It is what the type is
+# for: every server speaking this dialect takes parameters no other one
+# does, so an option vinga has never heard of travels rather than being
+# refused. The exceptions are the fields vinga composes for every
+# request, which it refuses here because writing one of them would
+# rewrite the request rather than configure the server: model,
+# max_tokens, messages, stream, stream_options, tools and tool_choice.
+# top_p: 0.9
+
 # Whether an openai_compatible endpoint sends session data off the host
 # is decided by base_url, so the server cannot know it from the type.
 # Under server.local_only the entry must say: egress: false is the
