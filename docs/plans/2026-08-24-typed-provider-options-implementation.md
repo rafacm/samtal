@@ -412,8 +412,12 @@ missing number branch, and the OpenAPI drift check on the four lines.
 
 ### What was done
 
-Five commits: the model, the builder's conversion, the three documents,
-the tests, and this record with the changelog and the tick.
+Six commits: the model, the builder's conversion, the three documents,
+the tests, this record with the changelog and the tick, and then the one
+the rebase asked for. The first five were written against M1 as it went
+to review; the section below on the rebase says what the review round's
+restructuring changed under them, and every count, diff and result in
+this section is read at the tip that came out of it.
 
 **The model.** `ElevenlabsOptions` declares the six options the builder
 read, with `extra="forbid"` and the example fragment's own sentence on
@@ -448,12 +452,18 @@ one thing an options model cannot hold. `ElevenLabsTts.__init__` is
 untouched, so what reaches the API is unchanged and the request-shape
 cases assert it unchanged.
 
+**The registration.** One argument on one line: the `("tts",
+"elevenlabs")` entry of `PROVIDER_TYPES` gains `options=
+ElevenlabsOptions`. `providers/registry.py` is byte-identical to main's,
+which is the clearest thing this milestone says about the shape the
+review round left behind: converting a type touches the table and the
+builder, and nothing in between.
+
 **The four renderings.** Nothing was written for them. Every surface
-reads `declared_options()`, so adding one key to `DECLARED_OPTIONS`
-moved three committed documents and the fourth (`config schema provider
-tts elevenlabs`) started answering. That is the machinery M1 paid for,
-and this milestone is the first evidence it works for a type it was not
-written against.
+reads `declared_options()`, so that one argument moved three committed
+documents and the fourth (`config schema provider tts elevenlabs`)
+started answering. That is the machinery M1 paid for, and this milestone
+is the first evidence it works for a type it was not written against.
 
 ### Deviations from the plan
 
@@ -505,11 +515,11 @@ does now. Held by `ELEVENLABS_PARITY` in
 | Option | Reader call | Accepted then | Accepted now | Same? |
 | --- | --- | --- | --- | --- |
 | `voice_id` | `required_string(...)` | a non-blank string; absent, null or blank refused as "is required" | `Nonblank` (`StrictStr` plus a not-blank rule), required | yes, and the two refusals are now separate sentences |
-| `model` | `string(..., "eleven_flash_v2_5")` | a string; absent gives the default, explicit null reached an `assert` | `StrictStr`, default `eleven_flash_v2_5` | null tightens, from a crash to a refusal |
-| `output_format` | `string(..., "pcm_24000")` plus `parse_sample_rate` | a `pcm_<rate>` string; anything else refused with the value quoted | `PcmFormat` (`StrictStr` plus the same pattern), default `pcm_24000` | null tightens the same way; the refusal is value-free now |
+| `model` | `string(..., "eleven_flash_v2_5")` | a string, `""` included and travelling as an empty model id; absent gives the default, explicit null reached an `assert` | `StrictStr`, default `eleven_flash_v2_5` | null tightens, from a crash to a refusal; `""` unchanged, because this reader had no `or <default>` |
+| `output_format` | `string(..., "pcm_24000")` plus `parse_sample_rate` | a `pcm_<rate>` string; anything else refused with the value quoted, `""` included | `PcmFormat` (`StrictStr` plus the same pattern), default `pcm_24000` | null tightens the same way; the refusal is value-free now |
 | `language_code` | `string(...)` | a string or null | `StrictStr \| None` | yes |
 | `timeout_s` | `number(..., 30.0)` | an int or a float, never a bool, a string or a null, normalized to float | `Number` (a before-validator with the same rule), default `30.0` | yes |
-| `voice_settings` | `mapping(...)` | a mapping or absent; never a list or a scalar | `VoiceSettings`, `extra="forbid"` | explicit null tightens |
+| `voice_settings` | `mapping(...)` | a mapping, absent, or null, which answered `{}`; never a list or a scalar | `VoiceSettings`, `extra="forbid"`, with null dropped as unwritten | yes; `""` widens from refused to unwritten, per the rebase note below |
 | `voice_settings.stability` | `read_voice_settings` | an int or a float or null, never a bool or a string | `OptionalNumber` | yes |
 | `voice_settings.similarity_boost` | `read_voice_settings` | the same | `OptionalNumber` | yes |
 | `voice_settings.style` | `read_voice_settings` | the same | `OptionalNumber` | yes |
@@ -518,15 +528,64 @@ does now. Held by `ELEVENLABS_PARITY` in
 | any other `voice_settings` key | `read_voice_settings` | refused, naming the unknown keys and the known ones | `extra="forbid"`, refused at `/voice_settings` without naming them | refusal is now value-free and earlier |
 | any other option | `finish()` | refused, naming the unknown keys | `extra="forbid"`, refused without naming them | refusal is now value-free and earlier |
 
-The deliberate divergences, all in the changelog: the explicit nulls
-above, the unknown key refused at write rather than at build and without
-echoing the key, and the output format refused by its rule rather than
-quoted back.
+The deliberate divergences, all in the changelog: the explicit nulls on
+`model` and `output_format`, the unknown key refused at write rather
+than at build and without echoing the key, and the output format refused
+by its rule rather than quoted back.
+
+The one option whose absence had a second spelling is `voice_settings`,
+and the two beside it deliberately do not: the reader read them with
+`string(key, default)` and nothing after it, so a blank there was a
+value rather than a way of writing nothing. That is the whole of the
+parity decision the rebase asked for, and the section below records how
+it was reached.
+
+### The rebase onto the restructured M1
+
+M1 merged as PR #275 after a review round that restructured the base
+this milestone was written against, so the five commits above were
+rebased onto it and a sixth was written for what the restructuring
+asked. Everything else in this section is read at the resulting tip.
+
+What the round changed, and what each meant here:
+
+- **`DECLARED_OPTIONS` and the per-type factory closures are gone.**
+  One table, `PROVIDER_TYPES`, keyed by stage and then by type, each
+  entry a frozen `ProviderType(module, attribute, options, extra)` that
+  NAMES its factory rather than closing over an import.
+  `providers/registry.py` resolves those names and derives its
+  registrations by comprehension. The two conflicts this produced
+  resolved by re-landing: the model classes are unchanged, and the
+  registration is now `options=ElevenlabsOptions` on the existing
+  `("tts", "elevenlabs")` entry. The registry file ends up
+  byte-identical to main's, which is the reconciliation's own receipt:
+  a converted type costs one argument on the table and nothing on the
+  provider side.
+- **A build refusal now carries an empty chain.** No M2 case asserted a
+  kept cause, so none had to be inverted; the two build-path cases this
+  milestone touches already asserted the no-leak shape.
+- **`Numbers` gained a `json_schema_input_type`.** Kept as merged. The
+  `OptionalNumber` annotation this milestone adds needs no equivalent
+  and says so where it is declared: what its validator takes and what
+  its annotation states are both "a number, or null", so there is
+  nothing for a published schema to get wrong.
+- **Blank spellings of an absent option read as unwritten.** This is
+  the one that asked for work, and its answer is in the commit and in
+  the parity table above: `voice_settings` has the history and the two
+  string options do not. The walk itself became a shared function,
+  because which keys a type lists is the type's own fact while what
+  happens to a blank one is not, and a second copy of the
+  comprehension would be the second statement of one rule.
+
+The rebase moved no artifact. All six documents were regenerated on the
+restructured base and none of them differs from what the milestone's own
+artifact commit produced, which is what the blank rule being deliberately
+absent from the published schema means in practice.
 
 ### Artifact churn
 
-The same three of the six moved, and the two the plan says must not move
-did not.
+The same three of the six moved, measured at the tip against
+`origin/main`, and the two the plan says must not move did not.
 
 - `docs/reference/domain-config.md` (+33, -8): the `#88` note's list of
   declared types gains `tts elevenlabs` (which reflowed the paragraph,
@@ -543,7 +602,8 @@ did not.
   `options for tts type elevenlabs:` listing, six fields and five nested
   ones at the path a fragment writes them at.
 - `docs/reference/events.md`, `docs/reference/conversations-schema.md`:
-  byte-identical, checked at the tip with `git diff` against M1's.
+  byte-identical, checked at the tip by regenerating both and by
+  `git diff origin/main HEAD`, which lists neither.
 
 The reference's stage-then-type grouping holds: `asr faster_whisper`
 comes before `tts elevenlabs` on the page, which
@@ -558,12 +618,13 @@ From `vinga-server/`, at the tip of the milestone.
 - `uv run ruff check .`: `All checks passed!`
 - `uv run mypy`: `Success: no issues found in 4 source files`
 - `uv run pytest tests/unit -q -n auto --dist loadfile`:
-  `3304 passed, 18 skipped in 44.05s`
-- `uv run pytest tests/integration -q`: `126 passed in 179.02s`
+  `3325 passed, 19 skipped in 42.38s`
+- `uv run pytest tests/integration -q`: `126 passed in 174.16s (0:02:54)`
 - The six drift checks as CI runs them: all six clean, including the two
   that must not move.
-- `uv sync --frozen`: `Checked 99 packages`, nothing resolved.
-- The three import-weight pins deviation 1 forced: green, untouched. No
-  allow-list moved: `ElevenlabsOptions` lives in the module M1 already
-  added to them, which is what one home for the declaration buys per
-  type from here on.
+- `uv sync --frozen`: `Checked 99 packages in 1ms`
+- The three import-weight pins deviation 1 forced: green, and their
+  files untouched by this milestone (`git diff origin/main HEAD` lists
+  none of the three). No allow-list moved: `ElevenlabsOptions` lives in
+  the module M1 already added to them, which is what one home for the
+  declaration buys per type from here on.

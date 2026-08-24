@@ -51,16 +51,20 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   replaces: a voice id is still required and still may not be blank, a
   bool is still not a number, an unknown `voice_settings` key is still
   refused, and a null written under one of those keys still travels to
-  the API. Three things tighten. An explicit `null` written where a
-  defaulted option sits (`model`, `output_format`, `voice_settings`) is
-  refused rather than read as the default, which for the first two used
-  to be an assertion failure rather than a refusal at all. A stored
-  entry carrying an option the type does not declare is now refused on
-  read as well as on write, which a deployment that wrote one meets as
-  a boot refusal naming the entry; `vinga-server config --local delete
-  provider tts <name>` is the way out. And an `output_format` this
-  stage cannot stream is refused by its rule rather than quoted back,
-  which is the discipline every other refusal here already follows.
+  the API. `voice_settings: null` still means no voice settings, which
+  is what it meant when that section was read through a call answering
+  an empty mapping for a missing key. Three things tighten. An explicit
+  `null` written where a defaulted option sits (`model`,
+  `output_format`) is refused rather than passed on, which used to be an
+  assertion failure inside the builder rather than a refusal at all; an
+  empty string is unaffected, because those two were never read with a
+  fallback that swallowed one. A stored entry carrying an option the
+  type does not declare is now refused on read as well as on write,
+  which a deployment that wrote one meets as a boot refusal naming the
+  entry; `vinga-server config --local delete provider tts <name>` is the
+  way out. And an `output_format` this stage cannot stream is refused by
+  its rule rather than quoted back, which is the discipline every other
+  refusal here already follows.
 - **`faster_whisper` entries are validated more strictly than they
   were** (#88, M1). What the type accepts is unchanged in kind, and the
   parity is held by a table-driven test taken call by call off the
