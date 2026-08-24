@@ -19,7 +19,9 @@ from vinga_server.config import cli, docgen
 from vinga_server.config.secrets import MASTER_KEY_ENV
 
 COMMITTED = Path(__file__).resolve().parents[3] / "docs" / "reference" / "domain-config.md"
+COMMITTED_CLI = Path(__file__).resolve().parents[3] / "docs" / "reference" / "cli.md"
 EXAMPLES = Path(__file__).resolve().parents[2] / "examples"
+PRESETS = EXAMPLES / docgen.PRESET_DIR
 
 
 @pytest.fixture
@@ -295,3 +297,104 @@ def test_every_example_file_is_claimed_by_exactly_one_entity() -> None:
 
     doubled = [f"{name} ({', '.join(claimed[name])})" for name in present if len(claimed[name]) > 1]
     assert not doubled, f"named by more than one entity: {', '.join(doubled)}"
+
+
+# The presets tier
+#
+# The two tests above are about the fragment tier, where a file is one
+# entity's body and exactly one descriptor claims it. A preset is the
+# other shape a file under `examples/` can have: a whole apply document,
+# several kinds at once, owned by the shape of the document rather than
+# by any one kind. So it is checked against that shape instead, and
+# against no descriptor at all: an entity that claimed one would be
+# telling a reader to install a whole deployment with a `set`.
+
+
+def test_every_preset_is_a_complete_apply_document() -> None:
+    """A preset is what `apply` takes, which is what makes it a tier
+    rather than a fragment in a subdirectory: its top-level keys are
+    sections of the domain configuration, and it names more than one of
+    them, because a document naming one section is a fragment with
+    ceremony."""
+    import yaml
+
+    from vinga_server.config.models import DOMAIN_KEYS
+
+    presets = sorted(PRESETS.glob("*.yaml"))
+    assert presets, "no presets, so what follows is vacuous"
+
+    for path in presets:
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        assert isinstance(document, dict), f"{path.name} is not a document"
+        unknown = sorted(set(document) - set(DOMAIN_KEYS))
+        assert not unknown, f"{path.name} names sections apply does not take: {unknown}"
+        assert len(document) > 1, f"{path.name} names one section, so it is a fragment"
+
+
+def test_a_preset_is_claimed_by_the_tier_rather_than_by_an_entity() -> None:
+    """The ownership rule for the second tier, in both directions. A
+    descriptor's `examples` are filenames under `examples/` itself, and
+    a preset is not one of them; and every file the presets directory
+    holds is a preset, so nothing can be parked there."""
+    claimed = _claims()
+    presets = {path.name for path in PRESETS.glob("*.yaml")}
+
+    assert not (claimed.keys() & presets), "an entity claims a preset as its fragment"
+    assert presets == {path.name for path in PRESETS.iterdir() if path.is_file()}
+
+
+# The recipes, and the CLI reference they are published in
+#
+# A recipe is read out of the example files rather than written beside
+# them, so what is worth pinning is the reading: that every command an
+# example quotes is published, that every published command is one this
+# grammar has, and that the committed page holds what the renderer
+# renders.
+
+
+def test_every_recipe_line_is_a_command_of_the_grammar() -> None:
+    """A recipe that named a command the grammar does not have would be
+    a page telling an operator to type something that cannot work. The
+    inventory is `cli.COMMANDS`, which is the grammar itself."""
+    registered = {row.words for row in cli.COMMANDS}
+
+    for recipe in docgen.recipes(cli.PROGRAM):
+        assert recipe.commands, f"{recipe.title}: a heading with no commands under it"
+        for line in recipe.commands:
+            words = tuple(line.removeprefix(f"{cli.PROGRAM} ").split())
+            assert words[:2] in registered or words[:1] in registered, line
+
+
+def test_every_command_an_example_quotes_is_published_as_a_recipe() -> None:
+    """The other direction, which is what keeps a command block added to
+    an example from going unpublished and unrun: every line any example
+    quotes is in some recipe, and the recipes name nothing else."""
+    quoted = {
+        line.strip().removeprefix("# ").strip()
+        for path in (*sorted(EXAMPLES.glob("*.yaml")), *sorted(PRESETS.glob("*.yaml")))
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.startswith(f"#   {cli.PROGRAM} ")
+    }
+    published = {line for recipe in docgen.recipes(cli.PROGRAM) for line in recipe.commands}
+
+    assert quoted, "no example quotes a command, so what follows is vacuous"
+    assert published == quoted
+
+
+def test_the_cli_reference_is_deterministic() -> None:
+    """The committed page is diffed byte for byte, so anything that
+    varied between two runs would turn the lane red on an unrelated
+    change. Click's help formatter measures the terminal it prints into
+    unless it is told not to, which is the one thing here that could."""
+    assert cli.cli_reference() == cli.cli_reference()
+
+
+def test_the_cli_reference_needs_no_database_and_no_key(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The fourth rendering command, held to the property the other
+    three have: rendering help and reading commented fragments opens no
+    database, reads no configuration file and needs no encryption key."""
+    assert run("cli-reference") == 0
+    assert capsys.readouterr().out.startswith("Generated by")
+

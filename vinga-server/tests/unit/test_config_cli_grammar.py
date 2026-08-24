@@ -486,9 +486,10 @@ def test_a_set_help_says_a_credential_is_never_one_of_its_arguments(
 #
 # Stated separately for the two positions the grammar really has. At the
 # root all of them are accepted before every command. At the leaf the
-# exclusions bind, and they are exclusions with reasons: the three
-# documentation commands render the models and the routes, so they open
-# no database, reach no server and take none of the three, and `ota-url`
+# exclusions bind, and they are exclusions with reasons: the four
+# documentation commands render the models, the routes and the command
+# tree, so they open no database, reach no server and take none of the
+# three, and `ota-url`
 # derives a string from the file half and contacts nothing, so it takes
 # `--config` and nothing that addresses an API.
 #
@@ -509,6 +510,7 @@ LEAF_EXCLUSIONS: dict[tuple[str, ...], frozenset[str]] = {
     ("schema",): frozenset(),
     ("reference",): frozenset(),
     ("openapi",): frozenset(),
+    ("cli-reference",): frozenset(),
 }
 
 

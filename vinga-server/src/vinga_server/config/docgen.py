@@ -43,7 +43,10 @@ the edge cannot come back unnoticed.
 """
 
 import json
+import re
 import textwrap
+from dataclasses import dataclass
+from pathlib import Path
 from types import NoneType, UnionType
 from typing import Annotated, Literal, Union, get_args, get_origin
 
@@ -468,6 +471,217 @@ def _sentence(description: str | None) -> str:
     return head + separator.strip()
 
 
+# The recipes
+#
+# A recipe is the sequence of commands one topic is written with, and
+# every line of one is read out of an example file rather than typed
+# beside it. The files already name their own commands: each fragment
+# quotes the `set` that installs it, each preset quotes the `apply` that
+# writes it whole, and the ones that can hold a credential quote the
+# `set-secret` that fills the slot. Those quoted lines are the recipes,
+# collected and grouped, so a recipe cannot come to name a file that
+# moved or an entity name the file no longer uses.
+#
+# What this reads is a directory rather than the models, which is the
+# one thing separating it from everything above. The example fragments
+# sit beside the package rather than inside it, because they are edited
+# and copied by hand and a fragment nobody can find is worth nothing;
+# that makes this the one rendering here that needs the repository
+# around it, and `MISSING_EXAMPLES` is what it says when it is not.
+
+# Where the example fragments are, relative to this file: the package is
+# under `src/`, and `examples/` is beside `src/`.
+EXAMPLE_DIR = Path(__file__).resolve().parents[3] / "examples"
+
+# The subdirectory holding complete apply documents rather than one
+# entity's fragment. A tier of its own: a preset is owned by the shape
+# of the document it is, not by any one descriptor, which is why no
+# entity claims one.
+PRESET_DIR = "presets"
+
+MISSING_EXAMPLES = (
+    "the example fragments are not beside this installation, so the command recipes "
+    "cannot be rendered; run this from a checkout of the repository, where "
+    "vinga-server/examples/ is"
+)
+
+# How an example quotes a command of its own: an indented comment line.
+# That indentation is the whole of the rule, and it is what tells a
+# block meant to be copied from a sentence that happens to mention a
+# command. Every one of these files already writes them this way.
+_QUOTED = re.compile(r"^#   (\S.*)$")
+
+# What a recipe says about the topic it writes, for the two topics that
+# have no descriptor to say it: the settings that are written from
+# arguments rather than from a document, and the credentials that are
+# never written into one at all.
+_PRESET_TOPIC = (
+    "A whole deployment in one document: every entity it names, in one transaction, "
+    "refused whole if anything in it will not resolve. This is the shortest path from "
+    "an empty database to a server with something to say."
+)
+
+_DEVICE_TOPIC = (
+    "Which board reaches which agent, which is the one thing a preset cannot know. A "
+    "binding applies at that device's next check-in rather than at a reload."
+)
+
+_SECRET_TOPIC = (
+    "A credential encrypted in the database, which never puts it in a file at all. The "
+    "value is read from stdin, or from the variable --from-env names, and never from an "
+    "argument. A stored secret wins over an environment reference written for the same "
+    "slot."
+)
+
+# Which topic a command belongs to, by the words it starts with. The
+# entity topics are not here: a `set <kind>` line names its own kind,
+# which is the registry's key for it, so those are looked up rather than
+# listed. Everything else is one of these three, and a command that is
+# none of them is a file quoting something this has never rendered,
+# which is a refusal rather than a line dropped on the floor.
+_TOPIC_VERBS: dict[str, str] = {
+    "apply": PRESET_DIR,
+    "bind-device": "devices",
+    "add-device": "devices",
+    "set-default-agent": "devices",
+    "clear-default-agent": "devices",
+    "set-secret": "secrets",
+}
+
+
+@dataclass(frozen=True)
+class Recipe:
+    """One topic's commands, in the order they are run in."""
+
+    # The heading a reader meets it under.
+    title: str
+
+    # Where in the configuration document the topic lives, or the empty
+    # string for the topics that are not one section of it.
+    location: str
+
+    # What the topic is, in a paragraph.
+    purpose: str
+
+    # The command lines, program name and all, deduplicated and in the
+    # order the files quote them.
+    commands: tuple[str, ...]
+
+
+def recipes(program: str) -> tuple[Recipe, ...]:
+    """Every topic's commands, read out of the example files.
+
+    The order is the order the whole list runs in against an empty
+    database: the presets first, then the entity kinds in the registry's
+    own order, then the bindings that need an agent to point at, then
+    the credentials that need an entry to sit on. That is not a second
+    creation order to keep in step with anything: it is the registry's
+    order, with the two topics that have no descriptor at the end
+    because both of them reference what the ones above create.
+
+    The program name is passed in rather than read here, because the
+    module that owns how this command group is spelled is the one that
+    registers it, and this renders documentation for whatever it is
+    called.
+    """
+    quoted = _quoted(program)
+    collected: dict[str, list[str]] = {}
+    for source, argv in quoted:
+        collected.setdefault(_topic(source, argv), []).append(f"{program} {argv}")
+    return tuple(
+        Recipe(
+            title=title,
+            location=location,
+            purpose=purpose,
+            commands=tuple(dict.fromkeys(collected.get(key, ()))),
+        )
+        for key, title, location, purpose in _TOPICS
+        if collected.get(key)
+    )
+
+
+# The topics, in the order a reader meets them and the order the whole
+# list runs in. Derived from the registry for the tier that has one, so
+# a new entity kind with an example file gets a recipe by existing.
+_TOPICS: tuple[tuple[str, str, str, str], ...] = (
+    (PRESET_DIR, "A whole deployment", "", _PRESET_TOPIC),
+    # The first sentence of a kind's purpose, which is the part that
+    # says what the topic is; the whole of it, and every field of it, is
+    # one page away in the generated reference, which is what a recipes
+    # section should not be a second copy of.
+    *(
+        (candidate.name, candidate.title, candidate.location, _sentence(candidate.purpose))
+        for candidate in COMMANDED
+    ),
+    ("devices", "Devices and the default agent", "devices, default_agent", _DEVICE_TOPIC),
+    ("secrets", "Stored credentials", "", _SECRET_TOPIC),
+)
+
+
+def _quoted(program: str) -> list[tuple[Path, str]]:
+    """Every command an example file quotes, as (file, arguments), in
+    the order the recipes run them in.
+
+    The presets first because a preset writes the entities the fragments
+    then replace one at a time, and the fragments in the registry's
+    order because that is the order their references resolve in.
+    """
+    if not EXAMPLE_DIR.is_dir():
+        from vinga_server.config.loader import ConfigError
+
+        raise ConfigError(MISSING_EXAMPLES)
+    files = [
+        *sorted((EXAMPLE_DIR / PRESET_DIR).glob("*.yaml")),
+        *(
+            EXAMPLE_DIR / filename
+            for candidate in COMMANDED
+            for filename in candidate.examples
+        ),
+    ]
+    prefix = f"{program} "
+    return [
+        (path, matched.group(1).removeprefix(prefix))
+        for path in files
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if (matched := _QUOTED.match(line)) and matched.group(1).startswith(prefix)
+    ]
+
+
+def _topic(source: Path, argv: str) -> str:
+    """Which topic one quoted command belongs to.
+
+    Read off the command itself rather than off the file it was found
+    in, because a fragment quotes the `set-secret` that fills its slot
+    as readily as the `set` that installs it, and the two belong under
+    different headings.
+    """
+    from vinga_server.config.loader import ConfigError
+
+    words = argv.split()
+    if words[:1] == ["set"] and len(words) > 1:
+        for candidate in COMMANDED:
+            if candidate.name == words[1]:
+                return candidate.name
+    topic = _TOPIC_VERBS.get(words[0] if words else "")
+    if topic is None:
+        raise ConfigError(
+            f"{source.name} quotes a command no recipe has a heading for: "
+            f"{words[0] if words else '(nothing)'}"
+        )
+    return topic
+
+
+def recipe_lines(program: str) -> list[str]:
+    """The recipes as the markdown they are published as."""
+    lines: list[str] = []
+    for recipe in recipes(program):
+        lines += [f"### {recipe.title}", ""]
+        if recipe.location:
+            lines += [f"`{recipe.location}`", ""]
+        lines += [*_paragraph(recipe.purpose), "", "```bash", *recipe.commands, "```", ""]
+    return lines
+
+
 __all__ = [
     # Re-exported from `entities`, where the two renderings of the
     # provider-options contract live now: `api.py` reads the second one
@@ -475,10 +689,13 @@ __all__ = [
     "API_OPTIONS_NOTE",
     "DOMAIN",
     "ENTITIES",
+    "Recipe",
     "entity",
     "entity_names",
     "fragment_help",
     "openapi",
+    "recipe_lines",
+    "recipes",
     "reference",
     "schema",
 ]
