@@ -385,11 +385,35 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   `--api-url https://host/api?token=...` was accepted and then named in
   full whenever the connection failed or the answer could not be read:
   the two failures an operator retries in front of a terminal. An
-  accepted address now travels as the pair it always was, what is
-  reached and what may be shown, and every sentence that names an
-  address names the second. The address is still named, because a
-  refusal that named none would leave nobody knowing which one was
+  accepted address now travels as the parts it always was, what a
+  request is built from and what may be shown, and every sentence that
+  names an address names the second. The address is still named, because
+  a refusal that named none would leave nobody knowing which one was
   tried.
+- **No request the config CLI makes narrates itself** (#290). httpx
+  writes one line per request at INFO carrying the URL, which this
+  server floors deliberately because for every other caller that URL is
+  already public. For this one it is the address an operator typed, so
+  the credential the refusals stopped printing was still landing in a
+  log record, which is retained in a way a terminal is not. The request
+  now runs with httpx and httpcore held at WARNING for its length, the
+  way the doctor's probe already ran.
+- **An address the client library refuses is a sentence, not a
+  traceback** (#290). A hostname that urllib reads and IDNA cannot
+  encode passed the transport policy and was refused by httpx when the
+  client was built, which was outside the boundary that turns failures
+  into sentences, so it left as a traceback quoting the hostname as it
+  was typed. Construction, the timeout, the request and the close are
+  all inside that boundary now, and an address that cannot be opened has
+  a fixed sentence of its own.
+- **A base URL carrying a query reaches the right endpoint** (#290).
+  With `--api-url https://host/api?token=...`, every request was sent to
+  `/api?token=.../<endpoint>`: a client joins an endpoint's path onto
+  the base's raw path, and a raw path carries the query, so the
+  endpoint's name landed inside the parameter's value and no command
+  reached the API at all. The query is now held apart from the base and
+  reattached after the path, exactly as it was written rather than
+  re-encoded.
 
 ## 2026-08-23
 
