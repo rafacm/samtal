@@ -491,6 +491,44 @@ def test_the_schema_selector_takes_a_stage_and_a_type() -> None:
     assert schema["$defs"]["VadParameters"]["properties"]["min_silence_duration_ms"]
 
 
+def test_the_published_schema_says_what_the_validator_accepts() -> None:
+    """The one field whose validator and annotation disagree on purpose,
+    held to saying so in every surface that publishes a schema.
+
+    A `BeforeValidator` widens what comes in and the annotation
+    describes what comes out, so `temperature` takes a bare number and
+    refuses an empty list while its declared type is a list. A schema
+    generated from the annotation alone would tell a client to write the
+    one form the ladder refuses and to omit the one an operator most
+    often writes, which is a contradiction a document cannot carry.
+
+    Asserted on the rendered surfaces rather than on the annotation,
+    because what a client reads is the document.
+    """
+    from vinga_server.config import docgen
+
+    published = [
+        json.loads(docgen.schema("provider", "asr", "faster_whisper")),
+        json.loads(docgen.openapi())["components"]["schemas"]["AsrFasterWhisperOptions"],
+    ]
+
+    for schema in published:
+        branches = schema["properties"]["temperature"]["anyOf"]
+        assert {"type": "number"} in branches
+        assert {"type": "null"} in branches
+        (array,) = [branch for branch in branches if branch.get("type") == "array"]
+        assert array["minItems"] == 1
+        assert array["items"] == {"type": "number"}
+
+    # And the schema is not describing a different rule from the one that
+    # runs: each branch it publishes is accepted, and the empty array it
+    # excludes is refused.
+    accept(temperature=0.4)
+    accept(temperature=[0.0, 0.2])
+    accept(temperature=None)
+    refuse(temperature=[])
+
+
 def test_the_selector_needs_the_stage_because_a_type_name_is_not_unique() -> None:
     """`openai` is an ASR type and a TTS type and `mock` is all four, so
     a selector keyed on the type alone would address whichever the

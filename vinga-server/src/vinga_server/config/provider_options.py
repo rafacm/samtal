@@ -118,7 +118,26 @@ def _as_numbers(value: object) -> object:
 # numeric string for an integer and the reader never did.
 Number = Annotated[float, BeforeValidator(_as_number)]
 
-Numbers = Annotated[list[float] | None, BeforeValidator(_as_numbers)]
+# What a validator accepts and what the schema says it accepts are two
+# statements of one contract, and a `BeforeValidator` is exactly where
+# they come apart: the annotation describes what comes OUT of it, so
+# without the input type below the published schema said "an array of
+# numbers, or null" while the validator took a bare number and refused
+# an empty array. A client generating from the document would have
+# written the one form the ladder refuses and omitted the one an
+# operator most often writes.
+#
+# So the input type is declared, and it is the rule itself in the
+# schema's own vocabulary: a number, or an array of at least one, or
+# null. `min_length` on the array branch is `minItems`, which is the
+# half `_as_numbers` refuses an empty list for.
+Numbers = Annotated[
+    list[float] | None,
+    BeforeValidator(
+        _as_numbers,
+        json_schema_input_type=float | Annotated[list[float], Field(min_length=1)] | None,
+    ),
+]
 
 
 class VadParameters(BaseModel):
