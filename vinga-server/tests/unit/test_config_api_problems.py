@@ -64,6 +64,17 @@ TOKEN = "test-api-token-" + "0123456789abcdef" * 2
 SENTINEL = "sk-test-6c3e9b12-never-a-real-credential"
 KEY_SENTINEL = "sk-test-9d41ac60-never-a-real-credential"
 
+# The third sentinel, and the reason it is spelled without the word
+# "credential" in it: the two above match a closed secret-shaped
+# fragment, so a key holding either is refused by `ProviderConfig`
+# before any later rule reads it. A key that gets PAST that rule is the
+# one that reaches the rules underneath, which is where a leak would
+# have to be looked for, and until the escape hatch (#88) an option key
+# nothing declared was a mistake rather than a shape this repository
+# supports. It is planted as the key and inside the URL that key holds,
+# so one assertion covers both halves of the same paste.
+URL_KEY_SENTINEL = "sk-live-4b7d2e10-never-a-real-one"
+
 
 @pytest.fixture
 def keys(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -578,12 +589,19 @@ def test_a_planted_credential_is_absent_from_every_surface(
 class PlantedKey(NamedTuple):
     """One fragment carrying the sentinel as a key, and the two ways in:
     the route a request reaches it by, and the repository call the CLI's
-    break-glass path reaches the same refusal by."""
+    break-glass path reaches the same refusal by.
+
+    `sentinel` is what to look for, and it is a field rather than the
+    module's constant because a key that matches a secret-shaped
+    fragment and a key that does not are refused by different rules and
+    only the second one reaches the rules underneath.
+    """
 
     what: str
     path: str
     fragment: dict[str, object]
     write: Callable[[ConfigStore, dict[str, object]], None]
+    sentinel: str = KEY_SENTINEL
 
 
 PLANTED_KEYS = [
@@ -639,6 +657,18 @@ PLANTED_KEYS = [
         lambda store, fragment: store.set_provider("llm", "local", fragment),
     ),
     PlantedKey(
+        "a credential-shaped key holding a credential-bearing URL",
+        "/providers/llm/local",
+        {
+            "type": "openai_compatible",
+            "base_url": "http://localhost:11434/v1",
+            "model": "qwen3:8b",
+            URL_KEY_SENTINEL: f"https://user:{URL_KEY_SENTINEL}@host/v1",
+        },
+        lambda store, fragment: store.set_provider("llm", "local", fragment),
+        URL_KEY_SENTINEL,
+    ),
+    PlantedKey(
         "a secret-shaped key in an MCP server's env",
         "/mcp-servers/home",
         {"transport": "stdio", "command": "uvx", "env": {f"{KEY_SENTINEL}_TOKEN": "v"}},
@@ -660,17 +690,17 @@ def test_a_credential_planted_as_a_key_is_absent_from_every_surface(
 
     assert response.status_code == 422
     body = response.json()
-    assert KEY_SENTINEL not in body["detail"]
+    assert case.sentinel not in body["detail"]
     for error in body["errors"]:
-        assert KEY_SENTINEL not in error["path"]
-        assert KEY_SENTINEL not in error["message"]
-    assert KEY_SENTINEL not in response.text
-    assert KEY_SENTINEL not in str(response.headers)
+        assert case.sentinel not in error["path"]
+        assert case.sentinel not in error["message"]
+    assert case.sentinel not in response.text
+    assert case.sentinel not in str(response.headers)
 
     text = logging.Formatter(logs.TEXT_FORMAT)
     for record in caplog.records:
-        assert KEY_SENTINEL not in logs.JsonFormatter().format(record)
-        assert KEY_SENTINEL not in text.format(record)
+        assert case.sentinel not in logs.JsonFormatter().format(record)
+        assert case.sentinel not in text.format(record)
 
 
 @pytest.mark.parametrize("case", PLANTED_KEYS, ids=PLANTED_IDS)
@@ -690,13 +720,13 @@ def test_a_credential_planted_as_a_key_is_absent_from_the_exception(
         case.write(store, case.fragment)
 
     refusal = caught.value
-    assert KEY_SENTINEL not in str(refusal)
-    assert KEY_SENTINEL not in repr(refusal)
+    assert case.sentinel not in str(refusal)
+    assert case.sentinel not in repr(refusal)
     assert refusal.__cause__ is None
     assert refusal.__context__ is None
     for carried in refusal.problems:
-        assert KEY_SENTINEL not in carried.path
-        assert KEY_SENTINEL not in carried.message
+        assert case.sentinel not in carried.path
+        assert case.sentinel not in carried.message
 
 
 # What the CLI prints for one
@@ -768,6 +798,62 @@ def test_the_cli_prints_a_typed_options_refusal_without_the_value(
     assert printed == str(caught.value)
     assert "beam_size" in printed
     assert SENTINEL not in printed
+
+
+def test_the_cli_prints_a_url_credential_refusal_without_the_key(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    store: ConfigStore,
+) -> None:
+    """The fourth surface for the same discipline, and the one the escape
+    hatch made reachable.
+
+    A provider entry has always accepted keys nobody declared, but until
+    #88 one was a mistake on its way to a refusal. Now an undeclared key
+    is a supported shape, and this rule is the one that reads what such
+    a key HOLDS: a URL with a credential in it. The refusal has to say
+    that a rule was broken and where to look without printing either
+    half of what was written, since the key is as good a place to have
+    pasted the credential as the URL is.
+    """
+    fragment = {
+        "type": "openai_compatible",
+        "base_url": "http://localhost:11434/v1",
+        "model": "qwen3:8b",
+        URL_KEY_SENTINEL: f"https://user:{URL_KEY_SENTINEL}@host/v1",
+    }
+    with pytest.raises(ConfigError) as caught:
+        store.set_provider("llm", "local", fragment)
+
+    run = runner(tmp_path, monkeypatch)
+
+    assert (
+        run(
+            "set",
+            "provider",
+            "llm",
+            "local",
+            "-f",
+            "-",
+            stdin=(
+                "type: openai_compatible\n"
+                "base_url: http://localhost:11434/v1\n"
+                "model: qwen3:8b\n"
+                f"{URL_KEY_SENTINEL}: https://user:{URL_KEY_SENTINEL}@host/v1\n"
+            ),
+        )
+        == 1
+    )
+    printed = capsys.readouterr().err.rstrip("\n")
+
+    assert printed == str(caught.value)
+    assert URL_KEY_SENTINEL not in printed
+    # What is left is what an operator needs: the entry, the rule, and
+    # what to do instead.
+    assert "providers.llm.local" in printed
+    assert "user and password before its host" in printed
+    assert "api_key_env" in printed
 
 
 # The status vocabulary
