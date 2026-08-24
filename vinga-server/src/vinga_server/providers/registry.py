@@ -34,7 +34,11 @@ from vinga_server.providers.base import (
     TtsProvider,
     VadProvider,
 )
-from vinga_server.providers.options import OptionsRefused, checked_options
+from vinga_server.providers.options import (
+    FasterWhisperOptions,
+    OptionsRefused,
+    checked_options,
+)
 
 
 class OptionsReader:
@@ -165,7 +169,9 @@ def _silero(label: str, config: ProviderConfig) -> object:
     return silero.build(label, config)
 
 
-def _faster_whisper(label: str, config: ProviderConfig) -> object:
+def _faster_whisper(
+    label: str, config: ProviderConfig, options: FasterWhisperOptions
+) -> object:
     try:
         from vinga_server.providers import faster_whisper
     except ImportError as exc:
@@ -173,7 +179,7 @@ def _faster_whisper(label: str, config: ProviderConfig) -> object:
             f'{label}: type "faster_whisper" needs the faster-whisper extra; '
             f"install it with: uv sync --extra faster-whisper"
         ) from exc
-    return faster_whisper.build(label, config)
+    return faster_whisper.build(label, config, options)
 
 
 def _openai_asr(label: str, config: ProviderConfig) -> object:
@@ -240,7 +246,7 @@ def _registrations() -> dict[str, dict[str, Registration]]:
         },
         "asr": {
             "mock": Registration(mock.build_asr),
-            "faster_whisper": Registration(_faster_whisper),
+            "faster_whisper": Registration(_faster_whisper, FasterWhisperOptions),
             "openai": Registration(_openai_asr),
         },
         "tts": {

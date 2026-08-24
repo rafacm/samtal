@@ -15,11 +15,13 @@ skips all of that at the price of monolingual deployment; the
 options are the middle ground, detecting when needed and trusting a
 detection only as far as its confidence earns.
 
-The decode options mirror `WhisperModel.transcribe` arguments of the
-same name and keep the engine's defaults when unset, with one
-exception: `beam_size` defaults to greedy decoding (1), because beam
-search buys little accuracy on short spoken commands and costs a
-multiple of the CPU time (#19).
+What this type accepts is declared once, as `FasterWhisperOptions` in
+`providers/options.py`, and reaches the builder below already
+validated. The decode options mirror `WhisperModel.transcribe`
+arguments of the same name and keep the engine's defaults when unset,
+with one exception: `beam_size` defaults to greedy decoding (1),
+because beam search buys little accuracy on short spoken commands and
+costs a multiple of the CPU time (#19).
 """
 
 import logging
@@ -28,15 +30,13 @@ import numpy as np
 from faster_whisper import WhisperModel
 
 from vinga_server.config.models import ProviderConfig
-from vinga_server.providers.base import AsrProvider, AsrResult, Operations, ProviderError
-from vinga_server.providers.registry import OptionsReader
+from vinga_server.providers.base import AsrProvider, AsrResult, Operations
+from vinga_server.providers.options import FasterWhisperOptions
 
 logger = logging.getLogger(__name__)
 
 # What faster-whisper expects, and what the pipeline feeds it.
 EXPECTED_SAMPLE_RATE = 16000
-
-LANGUAGE_DETECT_MODES = ("every_utterance", "once")
 
 
 def pcm_to_float(pcm: bytes) -> "np.ndarray":
@@ -186,32 +186,37 @@ class FasterWhisperAsr(AsrProvider):
         )
 
 
-def build(label: str, config: ProviderConfig) -> FasterWhisperAsr:
-    options = OptionsReader(label, config)
-    language_detect = options.string("language_detect", "every_utterance") or "every_utterance"
-    if language_detect not in LANGUAGE_DETECT_MODES:
-        raise ProviderError(
-            f'{label}: option "language_detect" must be one of: '
-            + ", ".join(LANGUAGE_DETECT_MODES)
-        )
-    # Read to the end and finished before a single weight is loaded: an
-    # unknown option is a refusal that must not cost a model load, and
-    # after the load there would be an object to let go of again (#191).
-    settings = {
-        "model": options.string("model", "small") or "small",
-        "language": options.string("language"),
-        "device": options.string("device", "cpu") or "cpu",
-        "compute_type": options.string("compute_type", "int8") or "int8",
-        "beam_size": options.integer("beam_size", 1),
-        "download_dir": options.string("download_dir"),
-        "cpu_threads": options.integer("cpu_threads", 0),
-        "vad_filter": options.boolean("vad_filter", False),
-        "vad_parameters": options.mapping("vad_parameters"),
-        "condition_on_previous_text": options.boolean("condition_on_previous_text", True),
-        "temperature": options.numbers("temperature"),
-        "language_detect": language_detect,
-        "language_fallback": options.string("language_fallback"),
-        "language_confidence_floor": options.number("language_confidence_floor", 0.6),
-    }
-    options.finish()
-    return FasterWhisperAsr(**settings)  # type: ignore[arg-type]
+def build(
+    label: str, config: ProviderConfig, options: FasterWhisperOptions
+) -> FasterWhisperAsr:
+    """The entry's validated options as the engine's own arguments.
+
+    Thin on purpose and not a pass-through: what it does is the one
+    translation this seam needs, `vad_parameters` from a model to the
+    mapping `WhisperModel.transcribe` takes. `exclude_unset` is what
+    makes that honest in both directions: an operator's explicit value
+    travels, a null they wrote travels, and a default this repository
+    injected does not, so the engine keeps deciding everything the
+    fragment did not.
+
+    Nothing here refuses. Every option was checked against
+    `FasterWhisperOptions` before this was called, which is the ordering
+    the reader's `finish()` used to hold: a refusal must not cost a
+    model load (#191).
+    """
+    return FasterWhisperAsr(
+        model=options.model,
+        language=options.language,
+        device=options.device,
+        compute_type=options.compute_type,
+        beam_size=options.beam_size,
+        download_dir=options.download_dir,
+        cpu_threads=options.cpu_threads,
+        vad_filter=options.vad_filter,
+        vad_parameters=options.vad_parameters.model_dump(exclude_unset=True),
+        condition_on_previous_text=options.condition_on_previous_text,
+        temperature=options.temperature,
+        language_detect=options.language_detect,
+        language_fallback=options.language_fallback,
+        language_confidence_floor=options.language_confidence_floor,
+    )
