@@ -221,6 +221,10 @@ ELEVENLABS_PARITY: list[tuple[str, object, bool]] = [
     # `mapping()` call `vad_parameters` went through answered {} for a
     # key that was not there.
     ("voice_settings", None, True),
+    # And the widening that came with sharing one notion of blank:
+    # `mapping()` refused an empty string here, and it is a spelling of
+    # absence now, exactly as it is under `vad_parameters`.
+    ("voice_settings", "", True),
     # and its five keys, each with the rule the hand check gave it. A
     # null under one of them was skipped by that check and travelled, so
     # it still does.
@@ -310,15 +314,23 @@ def test_a_null_voice_settings_section_reads_as_no_section() -> None:
     mapping was truthy, so a null section and a missing one produced the
     same request.
 
+    The empty string is the one widening: `mapping()` refused it and
+    this takes it as unwritten, which is what sharing one notion of
+    blank with `vad_parameters` costs. Deliberate, cheap and pinned
+    here, since a mapping written as `voice_settings:` with nothing
+    after it is a null in YAML rather than an empty string, so the
+    spelling this widens is one nobody writes.
+
     Its neighbours in this type deliberately have no such case. `model`
     and `output_format` were read without the `or <default>` that made a
     blank mean nothing elsewhere, so an empty string there is a value
     and the parity rows say so.
     """
-    options = elevenlabs(voice_settings=None)
+    for written in (None, ""):
+        options = elevenlabs(voice_settings=written)
 
-    assert options.voice_settings.model_dump(exclude_unset=True) == {}
-    assert "voice_settings" not in options.model_fields_set
+        assert options.voice_settings.model_dump(exclude_unset=True) == {}
+        assert "voice_settings" not in options.model_fields_set
     assert elevenlabs(model="").model == ""
 
 
