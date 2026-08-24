@@ -18,7 +18,9 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   noun-specific and its noun set is the growing one, which is the shape
   docker had before it moved to management commands), and the rules for
   naming a new noun or verb. Beside them sit eleven practices, each
-  with an example and a counterexample from the merged CLI: the
+  with an example from the merged CLI and the shape it rejects, that
+  shape labelled merged, historical or constructed so a reader can tell
+  a recorded rejection from an argument: the
   stdout/stderr split, refusals as fixed sentences that quote nothing
   back, one sentence and exit 1, notices that say when a write takes
   effect, credentials that are never an argument, the export/apply

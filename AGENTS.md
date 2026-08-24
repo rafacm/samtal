@@ -123,10 +123,12 @@ know. The method and its worked examples from merged vinga code are in
 
 Commands are held to a standard of their own, in
 [`docs/architecture/cli-guide.md`](docs/architecture/cli-guide.md): noun
-first and verb second, positionals are identity addressing in the API's own
-order, system-level verbs stay flat, and each practice is stated with an
-example and a counterexample from the merged CLI. Read it before adding a
-command, a noun, a verb or a flag.
+first and verb second, leading positionals are identity addressing in the
+API's own order with payload positionals behind them, and system-level
+verbs stay flat. Each practice carries an example from the merged CLI and
+the shape it rejects, and each rejected shape is labelled merged,
+historical or constructed. Read it before adding a command, a noun, a
+verb or a flag.
 
 ## Documentation process
 
