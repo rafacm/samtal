@@ -249,7 +249,7 @@ def _refusal(argv: tuple[str, ...]) -> cli.ConfigError:
     walker would find on it.
     """
     with pytest.raises(cli.ConfigError) as caught:
-        cli._parsed(list(argv))
+        cli._parsed(list(argv), cli.DISPATCHED)
     return caught.value
 
 

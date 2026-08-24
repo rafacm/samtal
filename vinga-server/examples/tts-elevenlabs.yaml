@@ -2,7 +2,7 @@
 # and sends the reply text to the vendor, and sounds markedly better
 # than a local voice for it.
 #
-#   vinga-server config provider set tts eleven -f examples/tts-elevenlabs.yaml
+#   vinga provider set tts eleven -f examples/tts-elevenlabs.yaml
 #
 # Every option below is passed to the ElevenLabs streaming endpoint,
 # whose reference documents all of them:

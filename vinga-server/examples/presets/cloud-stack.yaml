@@ -4,7 +4,7 @@
 # before anything leaves the host. One document, written in one
 # transaction:
 #
-#   vinga-server config apply -f examples/presets/cloud-stack.yaml
+#   vinga apply -f examples/presets/cloud-stack.yaml
 #
 # Applying orders the writes for you. A write whose references do not
 # resolve is refused, and a document is refused whole rather than half
@@ -21,21 +21,21 @@
 # at startup. The other way to hold a credential is encrypted in the
 # database, which never puts it in a file at all:
 #
-#   vinga-server config provider secret set llm brain api_key
+#   vinga provider secret set llm brain api_key
 #
 # A stored secret wins over an environment reference for the same slot,
-# and `vinga-server config show` marks the reference it displaces.
+# and `vinga show` marks the reference it displaces.
 #
 # There are deliberately no devices and no default agent below. Which
 # board talks to which agent is the one thing a preset cannot know, and
 # it is one command afterwards. Bind one board, by the MAC on its
 # sticker:
 #
-#   vinga-server config device bind aa:bb:cc:dd:ee:ff assistant
+#   vinga device bind aa:bb:cc:dd:ee:ff assistant
 #
 # or point every board that is bound to nothing at one agent:
 #
-#   vinga-server config default-agent set assistant
+#   vinga default-agent set assistant
 #
 # Every field below is documented in docs/reference/domain-config.md,
 # and examples/ holds a commented fragment per provider type with the

@@ -45,6 +45,12 @@ piper = ["piper-tts>=1.6"]
 
 [project.scripts]
 vinga-server = "vinga_server.main:main"
+# The CLI as a tool of its own, which is the same entry function the
+# `config` dispatch word reaches. It drops that word because there is
+# nothing here to dispatch away from: both spellings resolve and
+# everything after the word is identical, which is what makes the two
+# one grammar rather than two.
+vinga = "vinga_server.config.cli:main"
 
 [dependency-groups]
 dev = [

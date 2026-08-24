@@ -1,7 +1,7 @@
 # An MCP server this server spawns and talks to over stdio. This one
 # proxies to a Home Assistant on the LAN.
 #
-#   vinga-server config mcp-server set home -f examples/mcp-server-stdio.yaml
+#   vinga mcp-server set home -f examples/mcp-server-stdio.yaml
 #
 # The entry name is what its tools are prefixed with in the merged tool
 # list (`home__turn_on_light`), which is why it must be a plain
@@ -28,7 +28,7 @@ args:
 # is to store the value encrypted in the database, under the slot the
 # key names:
 #
-#   vinga-server config mcp-server secret set home env.API_ACCESS_TOKEN
+#   vinga mcp-server secret set home env.API_ACCESS_TOKEN
 #
 env:
   API_ACCESS_TOKEN: $HOME_ASSISTANT_TOKEN

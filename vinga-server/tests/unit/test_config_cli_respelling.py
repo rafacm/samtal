@@ -60,12 +60,14 @@ SECRET_ENV = "RESPELLING_SECRET"
 # claim is acknowledged with is the MAC it bound.
 MAC = "aa:bb:cc:dd:ee:ff"
 
-# What the transcript licenses to move, and the whole of it. Six
-# substitutions, every one of them a command word inside a line these
-# commands print: the header each entity's export opens with, which
-# names the command that writes one, and the step an export's header
-# tells an operator to run after applying. The longest key comes first,
-# because `agent-defaults` opens with `agent`.
+# What the transcript licenses to move, and the whole of it. Every one
+# of them is a spelling inside a line these commands print: the header
+# each entity's export opens with, which names the command that writes
+# one, the step an export's header tells an operator to run after
+# applying, and the program word every such line begins with, which the
+# console script shortened. The longest key comes first, because
+# `agent-defaults` opens with `agent`, and the program word comes last,
+# because the six above it name the longer spelling.
 RESPELLINGS: tuple[tuple[str, str], ...] = (
     ("config set agent-defaults -f", "config agent-defaults set -f"),
     ("config set agent <name>", "config agent set <name>"),
@@ -73,6 +75,7 @@ RESPELLINGS: tuple[tuple[str, str], ...] = (
     ("config set mcp-server <name>", "config mcp-server set <name>"),
     ("config set prompt-fragment <name>", "config prompt-fragment set <name>"),
     ("the set-secret commands at the foot", "the secret set commands at the foot"),
+    ("vinga-server config ", "vinga "),
 )
 
 

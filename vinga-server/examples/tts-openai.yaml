@@ -5,7 +5,7 @@
 # https://platform.openai.com/docs/api-reference/audio/createSpeech
 # https://platform.openai.com/docs/guides/text-to-speech
 #
-#   vinga-server config provider set tts openai_voice -f examples/tts-openai.yaml
+#   vinga provider set tts openai_voice -f examples/tts-openai.yaml
 
 type: openai
 

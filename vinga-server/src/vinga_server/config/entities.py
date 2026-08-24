@@ -61,6 +61,12 @@ from vinga_server.config.models import (
 )
 from vinga_server.config.provider_options import declared_options
 
+# How a command is spelled in the documents this registry feeds. The
+# canonical name `config/cli.py` publishes, written here because this
+# module is imported by the renderers and imports nothing of theirs; the
+# CLI re-exports it, so there is one string and not two.
+PROGRAM = "vinga"
+
 # Where the example fragments and the configuration file live, relative
 # to the committed reference (docs/reference/domain-config.md). Printed
 # as written when the same document goes to stdout.
@@ -92,7 +98,7 @@ _OPTIONS_CONTRACT = (
     "A provider entry carries whatever options its `type` takes. The types that "
     f"declare an option model, as stage and type, are: {_DECLARED_TYPES}. Their "
     "options are checked when the entry is written and refused by name, they are "
-    "printed by `vinga-server config schema provider <stage> <type>`, and the "
+    f"printed by `{PROGRAM} schema provider <stage> <type>`, and the "
     "reference lists their fields under the provider section. Every other type has "
     "its options passed through rather than declared, so no schema can list those, "
     "and until the rest are typed (#88) they are documented in the example "
@@ -167,7 +173,7 @@ BINDING_NOTICE = (
 # all three.
 RELOAD_NOTICE = (
     "This applies when the running server is asked to reload: run "
-    "`vinga-server config reload`, which re-reads the stored configuration and applies "
+    f"`{PROGRAM} reload`, which re-reads the stored configuration and applies "
     "it without a restart and without dropping a conversation. A conversation already "
     "in progress meets the tools an agent may reach at its next utterance and its "
     "prompt text at its next activation, while the voice it speaks in and the filled "
@@ -181,8 +187,8 @@ RELOAD_NOTICE = (
 # installs it rather than at a restart, which is what an operator who
 # has just written both would otherwise be sent away to do.
 BINDING_UNSERVED_NOTICE = (
-    "The binding applies at the device's next OTA check or connection, but this server "
-    "is not serving the agent it names yet: run `vinga-server config reload`, which "
+    f"The binding applies at the device's next OTA check or connection, but this server "
+    f"is not serving the agent it names yet: run `{PROGRAM} reload`, which "
     "installs the stored agents without a restart, and the device reaches it at the "
     "check-in after that."
 )
@@ -377,7 +383,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
             "same name. A voice is a provider entry, so two agents that should sound "
             "different reference two entries."
         ),
-        command="vinga-server config provider set <stage> <name> -f fragment.yaml",
+        command=f"{PROGRAM} provider set <stage> <name> -f fragment.yaml",
         examples=(
             "llm-anthropic.yaml",
             "llm-openai-compatible.yaml",
@@ -411,7 +417,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
             "logs a warning: its tools are absent, and it reconnects in the "
             "background when a session needs it."
         ),
-        command="vinga-server config mcp-server set <name> -f fragment.yaml",
+        command=f"{PROGRAM} mcp-server set <name> -f fragment.yaml",
         examples=("mcp-server-stdio.yaml", "mcp-server-streamable-http.yaml"),
         route="/mcp-servers",
         addressing=("name",),
@@ -435,7 +441,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
             "provenance the assembled prompt is reported under (`fragment:<name>`), so "
             "it must match `[A-Za-z0-9_-]+`."
         ),
-        command="vinga-server config prompt-fragment set <name> -f fragment.yaml",
+        command=f"{PROGRAM} prompt-fragment set <name> -f fragment.yaml",
         examples=("prompt-fragment.yaml",),
         notes=(
             "Nothing is added around the text, not one heading: it is prompt text the "
@@ -446,8 +452,8 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
             "A fragment that some layer still includes cannot be deleted, which is the "
             "same reference rule that keeps a referenced provider or MCP server from "
             "being taken away underneath an agent.",
-            "There is no length cap. `vinga-server config agent preview <agent>` "
-            "reports what "
+            f"There is no length cap. `{PROGRAM} agent preview <agent>` "
+            f"reports what "
             "each block costs and what the whole prompt costs, which is what an "
             "operator tunes a small model's context budget against.",
         ),
@@ -468,7 +474,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
             "must resolve to a provider, on the agent or through agent_defaults, for "
             "the server to start, so a typical agent is a prompt and a voice."
         ),
-        command="vinga-server config agent set <name> -f fragment.yaml",
+        command=f"{PROGRAM} agent set <name> -f fragment.yaml",
         examples=("agent.yaml",),
         notes=(
             "An agent's name is also the key its remembered facts are stored under, "
@@ -494,7 +500,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
             "makes an agent that agent, and inheriting one silently would make two "
             "agents the same one."
         ),
-        command="vinga-server config agent-defaults set -f fragment.yaml",
+        command=f"{PROGRAM} agent-defaults set -f fragment.yaml",
         examples=("agent-defaults.yaml",),
         notes=(
             "This entry is a singleton. There is one of it, writing it replaces it "
@@ -529,7 +535,7 @@ NESTED: tuple[NestedShape, ...] = (
             "nothing else, so an agent can switch the lights without being able to "
             "unlock the door. Tools are named by the published name without the "
             "entry prefix (`turn_on_light` for `home__turn_on_light`), which is what "
-            "`vinga-server config status` prints and what the model calls."
+            f"`{PROGRAM} status` prints and what the model calls."
         ),
         notes=(
             "There is no deny list, deliberately. A denied set fails open: a server "
@@ -566,11 +572,11 @@ SETTINGS: tuple[Setting, ...] = (
     Setting(
         name="devices",
         title="Devices",
-        command="vinga-server config device bind <mac> <agent> [<agent> ...]",
+        command=f"{PROGRAM} device bind <mac> <agent> [<agent> ...]",
         notes=(
             "A MAC is stored in its canonical form (lowercase, colon separated), so "
             "`AA-BB-CC-DD-EE-FF` and `aa:bb:cc:dd:ee:ff` are the same device.",
-            "`vinga-server config device delete <mac>` removes a binding.",
+            f"`{PROGRAM} device delete <mac>` removes a binding.",
         ),
         route="/devices",
         addressing=("mac",),
@@ -579,9 +585,9 @@ SETTINGS: tuple[Setting, ...] = (
     Setting(
         name="default_agent",
         title="Default agent",
-        command="vinga-server config default-agent set <name>",
+        command=f"{PROGRAM} default-agent set <name>",
         notes=(
-            "`vinga-server config default-agent clear` unsets it, which is a "
+            f"`{PROGRAM} default-agent clear` unsets it, which is a "
             "configuration rather than a mistake: the devices map is then the "
             "allowlist.",
             "It is required only when agents are defined and no device is bound to "
@@ -631,6 +637,7 @@ __all__ = [
     "OPTIONS_NOTE",
     "RELOAD_NOTICE",
     "RESTART_NOTICE",
+    "PROGRAM",
     "SETTINGS",
     "SNAPSHOT_NOTICE",
     "DocumentedShape",

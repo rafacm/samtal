@@ -4,6 +4,7 @@ import pytest
 
 from tests.support.configs import load_config_from_data
 from vinga_server.config import Config, ConfigError, load_file_config
+from vinga_server.config.entities import PROGRAM
 from vinga_server.config.models import DOMAIN_KEYS, NOT_A_MAC, normalize_mac
 from vinga_server.conversations.store import RETENTION_DAYS_DEFAULT
 
@@ -397,7 +398,7 @@ def test_a_domain_section_left_in_the_file_names_where_it_moved(
         load_file_config(path)
     message = str(excinfo.value)
     assert f"{key}: moved to the database" in message
-    assert f"vinga-server config {command}" in message
+    assert f"{PROGRAM} {command}" in message
     assert "docs/reference/domain-config.md" in message
 
 
@@ -415,7 +416,7 @@ def test_a_moved_environment_override_names_where_it_moved(
         load_file_config()
     message = str(excinfo.value)
     assert f"{variable}: {key} moved to the database" in message
-    assert "vinga-server config" in message
+    assert PROGRAM in message
 
 
 @pytest.mark.parametrize(
