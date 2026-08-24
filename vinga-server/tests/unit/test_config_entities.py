@@ -123,8 +123,13 @@ def test_the_options_note_names_the_types_that_declare_a_model() -> None:
             f"{stage} {type_name} is not in the note"
         )
 
+    # Asked as the pair, which is how the note writes one and the only
+    # spelling that can be looked for honestly: a type name on its own
+    # is a substring of another type's name (`openai` of
+    # `openai_compatible`), so a scan for the bare word reports a typed
+    # neighbour as an untyped type that got itself documented.
     untyped = {
-        type_name
+        f"{stage} {type_name}"
         for stage, types in _registrations().items()
         for type_name in types
         if (stage, type_name) not in declared

@@ -40,8 +40,10 @@ from vinga_server.config.provider_options import (
     NONBLANK_PATTERN,
     PCM_FORMAT_PATTERN,
     PROVIDER_TYPES,
+    RESERVED_REQUEST_FIELDS,
     ElevenlabsOptions,
     FasterWhisperOptions,
+    OpenaiCompatibleOptions,
     OptionsRefused,
     VadParameters,
     VoiceSettings,
@@ -68,9 +70,12 @@ WHISPER = ("asr", "faster_whisper")
 
 ELEVENLABS = ("tts", "elevenlabs")
 
+OPENAI = ("llm", "openai_compatible")
+
 BASE: dict[tuple[str, str], dict[str, object]] = {
     WHISPER: {},
     ELEVENLABS: {"voice_id": "voice-1"},
+    OPENAI: {"base_url": "http://localhost:11434/v1", "model": "qwen3:8b"},
 }
 
 
@@ -97,6 +102,12 @@ def whisper(**options: object) -> FasterWhisperOptions:
 def elevenlabs(**options: object) -> ElevenlabsOptions:
     entry = accept(ELEVENLABS, **options)
     assert isinstance(entry, ElevenlabsOptions)
+    return entry
+
+
+def openai_compatible(**options: object) -> OpenaiCompatibleOptions:
+    entry = accept(OPENAI, **options)
+    assert isinstance(entry, OpenaiCompatibleOptions)
     return entry
 
 
@@ -246,9 +257,48 @@ ELEVENLABS_PARITY: list[tuple[str, object, bool]] = [
     ("speaker", "lessac", False),
 ]
 
+OPENAI_PARITY: list[tuple[str, object, bool]] = [
+    # the two required strings, which is what `required_string` made
+    # them: present, a string, and with something in them.
+    ("base_url", "https://api.vendor.example/v1", True),
+    ("base_url", "", False),
+    ("base_url", "   ", False),
+    ("base_url", None, False),
+    ("base_url", 5, False),
+    ("model", "qwen3:14b", True),
+    ("model", "", False),
+    ("model", None, False),
+    ("model", 5, False),
+    # the integer, which `integer(...)` took as an int and nothing else:
+    # never a bool, never a float, never the digits written as a string,
+    # and never a null, since it measured whatever it popped rather than
+    # falling back on it.
+    ("max_tokens", 256, True),
+    ("max_tokens", "256", False),
+    ("max_tokens", 256.0, False),
+    ("max_tokens", True, False),
+    ("max_tokens", None, False),
+    # And the row that inverts, which is the whole of this type. Every
+    # key the builder did not read ended its build with `finish()`
+    # naming it; this is the one type whose reason for existing is that
+    # the server on the other end takes parameters this repository has
+    # never heard of, so they are kept now and forwarded.
+    ("top_p", 0.9, True),
+    ("keep_alive", "30m", True),
+    ("options", {"num_ctx": 8192}, True),
+    # Except a name the request already carries. That is not an option
+    # for the server, it is a rewrite of what is being asked.
+    ("messages", [], False),
+    ("stream", False, False),
+    ("tools", [], False),
+    ("tool_choice", "none", False),
+    ("stream_options", {"include_usage": True}, False),
+]
+
 PARITY: list[tuple[tuple[str, str], str, object, bool]] = [
     *((WHISPER, *row) for row in WHISPER_PARITY),
     *((ELEVENLABS, *row) for row in ELEVENLABS_PARITY),
+    *((OPENAI, *row) for row in OPENAI_PARITY),
 ]
 
 PARITY_IDS = [
@@ -489,6 +539,170 @@ def test_the_voice_settings_door_is_shut_and_the_vad_one_is_not() -> None:
     act."""
     assert VoiceSettings.model_config["extra"] == "forbid"
     assert VadParameters.model_config["extra"] == "allow"
+
+
+# What the openai_compatible type is, beside its parity
+#
+# The escape hatch. Its model is the one that declares three options and
+# keeps everything else, so what is pinned here is both halves of that:
+# that an undeclared key survives validation, and that it cannot be one
+# of the names the request already carries. What happens to it after
+# validation is not this file's business; the forwarding is pinned in
+# `test_providers_llm.py`, against the wire.
+
+
+def test_the_openai_compatible_defaults_are_the_ones_the_builder_had() -> None:
+    """What a fragment that names an endpoint and a model gets. Read by
+    the builder rather than by the endpoint, so a change here changes
+    what every existing deployment is sending."""
+    options = openai_compatible()
+
+    assert options.base_url == "http://localhost:11434/v1"
+    assert options.model == "qwen3:8b"
+    assert options.max_tokens == 1024
+    assert options.model_extra == {}
+
+
+def test_the_only_open_door_among_the_declared_types() -> None:
+    """The three declared types, and the one difference between them.
+
+    Asserted together so that opening one of the other two, or closing
+    this one, is a deliberate act rather than a setting that drifted. A
+    type whose door is shut refuses what it does not declare; this one
+    is the door itself.
+    """
+    assert OpenaiCompatibleOptions.model_config["extra"] == "allow"
+    assert FasterWhisperOptions.model_config["extra"] == "forbid"
+    assert ElevenlabsOptions.model_config["extra"] == "forbid"
+
+
+def test_a_key_this_type_does_not_declare_is_kept_rather_than_refused() -> None:
+    """The hatch, at the model. A server speaking this dialect takes
+    parameters no other one does, and a model enumerating one vendor's
+    would present them as the contract of all of them, so what is not
+    declared is carried instead of judged.
+
+    Carried as `model_extra`, which is the same place `ProviderConfig`
+    keeps a provider's options, so the inline-secret rule that walks
+    those keeps walking these.
+    """
+    options = openai_compatible(top_p=0.9, keep_alive="30m")
+
+    assert options.model_extra == {"top_p": 0.9, "keep_alive": "30m"}
+
+
+def test_a_passthrough_key_may_not_be_a_field_of_the_request() -> None:
+    """The one thing the hatch may not do. `messages` is the
+    conversation, and a key by that name is not an option for a server,
+    it is a rewrite of what is being asked.
+
+    The name is printed, which is the exception to the rule that a
+    caller's key is not: these are the repository's own words, published
+    in the schema on the model, so saying which one was written tells an
+    operator what to remove without repeating anything they invented.
+    The pointer addresses it for the same reason.
+    """
+    refusal = refuse(OPENAI, messages=[{"role": "user", "content": SECRET}])
+    (problem,) = refusal.problems
+
+    assert problem.path == "/messages"
+    assert '"messages"' in str(refusal)
+    assert SECRET not in str(refusal)
+
+
+def test_every_reserved_name_is_refused_and_each_one_is_named() -> None:
+    """The set as a set, so a field added to the request without being
+    added here fails rather than becoming quietly overridable.
+
+    Three of the seven are declared fields of the model, which is a
+    stronger refusal rather than a gap: a passthrough key cannot take a
+    name the model already has. They are in the set anyway because what
+    the set states is which fields the request composes, and a reader of
+    it should not have to know which of them the model happens to
+    declare.
+    """
+    declared = set(OpenaiCompatibleOptions.model_fields)
+    for name in sorted(RESERVED_REQUEST_FIELDS - declared):
+        refusal = refuse(OPENAI, **{name: "whatever"})
+        (problem,) = refusal.problems
+
+        assert problem.path == f"/{name}"
+        assert f'"{name}"' in str(refusal)
+
+    assert declared & RESERVED_REQUEST_FIELDS == {"model", "max_tokens"}
+
+
+def test_two_reserved_names_are_refused_as_two_problems() -> None:
+    """A form marks both fields rather than the first one, which is what
+    building the problems inside the validator is for."""
+    refusal = refuse(OPENAI, messages=[], tools=[])
+
+    assert [problem.path for problem in refusal.problems] == ["/messages", "/tools"]
+
+
+def test_a_reserved_collision_carries_the_name_and_nothing_of_the_value() -> None:
+    """The one refusal in this file that prints a key, held to printing
+    only that.
+
+    A reserved name is one of seven words this repository chose, so it
+    travels; what was written under it is the caller's, and this is the
+    third converted type's plant for that. The whole chain is read, for
+    the reason the two above it are: a `ValidationError` holds the
+    rejected mapping in its `errors()`.
+    """
+    refusal = refuse(OPENAI, messages=SECRET, stream=SECRET)
+
+    rendered = "\n".join(
+        [
+            str(refusal),
+            repr(refusal),
+            repr(refusal.__cause__),
+            repr(refusal.__context__),
+            *(f"{problem.path} {problem.message}" for problem in refusal.problems),
+        ]
+    )
+
+    assert SECRET not in rendered
+    assert "messages" in rendered and "stream" in rendered
+    assert refusal.__cause__ is None
+    assert refusal.__context__ is None
+
+
+def test_this_type_has_no_blank_spelling_of_an_absent_option() -> None:
+    """The parity decision this type asked for, and its answer is none.
+
+    The first two converted types each carried a list of options whose
+    absence had a second spelling, read off the readers they replaced:
+    an option ending in `or <default>` swallowed the empty string as
+    well as the null, and a section read through `mapping()` answered an
+    empty mapping for a key that was not there. This reader had neither.
+    `base_url` and `model` were `required_string`, which refused a blank
+    as loudly as an absent key, and `max_tokens` was `integer(key,
+    default)`, which measured whatever it popped. So a blank is a value
+    here, and refused as one, and there is no list for this type.
+    """
+    for written in ("", None):
+        refuse(OPENAI, base_url=written)
+        refuse(OPENAI, model=written)
+    refuse(OPENAI, max_tokens=None)
+
+
+def test_the_url_rule_is_not_this_models_and_the_credential_rule_is_not_either() -> None:
+    """Where the work is divided, stated as what this model does NOT do.
+
+    `required_string` is the whole of what the model replaces, so a
+    `base_url` that is a non-blank string passes here and is refused
+    where the endpoint question is asked: `parse_base_url`, at build,
+    for all three stages that speak this dialect. A URL carrying a
+    credential passes here too and is refused by the write path's own
+    rule, which reads values at every depth rather than fields.
+
+    Pinned as acceptance rather than argued in a comment, because the
+    thing that would break silently is this model quietly gaining a rule
+    that already has a home.
+    """
+    assert openai_compatible(base_url="not-a-url").base_url == "not-a-url"
+    assert openai_compatible(base_url="https://user:pw@host/v1").base_url.endswith("@host/v1")
 
 
 # Where a refusal points

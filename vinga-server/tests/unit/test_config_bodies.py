@@ -257,6 +257,36 @@ def test_every_provider_body_survives_the_validator_its_type_declares(
     )
 
 
+def test_the_options_no_builder_accepted_are_the_ones_that_now_travel() -> None:
+    """The oldest provider fixture, and what typing its type did to it.
+
+    `every-field.json` was written as an `openai_compatible` entry
+    carrying options no builder read: it existed to prove a body could
+    hold anything and still parse. Under #88 that type is the escape
+    hatch, so the same body parses unchanged and those keys stop being
+    inert: they are `model_extra` on the type's own model, which is what
+    the provider forwards into the outgoing request. That is why this
+    batch needed no compatibility decision for it, and why the claim is
+    asserted rather than written in a plan: a model that closed its door
+    would fail the case above, and one that kept the door open and
+    dropped the keys would fail this one.
+    """
+    path = BODIES / "provider" / "every-field.json"
+    descriptor = entities.descriptor("provider")
+    stage, _ = _identity(descriptor, path)
+    entry = descriptor.model.model_validate_json(path.read_text(encoding="utf-8"))
+
+    options = checked_options(f"{path.name}:", stage, _written_type(path), entry.options)  # type: ignore[attr-defined]
+
+    assert options is not None
+    assert options.model_extra == {
+        "temperature": 0.7,
+        "max_reply_length": 512,
+        "stop": ["\n\n"],
+        "connection": {"retries": 2, "timeout_s": None},
+    }
+
+
 def test_every_declared_type_has_a_body_of_its_own() -> None:
     """A type that gains an option model gains a compatibility surface,
     so it gains a fixture: a body in the shape a deployment already has,

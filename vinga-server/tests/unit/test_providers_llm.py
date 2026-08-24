@@ -1,7 +1,11 @@
 """Building the LLM providers and shaping their requests. Actual
 streaming needs a live endpoint; that is the local lane's job."""
 
+import json
+
+import httpx
 import pytest
+from openai import AsyncOpenAI
 
 from tests.support.llm_sdk import (
     FakeChoice,
@@ -16,7 +20,7 @@ from tests.support.llm_sdk import Falsey as FalseyClient
 from vinga_server.config.models import ProviderConfig
 from vinga_server.providers import LlmProvider, ProviderError, TextDelta, Turn, build_entry
 from vinga_server.providers.anthropic_llm import AnthropicLlm
-from vinga_server.providers.kit import DEFAULT_TIMEOUT_S, MAX_RETRIES
+from vinga_server.providers.kit import DEFAULT_MAX_TOKENS, DEFAULT_TIMEOUT_S, MAX_RETRIES
 from vinga_server.providers.openai_endpoint import DEFAULT_BASE_URL, OPENAI_HOST
 from vinga_server.providers.openai_llm import OpenAiCompatibleLlm, chat_messages
 
@@ -54,8 +58,12 @@ async def test_a_set_api_key_env_builds(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 async def test_openai_compatible_requires_a_base_url() -> None:
-    with pytest.raises(ProviderError, match='"base_url" is required'):
+    """The subject `required_string` used to hold, through the model:
+    there is no endpoint to speak to without one, and the refusal names
+    the field it is about."""
+    with pytest.raises(ProviderError, match="base_url") as failure:
         await build_entry("llm", "local", provider_config(type="openai_compatible", model="qwen3"))
+    assert "providers.llm.local" in str(failure.value)
 
 
 async def test_openai_compatible_builds_keyless_for_local_endpoints() -> None:
@@ -242,6 +250,143 @@ async def test_a_compatible_endpoint_is_not_asked_for_token_counts() -> None:
 
     assert "stream_options" not in local.request
     assert openai.request["stream_options"] == {"include_usage": True}
+
+
+# The escape hatch, and what it may not reach
+#
+# `openai_compatible` is the one type whose options model keeps its door
+# open, and an accepted key that went nowhere would be the silently
+# ignored configuration the whole issue exists to remove: the reader
+# this model replaces refused every leftover, so nothing was ever
+# ignored, and the hatch has to be better than that rather than worse.
+# So these ask the question at the wire.
+
+
+async def test_the_cap_on_a_reply_is_the_one_the_kit_names() -> None:
+    """The model states the default as a number because it may not
+    import the kit (the kit speaks httpx, and the declaration is on
+    three paths that load no client library). This is the side that may
+    import both, so this is where the two are held together."""
+    built = await build_entry(
+        "llm",
+        "local",
+        provider_config(
+            type="openai_compatible", base_url="http://localhost:11434/v1", model="qwen3:8b"
+        ),
+    )
+    assert isinstance(built, OpenAiCompatibleLlm)
+    assert built._max_tokens == DEFAULT_MAX_TOKENS
+
+
+async def test_an_option_this_repository_never_heard_of_reaches_the_endpoint() -> None:
+    """The hatch taking effect. `top_p` is nobody's declared option here
+    and every server speaking this dialect takes one, so it is written
+    on the entry, survives validation as an extra, and arrives in the
+    request the provider sends.
+
+    Two halves, for the reason the usage case below has two: a
+    deployment's client is built inside the provider and handed to
+    nobody, so no request a factory-built entry sends can be read
+    without reaching into it. What can be read is what the factory
+    handed over, and the halves meet there. A factory that dropped the
+    extras would fail the first; a provider that held them and sent
+    nothing would fail the second.
+    """
+    built = await build_entry(
+        "llm",
+        "local",
+        provider_config(
+            type="openai_compatible",
+            base_url="http://localhost:11434/v1",
+            model="qwen3:8b",
+            top_p=0.9,
+            keep_alive="30m",
+        ),
+    )
+    assert isinstance(built, OpenAiCompatibleLlm)
+    assert built._passthrough == {"top_p": 0.9, "keep_alive": "30m"}
+
+    completions = FakeCompletions([FakeChunk([FakeChoice(FakeDelta(content="Said."))])])
+    llm = OpenAiCompatibleLlm(
+        base_url="http://localhost:11434/v1",
+        model="qwen3:8b",
+        max_tokens=64,
+        api_key=None,
+        client=openai_client(completions),  # type: ignore[arg-type]
+        passthrough=built._passthrough,
+    )
+
+    assert await spoken(llm) == ["Said."]
+    assert completions.request["extra_body"] == {"top_p": 0.9, "keep_alive": "30m"}
+
+
+async def test_a_passthrough_option_is_a_top_level_field_of_the_request_body() -> None:
+    """And what `extra_body` means, against the SDK rather than against
+    a description of it.
+
+    The case above records the argument the provider passes; this one
+    records the JSON that leaves the process, because the claim being
+    made is about the outgoing request body and nothing short of the
+    body can settle it. A real client over a transport that answers
+    every request itself: no network, no key, no vendor.
+
+    The reserved half rides along, one level deeper than the write-time
+    refusal that normally stops it: a provider constructed directly is a
+    seam of its own, and the promise that a passthrough key cannot
+    rewrite the request is kept there too. It has to be, since the SDK
+    merges `extra_body` OVER the fields the provider sets rather than
+    under them.
+    """
+    sent: dict[str, object] = {}
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        sent.update(json.loads(request.content))
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=b"data: [DONE]\n\n",
+        )
+
+    client = AsyncOpenAI(
+        base_url="http://endpoint.invalid/v1",
+        api_key="unused",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(answer)),
+    )
+    llm = OpenAiCompatibleLlm(
+        base_url="http://endpoint.invalid/v1",
+        model="qwen3:8b",
+        max_tokens=64,
+        api_key=None,
+        client=client,
+        passthrough={"top_p": 0.9, "model": "hijacked", "messages": []},
+    )
+
+    assert await spoken(llm) == []
+
+    assert sent["top_p"] == 0.9
+    assert sent["model"] == "qwen3:8b"
+    assert sent["max_tokens"] == 64
+    assert sent["messages"] == [
+        {"role": "system", "content": "be brief"},
+        {"role": "user", "content": "hi"},
+    ]
+
+
+async def test_a_passthrough_key_naming_a_request_field_fails_the_build() -> None:
+    """And the ordinary way in, where it is refused before anything is
+    built at all: the model says which names the request composes, and
+    the refusal says which one was written."""
+    config = provider_config(
+        type="openai_compatible",
+        base_url="http://localhost:11434/v1",
+        model="qwen3:8b",
+        tool_choice="none",
+    )
+    with pytest.raises(ProviderError, match="tool_choice") as failure:
+        await build_entry("llm", "local", config)
+
+    assert "providers.llm.local" in str(failure.value)
+    assert failure.value.__cause__ is None
 
 
 async def test_a_falsey_anthropic_client_is_still_the_one_used() -> None:
