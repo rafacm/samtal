@@ -228,10 +228,10 @@ which runs in every lane.
 
 | Option | Reader call | Accepted then | Accepted now | Same? |
 | --- | --- | --- | --- | --- |
-| `model` | `string(..., "small")` | a string; absent or null gives the default | `StrictStr`, default `small` | null tightens |
+| `model` | `string(..., "small")` | a string; absent, null or empty gives the default | `StrictStr`, default `small`, blank read as unwritten | yes |
 | `language` | `string(...)` | a string or null | `StrictStr \| None` | yes |
-| `device` | `string(..., "cpu")` | a string; absent or null gives the default | `StrictStr`, default `cpu` | null tightens |
-| `compute_type` | `string(..., "int8")` | a string; absent or null gives the default | `StrictStr`, default `int8` | null tightens |
+| `device` | `string(..., "cpu")` | a string; absent, null or empty gives the default | `StrictStr`, default `cpu`, blank read as unwritten | yes |
+| `compute_type` | `string(..., "int8")` | a string; absent, null or empty gives the default | `StrictStr`, default `int8`, blank read as unwritten | yes |
 | `download_dir` | `string(...)` | a string or null | `StrictStr \| None` | yes |
 | `language_fallback` | `string(...)` | a string or null | `StrictStr \| None` | yes |
 | `beam_size` | `integer(..., 1)` | an int; never a bool, a float or `"5"` | `StrictInt`, default 1 | yes |
@@ -240,17 +240,24 @@ which runs in every lane.
 | `condition_on_previous_text` | `boolean(..., True)` | true or false; never `0` | `StrictBool`, default true | yes |
 | `language_confidence_floor` | `number(..., 0.6)` | an int or a float, never a bool or a string, normalized to float | `Number` (a before-validator with the same rule) | yes |
 | `temperature` | `numbers(...)` | a number as a list of one, a non-empty list of numbers, or absent; never a bool, an empty list, a string or a list holding either | `Numbers` (the same rule as a before-validator) | yes |
-| `vad_parameters` | `mapping(...)` | a mapping or absent; never a list or a scalar | `VadParameters`, `extra="allow"` | yes |
-| `language_detect` | `string(...)` plus a membership check | `every_utterance` or `once` | `Literal["every_utterance", "once"]` | yes |
+| `vad_parameters` | `mapping(...)` | a mapping, absent or null; never a list or a scalar | `VadParameters`, `extra="allow"`, null read as unwritten | yes |
+| `language_detect` | `string(...)` plus a membership check | `every_utterance` or `once`; absent, null or empty gives the first | `Literal[...]`, blank read as unwritten | yes |
 | any other key | `finish()` | refused, naming the unknown keys | `extra="forbid"`, refused without naming them | refusal is now value-free and earlier |
 
-Two deliberate divergences, both in the changelog. An explicit `null`
-written where a defaulted option sits used to be read as the default
-(`options.string("model", "small") or "small"`), and is refused now:
-accepting it would also mean declaring `null` in the published schema
-for a field that has no null meaning. And an unknown key is refused at
-write rather than at build, without echoing the key, which is the
-issue's point and the repository's standing rule about keys meeting.
+One deliberate divergence, in the changelog: an unknown key is refused
+at write rather than at build, without echoing the key, which is the
+issue's point and the repository's standing rule about keys.
+
+The blank rows were the PR review round's second finding, and the row
+they landed in is worth reading twice. The first version of this table
+recorded "null tightens" for four options and called it deliberate. It
+was not: `options.string("model", "small") or "small"` also swallowed
+the EMPTY STRING, so the tightening was wider than the note admitted,
+and it was a tightening on the one axis this batch has no reason to
+touch, an operator's existing file rather than an operator's typo. A
+model-level before-validator drops those keys instead, which reads them
+as unwritten rather than as the default written out, and the five cases
+are in `PARITY`.
 
 ### Artifact churn
 
@@ -297,3 +304,106 @@ eleven engine-facing cases in
 in CI. That is what the review round's finding 11 is about, and why the
 model, sanitizer and dispatch cases were written not to need them: 59
 of them run in the ordinary lane.
+
+### PR review round
+
+External review of PR #275, 2026-08-24. Four findings, verdict
+mergeable after fixes; each fix is its own commit and each is recorded
+here with what it changed and what proves it.
+
+**4 (P2), taken first because it restructures what the others touch:
+the placement fix left a parallel topology.** `DECLARED_OPTIONS` keyed
+by `(stage, type)` sat beside the registry's own stage-and-type keys,
+bridged by a one-way test, which is the shape deviation 1 was supposed
+to end rather than relocate.
+
+*Resolution.* One table, `PROVIDER_TYPES`, in the light module, keyed
+by stage and then by type, each entry carrying both facts a surface
+asks about a type: where its factory lives (a module name and an
+attribute, resolved at construction time) and the options model it
+declares. `providers/registry.py` derives its registrations by
+resolving those names, the known-types refusal counts the same keys,
+and `declared_options()` and `component_name()` read the same entries.
+`DECLARED_OPTIONS` and the bridge test are gone; what replaces the test
+is an invariant rather than a bridge, that the resolved registry IS the
+table (same keys, same models), plus one holding the table's stages to
+the pipeline's. The three allow-list widenings are unchanged and needed
+no further names: a factory is named rather than imported, so the
+module still weighs pydantic and `config.models`.
+
+*The coordinator's earlier compromise, superseded.* Deviation 1 above
+put the models on the configuration side and left the factories in the
+registry, deriving only the model half. That was the right half of the
+answer: it is what made the documentation possible at all. What it got
+wrong is that a type is one thing, so splitting it across two tables
+keyed the same way reproduced the duplication one field lower down.
+This round's synthesis keeps the address the pins force and puts the
+whole type at it.
+
+**1 (P1): library tracebacks were still reachable through the exception
+chain.** The generic factory-failure wrapper raised `ProviderError ...
+from exc`, and the missing-extra refusal chained its ImportError. Both
+sentences are printed to an operator as they are, and a chain is a
+rendering surface like any other.
+
+*Resolution.* Both capture what is safe inside the handler, the class
+name or nothing, and raise after it has closed, so the refusal carries
+neither a cause nor a context.
+
+*The decision this reverses, said out loud.* Keeping the original as
+`__cause__` was not an oversight: PR #188's round decided it
+deliberately on 2026-08-18, with the comment "the exception itself is
+this one's `__cause__` for whoever has a debugger" and a test requiring
+`isinstance(excinfo.value.__cause__, OSError)`. This round supersedes
+that under the discipline established since, which the #244, #245 and
+#194 rounds each enforced on their own refusal paths: what a diagnosis
+reads is the log, which records the class and the entry, and an
+exception chain reaches every renderer that walks one. The test that
+required the cause now requires its absence and looks for the planted
+sentinel through the whole chain.
+
+*Revert proof.* Restoring either `from exc` fails
+`test_a_provider_that_fails_to_construct_names_the_entry` on the
+`__cause__ is None` assertion, and the missing-extra case on its own.
+
+**2 (P2): the parity inventory missed the blank spellings.** Four
+options ended the reader's ladder with `or <default>`, which swallowed
+the empty string as well as the null, and `vad_parameters` was read
+through a call that answered `{}` for a missing key.
+
+*Resolution.* A model-level before-validator drops those five keys when
+they hold `None` or `""`, so they read as unwritten and the field's own
+default applies; the parity table above is corrected, the five cases
+are in `PARITY`, and an engine-facing case asserts `model: ""` reaches
+the engine as `small` and a null VAD section is not forwarded.
+
+*Revert proof.* Removing the validator fails eight parity rows and both
+of the blank-defaulted cases.
+
+**3 (P2): the published temperature schema contradicted its
+validator.** The annotation describes what comes out of a
+`BeforeValidator`, so the document said "array of numbers, or null"
+while the validator took a bare number and refused an empty array.
+
+*Resolution.* The validator declares its `json_schema_input_type`: a
+number, an array of at least one (`minItems: 1`), or null. The
+committed OpenAPI document moved by four lines, and the assertion runs
+over the rendered surfaces rather than the annotation, checking the
+same three forms through the validator.
+
+*Revert proof.* Dropping the input type fails
+`test_the_published_schema_says_what_the_validator_accepts` on the
+missing number branch, and the OpenAPI drift check on the four lines.
+
+### Verification after the review round
+
+- `uv run ruff check .`: `All checks passed!`
+- `uv run pytest tests/unit -q -n auto --dist loadfile`:
+  `3262 passed, 19 skipped in 43.34s`
+- `uv run pytest tests/integration -q`: `126 passed`
+- `uv run mypy`: `Success: no issues found in 4 source files`
+- The six drift checks: clean; `api-openapi.json` moved by the four
+  lines finding 3 adds and nothing else moved.
+- `uv sync --frozen`: `Checked 99 packages`, nothing resolved.
+- The three import-weight pins: green, with no name added beyond the
+  one this milestone already added to two of them.

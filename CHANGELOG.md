@@ -39,16 +39,16 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   parity is held by a table-driven test taken call by call off the
   reader it replaces: a boolean is still not a number, `"5"` is still
   not an integer, an empty temperature ladder is still refused and a
-  scalar one is still taken as a ladder of one. Two things do tighten.
-  An explicit `null` written where a defaulted option sits (`model`,
-  `device`, `compute_type`, `language_detect`) is refused rather than
-  silently read as the default. And a stored entry carrying an option
-  the type does not declare is now refused on read as well as on write,
-  which a deployment that wrote one meets as a boot refusal naming the
-  entry and the field; `vinga-server config --local delete provider asr
-  <name>` is the way out, and it does not read the row it removes. The
-  engine's own `vad_parameters` are unaffected: that section keeps its
-  door open on purpose and forwards every key it is given.
+  scalar one is still taken as a ladder of one, and the blank spellings
+  of an absent option (`model: ""`, `device: null`, `vad_parameters:
+  null`) still read as the default. One thing does tighten: a stored
+  entry carrying an option the type does not declare is now refused on
+  read as well as on write, which a deployment that wrote one meets as
+  a boot refusal naming the entry and the field; `vinga-server config
+  --local delete provider asr <name>` is the way out, and it does not
+  read the row it removes. The engine's own `vad_parameters` are
+  unaffected: that section keeps its door open on purpose and forwards
+  every key it is given.
 
 - **The config CLI has a documentation home, and half of it is
   generated** (#194, M4). `docs/reference/cli.md` joins the four
