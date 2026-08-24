@@ -1448,6 +1448,113 @@ def test_an_over_limit_document_is_refused_with_the_store_unmutated(
     assert document(capsys.readouterr().out)["agents"] == {}
 
 
+# The published documentation, run
+#
+# Two things this repository publishes are command lines an operator is
+# expected to type: the presets, which are whole deployments in one
+# document, and the recipes on `docs/reference/cli.md`, which are read
+# out of the example fragments. Both are run here, verbatim, against a
+# real server on an empty store, because a documented command that
+# stopped working is worse than an undocumented one: it is a promise.
+#
+# Verbatim means what it says. The commands are not rewritten to point
+# at the lane's server or at an absolute path: the address is put in the
+# environment, which is the documented remote shape, and the working
+# directory is `vinga-server/`, which is where the recipes say to run
+# them from.
+
+# Where the example fragments and the presets are, which is the
+# directory every recipe's `-f examples/...` is relative to.
+SERVER = Path(__file__).resolve().parents[2]
+
+PRESETS = sorted((SERVER / "examples" / docgen.PRESET_DIR).glob("*.yaml"))
+
+
+@pytest.mark.parametrize("preset", PRESETS, ids=[path.stem for path in PRESETS])
+def test_a_preset_applies_onto_an_empty_store(
+    live: Live,
+    isolated: Live,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    preset: Path,
+) -> None:
+    """One preset, applied to a server that booted on nothing.
+
+    That is the whole claim a preset makes: it is what an operator runs
+    first, before there is anything for a reference to resolve against,
+    so every entry it names has to arrive in one transaction and the
+    document has to be complete enough to leave a store that reads back.
+
+    Applied twice, because the second half of the claim is that applying
+    is idempotent: the same document again reports every entry unchanged
+    and writes nothing, which is what makes a preset safe to keep in
+    version control and re-run.
+    """
+    monkeypatch.chdir(SERVER)
+    monkeypatch.setenv(cli.API_URL_ENV, isolated.api_url)
+
+    assert run("apply", "-f", str(preset.relative_to(SERVER))) == 0
+    first = [line.split(": ")[-1] for line in capsys.readouterr().out.splitlines()]
+    assert first and set(first) == {"wrote"}
+
+    assert run("apply", "-f", str(preset.relative_to(SERVER))) == 0
+    again = [line.split(": ")[-1] for line in capsys.readouterr().out.splitlines()]
+    assert again == ["unchanged"] * len(first)
+
+    # And what it left is a store that reads back as the document said,
+    # rather than a run that merely returned zero.
+    assert run("show") == 0
+    shown = document(capsys.readouterr().out)
+    written_document = yaml.safe_load(preset.read_text(encoding="utf-8"))
+    assert shown["agents"].keys() >= written_document["agents"].keys()
+    for stage, entries in written_document["providers"].items():
+        assert shown["providers"][stage].keys() >= entries.keys()
+
+
+def test_every_published_recipe_runs_against_the_server(
+    live: Live,
+    isolated: Live,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Every command `docs/reference/cli.md` publishes, in the order it
+    publishes them, against a server that booted on an empty database.
+
+    The recipes are read out of the example fragments rather than
+    written beside them, which keeps them from naming a file that moved.
+    What that cannot keep them from is naming a fragment that no longer
+    validates, an entity name a sibling fragment stopped creating, or a
+    reference whose target is written after it rather than before. Only
+    running the list finds those, and running it in the published order
+    is what makes the order part of what is checked.
+
+    The credentials the secrets recipe stores are read from stdin, which
+    is where those commands read them from and the reason none of them
+    takes the value as an argument.
+    """
+    monkeypatch.chdir(SERVER)
+    monkeypatch.setenv(cli.API_URL_ENV, isolated.api_url)
+
+    published = [
+        line.removeprefix(f"{cli.PROGRAM} ")
+        for recipe in docgen.recipes(cli.PROGRAM)
+        for line in recipe.commands
+    ]
+    assert published, "no recipe is published, so what follows is vacuous"
+
+    for line in published:
+        argv = line.split()
+        assert run(*argv, stdin=SECRET if argv[0] == "set-secret" else None) == 0, line
+        assert capsys.readouterr().out.strip(), line
+
+    # The deployment those commands add up to, read back through the
+    # command an operator would read it back with.
+    assert run("list") == 0
+    summary = capsys.readouterr().out
+    assert "assistant" in summary
+    assert SECRET not in summary
+
+
 def test_the_lane_s_server_booted_from_the_environment_alone(
     deployed: Live, capsys: pytest.CaptureFixture[str]
 ) -> None:
