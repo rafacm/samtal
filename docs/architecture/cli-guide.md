@@ -18,9 +18,16 @@ Two conventions run through it.
 **Every example is real.** A spelling shown here is one the CLI
 answers to today, or one this guide marks as **owed**: a rule the
 grammar does not satisfy yet, whose implementation belongs to a named
-piece of work. An owed rule is still the standard. It is the reviewer's
-job to hold new commands to it, and nobody's job to pretend the old
-ones already meet it.
+piece of work. Where the merged code actively contradicts a rule this
+page states, that is a **tension**, recorded in place with the issue
+that tracks it. An owed rule and a rule with a tension against it are
+both still the standard. It is the reviewer's job to hold new commands
+to them, and nobody's job to pretend the old ones already comply.
+
+A counterexample is different from an example: it is the shape a rule
+rejects. Where the rejection is recorded in merged or in historical
+code this page says which, and the rest are constructions, written to
+make a rule falsifiable rather than reported as things that happened.
 
 **The audit is recorded, not summarized.** The practices below were
 arrived at by walking four published guides one guideline at a time and
@@ -268,15 +275,22 @@ captive portal hands back three sentences and a URL.
 
 ### A refusal is a fixed sentence that quotes nothing back
 
-Every failure is a sentence this codebase wrote. None of them repeats
-what was typed, and none of them relays a body that did not come from
-vinga's own sanitized output.
+The standard: every failure is a sentence this codebase wrote, no
+sentence repeats what was typed, no sentence relays a body that did not
+come from vinga's own sanitized output, every URL a sentence names is
+passed through `shown_url` first, and nothing leaves through a
+traceback.
 
 The reason is not tidiness. The values passing through this CLI are a
 bearer token that grants everything the API can do, provider
 credentials, and an OTA URL that is itself a deployment's secret. A
 message that echoes an argument echoes those, onto a terminal, into
-shell history, and into whatever collects stderr.
+shell history, and into whatever collects stderr. The surface is wider
+than the message, too: an exception raised while another is being
+handled carries the first on `__context__`, and httpx's exceptions
+carry the request while Click's carry the argument list, which is why
+this module builds its sentences inside the handler and raises them
+after it.
 
 **Example.** `_usage_problem` translates Click's usage errors to fixed
 sentences **by exception class**, which is the reading that cannot be
@@ -285,13 +299,40 @@ a shape it has not seen, because a message this code has not seen is a
 message that may carry a value. An unrecognized answer from the network
 is reported as a status code plus "a body this client does not
 recognize", never quoted, because what a proxy or a captive portal
-returns is not this API's output. A URL in any refusal goes through
-`shown_url`, which strips credentials.
+returns is not this API's output.
 
-**Counterexample.** Letting Click's own `NoSuchOption` sentence
-through. It carries a did-you-mean built from the typed word, and the
-mistake that produces it most often is typing the secret after
-`set-secret ... api_key`.
+**Counterexample**, and a real one. The pre-Typer argparse grammar
+passed argparse's own `invalid choice: 'x'` through verbatim, echoing
+the typed word, while every sibling grammar in this repository already
+refused to. The #194 rebuild closed it by translating Click's
+`UsageError` subclasses by class, and recorded the strengthening in the
+changelog. What made it worth closing is the mistake that produces that
+sentence most often: typing the value after `set-secret ... api_key`.
+
+**Tension recorded: two merged paths do not meet this standard.** Both
+were found by holding this page against `cli.py`, which is what a
+written standard is for, and neither is fixed here, because a
+documentation change is the wrong place to change a refusal path.
+
+- **Rejected input is echoed on two paths, and one of them can escape
+  as a traceback** (#289). `_file` names the fragment path it was given
+  and the library's `strerror`, and `_read_secret` names the variable
+  `--from-env` pointed at. Worse, `_file` catches `FileNotFoundError`
+  and `OSError`, and a file that is not UTF-8 raises
+  `UnicodeDecodeError`, which is a `ValueError`: it escapes the
+  boundary entirely, as a traceback whose exception retains the buffer
+  it failed to decode.
+- **An accepted URL reaches later refusals unsanitized** (#290).
+  `_permitted` computes `shown` and uses it only in the refusals it
+  raises itself, then returns the URL it was given. `_sent` and
+  `_unreadable` interpolate that raw value, so an `https://` address
+  carrying a secret in a query parameter is printed on stderr whenever
+  the connection fails or the answer cannot be read. Userinfo is
+  refused outright, so this is the query string and the path, which the
+  policy does not inspect.
+
+Both are owed against the standard above, not licence to weaken it. A
+new command is held to the whole of it.
 
 ### One sentence and exit 1, and asking for help is not a failure
 
@@ -607,7 +648,7 @@ Ninety-six guidelines, in the document's own section order.
 | 36 | Catch errors and rewrite them for humans | Adopted | Every boundary raises `ConfigError` with a written sentence |
 | 37 | Signal-to-noise ratio is crucial | Adopted | One sentence |
 | 38 | Consider where the user will look first | Adopted | The sentence is the last thing on stderr |
-| 39 | For unexpected errors, provide debug and traceback information | Rejected | Deliberately: an httpx exception carries the request URL and a Click context carries the argument list, so a traceback is where a token or a secret would surface. The no-leak posture outranks the debugging convenience |
+| 39 | For unexpected errors, provide debug and traceback information | Rejected | Deliberately: an httpx exception carries the request URL and a Click context carries the argument list, so a traceback is where a token or a secret would surface. The no-leak posture outranks the debugging convenience. #289 is the case where one escapes anyway, recorded as a tension against the refusal practice |
 | 40 | Make it effortless to submit bug reports | N/A | Pre-release; see 8 |
 | 41 | Prefer flags to args | Adapted | Identity addressing |
 | 42 | Have full-length versions of all flags | Adopted | `--config`, `--api-url`, `--file`, `--from-env` |
