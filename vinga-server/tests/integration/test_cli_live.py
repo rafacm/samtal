@@ -952,7 +952,7 @@ def test_the_running_server_is_read_after_a_reload(
 def test_the_documents_that_reach_nothing_render_in_the_same_environment(
     deployed: Live, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The four commands that contact no server, run in the environment
+    """The five commands that contact no server, run in the environment
     the rest of the lane runs in.
 
     They are here for completeness rather than for the wire: what makes
@@ -974,6 +974,13 @@ def test_the_documents_that_reach_nothing_render_in_the_same_environment(
     assert run("openapi") == 0
     served = json.loads(capsys.readouterr().out)
     assert "/apply" in served["paths"]
+
+    # The one of the five that reads a directory as well as the command
+    # tree, and so the one with something to lose by being run from a
+    # working directory that is not the lane's.
+    assert run("cli-reference") == 0
+    rendered = capsys.readouterr().out
+    assert f"### `{cli.PROGRAM} apply`" in rendered
 
     assert run("ota-url") == 0
     printed = capsys.readouterr()
@@ -1136,6 +1143,7 @@ REFUSALS: tuple[Refusal, ...] = (
     ),
     Refusal("reference", ("reference", "extra"), USAGE, False),
     Refusal("openapi", ("openapi", "extra"), USAGE, False),
+    Refusal("cli-reference", ("cli-reference", "extra"), USAGE, False),
     Refusal(
         "show", ("show", "provider", "llm", "no-such"), entities.NO_SUCH_PROVIDER, True
     ),

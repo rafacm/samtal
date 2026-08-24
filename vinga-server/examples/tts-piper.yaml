@@ -5,9 +5,8 @@
 # A voice is a provider entry: two agents that should sound different
 # reference two entries. There is no per-agent voice option, because for
 # Piper the voice is the loaded model either way. Installing a second
-# voice is this file again under another name and another `voice`:
-#
-#   vinga-server config set provider tts piper_english -f examples/tts-piper.yaml
+# voice is this file again, under another name and with another `voice`
+# value, written with the same command.
 #
 # piper-tts is GPL-3.0 and therefore an optional extra:
 #
