@@ -74,7 +74,13 @@ from pydantic import (
     model_validator,
 )
 
-from vinga_server.config.models import PROVIDER_STAGES, FieldProblem, validation_problems
+from vinga_server.config.models import (
+    PROVIDER_STAGES,
+    FieldProblem,
+    FieldProblemsError,
+    json_pointer,
+    validation_problems,
+)
 
 # What a coercion rule says when it refuses.
 #
@@ -584,6 +590,112 @@ class ElevenlabsOptions(BaseModel):
         return int(self.output_format.removeprefix("pcm_"))
 
 
+# The fields the openai_compatible type composes for every request, and
+# therefore the names a passthrough key may not take.
+#
+# The door the model below keeps open is a door into the request body,
+# and a body has fields of its own: `model` is the entry's model,
+# `messages` is the conversation so far, `stream` is what makes the call
+# a stream at all, `max_tokens` is the declared cap, and the tools pair
+# is what the session is about to answer. A key by one of those names
+# would not be a server-specific option, it would be a rewrite of the
+# request, and the SDK's own `extra_body` merges OVER what the caller
+# set rather than under it. So the set is stated once, here, refused
+# when the entry is written and dropped again at the seam that builds
+# the provider.
+#
+# Naming which one collided is safe where naming a key an operator
+# invented is not: these seven words are this repository's own, they are
+# published in the schema on the model below, and a refusal that says
+# which was written tells an operator what to remove without repeating
+# anything they wrote.
+RESERVED_REQUEST_FIELDS = frozenset(
+    {"model", "messages", "max_tokens", "stream", "stream_options", "tools", "tool_choice"}
+)
+
+RESERVED_RULE = (
+    "is a field this type composes for every request, so it cannot also be passed "
+    "through as an option; remove it from the entry"
+)
+
+
+class OpenaiCompatibleOptions(BaseModel):
+    """The options the `openai_compatible` LLM type accepts, and the one
+    door in this file that stays open to an operator: a key this model
+    does not declare is kept and forwarded into the outgoing request.
+
+    The type exists to reach a server this repository has never seen.
+    Ollama, LM Studio, llama.cpp, vLLM and every gateway in front of one
+    speak the chat-completions dialect and each takes parameters no
+    other does, so a model that enumerated the dialect would be a list
+    of one vendor's fields presented as the contract of all of them.
+    That is the reason `extra="allow"` is here and nowhere else among
+    the closed types.
+
+    An accepted key takes EFFECT, which is the half that makes the hatch
+    worth having. The extras ride into the request body as the API's own
+    escape door takes them, merged UNDER the fields listed in
+    `RESERVED_REQUEST_FIELDS`: `top_p` reaches the server, and nothing
+    written here can rewrite the conversation, the model, the stream or
+    the tools the session is about to answer. A passthrough key by one
+    of those names is refused when the entry is written, with the name
+    said out loud.
+
+    What the hatch does not open is a way past the rules every provider
+    entry is held to. An extra is still walked for an inline secret and
+    still refused if it is a URL carrying a credential, because those
+    rules read the fragment rather than the model.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    @model_validator(mode="after")
+    def _no_request_field_is_passed_through(self) -> "OpenaiCompatibleOptions":
+        """A passthrough key may not be one of the request's own fields.
+
+        Raised as `FieldProblemsError` rather than as a bare ValueError
+        so the name reaches the pointer as well as the sentence: a
+        model-level validator's error is located at the model, and this
+        is the one place that knows which key it was about.
+        """
+        taken = sorted(set(self.model_extra or {}) & RESERVED_REQUEST_FIELDS)
+        if taken:
+            raise FieldProblemsError(
+                [
+                    FieldProblem(json_pointer((name,)), f'"{name}" {RESERVED_RULE}')
+                    for name in taken
+                ]
+            )
+        return self
+
+    base_url: Nonblank = Field(
+        description=(
+            "The endpoint's OpenAI-compatible base URL, such as "
+            "http://localhost:11434/v1 for a local Ollama; pointing it at "
+            "api.openai.com works too. Required, because it is what decides which "
+            "server this entry speaks to and whether session data leaves the host."
+        ),
+    )
+    model: Nonblank = Field(
+        description=(
+            "The model to ask for, in the endpoint's own vocabulary (qwen3:8b on "
+            "Ollama, an OpenAI model id on api.openai.com)."
+        ),
+    )
+    # 1024 is what `providers/kit.py` calls a reply's default cap, and it
+    # cannot be imported here: the kit speaks httpx, and this module is
+    # on three paths that load no client library. Stated as the number
+    # and pinned against the kit's constant by a case in
+    # `test_providers_llm.py`, which is on the side that may import both.
+    max_tokens: StrictInt = Field(
+        default=1024,
+        description=(
+            "The cap on one reply's length, in tokens. Spoken replies are short, so "
+            "this bounds a runaway rather than a conversation."
+        ),
+    )
+
+
 class OptionsRefused(Exception):
     """One entry's options, refused, in the two renderings a refusal
     needs and in neither of the two a leak needs.
@@ -662,7 +774,7 @@ PROVIDER_TYPES: dict[str, dict[str, ProviderType]] = {
     "llm": {
         "mock": ProviderType("mock", "build_llm"),
         "anthropic": ProviderType("anthropic_llm"),
-        "openai_compatible": ProviderType("openai_llm"),
+        "openai_compatible": ProviderType("openai_llm", options=OpenaiCompatibleOptions),
     },
     "asr": {
         "mock": ProviderType("mock", "build_asr"),
@@ -797,8 +909,11 @@ __all__ = [
     "NUMBER_RULE",
     "PCM_FORMAT_PATTERN",
     "PCM_FORMAT_RULE",
+    "RESERVED_REQUEST_FIELDS",
+    "RESERVED_RULE",
     "ElevenlabsOptions",
     "FasterWhisperOptions",
+    "OpenaiCompatibleOptions",
     "OptionsRefused",
     "VadParameters",
     "VoiceSettings",
