@@ -476,13 +476,13 @@ def test_a_set_help_says_a_credential_is_never_one_of_its_arguments(
 
 # The two positions a global option is given in
 #
-# `--config`, `--api-url` and `--local` are accepted before the command
-# word and after it, because both readings are natural: `vinga-server
-# --config path` is how the server takes it, and options after their
-# subcommand is how everything else does. What makes that subtle is the
-# merge: a value given before the command must survive a command that
-# was not given one, which argparse spelled as `default=SUPPRESS` and
-# the Typer layer spells as a per-position fold.
+# `--config` and `--api-url` are accepted before the command word and
+# after it, because both readings are natural: `vinga-server --config
+# path` is how the server takes it, and options after their subcommand
+# is how everything else does. What makes that subtle is the merge: a
+# value given before the command must survive a command that was not
+# given one, which argparse spelled as `default=SUPPRESS` and the Typer
+# layer spells as a per-position fold.
 #
 # Stated separately for the two positions the grammar really has. At the
 # root all of them are accepted before every command. At the leaf the
@@ -494,7 +494,7 @@ def test_a_set_help_says_a_credential_is_never_one_of_its_arguments(
 # `--config` and nothing that addresses an API.
 #
 # Parameterized over the options the root declares rather than over a
-# list of them, so a fourth global option inherits the matrix by being
+# list of them, so a third global option inherits the matrix by being
 # declared.
 
 ROOT_OPTIONS = frozenset(
@@ -515,11 +515,11 @@ LEAF_EXCLUSIONS: dict[tuple[str, ...], frozenset[str]] = {
 
 
 def test_the_root_position_takes_every_global_option() -> None:
-    """Read off the root rather than listed, so a fourth global option
-    joins the matrix below by being declared. The three are named here
-    because they are what exists, and a fourth is a deliberate edit to
+    """Read off the root rather than listed, so a third global option
+    joins the matrix below by being declared. The two are named here
+    because they are what exists, and a third is a deliberate edit to
     this line rather than a silent widening."""
-    assert ROOT_OPTIONS == {"--config", "--api-url", "--local"}
+    assert ROOT_OPTIONS == {"--config", "--api-url"}
 
 
 @pytest.mark.parametrize(
@@ -542,7 +542,8 @@ def _positions(option: str, tmp_path: Path) -> tuple[str, str, str, str]:
     `--config` names a file whose `server.port` is what the default
     address is built from, and `--api-url` is the address, so both are
     read back the same way: through the base URL the client was built
-    with.
+    with. A third global option would have no answer here, and says so
+    by failing rather than by quietly taking another option's.
     """
     if option == "--config":
         return (
@@ -551,6 +552,7 @@ def _positions(option: str, tmp_path: Path) -> tuple[str, str, str, str]:
             "http://127.0.0.1:9101/api",
             "http://127.0.0.1:9102/api",
         )
+    assert option == "--api-url", option
     return (
         "http://127.0.0.1:9101/api",
         "http://127.0.0.1:9102/api",
@@ -565,10 +567,11 @@ def _configured(tmp_path: Path, port: int) -> str:
     return str(path)
 
 
-# The two that carry a value, which are the two that can conflict.
-# `--local` is presence-only and has no value to disagree about, so its
-# cases are the two below this pair.
-VALUE_OPTIONS = ("--config", "--api-url")
+# Every global option carries a value, so every one of them can
+# conflict with a copy of itself in the other position. Derived from
+# what the root declares rather than listed a second time, and sorted so
+# the parametrization has an order.
+VALUE_OPTIONS = tuple(sorted(ROOT_OPTIONS))
 
 
 @pytest.mark.parametrize("option", VALUE_OPTIONS)
@@ -608,26 +611,3 @@ def test_a_value_after_the_command_beats_one_before_it(
 
     assert run.reached[-1] == reached
 
-
-def test_the_flag_before_the_command_survives_a_command_that_does_not_repeat_it(
-    run, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """`--local` is presence-only, so what it has instead of a conflict
-    is this: a flag that is not there says nothing, and cannot unsay a
-    flag that is. Read back through the server not being reached, which
-    is what the break-glass path is."""
-    assert run("--local", "show") == 0
-
-    assert run.reached == []
-    assert "bypassing the configuration API" in capsys.readouterr().err
-
-
-def test_the_flag_in_both_positions_is_the_same_flag(
-    run, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """And the other half of presence-only: given twice it is given, and
-    the preamble is printed once rather than once per position."""
-    assert run("--local", "show", "--local") == 0
-
-    assert run.reached == []
-    assert capsys.readouterr().err.count("bypassing the configuration API") == 1

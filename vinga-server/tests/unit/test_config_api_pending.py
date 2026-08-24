@@ -408,8 +408,8 @@ def test_each_waiting_device_is_claimed_by_its_own_code(
 @contextmanager
 def _beside(directory: Path) -> Iterator[ConfigStore]:
     """The repository opened directly on the same database, which is
-    what the CLI's --local recovery path is and what a second process
-    would be: a writer this table cannot be told about."""
+    what a second process would be: a writer this table cannot be told
+    about."""
     engine = open_database(directory)
     try:
         yield ConfigStore(engine)

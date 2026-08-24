@@ -619,7 +619,7 @@ def test_an_entity_with_no_stored_credential_exports_without_an_annotation(
 #
 # Nothing about a name forbids one: the write path refuses a slash and a
 # control character and nothing else, so `--from-env` is a legal
-# provider name and `--local` is a legal slot. What such a name needs is
+# provider name and `--from-env` is a legal slot. What such a name needs is
 # Click's `--`, which ends the options and makes the rest positional,
 # and which an operator has to type to write the name in the first
 # place. The export renders the command it would take, so the command it

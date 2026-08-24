@@ -125,7 +125,8 @@ def test_an_explicit_variable_wins_over_the_mount(entrypoint) -> None:
 
 
 def test_the_command_line_reaches_the_server_unchanged(entrypoint) -> None:
-    """`docker run ... config --local show` has to read as it always
-    has, which means everything after the image name is the server's own
-    command line and none of it is the wrapper's."""
-    assert entrypoint("config", "--local", "show")["argv"] == "config --local show"
+    """`docker run ... config show provider llm claude` has to read as
+    it always has, which means everything after the image name is the
+    server's own command line and none of it is the wrapper's."""
+    argv = ("config", "show", "provider", "llm", "claude")
+    assert entrypoint(*argv)["argv"] == " ".join(argv)
