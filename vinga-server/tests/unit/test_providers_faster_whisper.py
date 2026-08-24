@@ -147,6 +147,25 @@ async def test_configured_decode_options_reach_the_engine(
 
 
 @pytest.mark.skipif(not HAS_FASTER_WHISPER, reason="faster-whisper extra not installed")
+def test_a_blank_option_reaches_the_engine_as_the_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other end of the normalization the options model performs.
+
+    `test_provider_options.py` asserts that `model: ""` reads as
+    `small`; what a deployment cares about is that `small` is the name
+    the engine is then asked to load, and that a null VAD section is not
+    forwarded as one. The engine is where that is observable, so this is
+    the case that runs where the extra is installed.
+    """
+    provider, engine = built_with(monkeypatch, model="", device="", vad_parameters=None)
+
+    assert engine.model == "small"
+    assert engine.ctor["device"] == "cpu"
+    assert "vad_parameters" not in provider._decode_options  # type: ignore[attr-defined]
+
+
+@pytest.mark.skipif(not HAS_FASTER_WHISPER, reason="faster-whisper extra not installed")
 async def test_detection_metadata_reaches_the_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

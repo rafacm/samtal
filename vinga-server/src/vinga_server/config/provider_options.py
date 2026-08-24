@@ -68,6 +68,7 @@ from pydantic import (
     StrictInt,
     StrictStr,
     ValidationError,
+    model_validator,
 )
 
 from vinga_server.config.models import PROVIDER_STAGES, FieldProblem, validation_problems
@@ -150,6 +151,19 @@ class VadParameters(BaseModel):
     )
 
 
+# The options whose absence had more than one spelling.
+#
+# Four ended the reader's ladder with `or <default>`, so an empty string
+# and an explicit null both fell through to the default, and
+# `vad_parameters` was read through a call that answered an empty
+# mapping for a key that was not there. Listed rather than marked per
+# field because what they have in common is a fact about the reader they
+# replace, not a fact about any of them.
+_BLANK_IS_UNWRITTEN = frozenset(
+    {"model", "device", "compute_type", "language_detect", "vad_parameters"}
+)
+
+
 class FasterWhisperOptions(BaseModel):
     """The options the `faster_whisper` ASR type accepts.
 
@@ -161,6 +175,40 @@ class FasterWhisperOptions(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _blank_reads_as_unwritten(cls, data: object) -> object:
+        """A spelling of absence this type has always accepted, kept.
+
+        The reader these fields replace ended four of them with
+        `or <default>` and read `vad_parameters` through a call that
+        answered an empty mapping for a missing key, so `model: ""`,
+        `device: null` and `vad_parameters: null` were all ways of
+        saying nothing and were all read as the default. A deployment
+        that wrote one of them has a configuration that boots today, and
+        this batch prices a break at zero only where the break is a
+        typo being caught.
+
+        Dropping the key rather than substituting the value is what
+        keeps one statement of each default: what a field holds when
+        nobody wrote it is the field's own `default`, said once, and
+        this makes those spellings mean nobody wrote it. It also keeps
+        `model_fields_set` honest, which is what `vad_parameters`
+        depends on: an empty section must not travel to the engine, and
+        `exclude_unset` is what stops it.
+
+        Deliberately not in the published schema. What the schema states
+        is what an operator should write, and `device: ""` is not that;
+        it is a spelling that used to work and still does.
+        """
+        if not isinstance(data, Mapping):
+            return data
+        return {
+            key: value
+            for key, value in data.items()
+            if key not in _BLANK_IS_UNWRITTEN or value not in (None, "")
+        }
 
     model: StrictStr = Field(
         default="small",
