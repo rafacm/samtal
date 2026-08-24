@@ -1,6 +1,8 @@
 """Constructing providers from their configuration entries.
 
-Each stage maps type names to factories. Heavyweight implementations
+Each stage maps type names to a `Registration`: how the type is built,
+and the options model it declares, which is the one table every other
+surface reads that question off. Heavyweight implementations
 import their engine inside the factory, so the core install only pays
 for what the configuration references, and a missing optional
 dependency becomes an error naming the extra to install rather than an
@@ -14,6 +16,8 @@ it (#191).
 
 from collections.abc import Callable
 from dataclasses import dataclass
+
+from pydantic import BaseModel
 
 from vinga_server.config import ConfigError
 from vinga_server.config.models import ProviderConfig
@@ -30,6 +34,7 @@ from vinga_server.providers.base import (
     TtsProvider,
     VadProvider,
 )
+from vinga_server.providers.options import OptionsRefused, checked_options
 
 
 class OptionsReader:
@@ -126,7 +131,32 @@ class OptionsReader:
             raise ProviderError(f"{self._label}: unknown option(s): {unknown}")
 
 
-Factory = Callable[[str, ProviderConfig], object]
+Factory = Callable[..., object]
+
+
+@dataclass(frozen=True)
+class Registration:
+    """What one stage's type name is: how it is built, and what it
+    accepts.
+
+    One table rather than two. The options model used to have nowhere to
+    live but a second stage-and-type mapping beside this one, and two
+    mappings that must agree about which types exist are one mapping
+    with a bug pending; construction, write-time validation, read-back
+    and the documentation all read this.
+
+    The factory comes in two shapes, and which one is which is decided
+    by `options` rather than by a flag: a type that declares a model is
+    called `(label, config, options)` and reads attributes off a
+    validated instance, and a type that declares none is called
+    `(label, config)` and reads its own `OptionsReader` ladder, exactly
+    as every type did before the conversion started. That is what lets
+    the types convert one at a time (#88) without a partially converted
+    registry meaning anything unusual.
+    """
+
+    factory: Factory
+    options: type[BaseModel] | None = None
 
 
 def _silero(label: str, config: ProviderConfig) -> object:
@@ -194,30 +224,61 @@ def _piper(label: str, config: ProviderConfig) -> object:
     return piper_tts.build(label, config)
 
 
-def _factories() -> dict[str, dict[str, Factory]]:
+def _registrations() -> dict[str, dict[str, Registration]]:
     # Imported here rather than at module top because the implementation
     # modules import the OptionsReader above; the table itself is tiny.
+    # `options` is imported at module scope instead, which is the whole
+    # point of that module being pydantic and nothing else: reading this
+    # table for what a type accepts costs no engine.
     from vinga_server.providers import mock
 
     return {
         "llm": {
-            "mock": mock.build_llm,
-            "anthropic": _anthropic,
-            "openai_compatible": _openai_compatible,
+            "mock": Registration(mock.build_llm),
+            "anthropic": Registration(_anthropic),
+            "openai_compatible": Registration(_openai_compatible),
         },
         "asr": {
-            "mock": mock.build_asr,
-            "faster_whisper": _faster_whisper,
-            "openai": _openai_asr,
+            "mock": Registration(mock.build_asr),
+            "faster_whisper": Registration(_faster_whisper),
+            "openai": Registration(_openai_asr),
         },
         "tts": {
-            "mock": mock.build_tts,
-            "elevenlabs": _elevenlabs,
-            "openai": _openai_tts,
-            "piper": _piper,
+            "mock": Registration(mock.build_tts),
+            "elevenlabs": Registration(_elevenlabs),
+            "openai": Registration(_openai_tts),
+            "piper": Registration(_piper),
         },
-        "vad": {"mock": mock.build_vad, "silero": _silero},
+        "vad": {"mock": Registration(mock.build_vad), "silero": Registration(_silero)},
     }
+
+
+def registration(stage: str, type_name: str) -> Registration | None:
+    """What the table says about one stage's type, or None for a stage
+    or a type it does not have.
+
+    The read every other surface goes through. `construct_provider`
+    below asks it what to build with; `providers/options.py` asks it
+    which model to validate against, which is how the write path, the
+    read-back and the build path share one answer.
+    """
+    return _registrations().get(stage, {}).get(type_name)
+
+
+def declared_options() -> tuple[tuple[str, str, type[BaseModel]], ...]:
+    """Every type that declares an options model, as stage, type and
+    model, in the table's own order.
+
+    The enumeration the documentation renders from, so that what a
+    schema, a reference table or a help page lists is what the registry
+    dispatches on rather than a second list of converted types.
+    """
+    return tuple(
+        (stage, type_name, entry.options)
+        for stage, types in _registrations().items()
+        for type_name, entry in types.items()
+        if entry.options is not None
+    )
 
 
 def construct_provider(
@@ -234,10 +295,12 @@ def construct_provider(
     Construction and nothing else, which is what lets this run in a
     worker thread: the checks that come after an object exists are the
     owner's (`providers/world.py`), because refusing one means closing
-    it and a close is a coroutine (#191). What a factory does before
-    returning is the mirror rule, and it is the provider modules': read
-    the options to the end and finish them, then construct, so that a
-    trailing unknown option is a refusal with nothing to let go of.
+    it and a close is a coroutine (#191). What comes before it is the
+    same rule read from the other end: a type that declares an options
+    model has it validated here, before its factory is called at all,
+    and a type that declares none reads its options to the end and
+    finishes them inside its own factory, so either way a bad option is
+    a refusal with nothing to let go of.
 
     `secrets` is the store a snapshot was loaded with, or None for a
     deployment whose credentials are all environment references. This is
@@ -245,12 +308,29 @@ def construct_provider(
     is keyed by, so it is where the entry's secrets are put in force for
     the construction call."""
     label = f"providers.{stage}.{name}"
-    factory = _factories()[stage].get(config.type)
-    if factory is None:
-        known = ", ".join(sorted(_factories()[stage]))
+    entry = registration(stage, config.type)
+    if entry is None:
+        known = ", ".join(sorted(_registrations()[stage]))
         raise ProviderError(
             f'{label}: unknown {stage} provider type "{config.type}" (known types: {known})'
         )
+    # What the type says it accepts, checked before anything is built,
+    # which is the ordering `finish()` established and this keeps: an
+    # option a type does not declare is a refusal that must not cost a
+    # model load, and after the load there would be an object to let go
+    # of again (#191).
+    #
+    # Recorded and raised outside the handler, and the refusal it raises
+    # chains nothing: what the sanitizer caught holds the rejected
+    # options, and this sentence is printed to an operator as it is.
+    options: BaseModel | None = None
+    refused: str | None = None
+    try:
+        options = checked_options(f"invalid {label}:", stage, config.type, config.options)
+    except OptionsRefused as exc:
+        refused = str(exc)
+    if refused is not None:
+        raise ProviderError(refused)
     # Every other failure in this function names the entry that caused
     # it, which is what makes a bad configuration a five-second fix.
     # Construction was the exception: a local engine fetching its
@@ -286,7 +366,11 @@ def construct_provider(
     # the common one.
     try:
         with provider_secrets_in_force(ProviderSecrets(stage, name, secrets)):
-            provider = factory(label, config)
+            provider = (
+                entry.factory(label, config)
+                if options is None
+                else entry.factory(label, config, options)
+            )
     except (ProviderError, ConfigError):
         raise
     except Exception as exc:
