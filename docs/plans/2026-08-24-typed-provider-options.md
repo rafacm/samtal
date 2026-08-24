@@ -273,10 +273,26 @@ prescribes anyway.
 
 ## Tests
 
+Two disciplines run through every milestone. Coercion parity: the
+reader's accepted-and-rejected set survives per converted call,
+inventoried field by field (booleans refused where numbers are
+expected, numeric strings refused for integers, empty number
+lists refused, a scalar temperature still accepted and normalized
+to a one-element list, required strings nonblank), stated with
+strict field types and normalization validators and held by a
+table-driven parity test per type. And CI reality: the
+option-model, sanitizer and registry-dispatch tests are
+dependency-free and always run (the default lane installs no
+optional extras, and the existing faster_whisper suites skip
+without the engine); only real implementation-to-engine plumbing
+stays under the extra guard, with a fake factory exercising the
+typed handoff in the ordinary lane.
+
 M1: the pointer-inversion pair in `test_config_api_problems.py`
 flips for a typed type's option (a declared field gets its
-`/options/<field>` pointer; the undeclared-under-typed case gets
-the unrecognized-key sentence at the deepest declared pointer) and
+`/<field>` pointer per decision 3's shapes; the
+undeclared-under-typed case gets the unrecognized-key sentence at
+the deepest declared pointer) and
 keeps the truncation case on an untyped type; the faster_whisper
 builder suite drops its reader cases for model cases with the same
 subjects (wrong type named, unknown mode refused, defaults hold);
@@ -410,6 +426,11 @@ resolution note here.
    and accepts scalar temperature; ordinary pydantic fields do
    not reproduce that set.
 
+   *Resolution* (this commit): the Tests section requires a per
+   converted call inventory, strict field types with
+   normalization validators, and a table-driven parity test per
+   type.
+
 9. **P2: the stored-body gate bypasses typed validation.** The
    bodies suite validates through stage-blind `ProviderConfig`
    with a hard-coded `llm` identity, and `_body` has no stage.
@@ -430,3 +451,8 @@ resolution note here.
 
 11. **P2: the faster_whisper builder tests would be skipped in
     default CI**, which installs no optional extras.
+
+    *Resolution* (this commit): the option-model, sanitizer and
+    dispatch tests are dependency-free and always run; a fake
+    factory exercises the typed handoff in the ordinary lane;
+    only engine plumbing stays under the extra guard.
