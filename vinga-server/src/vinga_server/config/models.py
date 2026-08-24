@@ -827,6 +827,91 @@ def json_pointer(segments: Iterable[object]) -> str:
     )
 
 
+def validation_problems(
+    headline: str, model: type[BaseModel], exc: ValidationError
+) -> tuple[str, tuple[FieldProblem, ...]]:
+    """One failed validation in both the renderings a refusal needs: the
+    sentence an operator reads, and the field problems a form acts on.
+
+    Walked once, so the two cannot come to disagree about how many
+    things were wrong or what was said about each. The sentence keeps
+    the dotted spelling of the location, because that is how an operator
+    reads their own file; the problems carry the JSON Pointer, which is
+    what a reader can act on.
+
+    Every location is put through `safe_location` against the model
+    first, so a segment the caller invented (an unrecognized key, an
+    option of a pass-through model, an entry of `env` or `headers`)
+    reaches neither rendering: a key is as good a place to paste a
+    credential as a value, and this sentence is printed by the CLI,
+    answered by the API and, for a stored row, written to the boot log.
+    `error["input"]` is never read either, here least of all: it is the
+    whole rejected fragment, inline secret and all.
+
+    It lives beside `safe_location` rather than in the repository that
+    used to hold it because a second caller arrived that is not the
+    repository: a provider type's own options model is validated by
+    `providers/options.py`, on a path that must not import a database
+    driver to reach one function. One walk, one wording, both callers.
+    """
+    lines = [headline]
+    problems: list[FieldProblem] = []
+    for error in exc.errors():
+        location, dropped = safe_location(model, error["loc"])
+        where = ".".join(str(part) for part in location)
+        prefix = json_pointer(location)
+        for problem in _error_problems(error, dropped):
+            lines += [refusal_line(where, line) for line in problem.message.splitlines()]
+            problems.append(FieldProblem(prefix + problem.path, problem.message))
+    return "\n".join(lines), tuple(problems)
+
+
+def refusal_line(where: str, line: str) -> str:
+    """One problem as a refusal prints it: an indented dash, and the
+    place in front of it when there is one this repository may name.
+
+    One home for the shape, because a refusal an operator reads is one
+    vocabulary however it was produced: the unchanged-value marker's own
+    refusal builds its sentence without a validation error behind it,
+    and a second spelling of the indentation would be a golden that
+    moves for no reason.
+    """
+    return f"  - {where}: {line}" if where else f"  - {line}"
+
+
+def _error_problems(
+    error: Mapping[str, object], dropped: bool
+) -> tuple[FieldProblem, ...]:
+    """What one pydantic error stands for, decomposed as far as it can
+    be.
+
+    A validator that knows its semantic field says so by raising
+    `FieldProblemsError`, and pydantic carries the exception object in
+    the error's context, which is the only place that knowledge
+    survives: a model-level validator's error is located at the model,
+    so several problems arrive as one error at one location. Everything
+    else is one problem at its own location, with the prefix pydantic
+    puts on a validator's ValueError stripped back off.
+
+    One error type is rendered in this repository's words rather than
+    pydantic's: an unrecognized key, whose location was the key itself
+    and is now the parent it was written under, so pydantic's sentence
+    would be left pointing at the wrong thing. The type is the decision
+    site because it is a closed token, unlike the message. Every other
+    message pydantic writes here is built from the error type and the
+    field's own constraints rather than from the input, which is what
+    the planted-key tests check rather than assume.
+    """
+    context = error.get("ctx")
+    raised = context.get("error") if isinstance(context, Mapping) else None
+    if isinstance(raised, FieldProblemsError):
+        return raised.problems
+    if dropped and error.get("type") == "extra_forbidden":
+        return (FieldProblem("", UNRECOGNIZED_KEY_REFUSED),)
+    message = str(error["msg"]).removeprefix("Value error, ")
+    return (FieldProblem("", message),)
+
+
 def secret_option_fragment(name: str) -> str | None:
     """Which of the closed fragments above an option name matched, or
     None.

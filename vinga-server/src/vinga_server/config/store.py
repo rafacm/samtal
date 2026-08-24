@@ -56,12 +56,10 @@ from vinga_server.config.models import (
     DOMAIN_KEYS,
     PROMPT_FRAGMENT_NAME_RULE,
     PROVIDER_STAGES,
-    UNRECOGNIZED_KEY_REFUSED,
     AgentConfig,
     AgentDefaults,
     DomainConfig,
     FieldProblem,
-    FieldProblemsError,
     McpServerConfig,
     PromptFragmentConfig,
     ProviderConfig,
@@ -74,8 +72,10 @@ from vinga_server.config.models import (
     json_pointer,
     normalize_device_bindings,
     normalize_mac,
+    refusal_line,
     safe_location,
     url_credential,
+    validation_problems,
 )
 from vinga_server.config.secrets import (
     MASK,
@@ -1643,7 +1643,7 @@ def _read_domain(connection: Connection) -> DomainConfig:
     except ValidationError as exc:
         # The sentence only, for the reason `_stored` records: unreadable
         # stored rows are not the caller's fields to correct.
-        problem, _ = _validation_problems(_UNREADABLE_ROWS, DomainConfig, exc)
+        problem, _ = validation_problems(_UNREADABLE_ROWS, DomainConfig, exc)
     if domain is None:
         raise StorageError(problem)
 
@@ -1692,7 +1692,7 @@ def _body[Model: BaseModel](model: type[Model], location: str, body: object) -> 
     operator wrote, and it is one string rather than a set of columns, so
     a sentence quoting "the row" would now quote the whole entity.
 
-    That bound is what `_validation_problems` already enforces, and it is
+    That bound is what `validation_problems` already enforces, and it is
     why the error is built inside the handler and raised outside it: a
     ValidationError's `errors()` carry the rejected input, which here is
     the body itself.
@@ -1720,7 +1720,7 @@ def _body[Model: BaseModel](model: type[Model], location: str, body: object) -> 
     try:
         entry = model.model_validate_json(body)  # type: ignore[arg-type]
     except ValidationError as exc:
-        problem, _ = _validation_problems(f"{location}: {_UNREADABLE_ROW}", model, exc)
+        problem, _ = validation_problems(f"{location}: {_UNREADABLE_ROW}", model, exc)
     if entry is None:
         raise StorageError(problem)
     unwritable = _untransportable(entry.model_dump(), numbers_only=True)
@@ -2385,7 +2385,7 @@ def _mask_refusal(
         if problem not in problems:
             problems.append(problem)
     lines = [f"invalid {location}:"]
-    lines += [_refusal_line("", problem.message) for problem in problems]
+    lines += [refusal_line("", problem.message) for problem in problems]
     return "\n".join(lines), tuple(problems)
 
 
@@ -2443,7 +2443,7 @@ def _load[Model: BaseModel](
         # __context__, and a ValidationError's errors() hold the whole
         # rejected fragment, inline secret and all. Raising after the
         # handler leaves neither a cause nor a context.
-        problem, problems = _validation_problems(f"invalid {location}:", model, exc)
+        problem, problems = validation_problems(f"invalid {location}:", model, exc)
     # The one place the structured half is filled: this is the refusal a
     # caller can act on, field by field, and the pairs the sentence was
     # rendered from are the pairs it carries.
@@ -2474,7 +2474,7 @@ def _stored[Model: BaseModel](
         # and the fields that failed are fields of a stored row rather
         # than of anything this request sent, so there is nothing for a
         # structured entry to attach to.
-        problem, _ = _validation_problems(f"{location}: {_UNREADABLE_ROW}", model, exc)
+        problem, _ = validation_problems(f"{location}: {_UNREADABLE_ROW}", model, exc)
     raise StorageError(problem)
 
 
@@ -2550,84 +2550,6 @@ def _untransportable(
     return _NOT_TRANSPORTABLE.format(
         where=path or "the fragment", kind=type(value).__name__
     )
-
-
-def _validation_problems(
-    headline: str, model: type[BaseModel], exc: ValidationError
-) -> tuple[str, tuple[FieldProblem, ...]]:
-    """One failed validation in both the renderings a refusal needs: the
-    sentence an operator reads, and the field problems a form acts on.
-
-    Walked once, so the two cannot come to disagree about how many
-    things were wrong or what was said about each. The sentence keeps
-    the dotted spelling of the location, because that is how an operator
-    reads their own file; the problems carry the JSON Pointer, which is
-    what a reader can act on.
-
-    Every location is put through `safe_location` against the model
-    first, so a segment the caller invented (an unrecognized key, an
-    option of a pass-through model, an entry of `env` or `headers`)
-    reaches neither rendering: a key is as good a place to paste a
-    credential as a value, and this sentence is printed by the CLI,
-    answered by the API and, for a stored row, written to the boot log.
-    `error["input"]` is never read either, here least of all: it is the
-    whole rejected fragment, inline secret and all.
-    """
-    lines = [headline]
-    problems: list[FieldProblem] = []
-    for error in exc.errors():
-        location, dropped = safe_location(model, error["loc"])
-        where = ".".join(str(part) for part in location)
-        prefix = json_pointer(location)
-        for problem in _error_problems(error, dropped):
-            lines += [_refusal_line(where, line) for line in problem.message.splitlines()]
-            problems.append(FieldProblem(prefix + problem.path, problem.message))
-    return "\n".join(lines), tuple(problems)
-
-
-def _refusal_line(where: str, line: str) -> str:
-    """One problem as a refusal prints it: an indented dash, and the
-    place in front of it when there is one this repository may name.
-
-    One home for the shape, because a refusal an operator reads is one
-    vocabulary however it was produced: the marker above builds its
-    sentence without a validation error behind it, and a second spelling
-    of the indentation would be a golden that moves for no reason.
-    """
-    return f"  - {where}: {line}" if where else f"  - {line}"
-
-
-def _error_problems(
-    error: Mapping[str, object], dropped: bool
-) -> tuple[FieldProblem, ...]:
-    """What one pydantic error stands for, decomposed as far as it can
-    be.
-
-    A validator that knows its semantic field says so by raising
-    `FieldProblemsError`, and pydantic carries the exception object in
-    the error's context, which is the only place that knowledge
-    survives: a model-level validator's error is located at the model,
-    so several problems arrive as one error at one location. Everything
-    else is one problem at its own location, with the prefix pydantic
-    puts on a validator's ValueError stripped back off.
-
-    One error type is rendered in this repository's words rather than
-    pydantic's: an unrecognized key, whose location was the key itself
-    and is now the parent it was written under, so pydantic's sentence
-    would be left pointing at the wrong thing. The type is the decision
-    site because it is a closed token, unlike the message. Every other
-    message pydantic writes here is built from the error type and the
-    field's own constraints rather than from the input, which is what
-    the planted-key tests check rather than assume.
-    """
-    context = error.get("ctx")
-    raised = context.get("error") if isinstance(context, Mapping) else None
-    if isinstance(raised, FieldProblemsError):
-        return raised.problems
-    if dropped and error.get("type") == "extra_forbidden":
-        return (FieldProblem("", UNRECOGNIZED_KEY_REFUSED),)
-    message = str(error["msg"]).removeprefix("Value error, ")
-    return (FieldProblem("", message),)
 
 
 def _refuse_unresolved(domain: DomainConfig) -> None:
