@@ -505,6 +505,36 @@ MISSING_EXAMPLES = (
     "vinga-server/examples/ is"
 )
 
+# What a rendering that cannot read one of its own sources says.
+#
+# Three categories rather than one, because they are three different
+# things to go and fix, and each names the file, which is a filename the
+# registry owns rather than anything a person typed at this command.
+#
+# What is never in one is a word off the exception. An `OSError` carries
+# the operating system's own message and a `UnicodeDecodeError` carries
+# the bytes it choked on and, on its `object` attribute, the whole
+# buffer it was decoding. A file under `examples/` is a file somebody
+# edits, so its bytes are as good a place for a credential pasted where
+# a variable name belongs as a fragment is, and this module is on the
+# same side of that boundary as every other refusal in this package.
+MISSING_EXAMPLE = "the recipes name {name}, and there is no such file under examples/"
+
+UNREADABLE_EXAMPLE = "the recipes name {name}, under examples/, which cannot be read"
+
+UNDECODABLE_EXAMPLE = "{name}, under examples/, is not valid UTF-8 and was not read"
+
+# And what an example quoting a command with no topic says. The file is
+# named and the command is not, for the reason above: a quoted line is
+# the one part of an example this module reads as input, and echoing the
+# word back is how a credential typed into a quoted command block would
+# reach a stream.
+UNKNOWN_TOPIC = (
+    "{name}, under examples/, quotes a command line no recipe has a heading for; "
+    "every command an example quotes is published as a recipe, so a verb this has "
+    "not seen before needs a topic of its own"
+)
+
 # How an example quotes a command of its own: an indented comment line.
 # That indentation is the whole of the rule, and it is what tells a
 # block meant to be copied from a sentence that happens to mention a
@@ -642,9 +672,41 @@ def _quoted(program: str) -> list[tuple[Path, str]]:
     return [
         (path, matched.group(1).removeprefix(prefix))
         for path in files
-        for line in path.read_text(encoding="utf-8").splitlines()
+        for line in _read(path).splitlines()
         if (matched := _QUOTED.match(line)) and matched.group(1).startswith(prefix)
     ]
+
+
+def _read(path: Path) -> str:
+    """One example file's text, or the fixed sentence for one that will
+    not read.
+
+    Recorded inside the handler and raised after it, the rule every
+    boundary in this package raises by: an exception raised while
+    another is being handled keeps that one on `__context__` for
+    anything walking the chain to find, and the two families caught here
+    are exactly the two that carry the file's contents. What survives
+    the arm is a string built from `path.name`, which is the registry's.
+
+    `FileNotFoundError` before the `OSError` it is a subclass of, since
+    a file the registry names and nobody wrote is a different mistake
+    from one the process may not read. The docgen suite already holds
+    every named example to being a file that exists, so this is the belt
+    under that: a rendering command must not answer with a traceback
+    because a working tree lost a file between two runs.
+    """
+    from vinga_server.config.loader import ConfigError
+
+    problem: str | None = None
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        problem = MISSING_EXAMPLE.format(name=path.name)
+    except OSError:
+        problem = UNREADABLE_EXAMPLE.format(name=path.name)
+    except UnicodeError:
+        problem = UNDECODABLE_EXAMPLE.format(name=path.name)
+    raise ConfigError(problem)
 
 
 def _topic(source: Path, argv: str) -> str:
@@ -664,10 +726,7 @@ def _topic(source: Path, argv: str) -> str:
                 return candidate.name
     topic = _TOPIC_VERBS.get(words[0] if words else "")
     if topic is None:
-        raise ConfigError(
-            f"{source.name} quotes a command no recipe has a heading for: "
-            f"{words[0] if words else '(nothing)'}"
-        )
+        raise ConfigError(UNKNOWN_TOPIC.format(name=source.name))
     return topic
 
 
