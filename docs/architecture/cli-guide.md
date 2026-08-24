@@ -33,9 +33,9 @@ reported as something that happened.
 
 **The audit is recorded, not summarized.** The practices below were
 arrived at by walking four published guides one guideline at a time and
-dispositioning each as adopted, adapted or rejected. That record is at
-the foot of the page, so a later reader can check what was considered
-rather than trusting that it was.
+giving each a disposition from a fixed vocabulary of eight words. That
+record is at the foot of the page, so a later reader can check what was
+considered rather than trusting that it was.
 
 ## The two spellings
 
@@ -662,27 +662,45 @@ asserted. Where two sources say the same thing, the second names the
 practice the first was dispositioned into rather than repeating the
 reasoning.
 
-Dispositions: **Adopted** (the rule holds as written), **Adapted** (the
-rule holds in a modified form, and the row says how), **Owed** (adopted
-as the standard, not met by the grammar today), **Rejected** (the rule
-is deliberately not followed, and the row says why), **N/A** (out of
-scope for a configuration CLI).
+Every row's disposition is exactly one of these eight words, and the
+Where column carries the qualification. That is a property worth
+keeping mechanical: a reader can check the vocabulary by scanning one
+column, and a row that needed a ninth word is a row that has not been
+thought through.
+
+- **Adopted.** The rule holds as written.
+- **Adapted.** The rule holds in a modified form, and the row says how.
+- **Owed.** Adopted as the standard, not met by the grammar today.
+- **Rejected.** Deliberately not followed, and the row says why.
+- **Deferred.** Not rejected and not owed: a decision held open on
+  purpose, with the case for reopening it written down. Three rows,
+  all of them `--json`.
+- **Split.** One guideline that the source states as one and this
+  project answers in parts, because the parts have different answers.
+  The row names each part and its disposition. It is not a hedge:
+  "Split" with an unexplained Where column would be one.
+- **Tension recorded.** The merged code contradicts a rule this page
+  states, and the contradiction is written down rather than argued
+  away. One row, and the two tensions in the practices above.
+- **N/A.** Out of scope for a configuration CLI.
 
 ### ThoughtWorks, "Elevate developer experiences with CLI design guidelines"
 
-Eight guidelines.
+Eight guidelines, in ten rows: the sixth bundles three separate rules
+under one heading and they are dispositioned separately, as 6a, 6b and
+6c.
 
 | # | Guideline | Disposition | Where |
 | --- | --- | --- | --- |
 | 1 | Be consistent in structure and follow common naming; `platform-cli [noun] [verb]` | Adopted | The settled decision; owed until the #223 re-cut |
-| 2 | Prompt if you can, but never mandate; confirmation prompts for critical actions; a force flag | Adopted, partly owed | Prompt where there is somebody to ask; the confirmation half is owed |
+| 2 | Prompt if you can, but never mandate; confirmation prompts for critical actions; a force flag | Split | Adopted: prompt where there is somebody to ask, never require it. Owed: the confirmation half and its force flag |
 | 3 | Use expressive flags; one argument fine, two questionable, three never | Adapted | Identity addressing: the cap applies to identity segments, not to flags |
 | 4 | Avoid implicit steps; inform or split the command | Adopted | A write says what it did and when it takes effect; `apply` never deletes; a write never reloads by itself |
-| 5 | Always provide help: command, arguments and flags described, examples most read | Adopted, examples owed | The whole tree's help is the committed reference; examples are the recipes region, not the command pages |
+| 5 | Always provide help: command, arguments and flags described, examples most read | Split | Adopted: the whole tree's help is the committed reference, every command, argument and flag described. Owed: examples, which are the recipes region rather than the command pages |
 | 6a | Exit nonzero if and only if the program terminated with errors | Adopted | One sentence and exit 1 |
 | 6b | stdout for information and warnings, stderr for errors | Adapted | Data on stdout, notices on stderr: warnings and notices go to stderr here, following the other three sources, because a notice must survive `export > file` |
 | 6c | Error messages carry an error code, title, description, resolution steps and a URL | Rejected | The contract is one fixed sentence carrying the fix. A code is a second vocabulary to keep honest; a URL dates and cannot be reached from a private deployment; and the five-part format invites quoting the input back, which is the one thing these sentences exist not to do |
-| 7 | Keep the user in the loop: current step, long-run indicator, OS notifications | Partly adopted, partly owed, partly rejected | `apply` prints one line per entry as it reports them; the progress line is owed; OS notifications are rejected as a desktop assumption a container CLI does not have |
+| 7 | Keep the user in the loop: current step, long-run indicator, OS notifications | Split | Adopted: `apply` prints one line per entry as it reports them. Owed: the progress line. Rejected: OS notifications, a desktop assumption a container CLI does not have |
 | 8 | Be fun and fancy: color, spinners, tables, machine-readable output | Split | Tables and machine-readable output adopted; color, ASCII art and emoji rejected under output determinism |
 
 ### clig.dev, "Command Line Interface Guidelines"
@@ -698,14 +716,14 @@ Ninety-six guidelines, in the document's own section order.
 | 5 | Display extensive help text when asked | Adopted | Every command's `--help`, and the whole tree as the committed reference |
 | 6 | Display concise help text by default | Adopted | One lowercase sentence per row in the command listing |
 | 7 | Show full help on `-h` and `--help` | Owed | `--help` only today; `-h` is unbound |
-| 8 | Provide a support path for feedback and issues | Rejected for now | Pre-release, self-hosted, no support channel to name. The refusals carry the fix instead of a channel |
+| 8 | Provide a support path for feedback and issues | Rejected | Pre-release and self-hosted: there is no support channel to name, and the refusals carry the fix instead of pointing at one. Revisit when there is a channel |
 | 9 | Link to the web version of the documentation in help | Adapted | Help names the command that prints the document (`Full descriptions: vinga-server config schema provider`), because the documents ship with the CLI and a URL would date |
-| 10 | Lead with examples | Adapted, partly owed | Examples are the generated recipes region of the reference, read out of `vinga-server/examples/`; examples on the command pages are owed |
+| 10 | Lead with examples | Split | Adapted: examples lead the reference, generated from `vinga-server/examples/` rather than hand-written. Owed: examples on the command pages |
 | 11 | Put loads of examples somewhere else | Adopted | The recipes region and `vinga-server/examples/` |
 | 12 | Most common flags and commands at the start of the help | Adopted | The command listing order is the table's, restored after Typer's own ordering |
 | 13 | Use formatting in your help text | Rejected | `rich_markup_mode=None` and `color=False`: the help pages are a committed artifact CI diffs byte for byte |
 | 14 | If you can guess what they meant, suggest it | Rejected | A suggestion is built from the typed word. Closed deliberately in the #194 review rounds; see the refusal practice |
-| 15 | A command expecting a pipe, run at a TTY, shows help and quits | Partly adopted, partly owed | `set-secret` prompts instead, which is better; `-f -` blocks, which is owed |
+| 15 | A command expecting a pipe, run at a TTY, shows help and quits | Split | Adopted, and improved on: `set-secret` prompts rather than quitting. Owed: `-f -`, which blocks at a terminal |
 | 16 | Provide web-based documentation | Adopted | `docs/reference/cli.md` |
 | 17 | Provide terminal-based documentation | Adopted | `--help`, plus `schema`, `reference`, `openapi`, `cli-reference` |
 | 18 | Consider providing man pages | N/A | The deployment surface is a container image |
@@ -749,7 +767,7 @@ Ninety-six guidelines, in the document's own section order.
 | 56 | If `--no-input` is passed, do not prompt | Owed | With the confirmation prompts |
 | 57 | Do not print a password as it is typed | Adopted | `getpass` |
 | 58 | Let the user escape | Adopted | Nothing is trapped; Ctrl-C is the interpreter's |
-| 59 | Be consistent across subcommands | Adopted, mechanically | The rows are generated from the descriptor registry |
+| 59 | Be consistent across subcommands | Adopted | And mechanically: the rows are generated from the descriptor registry |
 | 60 | Use consistent names for multiple levels of subcommand | Adopted | The noun word is spelled the same under every verb |
 | 61 | Do not have ambiguous or similarly-named commands | Tension recorded | `bind-device` and `add-device` are two ways to bind one board, told apart only by their help text. Noun first is where this is fixed: they are two verbs of `device`, addressed by a MAC and by an activation code |
 | 62 | Validate user input | Adopted | The same pydantic models validate a write and the read of the answer |
@@ -769,7 +787,7 @@ Ninety-six guidelines, in the document's own section order.
 | 76 | On Ctrl-C, exit as soon as possible | Adopted | Nothing is trapped |
 | 77 | On Ctrl-C during clean-up, skip it | N/A | The CLI has no clean-up phase. The server does exactly this on its drain |
 | 78 | Follow the XDG spec | Rejected | The deployment surface is a container, and the configuration file is named by `--config` or `VINGA_CONFIG` so the server and the CLI cannot disagree about which one it is. A home-directory default would be a second answer to that question |
-| 79 | Ask consent before modifying configuration that is not yours | Adopted trivially | The CLI writes only through the API, into vinga's own store, and touches no file |
+| 79 | Ask consent before modifying configuration that is not yours | Adopted | Trivially: the CLI writes only through the API, into vinga's own store, and touches no file |
 | 80 | Apply configuration parameters in order of precedence | Adopted | Where to reach, in a stated order |
 | 81 | Environment variables are for behavior that varies with context | Adopted | `VINGA_API_URL`, `VINGA_CONFIG`, the token variable |
 | 82 | Uppercase, numbers and underscores only | Adopted | |
@@ -778,14 +796,14 @@ Ninety-six guidelines, in the document's own section order.
 | 85 | Check general-purpose environment variables where possible | N/A | None apply. `NO_COLOR` would, if anything colored |
 | 86 | Read environment variables from `.env` where appropriate | Adopted | `load_dotenv(find_dotenv(usecwd=True))` at the entry point, with the real environment winning |
 | 87 | Do not use `.env` as a substitute for a configuration file | Adopted | The file half is the configuration; `.env` carries variables only |
-| 88 | Do not read secrets from environment variables | Rejected, tension recorded | The API token and `--from-env` are both environment reads, deliberately. On a container deployment the alternatives are a file on disk or an argument, and both are worse. The environment is how a credential is handed over once; the encrypted store is where it lives |
+| 88 | Do not read secrets from environment variables | Rejected | The API token and `--from-env` are both environment reads, deliberately. On a container deployment the alternatives are a file on disk or an argument, and both are worse. The environment is how a credential is handed over once; the encrypted store is where it lives |
 | 89 | Make it a simple, memorable word | Adopted | `vinga`, which the rename delivers |
 | 90 | Use only lowercase letters, and dashes if you need them | Adopted | |
 | 91 | Keep it short | Adopted | |
 | 92 | Make it easy to type | Adopted | |
 | 93 | Distribute as a single binary if possible | Adapted | The image ships the CLI, which is the intended path. A tool of its own is #223's; there is no published package yet, and the reference says so plainly rather than implying one |
 | 94 | Make it easy to uninstall | Adopted | `uv tool uninstall`, or deleting the container |
-| 95 | Do not phone home usage or crash data without consent | Adopted, and stronger | Nothing phones home at all |
+| 95 | Do not phone home usage or crash data without consent | Adopted | And stronger: nothing phones home at all |
 | 96 | Consider alternatives to collecting analytics | N/A | See 95 |
 
 ### Heroku CLI style guide
@@ -817,7 +835,7 @@ the end.
 | 20 | Use inquirer for prompts | N/A | Node-specific |
 | 21 | Prompting must never be required; args or flags bypass it | Adopted | Prompt where there is somebody to ask |
 | 22 | Output commands print to stdout | Adopted | |
-| 23 | Action commands show a spinner, on stderr, with a non-TTY fallback | Partly owed | The stderr half already holds for notices; the spinner is the owed progress line, and the non-TTY fallback is the rule it will be built to |
+| 23 | Action commands show a spinner, on stderr, with a non-TTY fallback | Split | Adopted: the stderr half already holds for notices. Owed: the spinner, which is the progress line, and the non-terminal fallback is the rule it will be built to |
 | 24 | Color is encouraged; standard colors per noun | Rejected | Output determinism |
 | 25 | Color disabled by `--no-color`, `COLOR=false`, or a non-TTY | N/A | Nothing colors |
 | 26 | Human-readable output should be grep-parseable; tables without borders | Adopted | The pending listing |
@@ -827,7 +845,7 @@ the end.
 | 30 | Stdout for all output | Adopted | |
 | 31 | Stderr for warnings, errors and out-of-band information | Adopted | |
 | 32 | No native dependencies | N/A | Node-specific. The equivalent holds by accident: the CLI is the server package, and the argument layer added exactly one dependency |
-| 33 | Be judicious with dependencies | Adopted in spirit | |
+| 33 | Be judicious with dependencies | Adopted | In spirit: the argument layer added one direct dependency, and the offline commands pull in nothing further |
 | 34 | Use dev dependencies for what is only needed to work on it | Adopted | The `dev` dependency group |
 | 35 | Discouraged dependencies (request, underscore) | N/A | Node-specific |
 
@@ -837,12 +855,12 @@ Twelve factors.
 
 | # | Factor | Disposition | Where |
 | --- | --- | --- | --- |
-| 1 | Great help is essential: in-CLI and web, every spelling shows it, examples matter most | Adopted, partly owed | See clig 5 to 17. One deliberate deviation: `vinga-server config` with nothing after it is a mistake in the grammar, not a request for help, so it answers with a sentence pointing at `--help` and exit 1, the way every other mistake does |
+| 1 | Great help is essential: in-CLI and web, every spelling shows it, examples matter most | Split | Adopted and owed as clig 5 to 17 records it. One deliberate deviation: `vinga-server config` with nothing after it is a mistake in the grammar, not a request for help, so it answers with a sentence pointing at `--help` and exit 1, the way every other mistake does |
 | 2 | Prefer flags to args; one type fine, two suspect, three never; support `--` | Adapted | Identity addressing; `--` is accepted, and the reference's rebuild section uses it |
 | 3 | Make the version reachable several ways | Owed | There is no `--version`. The running server answers `version` and `revision` on `/health` and in the OTA reply, and stamps both on every session record, while the CLI cannot be asked at all, which is the wrong way round for the thing an operator has in their hand |
 | 4 | Mind the streams: stdout is for output, stderr is for messaging | Adopted | Data on stdout, notices on stderr |
 | 5 | Handle things going wrong: informative errors, a traceback or debug mode, error logs without ANSI | Split | Informative fixed sentences adopted; the traceback and debug-dump half rejected, per clig 39 |
-| 6 | Be fancy: colors, spinners, OS notifications, with fallbacks and `NO_COLOR` respected | Rejected, except the owed progress line | Output determinism |
+| 6 | Be fancy: colors, spinners, OS notifications, with fallbacks and `NO_COLOR` respected | Split | Rejected: colors, ASCII art, emoji and OS notifications, under output determinism. Owed: the progress line, which the determinism practice licenses as an interactive affordance |
 | 7 | Prompt if you can, never require | Adopted | |
 | 8 | Use tables: one entry per row, no borders, plus `--columns`, `--no-truncate`, `--no-headers`, `--filter`, `--sort`, csv and json | Split | One entry per row and no borders adopted, and the pending listing is exactly that. The six table flags are rejected: they are a query language over an answer that is already small and already a document, and `grep`, `wc` and a YAML parser cover it |
 | 9 | Be speedy | Adapted | What is pinned is import weight, by a test, and the offline commands open no database, need no key and reach no server. Nothing else is measured, and no startup budget is claimed |
