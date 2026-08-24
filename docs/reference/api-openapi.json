@@ -5328,11 +5328,13 @@
         "properties": {
           "base_url": {
             "description": "The endpoint's OpenAI-compatible base URL, such as http://localhost:11434/v1 for a local Ollama; pointing it at api.openai.com works too. Required, because it is what decides which server this entry speaks to and whether session data leaves the host.",
+            "pattern": "\\S",
             "title": "Base Url",
             "type": "string"
           },
           "model": {
             "description": "The model to ask for, in the endpoint's own vocabulary (qwen3:8b on Ollama, an OpenAI model id on api.openai.com).",
+            "pattern": "\\S",
             "title": "Model",
             "type": "string"
           },

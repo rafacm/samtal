@@ -705,6 +705,41 @@ def test_the_url_rule_is_not_this_models_and_the_credential_rule_is_not_either()
     assert openai_compatible(base_url="https://user:pw@host/v1").base_url.endswith("@host/v1")
 
 
+def test_this_types_two_required_names_publish_the_blank_rule_too() -> None:
+    """The third type's half of the second one's review finding.
+
+    Both required fields here are `Nonblank`, so the pattern that
+    finding published reaches this component as well, and the two lines
+    it adds to the committed document are read by this rather than only
+    diffed. Written per type rather than as a walk over every declared
+    model, which is how the case above it is written: what a walk would
+    say is that annotations produce their own schema, and what these say
+    is that this type's contract is stated in full where a client reads
+    it.
+    """
+    from vinga_server.config import docgen
+
+    published = [
+        json.loads(docgen.schema("provider", "llm", "openai_compatible")),
+        json.loads(docgen.openapi())["components"]["schemas"]["LlmOpenaiCompatibleOptions"],
+    ]
+
+    for schema in published:
+        for name in ("base_url", "model"):
+            assert schema["properties"][name]["pattern"] == NONBLANK_PATTERN
+            assert schema["properties"][name]["description"]
+        # And the door the type exists for, in the vocabulary a document
+        # has for one.
+        assert schema["additionalProperties"] is True
+
+    for value, allowed in (("qwen3:8b", True), (" ", False), ("", False)):
+        assert bool(re.search(NONBLANK_PATTERN, value)) is allowed
+        if allowed:
+            openai_compatible(model=value)
+        else:
+            refuse(OPENAI, model=value)
+
+
 # Where a refusal points
 #
 # Options are flat siblings of `type` in the fragment that is actually
