@@ -2,6 +2,7 @@
 streaming needs a live endpoint; that is the local lane's job."""
 
 import json
+from pathlib import Path
 
 import httpx
 import pytest
@@ -18,7 +19,14 @@ from tests.support.llm_sdk import (
 )
 from tests.support.llm_sdk import Falsey as FalseyClient
 from vinga_server.config.models import ProviderConfig
-from vinga_server.providers import LlmProvider, ProviderError, TextDelta, Turn, build_entry
+from vinga_server.providers import (
+    LlmProvider,
+    ProviderError,
+    TextDelta,
+    Turn,
+    build_entry,
+    openai_llm,
+)
 from vinga_server.providers.anthropic_llm import AnthropicLlm
 from vinga_server.providers.kit import DEFAULT_MAX_TOKENS, DEFAULT_TIMEOUT_S, MAX_RETRIES
 from vinga_server.providers.openai_endpoint import DEFAULT_BASE_URL, OPENAI_HOST
@@ -254,6 +262,47 @@ async def test_a_compatible_endpoint_is_not_asked_for_token_counts() -> None:
 
 # The escape hatch, and what it may not reach
 #
+# A transport that answers every request itself, so a real SDK client can
+# be driven with no network, no key and no vendor, and what it recorded
+# is the JSON that left the process. `data: [DONE]` is an empty but
+# well-formed stream, which is all these cases need: what is under test
+# is the request, and the reply is the shortest legal one.
+
+
+def recording(sent: dict[str, object]) -> httpx.AsyncClient:
+    """An HTTP client that files each request body under `sent`."""
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        sent.update(json.loads(request.content))
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=b"data: [DONE]\n\n",
+        )
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(answer))
+
+
+def recorded(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+    """The same transport put where a FACTORY-built provider will find
+    it, which is the client class the builder reaches for.
+
+    Reaching into the object the factory returned would leave the one
+    thing under test untested: a deployment's client is built inside the
+    provider from what `build` handed it, so a forwarding dropped
+    between the entry and the constructor is invisible to any case that
+    supplies its own client. Replacing the class keeps `build` and
+    `__init__` real and only changes what carries the bytes.
+    """
+    sent: dict[str, object] = {}
+    real = AsyncOpenAI
+
+    def client(**arguments: object) -> AsyncOpenAI:
+        return real(**arguments, http_client=recording(sent))  # type: ignore[arg-type]
+
+    monkeypatch.setattr(openai_llm, "AsyncOpenAI", client)
+    return sent
+#
 # `openai_compatible` is the one type whose options model keeps its door
 # open, and an accepted key that went nowhere would be the silently
 # ignored configuration the whole issue exists to remove: the reader
@@ -338,19 +387,10 @@ async def test_a_passthrough_option_is_a_top_level_field_of_the_request_body() -
     under them.
     """
     sent: dict[str, object] = {}
-
-    def answer(request: httpx.Request) -> httpx.Response:
-        sent.update(json.loads(request.content))
-        return httpx.Response(
-            200,
-            headers={"content-type": "text/event-stream"},
-            content=b"data: [DONE]\n\n",
-        )
-
     client = AsyncOpenAI(
         base_url="http://endpoint.invalid/v1",
         api_key="unused",
-        http_client=httpx.AsyncClient(transport=httpx.MockTransport(answer)),
+        http_client=recording(sent),
     )
     llm = OpenAiCompatibleLlm(
         base_url="http://endpoint.invalid/v1",
@@ -370,6 +410,53 @@ async def test_a_passthrough_option_is_a_top_level_field_of_the_request_body() -
         {"role": "system", "content": "be brief"},
         {"role": "user", "content": "hi"},
     ]
+
+
+async def test_the_committed_body_of_this_type_reaches_the_endpoint_whole(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The compatibility fixture, taken all the way to the wire.
+
+    `domain-bodies/provider/every-field.json` was written as an
+    `openai_compatible` entry carrying options no builder read, to prove
+    a body could hold anything and still parse. Under #88 that type is
+    the escape hatch, which is the recorded reason the fixture needed no
+    compatibility decision: the same body parses, and its four unread
+    keys stop being inert.
+
+    "Stop being inert" is a claim about the request, so it is asserted
+    against the request. The bodies suite says those keys survive
+    validation as `model_extra`, and a builder that dropped, renamed or
+    filtered any of them would pass that and fail this. Keys AND values,
+    since forwarding a key with the wrong value under it is the same
+    silence in a different shape, and `null` under `connection.timeout_s`
+    is the one an `exclude_unset` reflex would eat.
+    """
+    monkeypatch.setenv("MY_PROVIDER_KEY", "sk-test")
+    body = json.loads(
+        (
+            Path(__file__).parent / "data" / "domain-bodies" / "provider" / "every-field.json"
+        ).read_text(encoding="utf-8")
+    )
+    sent = recorded(monkeypatch)
+
+    built = await build_entry("llm", "local", provider_config(**body))
+    assert isinstance(built, OpenAiCompatibleLlm)
+    assert await spoken(built) == []
+
+    for key, value in body.items():
+        if key in ("type", "api_key_env", "egress", "base_url"):
+            continue
+        assert sent[key] == value, key
+    # Named as well as walked, so that a fixture edited down to nothing
+    # would fail here rather than pass vacuously.
+    assert sent["temperature"] == 0.7
+    assert sent["max_reply_length"] == 512
+    assert sent["stop"] == ["\n\n"]
+    assert sent["connection"] == {"retries": 2, "timeout_s": None}
+    # And the fields the type composes are its own, unmoved.
+    assert sent["model"] == "a-model"
+    assert sent["stream"] is True
 
 
 async def test_a_passthrough_key_naming_a_request_field_fails_the_build() -> None:
