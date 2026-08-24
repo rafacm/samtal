@@ -23,9 +23,11 @@ bind a board takes a MAC and which takes an activation code.
 
 import io
 import logging
+from importlib import metadata
 from pathlib import Path
 
 import pytest
+from typer._click.core import Context
 
 from tests.support.config_cli import SECRET, chain, runner
 from tests.support.events import both_formats
@@ -350,6 +352,35 @@ def _leaf(words: tuple[str, ...]):
     return found
 
 
+def _page(words: tuple[str, ...]) -> str:
+    """One command's help page, rendered the way the committed
+    reference renders it: a stated width and no color, so what is read
+    here does not depend on the terminal."""
+    shape = cli.command()
+    context = Context(
+        shape,
+        info_name=cli.PROGRAM,
+        terminal_width=80,
+        max_content_width=80,
+        color=False,
+        help_option_names=cli.HELP_OPTION_NAMES,
+    )
+    # Down the tree with the contexts chained, which is what the
+    # committed reference does and what carries the help spellings from
+    # the root's settings to every page below it.
+    for word in words:
+        shape = shape.commands[word]
+        context = Context(
+            shape,
+            info_name=word,
+            parent=context,
+            terminal_width=80,
+            max_content_width=80,
+            color=False,
+        )
+    return shape.get_help(context)
+
+
 def _said(text: str) -> str:
     """One string with every space taken out, which is how a sentence in
     the help is compared with the sentence it was declared as.
@@ -506,11 +537,17 @@ def test_a_set_help_says_a_credential_is_never_one_of_its_arguments(
 # list of them, so a third global option inherits the matrix by being
 # declared.
 
+# The two the root declares that no command may declare, each with its
+# reason: help is Click's own and is on every page of the tree by
+# construction, and `--version` is about the installed artifact rather
+# than about this invocation, so a command has nothing to do with it.
+ROOT_ONLY = frozenset({"-h", "--help", "--version"})
+
 ROOT_OPTIONS = frozenset(
     spelling
     for parameter in cli.command().params
     for spelling in parameter.opts
-    if spelling != "--help"
+    if spelling not in ROOT_ONLY
 )
 
 # What each command takes of them where it is not all of them.
@@ -591,7 +628,7 @@ FLAG_OPTIONS = tuple(
         spelling
         for parameter in cli.command().params
         for spelling in parameter.opts
-        if spelling != "--help" and getattr(parameter, "is_flag", False)
+        if spelling not in ROOT_ONLY and getattr(parameter, "is_flag", False)
     )
 )
 
@@ -692,3 +729,110 @@ def test_a_flag_after_the_command_is_taken_on_its_own(
 
     assert run("agent", "delete", "kids", option) == _flag_answer(option)
 
+
+# What every description in the tree is
+#
+# One lowercase sentence with no full stop in it, which is the rule
+# three of the four audited guides state and the one the committed help
+# pages are diffed byte for byte against. Held over `GROUPS` and
+# `COMMANDS` together, because a group's description sits in the same
+# listing a row's does and a reader cannot tell which is which.
+#
+# The dotted paths are not full stops and are not treated as any: what
+# the rule is about is a second sentence, so what is looked for is a
+# stop that ends the string or is followed by a space.
+
+
+def _described() -> list[tuple[str, str]]:
+    return [
+        *((" ".join(path), described) for path, described in cli.GROUPS.items()),
+        *((" ".join(row.words), row.help) for row in cli.COMMANDS),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("named", "described"), _described(), ids=[named for named, _ in _described()]
+)
+def test_every_description_is_one_lowercase_sentence(named: str, described: str) -> None:
+    assert described[:1].islower(), named
+    assert not described.endswith("."), named
+    assert ". " not in described, named
+    assert "\n" not in described, named
+
+
+def test_the_version_is_asked_of_the_root_alone() -> None:
+    """A version is a fact about the installed artifact, so it is asked
+    once and not once per command: a `--version` on every page would be
+    forty-eight ways to ask the same question."""
+    assert "--version" in {
+        spelling for parameter in cli.command().params for spelling in parameter.opts
+    }
+    for row in cli.COMMANDS:
+        declared = {
+            spelling for parameter in _leaf(row.words).params for spelling in parameter.opts
+        }
+        assert "--version" not in declared, " ".join(row.words)
+
+
+@pytest.mark.parametrize(
+    "row", cli.COMMANDS, ids=[" ".join(row.words) for row in cli.COMMANDS]
+)
+def test_every_page_answers_the_short_spelling_of_help(row) -> None:
+    """clig 7: `-h` and `--help` both, on every page, because `-h` is
+    the one half the world types first.
+
+    Read off the rendered page rather than off the parameters, because
+    Click's help option is not one of them: it is built from the
+    context, which is where this is set and where every page below
+    inherits it from.
+    """
+    assert "-h, --help" in _page(row.words)
+
+
+# The version, and the one thing it must not become
+#
+# 12 Factor 3: the version has to be reachable from the thing an
+# operator is holding. The running server already answers `version` and
+# `revision` on `/healthz` and stamps both on every session record,
+# while the CLI could not be asked at all, which is the wrong way round.
+
+
+def test_the_version_names_the_distribution_and_leaves_through_zero() -> None:
+    """Asking is not failing, so it leaves the way `--help` does."""
+    with pytest.raises(SystemExit) as caught:
+        cli.main(["--version"])
+
+    assert caught.value.code == 0
+
+
+def test_the_version_is_the_same_bytes_through_either_spelling(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A version is a fact about the installed artifact, so it may no
+    more vary with the invocation than a generated document may. The
+    console script is the call with no argument list, which is what
+    tells the two entry points apart."""
+    with pytest.raises(SystemExit):
+        cli.main(["--version"])
+    dispatched = capsys.readouterr().out
+
+    monkeypatch.setattr("sys.argv", ["vinga", "--version"])
+    with pytest.raises(SystemExit):
+        cli.main()
+    scripted = capsys.readouterr().out
+
+    assert dispatched == scripted
+    assert dispatched == f"{cli.DISTRIBUTION} {cli.installed_version()}\n"
+
+
+def test_a_tree_with_nothing_installed_says_so_rather_than_guessing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A version this code invented would be worse than none, since what
+    the read is for is comparing two halves of a deployment."""
+    def missing(_name: str) -> str:
+        raise metadata.PackageNotFoundError(cli.DISTRIBUTION)
+
+    monkeypatch.setattr(metadata, "version", missing)
+
+    assert cli.installed_version() == cli.VERSION_UNKNOWN
