@@ -259,9 +259,14 @@ other kind of apply, and there is not.
   first, but it has to be a verb.** A noun in the verb slot reads as a
   possessive and hides what the command does.
 - **A description is one lowercase sentence with no full stop, inside
-  80 columns.** This is what every row in `GROUPS` and `COMMANDS`
-  already does, and the width is `REFERENCE_WIDTH`, because the help
-  pages are a committed artifact that CI diffs byte for byte.
+  80 columns.** The width is `REFERENCE_WIDTH`, because the help pages
+  are a committed artifact that CI diffs byte for byte. Forty-seven of
+  the forty-eight rows in `GROUPS` and `COMMANDS` meet the rest of it.
+  **Owed:** `apply` is the forty-eighth, at three sentences with two
+  internal full stops. Normalizing it is deliberately not done here.
+  The re-cut rewrites every command word in this grammar, and a help
+  string edited now would be rewritten there anyway, at the cost of a
+  regenerated reference and a review of a diff nobody wants twice.
 - **Derive the verb set where the kinds are uniform.** The `set`,
   `delete`, `show` and `export` rows are generated from
   `entities.ENTITIES`, and each row's help is written by
@@ -783,8 +788,8 @@ the end.
 | 9 | Never create a `*:list` command | Adapted | `list` here is a whole-configuration summary tree, not a topic's listing. Where a noun's only verb is a listing (`sessions list`), the noun word alone prints help rather than data, which is what the rule's premise assumes away |
 | 10 | Descriptions for all topics and commands | Adopted | Every row in `GROUPS` and `COMMANDS` |
 | 11 | Descriptions fit 80-column screens | Adopted | `REFERENCE_WIDTH` |
-| 12 | Descriptions begin with a lowercase character | Adopted | |
-| 13 | Descriptions do not end in a period | Adopted | |
+| 12 | Descriptions begin with a lowercase character | Adopted | All forty-eight rows |
+| 13 | Descriptions do not end in a period | Split | Adopted, and owed on one row: none ends in a period, and `apply` carries two full stops inside it. Normalization rides the re-cut, which rewrites every spelling anyway |
 | 14 | Flags are preferred to arguments | Adapted | Identity addressing |
 | 15 | Descriptions for all flags | Adopted | |
 | 16 | Flag descriptions lowercase | Adopted | |
