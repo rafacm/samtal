@@ -27,6 +27,7 @@ things a name list can say.
 
 import asyncio
 import json
+import logging
 import threading
 import time
 from collections.abc import Callable, Collection, Mapping
@@ -872,6 +873,45 @@ async def test_an_egress_refusal_leaves_the_running_engines_exactly_as_they_were
     # from this carries the fixed sentence and nothing else.
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
+
+
+async def test_a_typed_options_refusal_reaches_the_reload_as_the_fixed_sentence(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """#88's refusal, met where detail is deliberately withheld.
+
+    A write names the field, because a caller wrote it and can correct
+    it. A reload is about stored values nobody sent, so the answer is
+    the fixed sentence and the log gets the class name, and this is the
+    case that proves the new refusal is inside that rule rather than
+    beside it: the option name and the value are both stored, and
+    neither may travel.
+    """
+    planted = "sk-live-71b0c4e3-never-a-real-credential"
+    running = voices()
+    stored = served(
+        providers={
+            "llm": {"mock": {"type": "mock"}},
+            "asr": {"ears": {"type": "faster_whisper", "beam_size": planted}},
+            "tts": {"voice": {"type": "mock"}},
+            "vad": {"mock": {"type": "mock"}},
+        },
+        agent_defaults={"llm": "mock", "asr": "ears", "vad": "mock"},
+        agents={"assistant": {"prompt": "A", "tts": "voice"}},
+    )
+    generations, reload = applying(running, stored)
+    serving_now = generations.current()
+
+    with caplog.at_level(logging.DEBUG), pytest.raises(ProviderRefusedError) as caught:
+        await reload.apply()
+
+    assert generations.current() is serving_now
+    assert planted not in str(caught.value)
+    assert "beam_size" not in str(caught.value)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert planted not in caplog.text
+    assert "beam_size" not in caplog.text
 
 
 async def test_a_voice_that_will_not_close_still_leaves_an_applied_world(
