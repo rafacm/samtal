@@ -1,0 +1,342 @@
+== provider-set
+exit 0
+-- stdout
+wrote provider llm.claude
+
+-- stderr
+This applies when the running server is asked to reload: run `vinga-server config reload`, which re-reads the stored configuration and applies it without a restart and without dropping a conversation. A conversation already in progress meets the tools an agent may reach at its next utterance and its prompt text at its next activation, while the voice it speaks in and the filled pauses it masks with reach the next conversation.
+
+== provider-set-asr
+exit 0
+-- stdout
+wrote provider asr.ears
+
+-- stderr
+This applies when the running server is asked to reload: run `vinga-server config reload`, which re-reads the stored configuration and applies it without a restart and without dropping a conversation. A conversation already in progress meets the tools an agent may reach at its next utterance and its prompt text at its next activation, while the voice it speaks in and the filled pauses it masks with reach the next conversation.
+
+== provider-set-tts
+exit 0
+-- stdout
+wrote provider tts.voice
+
+-- stderr
+This applies when the running server is asked to reload: run `vinga-server config reload`, which re-reads the stored configuration and applies it without a restart and without dropping a conversation. A conversation already in progress meets the tools an agent may reach at its next utterance and its prompt text at its next activation, while the voice it speaks in and the filled pauses it masks with reach the next conversation.
+
+== provider-set-vad
+exit 0
+-- stdout
+wrote provider vad.sensor
+
+-- stderr
+This applies when the running server is asked to reload: run `vinga-server config reload`, which re-reads the stored configuration and applies it without a restart and without dropping a conversation. A conversation already in progress meets the tools an agent may reach at its next utterance and its prompt text at its next activation, while the voice it speaks in and the filled pauses it masks with reach the next conversation.
+
+== mcp-server-set
+exit 0
+-- stdout
+wrote mcp-server home
+
+-- stderr
+This applies when the running server is asked to reload: run `vinga-server config reload`, which re-reads the stored configuration and applies it without a restart and without dropping a conversation. A conversation already in progress meets the tools an agent may reach at its next utterance and its prompt text at its next activation, while the voice it speaks in and the filled pauses it masks with reach the next conversation.
+
+== prompt-fragment-set
+exit 0
+-- stdout
+wrote prompt-fragment house
+
+-- stderr
+This applies when the running server is asked to reload: run `vinga-server config reload`, which re-reads the stored configuration and applies it without a restart and without dropping a conversation. A conversation already in progress meets the tools an agent may reach at its next utterance and its prompt text at its next activation, while the voice it speaks in and the filled pauses it masks with reach the next conversation.
+
+== agent-defaults-set
+exit 0
+-- stdout
+wrote agent-defaults
+
+-- stderr
+This applies when the running server is asked to reload: run `vinga-server config reload`, which re-reads the stored configuration and applies it without a restart and without dropping a conversation. A conversation already in progress meets the tools an agent may reach at its next utterance and its prompt text at its next activation, while the voice it speaks in and the filled pauses it masks with reach the next conversation.
+
+== agent-set
+exit 0
+-- stdout
+wrote agent sam
+
+-- stderr
+This applies when the running server is asked to reload: run `vinga-server config reload`, which re-reads the stored configuration and applies it without a restart and without dropping a conversation. A conversation already in progress meets the tools an agent may reach at its next utterance and its prompt text at its next activation, while the voice it speaks in and the filled pauses it masks with reach the next conversation.
+
+== agent-set-inline
+exit 0
+-- stdout
+wrote agent guest
+
+-- stderr
+This applies when the running server is asked to reload: run `vinga-server config reload`, which re-reads the stored configuration and applies it without a restart and without dropping a conversation. A conversation already in progress meets the tools an agent may reach at its next utterance and its prompt text at its next activation, while the voice it speaks in and the filled pauses it masks with reach the next conversation.
+
+== device-pending-claim
+exit 0
+-- stdout
+wrote device aa:bb:cc:dd:ee:ff bound to guest
+
+-- stderr
+The binding applies at the device's next OTA check or connection, but this server is not serving the agent it names yet: run `vinga-server config reload`, which installs the stored agents without a restart, and the device reaches it at the check-in after that.
+
+== provider-show
+exit 0
+-- stdout
+type: anthropic
+model: m
+
+-- stderr
+
+== mcp-server-show
+exit 0
+-- stdout
+transport: stdio
+command: uvx
+egress: false
+tool_timeout_s: 15.0
+use_server_instructions: false
+
+-- stderr
+
+== prompt-fragment-show
+exit 0
+-- stdout
+text: The bins go out on Tuesday.
+
+-- stderr
+
+== agent-show
+exit 0
+-- stdout
+prompt: You are Sam.
+prompt_includes:
+- house
+
+-- stderr
+
+== agent-defaults-show
+exit 0
+-- stdout
+llm: claude
+asr: ears
+tts: voice
+vad: sensor
+mcp:
+- home
+
+-- stderr
+
+== provider-export
+exit 0
+-- stdout
+# One provider (providers.<stage>.<name>), as written by
+# `vinga-server config set provider <stage> <name> -f fragment.yaml`.
+type: anthropic
+model: m
+
+-- stderr
+
+== mcp-server-export
+exit 0
+-- stdout
+# One mcp server (mcp_servers.<name>), as written by
+# `vinga-server config set mcp-server <name> -f fragment.yaml`.
+transport: stdio
+command: uvx
+egress: false
+tool_timeout_s: 15.0
+use_server_instructions: false
+
+-- stderr
+
+== prompt-fragment-export
+exit 0
+-- stdout
+# One prompt fragment (prompt_fragments.<name>), as written by
+# `vinga-server config set prompt-fragment <name> -f fragment.yaml`.
+text: The bins go out on Tuesday.
+
+-- stderr
+
+== agent-export
+exit 0
+-- stdout
+# One agent (agents.<name>), as written by
+# `vinga-server config set agent <name> -f fragment.yaml`.
+prompt: You are Sam.
+prompt_includes:
+- house
+
+-- stderr
+
+== agent-defaults-export
+exit 0
+-- stdout
+# One agent defaults (agent_defaults), as written by
+# `vinga-server config set agent-defaults -f fragment.yaml`.
+llm: claude
+asr: ears
+tts: voice
+vad: sensor
+mcp:
+- home
+
+-- stderr
+
+== provider-secret-set
+exit 0
+-- stdout
+wrote secret for provider llm.claude api_key
+
+-- stderr
+This applies when the running server is asked to reload: run `vinga-server config reload`, which re-reads the stored configuration and applies it without a restart and without dropping a conversation. A conversation already in progress meets the tools an agent may reach at its next utterance and its prompt text at its next activation, while the voice it speaks in and the filled pauses it masks with reach the next conversation.
+
+== mcp-server-secret-set
+exit 0
+-- stdout
+wrote secret for mcp_server home env.MCP_TOKEN
+
+-- stderr
+This applies when the running server is asked to reload: run `vinga-server config reload`, which re-reads the stored configuration and applies it without a restart and without dropping a conversation. A conversation already in progress meets the tools an agent may reach at its next utterance and its prompt text at its next activation, while the voice it speaks in and the filled pauses it masks with reach the next conversation.
+
+== default-agent-set
+exit 0
+-- stdout
+wrote default agent sam
+
+-- stderr
+The binding applies at the device's next OTA check or connection, but this server is not serving the agent it names yet: run `vinga-server config reload`, which installs the stored agents without a restart, and the device reaches it at the check-in after that.
+
+== device-bind
+exit 0
+-- stdout
+wrote device aa:bb:cc:dd:ee:ff bound to sam
+
+-- stderr
+The binding applies at the device's next OTA check or connection, but this server is not serving the agent it names yet: run `vinga-server config reload`, which installs the stored agents without a restart, and the device reaches it at the check-in after that.
+
+== device-show
+exit 0
+-- stdout
+agents:
+- sam
+
+-- stderr
+
+== agent-preview
+exit 1
+-- stdout
+
+-- stderr
+This application has no running server around it, so there is nothing for a runtime action to act on. A deployment reaches the API on its server's own port; an application built without one serves the reads in the /runtime namespace emptily and refuses the actions.
+
+== device-delete
+exit 0
+-- stdout
+wrote device aa:bb:cc:dd:ee:ff deleted
+
+-- stderr
+This applies at the device's next OTA check or connection: a running server reads device bindings as it needs them, so no restart is needed.
+
+== default-agent-clear
+exit 0
+-- stdout
+wrote default agent cleared; the devices map is now the allowlist
+
+-- stderr
+This applies at the device's next OTA check or connection: a running server reads device bindings as it needs them, so no restart is needed.
+
+== provider-secret-clear
+exit 0
+-- stdout
+wrote secret for provider llm.claude api_key cleared
+
+-- stderr
+This applies when the running server is asked to reload: run `vinga-server config reload`, which re-reads the stored configuration and applies it without a restart and without dropping a conversation. A conversation already in progress meets the tools an agent may reach at its next utterance and its prompt text at its next activation, while the voice it speaks in and the filled pauses it masks with reach the next conversation.
+
+== mcp-server-secret-clear
+exit 0
+-- stdout
+wrote secret for mcp_server home env.MCP_TOKEN cleared
+
+-- stderr
+This applies when the running server is asked to reload: run `vinga-server config reload`, which re-reads the stored configuration and applies it without a restart and without dropping a conversation. A conversation already in progress meets the tools an agent may reach at its next utterance and its prompt text at its next activation, while the voice it speaks in and the filled pauses it masks with reach the next conversation.
+
+== agent-delete
+exit 0
+-- stdout
+wrote agent sam deleted
+
+-- stderr
+This applies when the running server is asked to reload: run `vinga-server config reload`, which re-reads the stored configuration and applies it without a restart and without dropping a conversation. A conversation already in progress meets the tools an agent may reach at its next utterance and its prompt text at its next activation, while the voice it speaks in and the filled pauses it masks with reach the next conversation.
+
+== agent-delete-guest
+exit 0
+-- stdout
+wrote agent guest deleted
+
+-- stderr
+This applies when the running server is asked to reload: run `vinga-server config reload`, which re-reads the stored configuration and applies it without a restart and without dropping a conversation. A conversation already in progress meets the tools an agent may reach at its next utterance and its prompt text at its next activation, while the voice it speaks in and the filled pauses it masks with reach the next conversation.
+
+== agent-defaults-reset
+exit 0
+-- stdout
+wrote agent-defaults
+
+-- stderr
+This applies when the running server is asked to reload: run `vinga-server config reload`, which re-reads the stored configuration and applies it without a restart and without dropping a conversation. A conversation already in progress meets the tools an agent may reach at its next utterance and its prompt text at its next activation, while the voice it speaks in and the filled pauses it masks with reach the next conversation.
+
+== prompt-fragment-delete
+exit 0
+-- stdout
+wrote prompt-fragment house deleted
+
+-- stderr
+This applies when the running server is asked to reload: run `vinga-server config reload`, which re-reads the stored configuration and applies it without a restart and without dropping a conversation. A conversation already in progress meets the tools an agent may reach at its next utterance and its prompt text at its next activation, while the voice it speaks in and the filled pauses it masks with reach the next conversation.
+
+== mcp-server-delete
+exit 0
+-- stdout
+wrote mcp-server home deleted, with its stored secrets
+
+-- stderr
+This applies when the running server is asked to reload: run `vinga-server config reload`, which re-reads the stored configuration and applies it without a restart and without dropping a conversation. A conversation already in progress meets the tools an agent may reach at its next utterance and its prompt text at its next activation, while the voice it speaks in and the filled pauses it masks with reach the next conversation.
+
+== provider-delete
+exit 0
+-- stdout
+wrote provider llm.claude deleted, with its stored secrets
+
+-- stderr
+This applies when the running server is asked to reload: run `vinga-server config reload`, which re-reads the stored configuration and applies it without a restart and without dropping a conversation. A conversation already in progress meets the tools an agent may reach at its next utterance and its prompt text at its next activation, while the voice it speaks in and the filled pauses it masks with reach the next conversation.
+
+== store-after
+exit 0
+-- stdout
+# The domain configuration of this deployment, in the shape
+# `vinga-server config apply` takes. Reproduce it in two steps, in this order:
+#
+#   1. vinga-server config apply -f <this file>
+#   2. the set-secret commands at the foot of this file, if any
+#
+# A stored credential never travels in a read, which is what the second
+# step is for. Applying is additive: a section this document does not
+# name is left alone, and nothing in it deletes.
+providers:
+  llm: {}
+  asr:
+    ears:
+      type: mock
+  tts:
+    voice:
+      type: mock
+  vad:
+    sensor:
+      type: mock
+mcp_servers: {}
+prompt_fragments: {}
+agent_defaults: {}
+agents: {}
+devices: {}
+default_agent: null
+
+-- stderr
