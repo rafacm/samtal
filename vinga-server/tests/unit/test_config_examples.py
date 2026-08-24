@@ -226,6 +226,40 @@ def test_every_fragment_is_listed_in_the_examples_readme() -> None:
     assert not missing, f"not listed in examples/README.md: {', '.join(missing)}"
 
 
+def test_the_readme_names_every_type_that_declares_its_options() -> None:
+    """The other sentence about the models, and the one that lagged.
+
+    This README tells a reader which types have their options declared
+    and which are documented by the fragment they are reading. Both
+    halves of that go wrong silently: a type left out reads as
+    pass-through when it is checked and refused by name, and a type
+    named that declares nothing sends a reader to a schema command that
+    refuses. It is prose rather than a generated region, so what keeps
+    it honest is this, which is the same pair of checks
+    `test_config_entities.py` holds the reference's own note to.
+
+    The spelling asserted is the stage and the type together, which is
+    what addresses a model, so the sentence a reader meets is the
+    sentence this reads (#88).
+    """
+    from vinga_server.config.provider_options import PROVIDER_TYPES, declared_options
+
+    readme = (EXAMPLES / "README.md").read_text(encoding="utf-8")
+    declared = {(stage, type_name) for stage, type_name, _ in declared_options()}
+    assert declared, "no type declares an options model, so this check is vacuous"
+
+    for stage, type_name in sorted(declared):
+        assert f"`{stage} {type_name}`" in readme, f"{stage} {type_name} is not in the README"
+
+    named = sorted(
+        f"{stage} {type_name}"
+        for stage, types in PROVIDER_TYPES.items()
+        for type_name in types
+        if (stage, type_name) not in declared and f"`{stage} {type_name}`" in readme
+    )
+    assert not named, f"the README names types that declare no model: {', '.join(named)}"
+
+
 def _sections(annotation: object) -> list[type[BaseModel]]:
     """The nested settings models an annotation names, read out of the
     annotation itself: an optional section is a union, so `capture` and
