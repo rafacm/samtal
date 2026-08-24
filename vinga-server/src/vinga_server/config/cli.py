@@ -52,7 +52,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any, get_args, get_origin
-from urllib.parse import quote
+from urllib.parse import quote, urlunsplit
 
 import httpx
 import typer
@@ -708,16 +708,25 @@ _NOTHING = object()
 
 @dataclass(frozen=True, kw_only=True)
 class Address:
-    """Where the API is, in the two forms that are not the same string.
+    """Where the API is, in the three forms that are not one string.
 
-    `reached` is what a request is sent to, whole, because that is what
-    the operator pointed this at. `shown` is the same address with its
-    credentials taken out, and it is the only one any sentence here may
-    name: an accepted URL is not a safe one to print, since the policy
-    below refuses the userinfo but says nothing about a query string,
-    and `...?token=<secret>` is the other form vendors accept.
+    `base` is what the client is built on: the scheme, the host and the
+    path, and no query. `query` is the query string the operator's
+    address carried, which every request puts back after its own path.
+    `shown` is the address with its credentials taken out, bounded and
+    made printable, and it is the only one any sentence here may name:
+    an accepted URL is not a safe one to print, since the policy below
+    refuses the userinfo but says nothing about a query string, and
+    `...?token=<secret>` is the other form vendors accept.
 
-    One type rather than two arguments travelling together, because
+    The query is held apart rather than left on the base because a
+    client joins an endpoint's path onto the base's whole raw path,
+    query included: a base of `https://host/api?token=x` used to send
+    `GET /api?token=x/agents`, which is the endpoint's name inside the
+    credential's value. `endpoint` below is the composition that was
+    missing.
+
+    One type rather than three arguments travelling together, because
     every function that names an address had a plain string to reach for
     and reached for the wrong one (#290): a transport failure and an
     unreadable answer both printed the URL they were given. What crosses
@@ -725,8 +734,19 @@ class Address:
     without saying what it is doing.
     """
 
-    reached: str
+    base: str
+    query: str
     shown: str
+
+    def endpoint(self, path: str) -> str:
+        """One endpoint's path under this address, with the query put
+        back after it.
+
+        Reattached as it was written rather than re-encoded, since what
+        it holds can be a credential a gateway compares literally, and
+        `%20` and `+` are the same space to a reader and two different
+        strings to a comparison."""
+        return f"{path}?{self.query}" if self.query else path
 
 
 def _call(
@@ -802,12 +822,13 @@ def _sent(
     answered: httpx.Response | None = None
     try:
         try:
-            client = build_client(address.reached, token)
+            client = build_client(address.base, token)
             client.timeout = httpx.Timeout(read_timeout_s, connect=CONNECT_TIMEOUT_S)
+            endpoint = address.endpoint(path)
             answered = (
-                client.request(method, path)
+                client.request(method, endpoint)
                 if body is _NOTHING
-                else client.request(method, path, json=body)
+                else client.request(method, endpoint, json=body)
             )
         except httpx.HTTPError:
             problem = _unreachable(address)
@@ -918,7 +939,7 @@ def _address(args: Invocation, file_config: FileConfig) -> Address:
     if named:
         return _permitted(named, API_URL_ENV)
     local = f"http://127.0.0.1:{file_config.server.port}{API_MOUNT_PATH}"
-    return Address(reached=local, shown=local)
+    return Address(base=local, query="", shown=local)
 
 
 def _permitted(url: str, source: str) -> Address:
@@ -964,7 +985,15 @@ def _permitted(url: str, source: str) -> Address:
             f"running container and reach the API on loopback. There is deliberately "
             f"no flag to override this."
         )
-    return Address(reached=url.rstrip("/"), shown=shown.rstrip("/"))
+    # Rebuilt from the parsed parts rather than trimmed as a string,
+    # which is what takes the query off the base and the fragment with
+    # it. The userinfo cannot survive either, and is refused above in
+    # any case.
+    return Address(
+        base=urlunsplit((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", "")),
+        query=parsed.query,
+        shown=shown.rstrip("/"),
+    )
 
 
 def _loopback(host: str) -> bool:
