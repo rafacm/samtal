@@ -72,26 +72,30 @@ open). The remaining types follow as independent single-PR issues.
 
 ### 1. The models live in `providers/options.py`, and the registry carries them
 
-A new module `providers/options.py` declares the per-type models
-and one table, `OPTION_MODELS: Mapping[str, Mapping[str, type[BaseModel]]]`
-(stage, then type). The module imports pydantic and nothing heavy:
-no engine, no implementation module, which is what lets the config
-write path import it without pulling `faster_whisper` or `httpx`
-into a `config set`. `registry._factories()` keeps the factory
-table it has; a unit test holds the two tables to consistency in
-one direction (every OPTION_MODELS key names a registered type;
-the reverse is deliberately not required, since types gain models
-one PR at a time). The models are the type's contract stated once:
-each field carries the example fragment's factual sentence as its
+A new module `providers/options.py` declares the per-type model
+CLASSES and nothing else: pydantic only, no engine, no
+implementation module, which is what lets the config write path
+import it without pulling `faster_whisper` or `httpx` into a
+`config set`. The topology lives in ONE place, the registry:
+`_factories()`'s values become a small frozen `Registration`
+carrying the lazy factory and the optional options-model type, so
+there is no second stage/type table to hold against the first
+(the plan's earlier parallel `OPTION_MODELS` table is withdrawn;
+the issue says the model is declared in the registry, and two
+tables held together by a test are the design guide's pending
+bug). Construction, write-time validation, documentation and the
+enumeration of typed types all derive from that one table through
+a dependency-light read: the registry module's table constructor
+imports `options` (light) and defers the implementation imports
+inside the factory closures exactly as today, so importing the
+registry for its table stays cheap and a subprocess test pins
+that a `config set provider` path loads no engine module.
+
+The models are the type's contract stated once: each field
+carries the example fragment's factual sentence as its
 `Field(description=...)`, and the narrative prose (measurements,
 tuning ladders) stays in the fragments per the standing
 documentation decision.
-
-Not in the registry dataclass-ification's way: `_factories()`
-values stay callables; `construct_provider` looks the options
-model up in `OPTION_MODELS` beside its factory lookup. One new
-import edge (`registry` imports `options`), no cycle (options
-imports no registry).
 
 ### 2. One contract per type: the builder consumes the model
 
@@ -288,6 +292,11 @@ resolution note here.
 4. **P2: the parallel OPTION_MODELS table violates the registry
    decision and the locality rule.** Two stage/type tables held
    together by a one-way test are the design guide's pending bug.
+
+   *Resolution* (this commit): withdrawn; the registry's values
+   become one frozen `Registration` carrying factory and optional
+   model, everything derives from it, and `providers/options.py`
+   keeps only the model classes.
 
 5. **P2: `/options/<field>` is not a pointer into a provider
    fragment.** Options are flat siblings of `type`; the pointer
