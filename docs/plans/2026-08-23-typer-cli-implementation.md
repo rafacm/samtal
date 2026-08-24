@@ -1368,7 +1368,7 @@ exactly as it was meant to.
 
 | File | Lines | What |
 | --- | --- | --- |
-| `docs/reference/cli.md` | 1490 | new; 220 hand-written, the rest generated |
+| `docs/reference/cli.md` | 1495 | new; 225 hand-written, the rest generated |
 | `examples/presets/cloud-stack.yaml` | 96 | new |
 | `examples/presets/local-stack.yaml` | 86 | new |
 | `src/vinga_server/config/cli.py` | 3431 | +141: the renderer, the verb, its row |

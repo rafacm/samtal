@@ -33,8 +33,7 @@ loopback address in its environment, so there is nothing to arrange:
 docker exec -i vinga vinga-server config list
 ```
 
-A shell function makes that the shortest of the three, and the rest of
-this page assumes one:
+A shell function makes that the shortest of the three:
 
 ```bash
 vinga() { docker exec -i vinga vinga-server "$@"; }
@@ -44,6 +43,12 @@ vinga config list
 
 The `-i` is load-bearing rather than habit: `set-secret` reads the
 credential from stdin, and `apply -f -` reads a whole document from it.
+The rest of this page spells the command out as `vinga-server config`,
+which is what its own help pages say and what a checkout runs; read it
+as `vinga config` wherever the shim is what you have. One thing does not
+carry over: a path is resolved inside the container, which has the CLI
+but not `examples/`, so a document that lives on your machine is piped
+in with `-f -` rather than named.
 
 **From a checkout**, which is what a development machine does. Run it
 from `vinga-server/`, where the example fragments are:
@@ -142,7 +147,7 @@ act.
 and writes all of it in one transaction:
 
 ```bash
-vinga config apply -f examples/presets/local-stack.yaml
+vinga-server config apply -f examples/presets/local-stack.yaml
 ```
 
 The document's top-level keys are the sections of the domain
@@ -198,8 +203,8 @@ one: the same content in the shape `apply` takes it, with a header
 saying how to reproduce the deployment.
 
 ```bash
-vinga config export > deployment.yaml
-vinga config export agent assistant > assistant.yaml
+vinga-server config export > deployment.yaml
+vinga-server config export agent assistant > assistant.yaml
 ```
 
 A credential never travels in a read, so an exported document does not
@@ -208,7 +213,7 @@ enters each stored credential, as comment lines at the foot of the file.
 Reproducing a deployment is therefore two steps, in this order:
 
 ```bash
-vinga config apply -f deployment.yaml
+vinga-server config apply -f deployment.yaml
 # then the set-secret commands the export listed, one per stored slot
 ```
 
