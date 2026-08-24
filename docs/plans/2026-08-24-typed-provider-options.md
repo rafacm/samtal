@@ -330,7 +330,7 @@ CLI surfaces once in M1.
 ## Milestones
 
 - [x] [**M1: the machinery and faster_whisper.**](2026-08-24-typed-provider-options-implementation.md#m1-the-machinery-and-faster_whisper)
-  (PR TBD) Decisions 1, 2, 3, 5 and the first conversion. Design
+  (PR #275) Decisions 1, 2, 3, 5 and the first conversion. Design
   footprint: adds `config/provider_options.py` (one home for what each
   type accepts, at an address the documentation can afford to import,
   with the registry deriving its own table from it); deepens the
