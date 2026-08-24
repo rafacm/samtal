@@ -578,7 +578,7 @@ class ConfigStore:
                     f"devices.{written}: this device has been bound since it started "
                     f"showing that activation code, so the code binds nothing now. "
                     f"Nothing was changed, and the device reaches its agents at its "
-                    f"next check. Run `vinga-server config show device {written}` to "
+                    f"next check. Run `vinga-server config device show {written}` to "
                     f"see what it is bound to, or bind it again by its MAC"
                 )
             if domain.default_agent is not None:
@@ -1909,7 +1909,7 @@ def addressed(descriptor: EntityDescriptor, identity: str) -> tuple[str, ...]:
     one home for it because three of them ask: an applied document,
     which names an entry by that join; a stored secret's location, whose
     identity is the same join; and the CLI's export, which renders a
-    location back into the `set-secret` command that fills it.
+    location back into the `secret set` command that fills it.
 
     Split at the first separator only, and only as many times as the
     kind has parameters, which is what keeps a name holding a dot still

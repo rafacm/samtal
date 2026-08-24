@@ -1661,7 +1661,7 @@ class OtaCheckActivating(Variant):
     LEVEL: ClassVar[int] = logging.WARNING
     TEMPLATE: ClassVar[str] = (
         "device %s (%s, firmware %s) has no agent and is showing activation "
-        "code %s; bind it with: vinga-server config add-device %s <agent>"
+        "code %s; bind it with: vinga-server config device pending claim %s <agent>"
     )
     ARGS: ClassVar[tuple[str, ...]] = ("said_device", "board", "firmware", "code", "code")
 
@@ -1796,7 +1796,7 @@ class ActivationNotOfferedRefused(Variant):
     TEMPLATE: ClassVar[str] = (
         "device %s is unbound but was offered no activation code: %s. It is "
         "answered exactly as it was before onboarding existed, with no "
-        "token; bind it by its MAC with: vinga-server config bind-device "
+        "token; bind it by its MAC with: vinga-server config device bind "
         "%s <agent>"
     )
     ARGS: ClassVar[tuple[str, ...]] = ("device", "reason", "device")

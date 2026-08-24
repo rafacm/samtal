@@ -1046,7 +1046,7 @@ instead.
 #### Variant 1: `vinga_server.ota` at WARNING
 
 ```text
-device %s (%s, firmware %s) has no agent and is showing activation code %s; bind it with: vinga-server config add-device %s <agent>
+device %s (%s, firmware %s) has no agent and is showing activation code %s; bind it with: vinga-server config device pending claim %s <agent>
 ```
 
 | # | Argument | Nullable | Constraint | Note |
@@ -1160,7 +1160,7 @@ device %s is unbound in the configuration this server started with, but the data
 #### Variant 2: `vinga_server.ota` at WARNING
 
 ```text
-device %s is unbound but was offered no activation code: %s. It is answered exactly as it was before onboarding existed, with no token; bind it by its MAC with: vinga-server config bind-device %s <agent>
+device %s is unbound but was offered no activation code: %s. It is answered exactly as it was before onboarding existed, with no token; bind it by its MAC with: vinga-server config device bind %s <agent>
 ```
 
 | # | Argument | Nullable | Constraint | Note |

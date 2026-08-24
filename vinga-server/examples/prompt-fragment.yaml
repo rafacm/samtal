@@ -1,6 +1,6 @@
 # One named block of prompt text, shared by the agents that include it:
 #
-#   vinga-server config set prompt-fragment household -f examples/prompt-fragment.yaml
+#   vinga-server config prompt-fragment set household -f examples/prompt-fragment.yaml
 #
 # The name is an argument rather than part of the fragment, so the same
 # file installed under a second name is a second fragment. It must match
@@ -14,7 +14,7 @@
 # heading, no separator of its own, no rewriting. What is written here
 # is what the model reads, this file's indentation and its own blank
 # lines included; the only bytes trimmed are whitespace at the two ends
-# of the whole assembled prompt, and `vinga-server config prompt
+# of the whole assembled prompt, and `vinga-server config agent preview
 # <agent>` reports what was sent rather than what was stored.
 #
 # What belongs here is standing context every agent in the house shares,
@@ -25,7 +25,7 @@
 #
 # There is no length cap, and every block competes with the others (and
 # with the remembered facts) for the context budget of a small local
-# model. `vinga-server config prompt <agent>` prints what an agent's
+# model. `vinga-server config agent preview <agent>` prints what an agent's
 # prompt is made of, block by block, with the size of each and the
 # total, which is the number to tune against.
 #

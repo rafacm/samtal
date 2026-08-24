@@ -137,7 +137,7 @@ def resolve_api_key(label: str, api_key_env: str | None) -> str | None:
     build, because at request time it would fail every conversation.
 
     Ciphertext wins, and the reference it shadows is not read at all:
-    set-secret is the later and more deliberate act, and an unset
+    a secret write is the later and more deliberate act, and an unset
     variable left behind it must not fail the boot the stored secret was
     set to fix. The value goes straight into the client here and lands
     on no model on the way.

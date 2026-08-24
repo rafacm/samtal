@@ -63,30 +63,27 @@ def test_an_empty_database_becomes_a_working_configuration(
     devices, default agent. Every intermediate state here would fail the
     boot-only completeness rule, and none of the writes may be refused."""
     claude = "type: anthropic\nmodel: m\n"
-    assert run("set", "provider", "llm", "claude", "-f", "-", stdin=claude) == 0
-    assert run("set", "provider", "asr", "whisper", "-f", "-", stdin="type: mock\n") == 0
-    assert run("set", "provider", "tts", "voice", "-f", "-", stdin="type: mock\n") == 0
-    assert run("set", "provider", "vad", "ears", "-f", "-", stdin="type: mock\n") == 0
+    assert run("provider", "set", "llm", "claude", "-f", "-", stdin=claude) == 0
+    assert run("provider", "set", "asr", "whisper", "-f", "-", stdin="type: mock\n") == 0
+    assert run("provider", "set", "tts", "voice", "-f", "-", stdin="type: mock\n") == 0
+    assert run("provider", "set", "vad", "ears", "-f", "-", stdin="type: mock\n") == 0
     assert run(
-        "set",
-        "mcp-server",
-        "home",
+        "mcp-server", "set", "home",
         "-f",
         "-",
         stdin="transport: stdio\ncommand: uvx\negress: false\n",
     ) == 0
     assert run(
-        "set",
-        "agent-defaults",
+        "agent-defaults", "set",
         "-f",
         "-",
         stdin="llm: claude\nasr: whisper\ntts: voice\nvad: ears\nmcp: [home]\n",
     ) == 0
     # The agent no default_agent names yet: the write that would deadlock
     # if completeness were enforced here.
-    assert run("set", "agent", "sam", "-f", "-", stdin="prompt: You are Sam.\n") == 0
-    assert run("bind-device", "AA-BB-CC-DD-EE-FF", "sam") == 0
-    assert run("set-default-agent", "sam") == 0
+    assert run("agent", "set", "sam", "-f", "-", stdin="prompt: You are Sam.\n") == 0
+    assert run("device", "bind", "AA-BB-CC-DD-EE-FF", "sam") == 0
+    assert run("default-agent", "set", "sam") == 0
     capsys.readouterr()
 
     assert run("show") == 0
@@ -106,10 +103,10 @@ def test_a_fragment_can_come_from_a_file(
     fragment = tmp_path / "claude.yaml"
     fragment.write_text("type: anthropic\nmodel: m\n", encoding="utf-8")
 
-    assert run("set", "provider", "llm", "claude", "-f", str(fragment)) == 0
+    assert run("provider", "set", "llm", "claude", "-f", str(fragment)) == 0
     capsys.readouterr()
 
-    assert run("show", "provider", "llm", "claude") == 0
+    assert run("provider", "show", "llm", "claude") == 0
     assert _document(capsys.readouterr().out) == {"type": "anthropic", "model": "m"}
 
 
@@ -200,7 +197,7 @@ def test_every_way_a_fragment_file_fails_has_one_sentence_of_its_own(
     fragment = tmp_path / FRAGMENT_NAME
 
     with caplog.at_level(logging.DEBUG):
-        assert run("set", "agent", "sam", "-f", str(fragment)) == 1
+        assert run("agent", "set", "sam", "-f", str(fragment)) == 1
 
     captured = capsys.readouterr()
     # The whole of stderr, not a substring of it: what is under test is
@@ -245,7 +242,7 @@ def test_a_missing_fragment_file_really_does_take_that_row(
     produces the same way."""
     missing = tmp_path / f"{SECRET}.yaml"
 
-    assert run("set", "agent", "sam", "-f", str(missing)) == 1
+    assert run("agent", "set", "sam", "-f", str(missing)) == 1
 
     captured = capsys.readouterr()
     assert captured.err == cli.FILE_NOT_FOUND + "\n"
@@ -259,7 +256,7 @@ def test_a_directory_where_a_fragment_belongs_really_does_take_its_row(
     directory = tmp_path / f"{SECRET}.yaml"
     directory.mkdir()
 
-    assert run("set", "agent", "sam", "-f", str(directory)) == 1
+    assert run("agent", "set", "sam", "-f", str(directory)) == 1
 
     captured = capsys.readouterr()
     assert captured.err == cli.FILE_NOT_READABLE + "\n"
@@ -283,7 +280,7 @@ def test_a_fragment_file_that_is_not_text_is_refused_rather_than_thrown(
     binary.write_bytes(f"prompt: {SECRET}\n".encode() + b"\xff\xfe\x80\x00")
 
     with caplog.at_level(logging.DEBUG):
-        assert run("set", "agent", "sam", "-f", str(binary)) == 1
+        assert run("agent", "set", "sam", "-f", str(binary)) == 1
 
     captured = capsys.readouterr()
     assert captured.err == cli.FILE_NOT_TEXT + "\n"
@@ -303,7 +300,7 @@ def test_a_fragment_file_that_will_not_parse_is_not_named_either(
     broken = tmp_path / f"{SECRET}.yaml"
     broken.write_text("prompt: A\nmcp: [\n", encoding="utf-8")
 
-    assert run("set", "agent", "sam", "-f", str(broken)) == 1
+    assert run("agent", "set", "sam", "-f", str(broken)) == 1
 
     captured = capsys.readouterr()
     assert f"invalid YAML in {cli.FILE_SOURCE} at line" in captured.err
@@ -322,15 +319,15 @@ def test_every_mutating_command_says_when_the_write_applies(
     is what is asserted; the agent's notice is also the whole of what
     the command printed, which is what pins that a write says one thing
     and not a paragraph of them."""
-    run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
+    run("provider", "set", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
     assert boundaries(capsys.readouterr().err) == {RELOAD}
 
-    run("set", "agent", "sam", "-f", "-", stdin="llm: claude\n")
+    run("agent", "set", "sam", "-f", "-", stdin="llm: claude\n")
     written = capsys.readouterr().err
     assert boundaries(written) == {RELOAD}
     assert written.count("\n") == 1
 
-    run("set-default-agent", "sam")
+    run("default-agent", "set", "sam")
     # The application this fixture builds is told of no servable agents,
     # so the default agent it just named is one this server is not
     # serving, and the acknowledgement names the reload that would
@@ -349,19 +346,19 @@ def test_a_device_write_says_the_device_meets_it_itself(
     from what the API answered: a running server reads the devices table
     as a device asks, so a delete reaches the device at its next
     check-in and needs neither a reload nor a start."""
-    run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
-    run("set", "agent", "sam", "-f", "-", stdin="llm: claude\n")
-    run("bind-device", "aa:bb:cc:dd:ee:ff", "sam")
+    run("provider", "set", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
+    run("agent", "set", "sam", "-f", "-", stdin="llm: claude\n")
+    run("device", "bind", "aa:bb:cc:dd:ee:ff", "sam")
     capsys.readouterr()
 
-    assert run("delete", "device", "aa:bb:cc:dd:ee:ff") == 0
+    assert run("device", "delete", "aa:bb:cc:dd:ee:ff") == 0
 
     assert boundaries(capsys.readouterr().err) == {CHECK_IN}
 
 
 def _an_agent(run) -> None:
-    run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
-    run("set", "agent", "sam", "-f", "-", stdin="llm: claude\n")
+    run("provider", "set", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
+    run("agent", "set", "sam", "-f", "-", stdin="llm: claude\n")
 
 
 # Shared prompt fragments
@@ -375,14 +372,14 @@ def _an_agent(run) -> None:
 def test_a_prompt_fragment_is_written_shown_and_listed(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert run("set", "prompt-fragment", "household", "-f", "-", stdin=FRAGMENT_INPUT) == 0
+    assert run("prompt-fragment", "set", "household", "-f", "-", stdin=FRAGMENT_INPUT) == 0
     written = capsys.readouterr()
     assert written.out == "wrote prompt-fragment household\n"
     # A fragment is prompt text, which a reload puts in front of the
     # next activation of every agent that includes it.
     assert boundaries(written.err) == {RELOAD}
 
-    assert run("show", "prompt-fragment", "household") == 0
+    assert run("prompt-fragment", "show", "household") == 0
     assert _document(capsys.readouterr().out) == {"text": FRAGMENT_TEXT}
 
     assert run("list") == 0
@@ -403,13 +400,13 @@ def test_an_agent_includes_a_fragment_and_reads_it_back(
     exists first, the agent names it, and the include is echoed in the
     shape it was written in."""
     _an_agent(run)
-    run("set", "prompt-fragment", "household", "-f", "-", stdin=FRAGMENT_INPUT)
+    run("prompt-fragment", "set", "household", "-f", "-", stdin=FRAGMENT_INPUT)
     assert run(
-        "set", "agent", "sam", "-f", "-", stdin="llm: claude\nprompt_includes: [household]\n"
+        "agent", "set", "sam", "-f", "-", stdin="llm: claude\nprompt_includes: [household]\n"
     ) == 0
     capsys.readouterr()
 
-    assert run("show", "agent", "sam") == 0
+    assert run("agent", "show", "sam") == 0
 
     assert _document(capsys.readouterr().out)["prompt_includes"] == ["household"]
 
@@ -418,17 +415,18 @@ def test_a_fragment_an_agent_includes_is_not_deleted_from_under_it(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _an_agent(run)
-    run("set", "prompt-fragment", "household", "-f", "-", stdin=FRAGMENT_INPUT)
-    run("set", "agent", "sam", "-f", "-", stdin="llm: claude\nprompt_includes: [household]\n")
+    run("prompt-fragment", "set", "household", "-f", "-", stdin=FRAGMENT_INPUT)
+    run("agent", "set", "sam", "-f", "-", stdin="llm: claude\nprompt_includes: [household]\n")
     capsys.readouterr()
 
-    assert run("delete", "prompt-fragment", "household") == 1
+    assert run("prompt-fragment", "delete", "household") == 1
 
     assert "prompt_includes" in capsys.readouterr().err
 
 
-# Every section a command addresses one entry of, as the arguments that
-# address something nothing wrote, the sentence both verbs answer with,
+# Every section a command addresses one entry of, as the noun and the
+# identity that address something nothing wrote, the sentence both verbs
+# answer with,
 # and the value that must not be printed. The names are credential
 # shaped, because a command line is where a paste lands; a device is
 # addressed by a MAC, which a credential-shaped argument never reaches
@@ -467,9 +465,10 @@ def test_an_identity_that_addresses_nothing_is_refused_without_printing_it(
     name nothing wrote and a stage that is not a stage, which are the
     two ways a segment can address nothing.
     """
+    noun, identity = addressed[0], addressed[1:]
     for verb in ("show", "delete"):
         with caplog.at_level(logging.DEBUG):
-            assert run(verb, *addressed) == 1
+            assert run(noun, verb, *identity) == 1
 
         captured = capsys.readouterr()
         # The leak first and the section after it, so a failure here
@@ -489,9 +488,9 @@ def test_an_identity_that_addresses_nothing_is_refused_without_printing_it(
 
 # Every command that takes a MAC as an argument.
 NOT_MACS = [
-    ("show", "device"),
-    ("delete", "device"),
-    ("bind-device",),
+    ("device", "show"),
+    ("device", "delete"),
+    ("device", "bind"),
 ]
 
 
@@ -505,14 +504,14 @@ def test_a_mac_that_is_not_a_mac_is_refused_without_printing_it(
     """The shape refusal, a step before any lookup (#205).
 
     A MAC is an ordinary command-line argument, so it is a place a paste
-    lands like the names above, and `bind-device` in particular takes it
+    lands like the names above, and `device bind` in particular takes it
     beside other arguments an operator is typing from a note. What fails
     the check is a value nothing here has validated, so the line an
     operator reads states what a MAC has to be and never what they
     typed: not on stderr, not on stdout, and not in a record it
     retained.
     """
-    trailing = ("sam",) if argv[0] == "bind-device" else ()
+    trailing = ("sam",) if argv[-1] == "bind" else ()
 
     with caplog.at_level(logging.DEBUG):
         assert run(*argv, SECRET, *trailing) == 1
@@ -542,7 +541,7 @@ def test_an_unknown_include_is_refused_without_printing_it(
         if layer == "agent-defaults"
         else f"llm: claude\nprompt: hi\nprompt_includes: [{SECRET}]\n"
     )
-    argv = ("set", layer) if layer == "agent-defaults" else ("set", "agent", "sam")
+    argv = ("agent-defaults", "set") if layer == "agent-defaults" else ("agent", "set", "sam")
     capsys.readouterr()
 
     with caplog.at_level(logging.DEBUG):
@@ -579,7 +578,7 @@ def test_an_unusable_fragment_name_is_refused_without_printing_it(
     it arrived with is parsed, so no sentence about the body carries the
     location it was written at."""
     with caplog.at_level(logging.DEBUG):
-        argv = ("set", "prompt-fragment", f"{SECRET}.pasted", "-f", "-")
+        argv = ("prompt-fragment", "set", f"{SECRET}.pasted", "-f", "-")
         assert run(*argv, stdin=written) == 1
 
     captured = capsys.readouterr()
@@ -604,7 +603,7 @@ def test_add_device_binds_the_board_showing_the_code(
     code = _showing(run)
     capsys.readouterr()
 
-    assert run("add-device", code, "sam") == 0
+    assert run("device", "pending", "claim", code, "sam") == 0
 
     captured = capsys.readouterr()
     # The operator never had to find the MAC; the acknowledgement names
@@ -621,10 +620,10 @@ def test_add_device_retires_the_code(run, capsys: pytest.CaptureFixture[str]) ->
     _an_agent(run)
     code = _showing(run)
 
-    run("add-device", code, "sam")
+    run("device", "pending", "claim", code, "sam")
     capsys.readouterr()
 
-    assert run("pending") == 0
+    assert run("device", "pending", "list") == 0
     assert capsys.readouterr().out.startswith("no device is waiting to be claimed")
 
 
@@ -635,7 +634,7 @@ def test_add_device_with_a_stale_code_says_to_read_the_screen(
     _an_agent(run)
     capsys.readouterr()
 
-    assert run("add-device", "000000", "sam") == 1
+    assert run("device", "pending", "claim", "000000", "sam") == 1
 
     captured = capsys.readouterr()
     assert captured.err.startswith("no device is waiting with that activation code")
@@ -654,7 +653,7 @@ def test_add_device_inherits_the_reference_check(
     it."""
     code = _showing(run)
 
-    assert run("add-device", code, "ghost") == 1
+    assert run("device", "pending", "claim", code, "ghost") == 1
 
     captured = capsys.readouterr()
     assert "at least one agent this deployment does not have" in captured.err
@@ -663,13 +662,13 @@ def test_add_device_inherits_the_reference_check(
     # And the board is still showing the number, so the number still
     # works.
     _an_agent(run)
-    assert run("add-device", code, "sam") == 0
+    assert run("device", "pending", "claim", code, "sam") == 0
 
 
 def test_a_refused_write_exits_one_with_the_reason(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert run("set", "agent", "sam", "-f", "-", stdin="llm: ghost\n") == 1
+    assert run("agent", "set", "sam", "-f", "-", stdin="llm: ghost\n") == 1
 
     captured = capsys.readouterr()
     assert "agents.sam.llm: names no llm provider that exists" in captured.err
@@ -687,7 +686,7 @@ def test_a_malformed_grant_is_refused_without_echoing_it(
     fragment = f"prompt: A\nmcp:\n  - server: weather\n    tools: [{SECRET}, {SECRET}]\n"
 
     with caplog.at_level(logging.DEBUG):
-        assert run("set", "agent", "sam", "-f", "-", stdin=fragment) == 1
+        assert run("agent", "set", "sam", "-f", "-", stdin=fragment) == 1
 
     captured = capsys.readouterr()
     assert "entry 1" in captured.err
@@ -701,7 +700,7 @@ def test_a_malformed_grant_is_refused_without_echoing_it(
 def test_malformed_yaml_is_refused_without_echoing_the_line(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert run("set", "agent", "sam", "-f", "-", stdin=f"prompt: '{SECRET}\n") == 1
+    assert run("agent", "set", "sam", "-f", "-", stdin=f"prompt: '{SECRET}\n") == 1
 
     captured = capsys.readouterr()
     assert "invalid YAML" in captured.err
@@ -737,7 +736,7 @@ UNREADABLE = [
 
 # The two commands that read a YAML source, and what each calls it.
 READERS = [
-    ("a fragment", ("set", "agent", "sam", "-f", "-")),
+    ("a fragment", ("agent", "set", "sam", "-f", "-")),
     ("a document", ("apply", "-f", "-")),
 ]
 
@@ -797,7 +796,7 @@ def test_a_number_that_is_not_finite_is_refused(
     different one, so the write is refused where every other fragment
     rule is applied."""
     assert run(
-        "set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\ntemperature: .nan\n"
+        "provider", "set", "llm", "claude", "-f", "-", stdin="type: anthropic\ntemperature: .nan\n"
     ) == 1
 
     captured = capsys.readouterr()
@@ -806,10 +805,10 @@ def test_a_number_that_is_not_finite_is_refused(
 
     # And a finite value goes through and shows as itself.
     assert run(
-        "set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\ntemperature: 0.7\n"
+        "provider", "set", "llm", "claude", "-f", "-", stdin="type: anthropic\ntemperature: 0.7\n"
     ) == 0
     capsys.readouterr()
-    run("show", "provider", "llm", "claude")
+    run("provider", "show", "llm", "claude")
     assert _document(capsys.readouterr().out)["temperature"] == 0.7
 
 
@@ -836,7 +835,7 @@ def test_a_fragment_json_cannot_carry_is_refused_before_it_travels(
     request body has no way to say. Every one of them meets the
     repository's sentence rather than the JSON encoder's TypeError,
     ValueError or RecursionError, and none of them writes anything."""
-    assert run("set", "provider", "llm", "claude", "-f", "-", stdin=fragment) == 1, what
+    assert run("provider", "set", "llm", "claude", "-f", "-", stdin=fragment) == 1, what
 
     captured = capsys.readouterr()
     assert expected in captured.err, what
@@ -844,7 +843,7 @@ def test_a_fragment_json_cannot_carry_is_refused_before_it_travels(
     assert captured.out == "", what
 
     # And nothing was written: the entity does not exist.
-    assert run("show", "provider", "llm", "claude") == 1
+    assert run("provider", "show", "llm", "claude") == 1
     assert capsys.readouterr().err.startswith("providers:")
 
 
@@ -856,10 +855,10 @@ def test_a_fragment_sharing_one_anchor_twice_still_travels(
     is written out twice in JSON."""
     fragment = "type: anthropic\none: &shared\n  a: 1\ntwo: *shared\n"
 
-    assert run("set", "provider", "llm", "claude", "-f", "-", stdin=fragment) == 0
+    assert run("provider", "set", "llm", "claude", "-f", "-", stdin=fragment) == 0
     capsys.readouterr()
 
-    run("show", "provider", "llm", "claude")
+    run("provider", "show", "llm", "claude")
     shown = _document(capsys.readouterr().out)
     assert shown["one"] == {"a": 1}
     assert shown["two"] == {"a": 1}
@@ -895,27 +894,25 @@ def test_a_parser_failure_carries_no_parser_exception(tmp_path: Path) -> None:
 
 
 def test_show_renders_every_entity_kind(run, capsys: pytest.CaptureFixture[str]) -> None:
-    run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
+    run("provider", "set", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
     run(
-        "set",
-        "mcp-server",
-        "home",
+        "mcp-server", "set", "home",
         "-f",
         "-",
         stdin="transport: stdio\ncommand: uvx\n",
     )
-    run("set", "agent-defaults", "-f", "-", stdin="llm: claude\n")
-    run("set", "agent", "sam", "-f", "-", stdin="prompt: You are Sam.\n")
-    run("bind-device", "aa:bb:cc:dd:ee:ff", "sam")
+    run("agent-defaults", "set", "-f", "-", stdin="llm: claude\n")
+    run("agent", "set", "sam", "-f", "-", stdin="prompt: You are Sam.\n")
+    run("device", "bind", "aa:bb:cc:dd:ee:ff", "sam")
     capsys.readouterr()
 
-    run("show", "mcp-server", "home")
+    run("mcp-server", "show", "home")
     assert _document(capsys.readouterr().out)["command"] == "uvx"
-    run("show", "agent", "sam")
+    run("agent", "show", "sam")
     assert _document(capsys.readouterr().out)["prompt"] == "You are Sam."
-    run("show", "agent-defaults")
+    run("agent-defaults", "show")
     assert _document(capsys.readouterr().out) == {"llm": "claude"}
-    run("show", "device", "AA-BB-CC-DD-EE-FF")
+    run("device", "show", "AA-BB-CC-DD-EE-FF")
     assert _document(capsys.readouterr().out) == {"agents": ["sam"]}
 
 
@@ -932,18 +929,16 @@ def test_an_agent_is_printed_prompt_first(
     adds is that the rendering does not sort it away on the way to
     stdout.
     """
-    run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
+    run("provider", "set", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
     run(
-        "set",
-        "agent",
-        "sam",
+        "agent", "set", "sam",
         "-f",
         "-",
         stdin="llm: claude\nprompt: You are Sam.\n",
     )
     capsys.readouterr()
 
-    assert run("show", "agent", "sam") == 0
+    assert run("agent", "show", "sam") == 0
 
     assert capsys.readouterr().out == "prompt: You are Sam.\nllm: claude\n"
 
@@ -954,11 +949,11 @@ def test_showing_something_that_is_not_there_names_the_section_only(
     """The section it would have been in, one line, and the identity
     that was asked for in none of them (#132)."""
     for argv, section, identity in (
-        (("show", "provider", "llm", "ghost"), "providers", "ghost"),
-        (("show", "mcp-server", "ghost"), "mcp_servers", "ghost"),
-        (("show", "prompt-fragment", "ghost"), "prompt_fragments", "ghost"),
-        (("show", "agent", "ghost"), "agents", "ghost"),
-        (("show", "device", "aa:bb:cc:dd:ee:ff"), "devices", "aa:bb:cc:dd:ee:ff"),
+        (("provider", "show", "llm", "ghost"), "providers", "ghost"),
+        (("mcp-server", "show", "ghost"), "mcp_servers", "ghost"),
+        (("prompt-fragment", "show", "ghost"), "prompt_fragments", "ghost"),
+        (("agent", "show", "ghost"), "agents", "ghost"),
+        (("device", "show", "aa:bb:cc:dd:ee:ff"), "devices", "aa:bb:cc:dd:ee:ff"),
     ):
         assert run(*argv) == 1
         captured = capsys.readouterr()
@@ -969,11 +964,11 @@ def test_showing_something_that_is_not_there_names_the_section_only(
 
 
 def test_the_default_agent_can_be_cleared(run, capsys: pytest.CaptureFixture[str]) -> None:
-    run("set", "agent", "sam", "-f", "-", stdin="prompt: You are Sam.\n")
-    run("set-default-agent", "sam")
+    run("agent", "set", "sam", "-f", "-", stdin="prompt: You are Sam.\n")
+    run("default-agent", "set", "sam")
     capsys.readouterr()
 
-    assert run("clear-default-agent") == 0
+    assert run("default-agent", "clear") == 0
     run("list")
     assert "default_agent: (none)" in capsys.readouterr().out
 
@@ -984,7 +979,7 @@ def test_a_row_of_the_wrong_shape_is_reported_rather_than_raised(
     """The reading commands are what an operator reaches for when
     something is wrong with the database, so a row that cannot be read
     has to come back as a sentence rather than as a traceback."""
-    run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
+    run("provider", "set", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
     capsys.readouterr()
 
     engine = open_database(tmp_path / "db")
@@ -994,7 +989,7 @@ def test_a_row_of_the_wrong_shape_is_reported_rather_than_raised(
     finally:
         engine.dispose()
 
-    for argv in (("list",), ("show",), ("show", "provider", "llm", "claude")):
+    for argv in (("list",), ("show",), ("provider", "show", "llm", "claude")):
         assert run(*argv) == 1
         captured = capsys.readouterr()
         assert "providers.llm.claude" in captured.err
@@ -1023,15 +1018,15 @@ def test_a_database_that_cannot_be_opened_names_the_key(
 def test_an_awkward_name_round_trips_through_the_whole_client(
     run, name: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert run("set", "agent", name, "-f", "-", stdin="prompt: You are it.\n") == 0
+    assert run("agent", "set", name, "-f", "-", stdin="prompt: You are it.\n") == 0
     assert f"wrote agent {name}" in capsys.readouterr().out
 
-    assert run("show", "agent", name) == 0
+    assert run("agent", "show", name) == 0
     assert _document(capsys.readouterr().out)["prompt"] == "You are it."
 
-    assert run("delete", "agent", name) == 0
+    assert run("agent", "delete", name) == 0
     capsys.readouterr()
-    assert run("show", "agent", name) == 1
+    assert run("agent", "show", name) == 1
     assert capsys.readouterr().err.startswith("agents:")
 
 
@@ -1040,7 +1035,7 @@ def test_a_name_a_url_path_cannot_carry_is_refused(
 ) -> None:
     """Refused at the repository when it can be reached, and unroutable
     when it cannot: either way no such entity is created."""
-    assert run("set", "agent", "a/b", "-f", "-", stdin="prompt: You are it.\n") == 1
+    assert run("agent", "set", "a/b", "-f", "-", stdin="prompt: You are it.\n") == 1
     capsys.readouterr()
 
     assert run("list") == 0
@@ -1058,38 +1053,38 @@ def test_a_name_a_url_path_cannot_carry_is_refused(
 INLINE = [
     (
         "a flat entity",
-        ("set", "provider", "llm", "claude"),
+        ("provider", "set", "llm", "claude"),
         ("type=anthropic", "model=m"),
         "type: anthropic\nmodel: m\n",
-        ("show", "provider", "llm", "claude"),
+        ("provider", "show", "llm", "claude"),
     ),
     (
         "the singleton, addressed by nothing",
-        ("set", "agent-defaults"),
+        ("agent-defaults", "set"),
         ("llm=claude",),
         "llm: claude\n",
-        ("show", "agent-defaults"),
+        ("agent-defaults", "show"),
     ),
     (
         "a dotted key, which nests",
-        ("set", "agent", "sam"),
+        ("agent", "set", "sam"),
         ("prompt=hi", "filler.enabled=false"),
         "prompt: hi\nfiller:\n  enabled: false\n",
-        ("show", "agent", "sam"),
+        ("agent", "show", "sam"),
     ),
     (
         "values that are not strings",
-        ("set", "provider", "llm", "claude"),
+        ("provider", "set", "llm", "claude"),
         ("type=anthropic", "temperature=0.7", "stream=true", "retries=3", "seed=null"),
         "type: anthropic\ntemperature: 0.7\nstream: true\nretries: 3\nseed: null\n",
-        ("show", "provider", "llm", "claude"),
+        ("provider", "show", "llm", "claude"),
     ),
     (
         "a value holding the separator",
-        ("set", "provider", "llm", "claude"),
+        ("provider", "set", "llm", "claude"),
         ("type=anthropic", "base_url=https://example.invalid/v1?a=b"),
         "type: anthropic\nbase_url: https://example.invalid/v1?a=b\n",
-        ("show", "provider", "llm", "claude"),
+        ("provider", "show", "llm", "claude"),
     ),
 ]
 
@@ -1129,7 +1124,7 @@ def test_an_inline_write_is_acknowledged_the_way_a_fragment_is(
 ) -> None:
     """Same path, same answer: the acknowledgement and the boundary it
     names are the API's, and the inline form does not touch either."""
-    assert run("set", "provider", "llm", "claude", "type=anthropic", "model=m") == 0
+    assert run("provider", "set", "llm", "claude", "type=anthropic", "model=m") == 0
 
     written = capsys.readouterr()
     assert written.out == "wrote provider llm.claude\n"
@@ -1142,7 +1137,7 @@ def test_an_inline_value_json_cannot_carry_meets_the_same_sentence(
     """A bare date is a YAML scalar, so the pair parser passes it, and
     the rule about what JSON can carry stays where it lives for a
     fragment too."""
-    assert run("set", "provider", "llm", "claude", "type=anthropic", "released=2026-01-01") == 1
+    assert run("provider", "set", "llm", "claude", "type=anthropic", "released=2026-01-01") == 1
 
     captured = capsys.readouterr()
     assert "JSON has no way to write" in captured.err
@@ -1155,7 +1150,7 @@ def test_a_secret_shaped_inline_key_is_refused_by_the_store(
     """The rule that a plaintext credential never enters is the
     repository's and is about the key's shape, so it holds whichever way
     the entity was written."""
-    assert run("set", "provider", "llm", "claude", "type=anthropic", f"api_key={SECRET}") == 1
+    assert run("provider", "set", "llm", "claude", "type=anthropic", f"api_key={SECRET}") == 1
 
     captured = capsys.readouterr()
     assert "looks like an inline secret" in captured.err
@@ -1172,7 +1167,7 @@ def test_neither_way_of_writing_an_entity_is_the_missing_argument(
     """Click cannot see this one, because either of the two satisfies
     the command, so the grammar says it itself, in the words the
     boundary says it in."""
-    assert run("set", "agent", "sam") == 1
+    assert run("agent", "set", "sam") == 1
 
     captured = capsys.readouterr()
     assert cli.MISSING_ARGUMENT in captured.err
@@ -1186,13 +1181,13 @@ def test_both_ways_at_once_is_refused(
     fragment = tmp_path / "sam.yaml"
     fragment.write_text("prompt: hi\n", encoding="utf-8")
 
-    assert run("set", "agent", "sam", "prompt=hi", "-f", str(fragment)) == 1
+    assert run("agent", "set", "sam", "prompt=hi", "-f", str(fragment)) == 1
 
     captured = capsys.readouterr()
     assert cli.BOTH_INPUTS in captured.err
     assert captured.out == ""
     # And nothing was written either way.
-    assert run("show", "agent", "sam") == 1
+    assert run("agent", "show", "sam") == 1
 
 
 # The pair parser as a boundary
@@ -1239,7 +1234,7 @@ def test_a_malformed_pair_says_nothing_of_what_was_typed(
     sentence: str,
 ) -> None:
     with caplog.at_level(logging.DEBUG):
-        assert run("set", "provider", "llm", "claude", "type=anthropic", *pairs) == 1
+        assert run("provider", "set", "llm", "claude", "type=anthropic", *pairs) == 1
 
     captured = capsys.readouterr()
     assert sentence in captured.err
@@ -1248,7 +1243,7 @@ def test_a_malformed_pair_says_nothing_of_what_was_typed(
     assert "Traceback" not in captured.err
     assert all(SECRET not in str(record.__dict__) for record in caplog.records)
     # And nothing of the refused write landed.
-    assert run("show", "provider", "llm", "claude") == 1
+    assert run("provider", "show", "llm", "claude") == 1
 
 
 @pytest.mark.parametrize(
@@ -1356,7 +1351,7 @@ def test_a_refused_document_prints_every_mistake_and_writes_nothing(
     assert "agents.sam.llm: names no llm provider that exists" in captured.err
     assert captured.out == ""
     assert "Traceback" not in captured.err
-    assert run("show", "provider", "llm", "claude") == 1
+    assert run("provider", "show", "llm", "claude") == 1
     assert capsys.readouterr().err.startswith("providers:")
 
 

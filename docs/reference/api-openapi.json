@@ -4614,7 +4614,7 @@
               }
             ],
             "default": null,
-            "description": "The name of the environment variable holding this provider's credential, never the credential itself. Left unset for a local engine or a keyless self-hosted endpoint. A credential stored with `config set-secret` fills the same slot and takes precedence.",
+            "description": "The name of the environment variable holding this provider's credential, never the credential itself. Left unset for a local engine or a keyless self-hosted endpoint. A credential stored with `config provider secret set` fills the same slot and takes precedence.",
             "title": "Api Key Env"
           },
           "egress": {
@@ -4735,7 +4735,7 @@
           },
           "use_server_instructions": {
             "default": false,
-            "description": "Whether to inject the guidance this server ships about itself, the `instructions` field of its initialize result, into the system prompt of every agent this entry is granted to. Off by default, and deliberately: the entry's own `instructions` is what your operator wrote, while this is a third party's text steering the agent, so consuming it is an explicit opt-in taken per entry and per channel. What a server ships is captured on every connect whatever this says, so turning it on applies at the next reload without restarting the connection, and turning it off stops the injection at the next activation. A block longer than 4000 characters is skipped whole rather than truncated. The block sits after this entry's own guidance, and `vinga-server config prompt <agent>` reports it under `server_instructions:<entry>`, so an operator can see whose words they are reading.",
+            "description": "Whether to inject the guidance this server ships about itself, the `instructions` field of its initialize result, into the system prompt of every agent this entry is granted to. Off by default, and deliberately: the entry's own `instructions` is what your operator wrote, while this is a third party's text steering the agent, so consuming it is an explicit opt-in taken per entry and per channel. What a server ships is captured on every connect whatever this says, so turning it on applies at the next reload without restarting the connection, and turning it off stops the injection at the next activation. A block longer than 4000 characters is skipped whole rather than truncated. The block sits after this entry's own guidance, and `vinga-server config agent preview <agent>` reports it under `server_instructions:<entry>`, so an operator can see whose words they are reading.",
             "title": "Use Server Instructions",
             "type": "boolean"
           },
@@ -4767,7 +4767,7 @@
         "description": "One named block of prompt text, shared by the agents that include\nit.\n\nA mapping with one field rather than a bare string. Every entity in\nthis configuration travels the same path (a stored row, a read\nenvelope, a written fragment), and all three of those want a mapping;\na one-field mapping also leaves room for a second field later without\nchanging the shape a client writes, which is why a grant took its\nobject form too.",
         "properties": {
           "text": {
-            "description": "The text injected into the system prompt of every agent whose prompt_includes names this fragment, as written: its indentation and its own blank lines are part of it, and nothing is added around it, not even a heading, since this is prompt text the operator wrote and a heading would editorialize. The only bytes trimmed are whitespace at the two ends of the whole assembled prompt, which is also what the inspection surface reports. It sits after the agent's own prompt and before any MCP guidance, in the order the including layer lists it. There is no length cap: what each block costs is reported by `vinga-server config prompt <agent>`, and the operator is the one who knows what their model tolerates.",
+            "description": "The text injected into the system prompt of every agent whose prompt_includes names this fragment, as written: its indentation and its own blank lines are part of it, and nothing is added around it, not even a heading, since this is prompt text the operator wrote and a heading would editorialize. The only bytes trimmed are whitespace at the two ends of the whole assembled prompt, which is also what the inspection surface reports. It sits after the agent's own prompt and before any MCP guidance, in the order the including layer lists it. There is no length cap: what each block costs is reported by `vinga-server config agent preview <agent>`, and the operator is the one who knows what their model tolerates.",
             "title": "Text",
             "type": "string"
           }

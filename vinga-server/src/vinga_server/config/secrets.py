@@ -6,7 +6,8 @@ environment reference, carried over verbatim from the YAML file:
 value in an MCP server's env or headers. Those stay the models'
 business, they are not secrets themselves, and they display as
 themselves. The second is ciphertext, written only by
-`vinga-server config set-secret`, stored as the JSON object
+`vinga-server config provider secret set` and its MCP sibling, stored
+as the JSON object
 `{"enc": "<fernet token>"}` in the entity row's `secrets` column under
 the credential slot it fills.
 
@@ -226,7 +227,7 @@ def decrypt(location: SecretLocation, envelope: object, keys: MultiFernet | None
     if not is_envelope(envelope):
         raise ConfigError(
             f"{location.describe()}: the stored secret is not a valid envelope; "
-            f"set it again with vinga-server config set-secret"
+            f"set it again with that entry's own secret set command"
         )
     if keys is None:
         raise ConfigError(
@@ -266,8 +267,8 @@ def _unwrap(location: SecretLocation, payload: bytes) -> str:
     if not decoded:
         raise ConfigError(
             f"{location.describe()}: the stored secret decrypted to something "
-            f"that is not a valid payload; set it again with vinga-server "
-            f"config set-secret"
+            f"that is not a valid payload; set it again with that entry's own "
+            f"secret set command"
         )
 
     if not isinstance(document, dict) or document.get("v") != _PAYLOAD_VERSION:
@@ -290,7 +291,7 @@ def _unwrap(location: SecretLocation, payload: bytes) -> str:
         raise ConfigError(
             f"{location.describe()}: the stored secret was written for "
             f"{stored.describe()}; a secret cannot be moved between slots, "
-            f"set it again with vinga-server config set-secret"
+            f"set it again with that entry's own secret set command"
         )
 
     secret = document.get("secret")
@@ -492,7 +493,7 @@ def resolve_mcp_values(
     Literal values pass through and a `$VAR` is read from the server's
     own environment, exactly as before. A slot with a stored secret
     takes precedence over the reference written for the same key,
-    because set-secret is the later and more deliberate act, and a slot
+    because a secret write is the later and more deliberate act, and a slot
     with no key in the entity at all is added: a fragment cannot carry
     the value, so requiring it to carry a placeholder would mean
     inventing an environment variable nobody sets.

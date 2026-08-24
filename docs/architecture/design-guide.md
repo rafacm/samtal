@@ -174,7 +174,7 @@ together by one pure function. Nothing else in the server joins
 prompt text or counts it. Three surfaces read what it produces: the
 pipeline sends the text to the model, the `prompt_assembled` event
 carries the block sizes, and the inspection route behind
-`vinga-server config prompt <agent>` prints the blocks whole.
+`vinga-server config agent preview <agent>` prints the blocks whole.
 
 What the module guarantees is worth stating precisely, because the
 tempting claim is larger than the truth. It does not make those three

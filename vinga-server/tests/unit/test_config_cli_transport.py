@@ -862,7 +862,7 @@ def test_a_write_that_cannot_take_the_lock_prints_the_retryable_refusal(
     are up before the lock exists, and the lock arrives while the CLI's
     command is in flight."""
     monkeypatch.setattr(db_module, "BUSY_TIMEOUT_MS", SHORT_BUSY_MS)
-    run("set", "agent", "sam", "-f", "-", stdin="prompt: You are Sam.\n")
+    run("agent", "set", "sam", "-f", "-", stdin="prompt: You are Sam.\n")
     capsys.readouterr()
     directory = tmp_path / "db"
     holder: sqlite3.Connection | None = None
@@ -886,7 +886,7 @@ def test_a_write_that_cannot_take_the_lock_prints_the_retryable_refusal(
     with TestClient(
         build_api(TOKEN, directory), headers={"Authorization": f"Bearer {TOKEN}"}
     ) as served:
-        assert run("set", "agent", "sam", "-f", "-", stdin="prompt: Still Sam.\n") == 1
+        assert run("agent", "set", "sam", "-f", "-", stdin="prompt: Still Sam.\n") == 1
         assert holder is not None
         try:
             over_http = served.put("/agents/sam", json={"prompt": "Still Sam."})
@@ -899,4 +899,4 @@ def test_a_write_that_cannot_take_the_lock_prints_the_retryable_refusal(
         assert captured.out == ""
         # And with the lock let go, the same command is answered.
         monkeypatch.setattr(cli, "build_client", built)
-        assert run("set", "agent", "sam", "-f", "-", stdin="prompt: Still Sam.\n") == 0
+        assert run("agent", "set", "sam", "-f", "-", stdin="prompt: Still Sam.\n") == 0

@@ -15,14 +15,14 @@
 # deployment is one document and one command:
 #
 #   vinga-server config apply -f examples/presets/local-stack.yaml
-#   vinga-server config set-default-agent assistant
+#   vinga-server config default-agent set assistant
 #   vinga-server config list
 #
 # and one entity at a time is what editing it afterwards looks like:
 #
-#   vinga-server config set provider llm claude -f examples/llm-anthropic.yaml
-#   vinga-server config set agent sam -f examples/agent.yaml
-#   vinga-server config bind-device aa:bb:cc:dd:ee:ff sam
+#   vinga-server config provider set llm claude -f examples/llm-anthropic.yaml
+#   vinga-server config agent set sam -f examples/agent.yaml
+#   vinga-server config device bind aa:bb:cc:dd:ee:ff sam
 #
 # Those commands write through the configuration API described under
 # server.api below, so they need a running server, and an empty database
@@ -42,7 +42,7 @@
 # Secrets never live in this file: a provider names the environment
 # variable that holds its key (api_key_env), and the server reads the
 # variable at startup; a credential can also be stored encrypted in the
-# database with `vinga-server config set-secret`. Any key here can be
+# database with `vinga-server config <kind> secret set`. Any key here can be
 # overridden with a VINGA_-prefixed environment variable, nested keys
 # joined with __ (VINGA_SERVER__PORT=9000,
 # VINGA_SERVER__LOG_LEVEL=DEBUG); a .env file next to where the server
@@ -136,8 +136,8 @@ server:
   #   vinga-server doctor
   #
   # A board typing that URL and resolving to no agent is answered with a
-  # six-digit code it shows and speaks; `config pending` lists what is
-  # waiting and `config add-device <code> <agent>` binds it, with no
+  # six-digit code it shows and speaks; `config device pending list` lists what is
+  # waiting and `config device pending claim <code> <agent>` binds it, with no
   # restart and no MAC to look up. A deployment with default_agent set
   # covers every unknown board already, so its devices never see a code.
   onboarding:

@@ -53,7 +53,7 @@ def test_an_invalid_fragment_is_refused_without_echoing_it(
     input is itself the thing that must not be printed back."""
     with caplog.at_level(logging.DEBUG):
         fragment = f"type: anthropic\napi_key: {SECRET}\n"
-        assert run("set", "provider", "llm", "claude", "-f", "-", stdin=fragment) == 1
+        assert run("provider", "set", "llm", "claude", "-f", "-", stdin=fragment) == 1
 
     captured = capsys.readouterr()
     assert "looks like an inline secret" in captured.err
@@ -72,7 +72,7 @@ def test_a_secret_nested_in_an_option_is_refused_and_never_read_back(
     nested = f"type: anthropic\nconnection:\n  api_key: {SECRET}\n"
 
     with caplog.at_level(logging.DEBUG):
-        assert run("set", "provider", "llm", "claude", "-f", "-", stdin=nested) == 1
+        assert run("provider", "set", "llm", "claude", "-f", "-", stdin=nested) == 1
 
     captured = capsys.readouterr()
     assert 'a key containing "api_key"' in captured.err
@@ -86,10 +86,10 @@ def test_a_secret_nested_in_an_option_is_refused_and_never_read_back(
 
     pasted = "sk_test_4f8b2c9e_never_a_real_credential"
     accepted = f"type: anthropic\nconnection:\n  api_key_env: {pasted}\n"
-    assert run("set", "provider", "llm", "claude", "-f", "-", stdin=accepted) == 0
+    assert run("provider", "set", "llm", "claude", "-f", "-", stdin=accepted) == 0
     capsys.readouterr()
 
-    assert run("show", "provider", "llm", "claude") == 0
+    assert run("provider", "show", "llm", "claude") == 0
     shown = capsys.readouterr().out
     # Quoted by the YAML dumper, since the mask begins with an alias
     # indicator; what matters is that the value shown is the mask.
@@ -100,11 +100,13 @@ def test_a_secret_nested_in_an_option_is_refused_and_never_read_back(
 def test_a_secret_is_read_from_stdin_and_never_shown(
     run, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
 ) -> None:
-    run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
+    run("provider", "set", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
     capsys.readouterr()
 
     with caplog.at_level(logging.DEBUG):
-        assert run("set-secret", "provider", "llm", "claude", "api_key", stdin=f"{SECRET}\n") == 0
+        assert run(
+            "provider", "secret", "set", "llm", "claude", "api_key", stdin=f"{SECRET}\n"
+        ) == 0
 
     captured = capsys.readouterr()
     assert "wrote secret for provider llm.claude api_key" in captured.out
@@ -116,16 +118,16 @@ def test_a_secret_is_read_from_stdin_and_never_shown(
 def test_a_secret_can_come_from_a_named_variable(
     run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
+    run("provider", "set", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
     monkeypatch.setenv("VINGA_TEST_KEY", SECRET)
 
     assert run(
-        "set-secret", "provider", "llm", "claude", "api_key", "--from-env", "VINGA_TEST_KEY"
+        "provider", "secret", "set", "llm", "claude", "api_key", "--from-env", "VINGA_TEST_KEY"
     ) == 0
 
     monkeypatch.delenv("VINGA_TEST_KEY")
     assert run(
-        "set-secret", "provider", "llm", "claude", "api_key", "--from-env", "VINGA_TEST_KEY"
+        "provider", "secret", "set", "llm", "claude", "api_key", "--from-env", "VINGA_TEST_KEY"
     ) == 1
     captured = capsys.readouterr()
     assert "--from-env names a variable that is not set" in captured.err
@@ -145,11 +147,13 @@ def test_a_variable_that_is_not_set_names_the_rule_and_never_the_name(
     refusal fire; that it is set nowhere is the point, since the secret
     typed by mistake is a value no environment holds.
     """
-    run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
+    run("provider", "set", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
     capsys.readouterr()
 
     with caplog.at_level(logging.DEBUG):
-        assert run("set-secret", "provider", "llm", "claude", "api_key", "--from-env", SECRET) == 1
+        assert run(
+            "provider", "secret", "set", "llm", "claude", "api_key", "--from-env", SECRET
+        ) == 1
 
     captured = capsys.readouterr()
     assert "--from-env names a variable that is not set" in captured.err
@@ -177,7 +181,7 @@ def test_an_interactive_terminal_is_read_without_echo(
 ) -> None:
     """A typed secret must not land in the scrollback, so a terminal is
     read through getpass rather than by reading stdin."""
-    run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
+    run("provider", "set", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
 
     class Terminal(io.StringIO):
         def isatty(self) -> bool:
@@ -187,16 +191,16 @@ def test_an_interactive_terminal_is_read_without_echo(
     monkeypatch.setattr(sys, "stdin", Terminal("this is never read\n"))
     monkeypatch.setattr(cli.getpass, "getpass", lambda prompt: asked.append(prompt) or SECRET)
 
-    assert run("set-secret", "provider", "llm", "claude", "api_key") == 0
+    assert run("provider", "secret", "set", "llm", "claude", "api_key") == 0
 
     assert asked, "the terminal was read without getpass"
     assert SECRET not in capsys.readouterr().out
 
 
 def test_an_empty_secret_is_refused(run, capsys: pytest.CaptureFixture[str]) -> None:
-    run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
+    run("provider", "set", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
 
-    assert run("set-secret", "provider", "llm", "claude", "api_key", stdin="\n") == 1
+    assert run("provider", "secret", "set", "llm", "claude", "api_key", stdin="\n") == 1
     assert "empty" in capsys.readouterr().err
 
 
@@ -204,24 +208,19 @@ def test_show_and_list_mask_stored_secrets_and_mark_what_they_shadow(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
     run(
-        "set",
-        "provider",
-        "llm",
-        "claude",
+        "provider", "set", "llm", "claude",
         "-f",
         "-",
         stdin="type: anthropic\nmodel: m\napi_key_env: ANTHROPIC_API_KEY\n",
     )
     run(
-        "set",
-        "mcp-server",
-        "weather",
+        "mcp-server", "set", "weather",
         "-f",
         "-",
         stdin="transport: streamable_http\nurl: https://example.invalid/mcp\n",
     )
-    run("set-secret", "provider", "llm", "claude", "api_key", stdin=SECRET)
-    run("set-secret", "mcp-server", "weather", "headers.Authorization", stdin=OTHER_SECRET)
+    run("provider", "secret", "set", "llm", "claude", "api_key", stdin=SECRET)
+    run("mcp-server", "secret", "set", "weather", "headers.Authorization", stdin=OTHER_SECRET)
     capsys.readouterr()
 
     run("show")
@@ -234,7 +233,7 @@ def test_show_and_list_mask_stored_secrets_and_mark_what_they_shadow(
     assert "api_key_env: ANTHROPIC_API_KEY" in shown
     assert "used instead of api_key_env: ANTHROPIC_API_KEY" in shown
 
-    run("show", "provider", "llm", "claude")
+    run("provider", "show", "llm", "claude")
     assert f"api_key: {MASK}" in capsys.readouterr().out
 
     run("list")
@@ -254,7 +253,7 @@ def test_a_pasted_credential_in_a_reference_field_is_refused(
     fragment = f"type: anthropic\nmodel: m\napi_key_env: {SECRET}\n"
 
     with caplog.at_level(logging.DEBUG):
-        assert run("set", "provider", "llm", "claude", "-f", "-", stdin=fragment) == 1
+        assert run("provider", "set", "llm", "claude", "-f", "-", stdin=fragment) == 1
 
     captured = capsys.readouterr()
     assert "name of an environment variable" in captured.err
@@ -264,7 +263,7 @@ def test_a_pasted_credential_in_a_reference_field_is_refused(
     assert "Traceback" not in captured.err
 
     # And nothing was written: the entity does not exist.
-    assert run("show", "provider", "llm", "claude") == 1
+    assert run("provider", "show", "llm", "claude") == 1
     assert capsys.readouterr().err.startswith("providers:")
 
 
@@ -275,9 +274,7 @@ def test_an_mcp_reference_shows_and_anything_else_in_its_place_does_not(
     valid entry displays exactly as it was written; the mask is what
     covers a value that got in another way."""
     run(
-        "set",
-        "mcp-server",
-        "weather",
+        "mcp-server", "set", "weather",
         "-f",
         "-",
         stdin=(
@@ -290,7 +287,7 @@ def test_an_mcp_reference_shows_and_anything_else_in_its_place_does_not(
     )
     capsys.readouterr()
 
-    run("show", "mcp-server", "weather")
+    run("mcp-server", "show", "weather")
     shown = capsys.readouterr().out
     assert "$WEATHER_TOKEN" in shown
     # A key that carries no secret keeps its literal value: masking it
@@ -301,11 +298,11 @@ def test_an_mcp_reference_shows_and_anything_else_in_its_place_does_not(
 def test_deleting_an_entity_takes_its_secrets_with_it(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
-    run("set-secret", "provider", "llm", "claude", "api_key", stdin=SECRET)
+    run("provider", "set", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
+    run("provider", "secret", "set", "llm", "claude", "api_key", stdin=SECRET)
     capsys.readouterr()
 
-    assert run("delete", "provider", "llm", "claude") == 0
+    assert run("provider", "delete", "llm", "claude") == 0
     capsys.readouterr()
 
     run("list")
@@ -315,11 +312,11 @@ def test_deleting_an_entity_takes_its_secrets_with_it(
 
 
 def test_a_secret_can_be_cleared(run, capsys: pytest.CaptureFixture[str]) -> None:
-    run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
-    run("set-secret", "provider", "llm", "claude", "api_key", stdin=SECRET)
+    run("provider", "set", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
+    run("provider", "secret", "set", "llm", "claude", "api_key", stdin=SECRET)
     capsys.readouterr()
 
-    assert run("clear-secret", "provider", "llm", "claude", "api_key") == 0
+    assert run("provider", "secret", "clear", "llm", "claude", "api_key") == 0
     run("list")
     assert "[secrets:" not in capsys.readouterr().out
 
@@ -330,35 +327,35 @@ def test_the_cli_still_works_when_the_key_is_missing_or_wrong(
     """The recovery case the boot check is deliberately kept out of
     opening the database for: reading, deleting and replacing all treat
     ciphertext as opaque, and only storing a new secret needs a key."""
-    run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
-    run("set-secret", "provider", "llm", "claude", "api_key", stdin=SECRET)
+    run("provider", "set", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
+    run("provider", "secret", "set", "llm", "claude", "api_key", stdin=SECRET)
     capsys.readouterr()
 
     monkeypatch.delenv(MASTER_KEY_ENV)
     assert run("list") == 0
     assert "[secrets: api_key]" in capsys.readouterr().out
-    assert run("show", "provider", "llm", "claude") == 0
+    assert run("provider", "show", "llm", "claude") == 0
     shown = capsys.readouterr().out
     assert MASK in shown
     assert SECRET not in shown
 
-    assert run("set-secret", "provider", "llm", "claude", "api_key", stdin=SECRET) == 1
+    assert run("provider", "secret", "set", "llm", "claude", "api_key", stdin=SECRET) == 1
     assert MASTER_KEY_ENV in capsys.readouterr().err
 
     # And the unreadable secret can be removed and the entity replaced.
-    assert run("clear-secret", "provider", "llm", "claude", "api_key") == 0
+    assert run("provider", "secret", "clear", "llm", "claude", "api_key") == 0
     replacement = "type: anthropic\nmodel: n\n"
-    assert run("set", "provider", "llm", "claude", "-f", "-", stdin=replacement) == 0
+    assert run("provider", "set", "llm", "claude", "-f", "-", stdin=replacement) == 0
 
 
 def test_an_unusable_key_names_its_position_and_not_its_material(
     run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
+    run("provider", "set", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
     capsys.readouterr()
     monkeypatch.setenv(MASTER_KEY_ENV, "not-a-fernet-key")
 
-    assert run("set-secret", "provider", "llm", "claude", "api_key", stdin=SECRET) == 1
+    assert run("provider", "secret", "set", "llm", "claude", "api_key", stdin=SECRET) == 1
 
     captured = capsys.readouterr()
     assert MASTER_KEY_ENV in captured.err
@@ -379,15 +376,15 @@ PASTED = "sk-live-3f9a1c7e-never-a-real-value"
 # section the refusal names.
 SLOTS = [
     (
-        ("set", "provider", "llm", "claude", "-f", "-"),
+        ("provider", "set", "llm", "claude", "-f", "-"),
         "type: anthropic\nmodel: m\n",
-        ("provider", "llm", "claude", PASTED),
+        ("provider", "secret", "set", "llm", "claude", PASTED),
         "providers",
     ),
     (
-        ("set", "mcp-server", "home", "-f", "-"),
+        ("mcp-server", "set", "home", "-f", "-"),
         "transport: stdio\ncommand: uvx\n",
-        ("mcp-server", "home", PASTED),
+        ("mcp-server", "secret", "set", "home", PASTED),
         "mcp_servers",
     ),
 ]
@@ -405,7 +402,7 @@ def test_a_slot_that_is_not_a_credential_slot_is_refused_without_printing_it(
 ) -> None:
     """The slot half of a secret's address (#132).
 
-    `set-secret` is the command a credential is pasted into, so a
+    A secret set is the command a credential is pasted into, so a
     credential typed one argument early lands in the slot. The entity it
     is offered to exists here on purpose: the entity-miss refusal used
     to answer first, which meant this check was never the one under
@@ -415,7 +412,7 @@ def test_a_slot_that_is_not_a_credential_slot_is_refused_without_printing_it(
     capsys.readouterr()
 
     with caplog.at_level(logging.DEBUG):
-        assert run("set-secret", *addressed, stdin=SECRET) == 1
+        assert run(*addressed, stdin=SECRET) == 1
 
     captured = capsys.readouterr()
     assert PASTED not in captured.err

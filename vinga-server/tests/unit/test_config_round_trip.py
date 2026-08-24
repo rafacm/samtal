@@ -402,10 +402,7 @@ def test_the_cli_resubmits_a_masked_document_it_printed(
     was not shown survives it."""
     assert (
         run(
-            "set",
-            "provider",
-            "llm",
-            "claude",
+            "provider", "set", "llm", "claude",
             "-f",
             "-",
             stdin=f"type: anthropic\nmodel: m\nconnection:\n  api_key_env: {PASTED}\n",
@@ -414,18 +411,18 @@ def test_the_cli_resubmits_a_masked_document_it_printed(
     )
     capsys.readouterr()
 
-    run("show", "provider", "llm", "claude")
+    run("provider", "show", "llm", "claude")
     shown = capsys.readouterr().out
     printed = document(shown)
     assert printed["connection"] == {"api_key_env": MASK}
     assert PASTED not in shown
 
     assert (
-        run("set", "provider", "llm", "claude", "-f", "-", stdin=yaml.safe_dump(printed)) == 0
+        run("provider", "set", "llm", "claude", "-f", "-", stdin=yaml.safe_dump(printed)) == 0
     )
 
     capsys.readouterr()
-    run("show", "provider", "llm", "claude")
+    run("provider", "show", "llm", "claude")
     assert document(capsys.readouterr().out) == printed
 
 
@@ -441,8 +438,9 @@ def test_the_cli_resubmits_a_masked_document_it_printed(
 # stored credential is not in an exported body at all, and it cannot be:
 # the mask is not a value a creating write accepts, so an export with
 # masks injected would fail on the empty store it is most needed for,
-# and `set-secret` cannot run before the entity exists. So the sequence
-# is apply, then set-secret, which is what the export's own header says.
+# and a secret write cannot run before the entity exists. So the
+# sequence is apply, then the secret sets, which is what the export's
+# own header says.
 
 # The three ways a secret reaches an entity, all three seeded below,
 # because they travel three different ways. An environment reference is
@@ -462,18 +460,18 @@ STORED = {
 def _seed(run) -> None:
     """A deployment holding all three, written the way an operator
     writes one."""
-    assert run("set", "provider", "llm", "claude", "type=anthropic", "model=m",
+    assert run("provider", "set", "llm", "claude", "type=anthropic", "model=m",
                f"api_key_env={ANTHROPIC_REFERENCE}") == 0
-    assert run("set", "provider", "asr", "whisper", "type=mock") == 0
+    assert run("provider", "set", "asr", "whisper", "type=mock") == 0
     assert run(
-        "set", "mcp-server", "home",
+        "mcp-server", "set", "home",
         "transport=streamable_http",
         "url=https://example.invalid/mcp",
         f"headers.Authorization={HOME_REFERENCE}",
     ) == 0
-    assert run("set", "agent", "sam", "prompt=You are Sam.", "llm=claude", "asr=whisper") == 0
-    assert run("bind-device", "AA-BB-CC-DD-EE-FF", "sam") == 0
-    assert run("set-default-agent", "sam") == 0
+    assert run("agent", "set", "sam", "prompt=You are Sam.", "llm=claude", "asr=whisper") == 0
+    assert run("device", "bind", "AA-BB-CC-DD-EE-FF", "sam") == 0
+    assert run("default-agent", "set", "sam") == 0
     _enter_secrets(run, _SET_SECRETS)
 
 
@@ -482,8 +480,8 @@ def _seed(run) -> None:
 # lists its locations sorted, so that two exports of one configuration
 # are the same bytes whatever order the credentials were entered in.
 _SET_SECRETS = [
-    ["set-secret", "mcp-server", "--", "home", "headers.Authorization"],
-    ["set-secret", "provider", "--", "asr", "whisper", "api_key"],
+    ["mcp-server", "secret", "set", "--", "home", "headers.Authorization"],
+    ["provider", "secret", "set", "--", "asr", "whisper", "api_key"],
 ]
 
 
@@ -494,11 +492,11 @@ def _enter_secrets(run, commands: list[list[str]]) -> None:
 
 
 def _located(words: list[str]) -> tuple[str, str, str]:
-    """One `set-secret` command as the location it addresses, which is
+    """One secret-set command as the location it addresses, which is
     how a test knows which credential to feed it. The `--` is dropped
     the way the parser drops it: it separates the command's own words
     from the identity, and is not part of either."""
-    kind, _marker, *identity, slot = words[1:]
+    kind, _secret, _verb, _marker, *identity, slot = words
     return (kind.replace("-", "_"), ".".join(identity), slot)
 
 
@@ -585,7 +583,7 @@ def test_one_entity_exports_as_the_fragment_that_writes_it(
     _seed(run)
     capsys.readouterr()
 
-    assert run("export", "mcp-server", "home") == 0
+    assert run("mcp-server", "export", "home") == 0
 
     exported = capsys.readouterr().out
     assert "# One mcp server (mcp_servers.<name>)" in exported
@@ -595,9 +593,9 @@ def test_one_entity_exports_as_the_fragment_that_writes_it(
     assert body["headers"] == {"Authorization": HOME_REFERENCE}
 
     # And it is a fragment: the command whose header it names takes it.
-    assert run("set", "mcp-server", "second", "-f", "-", stdin=exported) == 0
+    assert run("mcp-server", "set", "second", "-f", "-", stdin=exported) == 0
     capsys.readouterr()
-    run("show", "mcp-server", "second")
+    run("mcp-server", "show", "second")
     assert document(capsys.readouterr().out)["url"] == "https://example.invalid/mcp"
 
 
@@ -608,7 +606,7 @@ def test_an_entity_with_no_stored_credential_exports_without_an_annotation(
     _seed(run)
     capsys.readouterr()
 
-    assert run("export", "agent", "sam") == 0
+    assert run("agent", "export", "sam") == 0
 
     exported = capsys.readouterr().out
     assert "Stored credentials" not in exported
@@ -638,8 +636,8 @@ def test_an_exported_command_runs_for_a_name_that_begins_with_a_dash(
 ) -> None:
     run = runner(tmp_path, monkeypatch)
     # Written with the marker, because that is the only way to write it.
-    assert run("set", "provider", "--", "llm", DASHED_NAME, "type=mock") == 0
-    assert run("set-secret", "provider", "--", "llm", DASHED_NAME, DASHED_SLOT,
+    assert run("provider", "set", "--", "llm", DASHED_NAME, "type=mock") == 0
+    assert run("provider", "secret", "set", "--", "llm", DASHED_NAME, DASHED_SLOT,
                stdin="sk-test-dashed-never-a-real-credential\n") == 0
     capsys.readouterr()
 
@@ -647,7 +645,9 @@ def test_an_exported_command_runs_for_a_name_that_begins_with_a_dash(
     exported = capsys.readouterr().out
 
     (command,) = _exported_secret_commands(exported)
-    assert command == ["set-secret", "provider", "--", "llm", DASHED_NAME, DASHED_SLOT]
+    assert command == [
+        "provider", "secret", "set", "--", "llm", DASHED_NAME, DASHED_SLOT
+    ]
     # And it runs, which is the whole of what an exported command is for.
     assert run(*command, stdin="sk-test-dashed-never-a-real-credential\n") == 0
     assert "wrote secret" in capsys.readouterr().out
@@ -660,10 +660,10 @@ def test_the_same_command_without_the_marker_does_not_run(
     the name as an option and refuses, which is what the export used to
     render."""
     run = runner(tmp_path, monkeypatch)
-    run("set", "provider", "--", "llm", DASHED_NAME, "type=mock")
-    run("set-secret", "provider", "--", "llm", DASHED_NAME, DASHED_SLOT, stdin="s3cret\n")
+    run("provider", "set", "--", "llm", DASHED_NAME, "type=mock")
+    run("provider", "secret", "set", "--", "llm", DASHED_NAME, DASHED_SLOT, stdin="s3cret\n")
     capsys.readouterr()
 
-    assert run("set-secret", "provider", "llm", DASHED_NAME, DASHED_SLOT, stdin="s3cret\n") == 1
+    assert run("provider", "secret", "set", "llm", DASHED_NAME, DASHED_SLOT, stdin="s3cret\n") == 1
 
     assert "run with --help for the grammar" in capsys.readouterr().err

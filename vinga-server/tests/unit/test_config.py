@@ -361,17 +361,17 @@ def test_unknown_top_level_key_is_rejected(tmp_path: Path) -> None:
 # What a leftover section of each moved key looks like in a file, and
 # the command the refusal has to name for it.
 MOVED_SECTIONS: list[tuple[str, str, str]] = [
-    ("providers", "providers:\n  llm:\n    claude:\n      type: anthropic\n", "set provider"),
-    ("mcp_servers", "mcp_servers:\n  home:\n    transport: stdio\n", "set mcp-server"),
+    ("providers", "providers:\n  llm:\n    claude:\n      type: anthropic\n", "provider set"),
+    ("mcp_servers", "mcp_servers:\n  home:\n    transport: stdio\n", "mcp-server set"),
     (
         "prompt_fragments",
         "prompt_fragments:\n  household:\n    text: The bins go out on Tuesday.\n",
-        "set prompt-fragment",
+        "prompt-fragment set",
     ),
-    ("agent_defaults", "agent_defaults:\n  llm: claude\n", "set agent-defaults"),
-    ("agents", "agents:\n  assistant:\n    prompt: hi\n", "set agent"),
-    ("devices", 'devices:\n  "aa:bb:cc:dd:ee:ff":\n    - assistant\n', "bind-device"),
-    ("default_agent", "default_agent: assistant\n", "set-default-agent"),
+    ("agent_defaults", "agent_defaults:\n  llm: claude\n", "agent-defaults set"),
+    ("agents", "agents:\n  assistant:\n    prompt: hi\n", "agent set"),
+    ("devices", 'devices:\n  "aa:bb:cc:dd:ee:ff":\n    - assistant\n', "device bind"),
+    ("default_agent", "default_agent: assistant\n", "default-agent set"),
 ]
 
 

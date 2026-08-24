@@ -150,7 +150,7 @@ def test_the_url_is_alone_on_stdout_and_the_advice_is_not(
     captured = capsys.readouterr()
     assert captured.out.splitlines() == [f"http://0.0.0.0:8003/x/{KEY}/"]
     assert "captive portal" in captured.err
-    assert "add-device" in captured.err
+    assert "device pending claim" in captured.err
 
 
 def test_the_guidance_promises_only_what_the_readme_does(
@@ -178,7 +178,7 @@ def test_the_guidance_promises_only_what_the_readme_does(
     # Conditional in both, and the condition named the same way.
     assert "If the board" in printed
     assert "if it shows any" in section
-    for vocabulary in ("activation code", "default_agent", "add-device"):
+    for vocabulary in ("activation code", "default_agent", "device pending claim"):
         assert vocabulary in printed, vocabulary
         assert vocabulary in section, vocabulary
     # The promise that was there before.

@@ -675,39 +675,39 @@ def test_one_entity_is_written_read_exported_and_deleted(
     """
     path = written(tmp_path, "fragment.yaml", fragment)
 
-    assert run("set", kind, *identity, "-f", path) == 0
+    assert run(kind, "set", *identity, "-f", path) == 0
     acknowledged = capsys.readouterr()
     assert acknowledged.out.startswith("wrote ")
     # Every write says when it takes effect, and it says it on stderr so
     # that stdout holds the acknowledgement alone.
     assert acknowledged.err.strip()
 
-    assert run("show", kind, *identity) == 0
+    assert run(kind, "show", *identity) == 0
     shown = document(capsys.readouterr().out)
     assert fragment.items() <= shown.items()
 
-    assert run("export", kind, *identity) == 0
+    assert run(kind, "export", *identity) == 0
     exported = capsys.readouterr().out
     # The header names the command that writes one back, and the body
     # under it is the same read `show` renders: export is the writable
     # projection of the display one, not a second read.
     assert exported.startswith("# One ")
-    assert f"{cli.PROGRAM} set {kind}" in exported
+    assert f"{cli.PROGRAM} {kind} set " in exported
     assert document(exported) == shown
 
-    assert run("set", kind, *identity, *pairs) == 0
+    assert run(kind, "set", *identity, *pairs) == 0
     assert capsys.readouterr().out.startswith("wrote ")
 
-    assert run("show", kind, *identity) == 0
+    assert run(kind, "show", *identity) == 0
     assert document(capsys.readouterr().out) == shown
 
     if not deletable:
         return
 
-    assert run("delete", kind, *identity) == 0
+    assert run(kind, "delete", *identity) == 0
     assert capsys.readouterr().out.startswith("wrote ")
 
-    assert run("show", kind, *identity) == 1
+    assert run(kind, "show", *identity) == 1
     gone = capsys.readouterr()
     assert gone.out == ""
     assert "Traceback" not in gone.err
@@ -728,18 +728,18 @@ def test_a_board_is_bound_by_the_mac_you_already_know(
     """Written in the spelling a sticker carries and read back in the
     one the configuration holds, which is the normalization the write
     path does and the wire carries verbatim."""
-    assert run("bind-device", KNOWN_MAC.upper().replace(":", "-"), "sam") == 0
+    assert run("device", "bind", KNOWN_MAC.upper().replace(":", "-"), "sam") == 0
     bound = capsys.readouterr()
     assert bound.out.startswith("wrote ")
     assert bound.err.strip()
 
-    assert run("show", "device", KNOWN_MAC) == 0
+    assert run("device", "show", KNOWN_MAC) == 0
     assert document(capsys.readouterr().out) == {"agents": ["sam"]}
 
-    assert run("delete", "device", KNOWN_MAC) == 0
+    assert run("device", "delete", KNOWN_MAC) == 0
     assert capsys.readouterr().out.startswith("wrote ")
 
-    assert run("show", "device", KNOWN_MAC) == 1
+    assert run("device", "show", KNOWN_MAC) == 1
     assert capsys.readouterr().out == ""
 
 
@@ -763,33 +763,33 @@ def test_a_board_is_onboarded_by_the_code_on_its_screen(
     that makes the server log, so it is where the collection can be
     shown to hold a record no code in this thread made.
     """
-    assert run("set-default-agent", "sam") == 0
+    assert run("default-agent", "set", "sam") == 0
     assert capsys.readouterr().out.startswith("wrote ")
     assert "activation" not in check_in(deployed, WAITING_MAC)
 
-    assert run("clear-default-agent") == 0
+    assert run("default-agent", "clear") == 0
     assert capsys.readouterr().out.startswith("wrote ")
     activation = check_in(deployed, WAITING_MAC)["activation"]
     code = str(activation["code"])
     assert code.isdigit()
 
-    assert run("pending") == 0
+    assert run("device", "pending", "list") == 0
     waiting = capsys.readouterr().out
     assert code in waiting
     assert WAITING_MAC in waiting
     assert BOARD in waiting
 
-    assert run("add-device", code, "sam") == 0
+    assert run("device", "pending", "claim", code, "sam") == 0
     claimed = capsys.readouterr()
     assert claimed.out.startswith("wrote ")
     assert claimed.err.strip()
 
-    assert run("show", "device", WAITING_MAC) == 0
+    assert run("device", "show", WAITING_MAC) == 0
     assert document(capsys.readouterr().out) == {"agents": ["sam"]}
 
     # And the code is retired with the claim, so the board that was
     # waiting is no longer waiting for anything.
-    assert run("pending") == 0
+    assert run("device", "pending", "list") == 0
     assert code not in capsys.readouterr().out
 
     # The capture reaches the server: the warning a board with no agent
@@ -836,13 +836,15 @@ def test_a_credential_is_stored_masked_and_cleared(
         seen.extend((captured.out, captured.err))
         return captured.out
 
-    assert run("set-secret", "provider", "llm", "spare", "api_key", "--from-env", SECRET_ENV) == 0
+    assert run(
+        "provider", "secret", "set", "llm", "spare", "api_key", "--from-env", SECRET_ENV
+    ) == 0
     kept("wrote ")
 
-    assert run("set-secret", "mcp-server", "weather", "headers.Authorization", stdin=SECRET) == 0
+    assert run("mcp-server", "secret", "set", "weather", "headers.Authorization", stdin=SECRET) == 0
     kept("wrote ")
 
-    assert run("show", "provider", "llm", "spare") == 0
+    assert run("provider", "show", "llm", "spare") == 0
     entity = kept("")
     assert f"api_key: {MASK}" in entity
 
@@ -860,16 +862,16 @@ def test_a_credential_is_stored_masked_and_cleared(
     # creating write would refuse.
     # The marker is part of the exported command since the M2 round's
     # finding 6: a legal leading-dash identity must survive the argv.
-    assert f"{cli.PROGRAM} set-secret provider -- llm spare api_key" in exported
-    assert f"{cli.PROGRAM} set-secret mcp-server -- weather headers.Authorization" in exported
+    assert f"{cli.PROGRAM} provider secret set -- llm spare api_key" in exported
+    assert f"{cli.PROGRAM} mcp-server secret set -- weather headers.Authorization" in exported
     assert MASK not in exported
 
-    assert run("clear-secret", "provider", "llm", "spare", "api_key") == 0
+    assert run("provider", "secret", "clear", "llm", "spare", "api_key") == 0
     kept("wrote ")
-    assert run("clear-secret", "mcp-server", "weather", "headers.Authorization") == 0
+    assert run("mcp-server", "secret", "clear", "weather", "headers.Authorization") == 0
     kept("wrote ")
 
-    assert run("show", "provider", "llm", "spare") == 0
+    assert run("provider", "show", "llm", "spare") == 0
     cleared = kept("")
     assert MASK not in cleared
     # And what the stored value was covering is back in view.
@@ -904,7 +906,7 @@ def test_the_running_server_is_read_after_a_reload(
     reload installs it. That sequence needs a server with a lifetime,
     which is what this lane has and the acceptance suites do not.
     """
-    assert run("prompt", "sam") == 1
+    assert run("agent", "preview", "sam") == 1
     unserved = capsys.readouterr()
     assert unserved.out == ""
     assert "Traceback" not in unserved.err
@@ -913,7 +915,7 @@ def test_the_running_server_is_read_after_a_reload(
     applied = capsys.readouterr().out
     assert "sam" in applied
 
-    assert run("prompt", "sam") == 0
+    assert run("agent", "preview", "sam") == 0
     assembled = capsys.readouterr().out
     assert "You are Sam." in assembled
     # The fragment the agent includes is part of what the model is
@@ -1030,9 +1032,9 @@ def _annotated_secret_command(exported: str) -> tuple[str, ...]:
         line.lstrip("# ")
         for line in exported.splitlines()
         if line.lstrip("# ").startswith(cli.PROGRAM)
-        and " set-secret " in line
+        and " secret set " in line
     ]
-    assert len(named) == 1, f"the export named {len(named)} set-secret commands"
+    assert len(named) == 1, f"the export named {len(named)} secret set commands"
     return tuple(shlex.split(named[0])[len(cli.PROGRAM.split()) :])
 
 
@@ -1108,9 +1110,9 @@ def test_a_deployment_is_rebuilt_from_its_export_on_an_empty_database(
         # The rebuild has to reach a server that boots, so what it puts
         # back has to be complete: the default agent is part of the
         # deployment being recovered rather than a detail of this test.
-        assert run(*seeded, "set-default-agent", "sam") == 0
+        assert run(*seeded, "default-agent", "set", "sam") == 0
         assert run(
-            *seeded, "set-secret", "provider", "llm", "spare", "api_key",
+            *seeded, "provider", "secret", "set", "llm", "spare", "api_key",
             "--from-env", SECRET_ENV,
         ) == 0
         capsys.readouterr()
@@ -1209,99 +1211,114 @@ MISSING_CONFIG = "/nowhere/at/all.yaml"
 
 
 class Refusal(NamedTuple):
-    """One family's refusal: what to type, the whole of what stderr says
-    afterwards, and which end of the connection composed it."""
+    """One family's refusal: which family it stands for, what to type,
+    the whole of what stderr says afterwards, and which end of the
+    connection composed it."""
 
-    family: str
+    # The noun path the command sits under, which is what a family is
+    # once the tree is deeper than two words: `provider secret` refusals
+    # are not `provider` refusals, and counting them as one would leave
+    # the sub-noun's sentences unwatched. A flat command is its own
+    # family, since it sits under no noun.
+    family: tuple[str, ...]
+
     argv: tuple[str, ...]
     stderr: str
     wire: bool
 
 
+def family_of(words: tuple[str, ...]) -> tuple[str, ...]:
+    """Which family one registered row belongs to: the noun path it
+    sits under, or itself when it sits under nothing."""
+    return words[:-1] if len(words) > 1 else words
+
+
 REFUSALS: tuple[Refusal, ...] = (
     Refusal(
-        "set",
-        ("set", "agent", "refused-agent", f"prompt={PLANTED}", "llm=nowhere"),
+        ("agent",),
+        ("agent", "set", "refused-agent", f"prompt={PLANTED}", "llm=nowhere"),
         UNRESOLVED
         + "\n  - agents.refused-agent.llm: names no llm provider that exists, and the "
         "name is not quoted back (defined: brain, spare)",
         True,
     ),
-    Refusal("delete", ("delete", "agent", "no-such-agent"), entities.NO_SUCH_AGENT, True),
-    Refusal("bind-device", ("bind-device", "not-a-mac", "sam"), NOT_A_MAC, True),
+    Refusal(("agent",), ("agent", "delete", "no-such-agent"), entities.NO_SUCH_AGENT, True),
     Refusal(
-        "add-device",
-        ("add-device", "000000", "sam"),
-        "no device is waiting with that activation code. A code lasts ten minutes and "
-        "is retired the moment it is claimed, and a device that has been waiting longer "
-        "is already showing a fresh one: read the code currently on the device's screen "
-        "and use that. `vinga-server config pending` lists the codes this server is "
-        "showing right now.",
+        ("provider",), ("provider", "show", "llm", "no-such"), entities.NO_SUCH_PROVIDER, True
+    ),
+    Refusal(
+        ("mcp-server",),
+        ("mcp-server", "show", "no-such"),
+        entities.NO_SUCH_MCP_SERVER,
         True,
     ),
     Refusal(
-        "apply",
+        ("prompt-fragment",),
+        ("prompt-fragment", "show", "no-such"),
+        entities.NO_SUCH_FRAGMENT,
+        True,
+    ),
+    Refusal(("agent-defaults",), ("agent-defaults", "show", "extra"), USAGE, False),
+    Refusal(("device",), ("device", "bind", "not-a-mac", "sam"), NOT_A_MAC, True),
+    Refusal(
+        ("device", "pending"),
+        ("device", "pending", "claim", "000000", "sam"),
+        "no device is waiting with that activation code. A code lasts ten minutes and "
+        "is retired the moment it is claimed, and a device that has been waiting longer "
+        "is already showing a fresh one: read the code currently on the device's screen "
+        "and use that. `vinga-server config device pending list` lists the codes this "
+        "server is showing right now.",
+        True,
+    ),
+    Refusal(
+        ("provider", "secret"),
+        ("provider", "secret", "set", "llm", "no-such", "api_key", "--from-env", SECRET_ENV),
+        entities.NO_SUCH_PROVIDER,
+        True,
+    ),
+    Refusal(
+        ("mcp-server", "secret"),
+        ("mcp-server", "secret", "clear", "no-such", "env.TOKEN"),
+        "mcp_servers: no secret is stored for that slot",
+        True,
+    ),
+    Refusal(
+        ("default-agent",),
+        ("default-agent", "set", "no-such-agent"),
+        UNRESOLVED
+        + "\n  - default_agent: names no agent that exists, and the name is not quoted "
+        "back (defined: sam)",
+        True,
+    ),
+    Refusal(
+        ("apply",),
         ("apply", "-f", REFUSED_DOCUMENT),
         "document: the top-level keys of an applied document are the sections of the "
         "domain configuration, which are " + ", ".join(DOMAIN_KEYS) + ". Something else "
         "was written, and it is not quoted back",
         True,
     ),
-    Refusal("pending", ("pending", "extra"), USAGE, False),
-    Refusal("status", ("status", "extra"), USAGE, False),
+    Refusal(("status",), ("status", "extra"), USAGE, False),
+    Refusal(("reload",), ("reload", "extra"), USAGE, False),
     Refusal(
-        "prompt",
-        ("prompt", "no-such-agent"),
-        "this server is not serving an agent of that name. The agents a server can "
-        "serve are the agents of the world it has installed, so one written since is "
-        "served by the reload that installs it (`vinga-server config reload`), and one "
-        "that never existed is a name nothing answers to. `vinga-server config list` "
-        "shows the agents that are stored.",
-        True,
-    ),
-    Refusal("reload", ("reload", "extra"), USAGE, False),
-    Refusal(
-        "ota-url",
+        ("ota-url",),
         ("ota-url", "--config", MISSING_CONFIG),
         f"config file not found: {MISSING_CONFIG}",
         False,
     ),
+    Refusal(("list",), ("list", "extra"), USAGE, False),
+    Refusal(("show",), ("show", "extra"), USAGE, False),
+    Refusal(("export",), ("export", "extra"), USAGE, False),
     Refusal(
-        "set-default-agent",
-        ("set-default-agent", "no-such-agent"),
-        UNRESOLVED
-        + "\n  - default_agent: names no agent that exists, and the name is not quoted "
-        "back (defined: sam)",
-        True,
-    ),
-    Refusal("clear-default-agent", ("clear-default-agent", "extra"), USAGE, False),
-    Refusal(
-        "set-secret",
-        ("set-secret", "provider", "llm", "no-such", "api_key", "--from-env", SECRET_ENV),
-        entities.NO_SUCH_PROVIDER,
-        True,
-    ),
-    Refusal(
-        "clear-secret",
-        ("clear-secret", "provider", "llm", "no-such", "api_key"),
-        "providers: no secret is stored for that slot",
-        True,
-    ),
-    Refusal("list", ("list", "extra"), USAGE, False),
-    Refusal(
-        "schema",
+        ("schema",),
         ("schema", "nonsense"),
         '"nonsense" is not a documented entity; expected one of: '
         + ", ".join(docgen.entity_names()),
         False,
     ),
-    Refusal("reference", ("reference", "extra"), USAGE, False),
-    Refusal("openapi", ("openapi", "extra"), USAGE, False),
-    Refusal("cli-reference", ("cli-reference", "extra"), USAGE, False),
-    Refusal(
-        "show", ("show", "provider", "llm", "no-such"), entities.NO_SUCH_PROVIDER, True
-    ),
-    Refusal("export", ("export", "agent", "no-such"), entities.NO_SUCH_AGENT, True),
+    Refusal(("reference",), ("reference", "extra"), USAGE, False),
+    Refusal(("openapi",), ("openapi", "extra"), USAGE, False),
+    Refusal(("cli-reference",), ("cli-reference", "extra"), USAGE, False),
 )
 
 # What a client that cannot reach the API says, pinned at both ends
@@ -1320,7 +1337,9 @@ def test_every_family_of_the_grammar_has_a_refusal() -> None:
     is a command added to the grammar rather than a row deleted from
     this file.
     """
-    assert {row.family for row in REFUSALS} == {row.words[0] for row in cli.COMMANDS}
+    assert {row.family for row in REFUSALS} == {
+        family_of(row.words) for row in cli.COMMANDS
+    }
 
 
 def refusing(argv: Sequence[str], directory: Path) -> tuple[str, ...]:
@@ -1339,7 +1358,9 @@ def refusing(argv: Sequence[str], directory: Path) -> tuple[str, ...]:
     )
 
 
-@pytest.mark.parametrize("row", REFUSALS, ids=[row.family for row in REFUSALS])
+@pytest.mark.parametrize(
+    "row", REFUSALS, ids=[" ".join(row.family) for row in REFUSALS]
+)
 def test_one_refusal_of_each_family_arrives_intact(
     deployed: Live,
     tmp_path: Path,
@@ -1379,7 +1400,9 @@ def test_one_refusal_of_each_family_arrives_intact(
     assert leaked(SECRET, **surfaces) == []
 
 
-@pytest.mark.parametrize("row", REFUSALS, ids=[row.family for row in REFUSALS])
+@pytest.mark.parametrize(
+    "row", REFUSALS, ids=[" ".join(row.family) for row in REFUSALS]
+)
 def test_a_refusal_the_server_composes_needs_the_server(
     deployed: Live,
     tmp_path: Path,
@@ -1445,7 +1468,7 @@ def test_a_fragment_that_will_not_parse_never_travels(
     """
     broken = tmp_path / "broken.yaml"
     broken.write_text(f"prompt: {PLANTED}\nmcp: [\n", encoding="utf-8")
-    argv = ("set", "agent", "sam", "-f", str(broken))
+    argv = ("agent", "set", "sam", "-f", str(broken))
 
     assert run(*argv) == 1
     refused = capsys.readouterr()
@@ -1471,7 +1494,7 @@ def test_a_fragment_that_will_not_parse_never_travels(
         == []
     )
 
-    assert run("show", "agent", "sam") == 0
+    assert run("agent", "show", "sam") == 0
     assert document(capsys.readouterr().out)["prompt"] == "You are Sam."
 
 
@@ -1703,7 +1726,8 @@ def test_every_published_recipe_runs_against_the_server(
 
     for line in published:
         argv = line.split()
-        assert run(*argv, stdin=SECRET if argv[0] == "set-secret" else None) == 0, line
+        secret = argv[1:3] == ["secret", "set"]
+        assert run(*argv, stdin=SECRET if secret else None) == 0, line
         assert capsys.readouterr().out.strip(), line
 
     # The deployment those commands add up to, read back through the
@@ -1745,7 +1769,7 @@ def test_the_lane_s_server_booted_from_the_environment_alone(
 
     # And the CLI, which resolved this server's address from the
     # environment too, is reading the same store.
-    assert run("show", "agent", "sam") == 0
+    assert run("agent", "show", "sam") == 0
     assert document(capsys.readouterr().out)["prompt"] == stored.domain.agents["sam"].prompt
 
 
@@ -1836,6 +1860,8 @@ def test_the_lane_drove_every_command_of_the_registration_table(
         f"them successfully: {missing}"
     )
 
-    # And every group word was reached through one of them, which is the
-    # other half of the tree the table describes.
-    assert set(cli.GROUPS) <= {words[0] for words in DRIVEN}
+    # And every noun path was reached through one of them, which is the
+    # other half of the tree the table describes: a group nothing was
+    # driven under is a heading with no command behind it.
+    reached = {words[:length] for words in DRIVEN for length in range(1, len(words) + 1)}
+    assert set(cli.GROUPS) <= reached

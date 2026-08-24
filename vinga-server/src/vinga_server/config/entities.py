@@ -377,7 +377,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
             "same name. A voice is a provider entry, so two agents that should sound "
             "different reference two entries."
         ),
-        command="vinga-server config set provider <stage> <name> -f fragment.yaml",
+        command="vinga-server config provider set <stage> <name> -f fragment.yaml",
         examples=(
             "llm-anthropic.yaml",
             "llm-openai-compatible.yaml",
@@ -411,7 +411,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
             "logs a warning: its tools are absent, and it reconnects in the "
             "background when a session needs it."
         ),
-        command="vinga-server config set mcp-server <name> -f fragment.yaml",
+        command="vinga-server config mcp-server set <name> -f fragment.yaml",
         examples=("mcp-server-stdio.yaml", "mcp-server-streamable-http.yaml"),
         route="/mcp-servers",
         addressing=("name",),
@@ -435,7 +435,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
             "provenance the assembled prompt is reported under (`fragment:<name>`), so "
             "it must match `[A-Za-z0-9_-]+`."
         ),
-        command="vinga-server config set prompt-fragment <name> -f fragment.yaml",
+        command="vinga-server config prompt-fragment set <name> -f fragment.yaml",
         examples=("prompt-fragment.yaml",),
         notes=(
             "Nothing is added around the text, not one heading: it is prompt text the "
@@ -446,7 +446,8 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
             "A fragment that some layer still includes cannot be deleted, which is the "
             "same reference rule that keeps a referenced provider or MCP server from "
             "being taken away underneath an agent.",
-            "There is no length cap. `vinga-server config prompt <agent>` reports what "
+            "There is no length cap. `vinga-server config agent preview <agent>` "
+            "reports what "
             "each block costs and what the whole prompt costs, which is what an "
             "operator tunes a small model's context budget against.",
         ),
@@ -467,7 +468,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
             "must resolve to a provider, on the agent or through agent_defaults, for "
             "the server to start, so a typical agent is a prompt and a voice."
         ),
-        command="vinga-server config set agent <name> -f fragment.yaml",
+        command="vinga-server config agent set <name> -f fragment.yaml",
         examples=("agent.yaml",),
         notes=(
             "An agent's name is also the key its remembered facts are stored under, "
@@ -493,7 +494,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
             "makes an agent that agent, and inheriting one silently would make two "
             "agents the same one."
         ),
-        command="vinga-server config set agent-defaults -f fragment.yaml",
+        command="vinga-server config agent-defaults set -f fragment.yaml",
         examples=("agent-defaults.yaml",),
         notes=(
             "This entry is a singleton. There is one of it, writing it replaces it "
@@ -565,11 +566,11 @@ SETTINGS: tuple[Setting, ...] = (
     Setting(
         name="devices",
         title="Devices",
-        command="vinga-server config bind-device <mac> <agent> [<agent> ...]",
+        command="vinga-server config device bind <mac> <agent> [<agent> ...]",
         notes=(
             "A MAC is stored in its canonical form (lowercase, colon separated), so "
             "`AA-BB-CC-DD-EE-FF` and `aa:bb:cc:dd:ee:ff` are the same device.",
-            "`vinga-server config delete device <mac>` removes a binding.",
+            "`vinga-server config device delete <mac>` removes a binding.",
         ),
         route="/devices",
         addressing=("mac",),
@@ -578,9 +579,9 @@ SETTINGS: tuple[Setting, ...] = (
     Setting(
         name="default_agent",
         title="Default agent",
-        command="vinga-server config set-default-agent <name>",
+        command="vinga-server config default-agent set <name>",
         notes=(
-            "`vinga-server config clear-default-agent` unsets it, which is a "
+            "`vinga-server config default-agent clear` unsets it, which is a "
             "configuration rather than a mistake: the devices map is then the "
             "allowlist.",
             "It is required only when agents are defined and no device is bound to "

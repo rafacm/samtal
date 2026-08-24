@@ -129,7 +129,7 @@ portal, no USB needed. The factory image's portal (firmware 2.2.4)
 has the Custom OTA URL field on its Advanced tab: enter your WiFi
 and the server's onboarding URL in one pass, and the board then
 shows a 6-digit code and connects within seconds of
-`vinga-server config add-device <code> <agent>`. Two cautions from
+`vinga-server config device pending claim <code> <agent>`. Two cautions from
 that same session: type the URL exactly as the server printed it,
 and if the board shows `code=307` and keeps restarting, or a save
 does not seem to take, the portal wrote something other than what

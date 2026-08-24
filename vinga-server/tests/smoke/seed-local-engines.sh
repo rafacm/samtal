@@ -16,34 +16,34 @@ trap on_interrupt INT
 trap on_terminate TERM
 start_server
 
-vinga-server config set provider llm mock -f - <<'YAML'
+vinga-server config provider set llm mock -f - <<'YAML'
 type: mock
 YAML
 
-vinga-server config set provider asr whisper -f - <<'YAML'
+vinga-server config provider set asr whisper -f - <<'YAML'
 type: faster_whisper
 model: small
 YAML
 
-vinga-server config set provider tts mock -f - <<'YAML'
+vinga-server config provider set tts mock -f - <<'YAML'
 type: mock
 YAML
 
-vinga-server config set provider vad silero -f - <<'YAML'
+vinga-server config provider set vad silero -f - <<'YAML'
 type: silero
 YAML
 
-vinga-server config set agent-defaults -f - <<'YAML'
+vinga-server config agent-defaults set -f - <<'YAML'
 llm: mock
 asr: whisper
 tts: mock
 vad: silero
 YAML
 
-vinga-server config set agent assistant -f - <<'YAML'
+vinga-server config agent set assistant -f - <<'YAML'
 prompt: A local-engine configuration.
 YAML
 
-vinga-server config set-default-agent assistant
+vinga-server config default-agent set assistant
 
 stop_server

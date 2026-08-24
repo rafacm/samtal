@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.support.config_cli import SECRET, chain
+from tests.support.config_cli import SECRET, chain, registered
 from tests.support.events import both_formats
 from vinga_server.config import cli, docgen
 from vinga_server.config.secrets import MASTER_KEY_ENV
@@ -457,13 +457,11 @@ def test_every_recipe_line_is_a_command_of_the_grammar() -> None:
     """A recipe that named a command the grammar does not have would be
     a page telling an operator to type something that cannot work. The
     inventory is `cli.COMMANDS`, which is the grammar itself."""
-    registered = {row.words for row in cli.COMMANDS}
-
     for recipe in docgen.recipes(cli.PROGRAM):
         assert recipe.commands, f"{recipe.title}: a heading with no commands under it"
         for line in recipe.commands:
             words = tuple(line.removeprefix(f"{cli.PROGRAM} ").split())
-            assert words[:2] in registered or words[:1] in registered, line
+            assert registered(words) is not None, line
 
 
 def test_every_command_an_example_quotes_is_published_as_a_recipe() -> None:

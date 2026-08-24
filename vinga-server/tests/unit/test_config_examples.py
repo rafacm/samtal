@@ -48,8 +48,8 @@ API_SECRET_ENV = "VINGA_API_SECRET"
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
 
 # The command a fragment's header names, as in
-#   vinga-server config set provider llm claude -f examples/llm-anthropic.yaml
-COMMAND = re.compile(r"^#\s+vinga-server config (set .+?) -f ")
+#   vinga-server config provider set llm claude -f examples/llm-anthropic.yaml
+COMMAND = re.compile(r"^#\s+vinga-server config (\S+ set\b.*?) -f ")
 
 # Providers, MCP servers and prompt fragments have to exist before
 # anything references them: a write leaving a reference unresolved is
@@ -81,14 +81,14 @@ def _fragments() -> list[Path]:
 
 
 def _command(fragment: Path) -> list[str]:
-    """The first `config set` line in the file's header comment. A file
+    """The first noun's `set` line in the file's header comment. A file
     may name more than one (the same voice provider installed twice
     under two names); the first is the one this runs."""
     for line in fragment.read_text(encoding="utf-8").splitlines():
         found = COMMAND.match(line)
         if found:
             return found.group(1).split()
-    raise AssertionError(f"{fragment.name} names no `vinga-server config set` command")
+    raise AssertionError(f"{fragment.name} names no `vinga-server config <noun> set` command")
 
 
 @pytest.fixture
@@ -141,7 +141,7 @@ def test_there_are_fragments_to_check() -> None:
 def test_every_fragment_installs_through_the_command_it_names(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    ordered = sorted(_fragments(), key=lambda path: ORDER.index(_command(path)[1]))
+    ordered = sorted(_fragments(), key=lambda path: ORDER.index(_command(path)[0]))
 
     for fragment in ordered:
         argv = [*_command(fragment), "-f", str(fragment)]

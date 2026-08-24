@@ -60,10 +60,20 @@ SECRET_ENV = "RESPELLING_SECRET"
 # claim is acknowledged with is the MAC it bound.
 MAC = "aa:bb:cc:dd:ee:ff"
 
-# What the transcript licenses to move, and the whole of it. Empty until
-# the rename fills it, because before the rename there is nothing that
-# has moved.
-RESPELLINGS: tuple[tuple[str, str], ...] = ()
+# What the transcript licenses to move, and the whole of it. Six
+# substitutions, every one of them a command word inside a line these
+# commands print: the header each entity's export opens with, which
+# names the command that writes one, and the step an export's header
+# tells an operator to run after applying. The longest key comes first,
+# because `agent-defaults` opens with `agent`.
+RESPELLINGS: tuple[tuple[str, str], ...] = (
+    ("config set agent-defaults -f", "config agent-defaults set -f"),
+    ("config set agent <name>", "config agent set <name>"),
+    ("config set provider <stage> <name>", "config provider set <stage> <name>"),
+    ("config set mcp-server <name>", "config mcp-server set <name>"),
+    ("config set prompt-fragment <name>", "config prompt-fragment set <name>"),
+    ("the set-secret commands at the foot", "the secret set commands at the foot"),
+)
 
 
 @dataclass(frozen=True)
@@ -110,61 +120,61 @@ def _step(name: str, *argv: str, stdin: str | None = None, claims: bool = False)
 # a referenced entity is refused and a read of a missing one is a
 # different answer. Every row whose words the re-cut moves is here.
 STEPS: tuple[Step, ...] = (
-    _step("provider-set", "set", "provider", "llm", "claude", "-f", "-", stdin=_LLM),
-    _step("provider-set-asr", "set", "provider", "asr", "ears", "-f", "-", stdin=_ASR),
-    _step("provider-set-tts", "set", "provider", "tts", "voice", "-f", "-", stdin=_ASR),
-    _step("provider-set-vad", "set", "provider", "vad", "sensor", "-f", "-", stdin=_ASR),
-    _step("mcp-server-set", "set", "mcp-server", "home", "-f", "-", stdin=_MCP),
+    _step("provider-set", "provider", "set", "llm", "claude", "-f", "-", stdin=_LLM),
+    _step("provider-set-asr", "provider", "set", "asr", "ears", "-f", "-", stdin=_ASR),
+    _step("provider-set-tts", "provider", "set", "tts", "voice", "-f", "-", stdin=_ASR),
+    _step("provider-set-vad", "provider", "set", "vad", "sensor", "-f", "-", stdin=_ASR),
+    _step("mcp-server-set", "mcp-server", "set", "home", "-f", "-", stdin=_MCP),
     _step(
-        "prompt-fragment-set", "set", "prompt-fragment", "house", "-f", "-", stdin=_FRAGMENT
+        "prompt-fragment-set", "prompt-fragment", "set", "house", "-f", "-", stdin=_FRAGMENT
     ),
-    _step("agent-defaults-set", "set", "agent-defaults", "-f", "-", stdin=_DEFAULTS),
-    _step("agent-set", "set", "agent", "sam", "-f", "-", stdin=_AGENT),
-    _step("agent-set-inline", "set", "agent", "guest", "prompt=You are a guest."),
+    _step("agent-defaults-set", "agent-defaults", "set", "-f", "-", stdin=_DEFAULTS),
+    _step("agent-set", "agent", "set", "sam", "-f", "-", stdin=_AGENT),
+    _step("agent-set-inline", "agent", "set", "guest", "prompt=You are a guest."),
     # The waiting board is claimed by its code first, because binding a
     # board by its MAC is what retires the code it was showing.
-    _step("device-pending-claim", "add-device", "CODE", "guest", claims=True),
-    _step("provider-show", "show", "provider", "llm", "claude"),
-    _step("mcp-server-show", "show", "mcp-server", "home"),
-    _step("prompt-fragment-show", "show", "prompt-fragment", "house"),
-    _step("agent-show", "show", "agent", "sam"),
-    _step("agent-defaults-show", "show", "agent-defaults"),
-    _step("provider-export", "export", "provider", "llm", "claude"),
-    _step("mcp-server-export", "export", "mcp-server", "home"),
-    _step("prompt-fragment-export", "export", "prompt-fragment", "house"),
-    _step("agent-export", "export", "agent", "sam"),
-    _step("agent-defaults-export", "export", "agent-defaults"),
+    _step("device-pending-claim", "device", "pending", "claim", "CODE", "guest", claims=True),
+    _step("provider-show", "provider", "show", "llm", "claude"),
+    _step("mcp-server-show", "mcp-server", "show", "home"),
+    _step("prompt-fragment-show", "prompt-fragment", "show", "house"),
+    _step("agent-show", "agent", "show", "sam"),
+    _step("agent-defaults-show", "agent-defaults", "show"),
+    _step("provider-export", "provider", "export", "llm", "claude"),
+    _step("mcp-server-export", "mcp-server", "export", "home"),
+    _step("prompt-fragment-export", "prompt-fragment", "export", "house"),
+    _step("agent-export", "agent", "export", "sam"),
+    _step("agent-defaults-export", "agent-defaults", "export"),
     _step(
         "provider-secret-set",
-        "set-secret", "provider", "llm", "claude", "api_key", "--from-env", SECRET_ENV,
+        "provider", "secret", "set", "llm", "claude", "api_key",
+        "--from-env", SECRET_ENV,
     ),
     _step(
         "mcp-server-secret-set",
-        "set-secret", "mcp-server", "home", "env.MCP_TOKEN",
+        "mcp-server", "secret", "set", "home", "env.MCP_TOKEN",
         "--from-env", SECRET_ENV,
     ),
-    _step("default-agent-set", "set-default-agent", "sam"),
-    _step("device-bind", "bind-device", "AA-BB-CC-DD-EE-FF", "sam"),
-    _step("device-show", "show", "device", MAC),
+    _step("default-agent-set", "default-agent", "set", "sam"),
+    _step("device-bind", "device", "bind", "AA-BB-CC-DD-EE-FF", "sam"),
+    _step("device-show", "device", "show", MAC),
     # The one running-server read whose words move. Driven without a
     # server around the API, which is the answer that needs no runtime
     # and is still this act's own refusal rather than a usage error.
-    _step("agent-preview", "prompt", "sam"),
-    _step("device-delete", "delete", "device", MAC),
-    _step("default-agent-clear", "clear-default-agent"),
-    _step("provider-secret-clear", "clear-secret", "provider", "llm", "claude", "api_key"),
+    _step("agent-preview", "agent", "preview", "sam"),
+    _step("device-delete", "device", "delete", MAC),
+    _step("default-agent-clear", "default-agent", "clear"),
+    _step("provider-secret-clear", "provider", "secret", "clear", "llm", "claude", "api_key"),
     _step(
-        "mcp-server-secret-clear",
-        "clear-secret", "mcp-server", "home", "env.MCP_TOKEN",
+        "mcp-server-secret-clear", "mcp-server", "secret", "clear", "home", "env.MCP_TOKEN",
     ),
-    _step("agent-delete", "delete", "agent", "sam"),
-    _step("agent-delete-guest", "delete", "agent", "guest"),
+    _step("agent-delete", "agent", "delete", "sam"),
+    _step("agent-delete-guest", "agent", "delete", "guest"),
     # The singleton has no delete, so the layer that still references
     # the entries below is replaced by an empty one instead.
-    _step("agent-defaults-reset", "set", "agent-defaults", "-f", "-", stdin="{}\n"),
-    _step("prompt-fragment-delete", "delete", "prompt-fragment", "house"),
-    _step("mcp-server-delete", "delete", "mcp-server", "home"),
-    _step("provider-delete", "delete", "provider", "llm", "claude"),
+    _step("agent-defaults-reset", "agent-defaults", "set", "-f", "-", stdin="{}\n"),
+    _step("prompt-fragment-delete", "prompt-fragment", "delete", "house"),
+    _step("mcp-server-delete", "mcp-server", "delete", "home"),
+    _step("provider-delete", "provider", "delete", "llm", "claude"),
     # And the store read back, which is the third surface the
     # differential covers: what the sequence left behind.
     _step("store-after", "export"),

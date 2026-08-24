@@ -22,11 +22,11 @@
 # it is one command afterwards. Bind one board, by the MAC on its
 # sticker:
 #
-#   vinga-server config bind-device aa:bb:cc:dd:ee:ff assistant
+#   vinga-server config device bind aa:bb:cc:dd:ee:ff assistant
 #
 # or point every board that is bound to nothing at one agent:
 #
-#   vinga-server config set-default-agent assistant
+#   vinga-server config default-agent set assistant
 #
 # Every field below is documented in docs/reference/domain-config.md,
 # and examples/ holds a commented fragment per provider type with the
