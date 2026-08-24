@@ -44,7 +44,6 @@ from vinga_server.conversations.store import (
     STOP_TIMEOUT_S,
     ConversationStore,
     _Batch,
-    purge,
     read_conversations,
 )
 from vinga_server.db import BUSY_TIMEOUT_MS
@@ -472,31 +471,42 @@ def test_records_for_a_session_it_never_opened_are_refused_once(
 
 
 @pytest.mark.parametrize("after_a_turn", [False, True])
-def test_a_purged_session_is_never_resurrected(
+def test_a_session_deleted_under_a_live_one_is_never_resurrected(
     tmp_path: Path, stores, after_a_turn: bool
 ) -> None:
-    """The purge command is a second writer, in a second process, and
-    the session it deletes may be mid conversation.
+    """Retention is a deleter that can take a session that is still
+    talking, because it selects on `started_at` and asks nothing about
+    whether the conversation ended. A conversation older than the window
+    is unusual and entirely legal, and its row goes at the next close.
 
-    Driven through the real `purge()` rather than a hand-written DELETE,
+    Driven through the real prune rather than a hand-written DELETE,
     because what is under test is the interaction between the two and a
-    hand-written statement is only the half this suite already
-    controls. Two interleavings: the purge landing before the session's
-    first turn marker has committed anything, and landing after a
-    commit with more records already in flight. In both, absence of the
-    session row is the tombstone: the writer discards the batch, forgets
-    the session, and nothing still in flight can recreate it as orphan
-    rows.
+    hand-written statement is only the half this suite already controls.
+    The queue is what fixes the interleaving: everything below is
+    enqueued while the writer is parked, so the deleting marker is
+    guaranteed to land between the records already committed and the
+    records still in flight. Two of them: the deletion landing before the
+    session's first turn marker has committed anything, and landing after
+    a commit with more records already on their way. In both, absence of
+    the session row is the tombstone: the writer discards the batch,
+    forgets the session, and nothing still in flight can recreate it as
+    orphan rows.
 
-    The conversation then finishes normally, exactly as a real one
-    would, since neither the runtime nor the device edge knows a purge
-    happened. What the conversation says after the purge is not
-    recorded, which is the consequence the command's help states.
+    The conversation then finishes normally, exactly as a real one would,
+    since neither the runtime nor the device edge knows a deletion
+    happened. What it says afterwards is not recorded.
     """
+    now = dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC)
+    older_than_the_window = {
+        **MANIFEST,
+        "started_at": (now - dt.timedelta(days=400)).isoformat(),
+    }
+    inside_it = {**MANIFEST, "started_at": now.isoformat()}
+
     gate = Gate()
-    store = stores(gate=gate, retention_days=0)
+    store = stores(gate=gate, now=lambda: now, retention_days=90)
     store.start()
-    store.open_session("alpha", 100.0, MANIFEST)
+    store.open_session("alpha", 100.0, older_than_the_window)
     gate.wait()
     gate.let_through()
 
@@ -506,27 +516,28 @@ def test_a_purged_session_is_never_resurrected(
         gate.let_through()
         # Committed, and more already on its way.
         store.record_event("alpha", "heard", logging.INFO, {"duration_s": 1.0}, 102.0)
-        store.record_turn("alpha", a_turn(at=103.0))
-        gate.wait()
-    else:
-        # Nothing of this session but its open row has been committed.
+
+    # A second conversation, inside the window, whose close is when
+    # retention runs. Enqueued ahead of the rest of alpha's records, so
+    # the prune it triggers lands between what alpha has committed and
+    # what it still has in flight.
+    store.open_session("beta", 200.0, inside_it)
+    store.close_session("beta", duration_s=1.0, reason="client")
+
+    if not after_a_turn:
+        # Nothing of alpha but its open row has been committed.
         store.record_event("alpha", "heard", logging.INFO, {"duration_s": 1.0}, 101.0)
-        store.record_turn("alpha", a_turn())
-        gate.wait()
-
-    # The command, against the live store, while the writer is parked
-    # in front of the marker that would have written the batch.
-    taken = purge(tmp_path, session="alpha")
-    assert taken.sessions == 1
-
+    store.record_turn("alpha", a_turn(at=103.0))
+    gate.wait()
     gate.open_forever()
+
     # And the conversation carries on to its natural end.
     store.record_event("alpha", "replied", logging.INFO, {"duration_s": 2.0}, 104.0)
     store.record_turn("alpha", a_turn(at=105.0))
     store.close_session("alpha", duration_s=8.0, reason="client")
     store.stop()
 
-    assert rows(tmp_path, "sessions") == []
+    assert [row["session"] for row in rows(tmp_path, "sessions")] == ["beta"]
     assert rows(tmp_path, "turns") == []
     assert rows(tmp_path, "tool_invocations") == []
     assert rows(tmp_path, "events") == []

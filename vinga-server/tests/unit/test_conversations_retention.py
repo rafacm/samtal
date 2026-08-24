@@ -357,6 +357,7 @@ def test_a_reader_defers_the_stores_truncation_and_the_next_marker_takes_it(
     seeding.stop()
 
     database = tmp_path / "conversations.db"
+    log = tmp_path / "conversations.db-wal"
     assert _holds(database, SENTINEL)
 
     # Held across the pruning store's start, which is when it prunes.
@@ -388,7 +389,14 @@ def test_a_reader_defers_the_stores_truncation_and_the_next_marker_takes_it(
         "the owed truncation was never taken at a later marker",
     )
 
-    assert not _holds(database, SENTINEL)
+    # Every file the store keeps, not only the database: the frames that
+    # held the bytes lived in the log, and the shared-memory index beside
+    # it is written from the same pages. The log is not asserted empty,
+    # because the marker that took the owed truncation wrote its own
+    # frames into it.
+    for path in (database, log, tmp_path / "conversations.db-shm"):
+        assert path.exists(), f"{path.name} went missing"
+        assert not _holds(path, SENTINEL), f"{path.name} still holds it"
 
 
 def test_a_reader_defers_a_purges_truncation_and_a_later_purge_takes_it(
