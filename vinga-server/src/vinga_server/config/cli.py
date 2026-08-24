@@ -512,7 +512,7 @@ def _cli_reference(args: Invocation) -> None:
 
 # Where the generated region of the committed page begins and ends. The
 # hand-written half around it is prose nobody generates (installing the
-# thing, reaching a server, the break-glass path), so the drift check
+# thing, reaching a server, rebuilding one), so the drift check
 # compares the region between these two markers and leaves the rest
 # alone.
 REFERENCE_BEGIN = "<!-- generated: cli reference -->"
@@ -898,11 +898,10 @@ def _understood(shape: object, answer: object, refusal: str) -> Any:
     problem: str | None = None
     try:
         adapter = TypeAdapter(shape)
-        # Answered back as the mappings the renderers read, so that a
-        # value the break-glass path built and a value that arrived over
-        # HTTP reach the same renderer in the same shape. Dumping a
-        # validated model is also what leaves the extras behind: only
-        # what the shape declares is written back out.
+        # Answered back as the mappings the renderers read, which is the
+        # shape a renderer takes. Dumping a validated model is also what
+        # leaves the extras behind: only what the shape declares is
+        # written back out.
         return adapter.dump_python(adapter.validate_python(_declared(shape, answer), strict=True))
     except ValidationError:
         problem = refusal

@@ -1,9 +1,9 @@
 """The `vinga-server conversations` command group: purge, and schema.
 
 Two commands, and neither needs a running server. `purge` is the
-administrative escape hatch and works the way `config --local` works,
-directly against the file named by the composed `server.database.dir`,
-because deletion must work exactly when the server is broken or gone.
+administrative escape hatch and works directly against the file named
+by the composed `server.database.dir`, because deletion must work
+exactly when the server is broken or gone.
 `schema` prints the generated reference and opens nothing at all.
 
 Every failure leaves as a `ConfigError` printed to stderr with exit code

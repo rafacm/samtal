@@ -227,10 +227,9 @@ class PendingDevices:
         The listing exists to answer "which of these boards may I
         claim", so a board that has just been bound by its MAC does not
         belong in it. This is housekeeping and not the guarantee: a
-        write made where this table cannot be reached (the `--local`
-        recovery path, or a second process) reconciles nothing, which is
-        why the claim itself refuses to bind a device that is already
-        configured.
+        write made where this table cannot be reached, such as a second
+        process, reconciles nothing, which is why the claim itself
+        refuses to bind a device that is already configured.
         """
         with self._lock:
             device = self._by_mac.get(mac)
