@@ -1414,13 +1414,17 @@ All from `vinga-server/`.
 - `uv run mypy` (the scoped `events` lane):
   `Success: no issues found in 4 source files`.
 - `uv run pytest tests/unit -q -n auto --dist loadfile`:
-  `3146 passed, 20 skipped in 43.37s`, where M3's tip was
-  `3079 passed, 20 skipped`.
+  `3146 passed, 20 skipped in 43.69s` at the rebased tip, where M3's
+  reviewed tip was `3137 passed, 20 skipped` (this milestone's own
+  first record said 3,146 against 3,079, numbers taken before M2's
+  and M3's review rounds landed beneath it; refreshed here after the
+  rebase, per the rule those rounds each had to restate).
 - `uv run pytest tests/integration -q`:
-  `125 passed in 189.69s (0:03:09)`, where M3's tip was `120 passed in
-  196.51s`. The CLI lane's own runtime is `64 passed in 3.94s`, against
-  M3's 59 cases in 2.7 to 3.6 s: the five new cases add roughly a
-  second, most of it the two extra server boots the preset cases need.
+  `126 passed in 190.27s (0:03:10)` at the rebased tip, where M3's
+  reviewed tip was `121 passed` (its round added a synthetic
+  leak-check case). The CLI lane's own runtime is ~4 s: the five new
+  cases add roughly a second, most of it the two extra server boots
+  the preset cases need.
 - **All five drift checks**, run exactly as the CI steps run them:
   `domain-config.md`, `conversations-schema.md`, `events.md`,
   `api-openapi.json` and `cli.md`, all clean. Only `cli.md` is new;
