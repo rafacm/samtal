@@ -54,6 +54,7 @@ import io
 import json
 import logging
 import os
+import shlex
 import socket
 import sys
 import threading
@@ -1019,6 +1020,111 @@ def test_the_store_exports_as_a_document_it_applies_back_unchanged(
     assert capsys.readouterr().out == exported
 
 
+# Recovery, which is what an export is for
+#
+# The one procedure that used to have a flag of its own. A deployment
+# whose server will not start is repaired by stopping it, deleting the
+# database, booting clean and applying a kept export, and the stored
+# credentials come back through the commands the export annotated. That
+# is a claim about a server with a lifetime and a store on disk, which
+# is why it is here rather than in an acceptance suite: nothing
+# in-process can stop a server, take its file away and start another on
+# the same path.
+
+
+def _annotated_secret_command(exported: str) -> tuple[str, ...]:
+    """The `set-secret` an export named, as the words to run.
+
+    Read out of the document rather than written here, and run rather
+    than compared: what is being held is that the line an operator
+    pastes out of their export is a line that works. The program's own
+    two words come off the front, because this drives `cli.main`, which
+    is already inside them.
+    """
+    named = [
+        line.lstrip("# ")
+        for line in exported.splitlines()
+        if line.lstrip("# ").startswith(cli.PROGRAM)
+        and " set-secret " in line
+    ]
+    assert len(named) == 1, f"the export named {len(named)} set-secret commands"
+    return tuple(shlex.split(named[0])[len(cli.PROGRAM.split()) :])
+
+
+def test_a_deployment_is_rebuilt_from_its_export_on_an_empty_database(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The recovery procedure, end to end over a real socket.
+
+    Seed a deployment and store a credential on it, keep the export,
+    stop the server, delete the database, boot another on the same empty
+    directory, apply the export, re-run the set-secret command the export
+    annotated, and export again. The second export is the first one's
+    bytes, which is the whole claim: what an operator keeps is enough to
+    reproduce what they had.
+
+    A store and a key of its own, because the deployment is destroyed
+    half way through and the lane's is shared. The key is stable across
+    both boots, which it has to be: the credential re-entered after the
+    apply is read back by the export that follows it.
+    """
+    monkeypatch.delenv(CONFIG_ENV, raising=False)
+    monkeypatch.setenv(MASTER_KEY_ENV, generate_key())
+    monkeypatch.setenv(SECRET_ENV, SECRET)
+    directory = tmp_path / "db"
+    document_path = written(tmp_path, "deployment.yaml", DEPLOYMENT)
+
+    with serving(directory) as before:
+        seeded = ("--api-url", before.api_url)
+        assert run(*seeded, "apply", "-f", document_path) == 0
+        assert run(
+            *seeded, "set-secret", "provider", "llm", "spare", "api_key",
+            "--from-env", SECRET_ENV,
+        ) == 0
+        capsys.readouterr()
+        assert run(*seeded, "export") == 0
+        exported = capsys.readouterr().out
+
+    # The database, gone: what an operator does when a stored row is what
+    # the boot refuses. The file is named rather than the directory
+    # removed wholesale, so this fails loudly if the store ever moves.
+    database = directory / DATABASE_FILENAME
+    assert database.exists()
+    for path in directory.iterdir():
+        path.unlink()
+    assert not database.exists()
+
+    with serving(directory) as after:
+        rebuilt = ("--api-url", after.api_url)
+        # Clean, which is what makes the apply below a reproduction
+        # rather than a no-op against what was already there.
+        assert run(*rebuilt, "show") == 0
+        assert document(capsys.readouterr().out)["agents"] == {}
+
+        path = tmp_path / "exported.yaml"
+        path.write_text(exported, encoding="utf-8")
+        assert run(*rebuilt, "apply", "-f", str(path)) == 0
+        outcomes = dict(
+            line.split(": ") for line in capsys.readouterr().out.splitlines()
+        )
+        # Everything the document names was written, because the store
+        # was empty. Everything except the one setting an empty store
+        # already agrees with: this deployment binds no default agent,
+        # and `default_agent: null` onto a store that holds null is the
+        # `unchanged` an idempotent apply is supposed to report.
+        assert outcomes.pop("default_agent") == "unchanged"
+        assert outcomes and set(outcomes.values()) == {"wrote"}
+
+        # The half a document cannot carry: a credential never travels in
+        # a read, so the export named the command that enters it and this
+        # runs that command.
+        assert run(*rebuilt, *_annotated_secret_command(exported), stdin=SECRET) == 0
+        capsys.readouterr()
+
+        assert run(*rebuilt, "export") == 0
+        assert capsys.readouterr().out == exported
+
+
 # One refusal per family, and where each of them is composed
 #
 # A family is a top-level word of the grammar, which is a fact of the
@@ -1155,7 +1261,7 @@ REFUSALS: tuple[Refusal, ...] = (
 # appended value would fall outside the tail.
 UNREACHABLE_HEAD = "cannot reach the configuration API at "
 
-UNREACHABLE_TAIL = "covers show, delete, clear-secret and set-secret."
+UNREACHABLE_TAIL = "booting one on an empty database and applying a kept export."
 
 
 def test_every_family_of_the_grammar_has_a_refusal() -> None:
