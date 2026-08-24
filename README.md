@@ -62,19 +62,7 @@ Any board supported by xiaozhi-esp32 can work; these are the ones vinga targets 
 
 The device runs upstream's prebuilt xiaozhi firmware; the server is vinga's, and ships as a container image. This is the short path; [`vinga-server/README.md`](vinga-server/README.md) has every option, the security defaults, and the container details.
 
-**1. Write the server half.** One YAML file says how the process runs. A trial needs almost nothing in it:
-
-```yaml
-server:
-  # A trial on a network you trust. Leave it out for anything that
-  # outlives an afternoon: authentication is on by default.
-  auth:
-    enabled: false
-```
-
-Start from [`vinga-server/config.example.yaml`](vinga-server/config.example.yaml), which documents every key of it, or from [`vinga-server/config.deploy.example.yaml`](vinga-server/config.deploy.example.yaml), a ready-to-adapt deployment profile.
-
-**2. Start the server.** An empty database is a valid state to start on: the server comes up serving no agents, and the next step configures it over the API it serves. Generate the secrets **once** and keep them somewhere you can read them back:
+**1. Start the server.** No configuration file is needed to start one. Every key of the server half has a default and every one of them can be set as an environment variable, and an empty database is a valid state to start on: the server comes up serving no agents, and the next step configures it over the API it serves. Generate the secrets **once** and keep them somewhere you can read them back:
 
 ```bash
 openssl rand -hex 32 > ~/.vinga-api-secret       # once, ever
@@ -85,26 +73,27 @@ export VINGA_AUTH_SECRET=$(cat ~/.vinga-auth-secret)
 docker run -d --name vinga -p 8003:8003 \
   -e VINGA_API_SECRET \
   -e VINGA_AUTH_SECRET \
-  -v /path/to/config.yaml:/config/config.yaml:ro \
+  -e VINGA_SERVER__AUTH__ENABLED=false \
   -v vinga-data:/data \
   ghcr.io/rafacm/vinga-server:latest
 ```
 
-`VINGA_API_SECRET` is the bearer token for the configuration API; `VINGA_AUTH_SECRET` signs the device tokens. Never mint either inline in the `docker run`: a regenerated device secret invalidates the token every device has stored ([Security](vinga-server/README.md#security)).
+`VINGA_API_SECRET` is the bearer token for the configuration API; `VINGA_AUTH_SECRET` signs the device tokens. Never mint either inline in the `docker run`: a regenerated device secret invalidates the token every device has stored ([Security](vinga-server/README.md#security)). `VINGA_SERVER__AUTH__ENABLED=false` is for a trial on a network you trust; drop that line for anything that outlives an afternoon, since device authentication is on by default.
 
-**3. Say what the agent is.** The other half of the configuration (which engines, which agents, which devices) lives in a database on the data volume, written with `vinga-server config`, the CLI the image ships, run inside the container where the token is already in its environment. One document says the whole of it, and one command writes it. This agent is fully local and needs no account anywhere: Silero, faster-whisper, [Ollama](https://ollama.com) and Piper.
+Every key of the server half takes the same shape, nested keys joined with `__`: `VINGA_SERVER__PORT=9000`, `VINGA_SERVER__LOG_LEVEL=DEBUG`. A YAML file is the other way in and the one to reach for past a handful of keys: mount it at `/config/config.yaml` and the image reads it. [`vinga-server/config.example.yaml`](vinga-server/config.example.yaml) documents every key; [`vinga-server/config.deploy.example.yaml`](vinga-server/config.deploy.example.yaml) is a ready-to-adapt deployment profile.
+
+**2. Say what the agent is.** The other half of the configuration (which engines, which agents, which devices) lives in a database on the data volume, written with `vinga-server config`, the CLI the image ships, run inside the container where the token is already in its environment. One document says the whole of it, and one command writes it. This agent is fully local and needs no account anywhere: Silero, faster-whisper, [Ollama](https://ollama.com) and Piper.
 
 ```bash
 # The CLI, inside the container started above.
 vinga() { docker exec -i vinga vinga-server "$@"; }
 
-# One document, one transaction. local-stack.yaml is the preset at
-# vinga-server/examples/presets/local-stack.yaml in this repository;
-# point its llm base_url at the host before applying it, which from
-# inside the container is host.docker.internal rather than localhost
-# (on Linux, add --add-host=host.docker.internal:host-gateway to the
-# docker run in step 2).
-vinga config apply -f - < local-stack.yaml
+# One document, one transaction. The preset is piped in from this
+# repository, since the image carries the CLI and not the examples.
+# Point its llm base_url at the host first: from inside the container
+# that is host.docker.internal rather than localhost (on Linux, add
+# --add-host=host.docker.internal:host-gateway to the docker run above).
+vinga config apply -f - < vinga-server/examples/presets/local-stack.yaml
 
 # Which agent an unknown device reaches. Bind specific devices instead
 # with: vinga config bind-device aa:bb:cc:dd:ee:ff assistant
@@ -115,24 +104,24 @@ vinga config list
 
 Applying orders the writes for you: the whole document goes in as one transaction, refused whole if anything in it will not resolve, so there is no creation order to get right and nothing is ever half applied. [`vinga-server/examples/presets/`](vinga-server/examples/presets/) holds the same deployment on vendor APIs, [`vinga-server/examples/`](vinga-server/examples/) a commented fragment per entity to copy from, and every field of them is documented in [`docs/reference/domain-config.md`](docs/reference/domain-config.md). The CLI itself, including running it against a deployment it does not host, is [`docs/reference/cli.md`](docs/reference/cli.md); the server README's [Configuration](vinga-server/README.md#configuration) section covers the API surface and how credentials are stored.
 
-**4. Apply it.** A write is stored, not yet in effect; this builds the engines and serves them, without a restart and without dropping a conversation ([how](vinga-server/README.md#applying-a-change-without-a-restart)). The first apply downloads the speech models into `/data`, so it takes a few minutes; later ones take seconds.
+**3. Apply it.** A write is stored, not yet in effect; this builds the engines and serves them, without a restart and without dropping a conversation ([how](vinga-server/README.md#applying-a-change-without-a-restart)). The first apply downloads the speech models into `/data`, so it takes a few minutes; later ones take seconds.
 
 ```bash
 vinga config reload
 ```
 
-**5. Flash** the prebuilt xiaozhi merged binary for your board at offset `0x0`.
+**4. Flash** the prebuilt xiaozhi merged binary for your board at offset `0x0`.
 
-**6. Ask for the URL to type**, and check that something sensible answers on it. No cable is involved in either; the whole cable-free story is [Onboarding a device](vinga-server/README.md#onboarding-a-device).
+**5. Ask for the URL to type**, and check that something sensible answers on it. No cable is involved in either; the whole cable-free story is [Onboarding a device](vinga-server/README.md#onboarding-a-device).
 
 ```bash
 vinga config ota-url     # http://192.168.1.10:8003/x/AB2C4D5E/
 vinga doctor             # says what a device would be told, or what is wrong
 ```
 
-**7. Provision WiFi** from the device's captive portal, putting that URL in the portal's advanced section as the server address. Which button brings the portal up depends on the board (PWR on the Touch-LCD-1.54, BOOT on the others), so start from your board's guide in [`docs/devices/`](docs/devices/README.md), which also covers its wake word, its display, and the rest of its controls.
+**6. Provision WiFi** from the device's captive portal, putting that URL in the portal's advanced section as the server address. Which button brings the portal up depends on the board (PWR on the Touch-LCD-1.54, BOOT on the others), so start from your board's guide in [`docs/devices/`](docs/devices/README.md), which also covers its wake word, its display, and the rest of its controls.
 
-**8. Bind the board.** Step 3 set a `default_agent`, so any board that reaches the server is covered: press the button and talk. Leave it unset instead and an unbound board shows and speaks a six-digit code, and one command binds it; the device polls while it waits, so it connects seconds later.
+**7. Bind the board.** Step 2 set a `default_agent`, so any board that reaches the server is covered: press the button and talk. Leave it unset instead and an unbound board shows and speaks a six-digit code, and one command binds it; the device polls while it waits, so it connects seconds later.
 
 ```bash
 vinga config pending                       # which board is showing what

@@ -2260,12 +2260,18 @@ docker build --build-arg VINGA_REVISION=$(git rev-parse --short HEAD) -t vinga-s
 
 ## Running in a container
 
-The default image carries both local engines, so one mounted YAML and
-one seeded database serve a conversation. The server starts first, on
-whatever the database holds (nothing, the first time, which is a valid
-state to serve), and the domain half is written into it with the CLI
-inside the running container, where the API token and the loopback
-address are already in the environment:
+The default image carries both local engines, so one seeded database
+serves a conversation. The server starts first, on whatever the database
+holds (nothing, the first time, which is a valid state to serve), and
+the domain half is written into it with the CLI inside the running
+container, where the API token and the loopback address are already in
+the environment.
+
+**A configuration file is optional.** Every key of the server half has a
+default and every one of them is overridable with a `VINGA_`-prefixed
+variable, so a container started with nothing mounted at `/config`
+serves on those. Mount a YAML there and the image reads it, which is
+what a deployment past a handful of keys wants:
 
 ```bash
 docker run -d --name vinga \
@@ -2282,9 +2288,13 @@ docker exec -i vinga vinga-server \
 docker restart vinga
 ```
 
-- `/config/config.yaml` is where `VINGA_CONFIG` points, and it is the
-  server half. Mount it read-only; override any key of it with a
-  `VINGA_`-prefixed environment variable.
+- `/config/config.yaml` is the server half, and mounting it is optional.
+  The image's entrypoint names that path when a file is there and names
+  nothing when it is not, so an unmounted container boots on the
+  defaults and whatever `VINGA_SERVER__*` says. Mount it read-only;
+  override any key of it with a `VINGA_`-prefixed environment variable.
+  Setting `VINGA_CONFIG` yourself always wins, mounted file or not, and
+  a path you name and that is not there is refused rather than ignored.
 - `/data` is the volume every engine caches into (`HOME` points there):
   whisper models and Piper voices download at first start and survive a
   new image. Model weights are never baked in.
@@ -2479,13 +2489,15 @@ docker run --rm -i \
   config --local set-secret provider llm claude api_key
 ```
 
-The YAML is mounted because the image points `VINGA_CONFIG` at
-`/config/config.yaml`, and a command that finds nothing there refuses
-rather than guessing. Which directory it then opens comes from the
+The YAML is mounted here for the same reason the serving container
+mounts it, and for the same optional one: the image reads
+`/config/config.yaml` when it is there and boots on the environment when
+it is not. Which directory a `--local` command opens comes from the
 image's own `VINGA_SERVER__DATABASE__DIR`, `/data/db`, which is why the
-volume is the mount that matters. No port is published and no secret
-beyond the master key is passed, because nothing here serves anything or
-reaches the API.
+volume is the mount that matters, and why leaving the YAML out works as
+long as nothing in it moved the database. No port is published and no
+secret beyond the master key is passed, because nothing here serves
+anything or reaches the API.
 
 Every `--local` invocation prints one line on stderr saying that it
 bypasses the API, and every write under it then says when it takes
