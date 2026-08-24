@@ -742,6 +742,35 @@ def test_show_renders_every_entity_kind(run, capsys: pytest.CaptureFixture[str])
     assert _document(capsys.readouterr().out) == {"agents": ["sam"]}
 
 
+def test_an_agent_is_printed_prompt_first(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The printed document, byte for byte, which is the other half of
+    the claim the API's exact-bytes pin makes: YAML keeps the order the
+    mapping was built in, so an agent read here opens with the prompt
+    that makes it that agent and then says what it overrides.
+
+    The API answers the same order in JSON, which
+    `test_config_api_reads.py` pins on the response bytes. What this
+    adds is that the rendering does not sort it away on the way to
+    stdout.
+    """
+    run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
+    run(
+        "set",
+        "agent",
+        "sam",
+        "-f",
+        "-",
+        stdin="llm: claude\nprompt: You are Sam.\n",
+    )
+    capsys.readouterr()
+
+    assert run("show", "agent", "sam") == 0
+
+    assert capsys.readouterr().out == "prompt: You are Sam.\nllm: claude\n"
+
+
 def test_showing_something_that_is_not_there_names_the_section_only(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
