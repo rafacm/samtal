@@ -311,9 +311,9 @@ def test_the_api_answers_the_repository_s_own_words(
 ) -> None:
     """The compatibility claim of #192, held differentially.
 
-    The same fragment is written twice: once through the repository,
-    which is the path the CLI's break-glass mode takes, and once over
-    HTTP. The sentence and the per-field messages are compared against
+    The same fragment is written twice: once through the repository
+    directly and once over HTTP, which is the route the repository is
+    mounted behind. The sentence and the per-field messages are compared against
     each other rather than against a copy, so an operator meets one
     vocabulary whichever way they reached the API and nothing here has
     to be updated when the repository rewords a rule.
@@ -588,8 +588,8 @@ def test_a_planted_credential_is_absent_from_every_surface(
 
 class PlantedKey(NamedTuple):
     """One fragment carrying the sentinel as a key, and the two ways in:
-    the route a request reaches it by, and the repository call the CLI's
-    break-glass path reaches the same refusal by.
+    the route a request reaches it by, and the repository call under it
+    that composes the same refusal.
 
     `sentinel` is what to look for, and it is a field rather than the
     module's constant because a key that matches a secret-shaped

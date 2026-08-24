@@ -10,13 +10,11 @@ almost every command needs a server to be running. An empty database is
 a valid state for that server to be running on, which is what makes
 configuring a deployment from nothing possible at all.
 
-Two sets of commands are the exceptions, and both have a section of
-their own below. `--local` covers four of them and opens the database
-directly, for a deployment whose server will not start. The other five
-(`schema`, `reference`, `openapi`, `cli-reference` and `ota-url`) reach
-neither: four render documents out of the models, the routes and the
-command tree, and the fifth derives a URL from the file half. Those five
-open no database, need no key and contact nothing at all.
+Five commands are the exception. `schema`, `reference`, `openapi` and
+`cli-reference` render documents out of the models, the routes and the
+command tree, and `ota-url` derives a URL from the file half. Those five
+open no database, need no key and contact nothing at all. What to do
+when there is no server to ask has a section of its own below.
 
 What each field means is
 [`domain-config.md`](domain-config.md), generated from the models. What
@@ -119,39 +117,6 @@ export VINGA_API_SECRET=...
 vinga-server config list
 ```
 
-## The break-glass path
-
-`--local` is for a database whose server will not start, which is the
-one situation in which there is nothing to write through. It opens the
-database directly, covers four commands and no others, and says on
-stderr every time that it is bypassing the API:
-
-```bash
-vinga-server config --local show
-vinga-server config --local delete agent broken
-vinga-server config --local set-secret provider llm claude api_key
-vinga-server config --local clear-secret provider llm claude api_key
-```
-
-Those four are the recovery subset: look at what is stored, take out
-what will not load, and repair a credential. Every other command refuses
-the flag by naming them.
-
-It does not check whether a server is running against the same file.
-There is no reliable way to (a pid file lies after a crash and a lock
-probe races the answer), and a wrong refusal would wedge the recovery
-path in exactly the situation it exists for. What makes that safe is
-that a write is one transaction either way, so two writers serialize:
-the second waits for the lock and commits well inside the database's ten
-second busy timeout, and only a writer still waiting when that runs out
-is refused, told nothing was changed and to run the command again.
-
-Its `show` and `delete` go by what is stored rather than by what a new
-write would be allowed to create, which is what lets it reach a row
-written before a rule a later release added. Each of its writes says
-when it takes effect, and says the same thing the API says for the same
-act.
-
 ## Writing a whole deployment at once
 
 `apply` takes one document holding any number of entities and settings,
@@ -233,6 +198,42 @@ write would accept, so an export that injected masks into the bodies
 would fail to apply onto an empty store, which is the one place an
 export most has to work; and `set-secret` addresses an entity, so it
 cannot run before the entity exists.
+
+## When the server will not start
+
+A configuration the server refuses to boot on (a stored credential no
+configured key opens, an entity that cannot be loaded, a reference that
+no longer resolves) leaves nothing to write through: every command above
+is a request, and there is nobody to answer it. The way back is to
+rebuild the store rather than to operate on it.
+
+```bash
+# 1. Stop the server.
+# 2. Delete the database it will not boot on.
+# 3. Start it again, which boots clean on an empty one.
+# 4. Put the configuration back.
+vinga-server config apply -f deployment.yaml
+# 5. Re-enter each stored credential, one per set-secret command the
+#    export listed at the foot of that file.
+vinga-server config set-secret provider -- llm claude api_key
+```
+
+The document in step 4 is a `vinga-server config export` taken while the
+deployment was healthy, which is why an export belongs in version
+control beside the YAML file rather than in a drawer. What that document
+does not carry is the credentials themselves: a stored credential never
+travels in a read, so what the export carries is the command that enters
+each of them, and step 5 is running those commands. The values come from
+wherever the deployment keeps its secrets, the same place the first
+`set-secret` read them from.
+
+This is a rebuild and not a repair, and the difference matters: it puts
+back what the export says and nothing else, so a row nobody knew about
+is gone with the file. A deployment that wants a surgical edit to the
+stored rows instead has one, through ordinary SQLite tooling against the
+database file. That is not wrapped in this grammar, and deliberately: a
+second way in with its own vocabulary is a second thing to keep honest,
+and `sqlite3` is already documented by the people who wrote it.
 
 <!-- generated: cli reference -->
 
@@ -350,9 +351,8 @@ vinga-server config set-secret mcp-server weather headers.Authorization
 ## Every command
 
 Every command of the group, with the page its own `--help` prints. A command
-takes `--config`, `--api-url` and `--local` before the command word as well as
-after it, and a value given before it survives a command that was not given
-one.
+takes `--config` and `--api-url` before the command word as well as after it,
+and a value given before it survives a command that was not given one.
 
 ### `vinga-server config`
 
@@ -361,16 +361,13 @@ Usage: vinga-server config [OPTIONS] COMMAND [ARGS]...
 
   Read and write the domain half of the configuration: providers, MCP servers,
   agents, devices and their secrets. Commands go through the configuration API
-  on the running server; --local is the recovery path.
+  on the running server.
 
 Options:
   --config PATH  path to the YAML config file naming server.port and
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
-  --local        read and write the database directly instead of the API: the
-                 recovery subset (show, delete, clear-secret, set-secret), for
-                 when the server will not start
   --help         Show this message and exit.
 
 Commands:
@@ -461,9 +458,6 @@ Options:
                    server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL    base URL of the configuration API (default: $VINGA_API_URL,
                    then http://127.0.0.1:<server.port>/api)
-  --local          read and write the database directly instead of the API: the
-                   recovery subset (show, delete, clear-secret, set-secret), for
-                   when the server will not start
   --help           Show this message and exit.
 
 A credential is never a key=value argument: arguments land in shell history
@@ -595,9 +589,6 @@ Options:
                    server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL    base URL of the configuration API (default: $VINGA_API_URL,
                    then http://127.0.0.1:<server.port>/api)
-  --local          read and write the database directly instead of the API: the
-                   recovery subset (show, delete, clear-secret, set-secret), for
-                   when the server will not start
   --help           Show this message and exit.
 
 A credential is never a key=value argument: arguments land in shell history
@@ -662,9 +653,6 @@ Options:
                    server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL    base URL of the configuration API (default: $VINGA_API_URL,
                    then http://127.0.0.1:<server.port>/api)
-  --local          read and write the database directly instead of the API: the
-                   recovery subset (show, delete, clear-secret, set-secret), for
-                   when the server will not start
   --help           Show this message and exit.
 
 A credential is never a key=value argument: arguments land in shell history
@@ -705,9 +693,6 @@ Options:
                    server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL    base URL of the configuration API (default: $VINGA_API_URL,
                    then http://127.0.0.1:<server.port>/api)
-  --local          read and write the database directly instead of the API: the
-                   recovery subset (show, delete, clear-secret, set-secret), for
-                   when the server will not start
   --help           Show this message and exit.
 
 A credential is never a key=value argument: arguments land in shell history
@@ -769,9 +754,6 @@ Options:
                    server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL    base URL of the configuration API (default: $VINGA_API_URL,
                    then http://127.0.0.1:<server.port>/api)
-  --local          read and write the database directly instead of the API: the
-                   recovery subset (show, delete, clear-secret, set-secret), for
-                   when the server will not start
   --help           Show this message and exit.
 
 A credential is never a key=value argument: arguments land in shell history
@@ -846,9 +828,6 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
-  --local        read and write the database directly instead of the API: the
-                 recovery subset (show, delete, clear-secret, set-secret), for
-                 when the server will not start
   --help         Show this message and exit.
 ```
 
@@ -867,9 +846,6 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
-  --local        read and write the database directly instead of the API: the
-                 recovery subset (show, delete, clear-secret, set-secret), for
-                 when the server will not start
   --help         Show this message and exit.
 ```
 
@@ -888,9 +864,6 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
-  --local        read and write the database directly instead of the API: the
-                 recovery subset (show, delete, clear-secret, set-secret), for
-                 when the server will not start
   --help         Show this message and exit.
 ```
 
@@ -909,9 +882,6 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
-  --local        read and write the database directly instead of the API: the
-                 recovery subset (show, delete, clear-secret, set-secret), for
-                 when the server will not start
   --help         Show this message and exit.
 ```
 
@@ -930,9 +900,6 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
-  --local        read and write the database directly instead of the API: the
-                 recovery subset (show, delete, clear-secret, set-secret), for
-                 when the server will not start
   --help         Show this message and exit.
 ```
 
@@ -952,9 +919,6 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
-  --local        read and write the database directly instead of the API: the
-                 recovery subset (show, delete, clear-secret, set-secret), for
-                 when the server will not start
   --help         Show this message and exit.
 ```
 
@@ -975,9 +939,6 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
-  --local        read and write the database directly instead of the API: the
-                 recovery subset (show, delete, clear-secret, set-secret), for
-                 when the server will not start
   --help         Show this message and exit.
 ```
 
@@ -999,9 +960,6 @@ Options:
                    server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL    base URL of the configuration API (default: $VINGA_API_URL,
                    then http://127.0.0.1:<server.port>/api)
-  --local          read and write the database directly instead of the API: the
-                   recovery subset (show, delete, clear-secret, set-secret), for
-                   when the server will not start
   --help           Show this message and exit.
 ```
 
@@ -1017,9 +975,6 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
-  --local        read and write the database directly instead of the API: the
-                 recovery subset (show, delete, clear-secret, set-secret), for
-                 when the server will not start
   --help         Show this message and exit.
 ```
 
@@ -1037,9 +992,6 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
-  --local        read and write the database directly instead of the API: the
-                 recovery subset (show, delete, clear-secret, set-secret), for
-                 when the server will not start
   --help         Show this message and exit.
 ```
 
@@ -1060,9 +1012,6 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
-  --local        read and write the database directly instead of the API: the
-                 recovery subset (show, delete, clear-secret, set-secret), for
-                 when the server will not start
   --help         Show this message and exit.
 ```
 
@@ -1079,9 +1028,6 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
-  --local        read and write the database directly instead of the API: the
-                 recovery subset (show, delete, clear-secret, set-secret), for
-                 when the server will not start
   --help         Show this message and exit.
 ```
 
@@ -1114,9 +1060,6 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
-  --local        read and write the database directly instead of the API: the
-                 recovery subset (show, delete, clear-secret, set-secret), for
-                 when the server will not start
   --help         Show this message and exit.
 ```
 
@@ -1132,9 +1075,6 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
-  --local        read and write the database directly instead of the API: the
-                 recovery subset (show, delete, clear-secret, set-secret), for
-                 when the server will not start
   --help         Show this message and exit.
 ```
 
@@ -1172,9 +1112,6 @@ Options:
                   server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL   base URL of the configuration API (default: $VINGA_API_URL,
                   then http://127.0.0.1:<server.port>/api)
-  --local         read and write the database directly instead of the API: the
-                  recovery subset (show, delete, clear-secret, set-secret), for
-                  when the server will not start
   --help          Show this message and exit.
 ```
 
@@ -1196,9 +1133,6 @@ Options:
                   server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL   base URL of the configuration API (default: $VINGA_API_URL,
                   then http://127.0.0.1:<server.port>/api)
-  --local         read and write the database directly instead of the API: the
-                  recovery subset (show, delete, clear-secret, set-secret), for
-                  when the server will not start
   --help          Show this message and exit.
 ```
 
@@ -1234,9 +1168,6 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
-  --local        read and write the database directly instead of the API: the
-                 recovery subset (show, delete, clear-secret, set-secret), for
-                 when the server will not start
   --help         Show this message and exit.
 ```
 
@@ -1256,9 +1187,6 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
-  --local        read and write the database directly instead of the API: the
-                 recovery subset (show, delete, clear-secret, set-secret), for
-                 when the server will not start
   --help         Show this message and exit.
 ```
 
@@ -1274,9 +1202,6 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
-  --local        read and write the database directly instead of the API: the
-                 recovery subset (show, delete, clear-secret, set-secret), for
-                 when the server will not start
   --help         Show this message and exit.
 ```
 
@@ -1343,9 +1268,6 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
-  --local        read and write the database directly instead of the API: the
-                 recovery subset (show, delete, clear-secret, set-secret), for
-                 when the server will not start
   --help         Show this message and exit.
 
 Commands:
@@ -1373,9 +1295,6 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
-  --local        read and write the database directly instead of the API: the
-                 recovery subset (show, delete, clear-secret, set-secret), for
-                 when the server will not start
   --help         Show this message and exit.
 ```
 
@@ -1394,9 +1313,6 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
-  --local        read and write the database directly instead of the API: the
-                 recovery subset (show, delete, clear-secret, set-secret), for
-                 when the server will not start
   --help         Show this message and exit.
 ```
 
@@ -1415,9 +1331,6 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
-  --local        read and write the database directly instead of the API: the
-                 recovery subset (show, delete, clear-secret, set-secret), for
-                 when the server will not start
   --help         Show this message and exit.
 ```
 
@@ -1436,9 +1349,6 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
-  --local        read and write the database directly instead of the API: the
-                 recovery subset (show, delete, clear-secret, set-secret), for
-                 when the server will not start
   --help         Show this message and exit.
 ```
 
@@ -1454,9 +1364,6 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
-  --local        read and write the database directly instead of the API: the
-                 recovery subset (show, delete, clear-secret, set-secret), for
-                 when the server will not start
   --help         Show this message and exit.
 ```
 
@@ -1475,9 +1382,6 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
-  --local        read and write the database directly instead of the API: the
-                 recovery subset (show, delete, clear-secret, set-secret), for
-                 when the server will not start
   --help         Show this message and exit.
 ```
 
@@ -1493,9 +1397,6 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
-  --local        read and write the database directly instead of the API: the
-                 recovery subset (show, delete, clear-secret, set-secret), for
-                 when the server will not start
   --help         Show this message and exit.
 
 Commands:
@@ -1522,9 +1423,6 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
-  --local        read and write the database directly instead of the API: the
-                 recovery subset (show, delete, clear-secret, set-secret), for
-                 when the server will not start
   --help         Show this message and exit.
 ```
 
@@ -1543,9 +1441,6 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
-  --local        read and write the database directly instead of the API: the
-                 recovery subset (show, delete, clear-secret, set-secret), for
-                 when the server will not start
   --help         Show this message and exit.
 ```
 
@@ -1564,9 +1459,6 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
-  --local        read and write the database directly instead of the API: the
-                 recovery subset (show, delete, clear-secret, set-secret), for
-                 when the server will not start
   --help         Show this message and exit.
 ```
 
@@ -1585,9 +1477,6 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
-  --local        read and write the database directly instead of the API: the
-                 recovery subset (show, delete, clear-secret, set-secret), for
-                 when the server will not start
   --help         Show this message and exit.
 ```
 
@@ -1603,9 +1492,6 @@ Options:
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
                  then http://127.0.0.1:<server.port>/api)
-  --local        read and write the database directly instead of the API: the
-                 recovery subset (show, delete, clear-secret, set-secret), for
-                 when the server will not start
   --help         Show this message and exit.
 ```
 <!-- end generated: cli reference -->

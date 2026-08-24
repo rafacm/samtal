@@ -902,8 +902,8 @@ def test_a_credential_is_stored_masked_and_cleared(
 # What the running server is asked
 #
 # Three of the four reads below are of the process rather than of the
-# database, which is the whole reason they have no break-glass path and
-# the whole reason they belong here: what answers them is a server that
+# database, which is the whole reason they belong here: what answers
+# them is a server that
 # booted on an empty store and has been written to over HTTP ever since,
 # so the difference a reload makes is observable in one session.
 

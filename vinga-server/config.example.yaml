@@ -29,8 +29,8 @@
 # is a valid state to run one on. Applying orders the writes for you: one
 # transaction over the whole document, refused whole if anything in it
 # will not resolve, so there is no creation order to get right.
-# `vinga-server config --local` is the recovery path for a server that
-# will not start (show, delete, clear-secret, set-secret).
+# A server that will not start is recovered by booting one on an empty
+# database and applying a kept `vinga-server config export`.
 #
 # Every field of it is documented in docs/reference/domain-config.md
 # (generated from the models, also available as `vinga-server config
@@ -179,9 +179,8 @@ server:
   #
   #   VINGA_SERVER__DATABASE__DIR=./var uv run vinga-server
   #
-  # The same variable points `vinga-server config --local` at it, which
-  # is the one way a command reads or writes this file with no server on
-  # the other side.
+  # It is read by the server and by nothing else: the config commands
+  # are clients of its API, and where the rows are kept is its business.
   #
   # A write through the config commands applies at the next start: the
   # configuration is a boot-time snapshot, so restart the server after

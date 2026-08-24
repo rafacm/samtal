@@ -127,6 +127,6 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 #
 # The wrapper copied above ends in `exec`, so the server replaces it as
 # PID 1 and the signal still arrives; anything after the image name is
-# still the server's own command line, so `docker run ... config --local
-# show` reads as it always has.
+# still the server's own command line, so `docker run ... config list`
+# reads as it always has.
 ENTRYPOINT ["/usr/local/bin/vinga-entrypoint"]

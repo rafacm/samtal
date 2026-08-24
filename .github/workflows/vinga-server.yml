@@ -239,8 +239,8 @@ jobs:
 
       # And the CLI reference, which is the one committed document that
       # is only half generated: the prose above the marker is written by
-      # hand (installing the thing, reaching a server, the break-glass
-      # path) and everything between the markers comes from the command
+      # hand (installing the thing, reaching a server, rebuilding one)
+      # and everything between the markers comes from the command
       # tree and the example fragments. So this rebuilds the page rather
       # than diffing a fragment of it: keep everything up to and
       # including the opening marker, regenerate the region, close it,

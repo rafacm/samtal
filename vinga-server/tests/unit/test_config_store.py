@@ -872,7 +872,7 @@ def test_a_number_that_is_not_finite_is_refused(store: ConfigStore) -> None:
 
 # Deleting what will not load
 #
-# The break-glass case: a row the loader refuses is the row that is
+# The recovery case: a row the loader refuses is the row that is
 # keeping the server from starting, so it is the one that has to be
 # removable. A delete that read and validated the whole domain first
 # could not remove it, because the read failed on the way there.
