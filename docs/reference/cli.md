@@ -237,6 +237,8 @@ database. Every line below is read out of the example file it names, so a
 recipe cannot come to name a file that moved or an entity name a fragment no
 longer uses, and the whole of it is run against a live server on every build.
 
+<!-- generated: cli recipes -->
+
 ### A whole deployment
 
 A whole deployment in one document: every entity it names, in one transaction,
@@ -331,6 +333,8 @@ vinga-server config set-secret provider llm claude api_key
 vinga-server config set-secret mcp-server home env.API_ACCESS_TOKEN
 vinga-server config set-secret mcp-server weather headers.Authorization
 ```
+
+<!-- end generated: cli recipes -->
 
 ## Every command
 

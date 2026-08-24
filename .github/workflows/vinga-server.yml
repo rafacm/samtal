@@ -258,6 +258,30 @@ jobs:
             exit 1
           fi
 
+      # And the recipes inside that region, against the renderer that
+      # reads the example fragments rather than against the one that
+      # builds the page.
+      #
+      # Not the step above with a smaller mouth. That one regenerates
+      # the whole region through the page composer, so a composer that
+      # dropped, truncated or reordered the recipes would move the
+      # committed bytes and the fresh render together and pass green.
+      # This one reads the committed bytes and compares them against the
+      # recipe renderer directly, which is the only reader that can tell
+      # those two apart.
+      - name: Check the committed CLI recipes are current
+        run: |
+          uv run python -c 'import sys; from vinga_server.config import cli; sys.stdout.write(cli.cli_recipes())' > "$RUNNER_TEMP/cli-recipes.md"
+          awk '/^<!-- end generated: cli recipes -->$/{f=0} f{print} /^<!-- generated: cli recipes -->$/{f=1}' ../docs/reference/cli.md > "$RUNNER_TEMP/committed-recipes.md"
+          if [ ! -s "$RUNNER_TEMP/committed-recipes.md" ]; then
+            echo "::error::the recipe markers are not on docs/reference/cli.md, so nothing was compared"
+            exit 1
+          fi
+          if ! diff -u "$RUNNER_TEMP/committed-recipes.md" "$RUNNER_TEMP/cli-recipes.md"; then
+            echo "::error::the recipes on docs/reference/cli.md are stale; they are read out of the example fragments, so regenerate the page with: uv run vinga-server config cli-reference"
+            exit 1
+          fi
+
       # The databases' Alembic scripts live inside the package so that a
       # built wheel carries them, and no test run from the checkout can
       # prove that: the source tree makes every file discoverable
