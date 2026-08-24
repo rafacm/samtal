@@ -342,7 +342,7 @@ CLI surfaces once in M1.
   three committed import-weight pins put anything inside the provider
   package out of reach of the surfaces that document it.
 - [x] [**M2: elevenlabs.**](2026-08-24-typed-provider-options-implementation.md#m2-elevenlabs)
-  (PR TBD) The conversion plus the deletion of `read_voice_settings`
+  (PR #276) The conversion plus the deletion of `read_voice_settings`
   and its key tables; the output-format rule moves into the model.
   Design footprint: deletes the hand-rolled precedent the pattern
   replaces, and adds the first nested model whose door is shut, which
