@@ -27,6 +27,16 @@ pure API client of the order of httpx plus the argument layer; the
 the open decisions: shapes source, what "binary" means, repository
 layout, version skew.
 
+**STATUS AFTER THE REVIEW ROUND: the architecture is an OPEN
+maintainer decision.** The round's finding 1 rejects this
+re-scope and prescribes the inverse (an in-repo `vinga-cli`
+package owning the remote grammar, with `vinga-server` depending
+on it); findings 5 (the generator spike) and 7 (publication) are
+likewise the maintainer's. The sections below still argue this
+plan's shape, the round records the counter-case, and the initial
+PR carries both to the maintainer. Every other amendment below
+holds under either shape.
+
 The census at `8aad881b` forces a re-scope of the letter while
 keeping every outcome, and this plan asks the review round and
 Rafael to weigh it:
@@ -74,7 +84,8 @@ building that wrapper today would add a name with no body.
 ### 1. The dependency tiers, stated in pyproject
 
 Core dependencies become exactly what the client needs: pydantic,
-httpx, typer, PyYAML, python-dotenv. A new `serve` extra carries
+pydantic-settings (the models import it eagerly and the CLI
+imports the models), httpx, typer, PyYAML, python-dotenv. A new `serve` extra carries
 FastAPI, uvicorn, SQLAlchemy, Alembic, cryptography, av, and
 whatever else the census of `pyproject.toml`'s current runtime
 list assigns to serving (the implementer inventories every current
@@ -86,15 +97,16 @@ for the CLI and name the extra for serving.
 
 ### 2. Six names move to light homes; the heavy imports go lazy
 
-- `check_transportable` and `APPLY_LOCATION` move from `store.py`
-  to a light home beside the transport vocabulary they serve (the
-  implementer proposes; `config/printing.py` or a sibling), with
-  `store.py` importing them back so the repository keeps one
-  definition.
+- `check_transportable`, `APPLY_LOCATION` and their helpers move
+  to a new `config/transport.py` owning the recursive
+  transportability policy, imported by both store and CLI: two
+  real consumers of one nontrivial policy, so it passes the
+  deletion test.
 - `addressed` moves beside the descriptors it reads
   (`entities.py`).
-- `views.reference_value` moves to the light module that renders
-  it (its only CLI caller is export's shadow note).
+- `views.reference_value` INLINES into its sole CLI caller
+  (export's shadow note) rather than gaining a module; a
+  one-caller move would be the pass-through the guide deletes.
 - `MASK` moves beside `is_secret_option` (`models.py`);
   `provider_identity` beside the descriptors. `secrets.py` keeps
   re-exports so the server-side callers do not churn.
@@ -106,11 +118,18 @@ for the CLI and name the extra for serving.
   function-local. A `--local` or serve invocation without the
   extra refuses with one fixed sentence naming the extra
   (`install vinga-server[serve] on the server host`), tested.
-- `main.py`'s eager `app`/`composition` imports move inside the
-  serve branch, mirroring the lazy dispatch it already does for
-  the command groups; `vinga-server` without the extra serves the
-  same fixed sentence, and `vinga-server config ...` works from
-  the thin install.
+- The WHOLE serve lifecycle leaves `main.py` for a new
+  server-runtime module (`DrainingServer`, which subclasses
+  `uvicorn.Server` at import time, the uvicorn configuration,
+  startup, shutdown, the banner, and every serve-only import:
+  today `main.py` eagerly imports FastAPI, uvicorn, composition,
+  boot, onboarding and providers before any dispatch). The module
+  owns the serve-lifecycle responsibility, which is what makes
+  the split a deepening rather than a length cut; `main.py` keeps
+  dispatch and the boundary sentences, imports the runtime only
+  in the serve branch, and `vinga-server` without the extra
+  answers the fixed sentence while `vinga-server config ...`
+  works from the thin install.
 
 ### 3. The `vinga` console script
 
@@ -124,7 +143,16 @@ working); the new script is an additional door onto the same
 way so help and usage read honestly (Click takes the prog from the
 invocation; the boundary's fixed sentences carry no prog and need
 no change; the one place the grammar prints its own name,
-`PROGRAM`, becomes invocation-aware). The docker shim note: the
+`PROGRAM`, becomes invocation-aware, mapping ONLY known entry
+points to two fixed canonical strings, `vinga` and
+`vinga-server config`; raw `argv[0]` is never interpolated into
+help, recipes, export output, the reference, logs or exception
+text, and a hostile-`argv[0]` sentinel case covers all six
+surfaces). Idempotent client-environment loading
+(`find_dotenv(usecwd=True)`, real environment winning) moves into
+`cli.main` itself so both spellings behave identically, tested
+from a temporary directory carrying URL and secret values with
+sentinel assertions on every stream. The docker shim note: the
 README's `vinga()` shell function would shadow an installed
 binary; the docs section that defines the shim gains the one
 sentence saying so and when to drop it.
