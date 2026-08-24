@@ -5551,6 +5551,7 @@
         "properties": {
           "voice_id": {
             "description": "Voice id from your ElevenLabs voice library: the id, not the display name, and account-specific even for the stock voices.",
+            "pattern": "\\S",
             "title": "Voice Id",
             "type": "string"
           },
@@ -5563,6 +5564,7 @@
           "output_format": {
             "default": "pcm_24000",
             "description": "Audio asked of the API. Only the pcm_<rate> formats work here, since the stage streams raw PCM; the default matches the rate devices are spoken at, so nothing is resampled. pcm_44100 and up need a paid ElevenLabs tier.",
+            "pattern": "^pcm_[0-9]+$",
             "title": "Output Format",
             "type": "string"
           },

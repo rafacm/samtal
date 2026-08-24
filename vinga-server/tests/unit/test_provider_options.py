@@ -26,6 +26,7 @@ shapes and the table decides which one a type gets.
 """
 
 import json
+import re
 import subprocess
 import sys
 import textwrap
@@ -36,6 +37,8 @@ from pydantic import BaseModel
 from vinga_server.config.loader import ConfigError
 from vinga_server.config.models import PROVIDER_STAGES, ProviderConfig
 from vinga_server.config.provider_options import (
+    NONBLANK_PATTERN,
+    PCM_FORMAT_PATTERN,
     PROVIDER_TYPES,
     ElevenlabsOptions,
     FasterWhisperOptions,
@@ -775,6 +778,52 @@ def test_the_published_schema_says_what_the_validator_accepts() -> None:
     accept(temperature=[0.0, 0.2])
     accept(temperature=None)
     refuse(temperature=[])
+
+
+def test_the_published_schema_carries_the_two_string_rules_as_patterns() -> None:
+    """The same claim for the second converted type, whose two rules are
+    `AfterValidator`s rather than a widened input.
+
+    A validator is code and a schema is not, so an annotation alone
+    describes both of these as any string at all: a client generating
+    from the document would write `voice_id: ""` or `output_format:
+    mp3_44100_128` and meet a refusal the document never warned about.
+    The pattern is what the document has to say a string rule with, so
+    it says it, on the selector's output and on the component the
+    provider PUT points at.
+    """
+    from vinga_server.config import docgen
+
+    published = [
+        json.loads(docgen.schema("provider", "tts", "elevenlabs")),
+        json.loads(docgen.openapi())["components"]["schemas"]["TtsElevenlabsOptions"],
+    ]
+
+    for schema in published:
+        assert schema["properties"]["voice_id"]["pattern"] == NONBLANK_PATTERN
+        assert schema["properties"]["output_format"]["pattern"] == PCM_FORMAT_PATTERN
+        # And the field descriptions survived the schema being stated
+        # rather than derived, which is the thing `WithJsonSchema` is
+        # easiest to lose.
+        assert schema["properties"]["voice_id"]["description"]
+        assert schema["properties"]["output_format"]["description"]
+
+    # And the patterns are not describing a different rule from the one
+    # that runs: what each matches is accepted and what it excludes is
+    # refused, checked with the published patterns themselves so a drift
+    # in either direction fails here.
+    for value, allowed in (("voice-1", True), (" ", False), ("", False)):
+        assert bool(re.search(NONBLANK_PATTERN, value)) is allowed
+        if allowed:
+            elevenlabs(voice_id=value)
+        else:
+            refuse(ELEVENLABS, voice_id=value)
+    for value, allowed in (("pcm_24000", True), ("mp3_44100_128", False), ("pcm_", False)):
+        assert bool(re.search(PCM_FORMAT_PATTERN, value)) is allowed
+        if allowed:
+            elevenlabs(output_format=value)
+        else:
+            refuse(ELEVENLABS, output_format=value)
 
 
 def test_the_selector_needs_the_stage_because_a_type_name_is_not_unique() -> None:
