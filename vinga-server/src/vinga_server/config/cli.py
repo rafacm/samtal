@@ -50,6 +50,7 @@ import sys
 import textwrap
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Annotated, Any, get_args, get_origin
 from urllib.parse import quote, urlunsplit
@@ -93,6 +94,7 @@ from vinga_server.config.responses import (
     Acknowledgement,
     AppliedDocument,
     AssembledPrompt,
+    ConfigDiff,
     ConfigDocument,
     ConfigReloadResult,
     Envelope,
@@ -1139,6 +1141,14 @@ def _declared(shape: object, answer: object) -> object:
     an entry nested in a listing is treated exactly as one that arrived
     on its own.
     """
+    if isinstance(shape, type) and issubclass(shape, Enum):
+        # A closed token, which arrives as the string it is declared as
+        # and which strict validation will not make a member of. Looked
+        # up rather than constructed: a token this client does not know
+        # stays the string it was and meets the refusal, where
+        # `Applies(answer)` would raise a ValueError out of a boundary
+        # that catches validation errors.
+        return {member.value: member for member in shape}.get(answer, answer)
     if isinstance(shape, type) and issubclass(shape, BaseModel):
         if isinstance(answer, Mapping):
             return {
@@ -1152,6 +1162,14 @@ def _declared(shape: object, answer: object) -> object:
         return {key: _declared(arguments[1], value) for key, value in answer.items()}
     if origin is list and isinstance(answer, list):
         return [_declared(arguments[0], item) for item in answer]
+    if origin is tuple and arguments[-1] is Ellipsis and isinstance(answer, list):
+        # A JSON array is a list, and strict validation will not make a
+        # tuple of one. The shape asked for a tuple because what it
+        # answers with is fixed once it is answered, which is a fact
+        # about the model and not about the wire, so the conversion
+        # belongs here with the other shape-guided ones rather than as a
+        # tolerance inside the validator.
+        return tuple(_declared(arguments[0], item) for item in answer)
     # Anything else is a leaf as far as this is concerned, including the
     # unions, which carry no model in any of these shapes, and
     # `dict[str, Any]`, which is where a masked entity body travels
@@ -1601,6 +1619,93 @@ def _reload_listing(answer: object) -> str:
         ]
         lines += [f"  {flag}: {'yes' if body[flag] else 'no'}" for flag in flags(shape)]
     return "\n".join(lines) + "\n\n" + _status_block(applied["mcp"]["servers"])
+
+
+# What the database holds that the running server is not serving
+#
+# One block per kind, in the order the domain declares them, and every
+# kind printed: a kind silently missing from the output would read as a
+# kind with nothing pending rather than as one this read does not
+# compare. What each block can say is read off its own model, so a field
+# added to the comparison is a field this prints, and a field shaped
+# like none of the three rules below is a failing test rather than
+# output nobody notices is gone.
+#
+# Three shapes and no fourth. A list of names is a list of names; a
+# yes-or-no is a kind there is one of, which has nothing to name; a
+# nested model is one kind's answer broken into the moments a
+# conversation meets each part at, and it is printed as its own indented
+# block for the reason the outer ones are.
+
+
+def named_lists(section: type[BaseModel]) -> tuple[str, ...]:
+    """One diff section's name lists, in the order it declares them."""
+    return tuple(
+        name
+        for name, field in section.model_fields.items()
+        if get_origin(field.annotation) is tuple and get_args(field.annotation) == (str, ...)
+    )
+
+
+def nested(section: type[BaseModel]) -> tuple[str, ...]:
+    """One diff section's own sub-sections, in the order it declares
+    them: the parts of one kind that reach a conversation at different
+    moments."""
+    return tuple(
+        name
+        for name, field in section.model_fields.items()
+        if isinstance(field.annotation, type) and issubclass(field.annotation, BaseModel)
+    )
+
+
+# Which kinds one comparison answers with and what shape each of them
+# is, read off the result rather than written down beside it, exactly as
+# the reload's sections are.
+DIFF_SECTIONS: dict[str, type[BaseModel]] = {
+    name: _section(field.annotation) for name, field in ConfigDiff.model_fields.items()
+}
+
+# What the label on a block means, said once at the head rather than
+# per block: three boundaries and no fourth, and which one a kind's
+# changes converge at is the answer's own.
+DIFF_INTRO = (
+    "# what the stored configuration would change on the running server. `applies`\n"
+    "# says when a change of that kind reaches a conversation: `reload` at the next\n"
+    "# reload, `check-in` as a device next asks, `restart` at the next server start."
+)
+
+
+def _diff_listing(answer: object) -> str:
+    """The comparison, kind by kind.
+
+    Names and labels and nothing else, which is what the shape carries:
+    no bodies, no values, no masks and no secret marks cross this
+    surface, so there is nothing here to filter.
+    """
+    body = _understood(ConfigDiff, answer, UNREADABLE_READ)
+    lines = [DIFF_INTRO]
+    for section, shape in DIFF_SECTIONS.items():
+        lines += _diff_block(section, shape, body[section], "")
+    return "\n".join(lines) + "\n"
+
+
+def _diff_block(
+    name: str, shape: type[BaseModel], body: Mapping[str, object], indent: str
+) -> list[str]:
+    """One kind's block, and the blocks of the parts under it."""
+    lines = [f"{indent}{name}: applies at {printable(str(body['applies']))}"]
+    lines += [
+        f"{indent}  {listed}: " + (_names(body[listed]) or "(none)")
+        for listed in named_lists(shape)
+    ]
+    lines += [
+        f"{indent}  {flag}: {'yes' if body[flag] else 'no'}" for flag in flags(shape)
+    ]
+    for under in nested(shape):
+        lines += _diff_block(
+            under, _section(shape.model_fields[under].annotation), body[under], indent + "  "
+        )
+    return lines
 
 
 def _summary(document: Mapping[str, object]) -> str:
@@ -2490,6 +2595,21 @@ RELOAD = Act(
 )
 
 
+def _diff_path(args: Invocation) -> str:
+    return _path("runtime", "config", "diff")
+
+
+# The read the other two in this namespace cannot give: they say what is
+# running and the entity reads say what is stored, and this is the
+# question an operator actually has after a write.
+DIFF = Act(
+    method="GET",
+    path=_diff_path,
+    answers=ConfigDiff,
+    render=_printed(_diff_listing),
+)
+
+
 # The one write that carries the whole configuration rather than one
 # entry of it. The document is checked for what JSON cannot carry before
 # it travels, exactly as a fragment is and against the same rule, under
@@ -3342,6 +3462,19 @@ COMMANDS: tuple[Command, ...] = (
         does=EXPORT_ALL,
         declare=_plain,
         help="the stored configuration as a document apply takes",
+    ),
+    # The seat #193 reserved. Flat with the three above it, because its
+    # subject is the deployment: it compares the whole stored half
+    # against the whole running one, and there is no noun to put in
+    # front of it that is not the thing the program is already about.
+    Command(
+        words=("diff",),
+        does=DIFF,
+        declare=_plain,
+        help=(
+            "what the stored configuration would change on the running server, kind by "
+            "kind, with the boundary each kind's changes reach a conversation at"
+        ),
     ),
     # A read of the running server rather than of the database: there is
     # no state to report when there is no server to ask.

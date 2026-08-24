@@ -388,6 +388,9 @@ Commands:
   show             print the whole stored configuration, with its stored secrets
                    masked
   export           the stored configuration as a document apply takes
+  diff             what the stored configuration would change on the running
+                   server, kind by kind, with the boundary each kind's changes
+                   reach a conversation at
   status           what each configured MCP server is doing on the running
                    server: connected, down, or unused because no agent
                    references it, since when, and which tools it published
@@ -1453,6 +1456,22 @@ Options:
 Usage: vinga export [OPTIONS]
 
   the stored configuration as a document apply takes
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --help         Show this message and exit.
+```
+
+### `vinga diff`
+
+```
+Usage: vinga diff [OPTIONS]
+
+  what the stored configuration would change on the running server, kind by
+  kind, with the boundary each kind's changes reach a conversation at
 
 Options:
   --config PATH  path to the YAML config file naming server.port and
