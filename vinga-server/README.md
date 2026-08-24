@@ -894,9 +894,8 @@ an allowed name the server does not actually offer is answerable in one
 read.
 
 It is a read of the running server rather than of the database, which is
-why there is no `--local` for it and why what it says cannot disagree
-with what is actually connected. Over the API it is
-`GET /api/runtime/mcp-servers`, keyed by entry name. The `/runtime`
+why what it says cannot disagree with what is actually connected. Over
+the API it is `GET /api/runtime/mcp-servers`, keyed by entry name. The `/runtime`
 namespace is separate from the entity namespaces on purpose: an
 `mcp_servers` entry may legally be named `status`, and a runtime route
 under `/mcp-servers/` would have shadowed it.
@@ -1185,7 +1184,7 @@ state for it to be up on. From inside the container the token and the
 loopback address are already in the environment; from outside, name the
 API with `--api-url` (or `VINGA_API_URL`) and carry the token yourself.
 [`../docs/reference/cli.md`](../docs/reference/cli.md) is the CLI's own
-page: installing it, reaching a server, the break-glass path, and every
+page: installing it, reaching a server, rebuilding one, and every
 command's help.
 
 A whole deployment, from an empty database, is one document and one
@@ -1220,12 +1219,11 @@ rather than at write time, so a half-built database is a legitimate
 state to be in and an illegitimate one to serve from.
 
 **When the server will not start**, there is nothing to write through,
-which is what `--local` is for: `show`, `delete`, `clear-secret` and
-`set-secret` against the database directly, the four commands that get a
-deployment out of a state its own server refuses. Every `--local`
-invocation says on stderr that it bypasses the API, and each write then
-says when it takes effect, the same answer the API gives for that act;
-every other command refuses `--local` by naming the four.
+and the way back is to rebuild the store rather than to operate on it:
+stop the server, delete the database, boot clean, apply the export taken
+while the deployment was healthy, and re-enter the credentials that
+export listed. That is [When the server will not
+start](#when-the-server-will-not-start), in the deployment notes.
 
 Every field of the domain half is documented in
 [`../docs/reference/domain-config.md`](../docs/reference/domain-config.md),
@@ -1313,12 +1311,9 @@ an error naming the key. Point it somewhere writable for local work:
 VINGA_SERVER__DATABASE__DIR=./var uv run vinga-server
 ```
 
-The reading commands take the same key, through `--local`, which is what
-lets one be run without a server on the other side:
-
-```bash
-VINGA_SERVER__DATABASE__DIR=./var uv run vinga-server config --local show
-```
+The server reads it at boot, and the config commands do not read it at
+all: they are clients of the API, and where the rows are kept is the
+server's business.
 
 ### The configuration API
 
@@ -1523,31 +1518,13 @@ The whole command line, including installing it away from a deployment
 and every command's own help page, is
 [`../docs/reference/cli.md`](../docs/reference/cli.md).
 
-**`--local` is the break-glass path**, for when there is no server to
-write through. It covers four commands, `show`, `delete`, `clear-secret`
-and `set-secret`, opens the database directly, and prints on stderr
-every time that it bypasses the API. When a change made this way is
-observed is then the write's own answer, in the same two cases as
-over the API: the next `config
-reload` for a provider entry, an MCP entry, the secrets stored on
-either, a prompt fragment, an agent and the defaults under them, and the
-device's next check-in for a
-binding. Every other command refuses the flag by
-naming the four. It does not check whether a server is running:
-there is no reliable way to, and a wrong refusal would wedge the
-recovery path in exactly the situation it exists for. What makes that
-safe is that a write is one transaction either way, so two writers
-serialize: the second one waits for the lock, and on any ordinary write
-it gets it and commits well inside the database's 10 second busy
-timeout. Only a writer still waiting when that timeout runs out is
-refused, and it is told nothing was changed and to run the command
-again.
-
-Its `show` and `delete` go by what is stored rather than by what a new
-write would be allowed to create, which is what lets it reach a row
-written before a rule that a later release added. The full procedure is
-in the deployment notes, under
-[The configuration API in a deployment](#the-configuration-api-in-a-deployment).
+**There is no second way in.** Every command here is a request, so a
+deployment whose server will not start is recovered by rebuilding its
+store rather than by editing it: stop the server, delete the database,
+boot clean, apply a kept `config export`, and re-enter each stored
+credential through the `set-secret` commands that export listed at its
+foot. The full procedure is in the deployment notes, under
+[When the server will not start](#when-the-server-will-not-start).
 
 ### Secrets
 
@@ -1578,13 +1555,11 @@ forms are supported:
   same slot, and `config show` marks the reference it displaces. With
   ciphertext stored and no key configured, or a key that does not open
   it, the server refuses to start naming the entity and the slot, and
-  the API goes down with it, so the repair runs through `--local`. Two
-  ways out, differing in what they need: `config --local clear-secret`
-  removes the envelope and needs no key at all, leaving the slot to its
-  environment reference if it has one, and `config --local set-secret`
-  writes the credential again and needs a usable key in
-  `VINGA_MASTER_KEY` to encrypt under, since storing a secret is the
-  one write that encrypts anything.
+  the API goes down with it, so the repair is the rebuild above: boot on
+  an empty database and put the configuration back, entering each
+  credential again under a key that works. A slot whose value is gone
+  for good is left to its environment reference by writing the entity
+  without the stored one.
 
 Instance configs stay out of the repository; `*.local.yaml` and `.env`
 are gitignored for local experiments, and the domain half of a local
@@ -2335,15 +2310,12 @@ whose keys are all environment references never needs one. Once
 ciphertext exists, losing the key means losing those credentials: the
 server refuses to start with a stored secret it cannot open, naming the
 entity and the slot. That refusal takes the API with it, so the way back
-in is `--local`, with two choices per slot.
-`config --local clear-secret` drops the envelope and needs no key, which
-is enough when the entity carries an environment reference for the same
-slot or can go without.
-`config --local set-secret` writes the value again and needs a usable
-key in `VINGA_MASTER_KEY` to encrypt under; it need not be the
-lost one, because what the next boot needs is a key list that opens
-every envelope still stored, which means every secret written under the
-lost key has to be set again or cleared.
+is the rebuild under [When the server will not
+start](#when-the-server-will-not-start): boot on an empty database and
+apply a kept export, which leaves no unopenable envelope behind. The key
+the credentials are then entered under need not be the lost one; what
+the next boot needs is a key list that opens every envelope stored, and
+after a rebuild every one of them was written under the key in use.
 
 **Rotation adds a key, and this release cannot retire one.**
 `VINGA_MASTER_KEY` holds a comma-separated list, newest first;
@@ -2444,84 +2416,55 @@ the host as written. Reach the API over `https://`, through a tunnel
 that terminates TLS, or on loopback from inside the container, which is
 the case the default address is built for.
 
-**When the server will not start, `--local` is the way back in.** A
-configuration the server refuses to boot on (a stored secret no
+### When the server will not start
+
+A configuration the server refuses to boot on (a stored secret no
 configured key opens, an entity that cannot be loaded, a reference that
-no longer resolves) leaves nothing to write through, which is the one
-situation the API cannot answer for. The recovery path opens the
-database directly and covers four commands:
+no longer resolves) leaves nothing to write through, because every
+config command is a request to a server that is not answering. The way
+back is not a surgical edit: stop the server, delete the database, start
+it again on the empty one, apply the export taken while the deployment
+was healthy, and re-enter each stored credential through the
+`set-secret` commands that export listed at its foot.
 
 ```bash
-# What is stored.
-vinga-server config --local show
-# Take out what will not load.
-vinga-server config --local delete agent broken
-# Repair a credential.
-vinga-server config --local clear-secret provider llm claude api_key
-vinga-server config --local set-secret provider llm claude api_key
+# Stop the container that will not serve, and take the database away.
+# A container of its own, because the one that serves is the one that
+# is down: same image, same volume, no port and no secret.
+docker stop vinga && docker rm vinga
+docker run --rm -v vinga-data:/data --entrypoint sh \
+  ghcr.io/rafacm/vinga-server:latest \
+  -c 'rm -f /data/db/vinga.db /data/db/vinga.db-wal /data/db/vinga.db-shm'
+
+# Start it again, which boots clean on the empty database, then put the
+# configuration back and re-enter the credentials it could not carry.
+docker run -d --name vinga ...          # the run command from above
+docker exec -i vinga vinga-server config apply -f - < deployment.yaml
+docker exec -i vinga vinga-server \
+  config set-secret provider -- llm claude api_key
 ```
 
-`set-secret` reads the value from stdin, or from a named variable with
-`--from-env`, and never from an argument. `--local` needs the master key
-only for `set-secret`, and needs no API token and no running server at
-all. Every other command refuses the flag by naming these four.
+The `-wal` and `-shm` files go with the database because the database is
+them: SQLite runs in WAL mode here, and a `vinga.db` deleted on its own
+leaves a write-ahead log the next boot reads.
 
-**Run them in a container of their own**, because the container that
-serves is the one that will not start, so there is nothing to exec into.
-Same image, same mounted YAML and same data volume, with the command
-replaced: the image's entrypoint is `vinga-server`, so what follows it
-is the command line above.
+That is what makes `vinga-server config export` worth keeping in version
+control beside the YAML file: it is the document the apply takes. A
+stored credential never travels in a read, so the export carries the
+command that enters each of them rather than the value, and the values
+come from wherever the deployment keeps its secrets.
 
-```bash
-docker run --rm -i \
-  -v /path/to/config.yaml:/config/config.yaml:ro \
-  -v vinga-data:/data \
-  ghcr.io/rafacm/vinga-server:latest \
-  config --local show
+It is a rebuild rather than a repair, and the difference is real: it
+puts back what the export says and nothing else, so a row nobody knew
+about goes with the file. A deployment that wants a surgical edit to the
+stored rows has one, through ordinary SQLite tooling against the
+database file. That is deliberately not wrapped in this project's own
+grammar: a second way in with its own vocabulary is a second thing to
+keep honest, and `sqlite3` is already documented by the people who wrote
+it.
 
-# set-secret is the one that needs the key, and reads the value on stdin
-# (-i is what gives it one).
-docker run --rm -i \
-  -e VINGA_MASTER_KEY \
-  -v /path/to/config.yaml:/config/config.yaml:ro \
-  -v vinga-data:/data \
-  ghcr.io/rafacm/vinga-server:latest \
-  config --local set-secret provider llm claude api_key
-```
-
-The YAML is mounted here for the same reason the serving container
-mounts it, and for the same optional one: the image reads
-`/config/config.yaml` when it is there and boots on the environment when
-it is not. Which directory a `--local` command opens comes from the
-image's own `VINGA_SERVER__DATABASE__DIR`, `/data/db`, which is why the
-volume is the mount that matters, and why leaving the YAML out works as
-long as nothing in it moved the database. No port is published and no
-secret beyond the master key is passed, because nothing here serves
-anything or reaches the API.
-
-Every `--local` invocation prints one line on stderr saying that it
-bypasses the API, and every write under it then says when it takes
-effect, the same sentence the API answers that act with: the next server
-start, the next `config reload` for an MCP entry, a secret on one, a
-prompt fragment or an agent's prompt, or the device's next check-in for
-a binding. That is not a warning about a hazard: it is the start-time
-contract and its two exceptions, said out loud at the one moment an
-operator is most likely to expect otherwise. The line itself is printed rather than enforced
-because there is no reliable way to tell whether a server is running
-against the same file, and a wrong refusal would wedge the recovery path
-in exactly the situation it exists for. Concurrency is safe regardless:
-each write is one transaction, so a `--local` write racing a server's
-own serializes with it, and the one that arrives second waits for the
-lock and then commits. The retryable refusal is what a writer meets only
-if the lock has not come free inside the 10 second busy timeout, and it
-says nothing was changed and to run the command again.
-
-Restart the server when the repair is done. That is the point of the
-path: it exists for a server that will not start, and starting it is
-the goal. It is not that a running server could observe none of this,
-which the write itself says: an MCP repair made this way is applied by
-`vinga-server config reload` like any other, and a binding is read at
-the device's next check-in.
+The full procedure, step by step, is in
+[`../docs/reference/cli.md`](../docs/reference/cli.md).
 
 ### Choosing an image
 

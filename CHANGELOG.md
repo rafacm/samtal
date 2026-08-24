@@ -68,6 +68,40 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   options are still passed through, and the example fragments are
   still where those are documented.
 
+### Removed
+
+- **`vinga-server config --local`, the break-glass path** (#281). The
+  flag opened the configuration database on the server's own disk for
+  four commands (`show`, `delete`, `set-secret`, `clear-secret`), and it
+  is gone with all of its plumbing: the banner it printed, the subset
+  refusal, the `local_ok` column on the command table, every local arm
+  of an act, the store opener, the encryption-key load and the per-kind
+  renderers behind them. `vinga-server config` is now a client of the
+  configuration API and nothing else, and imports no store, no database
+  and no key loader at all.
+
+  Three things retired it together. The store is moving to a real
+  database, where the file the flag opened does not exist and recovery
+  against a dead server is a database client's job. Upgrade care per
+  change begins at the first public release, so the scenario the flag
+  was kept for (a stored row a newer model refuses, killing the boot) is
+  not owed machinery yet. And `config export` and `config apply` changed
+  the arithmetic: the recovery that is actually written down now is stop
+  the server, delete the database, boot clean, apply the export, re-run
+  the `set-secret` commands the export annotated, which no longer makes
+  a second write path worth four duplicated command families and their
+  byte-parity obligations.
+
+  That procedure is now `When the server will not start` in
+  [`docs/reference/cli.md`](docs/reference/cli.md) and in the server
+  README, and it is driven end to end in the live CLI lane against a
+  real server whose database is deleted mid-test: the second export is
+  the first one's bytes. What it does not do is repair in place. A
+  deployment that wants a surgical edit to the stored rows has one
+  through ordinary SQLite tooling against the database file, documented
+  as exactly that rather than wrapped in this project's grammar. The
+  two refusals that used to name the flag now say what to do instead.
+
 ### Changed
 
 - **`openai_compatible` entries are validated more strictly than they
