@@ -836,21 +836,30 @@ class _Storage[Entry: BaseModel]:
     """What one kind checks around its own write, beyond what its model
     already says.
 
-    Two facts, each None for a kind that needs none, and each with the
+    Three facts, each None for a kind that needs none, and each with the
     signature its own caller uses rather than a shared loose one: what is
-    checked about the name before a body is parsed (`before_parse`), and
-    what is checked about the parsed entry before the write opens
-    (`inside_write`).
+    checked about the name before a body is parsed (`before_parse`), what
+    is checked about the parsed entry before the write opens
+    (`inside_write`), and what is checked about a stored row as it is
+    read back (`inside_read`).
 
-    The two take the same arguments as each other in spirit but not in
-    shape, and deliberately: a name check runs before there is an entry
+    The name check takes the same arguments as the other two in spirit
+    but not in shape, and deliberately: it runs before there is an entry
     to speak of, so it is given the name and nothing else, while an entry
     check is given the location a refusal will name, the parameters that
     address the entry, and the entry itself.
+
+    The read check is the write check's mirror and is a separate fact
+    rather than the same one run twice, because the two refuse
+    differently: a caller writing a fragment got it wrong and is told
+    which field, while a stored row nobody can edit from here is a
+    storage failure. What holds them to one answer is that both consult
+    the same validator (#88).
     """
 
     before_parse: Callable[[str], None] | None = None
     inside_write: Callable[[str, tuple[str, ...], Entry], None] | None = None
+    inside_read: Callable[[str, tuple[str, ...], Entry], None] | None = None
 
 
 _PROVIDER = entities.descriptor("provider")
@@ -922,9 +931,21 @@ def _from_row(descriptor: EntityDescriptor, row: Row) -> BaseModel:
     declared default, and `model_fields_set` holds exactly what was
     written. That last part is load-bearing rather than tidy, and
     `_to_row` says why.
+
+    This is also where a kind checks a stored row for what its model
+    cannot say alone, and the reason it is here rather than in `_body`
+    is structural: a provider's options are validated against the model
+    its STAGE and type declare, and the stage is a key column of the row
+    this function is holding. `_body` has a location string and would
+    have to parse one back out of it.
     """
     identity = tuple(getattr(row, part) for part in descriptor.addressing)
-    return _body(descriptor.model, _location(descriptor, *identity), row.body)
+    location = _location(descriptor, *identity)
+    entry = _body(descriptor.model, location, row.body)
+    check = _STORAGE[descriptor.name].inside_read
+    if check is not None:
+        check(location, identity, entry)
+    return entry
 
 
 def _to_row(descriptor: EntityDescriptor, entry: BaseModel) -> dict[str, object]:
@@ -2052,6 +2073,79 @@ def _check_entry_name(
         raise ConfigError(problem)
 
 
+def _checked_provider(
+    location: str, identity: tuple[str, ...], entry: ProviderConfig
+) -> None:
+    """What a provider entry has to survive beyond its own model, in the
+    order a refusal is most useful in.
+
+    The options come first because a key that is not the type's is the
+    thing an operator most often got wrong and the thing this repository
+    could not name until the types declared what they take. The URL rule
+    below is asked of whatever survived, and neither refusal quotes a
+    value.
+    """
+    _check_option_types(location, identity, entry)
+    _check_no_url_credentials(location, identity, entry)
+
+
+def _check_option_types(
+    location: str, identity: tuple[str, ...], entry: ProviderConfig
+) -> None:
+    """A provider's options through the model its type declares.
+
+    The write half of #88. A type that declares nothing is untouched,
+    which is what makes the conversion type by type a non-event here.
+
+    Imported inside the call, and that is not a habit: this module is
+    imported by `config/cli.py`, which is held to loading no part of a
+    conversation, and `providers/options.py` sits inside a package whose
+    `__init__` re-exports the whole provider layer. What the deferral
+    costs is one import on a write; what it buys is that rendering the
+    onboarding URL still loads no provider module at all
+    (`tests/unit/test_onboarding_import_weight.py`).
+
+    Recorded inside the handler and raised outside it, the rule every
+    refusal built from another exception here follows: what was caught
+    holds the rejected options.
+    """
+    from vinga_server.providers.options import OptionsRefused, checked_options
+
+    sentence: str | None = None
+    problems: tuple[FieldProblem, ...] = ()
+    try:
+        checked_options(f"invalid {location}:", identity[0], entry.type, entry.options)
+    except OptionsRefused as exc:
+        sentence, problems = str(exc), exc.problems
+    if sentence is not None:
+        raise ConfigError(sentence, problems)
+
+
+def _stored_option_types(
+    location: str, identity: tuple[str, ...], entry: ProviderConfig
+) -> None:
+    """The same question of a stored row, refused as a storage failure.
+
+    The read half, and the reason it is asked at all: an entry written
+    before its type declared a model can hold a key that model refuses,
+    and a server that read it back happily would be serving a
+    configuration its own write path would no longer accept. The refusal
+    names the entry and the fields, never the values, exactly as an
+    unreadable body does, and the way out of it is the one an unreadable
+    row has always had: `vinga-server config --local delete provider
+    <stage> <name>`.
+    """
+    from vinga_server.providers.options import OptionsRefused, checked_options
+
+    problem: str | None = None
+    try:
+        checked_options(f"{location}: {_UNREADABLE_ROW}", identity[0], entry.type, entry.options)
+    except OptionsRefused as exc:
+        problem = str(exc)
+    if problem is not None:
+        raise StorageError(problem)
+
+
 def _check_no_url_credentials(
     location: str, _identity: tuple[str, ...], entry: ProviderConfig
 ) -> None:
@@ -2087,7 +2181,9 @@ def _check_no_url_credentials(
 # five now run none at all: what used to bring them here was the shape of
 # their columns, and their shape is their model's.
 _STORAGE: dict[str, _Storage] = {
-    "provider": _Storage(inside_write=_check_no_url_credentials),
+    "provider": _Storage(
+        inside_write=_checked_provider, inside_read=_stored_option_types
+    ),
     "mcp-server": _Storage(inside_write=_check_entry_name),
     "prompt-fragment": _Storage(before_parse=_check_fragment_name),
     "agent": _Storage(),
