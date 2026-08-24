@@ -31,7 +31,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import vinga_server.tools.mcp as mcp_module
-from tests.support.config_cli import API_SECRET_ENV, SECRET, TOKEN, runner
+from tests.support.config_cli import API_SECRET_ENV, OTHER_SECRET, SECRET, TOKEN, runner
 from tests.support.config_cli import chain as _chain
 from tests.support.config_cli import logged as _logged
 from vinga_server import db as db_module
@@ -416,6 +416,78 @@ def test_an_unreadable_answer_from_an_accepted_url_names_it_sanitized(
     assert SECRET not in _logged(caplog)
 
 
+# An address urllib reads, this module's transport policy accepts, and
+# the client library then refuses: a hostname carrying a zero-width
+# joiner cannot be encoded as IDNA, and httpx says so by quoting the
+# hostname back. Construction is where that happens, which is why
+# construction is inside the request's boundary.
+#
+# Two sentinels, because the two halves of this address are not the same
+# kind of thing. The query is a credential and appears nowhere. The host
+# is what `shown_url` deliberately keeps and what every refusal in this
+# file already prints, so what is asserted about it is that what reaches
+# the terminal is the sanitized, printable form rather than the library's
+# quotation of what was typed.
+JOINER = "‍"
+
+UNOPENABLE = f"https://{OTHER_SECRET}{JOINER}.example/api?token={SECRET}"
+
+UNOPENABLE_SHOWN = f"https://{OTHER_SECRET}?.example/api"
+
+
+def test_an_address_the_library_will_not_open_is_a_sentence_not_a_traceback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The real client, and the real construction failure: `main` catches
+    `ConfigError` and nothing else, so an address the library refuses
+    used to leave as a traceback carrying the hostname exactly as it was
+    typed."""
+    monkeypatch.delenv("VINGA_CONFIG", raising=False)
+    monkeypatch.setenv("VINGA_SERVER__DATABASE__DIR", str(tmp_path / "db"))
+    monkeypatch.setenv(API_SECRET_ENV, TOKEN)
+
+    with caplog.at_level(logging.DEBUG):
+        assert cli.main(["--api-url", UNOPENABLE, "list"]) == 1
+
+    captured = capsys.readouterr()
+    both = captured.out + captured.err
+    assert f"no connection can be opened to {UNOPENABLE_SHOWN}" in captured.err
+    assert captured.out == ""
+    assert "Traceback" not in captured.err
+    # The credential in the query, on every surface.
+    assert SECRET not in both
+    assert "?token=" not in both
+    assert SECRET not in _logged(caplog)
+    # The library's own wording, which is the other half of what a
+    # traceback published: it quotes the hostname as it was typed, raw
+    # joiner included.
+    assert JOINER not in both
+    assert "IDNA" not in both
+    assert "InvalidURL" not in both
+
+
+def test_that_refusal_carries_no_library_exception_either(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """White-box for the chain: `httpx.InvalidURL` holds the hostname it
+    refused, and an exception raised inside the handler would keep it on
+    `__context__`."""
+    monkeypatch.setenv(API_SECRET_ENV, TOKEN)
+    address = cli._permitted(UNOPENABLE, "--api-url")
+
+    with pytest.raises(ConfigError) as caught:
+        cli._sent("GET", "/agents", cli._NOTHING, address, TOKEN, cli.READ_TIMEOUT_S)
+
+    rendered = _chain(caught.value)
+    assert SECRET not in rendered
+    assert JOINER not in rendered
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+
+
 def _answering(body: object = None) -> httpx.MockTransport:
     """A transport that answers anything, so a test about what a request
     leaves behind does not depend on what answered it."""
@@ -479,7 +551,9 @@ def test_the_quiet_lasts_exactly_as_long_as_the_request(
     assert narrator.level == was
 
 
-def test_neither_failure_carries_the_credential_in_its_chain() -> None:
+def test_neither_failure_carries_the_credential_in_its_chain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The chain, not just the message: httpx's own exceptions carry the
     request, and the request carries the URL that was reached.
 
@@ -492,12 +566,16 @@ def test_neither_failure_carries_the_credential_in_its_chain() -> None:
     def refuse(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("connection refused", request=request)
 
-    client = httpx.Client(base_url=address.reached, transport=httpx.MockTransport(refuse))
-    try:
-        with pytest.raises(ConfigError) as unreachable:
-            cli._sent(client, "GET", "/agents", cli._NOTHING, address)
-    finally:
-        client.close()
+    monkeypatch.setattr(
+        cli,
+        "build_client",
+        lambda base_url, token: httpx.Client(
+            base_url=base_url, transport=httpx.MockTransport(refuse)
+        ),
+    )
+
+    with pytest.raises(ConfigError) as unreachable:
+        cli._sent("GET", "/agents", cli._NOTHING, address, TOKEN, cli.READ_TIMEOUT_S)
 
     assert SECRET not in _chain(unreachable.value)
     assert unreachable.value.__cause__ is None

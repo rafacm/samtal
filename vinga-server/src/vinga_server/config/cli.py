@@ -761,38 +761,107 @@ def _call(
     address = _address(args, file_config)
     token = _token(file_config)
     with quieted(REQUEST_LOGGERS, QUIET_LEVEL):
-        client = build_client(address.reached, token)
-        client.timeout = httpx.Timeout(read_timeout_s, connect=CONNECT_TIMEOUT_S)
-        try:
-            response = _sent(client, method, path, body, address)
-        finally:
-            client.close()
+        response = _sent(method, path, body, address, token, read_timeout_s)
     return _answer(response, address)
 
 
 def _sent(
-    client: httpx.Client, method: str, path: str, body: object, address: Address
+    method: str,
+    path: str,
+    body: object,
+    address: Address,
+    token: str,
+    read_timeout_s: float | None,
 ) -> httpx.Response:
-    """The request, with a transport failure turned into a sentence.
+    """The request, with everything that can go wrong making it turned
+    into a sentence.
 
-    The message is built inside the handler and raised after it: an
-    exception raised while another is being handled carries that one as
-    its context, and httpx's exceptions carry the request, whose URL is
-    one of the two things this whole policy exists to keep out of sight.
+    Building the client is inside the boundary with the request and the
+    close, which is where `doctor.py`'s probe already puts it and for the
+    same reason: httpx validates the address when it is handed one, so
+    construction is where an address this module's own policy accepted
+    and the library then refuses would otherwise leave as a traceback
+    with what was typed in it. An IDNA hostname is the shape that does
+    it, and it arrives as a `UnicodeError` from under the library rather
+    than as anything httpx names, which is why the arm is that wide.
+
+    Every message is built inside a handler and raised after all of
+    them: an exception raised while another is being handled carries
+    that one as its context, and httpx's exceptions carry the request,
+    whose URL is one of the two things this whole policy exists to keep
+    out of sight.
+
+    The close is a step of the request rather than tidying after it, so
+    it answers a sentence instead of raising: an exception out of a
+    `finally` leaves this boundary altogether, taking whatever a driver
+    wrote into its message with it, and it would replace a refusal
+    already in flight. Whatever failed first is what is reported.
     """
     problem: str | None = None
+    client: httpx.Client | None = None
+    answered: httpx.Response | None = None
     try:
-        if body is _NOTHING:
-            return client.request(method, path)
-        return client.request(method, path, json=body)
-    except httpx.HTTPError:
-        problem = (
-            f"cannot reach the configuration API at {address.shown}: the request did not "
-            f"complete. Check that the server is running and that this is the address "
-            f"it serves. A deployment whose server will not start at all is recovered "
-            f"by booting one on an empty database and applying a kept export."
+        try:
+            client = build_client(address.reached, token)
+            client.timeout = httpx.Timeout(read_timeout_s, connect=CONNECT_TIMEOUT_S)
+            answered = (
+                client.request(method, path)
+                if body is _NOTHING
+                else client.request(method, path, json=body)
+            )
+        except httpx.HTTPError:
+            problem = _unreachable(address)
+        except (httpx.InvalidURL, ValueError):
+            problem = _unopenable(address)
+    finally:
+        problem = problem or _close_failed(client, address)
+    if answered is None or problem is not None:
+        raise ConfigError(problem)
+    return answered
+
+
+def _unreachable(address: Address) -> str:
+    return (
+        f"cannot reach the configuration API at {address.shown}: the request did not "
+        f"complete. Check that the server is running and that this is the address "
+        f"it serves. A deployment whose server will not start at all is recovered "
+        f"by booting one on an empty database and applying a kept export."
+    )
+
+
+def _unopenable(address: Address) -> str:
+    """What an address this module accepted and the library would not
+    open says. The transport policy is about the scheme, the host and
+    the credential; whether a host can be encoded at all is the
+    library's rule, and this is where its refusal becomes one of ours."""
+    return (
+        f"no connection can be opened to {address.shown}: the address passed the "
+        f"transport policy, and the library that would carry the request will not "
+        f"accept it. A hostname holding a character no name may hold is what does "
+        f"this. Neither the address as it was typed nor the library's own wording is "
+        f"repeated here."
+    )
+
+
+def _close_failed(client: httpx.Client | None, address: Address) -> str | None:
+    """Give the connection back, and say so when it will not go.
+
+    Answered rather than raised, for the reason the caller states, and
+    named by nothing at all rather than quoted, because a transport
+    failing on its way out can put the address, a header or a driver's
+    own text into its message."""
+    if client is None:
+        return None
+    try:
+        client.close()
+    except Exception:
+        return (
+            f"the configuration API at {address.shown} answered, but the connection to "
+            f"it could not be closed, so what it said is not printed: an answer this "
+            f"client could not finish reading is not one to act on. What the library "
+            f"said is not repeated here."
         )
-    raise ConfigError(problem)
+    return None
 
 
 def _answer(response: httpx.Response, address: Address) -> object:
@@ -869,7 +938,12 @@ def _permitted(url: str, source: str) -> Address:
     the transport failures further up print the address they were given.
     """
     parsed = parsed_url(url, source)
-    shown = shown_url(parsed)
+    # Bounded and made printable as well as stripped, because this is
+    # the form every sentence below names and a typed address is text
+    # nobody has vouched for: `urlsplit` deletes tabs and newlines and
+    # leaves every other control character where it was, and a hostname
+    # the library goes on to refuse is exactly the one carrying one.
+    shown = printable(shown_url(parsed))
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         raise ConfigError(
             f"{source} is not an http:// or https:// URL with a host: {shown}"
