@@ -144,6 +144,69 @@ def test_every_fragment_installs_through_the_command_it_names(
     assert "assistant" in listed
 
 
+# The typed types' fragments, and the promise a comment marker makes
+#
+# A fragment documents its type's options by writing the interesting
+# ones out and leaving the rest as commented `# key:` lines with the
+# reasoning above them, so every commented key is a key the file is
+# telling a reader they may write. Once a type declares an options model
+# that is a claim the model can contradict: a documented key the model
+# does not declare, or a documented value it refuses, is a fragment that
+# reads like working documentation and is not. So each typed type's
+# fragment is uncommented whole and installed (#88).
+
+
+def _fragment_type(fragment: Path) -> str | None:
+    """The `type:` a fragment declares, as it is written live."""
+    for line in fragment.read_text(encoding="utf-8").splitlines():
+        found = KEY_LINE.match(line)
+        if found and found.group("key") == "type":
+            return line.split(":", 1)[1].strip()
+    return None
+
+
+def _typed_fragments() -> list[Path]:
+    from vinga_server.providers.registry import declared_options
+
+    declared = {type_name for _, type_name, _ in declared_options()}
+    return [path for path in _fragments() if _fragment_type(path) in declared]
+
+
+def _uncommented(text: str) -> str:
+    """Every commented-out key written live, and every line of prose left
+    alone. The two are told apart the same way the coverage scan below
+    tells them apart: a comment whose content is a `key:` line is a
+    documented key, and a comment that is a sentence is a sentence."""
+    lines = []
+    for raw in text.splitlines():
+        hidden = COMMENT_LINE.match(raw)
+        shown = hidden.group("indent") + hidden.group("rest") if hidden else raw
+        lines.append(shown if hidden and KEY_LINE.match(shown) else raw)
+    return "\n".join(lines) + "\n"
+
+
+@pytest.mark.parametrize(
+    "fragment", _typed_fragments(), ids=[path.name for path in _typed_fragments()]
+)
+def test_every_documented_option_of_a_typed_type_installs(
+    run, tmp_path: Path, capsys: pytest.CaptureFixture[str], fragment: Path
+) -> None:
+    written = tmp_path / fragment.name
+    written.write_text(_uncommented(fragment.read_text(encoding="utf-8")), encoding="utf-8")
+
+    argv = [*_command(fragment), "-f", str(written)]
+
+    assert run(*argv) == 0, f"{fragment.name}, uncommented: {capsys.readouterr().err}"
+
+
+def test_the_uncommenting_is_doing_something() -> None:
+    """A transform that changed nothing would make the case above a
+    second copy of the one before it."""
+    for fragment in _typed_fragments():
+        text = fragment.read_text(encoding="utf-8")
+        assert _uncommented(text) != text, f"{fragment.name} documents no commented key"
+
+
 def test_every_fragment_is_listed_in_the_examples_readme() -> None:
     """The README's table is how a reader finds these, so a new file
     that is not in it is invisible."""

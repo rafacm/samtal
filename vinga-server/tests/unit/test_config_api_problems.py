@@ -152,6 +152,42 @@ REFUSALS = [
         ["/api_key_env"],
     ),
     Refusal(
+        "a declared option of a typed provider type",
+        "/providers/asr/ears",
+        {"type": "faster_whisper", "beam_size": "5"},
+        lambda store, fragment: store.set_provider("asr", "ears", fragment),
+        "providers.asr.ears",
+        # The inversion #88 bought. This key used to be an option of a
+        # pass-through model and so unprintable, exactly like the nested
+        # case above; the type declares it now, so it is a name this
+        # repository chose and the pointer addresses it. Options are flat
+        # siblings of `type` in the submitted fragment, so the pointer is
+        # the field itself rather than anything under an `options` key.
+        ["/beam_size"],
+    ),
+    Refusal(
+        "an undeclared option of a typed provider type",
+        "/providers/asr/ears",
+        {"type": "faster_whisper", "beem_size": 5},
+        lambda store, fragment: store.set_provider("asr", "ears", fragment),
+        "providers.asr.ears",
+        # And the other side of the same rule, which did not move: a key
+        # the caller invented is still not printed, whatever the type
+        # declares, so the refusal addresses the fragment.
+        [""],
+    ),
+    Refusal(
+        "a credential pasted into a declared option of a typed type",
+        "/providers/asr/ears",
+        {"type": "faster_whisper", "beam_size": SENTINEL},
+        lambda store, fragment: store.set_provider("asr", "ears", fragment),
+        "providers.asr.ears",
+        # The field is named because the type declared it; the value is
+        # not, because a value refused for being the wrong shape is
+        # exactly the shape of thing a credential is pasted as.
+        ["/beam_size"],
+    ),
+    Refusal(
         "a filler switched on with no phrases",
         "/agents/sam",
         {"prompt": "You are Sam.", "filler": {"enabled": True}},
@@ -523,6 +559,12 @@ PLANTED_KEYS = [
         lambda store, fragment: store.set_provider("llm", "claude", fragment),
     ),
     PlantedKey(
+        "an invented option key under a type that declares its own",
+        "/providers/asr/ears",
+        {"type": "faster_whisper", KEY_SENTINEL: 1},
+        lambda store, fragment: store.set_provider("asr", "ears", fragment),
+    ),
+    PlantedKey(
         "a secret-shaped key in an MCP server's env",
         "/mcp-servers/home",
         {"transport": "stdio", "command": "uvx", "env": {f"{KEY_SENTINEL}_TOKEN": "v"}},
@@ -614,6 +656,44 @@ def test_the_cli_prints_the_same_sentence_for_a_problem_document(
     assert run("set", "provider", "llm", "claude", "-f", "-", stdin="model: m\n") == 1
 
     assert capsys.readouterr().err.rstrip("\n") == str(caught.value)
+
+
+def test_the_cli_prints_a_typed_options_refusal_without_the_value(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    store: ConfigStore,
+) -> None:
+    """The third surface for #88's own refusal, after the exception and
+    the response: what a terminal shows.
+
+    A typed option refused for its shape is the case where the field is
+    printed and the value must not be, and the two halves are one
+    string: the CLI prints what the repository said.
+    """
+    fragment = {"type": "faster_whisper", "beam_size": SENTINEL}
+    with pytest.raises(ConfigError) as caught:
+        store.set_provider("asr", "ears", fragment)
+
+    run = runner(tmp_path, monkeypatch)
+
+    assert (
+        run(
+            "set",
+            "provider",
+            "asr",
+            "ears",
+            "-f",
+            "-",
+            stdin=f"type: faster_whisper\nbeam_size: {SENTINEL}\n",
+        )
+        == 1
+    )
+    printed = capsys.readouterr().err.rstrip("\n")
+
+    assert printed == str(caught.value)
+    assert "beam_size" in printed
+    assert SENTINEL not in printed
 
 
 # The status vocabulary

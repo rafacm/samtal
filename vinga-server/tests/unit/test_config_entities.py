@@ -96,6 +96,41 @@ def test_exactly_two_kinds_can_hold_a_stored_secret() -> None:
     assert holders == set(get_args(EntityKind))
 
 
+def test_the_options_note_names_the_types_that_declare_a_model() -> None:
+    """The one sentence in this registry that is prose about another
+    one.
+
+    `OPTIONS_NOTE` says which provider types declare an options model,
+    and it says it in words because this module is what the reference is
+    rendered from, on a path held to importing the models and this
+    registry and nothing else, while the provider registry sits inside a
+    package that re-exports the whole provider layer. Two statements of
+    one fact, then, which is what the design guide forbids unless the
+    second is derived or held: this is the holding.
+
+    Both directions. A type that gains a model and is not named here is
+    documented as passed-through when it is not; a type named here that
+    has no model would send a reader to a schema command that refuses.
+    """
+    from vinga_server.providers.registry import _registrations, declared_options
+
+    declared = {(stage, type_name) for stage, type_name, _ in declared_options()}
+    assert declared, "no type declares an options model, so this check is vacuous"
+
+    for stage, type_name in declared:
+        assert type_name in entities.OPTIONS_NOTE, f"{type_name} is not in the note"
+        assert f"{stage} stage" in entities.OPTIONS_NOTE, f"the {stage} stage is not in the note"
+
+    untyped = {
+        type_name
+        for stage, types in _registrations().items()
+        for type_name in types
+        if (stage, type_name) not in declared
+    }
+    named = sorted(one for one in untyped if one in entities.OPTIONS_NOTE)
+    assert not named, f"the note names types that declare no model: {', '.join(named)}"
+
+
 # What the registry may pull in: the models it declares its kinds
 # against, and what those reach in turn. Named one by one rather than
 # matched on a prefix, because each of the consumers that are absent is

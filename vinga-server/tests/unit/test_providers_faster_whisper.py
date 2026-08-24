@@ -3,8 +3,15 @@
 Transcription with a real model needs weights from the network, which
 the test lanes never download; that path is exercised by the local lane
 and the device checkpoint. What runs here depends on whether the extra
-is installed: the PCM conversion and the option plumbing (against a
-fake engine) when it is, the helpful registry error when it is not.
+is installed: the PCM conversion and the plumbing from the validated
+options to the engine (against a fake engine) when it is, the helpful
+registry error when it is not.
+
+What this file no longer holds is what the type ACCEPTS. That was a
+ladder of reader calls inside the builder and is `FasterWhisperOptions`
+now, so the cases about wrong types, unknown keys and the defaults live
+in `test_provider_options.py`, where they run in every lane rather than
+only where the extra is installed.
 """
 
 import importlib.util
@@ -14,6 +21,7 @@ import pytest
 
 from vinga_server.config.models import ProviderConfig
 from vinga_server.providers import ProviderError, build_entry
+from vinga_server.providers.options import FasterWhisperOptions
 
 HAS_FASTER_WHISPER = importlib.util.find_spec("faster_whisper") is not None
 
@@ -65,8 +73,13 @@ def built_with(
 
     ScriptedModel.detections = detections or [("en", 0.9)]
     monkeypatch.setattr(faster_whisper, "WhisperModel", ScriptedModel)
+    # Through the model rather than around it, so what reaches the engine
+    # below is what a written fragment would produce: the options are
+    # validated exactly as `construct_provider` validates them.
     provider = faster_whisper.build(
-        "providers.asr.ears", ProviderConfig.model_validate({"type": "faster_whisper", **options})
+        "providers.asr.ears",
+        ProviderConfig.model_validate({"type": "faster_whisper", **options}),
+        FasterWhisperOptions.model_validate(options),
     )
     # White-box, for the same reason the cloud providers' clients are:
     # the model a deployment gets is built inside the provider and
@@ -131,22 +144,6 @@ async def test_configured_decode_options_reach_the_engine(
         "temperature": [0.0, 0.2],
     }
     assert model.ctor["cpu_threads"] == 3
-
-
-@pytest.mark.skipif(not HAS_FASTER_WHISPER, reason="faster-whisper extra not installed")
-def test_a_wrongly_typed_decode_option_names_the_entry(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from vinga_server.providers import faster_whisper
-
-    monkeypatch.setattr(faster_whisper, "WhisperModel", FakeWhisperModel)
-    with pytest.raises(ProviderError) as excinfo:
-        faster_whisper.build(
-            "providers.asr.ears",
-            ProviderConfig.model_validate({"type": "faster_whisper", "vad_filter": "yes"}),
-        )
-    assert "providers.asr.ears" in str(excinfo.value)
-    assert '"vad_filter"' in str(excinfo.value)
 
 
 @pytest.mark.skipif(not HAS_FASTER_WHISPER, reason="faster-whisper extra not installed")
@@ -229,17 +226,6 @@ async def test_detect_once_locks_only_a_confident_detection(
     pinned, _ = built_with(monkeypatch, language="en", language_detect="once")
     result = await pinned.transcribe(AUDIO, 16000)
     assert result.lock_language is None
-
-
-@pytest.mark.skipif(not HAS_FASTER_WHISPER, reason="faster-whisper extra not installed")
-def test_an_unknown_language_detect_mode_names_the_choices(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    with pytest.raises(ProviderError) as excinfo:
-        built_with(monkeypatch, language_detect="sometimes")
-    assert '"language_detect"' in str(excinfo.value)
-    assert "every_utterance" in str(excinfo.value)
-    assert "once" in str(excinfo.value)
 
 
 @pytest.mark.skipif(HAS_FASTER_WHISPER, reason="faster-whisper extra is installed")

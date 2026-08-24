@@ -35,6 +35,7 @@ from vinga_server.config import entities
 from vinga_server.config.entities import EntityDescriptor
 from vinga_server.config.loader import StorageError
 from vinga_server.config.models import (
+    PROVIDER_STAGES,
     McpServerConfig,
     is_env_name,
     is_mcp_secret_key,
@@ -42,6 +43,8 @@ from vinga_server.config.models import (
 )
 from vinga_server.config.store import ConfigStore
 from vinga_server.db import open_database, schema
+from vinga_server.providers.options import checked_options
+from vinga_server.providers.registry import declared_options, registration
 
 BODIES = Path(__file__).parent / "data" / "domain-bodies"
 
@@ -51,16 +54,36 @@ BODIES = Path(__file__).parent / "data" / "domain-bodies"
 SECRET = "sk-test-9a41c7e0-never-a-real-credential"
 
 # The identity a planted row is written under, per kind: a value for
-# each of the parameters the kind is addressed by. A provider's stage
-# has to be a real one, since a stored row naming anything else is a
-# storage failure of its own.
+# each of the parameters the kind is addressed by.
+#
+# The provider is the one kind whose identity is not a constant, and the
+# reason is #88: a provider's options are checked against the model its
+# STAGE and type declare, so a body planted under the wrong stage would
+# be a body nothing checks. The stage is read off the registry by the
+# body's own type below, which is also the one place that mapping lives.
 IDENTITIES = {
-    "provider": ("llm", "planted"),
     "mcp-server": ("planted",),
     "prompt-fragment": ("planted",),
     "agent": ("planted",),
     "agent-defaults": (),
 }
+
+
+def _written_type(path: Path) -> str:
+    return str(json.loads(path.read_text(encoding="utf-8"))["type"])
+
+
+def _identity(descriptor: EntityDescriptor, path: Path) -> tuple[str, ...]:
+    """Where one fixture's row is planted, which for a provider carries
+    the stage its type is registered in."""
+    if descriptor.name != "provider":
+        return IDENTITIES[descriptor.name]
+    written = _written_type(path)
+    stage = next(
+        (one for one in PROVIDER_STAGES if registration(one, written) is not None), None
+    )
+    assert stage is not None, f"{path}: no stage registers the type {written}"
+    return (stage, "planted")
 
 
 def _fixtures() -> list[tuple[EntityDescriptor, Path]]:
@@ -96,14 +119,18 @@ def store(tmp_path: Path) -> Iterator[ConfigStore]:
         engine.dispose()
 
 
-def _row_identity(descriptor: EntityDescriptor) -> dict[str, object]:
-    identity = IDENTITIES[descriptor.name]
+def _row_identity(descriptor: EntityDescriptor, identity: tuple[str, ...]) -> dict[str, object]:
     if not descriptor.addressing:
         return {"id": schema.AGENT_DEFAULTS_ID}
     return dict(zip(descriptor.addressing, identity, strict=True))
 
 
-def _plant(store: ConfigStore, descriptor: EntityDescriptor, written: str) -> None:
+def _plant(
+    store: ConfigStore,
+    descriptor: EntityDescriptor,
+    written: str,
+    identity: tuple[str, ...],
+) -> None:
     """One row holding `written`, created or replaced.
 
     Written as a row rather than through a write path, deliberately and
@@ -112,22 +139,24 @@ def _plant(store: ConfigStore, descriptor: EntityDescriptor, written: str) -> No
     cannot show whether an older one still parses.
     """
     table = getattr(schema, descriptor.table)
-    identity = _row_identity(descriptor)
-    where = [table.c[column] == value for column, value in identity.items()]
+    columns = _row_identity(descriptor, identity)
+    where = [table.c[column] == value for column, value in columns.items()]
     planted(store, table.delete().where(*where))
-    planted(store, insert(table).values(**identity, body=written))
+    planted(store, insert(table).values(**columns, body=written))
 
 
-def _loaded(store: ConfigStore, descriptor: EntityDescriptor) -> BaseModel:
+def _loaded(
+    store: ConfigStore, descriptor: EntityDescriptor, identity: tuple[str, ...]
+) -> BaseModel:
     """The planted entry as a load gives it back, through the public
     read the server itself boots on."""
     domain = store.load().domain
     if not descriptor.addressing:
         return domain.agent_defaults
     section = getattr(domain, descriptor.moved_key)
-    for group in IDENTITIES[descriptor.name][:-1]:
+    for group in identity[:-1]:
         section = getattr(section, group)
-    return section[IDENTITIES[descriptor.name][-1]]
+    return section[identity[-1]]
 
 
 def test_the_floor_covers_every_entity_kind_and_both_transports() -> None:
@@ -192,16 +221,58 @@ def test_a_body_round_trips_through_the_mapper_pair(
     own writer had just produced.
     """
     written = path.read_text(encoding="utf-8")
-    _plant(store, descriptor, written)
+    identity = _identity(descriptor, path)
+    _plant(store, descriptor, written, identity)
 
-    first = _loaded(store, descriptor)
+    first = _loaded(store, descriptor, identity)
     assert first == descriptor.model.model_validate_json(written)
 
-    _plant(store, descriptor, body(first))
-    second = _loaded(store, descriptor)
+    _plant(store, descriptor, body(first), identity)
+    second = _loaded(store, descriptor, identity)
 
     assert second == first
     assert second.model_fields_set == first.model_fields_set
+
+
+@pytest.mark.parametrize(
+    ("descriptor", "path"),
+    [(one, path) for one, path in FIXTURES if one.name == "provider"],
+    ids=[name for name, (one, _) in zip(IDS, FIXTURES, strict=True) if one.name == "provider"],
+)
+def test_every_provider_body_survives_the_validator_its_type_declares(
+    descriptor: EntityDescriptor, path: Path
+) -> None:
+    """The floor, one level down, for the half a model cannot state.
+
+    A provider's options are `model_extra` as far as `ProviderConfig` is
+    concerned, so the case above passes on a body whose options the
+    type's own model would refuse. This runs the same public validator a
+    read-back runs (#88), which is what makes a tightening of a type's
+    options a failure here rather than a deployment that will not boot.
+    """
+    stage, _ = _identity(descriptor, path)
+    entry = descriptor.model.model_validate_json(path.read_text(encoding="utf-8"))
+    checked_options(
+        f"{path.name}:", stage, _written_type(path), entry.options  # type: ignore[attr-defined]
+    )
+
+
+def test_every_declared_type_has_a_body_of_its_own() -> None:
+    """A type that gains an option model gains a compatibility surface,
+    so it gains a fixture: a body in the shape a deployment already has,
+    including a key the model does not declare and forwards anyway.
+
+    Read off the registry rather than listed here, so the next type to
+    convert brings this assertion with it (#88).
+    """
+    written = {
+        _written_type(path) for descriptor, path in FIXTURES if descriptor.name == "provider"
+    }
+    declared = {type_name for _, type_name, _ in declared_options()}
+
+    assert declared <= written, (
+        "no committed body for: " + ", ".join(sorted(declared - written))
+    )
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -293,16 +364,17 @@ def test_an_mcp_list_written_as_plain_names_loads_and_is_written_back_unchanged(
     with the chain the squash deleted.
     """
     descriptor = entities.descriptor("agent")
+    identity = IDENTITIES["agent"]
     written = (BODIES / "agent" / "mcp-written-as-plain-names.json").read_text(encoding="utf-8")
-    _plant(store, descriptor, written)
+    _plant(store, descriptor, written, identity)
 
-    entry = _loaded(store, descriptor)
+    entry = _loaded(store, descriptor, identity)
 
     assert [mcp_entry_fragment(item) for item in entry.mcp] == ["home", "weather"]  # type: ignore[attr-defined]
 
     # And back out through the writer, which is where a normalization
     # into the object form would have shown up.
-    _plant(store, descriptor, body(entry))
+    _plant(store, descriptor, body(entry), identity)
     assert json.loads(_stored_body(store, descriptor))["mcp"] == ["home", "weather"]
 
 
@@ -324,7 +396,7 @@ def _stored_body(store: ConfigStore, descriptor: EntityDescriptor) -> str:
 def test_a_refusal_about_a_body_names_the_entity_and_never_the_body(
     store: ConfigStore,
 ) -> None:
-    _plant(store, entities.descriptor("provider"), '{"type": "anthropic"}')
+    _plant(store, entities.descriptor("provider"), '{"type": "anthropic"}', ("llm", "planted"))
     planted(
         store,
         update(schema.providers).values(
@@ -344,13 +416,54 @@ def test_a_refusal_about_a_body_names_the_entity_and_never_the_body(
     assert "api_key" not in rendered
 
 
+def test_a_stored_option_a_type_no_longer_accepts_names_the_entry_and_a_way_out(
+    store: ConfigStore,
+) -> None:
+    """The break this batch prices at zero, and the recovery it does not.
+
+    A deployment that wrote a passthrough key under a type that now
+    declares a model has a row this server refuses to read. The pre
+    release stance says that breakage is acceptable; it says nothing
+    about leaving an operator with a server that will not start and no
+    way to edit the row, so the way out is asserted here rather than
+    assumed: the refusal names the entry, and the delete that does not
+    read the row takes it away.
+    """
+    descriptor = entities.descriptor("provider")
+    identity = ("asr", "planted")
+    _plant(
+        store,
+        descriptor,
+        json.dumps({"type": "faster_whisper", "beam_size": SECRET}),
+        identity,
+    )
+
+    with pytest.raises(StorageError) as caught:
+        store.load()
+
+    # The boot path prints this sentence as it is, so what it may carry
+    # is the entry, the field and the rule, and nothing of the value.
+    assert "providers.asr.planted" in str(caught.value)
+    assert "beam_size" in str(caught.value)
+    assert SECRET not in _chain(caught.value)
+
+    store.delete_provider(*identity)
+
+    assert "planted" not in store.load().domain.providers.asr
+
+
 def test_a_body_that_is_not_json_at_all_refuses_without_quoting_it(
     store: ConfigStore,
 ) -> None:
     """The other half: a parse that never reached a field. Pydantic
     reports where the parse stopped rather than what it was reading,
     which is what makes this refusal safe to print."""
-    _plant(store, entities.descriptor("prompt-fragment"), f"not json, just {SECRET}")
+    _plant(
+        store,
+        entities.descriptor("prompt-fragment"),
+        f"not json, just {SECRET}",
+        IDENTITIES["prompt-fragment"],
+    )
 
     with pytest.raises(StorageError) as caught:
         store.load()
