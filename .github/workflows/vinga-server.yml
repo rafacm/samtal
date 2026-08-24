@@ -159,7 +159,7 @@ jobs:
       - name: Unit tests
         run: uv run pytest tests/unit -v --durations=25 -n auto --dist loadfile
 
-  # The shorter lane: the integration tests, the four generated-document
+  # The shorter lane: the integration tests, the five generated-document
   # drift checks, and the wheel migration. The checks ride here because
   # they cost seconds and this lane finishes well before the other one.
   integration:
@@ -234,6 +234,27 @@ jobs:
           uv run vinga-server config openapi > "$RUNNER_TEMP/api-openapi.json"
           if ! diff -u ../docs/reference/api-openapi.json "$RUNNER_TEMP/api-openapi.json"; then
             echo "::error::docs/reference/api-openapi.json is stale; regenerate it with: uv run vinga-server config openapi > ../docs/reference/api-openapi.json"
+            exit 1
+          fi
+
+      # And the CLI reference, which is the one committed document that
+      # is only half generated: the prose above the marker is written by
+      # hand (installing the thing, reaching a server, the break-glass
+      # path) and everything between the markers comes from the command
+      # tree and the example fragments. So this rebuilds the page rather
+      # than diffing a fragment of it: keep everything up to and
+      # including the opening marker, regenerate the region, close it,
+      # and diff the whole file. A hand-edited region is reverted by the
+      # next run exactly as it is for the four documents above, and a
+      # hand-edited head is nobody's to revert.
+      - name: Check the committed CLI reference is current
+        run: |
+          awk '1;/^<!-- generated: cli reference -->$/{exit}' ../docs/reference/cli.md > "$RUNNER_TEMP/cli.md"
+          echo >> "$RUNNER_TEMP/cli.md"
+          uv run vinga-server config cli-reference >> "$RUNNER_TEMP/cli.md"
+          echo '<!-- end generated: cli reference -->' >> "$RUNNER_TEMP/cli.md"
+          if ! diff -u ../docs/reference/cli.md "$RUNNER_TEMP/cli.md"; then
+            echo "::error::docs/reference/cli.md is stale; regenerate the region between its markers with: uv run vinga-server config cli-reference"
             exit 1
           fi
 
