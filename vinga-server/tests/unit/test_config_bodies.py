@@ -41,10 +41,10 @@ from vinga_server.config.models import (
     is_mcp_secret_key,
     mcp_entry_fragment,
 )
+from vinga_server.config.provider_options import checked_options, declared_options
 from vinga_server.config.store import ConfigStore
 from vinga_server.db import open_database, schema
-from vinga_server.providers.options import checked_options
-from vinga_server.providers.registry import declared_options, registration
+from vinga_server.providers.registry import registration
 
 BODIES = Path(__file__).parent / "data" / "domain-bodies"
 

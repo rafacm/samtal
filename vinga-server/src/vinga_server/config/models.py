@@ -851,7 +851,7 @@ def validation_problems(
     It lives beside `safe_location` rather than in the repository that
     used to hold it because a second caller arrived that is not the
     repository: a provider type's own options model is validated by
-    `providers/options.py`, on a path that must not import a database
+    `config/provider_options.py`, on a path that must not import a database
     driver to reach one function. One walk, one wording, both callers.
     """
     lines = [headline]

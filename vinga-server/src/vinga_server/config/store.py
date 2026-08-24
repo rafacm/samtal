@@ -77,6 +77,7 @@ from vinga_server.config.models import (
     url_credential,
     validation_problems,
 )
+from vinga_server.config.provider_options import OptionsRefused, checked_options
 from vinga_server.config.secrets import (
     MASK,
     EntityKind,
@@ -2097,20 +2098,10 @@ def _check_option_types(
     The write half of #88. A type that declares nothing is untouched,
     which is what makes the conversion type by type a non-event here.
 
-    Imported inside the call, and that is not a habit: this module is
-    imported by `config/cli.py`, which is held to loading no part of a
-    conversation, and `providers/options.py` sits inside a package whose
-    `__init__` re-exports the whole provider layer. What the deferral
-    costs is one import on a write; what it buys is that rendering the
-    onboarding URL still loads no provider module at all
-    (`tests/unit/test_onboarding_import_weight.py`).
-
     Recorded inside the handler and raised outside it, the rule every
     refusal built from another exception here follows: what was caught
     holds the rejected options.
     """
-    from vinga_server.providers.options import OptionsRefused, checked_options
-
     sentence: str | None = None
     problems: tuple[FieldProblem, ...] = ()
     try:
@@ -2135,8 +2126,6 @@ def _stored_option_types(
     row has always had: `vinga-server config --local delete provider
     <stage> <name>`.
     """
-    from vinga_server.providers.options import OptionsRefused, checked_options
-
     problem: str | None = None
     try:
         checked_options(f"{location}: {_UNREADABLE_ROW}", identity[0], entry.type, entry.options)

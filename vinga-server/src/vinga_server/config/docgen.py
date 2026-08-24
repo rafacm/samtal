@@ -67,6 +67,7 @@ from vinga_server.config.entities import (
 )
 from vinga_server.config.entities import ENTITIES as COMMANDED
 from vinga_server.config.models import DOMAIN_DESCRIPTIONS, DomainConfig
+from vinga_server.config.provider_options import declared_options, options_model
 
 # Every shape this document has a section for, in the order it documents
 # them: the five entity kinds a command writes, then the two that are
@@ -86,6 +87,11 @@ PROSE_WIDTH = 78
 
 # The whole domain configuration, as opposed to one entity kind.
 DOMAIN = "domain"
+
+# The kind whose types declare options of their own, which is the one
+# selector `schema` takes three words for and the one section of the
+# reference with a tier under it.
+PROVIDER = "provider"
 
 # Where a help epilog wraps. Narrower than a terminal, because argparse
 # prints this verbatim and a line that wraps on its own is worse than
@@ -124,13 +130,11 @@ def schema(name: str | None = None, stage: str = "", type_name: str = "") -> str
     type, `mock` is all four), so a type name alone addresses nothing in
     particular.
 
-    The registry is imported inside that branch rather than at the top
-    of the module, and the constraint it is protecting is stated in the
-    module docstring: rendering the reference and the whole-domain
-    schema must load the models and the descriptor registry and nothing
-    else, which `test_config_docgen.py` holds in a child interpreter.
-    Asking for one type's options is a different question and pays for
-    the table that answers it.
+    What answers it is the declaration in
+    `config/provider_options.py`, which this module can name at the top
+    like any other model source: it is pydantic and nothing else, and
+    the child-interpreter pin in `test_config_docgen.py` allows it for
+    that reason.
     """
     if stage or type_name:
         return _options_schema(name, stage, type_name)
@@ -158,12 +162,10 @@ def _options_schema(name: str | None, stage: str, type_name: str) -> str:
     """One provider type's options as JSON Schema, which is what a
     client reads before writing the fragment that carries them."""
     from vinga_server.config.loader import ConfigError
-    from vinga_server.providers.registry import declared_options, registration
 
-    if name != "provider" or not stage or not type_name:
+    if name != PROVIDER or not stage or not type_name:
         raise ConfigError(OPTIONS_ARE_A_PROVIDERS)
-    found = registration(stage, type_name)
-    model = found.options if found is not None else None
+    model = options_model(stage, type_name)
     if model is None:
         declared = ", ".join(
             f"{one} {other}" for one, other, _ in declared_options()

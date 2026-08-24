@@ -100,26 +100,28 @@ def test_the_options_note_names_the_types_that_declare_a_model() -> None:
     """The one sentence in this registry that is prose about another
     one.
 
-    `OPTIONS_NOTE` says which provider types declare an options model,
-    and it says it in words because this module is what the reference is
-    rendered from, on a path held to importing the models and this
-    registry and nothing else, while the provider registry sits inside a
-    package that re-exports the whole provider layer. Two statements of
-    one fact, then, which is what the design guide forbids unless the
-    second is derived or held: this is the holding.
+    `OPTIONS_NOTE` names the types that declare an options model, and
+    the names are read out of the declaration rather than written into
+    the sentence, so the first half below is a consequence rather than a
+    check. It is asserted anyway, because what it holds is that the
+    reading is still happening: a sentence that stopped naming them
+    would document every type as passed-through.
 
-    Both directions. A type that gains a model and is not named here is
-    documented as passed-through when it is not; a type named here that
-    has no model would send a reader to a schema command that refuses.
+    The second half is the one that could go wrong on its own. A type
+    named in this sentence that declares no model would send a reader to
+    a schema command that refuses, and the registry is the only place
+    that knows which types exist at all.
     """
-    from vinga_server.providers.registry import _registrations, declared_options
+    from vinga_server.config.provider_options import declared_options
+    from vinga_server.providers.registry import _registrations
 
     declared = {(stage, type_name) for stage, type_name, _ in declared_options()}
     assert declared, "no type declares an options model, so this check is vacuous"
 
     for stage, type_name in declared:
-        assert type_name in entities.OPTIONS_NOTE, f"{type_name} is not in the note"
-        assert f"{stage} stage" in entities.OPTIONS_NOTE, f"the {stage} stage is not in the note"
+        assert f"{stage} {type_name}" in entities.OPTIONS_NOTE, (
+            f"{stage} {type_name} is not in the note"
+        )
 
     untyped = {
         type_name
@@ -142,6 +144,14 @@ ALLOWED_IMPORTS = frozenset(
         "vinga_server.config.entities",
         "vinga_server.config.loader",
         "vinga_server.config.models",
+        # The same one name, for the same reason, added by the same
+        # change: the registry's provider entry says which types declare
+        # an options model, and it derives that from the declaration
+        # rather than restating it. See the note in
+        # `test_config_docgen.py`; the module is pydantic and
+        # `config.models`, and none of the consumers this pin exists to
+        # keep out is reachable through it.
+        "vinga_server.config.provider_options",
         "vinga_server.runtime",
         "vinga_server.runtime.prompt",
         "vinga_server.tools",

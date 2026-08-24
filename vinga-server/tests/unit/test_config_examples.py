@@ -166,7 +166,7 @@ def _fragment_type(fragment: Path) -> str | None:
 
 
 def _typed_fragments() -> list[Path]:
-    from vinga_server.providers.registry import declared_options
+    from vinga_server.config.provider_options import declared_options
 
     declared = {type_name for _, type_name, _ in declared_options()}
     return [path for path in _fragments() if _fragment_type(path) in declared]

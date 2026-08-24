@@ -82,6 +82,18 @@ ALLOWED_IMPORTS = frozenset(
         "vinga_server.config.entities",
         "vinga_server.config.loader",
         "vinga_server.config.models",
+        # The one name this set gained for #88, and the reason it is
+        # safe: `provider_options` declares the pydantic models a
+        # provider type's options are, and imports pydantic and
+        # `config.models` and nothing else. The `heavy` assertion below
+        # is what holds that claim rather than this comment, and it is
+        # still empty. The reason it is needed is that the two documents
+        # rendered here now describe those options, so the module that
+        # declares them is on the rendering path. What must stay out is
+        # `vinga_server.providers`, whose package `__init__` re-exports
+        # the engine layer; that is why the declaration lives on this
+        # side of the boundary at all.
+        "vinga_server.config.provider_options",
         "vinga_server.runtime",
         "vinga_server.runtime.prompt",
         "vinga_server.tools",
