@@ -121,80 +121,159 @@ def test_a_fragment_can_come_from_a_file(
 # from the secret commands, and a file that will not decode is as likely
 # to be key material as a mistyped document.
 #
-# Every case plants the sentinel where the value would be. In the path
-# for the three that never open the file, and inside the file for the
-# one that opens it and cannot read it as text.
+# The table below is the whole of `_FILE_PROBLEMS`, one row per class it
+# answers, each raised from the read itself rather than arranged on a
+# filesystem: a row whose failure a filesystem will not reliably produce
+# is a row that goes untested, and a test that skips itself on the
+# machine that runs it proves nothing on any other. What is asserted is
+# the whole of what an operator gets, so a row deleted from the
+# production table, or one left to fall through to the general sentence,
+# is a failure here rather than a silence.
+#
+# Every injected exception carries the sentinel where the real one
+# carries a value: an `OSError`'s `filename`, a decode error's buffer.
+# The two real-filesystem cases below the table are what says the
+# classes are the ones a filesystem actually raises.
+
+FRAGMENT_NAME = "fragment.yaml"
+
+FILE_FAILURES = [
+    ("nothing at the path", FileNotFoundError(2, "No such file", SECRET), "FILE_NOT_FOUND"),
+    (
+        "a path component that is not a directory",
+        NotADirectoryError(20, "Not a directory", SECRET),
+        "FILE_NOT_FOUND",
+    ),
+    (
+        "a directory where a file belongs",
+        IsADirectoryError(21, "Is a directory", SECRET),
+        "FILE_NOT_READABLE",
+    ),
+    (
+        "a file this user may not read",
+        PermissionError(13, "Permission denied", SECRET),
+        "FILE_NOT_READABLE",
+    ),
+    (
+        "bytes that are not UTF-8",
+        UnicodeDecodeError("utf-8", f"prompt: {SECRET}\n".encode() + b"\xff", 41, 42, "invalid"),
+        "FILE_NOT_TEXT",
+    ),
+    ("anything else the system says", OSError(5, "Input/output error", SECRET), "FILE_UNREADABLE"),
+]
 
 
-def test_a_missing_fragment_file_names_the_rule_and_never_the_path(
-    run, tmp_path: Path, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
+@pytest.fixture
+def refusing_read(monkeypatch: pytest.MonkeyPatch):
+    """Make the fragment file's own read raise, and leave every other
+    read in the process alone: the command reads its configuration file
+    through the same call."""
+
+    def arrange(raised: BaseException) -> None:
+        real = Path.read_text
+
+        def read_text(self: Path, *args: object, **kwargs: object) -> str:
+            if self.name == FRAGMENT_NAME:
+                raise raised
+            return real(self, *args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(Path, "read_text", read_text)
+
+    return arrange
+
+
+@pytest.mark.parametrize(
+    ("raised", "sentence"),
+    [(raised, sentence) for _, raised, sentence in FILE_FAILURES],
+    ids=[what for what, _, _ in FILE_FAILURES],
+)
+def test_every_way_a_fragment_file_fails_has_one_sentence_of_its_own(
+    run,
+    refusing_read,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+    raised: BaseException,
+    sentence: str,
 ) -> None:
-    missing = tmp_path / f"{SECRET}.yaml"
+    refusing_read(raised)
+    fragment = tmp_path / FRAGMENT_NAME
 
     with caplog.at_level(logging.DEBUG):
-        assert run("set", "agent", "sam", "-f", str(missing)) == 1
+        assert run("set", "agent", "sam", "-f", str(fragment)) == 1
 
     captured = capsys.readouterr()
-    assert cli.FILE_NOT_FOUND in captured.err
-    assert SECRET not in captured.err
-    assert SECRET not in captured.out
-    assert str(missing) not in captured.err
-    assert "Traceback" not in captured.err
+    # The whole of stderr, not a substring of it: what is under test is
+    # that this row has a sentence rather than the next row's.
+    assert captured.err == getattr(cli, sentence) + "\n"
+    assert captured.out == ""
+    assert caplog.records == []
     assert SECRET not in _logged(caplog)
 
 
-def test_a_fragment_file_that_will_not_open_says_so_in_this_module_s_words(
-    run, tmp_path: Path, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
+@pytest.mark.parametrize(
+    ("raised", "sentence"),
+    [(raised, sentence) for _, raised, sentence in FILE_FAILURES],
+    ids=[what for what, _, _ in FILE_FAILURES],
+)
+def test_no_fragment_file_refusal_carries_what_the_failure_held(
+    refusing_read, tmp_path: Path, raised: BaseException, sentence: str
 ) -> None:
-    """A directory where a file belongs, which is the failure every
-    filesystem answers the same way; the operating system's own wording
-    for it is not passed through, because a sentence this code did not
-    write is a sentence it cannot promise carries no value."""
+    """White-box for the chain, the way the parser's refusals are
+    checked below: what an operating-system error holds is the path it
+    was given, what a decode error holds is the bytes it was given, and
+    neither is printed, so neither can be asserted through the runner.
+    """
+    refusing_read(raised)
+
+    with pytest.raises(cli.ConfigError) as caught:
+        cli._file(str(tmp_path / FRAGMENT_NAME))
+
+    assert str(caught.value) == getattr(cli, sentence)
+    assert SECRET not in _chain(caught.value)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+
+
+def test_a_missing_fragment_file_really_does_take_that_row(
+    run, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The table above injects the classes; these two say a filesystem
+    raises them, so the rows are answering real failures rather than
+    exceptions the test made up. A path that is not there and a
+    directory where a file belongs are the two every filesystem
+    produces the same way."""
+    missing = tmp_path / f"{SECRET}.yaml"
+
+    assert run("set", "agent", "sam", "-f", str(missing)) == 1
+
+    captured = capsys.readouterr()
+    assert captured.err == cli.FILE_NOT_FOUND + "\n"
+    assert str(missing) not in captured.err
+    assert SECRET not in captured.err + captured.out
+
+
+def test_a_directory_where_a_fragment_belongs_really_does_take_its_row(
+    run, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     directory = tmp_path / f"{SECRET}.yaml"
     directory.mkdir()
 
-    with caplog.at_level(logging.DEBUG):
-        assert run("set", "agent", "sam", "-f", str(directory)) == 1
+    assert run("set", "agent", "sam", "-f", str(directory)) == 1
 
     captured = capsys.readouterr()
-    assert cli.FILE_NOT_READABLE in captured.err
-    assert SECRET not in captured.err
-    assert SECRET not in captured.out
+    assert captured.err == cli.FILE_NOT_READABLE + "\n"
     assert "Is a directory" not in captured.err
-    assert "Traceback" not in captured.err
-    assert SECRET not in _logged(caplog)
-
-
-def test_a_fragment_file_this_user_may_not_read_says_the_same(
-    run, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """The other half of that sentence, and the half a test cannot
-    always produce: a user who can read anything reads this too."""
-    denied = tmp_path / f"{SECRET}.yaml"
-    denied.write_text("prompt: A\n", encoding="utf-8")
-    denied.chmod(0o000)
-    try:
-        denied.read_text(encoding="utf-8")
-    except PermissionError:
-        pass
-    else:
-        pytest.skip("this user reads a file with no permission bits, so nothing is denied")
-
-    assert run("set", "agent", "sam", "-f", str(denied)) == 1
-
-    captured = capsys.readouterr()
-    assert cli.FILE_NOT_READABLE in captured.err
-    assert SECRET not in captured.err
-    assert "Permission denied" not in captured.err
+    assert SECRET not in captured.err + captured.out
 
 
 def test_a_fragment_file_that_is_not_text_is_refused_rather_than_thrown(
     run, tmp_path: Path, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
 ) -> None:
-    """The half of #289 that was not about echoing: `UnicodeDecodeError`
-    is a `ValueError` rather than an `OSError`, so a file that is not
-    UTF-8 used to leave as a traceback, and the exception it left as
-    holds the buffer it could not decode.
+    """The half of #289 that was not about echoing, over a real file:
+    `UnicodeDecodeError` is a `ValueError` rather than an `OSError`, so a
+    file that is not UTF-8 used to leave as a traceback, and the
+    exception it left as holds the buffer it could not decode.
 
     The sentinel is inside the file, on the line above the bytes that
     break the decoding, which is where an operator's would be: a
@@ -207,34 +286,11 @@ def test_a_fragment_file_that_is_not_text_is_refused_rather_than_thrown(
         assert run("set", "agent", "sam", "-f", str(binary)) == 1
 
     captured = capsys.readouterr()
-    assert cli.FILE_NOT_TEXT in captured.err
+    assert captured.err == cli.FILE_NOT_TEXT + "\n"
+    assert captured.out == ""
     assert SECRET not in captured.err
-    assert SECRET not in captured.out
     assert "Traceback" not in captured.err
-    assert "utf-8" not in captured.err.replace("UTF-8", "")
     assert SECRET not in _logged(caplog)
-
-
-def test_no_fragment_file_refusal_carries_the_file_or_the_path_in_its_chain(
-    tmp_path: Path,
-) -> None:
-    """White-box for the chain, the way the parser's refusals are
-    checked below: what an operating-system error holds is the path it
-    was given, what a decode error holds is the bytes it was given, and
-    neither is printed, so neither can be asserted through the runner.
-    """
-    binary = tmp_path / f"{SECRET}.bin"
-    binary.write_bytes(f"prompt: {SECRET}\n".encode() + b"\xff\xfe\x80\x00")
-    directory = tmp_path / f"{SECRET}.d"
-    directory.mkdir()
-
-    for path in (tmp_path / f"{SECRET}.missing", binary, directory):
-        with pytest.raises(cli.ConfigError) as caught:
-            cli._file(str(path))
-
-        assert SECRET not in _chain(caught.value), path
-        assert caught.value.__cause__ is None, path
-        assert caught.value.__context__ is None, path
 
 
 def test_a_fragment_file_that_will_not_parse_is_not_named_either(
