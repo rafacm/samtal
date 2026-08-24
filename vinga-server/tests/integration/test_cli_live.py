@@ -75,7 +75,13 @@ from vinga_server.app import create_app
 from vinga_server.config import ConfigError, cli, docgen, entities
 from vinga_server.config.boot import load_boot_config
 from vinga_server.config.models import API_MOUNT_PATH, DOMAIN_KEYS, NOT_A_MAC
-from vinga_server.config.secrets import MASK, MASTER_KEY_ENV, generate_key, load_keys
+from vinga_server.config.secrets import (
+    MASK,
+    MASTER_KEY_ENV,
+    SecretLocation,
+    generate_key,
+    load_keys,
+)
 from vinga_server.config.store import APPLY_LIMIT, TOO_MANY_ENTRIES, ConfigStore
 from vinga_server.db import DATABASE_FILENAME, open_database
 from vinga_server.ota import OTA_PATH
@@ -1051,22 +1057,63 @@ def _annotated_secret_command(exported: str) -> tuple[str, ...]:
     return tuple(shlex.split(named[0])[len(cli.PROGRAM.split()) :])
 
 
+# Where the recovered credential is read back. Named here because it is
+# the one thing the procedure has to prove that no command of the
+# grammar can be asked: a credential never travels in a read, so the
+# only surface that can say the right plaintext went back in is the
+# repository the server itself decrypts through.
+RECOVERED_SLOT = SecretLocation.provider("llm", "spare", "api_key")
+
+
+def stored_plaintext(directory: Path, location: SecretLocation) -> str | None:
+    """One stored credential, decrypted the way a provider build reads
+    it.
+
+    Through the repository rather than through a command, because there
+    is deliberately no command that prints a stored value: `show` masks
+    it and `export` names the command that enters it. So an export
+    comparison cannot tell a credential that went back correctly from
+    one stored as the wrong bytes, and this is what tells them apart.
+
+    The keys are read from the environment at the moment of the call,
+    which after the rotation below is the new key and only the new key.
+    """
+    engine = open_database(directory)
+    try:
+        return ConfigStore(engine, load_keys()).load().secrets.secret(location)
+    finally:
+        engine.dispose()
+
+
 def test_a_deployment_is_rebuilt_from_its_export_on_an_empty_database(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The recovery procedure, end to end over a real socket.
 
     Seed a deployment and store a credential on it, keep the export,
-    stop the server, delete the database, boot another on the same empty
-    directory, apply the export, re-run the set-secret command the export
-    annotated, and export again. The second export is the first one's
-    bytes, which is the whole claim: what an operator keeps is enough to
-    reproduce what they had.
+    stop the server, delete the database, rotate to a key the old one is
+    not in, boot another server on the same empty directory, apply the
+    export, re-run the set-secret command the export annotated, and start
+    the server once more. Then read the credential back, and export.
+
+    A new key rather than the old one, because that is the case the
+    deployment notes promise: the key is lost with the database it
+    opened, and what the next boot needs is a key list that opens every
+    envelope stored, which after a rebuild is only the ones just
+    written. Carrying the old key across would prove a weaker thing than
+    the documentation claims.
+
+    The last two steps are what make this a proof rather than a
+    round trip. Starting the server again runs the boot's exhaustive
+    verification against the new key, so ciphertext nothing can open
+    fails here. And the credential is read back as plaintext before the
+    exports are compared, because an export carries a credential's
+    location and the command that fills it and never its value: a
+    set-secret that stored the wrong bytes writes an export that matches
+    the first one to the letter.
 
     A store and a key of its own, because the deployment is destroyed
-    half way through and the lane's is shared. The key is stable across
-    both boots, which it has to be: the credential re-entered after the
-    apply is read back by the export that follows it.
+    half way through and the lane's is shared.
     """
     monkeypatch.delenv(CONFIG_ENV, raising=False)
     monkeypatch.setenv(MASTER_KEY_ENV, generate_key())
@@ -1077,6 +1124,12 @@ def test_a_deployment_is_rebuilt_from_its_export_on_an_empty_database(
     with serving(directory) as before:
         seeded = ("--api-url", before.api_url)
         assert run(*seeded, "apply", "-f", document_path) == 0
+        # A deployment that can be started, which an empty database also
+        # is and a store holding agents and nothing bound to one is not.
+        # The rebuild has to reach a server that boots, so what it puts
+        # back has to be complete: the default agent is part of the
+        # deployment being recovered rather than a detail of this test.
+        assert run(*seeded, "set-default-agent", "sam") == 0
         assert run(
             *seeded, "set-secret", "provider", "llm", "spare", "api_key",
             "--from-env", SECRET_ENV,
@@ -1094,6 +1147,13 @@ def test_a_deployment_is_rebuilt_from_its_export_on_an_empty_database(
         path.unlink()
     assert not database.exists()
 
+    # And the key with it. Nothing that follows can open an envelope
+    # written above, which is the point: the rebuild puts the
+    # credentials back rather than recovering them.
+    lost, replacement = os.environ[MASTER_KEY_ENV], generate_key()
+    assert replacement != lost
+    monkeypatch.setenv(MASTER_KEY_ENV, replacement)
+
     with serving(directory) as after:
         rebuilt = ("--api-url", after.api_url)
         # Clean, which is what makes the apply below a reproduction
@@ -1104,16 +1164,12 @@ def test_a_deployment_is_rebuilt_from_its_export_on_an_empty_database(
         path = tmp_path / "exported.yaml"
         path.write_text(exported, encoding="utf-8")
         assert run(*rebuilt, "apply", "-f", str(path)) == 0
-        outcomes = dict(
-            line.split(": ") for line in capsys.readouterr().out.splitlines()
-        )
-        # Everything the document names was written, because the store
-        # was empty. Everything except the one setting an empty store
-        # already agrees with: this deployment binds no default agent,
-        # and `default_agent: null` onto a store that holds null is the
-        # `unchanged` an idempotent apply is supposed to report.
-        assert outcomes.pop("default_agent") == "unchanged"
-        assert outcomes and set(outcomes.values()) == {"wrote"}
+        outcomes = [line.split(": ")[-1] for line in capsys.readouterr().out.splitlines()]
+        # Every entry the document names was written, the default agent
+        # included, because the store it landed in was empty: an
+        # `unchanged` anywhere here would be a section the rebuild did
+        # not actually put back.
+        assert outcomes and set(outcomes) == {"wrote"}
 
         # The half a document cannot carry: a credential never travels in
         # a read, so the export named the command that enters it and this
@@ -1121,7 +1177,20 @@ def test_a_deployment_is_rebuilt_from_its_export_on_an_empty_database(
         assert run(*rebuilt, *_annotated_secret_command(exported), stdin=SECRET) == 0
         capsys.readouterr()
 
-        assert run(*rebuilt, "export") == 0
+    # The boot the whole procedure exists to reach. `load_boot_config`
+    # opens every stored envelope under the configured keys before the
+    # application is built, so a server that starts here is a server
+    # whose credentials the new key opens; one that cannot refuses, and
+    # this context manager raises rather than yielding.
+    with serving(directory) as restarted:
+        recovered = ("--api-url", restarted.api_url)
+
+        # The value itself, which is the one thing neither the boot nor
+        # the export can be asked about: the boot proves the ciphertext
+        # opens, and opening the wrong plaintext is exactly as openable.
+        assert stored_plaintext(directory, RECOVERED_SLOT) == SECRET
+
+        assert run(*recovered, "export") == 0
         assert capsys.readouterr().out == exported
 
 
