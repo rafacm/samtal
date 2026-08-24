@@ -51,11 +51,15 @@ name is left alone, and the same document twice changes nothing.
   a component in the API document, the epilog of `config set provider`,
   and `vinga-server config schema provider <stage> <type>`. The types
   declared that way, as the stage and type that address one, are
-  `asr faster_whisper` and `tts elevenlabs`. Every other type still
-  passes its options through to the implementation, so no schema can
-  describe those. Until the rest are typed (#88), these files are where
-  they are documented, and either way these files are where the measured
-  numbers and the field findings behind each default are kept.
+  `llm openai_compatible`, `asr faster_whisper` and `tts elevenlabs`.
+  The first of them keeps its door open on purpose, because it exists to
+  reach a server this repository has never seen: a key its model does
+  not declare is not refused, it is sent to the endpoint as part of the
+  request. Every other type still passes its options through to the
+  implementation, so no schema can describe those. Until the rest are
+  typed (#88), these files are where they are documented, and either way
+  these files are where the measured numbers and the field findings
+  behind each default are kept.
 
 ## Secrets
 

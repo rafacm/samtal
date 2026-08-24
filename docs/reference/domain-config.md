@@ -147,14 +147,14 @@ vinga-server config set provider <stage> <name> -f fragment.yaml
 | ... | | | Passed through to the provider implementation. |
 
 A provider entry carries whatever options its `type` takes. The types that
-declare an option model, as stage and type, are: asr faster_whisper, tts
-elevenlabs. Their options are checked when the entry is written and refused by
-name, they are printed by `vinga-server config schema provider <stage>
-<type>`, and the reference lists their fields under the provider section.
-Every other type has its options passed through rather than declared, so no
-schema can list those, and until the rest are typed (#88) they are documented
-in the example fragments below, which is also where the measured numbers
-behind each default are kept.
+declare an option model, as stage and type, are: llm openai_compatible, asr
+faster_whisper, tts elevenlabs. Their options are checked when the entry is
+written and refused by name, they are printed by `vinga-server config schema
+provider <stage> <type>`, and the reference lists their fields under the
+provider section. Every other type has its options passed through rather than
+declared, so no schema can list those, and until the rest are typed (#88) they
+are documented in the example fragments below, which is also where the
+measured numbers behind each default are kept.
 
 Examples:
 
@@ -166,6 +166,21 @@ Examples:
 - [`tts-elevenlabs.yaml`](../../vinga-server/examples/tts-elevenlabs.yaml)
 - [`tts-openai.yaml`](../../vinga-server/examples/tts-openai.yaml)
 - [`vad-silero.yaml`](../../vinga-server/examples/vad-silero.yaml)
+
+#### `llm` options for `type: openai_compatible`
+
+`providers.llm.<name>`
+
+The options the `openai_compatible` LLM type accepts, and the one door in this
+file that stays open to an operator: a key this model does not declare is kept
+and forwarded into the outgoing request.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `base_url` | `str` | `required` | The endpoint's OpenAI-compatible base URL, such as http://localhost:11434/v1 for a local Ollama; pointing it at api.openai.com works too. Required, because it is what decides which server this entry speaks to and whether session data leaves the host. |
+| `model` | `str` | `required` | The model to ask for, in the endpoint's own vocabulary (qwen3:8b on Ollama, an OpenAI model id on api.openai.com). |
+| `max_tokens` | `int` | `1024` | The cap on one reply's length, in tokens. Spoken replies are short, so this bounds a runaway rather than a conversation. |
+| ... | | | Passed through to the provider implementation. |
 
 #### `asr` options for `type: faster_whisper`
 
