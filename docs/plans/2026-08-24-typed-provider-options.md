@@ -341,11 +341,12 @@ CLI surfaces once in M1.
   reasoning and its measurements in the implementation doc, because
   three committed import-weight pins put anything inside the provider
   package out of reach of the surfaces that document it.
-- [ ] **M2: elevenlabs.**
-  The conversion plus the deletion of `read_voice_settings` and
-  its key tables; the output-format rule moves into the model.
+- [x] [**M2: elevenlabs.**](2026-08-24-typed-provider-options-implementation.md#m2-elevenlabs)
+  (PR TBD) The conversion plus the deletion of `read_voice_settings`
+  and its key tables; the output-format rule moves into the model.
   Design footprint: deletes the hand-rolled precedent the pattern
-  replaces.
+  replaces, and adds the first nested model whose door is shut, which
+  is what makes two of decision 3's four pointer shapes testable.
 - [ ] **M3: openai_compatible, the escape hatch.**
   Decision 4. Design footprint: the one model whose `extra`
   stays open, stated on the model, with the fixture untouched as
