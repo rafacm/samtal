@@ -18,6 +18,17 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   read one place. A typo in an option is refused when the entry is
   written, with the field named and the value never quoted back,
   instead of at the next build with only the entry named.
+- **`elevenlabs` declares its options too, and the hand-rolled version
+  is gone** (#88, M2). Its six options and the five keys of
+  `voice_settings` are a pydantic model, so the type is documented in
+  the same four places the first one is: `vinga-server config schema
+  provider tts elevenlabs`, a table per section in
+  `docs/reference/domain-config.md`, the `TtsElevenlabsOptions` and
+  `VoiceSettings` components of the OpenAPI document, and the `set
+  provider` help. What it replaces is the code this pattern
+  generalizes: a `voice_settings` reader with its own key tables and
+  its own two type checks, and a separate function that parsed the
+  output format. Both said something the model now says once.
 - **A declared type's options are documented in all four places the
   configuration is documented** (#88, M1). `vinga-server config schema
   provider asr faster_whisper` prints the contract as JSON Schema;
@@ -34,6 +45,22 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **`elevenlabs` entries are validated more strictly than they were**
+  (#88, M2). What the type accepts is unchanged in kind, held by the
+  same table-driven parity test taken call by call off the reader it
+  replaces: a voice id is still required and still may not be blank, a
+  bool is still not a number, an unknown `voice_settings` key is still
+  refused, and a null written under one of those keys still travels to
+  the API. Three things tighten. An explicit `null` written where a
+  defaulted option sits (`model`, `output_format`, `voice_settings`) is
+  refused rather than read as the default, which for the first two used
+  to be an assertion failure rather than a refusal at all. A stored
+  entry carrying an option the type does not declare is now refused on
+  read as well as on write, which a deployment that wrote one meets as
+  a boot refusal naming the entry; `vinga-server config --local delete
+  provider tts <name>` is the way out. And an `output_format` this
+  stage cannot stream is refused by its rule rather than quoted back,
+  which is the discipline every other refusal here already follows.
 - **`faster_whisper` entries are validated more strictly than they
   were** (#88, M1). What the type accepts is unchanged in kind, and the
   parity is held by a table-driven test taken call by call off the

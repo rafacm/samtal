@@ -407,3 +407,163 @@ missing number branch, and the OpenAPI drift check on the four lines.
 - `uv sync --frozen`: `Checked 99 packages`, nothing resolved.
 - The three import-weight pins: green, with no name added beyond the
   one this milestone already added to two of them.
+
+## M2: elevenlabs
+
+### What was done
+
+Five commits: the model, the builder's conversion, the three documents,
+the tests, and this record with the changelog and the tick.
+
+**The model.** `ElevenlabsOptions` declares the six options the builder
+read, with `extra="forbid"` and the example fragment's own sentence on
+each field. Two rules the builder held by hand are stated on the fields
+that have them: `voice_id` is `Nonblank`, which is what
+`required_string` demanded, and `output_format` is `PcmFormat`, which is
+`parse_sample_rate`'s refusal moved to where the field is declared. The
+rate itself is a `@property` off the validated string rather than a
+field: it is not an option, it is what `output_format` means to
+everything past the request, and it can be read without a failure of its
+own because the validator is what admitted the string.
+
+`VoiceSettings` is nested and shuts its door, which is the one place M2
+differs from M1's nested model. `VadParameters` keeps `extra="allow"`
+because an engine reads more keys than vinga documents; the vendor's
+voice tuning is a fixed five that `read_voice_settings` already listed
+in full and already refused a sixth of, so declaring it and closing it
+is the same contract rather than a new one. The four numeric keys are
+`OptionalNumber`, a new annotation beside `Number`: the hand check
+skipped a key whose value was null and let it travel, and a knob whose
+absence means the vendor's own default is one an operator may legitimately
+write as an explicit null.
+
+**The builder.** `build(label, config, options)` reads attributes.
+`read_voice_settings`, `_VOICE_SETTING_NUMBERS`, `_VOICE_SETTING_FLAGS`,
+`parse_sample_rate`, `_PCM_FORMAT`, `DEFAULT_MODEL` and
+`DEFAULT_OUTPUT_FORMAT` are deleted: every one of them said something
+the model now says. What is left is two translations and a lookup, the
+rate, `voice_settings` dumped `exclude_unset=True` into the request body
+exactly where the old dictionary went, and the credential, which is the
+one thing an options model cannot hold. `ElevenLabsTts.__init__` is
+untouched, so what reaches the API is unchanged and the request-shape
+cases assert it unchanged.
+
+**The four renderings.** Nothing was written for them. Every surface
+reads `declared_options()`, so adding one key to `DECLARED_OPTIONS`
+moved three committed documents and the fourth (`config schema provider
+tts elevenlabs`) started answering. That is the machinery M1 paid for,
+and this milestone is the first evidence it works for a type it was not
+written against.
+
+### Deviations from the plan
+
+None. The milestone is decision 2's second half and the plan's M2 as
+written.
+
+### Discoveries
+
+**A prose convention collided with the uncomment-and-install case.**
+`test_config_examples.py` uncomments every commented `# key:` line of a
+typed type's fragment and installs the result, which is what stops a
+fragment documenting a key its model refuses. Three fragments open a
+paragraph with `Default: <value>` and one with `API: <what it is>`, and
+`KEY_LINE` read those as documented keys: the uncommented elevenlabs
+fragment submitted `Default` as an option and was told it is not one.
+The pattern now requires a lower-case initial, which is a rule about
+this repository rather than about YAML (every key any model here
+declares is snake_case, and a sentence of prose starts with a capital).
+Narrowed rather than reworded: the comment above `KEY_LINE` already said
+prose is not coverage, and bending documentation around a scan is the
+wrong direction. It also de-mines M3, whose fragment carries the `API:`
+line.
+
+**The nested-refusal pointer shapes had no test until this type.**
+Decision 3 states four pointer shapes and M1 could assert three of them:
+`VadParameters` forwards what it does not declare, so an unknown key
+under a typed type's nested section is never refused there at all. The
+first closed nested model is this one, so `/voice_settings` for an
+invented key and `/voice_settings/stability` for a declared one are
+asserted here, at the model and again as request-body pointers in
+`test_config_api_problems.py`.
+
+**An explicit null used to be an assertion failure rather than a
+refusal.** The old builder read `model` and `output_format` with
+`options.string(key, default)`, which returns None for an explicitly
+null key, and then said `assert model is not None  # defaults are
+strings`. So `model: null` reached an `AssertionError` from inside the
+builder, and under `python -O` would have passed None to the request. It
+is a refusal at write time now, which is the same tightening M1 recorded
+for its own defaulted options and a better starting point than the one
+it replaces.
+
+### Coercion parity, inventoried call by call
+
+The reader call the builder made, what it accepted, and what the model
+does now. Held by `ELEVENLABS_PARITY` in
+`tests/unit/test_provider_options.py`, which runs in every lane.
+
+| Option | Reader call | Accepted then | Accepted now | Same? |
+| --- | --- | --- | --- | --- |
+| `voice_id` | `required_string(...)` | a non-blank string; absent, null or blank refused as "is required" | `Nonblank` (`StrictStr` plus a not-blank rule), required | yes, and the two refusals are now separate sentences |
+| `model` | `string(..., "eleven_flash_v2_5")` | a string; absent gives the default, explicit null reached an `assert` | `StrictStr`, default `eleven_flash_v2_5` | null tightens, from a crash to a refusal |
+| `output_format` | `string(..., "pcm_24000")` plus `parse_sample_rate` | a `pcm_<rate>` string; anything else refused with the value quoted | `PcmFormat` (`StrictStr` plus the same pattern), default `pcm_24000` | null tightens the same way; the refusal is value-free now |
+| `language_code` | `string(...)` | a string or null | `StrictStr \| None` | yes |
+| `timeout_s` | `number(..., 30.0)` | an int or a float, never a bool, a string or a null, normalized to float | `Number` (a before-validator with the same rule), default `30.0` | yes |
+| `voice_settings` | `mapping(...)` | a mapping or absent; never a list or a scalar | `VoiceSettings`, `extra="forbid"` | explicit null tightens |
+| `voice_settings.stability` | `read_voice_settings` | an int or a float or null, never a bool or a string | `OptionalNumber` | yes |
+| `voice_settings.similarity_boost` | `read_voice_settings` | the same | `OptionalNumber` | yes |
+| `voice_settings.style` | `read_voice_settings` | the same | `OptionalNumber` | yes |
+| `voice_settings.speed` | `read_voice_settings` | the same | `OptionalNumber` | yes |
+| `voice_settings.use_speaker_boost` | `read_voice_settings` | true, false or null; never `1` | `StrictBool \| None` | yes |
+| any other `voice_settings` key | `read_voice_settings` | refused, naming the unknown keys and the known ones | `extra="forbid"`, refused at `/voice_settings` without naming them | refusal is now value-free and earlier |
+| any other option | `finish()` | refused, naming the unknown keys | `extra="forbid"`, refused without naming them | refusal is now value-free and earlier |
+
+The deliberate divergences, all in the changelog: the explicit nulls
+above, the unknown key refused at write rather than at build and without
+echoing the key, and the output format refused by its rule rather than
+quoted back.
+
+### Artifact churn
+
+The same three of the six moved, and the two the plan says must not move
+did not.
+
+- `docs/reference/domain-config.md` (+33, -8): the `#88` note's list of
+  declared types gains `tts elevenlabs` (which reflowed the paragraph,
+  which is the eight deletions), and the new `#### \`tts\` options for
+  \`type: elevenlabs\`` subsection with its six-row table and the nested
+  `voice_settings` table under it. That nested table has no `| ... |`
+  pass-through row where `vad_parameters` has one, which is the two
+  models' `extra` setting rendering itself.
+- `docs/reference/api-openapi.json` (+126, -2): the
+  `TtsElevenlabsOptions` and `VoiceSettings` components, and the
+  provider PUT's description gaining the second row of its mapping. The
+  two deletions are the two descriptions that carry the type list.
+- `docs/reference/cli.md` (+27, -0): the `set provider` epilog's
+  `options for tts type elevenlabs:` listing, six fields and five nested
+  ones at the path a fragment writes them at.
+- `docs/reference/events.md`, `docs/reference/conversations-schema.md`:
+  byte-identical, checked at the tip with `git diff` against M1's.
+
+The reference's stage-then-type grouping holds: `asr faster_whisper`
+comes before `tts elevenlabs` on the page, which
+`test_the_typed_options_are_grouped_by_stage_and_then_by_type` asserts
+against `PROVIDER_STAGES` rather than against the declaration's
+insertion order.
+
+### Verification
+
+From `vinga-server/`, at the tip of the milestone.
+
+- `uv run ruff check .`: `All checks passed!`
+- `uv run mypy`: `Success: no issues found in 4 source files`
+- `uv run pytest tests/unit -q -n auto --dist loadfile`:
+  `3304 passed, 18 skipped in 44.05s`
+- `uv run pytest tests/integration -q`: `126 passed in 179.02s`
+- The six drift checks as CI runs them: all six clean, including the two
+  that must not move.
+- `uv sync --frozen`: `Checked 99 packages`, nothing resolved.
+- The three import-weight pins deviation 1 forced: green, untouched. No
+  allow-list moved: `ElevenlabsOptions` lives in the module M1 already
+  added to them, which is what one home for the declaration buys per
+  type from here on.
