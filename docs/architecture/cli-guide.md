@@ -25,9 +25,11 @@ both still the standard. It is the reviewer's job to hold new commands
 to them, and nobody's job to pretend the old ones already comply.
 
 A counterexample is different from an example: it is the shape a rule
-rejects. Where the rejection is recorded in merged or in historical
-code this page says which, and the rest are constructions, written to
-make a rule falsifiable rather than reported as things that happened.
+rejects, and every one of them below is labelled with where it comes
+from. **Merged** means the code contains it or refuses it today,
+**historical** means this repository once did it, and **constructed**
+means it is written here to make the rule falsifiable rather than
+reported as something that happened.
 
 **The audit is recorded, not summarized.** The practices below were
 arrived at by walking four published guides one guideline at a time and
@@ -108,24 +110,32 @@ growing too, and growing faster than the verb set: the conversation
 store work (#190) adds `sessions` and `conversations`, each with verbs
 of its own.
 
-Under verb first, every one of those becomes a hyphenated word at the
-top level (`set-secret`, `bind-device`, `add-device`,
-`set-default-agent`, `clear-default-agent`), which is the exact shape
-docker grew and then walked back. Under noun first they are verbs of
-their noun, and the top level is a list of things rather than a list of
-things-and-actions. What each of those peripheral verbs ends up spelled
-as is the re-cut's to settle, one command at a time; what this page
-fixes is the rule it settles them against.
+Verb first does not force a compound word for each of those; what it
+forces is a choice, taken one command at a time, and the merged grammar
+has taken it both ways. `set-secret` grew a noun level under itself
+(`set-secret provider llm claude api_key`), while `bind-device` welded
+the noun into the verb. That is the real cost, and it is not
+hypothetical: one grammar, two shapes for the same relationship, with
+nothing to tell a reader which shape the next command will use. Under
+noun first there is one shape, and the top level is a list of things
+rather than a list of things-and-actions. What each peripheral verb ends
+up spelled as is the re-cut's to settle; what this page fixes is the
+rule it settles them against.
 
 **Example.** `vinga provider set llm local` and `vinga provider delete
 llm local`: one noun, two verbs, and a third verb arriving for
 providers alone changes nothing about any other noun's page.
 
-**Counterexample.** `vinga set-provider-secret llm claude api_key`,
-which is what the same command has to be called when the top level is
-where verbs live: a compound word that is a verb, a noun and a
-qualifier welded together, and the fourth such word is where a reader
-stops being able to guess the fifth.
+**Counterexample, merged.** It is this grammar's own top level. The
+command listing of `vinga-server config --help` reads `set`, `delete`,
+`bind-device`, `add-device`, `apply`, `pending`, `status`, `prompt`,
+`reload`, `ota-url`, `set-default-agent`, `clear-default-agent`,
+`set-secret`, `clear-secret`, `list`, `schema`, `reference`, `openapi`,
+`cli-reference`, `show`, `export`. Twenty-one words in one list, in
+which a verb that applies to everything, a verb that applies to one
+kind, a noun-verb compound and a document renderer are typographically
+indistinguishable, and the only way to learn which is which is to read
+all of them.
 
 ### Identity addressing
 
@@ -187,11 +197,11 @@ address is a thing in its own right and should be the noun.
 One identity segment, one flag carrying the body, and the body is a
 document rather than a pile of options.
 
-**Counterexample.** `vinga set --kind provider --stage llm --name local
--f ...`, which is the same command with the address demoted to options.
-It is longer, it is order-independent in a way nobody needed, and it
-breaks the correspondence with the URL that keeps the two surfaces from
-drifting.
+**Counterexample, constructed.** The same command with its address
+demoted to options: `vinga set --kind provider --stage llm --name local
+-f ...`. It is longer, it is order-independent in a way nobody needed,
+and it breaks the correspondence with the URL that keeps the two
+surfaces from drifting.
 
 ### The flat system verbs
 
@@ -223,9 +233,9 @@ one: `vinga export` beside `vinga provider export llm local`.
 store. There is no noun because it does not reload a provider, it
 reloads the server.
 
-**Counterexample.** `vinga config apply`, adding a noun for symmetry
-with the noun-verb commands. It reads as though there were some other
-kind of apply, and there is not.
+**Counterexample, constructed.** `vinga config apply`, adding a noun for
+symmetry with the noun-verb commands. It reads as though there were some
+other kind of apply, and there is not.
 
 ### Naming a new noun, naming a new verb
 
@@ -269,9 +279,14 @@ is decided against is the one above.
 
 ## The practices
 
-Each is stated with an example and a counterexample from the merged
-CLI, so that a reviewer can hold a command to it rather than to a
-feeling. Where a practice is not met today it says so.
+Each is stated with an example from the merged CLI and the shape it
+rejects, so that a reviewer can hold a command to it rather than to a
+feeling. Every counterexample says where it comes from: **merged** if
+the code contains it or refuses it today, **historical** if this
+repository once did it, and **constructed** if it is written here to
+make the rule falsifiable. A constructed counterexample is not a weaker
+rule, it is an honest label. Where a practice is not met today, or the
+merged code contradicts it, the practice says so.
 
 ### Data on stdout, notices on stderr
 
@@ -304,12 +319,12 @@ and the take-effect notice on stderr, and it flushes stdout first,
 because stderr is unbuffered and stdout is not, so without the flush
 the notice would land above the line it is about.
 
-**Counterexample.** An export header saying how many entities were
-written and when. That is about the invocation, so it belongs on stderr
-if anywhere, and putting it in the document breaks the property
-`_secret_commands` is written to keep: two exports of an unchanged
-configuration would stop being the same bytes, and a checked-in export
-would show a diff on every run.
+**Counterexample, constructed.** An export header saying how many
+entities were written and when. That is about the invocation, so it
+belongs on stderr if anywhere, and putting it in the document breaks the
+property `_secret_commands` is written to keep: two exports of an
+unchanged configuration would stop being the same bytes, and a
+checked-in export would show a diff on every run.
 
 ### A refusal is a fixed sentence that quotes nothing back
 
@@ -339,13 +354,13 @@ is reported as a status code plus "a body this client does not
 recognize", never quoted, because what a proxy or a captive portal
 returns is not this API's output.
 
-**Counterexample**, and a real one. The pre-Typer argparse grammar
-passed argparse's own `invalid choice: 'x'` through verbatim, echoing
-the typed word, while every sibling grammar in this repository already
-refused to. The #194 rebuild closed it by translating Click's
-`UsageError` subclasses by class, and recorded the strengthening in the
-changelog. What made it worth closing is the mistake that produces that
-sentence most often: typing the value after `set-secret ... api_key`.
+**Counterexample, historical.** The pre-Typer argparse grammar passed
+argparse's own `invalid choice: 'x'` through verbatim, echoing the typed
+word, while every sibling grammar in this repository already refused to.
+The #194 rebuild closed it by translating Click's `UsageError`
+subclasses by class, and recorded the strengthening in the changelog.
+What made it worth closing is the mistake that produces that sentence
+most often: typing the value after `set-secret ... api_key`.
 
 **Tension recorded: two merged paths do not meet this standard.** Both
 were found by holding this page against `cli.py`, which is what a
@@ -392,9 +407,10 @@ with, and nothing scripted around this entry point should learn a new
 number from a change about what is printed. So the contract is: 0, 1,
 and 2 from the root dispatch alone.
 
-**Counterexample.** A code per failure kind (3 for unreachable, 4 for
-unauthorized, 5 for a validation error). It is in two of the four
-audited guides and it is rejected below, in the audit, with the reason.
+**Counterexample, constructed.** A code per failure kind (3 for
+unreachable, 4 for unauthorized, 5 for a validation error). It is in two
+of the four audited guides and it is rejected below, in the audit, with
+the reason.
 
 ### A write says what it did and when it takes effect
 
@@ -414,9 +430,9 @@ and neither of the other sentences would have been honest. `apply`
 prints each distinct notice once, because a document that wrote nine
 entities is waiting on one reload, not nine.
 
-**Counterexample.** A single "written" line. The operator finds out at
-the next field test that the board is still speaking in the old voice,
-and has no way to know whether that is a bug or a boundary.
+**Counterexample, constructed.** A single "written" line. The operator
+finds out at the next field test that the board is still speaking in the
+old voice, and has no way to know whether that is a bug or a boundary.
 
 ### A credential is never an argument, and never travels in a read
 
@@ -439,10 +455,10 @@ masks. One rule rather than three lists is the design guide's locality
 rule applied to the thing it would hurt most to get inconsistently
 right.
 
-**Counterexample.** `vinga provider set llm claude api_key=sk-...`,
-which is refused by the shape of the key whichever way the entity was
-written. Arguments land in shell history and in the process list, where
-a value cannot be taken back.
+**Counterexample, merged.** `vinga provider set llm claude
+api_key=sk-...`, which is refused by the shape of the key whichever way
+the entity was written. Arguments land in shell history and in the
+process list, where a value cannot be taken back.
 
 ### One machine-readable shape, and it is the document `apply` takes
 
@@ -464,9 +480,9 @@ answers ("which of these boards is the one I am holding") is read
 across a line. `status` prints blocks, because two of its three fields
 are lists of names.
 
-**Counterexample.** `_status_listing` rendered as columns. The tools a
-server published would wrap, and the one-entry-per-line property that
-makes the pending listing greppable would be gone.
+**Counterexample, constructed.** `_status_listing` rendered as columns.
+The tools a server published would wrap, and the one-entry-per-line
+property that makes the pending listing greppable would be gone.
 
 #### The `--json` question, deferred
 
@@ -515,9 +531,10 @@ choose how long a command's output is or put an escape sequence into
 it. `_granted` sorts by agent name, so two reads of an unchanged world
 print the same block.
 
-**Counterexample.** Color, spinners, emoji or ASCII art in anything a
-document is generated from. All four audited guides recommend some of
-those, and each is rejected in the audit below for this one reason.
+**Counterexample, constructed.** Color, spinners, emoji or ASCII art in
+anything a document is generated from. All four audited guides recommend
+some of those, and each is rejected in the audit below for this one
+reason.
 
 **Owed.** The one animation this rule would allow is a progress line
 for the two long waits (`apply`, which has no bound at all, and
@@ -536,16 +553,19 @@ was given, then a no-echo prompt if stdin is a terminal, then a plain
 read of stdin, which is what a pipe and a script use. The same value,
 three ways in, none of them mandatory.
 
-**Owed.** A destructive verb has no confirmation today: `vinga-server
-config delete agent kids` deletes without asking, whether or not
-anybody is watching. The standard is a confirmation when stdin is a
-terminal, `--force` (or `--yes`) to skip it, and no prompt at all when
+**Counterexample, merged.** One function below that one. `_stdin` reads
+standard input unconditionally, so `apply -f -` typed at a terminal
+blocks with no prompt and no explanation: the same rule broken from the
+other side, by never asking whether there is anybody there. The
+published answer, and the standard here, is to print the help and quit
+when a command that expects a pipe is run interactively. Owed.
+
+**Owed too.** A destructive verb has no confirmation today:
+`vinga-server config delete agent kids` deletes without asking, whether
+or not anybody is watching. The standard is a confirmation when stdin is
+a terminal, `--force` (or `--yes`) to skip it, and no prompt at all when
 stdin is not a terminal, so a script is never blocked by one. A
 `--no-input` flag that disables every prompt at once belongs with it.
-
-**Also owed.** `-f -` reads stdin unconditionally, so at a terminal it
-blocks with no explanation. The guides' answer is to print help and
-quit when a command expecting a pipe is run interactively.
 
 ### Where to reach, in a stated order, with no flag that weakens it
 
@@ -560,11 +580,11 @@ it. The token is the variable `server.api.secret_env` names, read from
 that same file, and a missing one is a sentence naming the variable
 printed before any request is sent, rather than a 401.
 
-**Counterexample.** An `--insecure` or `--no-verify-tls` flag. The
-bearer token grants everything the API can do and rides on every
-request, so such a flag's only purpose would be sending it in clear.
-`_permitted` refuses plain HTTP to a non-loopback host and says in the
-refusal that there is deliberately no override.
+**Counterexample, merged as a refusal.** An `--insecure` or
+`--no-verify-tls` flag. The bearer token grants everything the API can
+do and rides on every request, so such a flag's only purpose would be
+sending it in clear. `_permitted` refuses plain HTTP to a non-loopback
+host and says in the refusal that there is deliberately no override.
 
 ### Bound every wait that has a bound, and write down why one does not
 
@@ -580,13 +600,13 @@ nothing about the request bounds, so no finite number can be derived
 that would not sometimes expire on a transaction the server goes on to
 commit, which is the one outcome every timeout here exists to prevent.
 
-**Counterexample.** Leaving the HTTP library's five-second default in
-place. It is below the database's busy timeout, so it would turn
-exactly that retryable answer into a transport error, replacing
-"nothing was changed, run the command again" with a sentence that says
-nothing about what happened. That is why all four of these numbers are
-named constants with a paragraph attached rather than defaults nobody
-chose.
+**Counterexample, merged as a rejected default.** Leaving the HTTP
+library's five-second default in place. It is below the database's busy
+timeout, so it would turn exactly that retryable answer into a transport
+error, replacing "nothing was changed, run the command again" with a
+sentence that says nothing about what happened. That is why all four of
+these numbers are named constants with a paragraph attached rather than
+defaults nobody chose.
 
 ### The grammar is derived from the model it addresses
 
@@ -604,7 +624,7 @@ the same `Field(description=...)` values the markdown reference and the
 JSON Schema come from. The generated half of `cli.md` then walks that
 tree, and CI fails on any difference from the committed copy.
 
-**Counterexample.** The frozensets this CLI used to carry
+**Counterexample, historical.** The frozensets this CLI used to carry
 (`PENDING_FIELDS`, `STATUS_FIELDS`, and ten predicates walking a body
 key by key), a second encoding of models the API already declared, with
 nothing connecting the two. That is a worked example in
