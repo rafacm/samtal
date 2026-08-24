@@ -367,30 +367,37 @@ subclasses by class, and recorded the strengthening in the changelog.
 What made it worth closing is the mistake that produces that sentence
 most often: typing the value after `set-secret ... api_key`.
 
-**Tension recorded: two merged paths do not meet this standard.** Both
-were found by holding this page against `cli.py`, which is what a
-written standard is for, and neither is fixed here, because a
-documentation change is the wrong place to change a refusal path.
+**Two merged paths did not meet this standard, and both are closed.**
+Both were found by holding this page against `cli.py`, which is what a
+written standard is for, and neither was fixed in the change that wrote
+it down, because a documentation change is the wrong place to change a
+refusal path. They are recorded here because what the standard caught
+is the argument for keeping it written.
 
-- **Rejected input is echoed on two paths, and one of them can escape
-  as a traceback** (#289). `_file` names the fragment path it was given
-  and the library's `strerror`, and `_read_secret` names the variable
-  `--from-env` pointed at. Worse, `_file` catches `FileNotFoundError`
-  and `OSError`, and a file that is not UTF-8 raises
-  `UnicodeDecodeError`, which is a `ValueError`: it escapes the
+- **Rejected input was echoed on two paths, and one of them escaped as
+  a traceback** (#289, fixed). `_file` named the fragment path it was
+  given and the library's `strerror`, and `_read_secret` named the
+  variable `--from-env` pointed at. Worse, `_file` caught
+  `FileNotFoundError` and `OSError`, and a file that is not UTF-8 raises
+  `UnicodeDecodeError`, which is a `ValueError`: it escaped the
   boundary entirely, as a traceback whose exception retains the buffer
-  it failed to decode.
-- **An accepted URL reaches later refusals unsanitized** (#290).
-  `_permitted` computes `shown` and uses it only in the refusals it
-  raises itself, then returns the URL it was given. `_sent` and
-  `_unreadable` interpolate that raw value, so an `https://` address
-  carrying a secret in a query parameter is printed on stderr whenever
-  the connection fails or the answer cannot be read. Userinfo is
-  refused outright, so this is the query string and the path, which the
-  policy does not inspect.
+  it failed to decode. Both are one table of fixed sentences read by
+  exception class now, with the classes the boundary catches read off
+  that same table, and the parse failure that named the path calls the
+  file what this module calls it.
+- **An accepted URL reached later refusals unsanitized** (#290, fixed).
+  `_permitted` computed `shown`, used it only in the refusals it raised
+  itself, and returned the URL it was given. `_sent` and `_unreadable`
+  interpolated that raw value, so an `https://` address carrying a
+  secret in a query parameter was printed on stderr whenever the
+  connection failed or the answer could not be read. Userinfo is
+  refused outright, so this was the query string and the path, which
+  the policy does not inspect. An accepted address travels as an
+  `Address` now, what is reached and what may be shown, and every
+  sentence that names one reads the second.
 
-Both are owed against the standard above, not licence to weaken it. A
-new command is held to the whole of it.
+Neither was licence to weaken the standard, and a new command is held
+to the whole of it.
 
 ### One sentence and exit 1, and asking for help is not a failure
 
@@ -747,7 +754,7 @@ Ninety-six guidelines, in the document's own section order.
 | 36 | Catch errors and rewrite them for humans | Adopted | Every boundary raises `ConfigError` with a written sentence |
 | 37 | Signal-to-noise ratio is crucial | Adopted | One sentence |
 | 38 | Consider where the user will look first | Adopted | The sentence is the last thing on stderr |
-| 39 | For unexpected errors, provide debug and traceback information | Rejected | Deliberately: an httpx exception carries the request URL and a Click context carries the argument list, so a traceback is where a token or a secret would surface. The no-leak posture outranks the debugging convenience. #289 is the case where one escapes anyway, recorded as a tension against the refusal practice |
+| 39 | For unexpected errors, provide debug and traceback information | Rejected | Deliberately: an httpx exception carries the request URL and a Click context carries the argument list, so a traceback is where a token or a secret would surface. The no-leak posture outranks the debugging convenience. #289 was the case where one escaped anyway, found by this audit and since fixed; see the refusal practice |
 | 40 | Make it effortless to submit bug reports | N/A | Pre-release; see 8 |
 | 41 | Prefer flags to args | Adapted | Identity addressing |
 | 42 | Have full-length versions of all flags | Adopted | `--config`, `--api-url`, `--file`, `--from-env` |
