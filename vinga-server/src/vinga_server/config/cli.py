@@ -674,6 +674,29 @@ def build_client(base_url: str, token: str) -> httpx.Client:
 _NOTHING = object()
 
 
+@dataclass(frozen=True, kw_only=True)
+class Address:
+    """Where the API is, in the two forms that are not the same string.
+
+    `reached` is what a request is sent to, whole, because that is what
+    the operator pointed this at. `shown` is the same address with its
+    credentials taken out, and it is the only one any sentence here may
+    name: an accepted URL is not a safe one to print, since the policy
+    below refuses the userinfo but says nothing about a query string,
+    and `...?token=<secret>` is the other form vendors accept.
+
+    One type rather than two arguments travelling together, because
+    every function that names an address had a plain string to reach for
+    and reached for the wrong one (#290): a transport failure and an
+    unreadable answer both printed the URL they were given. What crosses
+    now is this, and `.shown` is the only field a message can read
+    without saying what it is doing.
+    """
+
+    reached: str
+    shown: str
+
+
 def _call(
     args: Invocation,
     method: str,
@@ -695,18 +718,18 @@ def _call(
     makes one request and closes it, so the two are the same thing here.
     """
     file_config = load_file_config(args.config)
-    base_url = _base_url(args, file_config)
-    client = build_client(base_url, _token(file_config))
+    address = _address(args, file_config)
+    client = build_client(address.reached, _token(file_config))
     client.timeout = httpx.Timeout(read_timeout_s, connect=CONNECT_TIMEOUT_S)
     try:
-        response = _sent(client, method, path, body, base_url)
+        response = _sent(client, method, path, body, address)
     finally:
         client.close()
-    return _answer(response, base_url)
+    return _answer(response, address)
 
 
 def _sent(
-    client: httpx.Client, method: str, path: str, body: object, base_url: str
+    client: httpx.Client, method: str, path: str, body: object, address: Address
 ) -> httpx.Response:
     """The request, with a transport failure turned into a sentence.
 
@@ -722,7 +745,7 @@ def _sent(
         return client.request(method, path, json=body)
     except httpx.HTTPError:
         problem = (
-            f"cannot reach the configuration API at {base_url}: the request did not "
+            f"cannot reach the configuration API at {address.shown}: the request did not "
             f"complete. Check that the server is running and that this is the address "
             f"it serves. A deployment whose server will not start at all is recovered "
             f"by booting one on an empty database and applying a kept export."
@@ -730,7 +753,7 @@ def _sent(
     raise ConfigError(problem)
 
 
-def _answer(response: httpx.Response, base_url: str) -> object:
+def _answer(response: httpx.Response, address: Address) -> object:
     """What the API said, or a sentence about why it cannot be read.
 
     A refusal's `detail` is the repository's own message and is passed
@@ -743,11 +766,11 @@ def _answer(response: httpx.Response, base_url: str) -> object:
     payload = _payload(response)
     if response.is_success:
         if payload is _NOTHING:
-            raise ConfigError(_unreadable(response, base_url))
+            raise ConfigError(_unreadable(response, address))
         return payload
     if isinstance(payload, Mapping) and isinstance(payload.get("detail"), str):
         raise ConfigError(payload["detail"])
-    raise ConfigError(_unreadable(response, base_url))
+    raise ConfigError(_unreadable(response, address))
 
 
 def _payload(response: httpx.Response) -> object:
@@ -764,26 +787,30 @@ def _payload(response: httpx.Response) -> object:
     return parsed
 
 
-def _unreadable(response: httpx.Response, base_url: str) -> str:
+def _unreadable(response: httpx.Response, address: Address) -> str:
     return (
-        f"the configuration API at {base_url} answered {response.status_code} with "
+        f"the configuration API at {address.shown} answered {response.status_code} with "
         f"{UNRECOGNIZED_ANSWER}. It is not quoted back: what a proxy or a gateway "
         f"returns is not this API's own output."
     )
 
 
-def _base_url(args: Invocation, file_config: FileConfig) -> str:
+def _address(args: Invocation, file_config: FileConfig) -> Address:
     """Where the API is: the flag, then the environment, then this
-    machine on the port the server half names."""
+    machine on the port the server half names.
+
+    The last of the three is this module's own string and carries
+    nothing to take out, so both of its forms are the same one."""
     if args.api_url:
         return _permitted(args.api_url, "--api-url")
     named = os.environ.get(API_URL_ENV, "").strip()
     if named:
         return _permitted(named, API_URL_ENV)
-    return f"http://127.0.0.1:{file_config.server.port}{API_MOUNT_PATH}"
+    local = f"http://127.0.0.1:{file_config.server.port}{API_MOUNT_PATH}"
+    return Address(reached=local, shown=local)
 
 
-def _permitted(url: str, source: str) -> str:
+def _permitted(url: str, source: str) -> Address:
     """The transport policy, which is about the token before it is about
     any secret body.
 
@@ -792,6 +819,12 @@ def _permitted(url: str, source: str) -> str:
     the whole client rather than a set-secret footnote. There is
     deliberately no flag to override it: such a flag's only purpose would
     be sending the token in clear.
+
+    An accepted URL leaves as an `Address` rather than as itself, and
+    the display form it carries is the one computed here: the policy
+    refuses a credential in the userinfo but says nothing about a query
+    string, so an accepted address can still hold `?token=<secret>`, and
+    the transport failures further up print the address they were given.
     """
     parsed = parsed_url(url, source)
     shown = shown_url(parsed)
@@ -815,7 +848,7 @@ def _permitted(url: str, source: str) -> str:
             f"running container and reach the API on loopback. There is deliberately "
             f"no flag to override this."
         )
-    return url.rstrip("/")
+    return Address(reached=url.rstrip("/"), shown=shown.rstrip("/"))
 
 
 def _loopback(host: str) -> bool:
