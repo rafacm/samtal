@@ -353,6 +353,44 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   built wheel to prove the copy arrived. `vinga-server/examples/` is
   still the one directory anybody edits.
 
+### Fixed
+
+- **A fragment file that cannot be read is refused in this CLI's own
+  words** (#289). `vinga-server config set ... -f PATH` used to answer a
+  file it could not read with the path it was given and the operating
+  system's `strerror`, and a file that will not parse with the path
+  again. The path is typed, and `-f` is one option away from the
+  commands that carry a credential, so all of it is now one fixed
+  sentence per failure, chosen by the class of the failure: no file
+  there, cannot be read, not UTF-8 text, or could not be read at all.
+  The parse failure calls the file "the fragment file" and locates the
+  mistake by line and column, which is what was useful about naming it.
+  A file that is not UTF-8 used to be worse than an echo: the decoding
+  failure is a `ValueError` rather than an `OSError`, so it escaped the
+  boundary as a traceback carrying the buffer it could not decode, which
+  for a secrets file pointed at by mistake is the credential itself. It
+  is now caught with the rest, and the classes the boundary catches are
+  read off the same table the sentences come from.
+- **`--from-env` no longer repeats the variable name it was given**
+  (#289). The refusal for a variable that is not set said which name it
+  was looking for. That name is typed on the command line, and the
+  mistake that produces this refusal most often is typing the secret
+  itself one word early, where the name belongs. The refusal names the
+  rule instead, and says to check the spelling and that the variable is
+  exported.
+- **A failure after an accepted API URL no longer prints its query
+  string** (#290). The transport policy refuses a credential written
+  into a URL's userinfo and says nothing about one written into its
+  query, which is the other form vendors accept, so
+  `--api-url https://host/api?token=...` was accepted and then named in
+  full whenever the connection failed or the answer could not be read:
+  the two failures an operator retries in front of a terminal. An
+  accepted address now travels as the pair it always was, what is
+  reached and what may be shown, and every sentence that names an
+  address names the second. The address is still named, because a
+  refusal that named none would leave nobody knowing which one was
+  tried.
+
 ## 2026-08-23
 
 ### Added
