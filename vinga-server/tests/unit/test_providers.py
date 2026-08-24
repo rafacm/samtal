@@ -57,9 +57,17 @@ async def test_a_provider_that_fails_to_construct_names_the_entry(
     and the text arriving here is whatever a third-party client raised
     while being handed this entry's options: an SDK that cannot reach its
     endpoint quotes the URL, one that will not authenticate quotes what
-    it was given. So the class name is said, the message is not, and the
-    exception itself is the cause for whoever has a debugger. The same
-    rule the device bindings' failed reads follow."""
+    it was given. So the class name is said and nothing else is: not the
+    message, and not the exception either.
+
+    That last part used to be the other way round, and this case used to
+    require it: the original travelled as `__cause__` "for whoever has a
+    debugger" (#188). A chain is a rendering surface like any other, a
+    traceback rendered from this one printed the library's sentence
+    whole, and the review round of #88 superseded that decision under
+    the discipline every refusal in the configuration package has been
+    held to since. What a diagnosis reads instead is the log, which
+    records the class and the entry."""
     from vinga_server.providers import registry
 
     # Not a credential: a fixed string shaped like one, riding in a
@@ -85,7 +93,25 @@ async def test_a_provider_that_fails_to_construct_names_the_entry(
     assert "OSError" in message
     assert "no space left on device" not in message
     assert sentinel not in message
-    assert isinstance(excinfo.value.__cause__, OSError)
+    # And nowhere behind it either: the refusal is composed after the
+    # handler has closed, so neither the library's exception nor
+    # anything it was holding is reachable from what travels out.
+    assert excinfo.value.__cause__ is None
+    assert excinfo.value.__context__ is None
+    assert sentinel not in _chain(excinfo.value)
+
+
+def _chain(exc: BaseException) -> str:
+    """Everything reachable from one exception, as text: the message,
+    the repr, and the same of every link of the chain behind it."""
+    parts: list[str] = []
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        parts += [repr(current), str(current)]
+        current = current.__cause__ or current.__context__
+    return "\n".join(parts)
 
 
 async def test_a_provider_error_raised_by_a_factory_is_left_exactly_as_it_is(
