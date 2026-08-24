@@ -522,9 +522,21 @@ it is the name all three guides use.
 
 ### Output is deterministic, and an answer cannot steer a terminal
 
-Two properties, one rule: what a command prints depends on the request
-and the stored state, never on the terminal it is printing into, and
-never on the bytes an answer happened to carry.
+Scope first, because the rule is about artifacts and not about
+terminals. **What may never vary with the terminal:** the data on
+stdout, every generated document, and any message at all once its
+stream is not a terminal. Two runs against one stored state produce the
+same bytes on a laptop, on a runner and through a pipe.
+
+**What may vary:** an interactive affordance, on stderr or at the
+prompt, provided the non-terminal path is complete and deterministic on
+its own. The affordance may only ever be the presentation of something
+the other path also delivers, so nothing that is only visible
+interactively is load-bearing. A script is entitled to the same
+information and the same bytes whatever the terminal does.
+
+And the second property, which has no exception: nothing an answer
+carries can steer the terminal it is printed into.
 
 **Example.** The generated help pages are rendered through a context
 with `terminal_width` and `max_content_width` stated and `color=False`,
@@ -536,16 +548,22 @@ choose how long a command's output is or put an escape sequence into
 it. `_granted` sorts by agent name, so two reads of an unchanged world
 print the same block.
 
+**Example of the licensed kind**, merged: `_read_secret` asks with
+`getpass` when stdin is a terminal and reads the pipe plainly when it
+is not. The affordance is the prompt and the suppressed echo; the value
+that comes out is the same either way, and nothing downstream can tell
+which path produced it.
+
 **Counterexample, constructed.** Color, spinners, emoji or ASCII art in
 anything a document is generated from. All four audited guides recommend
 some of those, and each is rejected in the audit below for this one
 reason.
 
-**Owed.** The one animation this rule would allow is a progress line
-for the two long waits (`apply`, which has no bound at all, and
-`reload`, which has a sixty-second one), on stderr and only when stderr
-is a terminal, which is exactly where the rule permits it: nothing that
-lands in a file, nothing that reaches a redirected stream.
+**Owed.** The progress line for the two long waits (`apply`, which has
+no bound at all, and `reload`, which has a sixty-second one) is the
+licensed kind: on stderr, only when stderr is a terminal, and carrying
+nothing the run does not report anyway. Nothing that lands in a file,
+nothing that reaches a redirected stream.
 
 ### Prompt where there is somebody to ask, and never require it
 
@@ -703,7 +721,7 @@ Ninety-six guidelines, in the document's own section order.
 | 28 | Increase information density with ASCII art | Rejected | Output determinism |
 | 29 | Use color with intention | Rejected | Output determinism |
 | 30 | Disable color when not in a terminal or when asked | N/A | Nothing colors |
-| 31 | No animations when stdout is not an interactive terminal | Adopted in advance | The owed progress line is stderr-only and TTY-only |
+| 31 | No animations when stdout is not an interactive terminal | Adopted | Stated in advance of the thing it governs: the owed progress line is stderr-only and terminal-only, which is the licence the determinism practice grants and its whole extent |
 | 32 | Use symbols and emoji where they make things clearer | Rejected | Output determinism, and `printable` maps anything unprintable to `?` |
 | 33 | Do not output information only the creators understand | Adopted | Refusals are operator sentences; the exception chain is suppressed on the way out |
 | 34 | Do not treat stderr like a log file | Adopted | Stderr carries notices and one refusal sentence; the structured JSON log is the server's surface, not the CLI's |
@@ -858,8 +876,10 @@ practice above, restated as the question to ask.
    including a mistyped one?
 8. **Is every wait it makes bounded**, and if one is not, is the reason
    written down where the constant is?
-9. **Is its description one lowercase sentence with no full stop, and
-   does its help page render the same on every machine?**
+9. **Is its description one lowercase sentence with no full stop, does
+   its help page render the same on every machine, and does any
+   terminal-dependent behavior it has leave the non-terminal path
+   complete?**
 10. **Is any part of it written twice?** A verb list, a field name, a
     section name or an address that also exists on a model is derived
     from that model, not restated.
