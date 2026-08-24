@@ -815,11 +815,23 @@ All from `vinga-server/`.
 
 ### What was done
 
-Nine commits, all of them test assets. One new module,
-`tests/integration/test_cli_live.py` (1,161 lines, 17 test functions,
-59 cases), and nothing else in the repository moved.
+Ten commits, all of them test assets. One new module,
+`tests/integration/test_cli_live.py`, and nothing else in the repository
+moved.
 
-**The harness** (`d60cf052`). A real uvicorn on an ephemeral loopback
+Nine of the ten are the milestone's own, below. The tenth (`077016a9`)
+is the rebase over M2's review round: that round's finding 6 put Click's
+end-of-options marker into the exported `set-secret` commands, and this
+lane's export assertion still expected the bare form, so the assertion
+now expects the command an operator types. It postdates the first
+writing of this section, which is why it is named here rather than
+inferable from the commit list.
+
+The hashes below are the rebased ones. Every number in this section, the
+inventory and the verification included, was observed at the branch tip
+after the PR review round recorded at the foot of it.
+
+**The harness** (`ff6094e3`). A real uvicorn on an ephemeral loopback
 port, in a thread, driven by `cli.main` with `build_client` untouched:
 the address resolution, the transport policy, the bearer token and both
 timeouts are the deployed ones, and what answers is a server. The
@@ -837,8 +849,8 @@ the packaged defaults. That is a deviation from decision 10's
 run the way the entry point runs it, recorded against its row of
 `cli.COMMANDS` when it succeeded.
 
-**The families** (`789eaf7c`, `c72116c4`, `aef0ffe3`, `5267ba88`,
-`31216a32`). One entity's whole life per commanded kind (written from a
+**The families** (`94301255`, `8af566d1`, `54700aa4`, `fc729d67`,
+`0954e739`). One entity's whole life per commanded kind (written from a
 fragment, read, exported, written again from the inline pairs, deleted);
 both device commands, the second of them through a real OTA check-in;
 a credential entered both ways, read back masked, exported as the
@@ -849,7 +861,7 @@ same environment, which is the only thing worth asserting about them
 here: the environment names a server and a database and they still open
 neither.
 
-**The refusals** (`57a07619`). One per family, where a family is a
+**The refusals** (`0d45dccd`). One per family, where a family is a
 top-level word of the grammar and the set of them is read off the
 registration table. Each asserts the sentence as it arrived, exit 1, and
 nothing on stdout. The table's `wire` column says where each refusal is
@@ -859,14 +871,14 @@ nothing listens on, where a refusal the server composes cannot happen
 and the transport sentence takes its place, and a refusal this side
 composes is unchanged.
 
-**The two apply-bound proofs** (`9439910d`), on a store of their own.
+**The two apply-bound proofs** (`cf0c80b0`), on a store of their own.
 `APPLY_LIMIT - 1` entries are applied while an ordinary read of the same
 server, through the same client implementation, with its bound cut to
 something this server cannot meet, gives up and says so. The over-limit document is
 refused with the limit named, nothing of it quoted, and the store read
 back empty.
 
-**The closing two** (`0829c5ba`). The fileless boot stated as a claim,
+**The closing two** (`e834a3e0`). The fileless boot stated as a claim,
 and the completeness test.
 
 ### The coverage map
@@ -993,9 +1005,12 @@ touched in this milestone.
 
 ### The inventory
 
-| File | Lines |
-| --- | --- |
-| `tests/integration/test_cli_live.py` | 1161 |
+| File | Lines | Test functions | Cases |
+| --- | --- | --- | --- |
+| `tests/integration/test_cli_live.py` | 1567 | 18 | 60 |
+
+At the milestone's own tip it was 1,163 lines, 17 functions and 59
+cases; the review round's leak work is the rest.
 
 Nothing else changed. `src/` is byte for byte what M2 left, which is
 what the milestone's "test assets only" footprint means.
@@ -1006,18 +1021,20 @@ All from `vinga-server/`.
 
 - `uv run ruff check .`: `All checks passed!`, at each commit.
 - `uv run pytest tests/unit -q -n auto --dist loadfile`:
-  `3079 passed, 20 skipped in 44.59s` (unchanged in count from M2's tip:
-  this milestone adds no unit test).
-- `uv run pytest tests/integration -q`: `120 passed in 196.51s (0:03:16)`,
-  where M2's tip was `61 passed in 193.28s`. **The new lane's own
-  runtime is 2.7 to 3.6 s** over four consecutive runs of
-  `uv run pytest tests/integration/test_cli_live.py -q`, which is 59
+  `3137 passed, 20 skipped in 42.83s`, which is exactly what M2's own
+  round left: this milestone adds no unit test.
+- `uv run pytest tests/integration -q`: `121 passed in 199.56s (0:03:19)`,
+  where M2's tip was `61 passed in 193.71s (0:03:13)`. **The new lane's
+  own runtime is 3.2 to 3.7 s** over three consecutive runs of
+  `uv run pytest tests/integration/test_cli_live.py -q`, which is 60
   cases and four server boots. The lane does not double the integration
-  lane's time; it adds about three seconds to it, which is what 59 cases
+  lane's time; it adds about six seconds to it, which is what 60 cases
   against a server that boots on an empty database and never speaks to a
-  device costs.
+  device cost, the review round's log capture included.
 - `uv run mypy` (the scoped `events` lane):
   `Success: no issues found in 4 source files`.
+- `uv sync --frozen`: `Checked 99 packages in 1ms`. No dependency moved
+  in this milestone.
 - The four drift checks, run the way CI runs them: all four clean.
   Nothing in M3 touches an artifact source, and `git status` is empty
   after regenerating all four.
@@ -1045,3 +1062,132 @@ in is this file.
 **Anything about concurrency.** One client, one command at a time. The
 retryable 409 under a held lock is proven over a real socket in
 `test_config_api.py`, and nothing here adds to it.
+
+## PR review round, M3 (PR #273)
+
+External review of the PR diff, 2026-08-24. Verdict as received:
+mergeable after fixes. Three findings, one P2 pair and one P3, each
+fixed in its own commit. The first is the one worth reading: a lane
+whose whole subject is what crosses a connection had checks that would
+have passed a value crossing it.
+
+### 1. P2: the refusal cases accepted an appended leak
+
+Every refusal asserted a substring of stderr and that no traceback was
+in it. A sentence with a credential appended to it contains the
+substring and holds no traceback, so the check that exists to catch
+exactly that shape could not. Three more gaps of the same kind: the
+credential case asserted on `out` and threw `err` away at every step, no
+case looked at what the server LOGGED while a command ran, and the
+over-limit case checked one entry name out of five hundred and one.
+
+Fixed in `bf87ad30`, four ways.
+
+**The whole of stderr, not a phrase in it.** The refusal table carries
+the full text now and each case asserts equality. Where a constant
+publishes the sentence it is imported (`cli.usage_line` with
+`SECRET_NEVER_AN_ARGUMENT`, `entities.NO_SUCH_AGENT` and
+`NO_SUCH_PROVIDER`, `models.NOT_A_MAC`, `models.DOMAIN_KEYS`,
+`docgen.entity_names`, `store.TOO_MANY_ENTRIES`); where the text is
+assembled at its raise site with no constant to import, it is written
+out. The transport sentence, whose middle is the case's own ephemeral
+address, is pinned at both ends instead, which bounds it the same way.
+
+**A sentinel in the input.** `PLANTED` goes where a refusal's own input
+can hold a credential: the body of the write that will be refused for
+its reference, the fragment that will not parse (on the line above the
+one it breaks on, where an operator's would be), and every entry of the
+over-limit document. Where it deliberately does NOT go is the
+unresolvable name itself, because the reference refusal names what it
+could not resolve, and planting a credential there would be asserting
+that a refusal must not say the thing it is for saying.
+
+**The log records.** A `watched` fixture collects everything logged
+while a case runs. `caplog` alone was tried first and is not enough:
+pytest's handler sits on the root logger and uvicorn configures its
+three loggers not to propagate, so the handler is attached to the root
+and to each of those by name, with the root at DEBUG and `httpx` and
+`httpcore` lowered from the level this server's logging setup pins them
+at. Records are kept and rendered whole rather than formatted, because a
+value can ride one interpolated into the message, unformatted in `args`,
+on an extra attribute, or inside an exception on `exc_info`.
+
+That the capture reaches the SERVER's thread is asserted rather than
+assumed, in the onboarding case: an unbound check-in is the one thing in
+this lane that makes the server log, and the case holds the collection
+to containing a `vinga_server.*` record made on a thread this one is
+not.
+
+**The chain, one attribute deeper.** `carried` walks a refusal's chain
+rendering each exception's repr, its str, its own attributes and one
+level into what those attributes hold. The unit lane's `chain` helper
+renders repr and str, which is not enough here: PyYAML keeps the WHOLE
+buffer it was parsing on a mark object hung off the exception, and
+neither the repr nor the str of the exception shows it. This was found
+by the deliberate-leak run below rather than by reading, and it is the
+one place the round changed what a check looks at rather than how much
+of it.
+
+### The deliberate-leak run
+
+The finding asked for one case proved load-bearing. Three were, one per
+surface, each a scratch edit to `config/cli.py`'s YAML boundary reverted
+afterwards (`git status` clean, the file restored and touched per
+`AGENTS.md`).
+
+| Leak | Edit | Caught by |
+| --- | --- | --- |
+| the sentence quotes the source it could not parse | append `[{text}]` to the refusal | stderr equality, naming the appended fragment |
+| the source is written to a log record and printed nowhere | a `DEBUG` record before the parse | `logs` |
+| the refusal is raised inside the handler | `raise` moved into the `except` arm | `chain`, only after `carried` went a level deeper |
+
+The third is the one that mattered: with the shallow walk it PASSED,
+because `str()` of a marked YAML error renders the snippet around the
+line it stopped on and not the buffer behind it. The deepened walk fails
+it, naming `chain`.
+
+One case in the lane now checks the checks: it plants the sentinel in a
+record's arguments, on an extra attribute, inside an attached exception,
+on both streams and behind an exception, and asserts every one of those
+surfaces is named.
+
+### 2. P2: the record predated the tip it described
+
+The M3 section was written before the branch was rebased over M2's
+review round, so its unit count (3,079) was a tree that no longer
+existed, its file line count was two short, and its commit hashes were
+the pre-rebase ones.
+
+Fixed in this commit: every lane rerun at the current tip and every
+number replaced with what came out, the hashes rewritten to the rebased
+ones, the inventory given the function and case counts beside the line
+count, and `077016a9` named in the section, since it postdates the
+section's first writing and cannot be inferred from a commit list that
+does not exist any more.
+
+### 3. P3: the record claimed a socket four commands never open
+
+The section and the changelog entry both said all forty-one commands
+complete "over the wire". Four of them (`schema`, `reference`,
+`openapi`, `ota-url`) deliberately reach nothing, and what the lane
+asserts about them is the opposite claim, so counting them into the wire
+total both overstated the coverage and lost the reason for running them
+here at all.
+
+Fixed in `b1b62d90`: forty-one run in the lane and answer, thirty-seven
+of them over real HTTP, and the four are held to opening nothing in an
+environment that names a running server and a database directory. "The
+same connection" went with it, in the doc and in the two test docstrings
+and the comment that said it: each command builds a client of its own
+and closes it, so what the apply-bound comparison shares with the read
+it is compared against is the server and the code that talks to it.
+
+### Verification after the round
+
+Rerun at the branch tip and recorded in the M3 section's own
+verification block above rather than a second time here, which is what
+finding 2 is about. In summary: ruff clean, mypy clean,
+`3137 passed, 20 skipped` on the unit lane, `121 passed in 199.56s` on
+the integration lane with the live lane's own runtime at 3.2 to 3.7 s,
+the four drift checks clean with nothing regenerated, and
+`uv sync --frozen` unchanged at 99 packages.
