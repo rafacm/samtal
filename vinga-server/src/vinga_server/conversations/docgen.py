@@ -135,28 +135,34 @@ def reference() -> str:
         ),
         "",
         *_paragraph(
-            "Deletion on demand is `vinga-server conversations purge`, by "
-            "`--session`, `--device` or `--before`, combining with AND. It works "
-            "directly against the file with no server running, because deletion has "
-            "to work exactly when the server is broken or gone. Purging a session "
-            "that is still running ends its recording: the writer finds the row gone "
-            "at its next turn and stops writing for that session. Capture files are a "
-            "separate instrument and are never touched; the session id is the "
-            "correlation key for whoever needs to remove the matching triplet."
+            "Deletion on demand is not something this release has a command for. "
+            "`vinga-server conversations purge` was one and is gone (#282), because "
+            "it reached the store's file directly and that is not a thing a command "
+            "can do once the store is a database elsewhere; erasing a named session "
+            "returns as an act of the API, with a CLI verb in front of it (#190). "
+            "Until then the window above is the whole of the deletion policy, and a "
+            "deployment that has to erase something now stops the server and deletes "
+            "the conversations database file, which takes every session rather than "
+            "the one that was asked about. Whichever way rows go, the deletion the "
+            "window takes is of a session at a time, row and children together: a "
+            "session that is still running when its row goes stops being recorded, "
+            "because the writer finds the row gone at its next turn. Capture files "
+            "are a separate instrument and are never touched by any of it; the "
+            "session id is the correlation key for whoever needs to remove the "
+            "matching triplet."
         ),
         "",
         *_paragraph(
             "Deletion is physical, not query-level. The database is opened with "
             "`PRAGMA secure_delete=ON`, so a freed page is overwritten with zeros "
-            "instead of lingering in the freelist, and both retention and purge "
-            "finish with `PRAGMA wal_checkpoint(TRUNCATE)` so the deleted frames do "
-            "not survive in the write-ahead log. Two limits are stated rather than "
-            "implied. A checkpoint a reader is blocking does not fail the deletion: "
-            "the rows are committed, the truncation is owed, and it is retried at "
-            "the next quiet moment, which is the server's next write or the next "
-            "purge. `vinga-server conversations purge` says so when it leaves one "
-            "owed. And copies that have already left the file (backups, filesystem "
-            "snapshots) are the operator's to manage."
+            "instead of lingering in the freelist, and retention finishes with "
+            "`PRAGMA wal_checkpoint(TRUNCATE)` so the deleted frames do not survive "
+            "in the write-ahead log. Two limits are stated rather than implied. A "
+            "checkpoint a reader is blocking does not fail the deletion: the rows "
+            "are committed, the truncation is owed, and it is retried at the next "
+            "quiet moment, which is the server's next write. And copies that have "
+            "already left the file (backups, filesystem snapshots) are the "
+            "operator's to manage."
         ),
         "",
         "## Reading it",

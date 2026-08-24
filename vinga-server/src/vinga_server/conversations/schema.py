@@ -402,8 +402,8 @@ tool_invocations = Table(
         Text,
         nullable=False,
         comment=(
-            "The `sessions.session` this call belongs to, denormalized so a "
-            "purge and a session-scoped query need no join."
+            "The `sessions.session` this call belongs to, denormalized so "
+            "retention and a session-scoped query need no join."
         ),
     ),
     Column(
