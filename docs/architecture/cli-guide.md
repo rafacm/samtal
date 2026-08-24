@@ -253,25 +253,41 @@ feeling. Where a practice is not met today it says so.
 
 ### Data on stdout, notices on stderr
 
-Stdout carries the thing a caller came for and nothing else. Stderr
-carries everything about it: what it means, when it takes effect, what
-to run next, and the one sentence a failure gets.
+Stdout carries the thing a caller came for. Stderr carries everything
+about the run that produced it: when a write takes effect, what to run
+next, and the one sentence a failure gets.
 
-The test is redirection. `vinga export > deployment.yaml` must produce
-a file that `apply` takes, with no prose in it, and the operator must
-still see on their screen that the credentials did not travel and how
-to put them back.
+The line is not prose against data. It is **about the artifact** against
+**about this invocation**. A document that explains itself is still the
+artifact: an export's header says how to reproduce the deployment in
+two steps, and its foot lists a `set-secret` command per stored slot,
+both as YAML comments, and both belong in the file because the file is
+what somebody opens six months later with no terminal scrollback to
+consult. `apply` reads it back with the comments in it.
 
-**Example.** `ota-url` prints the URL alone on stdout, then prints what
-to do with it and where its origin came from on stderr. `_acknowledged`
-prints `wrote provider llm.claude` on stdout and the take-effect notice
-on stderr, and it flushes stdout first, because stderr is unbuffered
-and stdout is not, so without the flush the notice would land above the
-line it is about.
+The test is therefore redirection in both directions.
+`vinga export > deployment.yaml` must produce a file that `apply` takes
+as it stands and that tells its own reader what it is, what it does not
+carry and what to run after it; and nothing about *that run* may be in
+it.
 
-**Counterexample.** Putting the OTA guidance paragraph on stdout, so
-that the one command whose whole output is meant to be pasted into a
-captive portal hands back three sentences and a URL.
+**Example.** `_exported` composes `EXPORT_HEADER`, the configuration,
+and `_secret_commands`, all to stdout, and `_secret_commands` emits the
+stored locations in the store's own fixed order so that two exports of
+one configuration are the same bytes. `ota-url` splits the other way:
+the URL alone on stdout, because it is what gets pasted into a captive
+portal, and what to do with it plus where its origin came from on
+stderr. `_acknowledged` prints `wrote provider llm.claude` on stdout
+and the take-effect notice on stderr, and it flushes stdout first,
+because stderr is unbuffered and stdout is not, so without the flush
+the notice would land above the line it is about.
+
+**Counterexample.** An export header saying how many entities were
+written and when. That is about the invocation, so it belongs on stderr
+if anywhere, and putting it in the document breaks the property
+`_secret_commands` is written to keep: two exports of an unchanged
+configuration would stop being the same bytes, and a checked-in export
+would show a diff on every run.
 
 ### A refusal is a fixed sentence that quotes nothing back
 
@@ -781,8 +797,10 @@ practice above, restated as the question to ask.
    according to whether it addresses one entry?
 3. **Are the positionals an identity**, in the same order and with the
    same names the API's path uses, and are there at most three?
-4. **Does anything it prints on stdout belong in a file?** Is
-   everything else on stderr?
+4. **Is everything it prints on stdout about the artifact, and
+   everything on stderr about the run?** A document that explains
+   itself is still the artifact; a count of what this invocation did is
+   not.
 5. **Does it say when what it wrote takes effect**, in the words the
    kind's own notice uses rather than new ones?
 6. **Can any sentence it prints contain something the caller typed, or
