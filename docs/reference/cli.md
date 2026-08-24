@@ -1,6 +1,6 @@
 # The configuration CLI
 
-`vinga-server config` reads and writes the domain half of a deployment's
+`vinga` reads and writes the domain half of a deployment's
 configuration: the providers, the MCP servers, the prompt fragments, the
 agent defaults, the agents, the device bindings and the default agent.
 It is a client of the configuration API rather than a second way into
@@ -15,6 +15,36 @@ Five commands are the exception. `schema`, `reference`, `openapi` and
 command tree, and `ota-url` derives a URL from the file half. Those five
 open no database, need no key and contact nothing at all. What to do
 when there is no server to ask has a section of its own below.
+
+## The two spellings
+
+The same command has two spellings, and both resolve.
+
+```bash
+vinga provider set llm local                 # the console script
+vinga-server config provider set llm local   # inside the image
+```
+
+`vinga-server` is the server's own entry point, and `config` is the word
+that dispatches away from serving to configuring; it has three siblings
+(`conversations`, `events` and `doctor`). `vinga` is the CLI as a tool of
+its own, and it has no server to dispatch away from, so it drops the
+`config` word. Everything after that word is identical, which is what
+makes the two one grammar rather than two, and both reach the same entry
+function, read the same `.env` file and answer the same sentences.
+
+Everything generated on this page is rendered in the short spelling,
+whichever invocation rendered it. That is deliberate: a generated
+document may no more vary with the invocation than with the terminal,
+and the recipes below are matched against the example fragments by that
+one prefix, so a name that changed with the entry point would publish an
+empty recipes region through one of them. What varies is a live `--help`
+page, which prints the spelling it was actually reached by.
+
+The docker shim below is a third way to type the same thing: the shell
+function it defines is named `vinga` and runs `vinga-server` inside the
+container, so `vinga config list` there is the long spelling with the
+program word supplied by the function.
 
 What each field means is
 [`domain-config.md`](domain-config.md), generated from the models. What
@@ -52,14 +82,11 @@ vinga() { docker exec -i vinga vinga-server "$@"; }
 vinga config list
 ```
 
-The `-i` is load-bearing rather than habit: `set-secret` reads the
+The `-i` is load-bearing rather than habit: a secret set reads the
 credential from stdin, and `apply -f -` reads a whole document from it.
-The rest of this page spells the command out as `vinga-server config`,
-which is what its own help pages say and what a checkout runs; read it
-as `vinga config` wherever the shim is what you have. One thing does not
-carry over: a path is resolved inside the container, which has the CLI
-but not `examples/`, so a document that lives on your machine is piped
-in with `-f -` rather than named.
+One thing does not carry over: a path is resolved inside the container,
+which has the CLI but not `examples/`, so a document that lives on your
+machine is piped in with `-f -` rather than named.
 
 **From a checkout**, which is what a development machine does. Run it
 from `vinga-server/`, where the example fragments are:
