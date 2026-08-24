@@ -64,6 +64,9 @@ RUN uv sync --frozen --no-install-project --no-dev --no-editable $(cat /tmp/extr
 
 COPY src ./src
 COPY README.md ./
+# The wheel force-includes examples/ (the recipe fragments ship inside
+# the package), so the build needs them where hatchling looks.
+COPY examples ./examples
 RUN uv sync --frozen --no-dev --no-editable $(cat /tmp/extras)
 
 
