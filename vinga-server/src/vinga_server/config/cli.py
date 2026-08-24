@@ -43,6 +43,7 @@ cryptography or httpx reaches the user.
 
 import getpass
 import ipaddress
+import logging
 import os
 import shlex
 import sys
@@ -99,6 +100,7 @@ from vinga_server.config.responses import (
 )
 from vinga_server.config.secrets import MASK, provider_identity
 from vinga_server.config.store import APPLY_LOCATION, addressed, check_transportable
+from vinga_server.logs import quieted
 
 # Imported like anything else since issue #143 split the onboarding
 # package. The derivation reads the configuration models, the key
@@ -649,6 +651,36 @@ def _paragraph(text: str) -> list[str]:
 # not cover is the addressing and the transport policy, which run in
 # front of it and are what those tests are checking.
 
+# The libraries that would narrate the request, and how quiet they are
+# held while it is made.
+#
+# `httpx` writes one line per request at INFO carrying the method, the
+# URL and the status, and `logs.py` keeps that deliberately where it
+# floors the vendor libraries: for every other caller in this server the
+# URL it names says nothing that is not already public. For this one it
+# is the address an operator typed, which is accepted with its query
+# string whole and can carry `?token=<secret>` in it, so the record the
+# library writes is the one surface `Address` exists to keep the
+# credential off. A log record is retained in a way a terminal is not.
+# `httpcore` traces the connection underneath and is held with it. The
+# same two loggers, at the same level and for the same reason, as
+# `doctor.py`'s probe; neither module may import the other, so the
+# reason is stated in both rather than shared through one.
+#
+# Held for every request rather than only for an address whose two forms
+# differ. The rule is then one rule: this command's own sentences are
+# what an operator reads, and no request of its making narrates itself.
+# Nothing is lost that anybody needs, because the request is one call
+# whose outcome the command reports either way, and a conditional would
+# make the quiet part of the value rather than part of the command.
+REQUEST_LOGGERS = ("httpx", "httpcore")
+
+# WARNING rather than off, so a library with something genuinely wrong
+# to say can still say it, and scoped to the request rather than set
+# once, so nothing here changes what a process that imported this logs
+# afterwards.
+QUIET_LEVEL = logging.WARNING
+
 
 def build_client(base_url: str, token: str) -> httpx.Client:
     """The connection to the configuration API.
@@ -716,15 +748,25 @@ def _call(
     TestClient refuses one outright, which would take the seam the whole
     acceptance suite runs through with it. Each call builds a client,
     makes one request and closes it, so the two are the same thing here.
+
+    The whole of the request is inside a logging boundary, and that is
+    the one thing here that is not about what reaches a terminal: the
+    client library writes a line per request naming the URL it was
+    given, which for this caller is an operator's address with its query
+    string whole. `REQUEST_LOGGERS` above says which loggers and why.
+    The token is resolved before the boundary opens, so a missing one is
+    still the sentence it was.
     """
     file_config = load_file_config(args.config)
     address = _address(args, file_config)
-    client = build_client(address.reached, _token(file_config))
-    client.timeout = httpx.Timeout(read_timeout_s, connect=CONNECT_TIMEOUT_S)
-    try:
-        response = _sent(client, method, path, body, address)
-    finally:
-        client.close()
+    token = _token(file_config)
+    with quieted(REQUEST_LOGGERS, QUIET_LEVEL):
+        client = build_client(address.reached, token)
+        client.timeout = httpx.Timeout(read_timeout_s, connect=CONNECT_TIMEOUT_S)
+        try:
+            response = _sent(client, method, path, body, address)
+        finally:
+            client.close()
     return _answer(response, address)
 
 

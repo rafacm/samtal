@@ -154,20 +154,24 @@ def runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def logged(caplog: pytest.LogCaptureFixture) -> str:
-    """Every record this server wrote while a command ran, rendered as
-    anything reading them would.
+    """Every record written while a command ran, whoever wrote it,
+    rendered as anything reading them would.
 
     The message, the arguments behind it and the exception info a
     traceback would be built from, because a value that reached a record
-    as an argument is a value the formatter puts back into the line. Only
-    this server's own channels: httpx logs the request line of every
-    request it makes, and what the HTTP client says about a URL it was
-    handed is not something a command here chose to write.
+    as an argument is a value the formatter puts back into the line.
+
+    Every record and not only this server's own, which is the whole of
+    what a no-leak claim about logs can honestly mean: a credential in
+    httpx's request line is in the deployment's log file exactly as much
+    as one in a line this code wrote. The config CLI holds that library
+    quiet around its request for precisely that reason (`REQUEST_LOGGERS`
+    in `config/cli.py`), so there is nothing left here to filter out, and
+    a filter would hide the regression if the quieting were removed.
     """
     return "\n".join(
-        f"{record.getMessage()}\n{record.args!r}\n{record.exc_info!r}"
+        f"{record.name}\n{record.getMessage()}\n{record.args!r}\n{record.exc_info!r}"
         for record in caplog.records
-        if record.name.startswith("vinga_server")
     )
 
 

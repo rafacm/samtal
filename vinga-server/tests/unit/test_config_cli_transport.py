@@ -416,6 +416,69 @@ def test_an_unreadable_answer_from_an_accepted_url_names_it_sanitized(
     assert SECRET not in _logged(caplog)
 
 
+def _answering(body: object = None) -> httpx.MockTransport:
+    """A transport that answers anything, so a test about what a request
+    leaves behind does not depend on what answered it."""
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"entries": []} if body is None else body)
+
+    return httpx.MockTransport(answer)
+
+
+def test_no_request_this_command_makes_narrates_itself(
+    run, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The surface the two failures above do not cover, and the one a
+    terminal does not show: httpx writes a line per request at INFO
+    naming the URL it was given, and `logs.py` floors that library at
+    INFO deliberately, because for every other caller in this server the
+    URL says nothing that is not already public.
+
+    For this one it is the address an operator typed, accepted with its
+    query string whole, and a log record is retained in a way a terminal
+    is not. So the request runs inside a logging boundary and this is a
+    successful command, which is the case no refusal test could reach:
+    the credential is in the URL whether or not anything went wrong.
+    """
+    monkeypatch.setattr(
+        cli,
+        "build_client",
+        lambda base_url, token: httpx.Client(base_url=base_url, transport=_answering()),
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        assert run("--api-url", REACHABLE_NOWHERE, "apply", "-f", "-", stdin="{}\n") == 0
+
+    assert SECRET not in _logged(caplog)
+    # Named, because the claim is about a library that was writing a
+    # line and now writes none: an assertion on the sentinel alone would
+    # pass again the day the URL stops being the thing it carries.
+    assert [
+        record.name
+        for record in caplog.records
+        if record.name.startswith(("httpx", "httpcore"))
+    ] == []
+
+
+def test_the_quiet_lasts_exactly_as_long_as_the_request(
+    run, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Logger levels are process state, so a command that left one
+    raised would have silenced a library for whatever runs next."""
+    narrator = logging.getLogger("httpx")
+    was = narrator.level
+    monkeypatch.setattr(
+        cli,
+        "build_client",
+        lambda base_url, token: httpx.Client(base_url=base_url, transport=_answering()),
+    )
+
+    assert run("--api-url", REACHABLE_NOWHERE, "apply", "-f", "-", stdin="{}\n") == 0
+
+    assert narrator.level == was
+
+
 def test_neither_failure_carries_the_credential_in_its_chain() -> None:
     """The chain, not just the message: httpx's own exceptions carry the
     request, and the request carries the URL that was reached.
