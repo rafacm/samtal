@@ -48,8 +48,8 @@ API_SECRET_ENV = "VINGA_API_SECRET"
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
 
 # The command a fragment's header names, as in
-#   vinga-server config provider set llm claude -f examples/llm-anthropic.yaml
-COMMAND = re.compile(r"^#\s+vinga-server config (\S+ set\b.*?) -f ")
+#   vinga provider set llm claude -f examples/llm-anthropic.yaml
+COMMAND = re.compile(rf"^#\s+{cli.PROGRAM} (\S+ set\b.*?) -f ")
 
 # Providers, MCP servers and prompt fragments have to exist before
 # anything references them: a write leaving a reference unresolved is

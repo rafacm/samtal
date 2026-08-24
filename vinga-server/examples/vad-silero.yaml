@@ -2,7 +2,7 @@
 # ends. Runs locally on every audio frame, whichever ASR is configured,
 # and is a core dependency rather than an extra.
 #
-#   vinga-server config provider set vad silero -f examples/vad-silero.yaml
+#   vinga provider set vad silero -f examples/vad-silero.yaml
 
 type: silero
 

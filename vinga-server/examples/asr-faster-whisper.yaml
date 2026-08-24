@@ -1,6 +1,6 @@
 # Local transcription with faster-whisper, on the CPU.
 #
-#   vinga-server config provider set asr whisper -f examples/asr-faster-whisper.yaml
+#   vinga provider set asr whisper -f examples/asr-faster-whisper.yaml
 #
 # The audio never leaves the host, which this type knows about itself:
 # it is what server.local_only accepts without an assertion, and it

@@ -457,7 +457,7 @@ def test_every_recipe_line_is_a_command_of_the_grammar() -> None:
     """A recipe that named a command the grammar does not have would be
     a page telling an operator to type something that cannot work. The
     inventory is `cli.COMMANDS`, which is the grammar itself."""
-    for recipe in docgen.recipes(cli.PROGRAM):
+    for recipe in docgen.recipes():
         assert recipe.commands, f"{recipe.title}: a heading with no commands under it"
         for line in recipe.commands:
             words = tuple(line.removeprefix(f"{cli.PROGRAM} ").split())
@@ -474,7 +474,7 @@ def test_every_command_an_example_quotes_is_published_as_a_recipe() -> None:
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.startswith(f"#   {cli.PROGRAM} ")
     }
-    published = {line for recipe in docgen.recipes(cli.PROGRAM) for line in recipe.commands}
+    published = {line for recipe in docgen.recipes() for line in recipe.commands}
 
     assert quoted, "no example quotes a command, so what follows is vacuous"
     assert published == quoted
@@ -559,7 +559,7 @@ def _refused() -> BaseException:
     with a sentence, so no caller-facing surface ever holds it.
     """
     with pytest.raises(cli.ConfigError) as caught:
-        docgen.recipes(cli.PROGRAM)
+        docgen.recipes()
     return caught.value
 
 

@@ -445,7 +445,7 @@ def chain_of(argv: Sequence[str]) -> str:
     changes nothing.
     """
     with pytest.raises(ConfigError) as caught:
-        cli._parsed(list(argv))
+        cli._parsed(list(argv), cli.DISPATCHED)
     return carried(caught.value)
 
 
@@ -1719,7 +1719,7 @@ def test_every_published_recipe_runs_against_the_server(
 
     published = [
         line.removeprefix(f"{cli.PROGRAM} ")
-        for recipe in docgen.recipes(cli.PROGRAM)
+        for recipe in docgen.recipes()
         for line in recipe.commands
     ]
     assert published, "no recipe is published, so what follows is vacuous"

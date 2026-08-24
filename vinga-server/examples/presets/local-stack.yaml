@@ -3,7 +3,7 @@
 # local voice, and the endpointer that runs on every audio frame anyway.
 # One document, written in one transaction:
 #
-#   vinga-server config apply -f examples/presets/local-stack.yaml
+#   vinga apply -f examples/presets/local-stack.yaml
 #
 # Applying orders the writes for you. A write whose references do not
 # resolve is refused, and a document is refused whole rather than half
@@ -22,11 +22,11 @@
 # it is one command afterwards. Bind one board, by the MAC on its
 # sticker:
 #
-#   vinga-server config device bind aa:bb:cc:dd:ee:ff assistant
+#   vinga device bind aa:bb:cc:dd:ee:ff assistant
 #
 # or point every board that is bound to nothing at one agent:
 #
-#   vinga-server config default-agent set assistant
+#   vinga default-agent set assistant
 #
 # Every field below is documented in docs/reference/domain-config.md,
 # and examples/ holds a commented fragment per provider type with the

@@ -57,6 +57,7 @@ from urllib.parse import quote, urlunsplit
 import httpx
 import typer
 import yaml
+from dotenv import find_dotenv, load_dotenv
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
 # Typer ships its own copy of Click rather than importing the installed
@@ -120,10 +121,32 @@ from vinga_server.onboarding.origin import onboarding_url
 # and the prefix comes from the same constant the server mounts on.
 API_URL_ENV = "VINGA_API_URL"
 
-# How this command group is spelled, which is the name it is registered
-# under and the name every command an export or a notice tells an
-# operator to run begins with.
-PROGRAM = "vinga-server config"
+# How a command of this grammar is spelled in anything this repository
+# generates: the committed CLI reference and its recipes, the export
+# header and the secret commands at its foot, the reference intro, and
+# the `command` strings the descriptors carry into the domain reference.
+#
+# One constant and not the invocation, and that is load-bearing rather
+# than tidy. `docgen._quoted` picks the commands it publishes as recipes
+# by matching each example file's comment lines against this prefix, so
+# a name that varied with the entry point would render an empty recipes
+# region through one of them and turn the drift check red on an
+# unrelated change. A generated document may no more vary with the
+# invocation than with the terminal.
+PROGRAM = entities.PROGRAM
+
+# And the two entry points this grammar has, as the fixed string each of
+# them prints in a live help page or usage line. A closed map from a
+# known entry point to a written-down name: `argv[0]` is never read and
+# never interpolated, so a hostile one has no surface here at all.
+#
+# `main` is reached one of two ways. The console script calls it with no
+# arguments, which is the short spelling; `vinga-server config` hands it
+# `sys.argv[2:]`, which is the spelling inside the image. Anything that
+# calls it some third way gets the canonical constant.
+CONSOLE_SCRIPT = "vinga"
+
+DISPATCHED = "vinga-server config"
 
 # The client's timeouts, explicit because the defaults would lie. The
 # server holds a write for up to the database's busy timeout (10 s)
@@ -248,16 +271,32 @@ def main(argv: Sequence[str] | None = None) -> int:
     Parsing is inside the boundary, so a mistake in the grammar answers
     the way a mistake in a fragment does: a sentence on stderr and exit
     1. --help still leaves through an exit 0 of its own, because asking
-    for help is not a failure."""
+    for help is not a failure.
+
+    An absent `argv` is the console script, which is the whole of what
+    tells the two entry points apart here: `vinga-server` hands this
+    `sys.argv[2:]` and the script hands it nothing. What that decides is
+    one string in a help page, and nothing else.
+
+    The `.env` file is read here rather than only in `vinga-server.main`,
+    because both spellings have to behave identically and the console
+    script never reaches that function. Read into the environment before
+    anything looks at it, with the real environment winning, and
+    searched from the invocation directory rather than from this file's.
+    """
+    load_dotenv(find_dotenv(usecwd=True))
     try:
-        _parsed(sys.argv[1:] if argv is None else argv)
+        _parsed(
+            sys.argv[1:] if argv is None else argv,
+            CONSOLE_SCRIPT if argv is None else DISPATCHED,
+        )
     except ConfigError as exc:
         print(exc, file=sys.stderr)
         return 1
     return 0
 
 
-def _parsed(argv: Sequence[str]) -> None:
+def _parsed(argv: Sequence[str], spelled: str) -> None:
     """The command line, parsed and run.
 
     Click is driven directly rather than through its standalone mode,
@@ -287,7 +326,7 @@ def _parsed(argv: Sequence[str]) -> None:
     asked_for: int | None = None
     try:
         grammar = command()
-        with grammar.make_context(PROGRAM, list(argv)) as context:
+        with grammar.make_context(spelled, list(argv)) as context:
             grammar.invoke(context)
         return
     except Exit as asked:
@@ -604,7 +643,7 @@ def cli_recipes() -> str:
     renderer there is, and the extraction is "the lines between the two
     markers", which has to be able to say so exactly.
     """
-    return "\n".join(["", *docgen.recipe_lines(PROGRAM)]) + "\n"
+    return "\n".join(["", *docgen.recipe_lines()]) + "\n"
 
 
 def _help_pages(shape: Any, words: tuple[str, ...], parent: Any) -> list[str]:

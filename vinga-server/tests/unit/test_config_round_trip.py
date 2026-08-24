@@ -37,6 +37,7 @@ from tests.support.problems import refused as refusal_body
 from tests.support.stores import body, planted
 from vinga_server import logs
 from vinga_server.config.api import build_api
+from vinga_server.config.entities import PROGRAM
 from vinga_server.config.loader import ConfigError
 from vinga_server.config.models import ProviderConfig
 from vinga_server.config.secrets import (
@@ -504,7 +505,7 @@ def _exported_secret_commands(exported: str) -> list[list[str]]:
     """The commands an export's foot names, as an operator would run
     them: the comment marker off, the words split the way a shell splits
     them, and the two words that name this command group dropped."""
-    prefix = "#   vinga-server config "
+    prefix = f"#   {PROGRAM} "
     return [
         __import__("shlex").split(line[len(prefix):])
         for line in exported.splitlines()

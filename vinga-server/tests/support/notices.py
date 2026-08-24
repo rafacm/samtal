@@ -32,6 +32,8 @@ A binding to an agent this server is not serving names two of them at
 once, which is why the answer is a set rather than a token.
 """
 
+from vinga_server.config.entities import PROGRAM
+
 CHECK_IN = "check-in"
 RELOAD = "reload"
 RESTART = "restart"
@@ -42,7 +44,7 @@ STORE_BOOT = "store-boot"
 # or what to run.
 _ANNOUNCED_BY = {
     CHECK_IN: "OTA check",
-    RELOAD: "config reload",
+    RELOAD: f"{PROGRAM} reload",
     RESTART: "next server start",
     STORE_BOOT: "starts from this store",
 }

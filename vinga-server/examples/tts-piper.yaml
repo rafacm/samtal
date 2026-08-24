@@ -1,6 +1,6 @@
 # A local voice, synthesized on this host.
 #
-#   vinga-server config provider set tts piper -f examples/tts-piper.yaml
+#   vinga provider set tts piper -f examples/tts-piper.yaml
 #
 # A voice is a provider entry: two agents that should sound different
 # reference two entries. There is no per-agent voice option, because for
