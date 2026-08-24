@@ -167,6 +167,36 @@ Examples:
 - [`tts-openai.yaml`](../../vinga-server/examples/tts-openai.yaml)
 - [`vad-silero.yaml`](../../vinga-server/examples/vad-silero.yaml)
 
+#### `asr` options for `type: faster_whisper`
+
+`providers.asr.<name>`
+
+The options the `faster_whisper` ASR type accepts.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `model` | `str` | `"small"` | Whisper model size (tiny, base, small, medium, large-v3, or a Hugging Face model id); weights download at server startup. |
+| `language` | `str \| null` | `null` | Language hint (ISO 639-1, such as sv or en); omit to auto-detect per utterance. Detection costs a constant encoder pass per utterance, several seconds of it on a small CPU. |
+| `device` | `str` | `"cpu"` | Where the engine runs inference, in faster-whisper's own vocabulary (cpu, cuda, auto). |
+| `compute_type` | `str` | `"int8"` | The quantization the weights are loaded with, in faster-whisper's own vocabulary (int8, int8_float16, float16, float32). |
+| `beam_size` | `int` | `1` | Greedy decoding by default: beam search costs a multiple of the CPU time and buys little accuracy on short spoken commands. |
+| `download_dir` | `str \| null` | `null` | Where the model weights are cached; unset leaves the engine its own cache location. |
+| `cpu_threads` | `int` | `0` | Threads for CPU inference. The engine sizes its pool from the host's core count and ignores container CPU quotas, so inside a limit set this to the quota (0 keeps the engine default). |
+| `vad_filter` | `bool` | `false` | Strip non-speech inside the ASR call before decoding. Cuts both latency and hallucinations on silence-padded utterances; recommended on. |
+| `vad_parameters` | `VadParameters` | `{}` | Tuning for the engine's own voice-activity filter, forwarded to it as written. Only what the fragment sets is sent. |
+| `condition_on_previous_text` | `bool` | `true` | Feeding each window's text into the next is the documented cause of repetition loops; false is the standard mitigation. |
+| `temperature` | `list[float] \| null` | `null` | Fallback ladder for failed decodes, as one number or a non-empty list of them. The engine's six-step default can retry one bad utterance six times over; a short ladder bounds worst-case latency, which a voice UI feels. |
+| `language_detect` | `"every_utterance" \| "once"` | `"every_utterance"` | Detection scope. every_utterance detects fresh on each turn; once detects until a confident answer arrives and then reuses that language for the rest of the session, so later turns skip the detection pass. |
+| `language_fallback` | `str \| null` | `null` | The language to decode in when a detection falls below the confidence floor; unset means the low-confidence detection is used as it is. |
+| `language_confidence_floor` | `float` | `0.6` | Below this detection confidence, distrust the guess: use language_fallback instead when one is set, and never lock a session to it. Misdetections cluster at low confidence, and a wrong language costs extra decode time on top of being wrong. |
+
+Fields of `vad_parameters`:
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `min_silence_duration_ms` | `int \| null` | `null` | How much silence ends a speech segment, in milliseconds. Any other key written here is passed to the engine's VAD unread, which is what this section is for. |
+| ... | | | Passed through to the provider implementation. |
+
 ### MCP server
 
 `mcp_servers.<name>`

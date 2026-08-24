@@ -206,7 +206,7 @@
       },
       "put": {
         "summary": "Write Provider",
-        "description": "Create or replace one provider from a fragment in the shape\nthe YAML section had. The running server builds it again at the\nnext reload, and the conversations that open after that speak\nthrough the new one.",
+        "description": "Create or replace one provider from a fragment in the shape the YAML section had. The running server builds it again at the next reload, and the conversations that open after that speak through the new one.\n\nThe options a fragment may carry beyond the fields of `ProviderConfig` are whatever its `type` takes. This body is validated by the server rather than described as a discriminated schema here, so the types that declare their options state them as components of their own, named for the stage and the type: an entry in the `asr` stage with `type: faster_whisper` carries `AsrFasterWhisperOptions`. Every other type passes its options through undeclared, and the example fragments shipped with the server document those.",
         "operationId": "write_provider_providers__stage___name__put",
         "parameters": [
           {
@@ -5320,6 +5320,152 @@
           "errors"
         ],
         "title": "Problem",
+        "type": "object"
+      },
+      "VadParameters": {
+        "additionalProperties": true,
+        "description": "The engine's own voice-activity tuning, forwarded as written.\n\nThe one model in this file whose door stays open, and it is open on\npurpose. `vad_parameters` has always been handed to\n`WhisperModel.transcribe` unread, the example documents one key of\nit, and faster-whisper's VAD takes several more that a deployment\nmay already have written. Closing the hatch on the evidence of one\ndocumented key would make a running deployment's valid setting\nunreadable on upgrade, so the model declares what vinga vouches for\nand says here that everything else still travels.\n\nWhat travels is what was written: the mapping is dumped with\n`exclude_unset=True` on the way to the engine, so an operator's\nexplicit values (nulls included) reach it and an injected default\ndoes not.",
+        "properties": {
+          "min_silence_duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "How much silence ends a speech segment, in milliseconds. Any other key written here is passed to the engine's VAD unread, which is what this section is for.",
+            "title": "Min Silence Duration Ms"
+          }
+        },
+        "title": "VadParameters",
+        "type": "object"
+      },
+      "AsrFasterWhisperOptions": {
+        "additionalProperties": false,
+        "description": "The options the `faster_whisper` ASR type accepts.\n\nThe decode options mirror `WhisperModel.transcribe` arguments of the\nsame name and keep the engine's defaults when unset, with one\nexception: `beam_size` defaults to greedy decoding, because beam\nsearch buys little accuracy on short spoken commands and costs a\nmultiple of the CPU time (#19).",
+        "properties": {
+          "model": {
+            "default": "small",
+            "description": "Whisper model size (tiny, base, small, medium, large-v3, or a Hugging Face model id); weights download at server startup.",
+            "title": "Model",
+            "type": "string"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Language hint (ISO 639-1, such as sv or en); omit to auto-detect per utterance. Detection costs a constant encoder pass per utterance, several seconds of it on a small CPU.",
+            "title": "Language"
+          },
+          "device": {
+            "default": "cpu",
+            "description": "Where the engine runs inference, in faster-whisper's own vocabulary (cpu, cuda, auto).",
+            "title": "Device",
+            "type": "string"
+          },
+          "compute_type": {
+            "default": "int8",
+            "description": "The quantization the weights are loaded with, in faster-whisper's own vocabulary (int8, int8_float16, float16, float32).",
+            "title": "Compute Type",
+            "type": "string"
+          },
+          "beam_size": {
+            "default": 1,
+            "description": "Greedy decoding by default: beam search costs a multiple of the CPU time and buys little accuracy on short spoken commands.",
+            "title": "Beam Size",
+            "type": "integer"
+          },
+          "download_dir": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Where the model weights are cached; unset leaves the engine its own cache location.",
+            "title": "Download Dir"
+          },
+          "cpu_threads": {
+            "default": 0,
+            "description": "Threads for CPU inference. The engine sizes its pool from the host's core count and ignores container CPU quotas, so inside a limit set this to the quota (0 keeps the engine default).",
+            "title": "Cpu Threads",
+            "type": "integer"
+          },
+          "vad_filter": {
+            "default": false,
+            "description": "Strip non-speech inside the ASR call before decoding. Cuts both latency and hallucinations on silence-padded utterances; recommended on.",
+            "title": "Vad Filter",
+            "type": "boolean"
+          },
+          "vad_parameters": {
+            "$ref": "#/components/schemas/VadParameters",
+            "description": "Tuning for the engine's own voice-activity filter, forwarded to it as written. Only what the fragment sets is sent."
+          },
+          "condition_on_previous_text": {
+            "default": true,
+            "description": "Feeding each window's text into the next is the documented cause of repetition loops; false is the standard mitigation.",
+            "title": "Condition On Previous Text",
+            "type": "boolean"
+          },
+          "temperature": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Fallback ladder for failed decodes, as one number or a non-empty list of them. The engine's six-step default can retry one bad utterance six times over; a short ladder bounds worst-case latency, which a voice UI feels.",
+            "title": "Temperature"
+          },
+          "language_detect": {
+            "default": "every_utterance",
+            "description": "Detection scope. every_utterance detects fresh on each turn; once detects until a confident answer arrives and then reuses that language for the rest of the session, so later turns skip the detection pass.",
+            "enum": [
+              "every_utterance",
+              "once"
+            ],
+            "title": "Language Detect",
+            "type": "string"
+          },
+          "language_fallback": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The language to decode in when a detection falls below the confidence floor; unset means the low-confidence detection is used as it is.",
+            "title": "Language Fallback"
+          },
+          "language_confidence_floor": {
+            "default": 0.6,
+            "description": "Below this detection confidence, distrust the guess: use language_fallback instead when one is set, and never lock a session to it. Misdetections cluster at low confidence, and a wrong language costs extra decode time on top of being wrong.",
+            "title": "Language Confidence Floor",
+            "type": "number"
+          }
+        },
+        "title": "FasterWhisperOptions",
         "type": "object"
       }
     },

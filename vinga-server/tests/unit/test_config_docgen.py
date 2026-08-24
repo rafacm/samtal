@@ -190,6 +190,74 @@ def test_the_reference_names_every_field_of_every_entity() -> None:
             assert f"| `{name}` |" in rendered, f"{entity.name}.{name} is not in the reference"
 
 
+def test_the_reference_documents_each_typed_types_options() -> None:
+    """The provider's second tier, in the rendered page.
+
+    A provider is the one kind whose remaining keys belong to whatever
+    its `type` names, so a table of `ProviderConfig` alone documents
+    three fields and an ellipsis. What is asserted here is that each
+    declared type has a section of its own, that the section is
+    addressed by stage and type together (the pair that selects it), and
+    that a nested section's leaves are in the page rather than only the
+    name of the section.
+    """
+    from vinga_server.config.provider_options import declared_options
+
+    rendered = docgen.reference()
+    declared = declared_options()
+    assert declared, "no type declares options, so this check is vacuous"
+
+    for stage, type_name, model in declared:
+        assert f"#### `{stage}` options for `type: {type_name}`" in rendered
+        for field in model.model_fields:
+            assert f"| `{field}` |" in rendered, f"{type_name}.{field} is not in the reference"
+
+    # The leaf under a nested section, and the heading that says whose
+    # it is. `vad_parameters` alone would tell a reader a mapping goes
+    # there and not what may go in it.
+    assert "Fields of `vad_parameters`:" in rendered
+    assert "| `min_silence_duration_ms` |" in rendered
+
+
+def test_the_typed_options_are_grouped_by_stage_and_then_by_type() -> None:
+    """The order the sections appear in, which is the order a provider
+    is addressed in: the pipeline's own stage order, and type names
+    under it. Asserted on the rendered page rather than on the
+    declaration, since the page is what a reader scans."""
+    from vinga_server.config.models import PROVIDER_STAGES
+    from vinga_server.config.provider_options import declared_options
+
+    rendered = docgen.reference()
+    headings = [
+        rendered.index(f"#### `{stage}` options for `type: {type_name}`")
+        for stage, type_name, _ in declared_options()
+    ]
+
+    assert headings == sorted(headings)
+    grouped = [
+        (PROVIDER_STAGES.index(stage), type_name)
+        for stage, type_name, _ in declared_options()
+    ]
+    assert grouped == sorted(grouped)
+
+
+def test_the_set_provider_epilog_lists_each_typed_types_options() -> None:
+    """The third rendering of the same contract, and the one a person
+    meets without leaving the terminal."""
+    from vinga_server.config.provider_options import declared_options
+
+    epilog = docgen.fragment_help("provider")
+
+    for stage, type_name, model in declared_options():
+        assert f"options for {stage} type {type_name}:" in epilog
+        for field in model.model_fields:
+            assert f"  {field}: " in epilog
+    # The nested leaf at the path a fragment writes it at.
+    assert "  vad_parameters.min_silence_duration_ms: " in epilog
+    # And the trailer, narrowed to the types that are still untyped.
+    assert "a type that declares none of its own" in epilog
+
+
 def test_the_reference_says_where_provider_options_are_documented() -> None:
     """The one part schema generation cannot describe, which the
     reference has to admit rather than leave a reader hunting for."""

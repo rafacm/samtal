@@ -508,6 +508,50 @@ def test_the_entity_schemas_are_registered_with_their_definitions() -> None:
     assert "$defs" not in schemas["AgentConfig"]
 
 
+def test_a_typed_types_options_are_reachable_from_the_provider_write() -> None:
+    """The structural half of #88's documentation claim, walked the way
+    a client would walk it.
+
+    The provider PUT takes its body unread, so it cannot carry a
+    discriminated request schema keyed on `type`; what it carries
+    instead is a mapping in words. That is only worth anything if the
+    components it names are there, so this starts at the route, reads
+    the names out of its description, and finds each one in
+    `components.schemas` with its leaf fields and their descriptions,
+    nested models included.
+    """
+    from vinga_server.config.provider_options import component_name, declared_options
+
+    document = json.loads(docgen.openapi())
+    described = document["paths"]["/providers/{stage}/{name}"]["put"]["description"]
+    schemas = document["components"]["schemas"]
+
+    declared = declared_options()
+    assert declared, "no type declares options, so this walk asserts nothing"
+
+    for stage, type_name, model in declared:
+        component = component_name(stage, type_name)
+        # The route says which component to read, naming the stage and
+        # the type that select it.
+        assert component in described
+        assert f"`type: {type_name}`" in described
+        assert f"`{stage}` stage" in described
+
+        assert component in schemas
+        # And the component is the whole contract: every declared field,
+        # each with the description the model carries.
+        properties = schemas[component]["properties"]
+        assert set(properties) == set(model.model_fields)
+        assert all(body.get("description") for body in properties.values())
+
+    # The nested leaf, which is the half a one-level injection would
+    # lose: `vad_parameters` is a reference, and what it refers to is a
+    # component of its own carrying the leaf a fragment writes.
+    reference = schemas["AsrFasterWhisperOptions"]["properties"]["vad_parameters"]["$ref"]
+    nested = schemas[reference.rsplit("/", 1)[-1]]
+    assert nested["properties"]["min_silence_duration_ms"]["description"]
+
+
 def test_the_description_admits_the_provider_options_contract() -> None:
     """The one part no schema can describe, in the words the markdown
     reference uses for it."""

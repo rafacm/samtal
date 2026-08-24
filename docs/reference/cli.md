@@ -485,8 +485,52 @@ fragment fields for provider (providers.<stage>.<name>):
     name (openai_compatible, and the openai ASR and TTS types, whose base_url
     may be local or a vendor).
 
-Any other key is an option for the provider implementation; see
-vinga-server/examples/ for each type's options.
+options for asr type faster_whisper:
+
+  model: str  (default: "small")
+    Whisper model size (tiny, base, small, medium, large-v3, or a Hugging Face
+    model id); weights download at server startup.
+  language: str | null  (default: null)
+    Language hint (ISO 639-1, such as sv or en); omit to auto-detect per
+    utterance.
+  device: str  (default: "cpu")
+    Where the engine runs inference, in faster-whisper's own vocabulary (cpu,
+    cuda, auto).
+  compute_type: str  (default: "int8")
+    The quantization the weights are loaded with, in faster-whisper's own
+    vocabulary (int8, int8_float16, float16, float32).
+  beam_size: int  (default: 1)
+    Greedy decoding by default: beam search costs a multiple of the CPU time
+    and buys little accuracy on short spoken commands.
+  download_dir: str | null  (default: null)
+    Where the model weights are cached; unset leaves the engine its own cache
+    location.
+  cpu_threads: int  (default: 0)
+    Threads for CPU inference.
+  vad_filter: bool  (default: false)
+    Strip non-speech inside the ASR call before decoding.
+  vad_parameters: VadParameters  (default: {})
+    Tuning for the engine's own voice-activity filter, forwarded to it as
+    written.
+  condition_on_previous_text: bool  (default: true)
+    Feeding each window's text into the next is the documented cause of
+    repetition loops; false is the standard mitigation.
+  temperature: list[float] | null  (default: null)
+    Fallback ladder for failed decodes, as one number or a non-empty list of
+    them.
+  language_detect: "every_utterance" | "once"  (default: "every_utterance")
+    Detection scope.
+  language_fallback: str | null  (default: null)
+    The language to decode in when a detection falls below the confidence
+    floor; unset means the low-confidence detection is used as it is.
+  language_confidence_floor: float  (default: 0.6)
+    Below this detection confidence, distrust the guess: use language_fallback
+    instead when one is set, and never lock a session to it.
+  vad_parameters.min_silence_duration_ms: int | null  (default: null)
+    How much silence ends a speech segment, in milliseconds.
+
+Any other key is an option for a type that declares none of its own;
+see vinga-server/examples/ for those types' options.
 
 Full descriptions: vinga-server config schema provider
 ```
@@ -654,6 +698,14 @@ fragment fields for agent (agents.<name>):
   prompt: str  (default: "")
     The instruction this agent replies under, sent as the system prompt on
     every turn.
+  filler.enabled: bool  (default: false)
+    Whether a filled pause is played while a slow reply is prepared.
+  filler.delay_ms: float  (default: 1800.0)
+    How long the user hears silence before the filler starts, in milliseconds,
+    counted from the transcription of their utterance.
+  filler.phrases: list[str]  (default: [])
+    The phrases to play, written in the agent's own language; the player
+    rotates through them rather than always playing the same one.
 
 Full descriptions: vinga-server config schema agent
 ```
@@ -708,6 +760,14 @@ fragment fields for agent defaults (agent_defaults):
     agent names a list of its own, each by the name it is defined under in
     prompt_fragments, injected in the order listed and directly after the
     agent's own prompt.
+  filler.enabled: bool  (default: false)
+    Whether a filled pause is played while a slow reply is prepared.
+  filler.delay_ms: float  (default: 1800.0)
+    How long the user hears silence before the filler starts, in milliseconds,
+    counted from the transcription of their utterance.
+  filler.phrases: list[str]  (default: [])
+    The phrases to play, written in the agent's own language; the player
+    rotates through them rather than always playing the same one.
 
 Full descriptions: vinga-server config schema agent-defaults
 ```
