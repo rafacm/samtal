@@ -72,8 +72,8 @@ async def build_a_throwaway_llm(
     returns it."""
     monkeypatch.setattr(
         registry,
-        "_factories",
-        lambda: {"llm": {"throwaway": lambda label, config: make()}},
+        "_registrations",
+        lambda: {"llm": {"throwaway": registry.Registration(lambda label, config: make())}},
     )
     return await build_entry("llm", "brain", provider_config(type="throwaway"))
 
