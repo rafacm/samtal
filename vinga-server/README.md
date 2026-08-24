@@ -1184,32 +1184,40 @@ so these commands need one to be up, and an empty database is a valid
 state for it to be up on. From inside the container the token and the
 loopback address are already in the environment; from outside, name the
 API with `--api-url` (or `VINGA_API_URL`) and carry the token yourself.
-A whole deployment, from an empty database:
+[`../docs/reference/cli.md`](../docs/reference/cli.md) is the CLI's own
+page: installing it, reaching a server, the break-glass path, and every
+command's help.
+
+A whole deployment, from an empty database, is one document and one
+command. [`examples/presets/`](examples/presets/) holds two of them, a
+deployment that reaches no vendor and the same thing on vendor APIs:
 
 ```bash
-vinga-server config set provider llm claude -f examples/llm-anthropic.yaml
-vinga-server config set provider asr ears -f examples/asr-openai.yaml
-vinga-server config set provider tts voice -f examples/tts-piper.yaml
-vinga-server config set provider vad silero -f examples/vad-silero.yaml
-vinga-server config set prompt-fragment household -f examples/prompt-fragment.yaml
-vinga-server config set agent-defaults -f examples/agent-defaults.yaml
-vinga-server config set agent assistant -f examples/agent.yaml
+vinga-server config apply -f examples/presets/cloud-stack.yaml
 vinga-server config bind-device aa:bb:cc:dd:ee:ff assistant
-vinga-server config set-default-agent assistant
 vinga-server config list
 ```
+
+Applying orders the writes for you. A write whose references do not
+resolve is refused, which is what forces the creation order when
+entities are written one at a time; a document is validated against the
+state it would leave and written in one transaction, so the providers,
+the defaults naming them and the agent inheriting them all arrive
+together and nothing is ever half applied. Applying is additive and
+never deletes, and the same document twice changes nothing.
+[`examples/`](examples/) holds a commented fragment per entity for
+writing one at a time with `config set`, which is what editing a
+deployment looks like once it exists.
 
 A board in front of you needs neither its MAC nor that `bind-device`
 line: `config pending` lists what is waiting and `config add-device`
 binds one by the code on its screen. That is
 [Onboarding a device](#onboarding-a-device).
 
-That order is not a style: a write whose references do not resolve is
-refused, so providers and MCP servers come first, then the agents, then
-the bindings. The rules about a runnable server (every stage of every
-agent resolving, a default agent when nothing is bound) are checked at
-boot instead, so a half-built database is a legitimate state to be in
-and an illegitimate one to serve from.
+The rules about a runnable server (every stage of every agent
+resolving, a default agent when nothing is bound) are checked at boot
+rather than at write time, so a half-built database is a legitimate
+state to be in and an illegitimate one to serve from.
 
 **When the server will not start**, there is nothing to write through,
 which is what `--local` is for: `show`, `delete`, `clear-secret` and
@@ -1223,11 +1231,15 @@ Every field of the domain half is documented in
 [`../docs/reference/domain-config.md`](../docs/reference/domain-config.md),
 generated from the models: `vinga-server config reference` prints that
 same document, and `vinga-server config schema [entity]` prints the JSON
-Schema behind it. [`examples/`](examples/) holds a commented fragment per
+Schema behind it. The command line itself is
+[`../docs/reference/cli.md`](../docs/reference/cli.md), whose command
+pages and recipes are generated the same way, by `vinga-server config
+cli-reference`. [`examples/`](examples/) holds a commented fragment per
 entity and provider type, each naming the command that installs it, and
 that is where the measured numbers and the field findings behind each
 provider option are kept. `config list` and `config show` read back what
-is stored, with every secret masked.
+is stored, with every secret masked, and `config export` prints the same
+content as a document `config apply` takes back.
 
 **The `server` section is what a start reads.** The port, the
 directories, the limits and the barge-in tuning come out of the file
@@ -1501,7 +1513,15 @@ refused outright, and any URL the client prints has that stripped. Its
 timeouts are explicit (5 s to connect, 30 s to read) so that the
 server's own retryable answer, which can take up to the database's 10
 second busy timeout to arrive, reaches you as itself rather than as a
-transport error.
+transport error. `apply` is the exception, and deliberately: its
+transaction loads the whole existing configuration and validates the
+whole resulting one, whose size no request bound limits, so it waits for
+the answer however long that takes rather than giving up on a write the
+server may be about to commit.
+
+The whole command line, including installing it away from a deployment
+and every command's own help page, is
+[`../docs/reference/cli.md`](../docs/reference/cli.md).
 
 **`--local` is the break-glass path**, for when there is no server to
 write through. It covers four commands, `show`, `delete`, `clear-secret`
