@@ -11,17 +11,26 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 - **A provider type can declare what it accepts, and `faster_whisper`
   is the first that does** (#88, M1). Its fourteen options are a
-  pydantic model in a new `providers/options.py`, with the example
-  fragment's own sentence on each field, and the registry's table
-  carries the model beside the factory so construction, write-time
-  validation, read-back and the schema all read one place. A typo in
-  an option is refused when the entry is written, with the field named
-  and the value never quoted back, instead of at the next build with
-  only the entry named. `vinga-server config schema provider asr
-  faster_whisper` prints the whole contract, nested definitions
-  included. Nothing changes for the types that declare no model yet:
-  their factories are called as before and their options are still
-  passed through.
+  pydantic model in a new `config/provider_options.py`, with the
+  example fragment's own sentence on each field, and the provider
+  registry derives its own table from that declaration, so
+  construction, write-time validation, read-back and every document
+  read one place. A typo in an option is refused when the entry is
+  written, with the field named and the value never quoted back,
+  instead of at the next build with only the entry named.
+- **A declared type's options are documented in all four places the
+  configuration is documented** (#88, M1). `vinga-server config schema
+  provider asr faster_whisper` prints the contract as JSON Schema;
+  `docs/reference/domain-config.md` gains a table per declared type
+  under the provider section, with nested sections rendered down to
+  their leaves; the OpenAPI document carries each model as a component
+  named for its stage and type (`AsrFasterWhisperOptions`), with the
+  provider PUT's description naming which component a fragment of that
+  stage and type carries; and `vinga-server config set provider
+  --help` lists the same fields. Nothing changes for the types that
+  declare no model yet: their factories are called as before, their
+  options are still passed through, and the example fragments are
+  still where those are documented.
 
 ### Changed
 

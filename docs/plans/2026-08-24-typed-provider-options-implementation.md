@@ -11,13 +11,18 @@ says so explicitly.
 
 ### What was done
 
-Seven commits: the options module and its sanitizer, the registry's one
+Ten commits: the options module and its sanitizer, the registry's one
 table, the faster_whisper conversion, the mechanical test repair the
 table forced, the store's two gates, the schema selector and the
-disclaimers, and the tests.
+disclaimers, the tests, this record, and then the two that resolved the
+deviation below: the declaration's move to the configuration side, and
+the three renderings its old address had put out of reach.
 
-**The options module.** `providers/options.py` holds the model classes
-and one function. `FasterWhisperOptions` declares all fourteen options
+**The options module.** `config/provider_options.py` holds the model
+classes, the `DECLARED_OPTIONS` mapping and two functions. It was
+`providers/options.py` for the first seven commits, and deviation 1
+below is the whole story of why it is not.
+`FasterWhisperOptions` declares all fourteen options
 the builder read, each carrying the example fragment's own factual
 sentence as its `Field(description=...)`, with `extra="forbid"`.
 `VadParameters` is nested and keeps `extra="allow"`, with the reason
@@ -26,13 +31,15 @@ forwarded unread, the fragment documents one key of it, and closing the
 hatch on that evidence would make a running deployment's valid setting
 unreadable on upgrade.
 
-`checked_options(headline, stage, type, options)` is the sanitizer.
-It reads the registry's table for the model, validates, and on failure
-builds the sentence and the `FieldProblem` tuple inside the handler and
-raises `OptionsRefused` outside it, so the `ValidationError` (which
-holds the whole rejected mapping in its `errors()`) is discarded with
-neither a cause nor a context. Each caller wraps it in the refusal of
-its own surface.
+`checked_options(headline, stage, type, options)` is the sanitizer: it
+resolves the model from the declaration and hands it to `validated()`,
+which builds the sentence and the `FieldProblem` tuple inside the
+handler and raises `OptionsRefused` outside it, so the
+`ValidationError` (which holds the whole rejected mapping in its
+`errors()`) is discarded with neither a cause nor a context. Each caller
+wraps it in the refusal of its own surface, and the build path calls
+`validated()` directly with the model its registration already
+resolved.
 
 **One walk, moved.** The rendering of a failed validation into a
 sentence and a set of field problems was `store._validation_problems`,
@@ -46,12 +53,13 @@ driver. `store.py` imports it; no wording changed, which the API
 problems suite holds differentially rather than by golden.
 
 **The registry's one table.** `_factories()` is `_registrations()`, and
-its values are a frozen `Registration(factory, options)`. Two reads
-come off it: `registration(stage, type)`, which is what
-`construct_provider` and the sanitizer ask, and `declared_options()`,
-which is the enumeration of typed types the tests and the documentation
-read. `construct_provider` validates through the sanitizer when the
-table declares a model, raises `ProviderError` outside the handler on a
+its values are a frozen `Registration(factory, options)` whose second
+half is read out of `DECLARED_OPTIONS` as the table is built rather
+than written beside the factory. `registration(stage, type)` is the read
+the build path goes through; the enumeration every rendering wants,
+`declared_options()`, is on the declaration's own side, where a document
+can reach it. `construct_provider` validates when the registration
+carries a model, raises `ProviderError` outside the handler on a
 refusal, and calls `factory(label, config, options)` for a typed type
 and `factory(label, config)` for a model-less one. The two shapes are
 decided by `options` being present rather than by a flag.
@@ -75,32 +83,45 @@ problems. The read check runs in `_from_row`, refusing with
 hand, which is the whole reason it is not in `_body`, whose location is
 a dotted string a reader would have to parse back apart.
 
-Both import `providers/options.py` inside the call. The reason is a
-committed pin rather than taste:
-`tests/unit/test_onboarding_import_weight.py` holds `import
-vinga_server.config.cli` to loading no `vinga_server.providers`, and the
-options module sits inside a package whose `__init__` re-exports the
-whole provider layer. The deferral costs one import on a write and keeps
-that pin honest; a subprocess test asserts that a real
-`store.set_provider` of a faster_whisper entry loads no engine module.
+Both call the sanitizer at module scope. They were written with the
+import deferred inside the call, because `config/cli.py` imports this
+module and is held to loading no `vinga_server.providers`; the move in
+deviation 1 retired the deferral, since what they import now is a
+configuration module. A subprocess test asserts the result: a real
+`store.set_provider` of a faster_whisper entry loads no engine, and no
+provider module either.
 
-**The selector and the disclaimers.** `docgen.schema(name, stage,
-type)` renders a typed model's JSON Schema, with the registry imported
-inside that branch; the CLI gained two optional positionals, so
-`vinga-server config schema provider asr faster_whisper` prints the
-contract. The `#88` note in `entities.py` and the bullet in
-`examples/README.md` now say which types are declared and keep the
-issue reference for the remainder.
+**The four renderings.** `docgen.schema(name, stage, type)` renders a
+typed model's JSON Schema, and the CLI gained two optional positionals,
+so `vinga-server config schema provider asr faster_whisper` prints the
+contract. The reference gains a subsection per typed type under the
+provider kind, addressed by stage and type together and rendered
+recursively, so `min_silence_duration_ms` appears rather than only the
+name of the section holding it. The OpenAPI document gains each model
+as a component named for the same pair (`AsrFasterWhisperOptions`),
+injected beside the entity models with its nested definitions hoisted;
+the provider PUT takes its body unread and so cannot carry a
+discriminated request schema, and what connects the two is a mapping in
+its description, derived from the declaration, with a test that walks
+from the route to each named component and finds the leaves. The `set
+provider` epilog lists the same fields, nested ones at the path a
+fragment writes them at. The `#88` note in `entities.py` reads its list
+of declared types out of the declaration, and the bullet in
+`examples/README.md` says the same thing in prose it owns.
 
 ### Deviations from the plan
 
 Three, and the first is the one that matters.
 
-**1. The reference tables, the OpenAPI injection and the per-type
-`fragment_help` listings are NOT in this milestone.** Decision 5 assumed
-the documentation surfaces could reach the registry's table. Two
-committed import-weight pins say they cannot, and both were measured
-rather than reasoned about:
+**1. The option models are declared on the configuration side, and the
+registry derives from that declaration.** RESOLVED; the milestone ships
+all of decision 5. What follows is the collision as it was found, the
+decision that resolved it, and the reasoning, kept in full so the PR
+review round can re-litigate it with everything in view.
+
+*The collision.* Decision 5 assumed the documentation surfaces could
+reach the registry's table. Two committed import-weight pins say they
+cannot, and both were measured rather than reasoned about:
 
 - `tests/unit/test_config_docgen.py::test_the_reference_and_the_schema_render_from_the_models_alone`
   runs `docgen.reference()` and `docgen.schema()` in a child interpreter
@@ -117,28 +138,49 @@ rather than reasoned about:
   Injecting the typed models into `components.schemas` happens inside
   that call, so it would trip this pin the same way.
 
-The instruction for this milestone was that the docgen pin must stay
-green and that a change which would widen it is a stop. So the two
-artifacts that need the table at render time are not implemented, and
-the third (`fragment_help`) is not either: `cli.py` builds every `set`
-command's epilog at module scope, so a per-type listing would load the
-provider package on a bare `import vinga_server.config.cli` and trip the
-second pin.
+The third rendering is blocked by the same shape: `cli.py` builds every
+`set` command's epilog at module scope, so a per-type listing would load
+the provider package on a bare `import vinga_server.config.cli` and trip
+the second pin.
 
-What IS delivered of decision 5: the stage-and-type schema selector
-(the registry is imported inside the branch the pin never takes), the
-rewritten disclaimers in all three artifacts, and a two-way test holding
-the disclaimer's list of declared types to `declared_options()`.
+*The decision.* The model classes, the stage-and-type mapping and the
+sanitizer live in `config/provider_options.py`, which imports pydantic
+and `config.models` and nothing else. The provider registry DERIVES its
+`Registration` from that mapping when its table is built
+(`Registration(factory, DECLARED_OPTIONS.get((stage, type)))`), so there
+is one topology, one direction, and no second copy to drift; a key
+declaring options for a stage-and-type no factory has is caught by a
+one-way test rather than by silence. `ALLOWED_IMPORTS` gains exactly
+`vinga_server.config.provider_options` and nothing else, in the docgen
+pin and in the registry pin beside it, each with the reason written on
+it; the assertion that no heavy dependency loads is untouched and still
+passes empty.
 
-The fix is a placement decision rather than a code problem, and it is
-the review round's to make. Either the pins are deliberately relaxed
-(both were written against the conversation stack, not against a
-pydantic-only module), or the option models move to a light module
-outside the `vinga_server.providers` package so that reaching them costs
-nothing the pins care about. The second unblocks the OpenAPI injection
-and the CLI help but not the reference tables, whose pin is an exact set
-and would have to be widened by one name whatever is done. Recorded here
-rather than decided here.
+*The reasoning, recorded because it supersedes a review resolution.*
+Plan review finding 4 put the models' declaration in the registry, and
+this supersedes the letter of that while keeping its spirit. The
+finding's objection was two stage-and-type tables held together by a
+one-way test, which is the design guide's pending bug; its remedy was
+one topology with everything derived from it, and that is exactly what
+this is. The finding's own text left the door open ("providers/options.py
+can still own the lightweight model definitions"). What decides the
+direction is that the two pins are load-bearing architecture rather than
+hygiene: documentation renders from the models alone, `document()` loads
+no providers package, and the CLI imports no engine. Those are promises
+about where this code can run, and the letter of the finding cannot
+satisfy them, because reaching anything inside `vinga_server.providers`
+runs a package `__init__` that re-exports the engine base classes and
+the provider world and pulls in cryptography through the secret store.
+So the declaration sits where the light readers can reach it, and what
+stays on the provider side is the half that is genuinely the provider
+layer's: which factory builds a type, and the reading of a validated
+instance inside a builder.
+
+One consequence worth naming: `construct_provider` validates against the
+model its own registration resolved (`validated()`) rather than looking
+the pair up a second time. A second lookup can answer differently from
+the first, and a test that replaced the registry's table with a fake
+type proved it immediately.
 
 **2. The sanitizer takes the refusal's headline.** The plan describes it
 as taking stage, type and the options mapping. It also requires each
@@ -215,15 +257,19 @@ issue's point and the repository's standing rule about keys meeting.
 Three of the six committed artifacts moved, and the two the plan says
 must not move did not.
 
-- `docs/reference/domain-config.md`: the `#88` note under the provider
-  section, four lines becoming eight. No table row changed.
-- `docs/reference/api-openapi.json`: the last paragraph of
-  `info.description`, which is the same note rendered for a document
-  with no page to point down. One line of the file.
-- `docs/reference/cli.md`: the `config schema` help page gains
-  `[STAGE] [TYPE]` in its usage line and two argument rows.
+- `docs/reference/domain-config.md` (+43, -9): the rewritten `#88`
+  note, and the new `#### \`asr\` options for \`type: faster_whisper\``
+  subsection with its fourteen-row table and the nested
+  `vad_parameters` table under it. No existing table row changed.
+- `docs/reference/api-openapi.json` (+150, -2): the
+  `AsrFasterWhisperOptions` and `VadParameters` components, the
+  provider PUT's description with the component mapping under it, and
+  the same note in `info.description`.
+- `docs/reference/cli.md` (+68, -4): the `config schema` usage line
+  gains `[STAGE] [TYPE]` with two argument rows, and the `set provider`
+  epilog gains the per-type option listing and its narrowed trailer.
 - `docs/reference/events.md`, `docs/reference/conversations-schema.md`:
-  byte-identical, checked.
+  byte-identical, checked at the tip.
 
 ### Verification
 
@@ -231,14 +277,19 @@ From `vinga-server/`, at the tip of the milestone.
 
 - `uv run ruff check .`: `All checks passed!`
 - `uv run pytest tests/unit -q -n auto --dist loadfile`:
-  `3238 passed, 18 skipped in 43.57s`
-- `uv run pytest tests/integration -q`: `126 passed in 194.08s`
+  `3244 passed, 18 skipped in 43.31s`
+- `uv run pytest tests/integration -q`: `126 passed in 195.55s`
 - `uv run mypy`: `Success: no issues found in 4 source files`
 - The six drift checks as CI runs them: all six clean, including the
   two that must not move.
 - `uv sync --frozen`: `Checked 99 packages`, nothing resolved.
-- The child-interpreter `ALLOWED_IMPORTS` pin: green and unchanged. It
-  is also the reason for deviation 1.
+- The three import-weight pins that forced deviation 1: green, with
+  `ALLOWED_IMPORTS` widened by exactly one name in the two places that
+  have one, and `test_onboarding_import_weight.py` untouched. A
+  subprocess case in `test_provider_options.py` now asserts the
+  stronger fact the move bought: a real `store.set_provider` of a
+  faster-whisper entry loads no `vinga_server.providers` module at
+  all.
 
 The faster-whisper extra is not installed in this environment, so the
 eleven engine-facing cases in
