@@ -46,15 +46,18 @@ skips rather than lies when the module was not run whole.
 import contextlib
 import io
 import json
+import logging
 import os
 import socket
 import sys
 import threading
 import time
+import traceback
 import urllib.request
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 import uvicorn
@@ -62,11 +65,11 @@ import yaml
 
 from tests.support.config_cli import document
 from vinga_server.app import create_app
-from vinga_server.config import cli
+from vinga_server.config import ConfigError, cli, docgen, entities
 from vinga_server.config.boot import load_boot_config
-from vinga_server.config.models import API_MOUNT_PATH
+from vinga_server.config.models import API_MOUNT_PATH, DOMAIN_KEYS, NOT_A_MAC
 from vinga_server.config.secrets import MASK, MASTER_KEY_ENV, generate_key, load_keys
-from vinga_server.config.store import APPLY_LIMIT, ConfigStore
+from vinga_server.config.store import APPLY_LIMIT, TOO_MANY_ENTRIES, ConfigStore
 from vinga_server.db import DATABASE_FILENAME, open_database
 from vinga_server.ota import OTA_PATH
 
@@ -84,6 +87,15 @@ CONFIG_ENV = "VINGA_CONFIG"
 SECRET_ENV = "VINGA_LANE_SECRET"
 
 SECRET = "sk-live-1c4e9f27-never-a-real-credential"
+
+# The other sentinel, planted where a refusal's own INPUT can carry a
+# credential-shaped value: the body of a write that will be refused, the
+# fragment that will not parse, the entries of a document over the
+# limit. A refusal that echoed any part of what it was given would carry
+# this, and the checks below look for it on every surface a value can
+# come out on. Distinct from `SECRET`, so a failure says which of the
+# two paths leaked.
+PLANTED = "sk-planted-9b3e7d41-never-a-real-credential"
 
 
 @dataclass(frozen=True)
@@ -263,6 +275,186 @@ def written(directory: Path, name: str, body: object) -> str:
     path = directory / name
     path.write_text(yaml.safe_dump(body, sort_keys=False), encoding="utf-8")
     return str(path)
+
+
+# Every surface a planted value could come out on
+#
+# A refusal is printed, and it is also logged, and it is also carried by
+# an exception until something catches it. This lane runs the server in
+# a thread of this process, so all three are reachable from inside a
+# test, and a check that looked at the printed half alone would pass a
+# server that wrote the value into a log record.
+
+
+class Watched:
+    """Every log record made while one case ran, whichever thread made
+    it and whichever logger it was made on."""
+
+    def __init__(self) -> None:
+        self.records: list[logging.LogRecord] = []
+
+    def everything(self) -> str:
+        """Every record rendered WHOLE, which is the point of collecting
+        the records rather than the formatted lines.
+
+        A value can ride a record in four places: interpolated into the
+        message, held unformatted in `args` for a handler to interpolate
+        later, attached as an extra attribute (which is how this server's
+        structured events carry their fields), or inside an exception on
+        `exc_info`. All four are rendered here, the last one through its
+        whole traceback and chain.
+        """
+        parts: list[str] = []
+        for record in self.records:
+            attributes = dict(record.__dict__)
+            exception = attributes.pop("exc_info", None)
+            try:
+                parts.append(record.getMessage())
+            except (TypeError, ValueError):
+                # A record whose arguments do not fit its template is
+                # still a record that carries them.
+                parts.append(repr((record.msg, record.args)))
+            parts.append(repr(attributes))
+            if exception:
+                parts.append("".join(traceback.format_exception(*exception)))
+        return "\n".join(parts)
+
+    def threads(self) -> set[str]:
+        """Which threads made them."""
+        return {record.threadName for record in self.records}
+
+    def elsewhere(self) -> list[logging.LogRecord]:
+        """The records some other thread made, which in this lane means
+        the server's.
+
+        What a case asserts this for is that its log check is looking at
+        the server at all. Every command here runs on the test's own
+        thread and the server runs on its own, so a collection holding
+        nothing but this thread's records is one that would not have
+        seen a value the server logged.
+        """
+        here = threading.current_thread().name
+        return [record for record in self.records if record.threadName != here]
+
+
+class _Collector(logging.Handler):
+    def __init__(self, into: list[logging.LogRecord]) -> None:
+        super().__init__(level=logging.NOTSET)
+        self._into = into
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self._into.append(record)
+
+
+# The root catches everything that propagates, which is this server's own
+# channels and every library's. Uvicorn's three do not propagate: it
+# installs its own dictConfig at startup with `propagate: False`, so the
+# handler is attached to them by name as well. Their LEVEL is left where
+# uvicorn set it, deliberately: raising it would send uvicorn's access
+# lines to the stream its handler captured when the module's server
+# booted, which is another test's captured stderr.
+WATCHED_LOGGERS = ("", "uvicorn", "uvicorn.error", "uvicorn.access")
+
+# Two the server's own logging setup pins above DEBUG, lowered for the
+# length of a case. They are the client half of every command here, so
+# what they say is where a value the CLI sent would surface if anything
+# on this side wrote one down.
+LOUD_LOGGERS = ("httpx", "httpcore")
+
+
+@pytest.fixture
+def watched() -> Iterator[Watched]:
+    """What was logged while this case ran.
+
+    `caplog` alone was tried first and is not enough: pytest's handler
+    sits on the root logger, and uvicorn's own loggers are configured
+    not to propagate to it, so a record uvicorn made would have been
+    missed. This attaches one handler to the root and to each of
+    uvicorn's three, and raises the root's level to DEBUG so that a
+    debug record from any of this server's channels is collected rather
+    than filtered before it reaches a handler.
+
+    What it collects is not hypothetical on either side: the client's
+    transport chatter arrives on this thread, and
+    `test_a_board_is_onboarded_by_the_code_on_its_screen` asserts that
+    records made on the SERVER's thread arrive too, which is the half a
+    fixture cannot claim for itself.
+    """
+    watching = Watched()
+    handler = _Collector(watching.records)
+    loggers = [logging.getLogger(name) for name in WATCHED_LOGGERS]
+    root = logging.getLogger()
+    levels = {name: logging.getLogger(name).level for name in LOUD_LOGGERS}
+    root_level = root.level
+    root.setLevel(logging.DEBUG)
+    for name in LOUD_LOGGERS:
+        logging.getLogger(name).setLevel(logging.DEBUG)
+    for logger in loggers:
+        logger.addHandler(handler)
+    try:
+        yield watching
+    finally:
+        for logger in loggers:
+            logger.removeHandler(handler)
+        for name, level in levels.items():
+            logging.getLogger(name).setLevel(level)
+        root.setLevel(root_level)
+
+
+def leaked(sentinel: str, **surfaces: str) -> list[str]:
+    """Which of the surfaces a planted value came out on, by name.
+
+    A list rather than an assertion, so that a failure says which
+    surface leaked rather than only that one did.
+    """
+    return sorted(name for name, text in surfaces.items() if sentinel in text)
+
+
+def carried(exc: BaseException) -> str:
+    """Everything an exception chain holds, one attribute deeper than
+    the exceptions themselves.
+
+    `tests.support.config_cli.chain` renders each exception's repr and
+    its str, which is what the unit lane's no-leak cases need. It is not
+    enough here, and the reason is worth stating rather than inheriting:
+    PyYAML's marked errors keep the WHOLE buffer they were parsing on a
+    mark object hung off the exception, and neither the exception's repr
+    nor its str renders that buffer. A refusal raised inside the handler
+    for one of those would carry the submitted document behind it and
+    read as clean to a shallower walk. This goes one attribute deeper,
+    which is where a chain walker would find it, and the deliberate-leak
+    run that proved it is in the M3 record.
+    """
+    parts: list[str] = []
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        parts += [repr(current), str(current)]
+        for name, value in vars(current).items():
+            parts.append(f"{name}={value!r}")
+            held = getattr(value, "__dict__", None)
+            if held:
+                parts.append(repr(held))
+        current = current.__cause__ or current.__context__
+    return "\n".join(parts)
+
+
+def chain_of(argv: Sequence[str]) -> str:
+    """What the refusal for this command line carries, including what a
+    chain walker would find behind it.
+
+    `cli._parsed` is reached for the reason the unit lane reaches it
+    (M1's review round, finding 2): `main` catches this exception by
+    design and answers with a sentence and an exit code, so no
+    caller-facing surface holds it, and a claim about what it carries
+    cannot otherwise be stated. Running the command a second time is
+    free here, because every command line this is used on is one that
+    changes nothing.
+    """
+    with pytest.raises(ConfigError) as caught:
+        cli._parsed(list(argv))
+    return carried(caught.value)
 
 
 def check_in(live: Live, mac: str) -> Mapping[str, object]:
@@ -560,7 +752,7 @@ def test_a_board_is_bound_by_the_mac_you_already_know(
 
 
 def test_a_board_is_onboarded_by_the_code_on_its_screen(
-    deployed: Live, capsys: pytest.CaptureFixture[str]
+    deployed: Live, capsys: pytest.CaptureFixture[str], watched: Watched
 ) -> None:
     """The whole onboarding ceremony against a running server: the
     default agent, the code, the listing and the claim.
@@ -572,6 +764,12 @@ def test_a_board_is_onboarded_by_the_code_on_its_screen(
     code at all, and the same board after `clear-default-agent` is
     unbound and gets one. Nothing in-process can show that: it is the
     running server re-reading the database between two requests.
+
+    This case carries one more claim, for the leak checks elsewhere in
+    the file rather than for itself: that the log capture reaches the
+    SERVER's thread. An unbound check-in is the one thing in this lane
+    that makes the server log, so it is where the collection can be
+    shown to hold a record no code in this thread made.
     """
     assert run("set-default-agent", "sam") == 0
     assert capsys.readouterr().out.startswith("wrote ")
@@ -602,6 +800,15 @@ def test_a_board_is_onboarded_by_the_code_on_its_screen(
     assert run("pending") == 0
     assert code not in capsys.readouterr().out
 
+    # The capture reaches the server: the warning a board with no agent
+    # earns was made on the thread uvicorn runs on, and this thread made
+    # no record of it. Every leak check in this file rests on that being
+    # true, and this is where it is a fact rather than an assumption.
+    made_there = watched.elsewhere()
+    assert made_there
+    assert {record.threadName for record in made_there} != {threading.current_thread().name}
+    assert any(record.name.startswith("vinga_server.") for record in made_there)
+
 
 # A credential's whole life over the wire
 #
@@ -613,7 +820,7 @@ def test_a_board_is_onboarded_by_the_code_on_its_screen(
 
 
 def test_a_credential_is_stored_masked_and_cleared(
-    deployed: Live, capsys: pytest.CaptureFixture[str]
+    deployed: Live, capsys: pytest.CaptureFixture[str], watched: Watched
 ) -> None:
     """Two slots on two kinds, entered the two ways the command takes,
     read back masked, exported as the commands that refill them, and
@@ -622,28 +829,40 @@ def test_a_credential_is_stored_masked_and_cleared(
     The entity the provider credential lands on is the one no agent
     references, so a reload never builds it and the value is never asked
     for by anything but this test.
+
+    Every step keeps BOTH streams rather than the one it makes an
+    assertion about, and the whole of the case is swept at the foot: a
+    value that came out on the stream a step was not looking at is
+    exactly the shape a leak takes.
     """
+    seen: list[str] = []
+
+    def kept(expected: str) -> str:
+        """One command's two streams, both kept for the sweep below."""
+        captured = capsys.readouterr()
+        assert captured.out.startswith(expected)
+        seen.extend((captured.out, captured.err))
+        return captured.out
+
     assert run("set-secret", "provider", "llm", "spare", "api_key", "--from-env", SECRET_ENV) == 0
-    assert capsys.readouterr().out.startswith("wrote ")
+    kept("wrote ")
 
     assert run("set-secret", "mcp-server", "weather", "headers.Authorization", stdin=SECRET) == 0
-    assert capsys.readouterr().out.startswith("wrote ")
+    kept("wrote ")
 
     assert run("show", "provider", "llm", "spare") == 0
-    entity = capsys.readouterr().out
+    entity = kept("")
     assert f"api_key: {MASK}" in entity
-    assert SECRET not in entity
 
     assert run("show") == 0
-    everything = capsys.readouterr().out
-    assert SECRET not in everything
+    everything = kept("")
     # The environment reference the stored value displaces is marked
     # rather than left silent, which is #192's marker seen from the far
     # end of a connection.
     assert "used instead of api_key_env: ANTHROPIC_API_KEY" in everything
 
     assert run("export") == 0
-    exported = capsys.readouterr().out
+    exported = kept("")
     # A credential never travels in a read, so what the document carries
     # is the command that enters it, and never the mask, which a
     # creating write would refuse.
@@ -652,18 +871,25 @@ def test_a_credential_is_stored_masked_and_cleared(
     assert f"{cli.PROGRAM} set-secret provider -- llm spare api_key" in exported
     assert f"{cli.PROGRAM} set-secret mcp-server -- weather headers.Authorization" in exported
     assert MASK not in exported
-    assert SECRET not in exported
 
     assert run("clear-secret", "provider", "llm", "spare", "api_key") == 0
-    assert capsys.readouterr().out.startswith("wrote ")
+    kept("wrote ")
     assert run("clear-secret", "mcp-server", "weather", "headers.Authorization") == 0
-    assert capsys.readouterr().out.startswith("wrote ")
+    kept("wrote ")
 
     assert run("show", "provider", "llm", "spare") == 0
-    cleared = capsys.readouterr().out
+    cleared = kept("")
     assert MASK not in cleared
     # And what the stored value was covering is back in view.
     assert "api_key_env: ANTHROPIC_API_KEY" in cleared
+
+    # The sweep. Nine commands' worth of both streams, and every log
+    # record any thread made while they ran: the value was read from a
+    # variable on this side, sent as a request body, encrypted by the
+    # server and answered for four times, and none of that may have
+    # written it down. The two reads above are rendered response bodies,
+    # so the bodies this case sees are in here too.
+    assert leaked(SECRET, streams="\n".join(seen), logs=watched.everything()) == []
 
 
 # What the running server is asked
@@ -787,10 +1013,18 @@ def test_the_store_exports_as_a_document_it_applies_back_unchanged(
 # each family's name is held to that table by
 # `test_every_family_of_the_grammar_has_a_refusal`.
 #
-# What is asserted about each is the sentence, exactly as it arrived. A
-# refusal composed by the API is serialized, sent, parsed and printed
-# before an operator sees it, and every step of that is a place a
-# sentence can be lost, truncated or replaced by a middlebox's page.
+# What is asserted about each is the WHOLE of stderr, not a phrase in
+# it. A refusal composed by the API is serialized, sent, parsed and
+# printed before an operator sees it, and every step of that is a place a
+# sentence can be lost, truncated, replaced by a middlebox's page, or
+# added to. A substring check passes all four of the last one's shapes,
+# which is what a value appended to a sentence is.
+#
+# The sentences are taken from the constants that hold them wherever one
+# is published, and written out where the text is assembled at its raise
+# site and has no constant to import. Written out is not a second home
+# for the wording: what a refusal says is decided by the module that
+# raises it, and a case here that disagrees is this file being wrong.
 #
 # The `wire` column says where each refusal is composed, and it is
 # load-bearing rather than documentation: the second case below runs
@@ -800,73 +1034,114 @@ def test_the_store_exports_as_a_document_it_applies_back_unchanged(
 
 USAGE = cli.usage_line(cli.SECRET_NEVER_AN_ARGUMENT)
 
-REFUSALS: tuple[tuple[str, tuple[str, ...], str, bool], ...] = (
-    (
+UNRESOLVED = "the change was refused; it would leave these references unresolved:"
+
+REFUSED_DOCUMENT = "REFUSED_DOCUMENT"
+
+MISSING_CONFIG = "/nowhere/at/all.yaml"
+
+
+class Refusal(NamedTuple):
+    """One family's refusal: what to type, the whole of what stderr says
+    afterwards, and which end of the connection composed it."""
+
+    family: str
+    argv: tuple[str, ...]
+    stderr: str
+    wire: bool
+
+
+REFUSALS: tuple[Refusal, ...] = (
+    Refusal(
         "set",
-        ("set", "agent", "refused-agent", "prompt=p", "llm=nowhere"),
-        "would leave these references unresolved",
+        ("set", "agent", "refused-agent", f"prompt={PLANTED}", "llm=nowhere"),
+        UNRESOLVED
+        + "\n  - agents.refused-agent.llm: names no llm provider that exists, and the "
+        "name is not quoted back (defined: brain, spare)",
         True,
     ),
-    ("delete", ("delete", "agent", "no-such-agent"), "no agent of that name exists", True),
-    (
-        "bind-device",
-        ("bind-device", "not-a-mac", "sam"),
-        "six colon-separated hex pairs",
-        True,
-    ),
-    (
+    Refusal("delete", ("delete", "agent", "no-such-agent"), entities.NO_SUCH_AGENT, True),
+    Refusal("bind-device", ("bind-device", "not-a-mac", "sam"), NOT_A_MAC, True),
+    Refusal(
         "add-device",
         ("add-device", "000000", "sam"),
-        "no device is waiting with that activation code",
+        "no device is waiting with that activation code. A code lasts ten minutes and "
+        "is retired the moment it is claimed, and a device that has been waiting longer "
+        "is already showing a fresh one: read the code currently on the device's screen "
+        "and use that. `vinga-server config pending` lists the codes this server is "
+        "showing right now.",
         True,
     ),
-    (
+    Refusal(
         "apply",
-        ("apply", "-f", "REFUSED_DOCUMENT"),
-        "the top-level keys of an applied document",
+        ("apply", "-f", REFUSED_DOCUMENT),
+        "document: the top-level keys of an applied document are the sections of the "
+        "domain configuration, which are " + ", ".join(DOMAIN_KEYS) + ". Something else "
+        "was written, and it is not quoted back",
         True,
     ),
-    ("pending", ("pending", "extra"), USAGE, False),
-    ("status", ("status", "extra"), USAGE, False),
-    (
+    Refusal("pending", ("pending", "extra"), USAGE, False),
+    Refusal("status", ("status", "extra"), USAGE, False),
+    Refusal(
         "prompt",
         ("prompt", "no-such-agent"),
-        "this server is not serving an agent of that name",
+        "this server is not serving an agent of that name. The agents a server can "
+        "serve are the agents of the world it has installed, so one written since is "
+        "served by the reload that installs it (`vinga-server config reload`), and one "
+        "that never existed is a name nothing answers to. `vinga-server config list` "
+        "shows the agents that are stored.",
         True,
     ),
-    ("reload", ("reload", "extra"), USAGE, False),
-    ("ota-url", ("ota-url", "--config", "/nowhere/at/all.yaml"), "config file not found", False),
-    (
+    Refusal("reload", ("reload", "extra"), USAGE, False),
+    Refusal(
+        "ota-url",
+        ("ota-url", "--config", MISSING_CONFIG),
+        f"config file not found: {MISSING_CONFIG}",
+        False,
+    ),
+    Refusal(
         "set-default-agent",
         ("set-default-agent", "no-such-agent"),
-        "would leave these references unresolved",
+        UNRESOLVED
+        + "\n  - default_agent: names no agent that exists, and the name is not quoted "
+        "back (defined: sam)",
         True,
     ),
-    ("clear-default-agent", ("clear-default-agent", "extra"), USAGE, False),
-    (
+    Refusal("clear-default-agent", ("clear-default-agent", "extra"), USAGE, False),
+    Refusal(
         "set-secret",
         ("set-secret", "provider", "llm", "no-such", "api_key", "--from-env", SECRET_ENV),
-        "no provider of that name exists for that stage",
+        entities.NO_SUCH_PROVIDER,
         True,
     ),
-    (
+    Refusal(
         "clear-secret",
         ("clear-secret", "provider", "llm", "no-such", "api_key"),
-        "no secret is stored for that slot",
+        "providers: no secret is stored for that slot",
         True,
     ),
-    ("list", ("list", "extra"), USAGE, False),
-    ("schema", ("schema", "nonsense"), "is not a documented entity", False),
-    ("reference", ("reference", "extra"), USAGE, False),
-    ("openapi", ("openapi", "extra"), USAGE, False),
-    (
-        "show",
-        ("show", "provider", "llm", "no-such"),
-        "no provider of that name exists for that stage",
-        True,
+    Refusal("list", ("list", "extra"), USAGE, False),
+    Refusal(
+        "schema",
+        ("schema", "nonsense"),
+        '"nonsense" is not a documented entity; expected one of: '
+        + ", ".join(docgen.entity_names()),
+        False,
     ),
-    ("export", ("export", "agent", "no-such"), "no agent of that name exists", True),
+    Refusal("reference", ("reference", "extra"), USAGE, False),
+    Refusal("openapi", ("openapi", "extra"), USAGE, False),
+    Refusal(
+        "show", ("show", "provider", "llm", "no-such"), entities.NO_SUCH_PROVIDER, True
+    ),
+    Refusal("export", ("export", "agent", "no-such"), entities.NO_SUCH_AGENT, True),
 )
+
+# What a client that cannot reach the API says, pinned at both ends
+# rather than written out: the address is this case's own, and an
+# appended value would fall outside the tail.
+UNREACHABLE_HEAD = "cannot reach the configuration API at "
+
+UNREACHABLE_TAIL = "covers show, delete, clear-secret and set-secret."
 
 
 def test_every_family_of_the_grammar_has_a_refusal() -> None:
@@ -877,59 +1152,72 @@ def test_every_family_of_the_grammar_has_a_refusal() -> None:
     is a command added to the grammar rather than a row deleted from
     this file.
     """
-    assert {family for family, _, _, _ in REFUSALS} == {row.words[0] for row in cli.COMMANDS}
+    assert {row.family for row in REFUSALS} == {row.words[0] for row in cli.COMMANDS}
 
 
 def refusing(argv: Sequence[str], directory: Path) -> tuple[str, ...]:
     """One refusal's command line, with the document the apply case
-    needs written where it can be found."""
+    needs written where it can be found.
+
+    The document carries the planted credential in the section it will
+    be refused for, which is what makes the apply row's leak check about
+    something: a refusal that quoted the document back would carry it.
+    """
     return tuple(
-        written(directory, "refused.yaml", {"nonsense_section": {}})
-        if word == "REFUSED_DOCUMENT"
+        written(directory, "refused.yaml", {"nonsense_section": {"note": PLANTED}})
+        if word == REFUSED_DOCUMENT
         else word
         for word in argv
     )
 
 
-@pytest.mark.parametrize(
-    ("family", "argv", "sentence", "wire"),
-    REFUSALS,
-    ids=[family for family, _, _, _ in REFUSALS],
-)
+@pytest.mark.parametrize("row", REFUSALS, ids=[row.family for row in REFUSALS])
 def test_one_refusal_of_each_family_arrives_intact(
     deployed: Live,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
-    family: str,
-    argv: tuple[str, ...],
-    sentence: str,
-    wire: bool,
+    watched: Watched,
+    row: Refusal,
 ) -> None:
     """A refusal is one sentence on stderr and exit 1, whichever end of
-    the connection composed it."""
-    assert run(*refusing(argv, tmp_path)) == 1
+    the connection composed it, and it is the WHOLE of stderr.
+
+    Two of these rows hand the command a credential-shaped value in the
+    place their own input can hold one: the body of the refused write,
+    and the entries of the refused document. A third sends a real one,
+    because `set-secret --from-env` reads the variable before it learns
+    there is no such entity to store it on. All three are checked on
+    every surface a value can come out on: the two streams, the log
+    records this server made while the case ran, whichever thread made
+    them, and the exception the refusal is carried by, chain included.
+    """
+    argv = refusing(row.argv, tmp_path)
+
+    assert run(*argv) == 1
 
     captured = capsys.readouterr()
-    assert sentence in captured.err
+    assert captured.err == row.stderr + "\n"
     # Nothing on stdout, so a script reading a command's output reads
     # nothing rather than half an answer.
     assert captured.out == ""
-    assert "Traceback" not in captured.err
+
+    surfaces = {
+        "stdout": captured.out,
+        "stderr": captured.err,
+        "logs": watched.everything(),
+        "chain": chain_of(argv),
+    }
+    assert leaked(PLANTED, **surfaces) == []
+    assert leaked(SECRET, **surfaces) == []
 
 
-@pytest.mark.parametrize(
-    ("family", "argv", "sentence", "wire"),
-    REFUSALS,
-    ids=[family for family, _, _, _ in REFUSALS],
-)
+@pytest.mark.parametrize("row", REFUSALS, ids=[row.family for row in REFUSALS])
 def test_a_refusal_the_server_composes_needs_the_server(
     deployed: Live,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
-    family: str,
-    argv: tuple[str, ...],
-    sentence: str,
-    wire: bool,
+    watched: Watched,
+    row: Refusal,
 ) -> None:
     """The same command lines against an address nothing listens on.
 
@@ -947,33 +1235,68 @@ def test_a_refusal_the_server_composes_needs_the_server(
         sock.bind(("127.0.0.1", 0))
         nowhere = f"http://127.0.0.1:{sock.getsockname()[1]}{API_MOUNT_PATH}"
 
-    assert run("--api-url", nowhere, *refusing(argv, tmp_path)) == 1
+    argv = ("--api-url", nowhere, *refusing(row.argv, tmp_path))
+
+    assert run(*argv) == 1
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "Traceback" not in captured.err
-    if wire:
-        assert "cannot reach the configuration API" in captured.err
-        assert nowhere in captured.err
+    if row.wire:
+        # Both ends pinned, since the middle names this case's own
+        # address: nothing may precede the sentence and nothing may
+        # follow it.
+        assert captured.err.startswith(f"{UNREACHABLE_HEAD}{nowhere}:")
+        assert captured.err.endswith(f"{UNREACHABLE_TAIL}\n")
     else:
-        assert sentence in captured.err
-        assert "cannot reach the configuration API" not in captured.err
+        assert captured.err == row.stderr + "\n"
+
+    surfaces = {
+        "stdout": captured.out,
+        "stderr": captured.err,
+        "logs": watched.everything(),
+        "chain": chain_of(argv),
+    }
+    assert leaked(PLANTED, **surfaces) == []
+    assert leaked(SECRET, **surfaces) == []
 
 
 def test_a_fragment_that_will_not_parse_never_travels(
-    deployed: Live, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    deployed: Live, tmp_path: Path, capsys: pytest.CaptureFixture[str], watched: Watched
 ) -> None:
     """The other end of the refusal spectrum from the table above: a
     fragment is read, parsed and checked before a connection is opened,
     so a broken one is refused with the entity it was aimed at still
-    exactly as it was."""
-    broken = tmp_path / "broken.yaml"
-    broken.write_text("prompt: [\n", encoding="utf-8")
+    exactly as it was.
 
-    assert run("set", "agent", "sam", "-f", str(broken)) == 1
+    The fragment carries the planted credential on the line above the
+    one it breaks on, which is where an operator's would be: a file
+    being edited holds the value already when the edit that breaks it is
+    saved. What a parser says about a file it could not read is the one
+    place a value gets quoted by accident, so the refusal is asserted
+    whole and swept on every surface.
+    """
+    broken = tmp_path / "broken.yaml"
+    broken.write_text(f"prompt: {PLANTED}\nmcp: [\n", encoding="utf-8")
+    argv = ("set", "agent", "sam", "-f", str(broken))
+
+    assert run(*argv) == 1
     refused = capsys.readouterr()
-    assert "invalid YAML in" in refused.err
-    assert "Traceback" not in refused.err
+    assert refused.err == (
+        f"invalid YAML in {broken} at line 3, column 1. Nothing of what it holds is "
+        f"quoted back: a source that will not parse is one nothing here has validated, "
+        f"and what a parser says about one repeats the tag or the key it stopped on\n"
+    )
+    assert refused.out == ""
+    assert (
+        leaked(
+            PLANTED,
+            stdout=refused.out,
+            stderr=refused.err,
+            logs=watched.everything(),
+            chain=chain_of(argv),
+        )
+        == []
+    )
 
     assert run("show", "agent", "sam") == 0
     assert document(capsys.readouterr().out)["prompt"] == "You are Sam."
@@ -1058,28 +1381,51 @@ def test_a_large_document_is_waited_out_however_long_it_takes(
 
 
 def test_an_over_limit_document_is_refused_with_the_store_unmutated(
-    isolated: Live, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    isolated: Live, tmp_path: Path, capsys: pytest.CaptureFixture[str], watched: Watched
 ) -> None:
     """The other side of the bound, read back rather than assumed.
 
     The entry count is what keeps a transaction from being unbounded, so
     it is refused before anything is prepared and before anything is
     written. What proves the second half is reading the store back over
-    the same connection: an empty store afterwards is the whole claim.
+    the same server: an empty store afterwards is the whole claim.
+
+    Every entry of the document carries the planted credential, because
+    the document that reaches this bound is a generated one and what a
+    generated document holds is whatever it was generated from. A
+    refusal that quoted any part of it back would carry five hundred
+    copies of the value, so the sentence is asserted whole and swept.
     """
     document_path = written(
         tmp_path,
         "too-large.yaml",
-        {"agents": {f"agent-{number:03d}": {"prompt": "p"} for number in range(APPLY_LIMIT + 1)}},
+        {
+            "agents": {
+                f"agent-{number:03d}": {"prompt": PLANTED}
+                for number in range(APPLY_LIMIT + 1)
+            }
+        },
     )
+    argv = ("apply", "-f", document_path, "--api-url", isolated.api_url)
 
-    assert run("apply", "-f", document_path, "--api-url", isolated.api_url) == 1
+    assert run(*argv) == 1
 
     refused = capsys.readouterr()
-    assert str(APPLY_LIMIT) in refused.err
+    assert refused.err == TOO_MANY_ENTRIES + "\n"
     assert refused.out == ""
     # Nothing of the document is quoted back, which is what makes the
-    # sentence safe to print whatever a generated document holds.
+    # sentence safe to print whatever a generated document holds: not
+    # the value in every entry, and not the entry names either.
+    assert (
+        leaked(
+            PLANTED,
+            stdout=refused.out,
+            stderr=refused.err,
+            logs=watched.everything(),
+            chain=chain_of(argv),
+        )
+        == []
+    )
     assert "agent-000" not in refused.err
 
     assert run("show", "--api-url", isolated.api_url) == 0
@@ -1119,6 +1465,56 @@ def test_the_lane_s_server_booted_from_the_environment_alone(
     # environment too, is reading the same store.
     assert run("show", "agent", "sam") == 0
     assert document(capsys.readouterr().out)["prompt"] == stored.domain.agents["sam"].prompt
+
+
+def test_the_leak_check_notices_a_value_on_every_surface(
+    watched: Watched, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The absence checks above, checked.
+
+    Every one of them asserts that something is NOT somewhere, which is
+    the shape of assertion that keeps passing after the machinery under
+    it stops working: a renderer that dropped a record's arguments, a
+    capture that collected nothing at all, a chain walker that stopped
+    at the first exception. So this plants the value in each of those
+    places deliberately and asserts the check names every one of them.
+
+    The three log shapes are the three ways a value rides a record, and
+    the middle one is why `everything()` renders `args` rather than the
+    formatted line: a handler that never formatted the record would
+    still be holding the value.
+    """
+    channel = logging.getLogger("vinga_server.lane_leak_check")
+    channel.warning("interpolated into the message: %s", PLANTED)
+    channel.warning("held on an extra attribute", extra={"planted": PLANTED})
+    try:
+        try:
+            raise ValueError(PLANTED)
+        except ValueError:
+            raise RuntimeError("what a chain walker has to go behind") from None
+    except RuntimeError:
+        channel.warning("inside an exception attached to a record", exc_info=True)
+
+    print(PLANTED)
+    print(PLANTED, file=sys.stderr)
+    captured = capsys.readouterr()
+
+    assert leaked(
+        PLANTED,
+        stdout=captured.out,
+        stderr=captured.err,
+        logs=watched.everything(),
+    ) == ["logs", "stderr", "stdout"]
+
+    # And the fourth surface, which has no stream of its own: a refusal
+    # that says nothing itself but carries something that does.
+    refusal = ConfigError("a sentence that quotes nothing")
+    refusal.__context__ = ValueError(PLANTED)
+    assert leaked(PLANTED, chain=carried(refusal)) == ["chain"]
+
+    # The value was planted here on purpose, so the three records above
+    # are this case's own and belong to no server.
+    assert not watched.elsewhere()
 
 
 def defined_here() -> set[str]:
