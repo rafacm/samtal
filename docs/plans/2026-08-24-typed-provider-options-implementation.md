@@ -724,3 +724,239 @@ From `vinga-server/`, at the tip.
 - `uv sync --frozen`: `Checked 99 packages in 1ms`
 - The three import-weight pins: green, and their files untouched by the
   round (`git diff 14ed7f7f HEAD` lists none of the three).
+
+## M3: openai_compatible
+
+### What was done
+
+Five commits: the model, the builder and the forwarding, the tests, the
+three documents with the fragment, and this record with the changelog
+and the tick.
+
+**The model.** `OpenaiCompatibleOptions` declares the three options the
+builder read, with the example fragment's own sentence on each field,
+and it is the one model in the file with `extra="allow"`. Two of the
+three are `Nonblank`, which is what `required_string` demanded of
+`base_url` and `model`; `max_tokens` is a `StrictInt` with the cap the
+kit has always applied, stated as the number for the reason
+`ElevenlabsOptions.timeout_s` is (the kit speaks httpx, and this module
+is on three paths that load no client library) and pinned against
+`DEFAULT_MAX_TOKENS` by a case on the side that may import both.
+
+The hatch is stated on the model's own docstring, which is what the
+JSON Schema carries and, in its first paragraph, what the reference
+prints above the table. The component the OpenAPI document gains says
+the same thing structurally: `additionalProperties: true`, where the
+other two declared types say `false`.
+
+**The reserved set.** `RESERVED_REQUEST_FIELDS` names the seven fields
+the type composes for every request, and a passthrough key taking one of
+them is refused by a model-level validator that raises
+`FieldProblemsError`, so the name reaches the pointer as well as the
+sentence. Naming it is the one exception to the rule that a caller's key
+is never printed, and the exception is argued where the set is declared:
+these are the repository's own seven words, published in the schema on
+the model, so saying which one was written tells an operator what to
+remove without repeating anything they invented. Two of the seven
+(`model`, `max_tokens`) are declared fields, so a passthrough key cannot
+take those names at all; they are in the set because what the set states
+is which fields the request composes, not which of them this model
+happens to declare.
+
+**The builder, and the hatch taking effect.** `build(label, config,
+options)` reads attributes; the reader ladder and its `finish()` are
+gone. `finish()` is the part that could not simply be deleted: it
+refused every leftover, so no option ever reached configuration and went
+nowhere, and dropping it without forwarding would have made the hatch
+silently ignored configuration, which is the failure the issue exists to
+remove. So `model_extra` travels to the provider and rides into the
+outgoing request through the SDK's `extra_body`, which is merged into
+the JSON at the top level and is the only way to send a parameter this
+dialect does not name: `create` takes the dialect's fields by name and
+nothing else, so a merged `**request` would be a TypeError on the first
+server-specific key.
+
+The provider drops the reserved names from what it was handed rather
+than trusting that validation caught them. That is not belt and braces,
+it is the direction of the SDK's own merge: `_merge_mappings(json_data,
+extra_json)` puts `extra_body` OVER the fields the caller set, so
+"merged under the fixed fields" is kept by never letting one of those
+names into the passthrough, on both sides of the seam.
+
+**What stayed where it was.** `parse_base_url` is still called in the
+builder. The model replaces `required_string` and nothing more: what
+`parse_base_url` asks is a question about an endpoint rather than about
+a string, all three stages speaking this dialect ask it, and it lives in
+the module that owns that question. The URL-credential rule is still the
+write path's, because it reads values at every depth rather than fields.
+Both are pinned as acceptance at the model, so this model quietly
+gaining a rule that already has a home is a failure rather than a
+silent duplication.
+
+**The registration and the renderings.** One argument on one line, and
+`providers/registry.py` is untouched again. All four renderings picked
+the type up from `declared_options()`.
+
+### Deviations from the plan
+
+Two, and both are readings of the plan's own words recorded rather than
+departures from its intent.
+
+**1. `max_tokens` is a `StrictInt` with no numeric bound.** The plan
+says "bounded int with today's default". Read as the option that bounds
+the reply rather than as an option with bounds of its own, because the
+reader it replaces was `integer("max_tokens", DEFAULT_MAX_TOKENS)`,
+which took any int, and the standing discipline of this batch is that a
+converted type accepts exactly what its reader accepted, with every
+tightening decided and written into the changelog. There is no evidence
+here for a floor or a ceiling, and inventing one would be a tightening
+on the axis this batch has no reason to touch, an operator's existing
+file rather than an operator's typo.
+
+**2. The example fragment does not document `max_tokens`.** It cannot,
+and the reason is discovery 1 below.
+
+### Discoveries
+
+**`max_tokens` cannot be written into a provider entry at all, and
+never could.** The name contains "token", so
+`secret_option_fragment("max_tokens")` matches and `ProviderConfig`'s
+`_reject_inline_secrets` refuses the key as an inline secret. This is
+not new and it is not this milestone's: it is true on `main`, for every
+provider type, through every door a `ProviderConfig` is validated
+behind, so it holds for the YAML file, the API and the CLI alike. The
+`anthropic` type has read a `max_tokens` option through its own ladder
+the whole time, and no fragment could ever supply one.
+
+It surfaced here because this is the first milestone to document the
+option: the example fragment gained a commented `# max_tokens: 1024`
+line, `test_every_documented_option_of_a_typed_type_installs`
+uncommented it and installed it, and the write refused it. The commented
+key came back out, since a fragment must not document a key that cannot
+be installed, and that suite is exactly the promise that it does not.
+
+Nothing else was changed for it, deliberately. The fix is a change to a
+security rule shared with the MCP entries (a word-boundary match, or an
+exemption for names a type's own model declares), which is a decision of
+its own and not one to take inside a milestone that is converting a
+provider type. What M3 leaves behind is a field the reference documents,
+the builder reads and the write path refuses, which is an honest
+statement of the contract with a defect visible beside it rather than a
+contract quietly narrowed to fit the defect.
+
+**The untyped-type scan in the options note matched on a substring.**
+`test_the_options_note_names_the_types_that_declare_a_model` checked
+that no untyped type name appears in `OPTIONS_NOTE`, by asking whether
+the bare type name is in the sentence. `openai` is an untyped ASR and
+TTS type and a substring of `openai_compatible`, so declaring this type
+made the note "name" a type that declares no model. The scan asks for
+the stage-and-type pair now, which is the spelling the note actually
+uses and the one the declared half was already checked with.
+
+**The URL-credential cases needed a model.** Three fragments in
+`test_config_store.py` wrote an `openai_compatible` entry with a
+`base_url` and no `model`, because nothing used to require one at write
+time. The options check runs before the URL rule, so those fragments
+started being refused for a missing field and proved nothing about the
+rule under test. They carry a model now, and one case was added beside
+them: a credential-bearing URL under a key this type does not declare,
+which is the question the hatch raises and which the rule still answers,
+because it reads values at every depth rather than declared fields.
+
+### Coercion parity, inventoried call by call
+
+The reader call the builder made, what it accepted, and what the model
+does now. Held by `OPENAI_PARITY` in
+`tests/unit/test_provider_options.py`, which runs in every lane.
+
+| Option | Reader call | Accepted then | Accepted now | Same? |
+| --- | --- | --- | --- | --- |
+| `base_url` | `required_string(...)` | a non-blank string; absent, null or blank refused as "is required" | `Nonblank` (`StrictStr` plus a not-blank rule), required | yes, and the two refusals are now separate sentences |
+| `model` | `required_string(...)` | the same | `Nonblank`, required | yes |
+| `max_tokens` | `integer(..., 1024)` | an int; never a bool, a float or `"1024"`, and never a null, since it measured whatever it popped | `StrictInt`, default 1024 | yes |
+| any other key | `finish()` | refused at build, naming the unknown keys | `extra="allow"`: kept, and forwarded into the request body | no, and this is the milestone |
+| a key named for a request field | `finish()` | refused at build, naming it | refused at write by name, value-free | the refusal moves earlier and stays by name |
+
+The one deliberate divergence is the fourth row, and it is in the
+changelog as a loosening rather than a tightening: an option that
+reached configuration used to fail the build and now reaches the
+endpoint.
+
+**The blank spellings, and why this type has none.** The first two
+converted types each carry a list of options whose absence had a second
+spelling, read off the readers they replaced. This reader had neither
+shape. `base_url` and `model` were `required_string`, which refused a
+blank as loudly as an absent key, so an empty string was never a way of
+writing nothing there; `max_tokens` was `integer(key, default)` with
+nothing after it, so a null was refused rather than swallowed. There is
+therefore no `_OPENAI_BLANK_IS_UNWRITTEN` set and no
+`_blank_reads_as_unwritten` validator on this model, and
+`test_this_type_has_no_blank_spelling_of_an_absent_option` is where that
+decision is written down.
+
+### The compatibility fixture, and why no decision was needed
+
+`tests/unit/data/domain-bodies/provider/every-field.json` is the
+historical body for this type and needed no companion: it was written as
+an `openai_compatible` entry carrying options no builder read, to prove
+a body could hold anything and still parse. It parses unchanged through
+the new model, and its four unread keys (`temperature`,
+`max_reply_length`, `stop`, `connection`) are `model_extra` now, which
+is what the provider forwards. That is asserted rather than argued, in
+`test_the_options_no_builder_accepted_are_the_ones_that_now_travel`: a
+model that shut its door would fail the suite's own floor case, and one
+that kept the door open and dropped the keys would fail this one.
+
+### Artifact churn
+
+The same three of the six moved, measured at the tip against M2's, and
+the two the plan says must not move did not.
+
+- `docs/reference/domain-config.md` (+23, -8): the `#88` note's list of
+  declared types gains `llm openai_compatible` at the front (which
+  reflowed the paragraph, which is the eight deletions), and the new
+  `#### \`llm\` options for \`type: openai_compatible\`` subsection with
+  its three-row table. That table carries the `| ... |` pass-through row
+  neither of the other two types' own tables has, which is the model's
+  `extra` setting rendering itself; the only other place the row appears
+  under a typed type is faster_whisper's nested `vad_parameters`, whose
+  door is open for its own reason.
+- `docs/reference/api-openapi.json` (+30, -2): the
+  `LlmOpenaiCompatibleOptions` component, with
+  `"additionalProperties": true` and the hatch stated in its
+  description, and the provider PUT's description gaining the third row
+  of its mapping. The two deletions are the two descriptions that carry
+  the type list.
+- `docs/reference/cli.md` (+12, -0): the `set provider` epilog's
+  `options for llm type openai_compatible:` listing, three fields.
+- `docs/reference/events.md`, `docs/reference/conversations-schema.md`:
+  byte-identical, checked at the tip by regenerating both and by
+  `git diff origin/main HEAD`, which lists neither.
+- Beside the six: `examples/llm-openai-compatible.yaml` (+10) documents
+  the hatch and `top_p` as its one commented example, and
+  `examples/README.md` (+6, -2) names all three declared types and says
+  which of them keeps its door open.
+
+The reference's stage-then-type grouping holds and is now visibly
+ordered by the pipeline rather than alphabetically: `llm
+openai_compatible` comes before `asr faster_whisper`, which
+`test_the_typed_options_are_grouped_by_stage_and_then_by_type` asserts
+against `PROVIDER_STAGES`.
+
+### Verification
+
+From `vinga-server/`, at the tip of the milestone.
+
+- `uv run ruff check .`: `All checks passed!`
+- `uv run mypy`: `Success: no issues found in 4 source files`
+- `uv run pytest tests/unit -q -n auto --dist loadfile`:
+  `3366 passed, 19 skipped in 43.94s`
+- `uv run pytest tests/integration -q`: `126 passed in 191.37s (0:03:11)`
+- The six drift checks as CI runs them: all six clean, including the two
+  that must not move.
+- `uv sync --frozen`: `Checked 99 packages`
+- The three import-weight pins deviation 1 of M1 forced: green, and
+  their files untouched by this milestone. No allow-list moved:
+  `OpenaiCompatibleOptions` lives in the module M1 already added to
+  them, which is the second time a converted type has cost nothing
+  there.
