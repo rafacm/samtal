@@ -768,7 +768,7 @@ def _raising(message: str):
 def test_the_reads_hold_no_engine_between_requests(
     tmp_path: Path, client: TestClient
 ) -> None:
-    """One engine per request, disposed with it: a store purged, moved
+    """One engine per request, disposed with it: a store deleted, moved
     or restored under a running server is met as it is now rather than
     through a pool opened before it moved."""
     recorded(tmp_path, sessions=1)

@@ -246,9 +246,8 @@ def test_the_conversation_migrations_ship_inside_the_package() -> None:
 
 
 def test_the_path_is_answered_without_creating_anything(tmp_path: Path) -> None:
-    """The question a read path and the purge command both ask before
-    deciding whether there is a store at all. Asking must not bring one
-    into existence."""
+    """The question a read path asks before deciding whether there is a
+    store at all. Asking must not bring one into existence."""
     path = conversations_path(tmp_path)
 
     assert path.name == DATABASE_FILENAME

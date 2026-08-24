@@ -12,10 +12,10 @@ numbers a query filters on; JSON carries the structures the manifest and
 the pydantic layers already own. Referential integrity is the writer's,
 not SQLite's, for the reason `db/schema.py` gives: validation belongs in
 one layer, and a per-connection pragma would be a second, weaker place.
-The writer is not the only writer either (retention and the purge
-command delete), so what keeps its inserts honest against a concurrent
-deletion is a check inside each of its transactions, described in
-`store.py`, rather than a constraint here.
+The writer is not the only deleter either (retention takes whole
+sessions, including one that is still talking), so what keeps its
+inserts honest against a deletion is a check inside each of its
+transactions, described in `store.py`, rather than a constraint here.
 
 Every column carries a `comment=`. That is what
 `docs/reference/conversations-schema.md` is rendered from, and the drift

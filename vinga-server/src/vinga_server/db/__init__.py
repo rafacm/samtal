@@ -230,18 +230,16 @@ def read_engine(directory: str | Path) -> Engine:
     return existing_engine(Path(directory) / DATABASE_FILENAME)
 
 
-def existing_engine(
-    path: Path, immediate: bool = False, secure_delete: bool = False
-) -> Engine:
+def existing_engine(path: Path) -> Engine:
     """An engine for a database file that has to be there already, which
-    is what `read_engine` is and what deleting from a file the server may
-    also have open needs.
+    is what `read_engine` is.
 
-    The two callers differ in one thing, so it is the one argument:
-    reading takes no lock (`BEGIN`), while a purge takes the write lock
-    before it reads (`BEGIN IMMEDIATE`) for the reason `write_engine`
-    gives. Neither creates the file, which is the property both need and
-    the reason the database is named as a URI.
+    It reads and takes no lock (`BEGIN`), and it creates nothing, which
+    is the property its callers need and the reason the database is named
+    as a URI. It took a write lock and overwrote freed pages for one
+    other caller, the conversations purge; that command is gone (#282)
+    and its arguments went with it, so what is left is one shape with no
+    options rather than a shape with two nobody passes.
     """
     # Percent-encoded because this is a URI now: a `?` or a `#` in the
     # path would otherwise end it, and the open would land somewhere
@@ -271,8 +269,6 @@ def existing_engine(
             # rather than of a connection. Setting it from here would be
             # a write from the read path.
             cursor.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
-            if secure_delete:
-                cursor.execute("PRAGMA secure_delete=ON")
         finally:
             cursor.close()
 
@@ -283,8 +279,7 @@ def existing_engine(
         # is not what the rest of the project does. Under WAL a deferred
         # transaction that only reads takes no lock and reads the last
         # committed snapshot, so a write in progress cannot stall it.
-        statement = "BEGIN IMMEDIATE" if immediate else "BEGIN"
-        connection.exec_driver_sql(statement)  # type: ignore[attr-defined]
+        connection.exec_driver_sql("BEGIN")  # type: ignore[attr-defined]
 
     return engine
 
@@ -398,8 +393,8 @@ def write_engine(path: Path, secure_delete: bool = False) -> Engine:
     `secure_delete` overwrites a freed page with zeros instead of
     leaving its bytes in the freelist. Off by default, because it is
     paid on every delete and the domain configuration has nothing to
-    erase; on for the conversations database, where a purge that left
-    the words in the file would not be a deletion."""
+    erase; on for the conversations database, where a retention pass that
+    left the words in the file would not be a deletion."""
     # Statement echo off and parameter logging never enabled, so a
     # secret bound into an INSERT cannot ride a debug log line. Echo is
     # off by default; it is named here because turning it on for a

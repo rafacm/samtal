@@ -116,8 +116,8 @@ _NO_STORE = (
 _UNKNOWN_SESSION = (
     "no session of that id is in the conversation store. The id is the session's uuid "
     "hex, which its events carry and its capture triplet is named after; a session "
-    "older than server.conversations.retention_days has been pruned, and one purged "
-    "with `vinga-server conversations purge` is gone with its turns and its events."
+    "older than server.conversations.retention_days has been pruned, and a pruned "
+    "session is gone with its turns and its events."
 )
 
 # What each refusal means here, where the shared sentence would not be
@@ -580,7 +580,7 @@ def reader(directory: Path) -> Callable[[], Iterator[Connection]]:
     connection, dispose the engine.
 
     Nothing holds an engine between requests, so a store that was
-    purged, moved or restored under a running server is met as it is now
+    deleted, moved or restored under a running server is met as it is now
     rather than through a connection pooled before it moved.
 
     This was the shape the configuration database's dependency had too,

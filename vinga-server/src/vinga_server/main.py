@@ -393,9 +393,9 @@ def main() -> None:
 
     if sys.argv[1:2] == [CONVERSATIONS_COMMAND]:
         # The second group, dispatched the same way and for the same
-        # reasons. It has to work when the server will not start, which
-        # is the whole point of a purge command, so it reaches nothing
-        # here beyond the file half of the configuration.
+        # reasons. It says what the conversation store's tables are,
+        # which must be answerable when the server will not start, so
+        # it opens no database and reaches nothing here.
         from vinga_server.conversations import cli as conversations_cli
 
         raise SystemExit(conversations_cli.main(sys.argv[2:]))
