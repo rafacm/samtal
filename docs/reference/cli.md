@@ -20,6 +20,8 @@ What each field means is
 [`domain-config.md`](domain-config.md), generated from the models. What
 the API answers is [`api-openapi.json`](api-openapi.json), generated
 from the routes. This page is about the command line in front of both.
+Why the grammar has the shape it has, and what a new command is held to,
+is [`../architecture/cli-guide.md`](../architecture/cli-guide.md).
 
 It is written in two halves. Everything above the `cli reference` marker
 below is written by hand. Everything inside that marker pair is
