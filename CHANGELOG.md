@@ -34,8 +34,16 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   applicable, with the reason. A `--json` output flag is deferred, with
   the case written out. Rules the CLI does not satisfy yet are marked
   owed rather than described as though they held: noun-verb itself,
-  confirmation on destructive verbs, a progress line for the unbounded
-  waits, `-h`, `--version`, and `-f -` at a terminal.
+  confirmation on destructive verbs, a progress line for the long
+  waits, `-h`, `--version`, `-f -` at a terminal, and description
+  normalization, where `apply` is the one row of forty-eight that is
+  not a single lowercase sentence. Two places where the merged code
+  contradicts a rule the guide states are recorded as tensions with
+  the issues that track them, rather than softening the rule: the
+  fragment and `--from-env` refusals echoing what was given, with a
+  `UnicodeDecodeError` escaping as a traceback (#289), and an accepted
+  URL reaching later refusals without passing through `shown_url`
+  (#290).
 - **A provider type can declare what it accepts, and `faster_whisper`
   is the first that does** (#88, M1). Its fourteen options are a
   pydantic model in a new `config/provider_options.py`, with the
