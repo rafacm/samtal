@@ -92,47 +92,19 @@ docker run -d --name vinga -p 8003:8003 \
 
 `VINGA_API_SECRET` is the bearer token for the configuration API; `VINGA_AUTH_SECRET` signs the device tokens. Never mint either inline in the `docker run`: a regenerated device secret invalidates the token every device has stored ([Security](vinga-server/README.md#security)).
 
-**3. Say what the agent is.** The other half of the configuration (which engines, which agents, which devices) lives in a database on the data volume, written with `vinga-server config`, the CLI the image ships, run inside the container where the token is already in its environment. This agent is fully local and needs no account anywhere: Silero, faster-whisper, [Ollama](https://ollama.com) and Piper.
+**3. Say what the agent is.** The other half of the configuration (which engines, which agents, which devices) lives in a database on the data volume, written with `vinga-server config`, the CLI the image ships, run inside the container where the token is already in its environment. One document says the whole of it, and one command writes it. This agent is fully local and needs no account anywhere: Silero, faster-whisper, [Ollama](https://ollama.com) and Piper.
 
 ```bash
 # The CLI, inside the container started above.
 vinga() { docker exec -i vinga vinga-server "$@"; }
 
-vinga config set provider vad ears -f - <<'YAML'
-type: silero
-YAML
-
-vinga config set provider asr whisper -f - <<'YAML'
-type: faster_whisper
-model: small
-YAML
-
-vinga config set provider llm local -f - <<'YAML'
-type: openai_compatible
-# Ollama on the host. On Linux, add
-# --add-host=host.docker.internal:host-gateway to the docker run in
-# step 2.
-base_url: http://host.docker.internal:11434/v1
-model: qwen3:8b
-YAML
-
-vinga config set provider tts voice -f - <<'YAML'
-type: piper
-voice: en_US-lessac-medium
-YAML
-
-vinga config set agent-defaults -f - <<'YAML'
-llm: local
-asr: whisper
-tts: voice
-vad: ears
-YAML
-
-vinga config set agent assistant -f - <<'YAML'
-prompt: >
-  You are a helpful voice assistant. Keep replies short, plain and
-  speakable, and always reply in the language the user spoke.
-YAML
+# One document, one transaction. local-stack.yaml is the preset at
+# vinga-server/examples/presets/local-stack.yaml in this repository;
+# point its llm base_url at the host before applying it, which from
+# inside the container is host.docker.internal rather than localhost
+# (on Linux, add --add-host=host.docker.internal:host-gateway to the
+# docker run in step 2).
+vinga config apply -f - < local-stack.yaml
 
 # Which agent an unknown device reaches. Bind specific devices instead
 # with: vinga config bind-device aa:bb:cc:dd:ee:ff assistant
@@ -141,7 +113,7 @@ vinga config set-default-agent assistant
 vinga config list
 ```
 
-The order matters: a write whose references do not resolve is refused, so the providers come first and the agent that names them second. Every field is documented in [`docs/reference/domain-config.md`](docs/reference/domain-config.md), [`vinga-server/examples/`](vinga-server/examples/) holds a commented fragment per entity to copy from, cloud engines included, and the server README's [Configuration](vinga-server/README.md#configuration) section covers the rest: the API surface, remote use, and how credentials are stored.
+Applying orders the writes for you: the whole document goes in as one transaction, refused whole if anything in it will not resolve, so there is no creation order to get right and nothing is ever half applied. [`vinga-server/examples/presets/`](vinga-server/examples/presets/) holds the same deployment on vendor APIs, [`vinga-server/examples/`](vinga-server/examples/) a commented fragment per entity to copy from, and every field of them is documented in [`docs/reference/domain-config.md`](docs/reference/domain-config.md). The CLI itself, including running it against a deployment it does not host, is [`docs/reference/cli.md`](docs/reference/cli.md); the server README's [Configuration](vinga-server/README.md#configuration) section covers the API surface and how credentials are stored.
 
 **4. Apply it.** A write is stored, not yet in effect; this builds the engines and serves them, without a restart and without dropping a conversation ([how](vinga-server/README.md#applying-a-change-without-a-restart)). The first apply downloads the speech models into `/data`, so it takes a few minutes; later ones take seconds.
 
