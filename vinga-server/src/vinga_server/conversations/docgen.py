@@ -106,8 +106,8 @@ def reference() -> str:
         *_paragraph(
             "Three kinds of column survive both switches, and each for a reason worth "
             "stating. The session spine (`sessions.session`, its device and its "
-            "timestamps) survives because retention, purging and every read key on "
-            "it, and a record that cannot be pruned cannot be kept. The structural "
+            "timestamps) survives because retention and every read key on it, and a "
+            "record that cannot be pruned cannot be kept. The structural "
             "halves of a turn (`t_ms`, `agent`, `language`, `tool_calls`) survive "
             "because they are neither a measured number nor conversation text. And "
             "`sessions.metrics` and `sessions.text` record which way the switches "
@@ -121,7 +121,10 @@ def reference() -> str:
             "say to it, which is the same statement the capture documentation makes "
             "about audio. Attributing a session on a shared device to one member "
             "needs voiceprint identification, which does not exist here yet, so the "
-            "deletion unit that is enforceable today is the session."
+            "session is the unit deletion is expressed in: it is what retention "
+            "takes whole and what the erasure API will address. Erasing one named "
+            "session on demand is not enforceable in this release at all, and the "
+            "section below says what a deployment has instead."
         ),
         "",
         "## Retention and deletion",

@@ -90,6 +90,31 @@ def test_the_reference_says_what_deletion_means_in_the_file() -> None:
     assert "Capture files are a" in flat(rendered)
 
 
+def test_the_document_says_once_that_targeted_erasure_is_absent() -> None:
+    """Two sections talk about deletion, and they drifted apart: the
+    privacy section called the session the deletion unit enforceable
+    today while the section below it said no command erases one.
+
+    An operator reading either alone has to reach the same answer, so
+    both are asserted here, and the claim the privacy section is not
+    allowed to make back is asserted absent. What the session still is
+    stays sayable: it is the unit retention takes and the one the API
+    will address, which is a different sentence from being erasable
+    now."""
+    flattened = flat(docgen.reference())
+
+    assert "Erasing one named session on demand is not enforceable in this release" in (
+        flattened
+    )
+    assert "Deletion on demand is not something this release has a command for" in flattened
+    assert "the session is the unit deletion is expressed in" in flattened
+    # The wording the two sections contradicted each other through.
+    assert "enforceable today" not in flattened
+    # And the command is named only as something that is gone.
+    assert flattened.count("conversations purge") == 1
+    assert "`vinga-server conversations purge` was one and is gone" in flattened
+
+
 def test_the_manual_erasure_names_every_file_that_holds_the_words() -> None:
     """The one destructive instruction this document gives, and the way
     it goes wrong is silent.
