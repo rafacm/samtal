@@ -729,9 +729,13 @@ From `vinga-server/`, at the tip.
 
 ### What was done
 
-Six commits: the model, the builder and the forwarding, the tests, the
-three documents with the fragment, this record with the changelog and
-the tick, and the one the fragment's own prose asked for.
+Seven commits: the model, the builder and the forwarding, the tests,
+the three documents with the fragment, this record with the changelog
+and the tick, the one the fragment's own prose asked for, and then the
+one the rebase asked for. The first six were written against M2 as it
+went to review; the section below on the rebase says what the review
+round's four commits changed under them, and every count, diff and
+result in this section is read at the tip that came out of it.
 
 **The model.** `OpenaiCompatibleOptions` declares the three options the
 builder read, with the example fragment's own sentence on each field,
@@ -842,7 +846,7 @@ its own and not one to take inside a milestone that is converting a
 provider type. What M3 leaves behind is a field the reference documents,
 the builder reads and the write path refuses, which is an honest
 statement of the contract with a defect visible beside it rather than a
-contract quietly narrowed to fit the defect.
+contract quietly narrowed to fit the defect. Filed as #277.
 
 **An open door lets a sentence become an option.** The fragment's
 uncommenting case is a scan, and a scan cannot tell a documented key
@@ -933,8 +937,9 @@ that kept the door open and dropped the keys would fail this one.
 
 ### Artifact churn
 
-The same three of the six moved, measured at the tip against M2's, and
-the two the plan says must not move did not.
+The same three of the six moved, measured at the tip against
+`origin/main` with M2 merged, and the two the plan says must not move
+did not.
 
 - `docs/reference/domain-config.md` (+23, -8): the `#88` note's list of
   declared types gains `llm openai_compatible` at the front (which
@@ -945,12 +950,14 @@ the two the plan says must not move did not.
   `extra` setting rendering itself; the only other place the row appears
   under a typed type is faster_whisper's nested `vad_parameters`, whose
   door is open for its own reason.
-- `docs/reference/api-openapi.json` (+30, -2): the
+- `docs/reference/api-openapi.json` (+32, -2): the
   `LlmOpenaiCompatibleOptions` component, with
   `"additionalProperties": true` and the hatch stated in its
   description, and the provider PUT's description gaining the third row
   of its mapping. The two deletions are the two descriptions that carry
-  the type list.
+  the type list. Two of the thirty-two are the rebase's: both required
+  fields are `Nonblank`, so each publishes the `\S` pattern M2's review
+  round added to that annotation.
 - `docs/reference/cli.md` (+12, -0): the `set provider` epilog's
   `options for llm type openai_compatible:` listing, three fields.
 - `docs/reference/events.md`, `docs/reference/conversations-schema.md`:
@@ -958,14 +965,62 @@ the two the plan says must not move did not.
   `git diff origin/main HEAD`, which lists neither.
 - Beside the six: `examples/llm-openai-compatible.yaml` (+11) documents
   the hatch and `top_p` as its one commented example, and
-  `examples/README.md` (+6, -2) names all three declared types and says
-  which of them keeps its door open.
+  `examples/README.md` (+9, -5) adds the third pair to the sentence M2's
+  review round rewrote and says which of the three keeps its door open.
 
 The reference's stage-then-type grouping holds and is now visibly
 ordered by the pipeline rather than alphabetically: `llm
 openai_compatible` comes before `asr faster_whisper`, which
 `test_the_typed_options_are_grouped_by_stage_and_then_by_type` asserts
 against `PROVIDER_STAGES`.
+
+### The rebase onto merged M2
+
+M2 merged as PR #276 after a review round of four commits, so the six
+above were rebased onto it and a seventh was written for what the round
+asked. Everything else in this section is read at the resulting tip.
+
+Two of the six conflicted, and both conflicts were textual rather than
+structural: the model, the builder and every test file merged clean,
+which is the same receipt M2's own rebase produced and says the same
+thing about the shape M1's round left behind.
+
+- **`examples/README.md`.** The round's finding 2 rewrote the bullet
+  this milestone also rewrote, and added
+  `test_the_readme_names_every_type_that_declares_its_options` to hold
+  it to the declaration. Resolved onto the round's sentence with the
+  third pair added, so the pairs read `llm openai_compatible`,
+  `asr faster_whisper` and `tts elevenlabs`, each backticked, which is
+  the spelling that test asserts. The hatch sentence this milestone
+  added to the bullet survives after them.
+- **This document.** Both sides appended to the end of the file: the
+  round added M2's review-round section and its verification block, and
+  this milestone added the M3 section. Resolved by keeping both, in that
+  order.
+
+What the round changed under this milestone, and what each meant here:
+
+- **`Nonblank` publishes its rule.** Finding 1 gave the annotation a
+  `WithJsonSchema` carrying `NONBLANK_PATTERN`, and both required fields
+  here are `Nonblank`, so the committed OpenAPI document gained two
+  lines on the rebased base. Regenerated rather than reconciled by hand,
+  and pinned rather than only diffed:
+  `test_this_types_two_required_names_publish_the_blank_rule_too`
+  asserts the pattern and the description on both published surfaces and
+  checks that what the pattern matches is what the model accepts, which
+  is the shape the round wrote for the second type.
+- **The README bullet gained a test.** Named above; this milestone's
+  wording satisfies it, which is what finding 2's last sentence asked
+  for.
+- **The wire cases for elevenlabs.** Finding 3 took two elevenlabs cases
+  from a fragment through `build_entry` to the bytes on the wire. This
+  milestone had written the same shape independently for its own type,
+  one level stronger: a real `AsyncOpenAI` over an `httpx.MockTransport`
+  reads the JSON body that leaves the process. Nothing to reconcile, and
+  the two now say the same thing about both converted builders.
+- **The one widening.** M2's finding 4 pinned a spelling that widened.
+  This type has no such spelling and says so in its own case, so there
+  was nothing here to pin.
 
 ### Verification
 
@@ -974,13 +1029,15 @@ From `vinga-server/`, at the tip of the milestone.
 - `uv run ruff check .`: `All checks passed!`
 - `uv run mypy`: `Success: no issues found in 4 source files`
 - `uv run pytest tests/unit -q -n auto --dist loadfile`:
-  `3367 passed, 19 skipped in 44.79s`
-- `uv run pytest tests/integration -q`: `126 passed in 190.89s (0:03:10)`
+  `3373 passed, 19 skipped in 43.17s`
+- `uv run pytest tests/integration -q`: `126 passed in 191.11s (0:03:11)`
 - The six drift checks as CI runs them: all six clean, including the two
   that must not move.
-- `uv sync --frozen`: `Checked 99 packages`
+- `uv sync --frozen`: `Checked 99 packages in 1ms`
 - The three import-weight pins deviation 1 of M1 forced: green, and
-  their files untouched by this milestone. No allow-list moved:
-  `OpenaiCompatibleOptions` lives in the module M1 already added to
-  them, which is the second time a converted type has cost nothing
-  there.
+  their files untouched by this milestone (`git diff origin/main HEAD`
+  lists neither of the two that carry an allow list, and the change to
+  `test_config_entities.py` is to its options-note scan rather than to
+  its own). No allow-list moved: `OpenaiCompatibleOptions` lives in the
+  module M1 already added to them, which is the third time a converted
+  type has cost nothing there.
