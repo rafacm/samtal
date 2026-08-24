@@ -49,13 +49,13 @@ name is left alone, and the same document twice changes nothing.
   fields are: a table per type in
   [`docs/reference/domain-config.md`](../../docs/reference/domain-config.md),
   a component in the API document, the epilog of `config set provider`,
-  and `vinga-server config schema provider <stage> <type>`. In the `asr`
-  stage the `faster_whisper` type is declared that way. Every other type
-  still passes its options through to the implementation, so no schema
-  can describe those. Until
-  the rest are typed (#88), these files are where they are documented,
-  and either way these files are where the measured numbers and the
-  field findings behind each default are kept.
+  and `vinga-server config schema provider <stage> <type>`. The types
+  declared that way, as the stage and type that address one, are
+  `asr faster_whisper` and `tts elevenlabs`. Every other type still
+  passes its options through to the implementation, so no schema can
+  describe those. Until the rest are typed (#88), these files are where
+  they are documented, and either way these files are where the measured
+  numbers and the field findings behind each default are kept.
 
 ## Secrets
 
