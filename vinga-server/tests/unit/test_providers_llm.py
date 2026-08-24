@@ -74,6 +74,22 @@ async def test_openai_compatible_requires_a_base_url() -> None:
     assert "providers.llm.local" in str(failure.value)
 
 
+async def test_openai_compatible_requires_a_model() -> None:
+    """The other required name, at the same gate.
+
+    Only the missing endpoint was pinned here, and the parity table
+    cannot cover either: its harness supplies both so that a case about
+    one option is not failed by the absence of another. A model is as
+    required as an endpoint is, and for the same reason `required_string`
+    was: there is nothing to ask the endpoint for without one.
+    """
+    config = provider_config(type="openai_compatible", base_url="http://localhost:11434/v1")
+    with pytest.raises(ProviderError, match="model") as failure:
+        await build_entry("llm", "local", config)
+    assert "providers.llm.local" in str(failure.value)
+    assert failure.value.__cause__ is None
+
+
 async def test_openai_compatible_builds_keyless_for_local_endpoints() -> None:
     config = provider_config(
         type="openai_compatible", base_url="http://localhost:11434/v1", model="qwen3:8b"

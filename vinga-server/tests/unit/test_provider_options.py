@@ -563,6 +563,27 @@ def test_the_openai_compatible_defaults_are_the_ones_the_builder_had() -> None:
     assert options.model_extra == {}
 
 
+def test_an_omitted_name_is_refused_by_the_name_it_omitted() -> None:
+    """The one shape the parity table cannot express.
+
+    Its harness merges every case over a fragment carrying both required
+    options, so that a case about `max_tokens` is not failed by a
+    missing `base_url`; the price is that omitting one of them is
+    unwritable as a row. Written here instead, against the sanitizer
+    directly, for both of them rather than the one an older case
+    happened to cover: `required_string` refused an absent key as
+    loudly as a blank one, and a required field is the whole of what it
+    left behind.
+    """
+    for name, present in (("model", "base_url"), ("base_url", "model")):
+        with pytest.raises(OptionsRefused) as caught:
+            checked_options(HEADLINE, *OPENAI, {present: "written"})
+
+        (problem,) = caught.value.problems
+        assert problem.path == f"/{name}"
+        assert name in str(caught.value)
+
+
 def test_the_only_open_door_among_the_declared_types() -> None:
     """The three declared types, and the one difference between them.
 
@@ -728,6 +749,10 @@ def test_this_types_two_required_names_publish_the_blank_rule_too() -> None:
         for name in ("base_url", "model"):
             assert schema["properties"][name]["pattern"] == NONBLANK_PATTERN
             assert schema["properties"][name]["description"]
+        # And that both of them are required, which is the half the
+        # parity table cannot state: its harness supplies them so that a
+        # case about one option is not failed by the absence of another.
+        assert schema["required"] == ["base_url", "model"]
         # And the door the type exists for, in the vocabulary a document
         # has for one.
         assert schema["additionalProperties"] is True
