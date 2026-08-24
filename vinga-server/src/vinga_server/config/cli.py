@@ -554,6 +554,19 @@ REFERENCE_BEGIN = "<!-- generated: cli reference -->"
 
 REFERENCE_END = "<!-- end generated: cli reference -->"
 
+# And a pair inside that pair, around the recipes alone.
+#
+# Not decoration and not a second copy of the outer lane. The outer check
+# regenerates the whole region through the page composer below, so a
+# composer that dropped, truncated or reordered the recipes would move
+# the committed page and the fresh render together and pass. The inner
+# check compares the same bytes against the recipe renderer directly,
+# which is the only reader that can tell those two apart, and it is what
+# the plan asks the recipes to have of their own.
+RECIPES_BEGIN = "<!-- generated: cli recipes -->"
+
+RECIPES_END = "<!-- end generated: cli recipes -->"
+
 # What every help page is wrapped at, stated rather than discovered. 80
 # is the width the rest of the generated documentation wraps prose at,
 # two columns wider, and it is what keeps a help page inside a fenced
@@ -596,7 +609,10 @@ def cli_reference() -> str:
         "",
         *_paragraph(RECIPES_INTRO),
         "",
-        *docgen.recipe_lines(PROGRAM),
+        RECIPES_BEGIN,
+        *cli_recipes().splitlines(),
+        RECIPES_END,
+        "",
         "## Every command",
         "",
         *_paragraph(COMMANDS_INTRO),
@@ -604,6 +620,22 @@ def cli_reference() -> str:
         *_help_pages(command(), (PROGRAM,), None),
     ]
     return "\n".join(lines).rstrip("\n") + "\n"
+
+
+def cli_recipes() -> str:
+    """The recipes alone, exactly as they sit between their own markers
+    on the committed page.
+
+    The composer above pastes this between the markers rather than
+    building the recipes itself, and the inner drift check compares the
+    page's own bytes against this, so what the check reads and what the
+    page carries are the same rendering rather than two of them. The
+    leading blank line is part of it: a paragraph pressed against an
+    HTML comment is swallowed into the comment's block by every markdown
+    renderer there is, and the extraction is "the lines between the two
+    markers", which has to be able to say so exactly.
+    """
+    return "\n".join(["", *docgen.recipe_lines(PROGRAM)]) + "\n"
 
 
 def _help_pages(shape: Any, words: tuple[str, ...], parent: Any) -> list[str]:

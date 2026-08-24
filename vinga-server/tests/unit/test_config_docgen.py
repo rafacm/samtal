@@ -595,3 +595,37 @@ def test_the_committed_cli_reference_matches_the_grammar() -> None:
         "the generated region of docs/reference/cli.md is stale; regenerate it with "
         "`uv run vinga-server config cli-reference`"
     )
+
+
+def _recipes(page: str) -> str:
+    """The recipes region of the committed page, which is the lines
+    between the inner pair of markers."""
+    _, _, tail = page.partition(cli.RECIPES_BEGIN + "\n")
+    region, _, _ = tail.partition(cli.RECIPES_END)
+    return region
+
+
+def test_the_committed_cli_recipes_match_the_example_fragments() -> None:
+    """The recipes' own lane, and the reason it is not the check above
+    with a smaller mouth.
+
+    That one regenerates the whole region through the page composer, so
+    a composer that dropped, truncated or reordered the recipes would
+    move the committed bytes and the fresh render together and pass
+    green. This compares the same bytes against the recipe renderer
+    itself, which is the only reader that can tell those two apart.
+    """
+    page = COMMITTED_CLI.read_text(encoding="utf-8")
+
+    assert page.count(cli.RECIPES_BEGIN) == 1
+    assert page.count(cli.RECIPES_END) == 1
+    # Inside the outer region, so the whole-page rebuild owns these
+    # bytes too and neither check is looking at something the other one
+    # is not.
+    assert cli.RECIPES_BEGIN in _generated(page)
+    assert cli.RECIPES_END in _generated(page)
+    assert _recipes(page) == cli.cli_recipes(), (
+        "the recipes on docs/reference/cli.md are stale; they are read out of the "
+        "example fragments, so regenerate the page with "
+        "`uv run vinga-server config cli-reference`"
+    )
