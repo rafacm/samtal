@@ -358,6 +358,21 @@ def test_a_preset_is_claimed_by_the_tier_rather_than_by_an_entity() -> None:
 # renders.
 
 
+def test_the_recipes_read_the_examples_this_suite_reads() -> None:
+    """The renderer resolves its fragments to the copy the build put
+    inside the package, falling back to the directory beside `src/`
+    where a checkout keeps them. In a checkout that is this suite's own
+    `EXAMPLES`, and it has to be: the ownership tests above are about a
+    directory, and they say nothing if the renderer reads another one.
+
+    Which of the two an installed artifact resolves is not something a
+    checkout can show, so it is asserted where it is true: CI renders
+    this reference from the built wheel, outside the checkout, and fails
+    unless the fragments came from inside the installed package.
+    """
+    assert Path(str(docgen.EXAMPLE_DIR)) == EXAMPLES
+
+
 def test_every_recipe_line_is_a_command_of_the_grammar() -> None:
     """A recipe that named a command the grammar does not have would be
     a page telling an operator to type something that cannot work. The

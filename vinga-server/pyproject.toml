@@ -69,6 +69,26 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/vinga_server"]
 
+# The example fragments and the presets, carried inside the package as
+# well as beside it.
+#
+# They are documentation an operator copies from, and they are also
+# input: `config cli-reference` reads the command each of them quotes
+# and publishes those lines as the recipes on the committed CLI
+# reference. A command that shipped and then could not run is worse than
+# one that does not ship, so what the command reads has to be in the
+# artifact.
+#
+# Copied at build time from the one directory anybody edits rather than
+# kept in two places: `vinga-server/examples/` stays where every
+# documented `-f examples/...` and every documentation link already
+# points, and the packaged copy is derived from it the way the wheel is
+# derived from `src/`. CI renders the reference from the built wheel and
+# diffs it against the committed page, which is what says the copy
+# arrived.
+[tool.hatch.build.targets.wheel.force-include]
+"examples" = "vinga_server/examples"
+
 [tool.ruff]
 line-length = 100
 
