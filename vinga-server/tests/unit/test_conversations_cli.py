@@ -49,6 +49,47 @@ def test_the_schema_command_prints_the_reference_and_opens_nothing(
     assert "### `sessions`" in printed
 
 
+def test_the_purge_command_is_gone(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The deletion asserted as a fact of the grammar rather than as an
+    absence in this file.
+
+    Every other case here would pass just as well with the subparser
+    restored, because none of them types the word. This one does, with
+    the selector it used to take, and requires the answer a word that is
+    not a command gets: the group's own fixed sentence, exit 1, and
+    nothing of what was typed echoed back into it.
+    """
+    assert run("purge", "--session", SENTINEL) == 1
+
+    captured = capsys.readouterr()
+    assert captured.err == (
+        "that is not a command; expected one of: schema; "
+        "run with --help for the grammar\n"
+    )
+    assert captured.out == ""
+    assert SENTINEL not in captured.err
+
+
+def test_the_group_help_offers_schema_and_nothing_else(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The other half of the same fact: what the group tells an operator
+    it can do. A subparser restored without its selectors would still
+    show up here."""
+    with pytest.raises(SystemExit) as left:
+        run("--help")
+
+    assert left.value.code == 0
+    printed = capsys.readouterr().out
+    assert "{schema}" in printed
+    assert "purge" not in printed
+    assert "--session" not in printed
+    assert "--device" not in printed
+    assert "--before" not in printed
+
+
 def test_a_mistake_in_the_grammar_leaves_by_the_same_door(
     run, caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str],
 ) -> None:
