@@ -77,7 +77,11 @@ from vinga_server.config.models import (
     url_credential,
     validation_problems,
 )
-from vinga_server.config.provider_options import OptionsRefused, checked_options
+from vinga_server.config.provider_options import (
+    OptionsRefused,
+    checked_options,
+    options_model,
+)
 from vinga_server.config.secrets import (
     MASK,
     EntityKind,
@@ -2136,7 +2140,7 @@ def _stored_option_types(
 
 
 def _check_no_url_credentials(
-    location: str, _identity: tuple[str, ...], entry: ProviderConfig
+    location: str, identity: tuple[str, ...], entry: ProviderConfig
 ) -> None:
     """A provider's address holds no credential.
 
@@ -2156,10 +2160,21 @@ def _check_no_url_credentials(
     strips this rather than by trusting that no row has it.
 
     The refusal names the option and the rule and never the value: what
-    fails this check is a credential.
+    fails this check is a credential. It names the option only when the
+    option is one this repository declared, which is `safe_location`'s
+    rule reaching the one refusal here that was still built by joining
+    strings. A provider entry has always been `extra="allow"`, so an
+    option key has always been the caller's; the escape hatch (#88) made
+    such a key ordinary rather than a mistake, and a key is as good a
+    place to paste a credential as a value. So the printable half is
+    computed from the type's own model and the rest of the walk keeps
+    the deepest name it may say.
     """
+    declared = options_model(identity[0], entry.type)
+    printable = frozenset(declared.model_fields) if declared is not None else frozenset()
     for key, value in entry.options.items():
-        _refuse_url_credentials(f"{location}.{key}", value)
+        named = key in printable
+        _refuse_url_credentials(f"{location}.{key}" if named else location, value, named=named)
 
 
 # What each kind checks around its own write, in one table because the
@@ -2180,14 +2195,26 @@ _STORAGE: dict[str, _Storage] = {
 }
 
 
-def _refuse_url_credentials(path: str, value: object) -> None:
+def _refuse_url_credentials(path: str, value: object, *, named: bool) -> None:
     """The same question at every depth, since an option can be a
     structure and `connection: {url: ...}` is as ordinary to write as
-    `url: ...` is."""
+    `url: ...` is.
+
+    `path` is the deepest place this repository may name and `named`
+    says whether it addresses the value under examination or an ancestor
+    of it, which is the difference between "this option is a URL
+    carrying a credential" and "an option of this entry is". Descending
+    sets `named` false and leaves `path` where it was, exactly as
+    `_check_no_inline_secrets` does: once a segment is the caller's,
+    everything under it is addressed relative to a key that cannot be
+    printed, so the honest answer is the nearest parent this repository
+    can name.
+    """
+    where = f'"{path}"' if named else f'an option of "{path}"'
     carried = url_credential(value)
     if carried == "userinfo":
         raise ConfigError(
-            f'"{path}" is a URL carrying a user and password before its host, which '
+            f"{where} is a URL carrying a user and password before its host, which "
             f"is not allowed: this value is stored as written, shown on every read, "
             f"and copied into the manifest of every capture and conversation record "
             f"made against this provider. Write the address on its own and name the "
@@ -2196,7 +2223,7 @@ def _refuse_url_credentials(path: str, value: object) -> None:
         )
     if carried == "query":
         raise ConfigError(
-            f'"{path}" is a URL carrying a credential as a query parameter, which is '
+            f"{where} is a URL carrying a credential as a query parameter, which is "
             f"not allowed, for the reason a user and password before the host is "
             f"not: this value is stored as written, shown on every read, and copied "
             f"into the manifest of every capture and conversation record made "
@@ -2205,11 +2232,11 @@ def _refuse_url_credentials(path: str, value: object) -> None:
             f"quoted back"
         )
     if isinstance(value, Mapping):
-        for key, nested in value.items():
-            _refuse_url_credentials(f"{path}.{key}", nested)
+        for nested in value.values():
+            _refuse_url_credentials(path, nested, named=False)
     elif isinstance(value, (list, tuple)):
-        for position, item in enumerate(value):
-            _refuse_url_credentials(f"{path}.{position}", item)
+        for item in value:
+            _refuse_url_credentials(path, item, named=False)
 
 
 def _check_addressable(location: str, what: str, value: str) -> None:
