@@ -581,13 +581,68 @@ def test_no_request_this_command_makes_narrates_itself(
     ] == []
 
 
+# The names the request is narrated under, one per library the boundary
+# names, and the connection tracer under the name it really writes as:
+# `httpcore` logs from `httpcore.connection` and `httpcore.http11`
+# rather than from its own name, which is what makes a boundary over the
+# parent the thing that silences them.
+#
+# A mock transport answers without ever opening a connection, so the
+# tracer under it says nothing on its own and the httpcore half of the
+# boundary would be a line nothing checked. These records stand in for
+# what it writes, at the level and under the names it writes them.
+NARRATORS = ("httpx", "httpcore.connection", "httpcore.http11")
+
+
+def test_neither_library_can_narrate_while_the_request_is_open(
+    run, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Both halves of the boundary, from inside the request itself.
+
+    The transport writes a record under each name while the request is
+    in flight, which is exactly when the libraries write theirs, and it
+    plants the credential in one as an argument rather than in the
+    message, since a value that reached a record that way is a value the
+    formatter puts back into the line.
+    """
+    narrated: list[str] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        for name in NARRATORS:
+            logging.getLogger(name).info("%s reached %s", name, SECRET)
+            narrated.append(name)
+        return httpx.Response(200, json={"entries": []})
+
+    monkeypatch.setattr(
+        cli,
+        "build_client",
+        lambda base_url, token: httpx.Client(
+            base_url=base_url, transport=httpx.MockTransport(answer)
+        ),
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        assert run("--api-url", REACHABLE_NOWHERE, "apply", "-f", "-", stdin="{}\n") == 0
+
+    # The records really were written, so their absence below is the
+    # boundary rather than a transport that was never reached.
+    assert narrated == list(NARRATORS)
+    assert SECRET not in _logged(caplog)
+    assert [
+        record.name
+        for record in caplog.records
+        if record.name.startswith(("httpx", "httpcore"))
+    ] == []
+
+
 def test_the_quiet_lasts_exactly_as_long_as_the_request(
     run, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Logger levels are process state, so a command that left one
-    raised would have silenced a library for whatever runs next."""
-    narrator = logging.getLogger("httpx")
-    was = narrator.level
+    raised would have silenced a library for whatever runs next. Every
+    name the boundary holds, since a restore that put one back is not a
+    restore."""
+    before = {name: logging.getLogger(name).level for name in cli.REQUEST_LOGGERS}
     monkeypatch.setattr(
         cli,
         "build_client",
@@ -596,7 +651,11 @@ def test_the_quiet_lasts_exactly_as_long_as_the_request(
 
     assert run("--api-url", REACHABLE_NOWHERE, "apply", "-f", "-", stdin="{}\n") == 0
 
-    assert narrator.level == was
+    assert {name: logging.getLogger(name).level for name in cli.REQUEST_LOGGERS} == before
+    # Read off the production tuple above, and checked to be the pair it
+    # is: a name dropped from it would otherwise be a name this test
+    # stopped asserting about at the same moment it stopped being held.
+    assert cli.REQUEST_LOGGERS == ("httpx", "httpcore")
 
 
 def test_neither_failure_carries_the_credential_in_its_chain(
