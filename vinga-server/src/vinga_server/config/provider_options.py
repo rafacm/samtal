@@ -70,6 +70,7 @@ from pydantic import (
     StrictInt,
     StrictStr,
     ValidationError,
+    WithJsonSchema,
     model_validator,
 )
 
@@ -101,7 +102,26 @@ NONBLANK_RULE = "must not be blank"
 # report rather than ours to predict.
 PCM_FORMAT_RULE = "must be one of the pcm_<rate> formats, since this stage streams raw PCM"
 
-_PCM_FORMAT = re.compile(r"^pcm_(\d+)$")
+# The same two rules in the vocabulary a published schema has for a
+# string, which is the only one it has: a pattern.
+#
+# Written once each and used twice each, because a rule a document
+# states and a rule a validator runs are one contract and this is the
+# seam they come apart at. The refusals stay the validators' own, so an
+# operator reads "must not be blank" rather than a regex; the patterns
+# are what a client generating from the document is held to, and the
+# cases in `test_provider_options.py` assert that what the document
+# publishes is what the model accepts.
+#
+# `pattern` is unanchored in JSON Schema, so `\S` says "holds a
+# non-whitespace character", which is `value.strip()` being truthy. The
+# format one anchors itself and has no capture group: the rate is read
+# off the validated string with `removeprefix`, so nothing needs one.
+NONBLANK_PATTERN = r"\S"
+
+PCM_FORMAT_PATTERN = r"^pcm_[0-9]+$"
+
+_PCM_FORMAT = re.compile(PCM_FORMAT_PATTERN)
 
 
 def _as_number(value: object) -> object:
@@ -187,9 +207,27 @@ Numbers = Annotated[
     ),
 ]
 
-Nonblank = Annotated[StrictStr, AfterValidator(_nonblank)]
+# The two string rules, each carrying the schema that states it.
+#
+# `WithJsonSchema` is to an `AfterValidator` what `json_schema_input_type`
+# is to a `BeforeValidator`: the annotation alone describes an
+# unrestricted string, because a validator is code and a schema is not,
+# so a document generated from it would tell a client that any string
+# will do and the server would then refuse what the client wrote. The
+# constraint is published rather than enforced twice: pydantic's own
+# pattern message names a regex, and what an operator should read is the
+# rule in this repository's words.
+Nonblank = Annotated[
+    StrictStr,
+    AfterValidator(_nonblank),
+    WithJsonSchema({"type": "string", "pattern": NONBLANK_PATTERN}),
+]
 
-PcmFormat = Annotated[StrictStr, AfterValidator(_as_pcm_format)]
+PcmFormat = Annotated[
+    StrictStr,
+    AfterValidator(_as_pcm_format),
+    WithJsonSchema({"type": "string", "pattern": PCM_FORMAT_PATTERN}),
+]
 
 
 class VadParameters(BaseModel):
@@ -753,9 +791,11 @@ def validated(
 
 __all__ = [
     "PROVIDER_TYPES",
+    "NONBLANK_PATTERN",
     "NONBLANK_RULE",
     "NUMBERS_RULE",
     "NUMBER_RULE",
+    "PCM_FORMAT_PATTERN",
     "PCM_FORMAT_RULE",
     "ElevenlabsOptions",
     "FasterWhisperOptions",
