@@ -5,15 +5,27 @@ llama.cpp servers, and API gateways all speak this dialect. `base_url`
 is required for that reason; pointing it at api.openai.com works too.
 Endpoints that need no key (Ollama) get a placeholder, since the SDK
 insists on one.
+
+What this type accepts is declared once, as `OpenaiCompatibleOptions` in
+`config/provider_options.py`, and reaches the builder below already
+validated. It is the one declaration whose door stays open, and this is
+the module that makes the opening mean something: an option the model
+does not declare is not dropped and not refused, it rides into the
+outgoing request body through the SDK's own `extra_body`, under the
+fields this module composes for every call (#88).
 """
 
 import json
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import Any
 
 from openai import AsyncOpenAI
 
 from vinga_server.config.models import ProviderConfig
+from vinga_server.config.provider_options import (
+    RESERVED_REQUEST_FIELDS,
+    OpenaiCompatibleOptions,
+)
 from vinga_server.providers.base import (
     LlmEvent,
     LlmProvider,
@@ -27,7 +39,6 @@ from vinga_server.providers.base import (
     Usage,
 )
 from vinga_server.providers.kit import (
-    DEFAULT_MAX_TOKENS,
     DEFAULT_TIMEOUT_S,
     MAX_RETRIES,
     OPENAI_FAILURES,
@@ -39,7 +50,6 @@ from vinga_server.providers.openai_endpoint import (
     endpoint_host,
     parse_base_url,
 )
-from vinga_server.providers.registry import OptionsReader
 
 # How this provider names itself in the message a failed request
 # carries. The entry's own name and host reach the event beside it, so
@@ -136,6 +146,7 @@ class OpenAiCompatibleLlm(LlmProvider):
         api_key: str | None,
         timeout_s: float = DEFAULT_TIMEOUT_S,
         client: AsyncOpenAI | None = None,
+        passthrough: Mapping[str, object] | None = None,
     ) -> None:
         # One client per provider entry, so its connection pool is
         # reused across turns and sessions, and the seam the other cloud
@@ -161,6 +172,19 @@ class OpenAiCompatibleLlm(LlmProvider):
         )
         self.model = model
         self._max_tokens = max_tokens
+        # The options this repository does not declare, on their way to
+        # a server that does. Filtered rather than trusted: the model
+        # refuses these names when the entry is written, and this is the
+        # seam a provider constructed directly comes through, so the
+        # promise that a passthrough key cannot rewrite the request is
+        # kept on both sides of it. The SDK merges `extra_body` OVER the
+        # fields below rather than under them, which is what makes the
+        # filtering the load-bearing half rather than the merge order.
+        self._passthrough = {
+            key: value
+            for key, value in (passthrough or {}).items()
+            if key not in RESERVED_REQUEST_FIELDS
+        }
         self.host = endpoint_host(base_url)
         # Whether to ask for token counts, rather than whether to read
         # them. OpenAI sends usage on a streamed call only when asked,
@@ -195,6 +219,20 @@ class OpenAiCompatibleLlm(LlmProvider):
             request["tool_choice"] = tool_choice
         if self._ask_for_usage:
             request["stream_options"] = {"include_usage": True}
+        # And the entry's own options, into the same body the fields
+        # above go into. `extra_body` is this SDK's escape door: what it
+        # holds is merged into the outgoing JSON at the top level, which
+        # is where a server-specific parameter belongs and is the only
+        # way to send one at all, since `create` takes the dialect's
+        # fields by name and nothing else.
+        #
+        # An option that reached configuration and then went nowhere is
+        # the failure this type's model exists to remove: the reader it
+        # replaced refused every leftover, so nothing was ever silently
+        # ignored, and a hatch that accepted a key without sending it
+        # would be a regression dressed as a feature (#88).
+        if self._passthrough:
+            request["extra_body"] = dict(self._passthrough)
 
         # Tool calls stream as fragments identified by their position in
         # the call list, so they are accumulated by index and yielded
@@ -260,12 +298,24 @@ class OpenAiCompatibleLlm(LlmProvider):
             yield usage
 
 
-def build(label: str, config: ProviderConfig) -> OpenAiCompatibleLlm:
-    options = OptionsReader(label, config)
-    base_url = options.required_string("base_url")
-    model = options.required_string("model")
-    max_tokens = options.integer("max_tokens", DEFAULT_MAX_TOKENS)
-    options.finish()
+def build(
+    label: str, config: ProviderConfig, options: OpenaiCompatibleOptions
+) -> OpenAiCompatibleLlm:
+    """The entry's validated options as the provider's own arguments.
+
+    One rule and one lookup, which is what this seam has left. The rule
+    is the URL's shape, and it stays here rather than moving onto the
+    field: `required_string` is all the model replaces, and what
+    `parse_base_url` asks is a question about an endpoint rather than
+    about a string, asked by all three stages that speak this dialect
+    from the one module that owns it. The lookup is the credential,
+    which is the one thing an options model cannot hold.
+
+    Nothing here refuses an option. Every one of them was checked
+    against `OpenaiCompatibleOptions` before this was called, which is
+    the ordering the reader's `finish()` used to hold, and what that
+    model did not recognize travels rather than being refused.
+    """
     # The answer is deliberately discarded: the constructor derives the
     # host it needs from the same URL for the failure event, and whether
     # that host is OpenAI's is what decides usage, so threading this
@@ -273,10 +323,11 @@ def build(label: str, config: ProviderConfig) -> OpenAiCompatibleLlm:
     # for is the refusal, which belongs at build like every other thing
     # this factory refuses rather than at the first request of the first
     # conversation.
-    parse_base_url(label, base_url)
+    parse_base_url(label, options.base_url)
     return OpenAiCompatibleLlm(
-        base_url=base_url,
-        model=model,
-        max_tokens=max_tokens,
+        base_url=options.base_url,
+        model=options.model,
+        max_tokens=options.max_tokens,
         api_key=resolve_api_key(label, config.api_key_env),
+        passthrough=options.model_extra,
     )
