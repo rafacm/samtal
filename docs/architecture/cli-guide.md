@@ -55,10 +55,12 @@ it has no server to dispatch away from, so it drops the `config` word.
 Everything after that word is identical, which is what makes the two
 one grammar rather than two.
 
-Until #223 lands, `vinga-server config ...` is what a checkout runs and
-what every help page prints, so it is the spelling the reference uses.
-This page uses the short one wherever the point is the grammar rather
-than the invocation.
+Both resolve, and #223 landed the short one as a console script of its
+own. What a live `--help` prints is the spelling it was reached by;
+every generated document carries the short one whatever rendered it,
+because a document may no more vary with the invocation than with the
+terminal. This page uses the short one wherever the point is the grammar
+rather than the invocation.
 
 ## The grammar
 
@@ -73,13 +75,12 @@ vinga sessions list
 ```
 
 This was settled on 2026-08-24 and is not reopened by a later command's
-convenience. It is **owed**: today's grammar is verb first
-(`vinga-server config set provider llm local`), and the re-cut that
-turns it around is #223's. What already exists in the right shape is
-the top level of the server's own entry point, where `conversations`
-and `events` are nouns carrying their own command word
+convenience. #223's re-cut turned the grammar around, so it is the
+merged shape rather than an owed one: the five configuration kinds are
+nouns carrying their own verbs, beside `conversations` and `events` on
+the server's own entry point, which already had it
 (`vinga-server conversations schema`, `vinga-server events
-reference`), which is what the configuration kinds become.
+reference`).
 
 ### Why not verb first
 
@@ -111,23 +112,23 @@ store work (#190) adds `sessions` and `conversations`, each with verbs
 of its own.
 
 Verb first does not force a compound word for each of those; what it
-forces is a choice, taken one command at a time, and the merged grammar
-has taken it both ways. `set-secret` grew a noun level under itself
-(`set-secret provider llm claude api_key`), while `bind-device` welded
-the noun into the verb. That is the real cost, and it is not
+forces is a choice, taken one command at a time, and the grammar before
+the re-cut had taken it both ways. `set-secret` grew a noun level under
+itself (`set-secret provider llm claude api_key`), while `bind-device`
+welded the noun into the verb. That was the real cost, and it was not
 hypothetical: one grammar, two shapes for the same relationship, with
-nothing to tell a reader which shape the next command will use. Under
+nothing to tell a reader which shape the next command would use. Under
 noun first there is one shape, and the top level is a list of things
-rather than a list of things-and-actions. What each peripheral verb ends
-up spelled as is the re-cut's to settle; what this page fixes is the
-rule it settles them against.
+rather than a list of things-and-actions. Each peripheral verb's
+spelling is settled below, against the rules on this page.
 
 **Example.** `vinga provider set llm local` and `vinga provider delete
 llm local`: one noun, two verbs, and a third verb arriving for
 providers alone changes nothing about any other noun's page.
 
-**Counterexample, merged.** It is this grammar's own top level. The
-command listing of `vinga-server config --help` reads `set`, `delete`,
+**Counterexample, historical.** It was this grammar's own top level
+until #223. The command listing of `vinga-server config --help` read
+`set`, `delete`,
 `bind-device`, `add-device`, `apply`, `pending`, `status`, `prompt`,
 `reload`, `ota-url`, `set-default-agent`, `clear-default-agent`,
 `set-secret`, `clear-secret`, `list`, `schema`, `reference`, `openapi`,
@@ -260,13 +261,10 @@ other kind of apply, and there is not.
   possessive and hides what the command does.
 - **A description is one lowercase sentence with no full stop, inside
   80 columns.** The width is `REFERENCE_WIDTH`, because the help pages
-  are a committed artifact that CI diffs byte for byte. Forty-seven of
-  the forty-eight rows in `GROUPS` and `COMMANDS` meet the rest of it.
-  **Owed:** `apply` is the forty-eighth, at three sentences with two
-  internal full stops. Normalizing it is deliberately not done here.
-  The re-cut rewrites every command word in this grammar, and a help
-  string edited now would be rewritten there anyway, at the cost of a
-  regenerated reference and a review of a diff nobody wants twice.
+  are a committed artifact that CI diffs byte for byte. Every row in
+  `GROUPS` and `COMMANDS` meets it, `apply` included since #223
+  normalized the one row that carried three sentences, and a test holds
+  every row and every group to it rather than a reviewer's eye.
 - **Derive the verb set where the kinds are uniform.** The `set`,
   `delete`, `show` and `export` rows are generated from
   `entities.ENTITIES`, and each row's help is written by
@@ -274,13 +272,52 @@ other kind of apply, and there is not.
   cannot come to be described one way in the help and another way in
   the reference, because there is one description.
 
-One case is open rather than settled, and it is recorded here rather
-than decided: `prompt` is the one command word in today's grammar that
-is a noun. Under noun first it lands as `agent prompt kids`, which
-reads as a possessive rather than an action. Either it earns an
-exception (an agent's prompt is a thing you ask for, and the noun slot
-is doing the work) or it gets a verb. The re-cut decides; the rule it
-is decided against is the one above.
+One case was open rather than settled, and #223 settled it. `prompt` was
+the one command word in the old grammar that was a noun, and under noun
+first it would have landed as `agent prompt kids`, which reads as a
+possessive rather than an action. **It got a verb, and the verb is
+`preview`.** The exception was not taken, because a rule with an
+exception at the first command that asks it is unenforceable, and
+`pending` and `status` were both queued behind it. `preview` is this
+repository's own word for the act: the design guide, describing exactly
+this route, says it *previews what an agent would be sent*. And it pairs
+with `show`, which is what noun first is for: `agent show kids` prints
+what is stored, `agent preview kids` prints what a new session would be
+sent, and stored against assembled is a real distinction an operator
+has to make. The ambiguity objection ("preview what?") is answered by
+the help string and by an agent having exactly one previewable thing.
+
+### How deep the tree goes, and why
+
+Two commands need a level between the noun and the verb, and inventing
+a rule per command is how the old grammar came to have two shapes for
+one relationship. The rule is derived instead, from the paths the
+grammar already mirrors:
+
+> **A path segment followed by an identity of its own is a sub-noun. A
+> trailing segment with no identity after it is an attribute of its
+> parent, and reading an attribute is a verb on the parent.**
+
+It is the rule above it ("the grammar is derived from the model it
+addresses") applied to tree depth rather than to row content, which is
+the one place that rule was not yet reaching. Its three worked cases
+are the three it was derived from.
+
+- `/providers/{stage}/{name}/secrets/{slot}`: `secrets` is followed by
+  `{slot}`, so `secret` is a sub-noun of `provider`, with `set` and
+  `clear` as its verbs. Identity depth is three, which is the floor of
+  what is needed and also the ceiling.
+- `/devices/pending/{code}`: `pending` is followed by `{code}`, so
+  `pending` is a sub-noun of `device`, with `claim` as its verb. The
+  listing `GET /devices/pending` is `list` on the same sub-noun, which
+  is what makes `device pending list` a verb command rather than the
+  adjective-in-the-verb-slot `device pending` would have been.
+- `/runtime/agents/{name}/prompt`: `prompt` is trailing with no
+  identity, so it is an attribute, and it becomes a verb on `agent`.
+
+**Counterexample, constructed.** `agent prompt show kids`, which
+introduces a sub-noun for a sub-thing with exactly one verb. A sub-noun
+is earned by an identity under it, and that route has none.
 
 ## The practices
 
@@ -583,19 +620,30 @@ was given, then a no-echo prompt if stdin is a terminal, then a plain
 read of stdin, which is what a pipe and a script use. The same value,
 three ways in, none of them mandatory.
 
-**Counterexample, merged.** One function below that one. `_stdin` reads
-standard input unconditionally, so `apply -f -` typed at a terminal
-blocks with no prompt and no explanation: the same rule broken from the
-other side, by never asking whether there is anybody there. The
-published answer, and the standard here, is to print the help and quit
-when a command that expects a pipe is run interactively. Owed.
+**Counterexample, historical.** The function below that one read
+standard input unconditionally until #223, so `apply -f -` typed at a
+terminal blocked with no prompt and no explanation: the same rule
+broken from the other side, by never asking whether there is anybody
+there. It answers one sentence and exit 1 now, which is this grammar's
+own shape for a mistake in it. The published answer is to print the
+help and quit; the sentence carries the usage tail every other mistake
+here carries instead of printing a page, because one refusal shape is
+worth more than matching the wording of a guideline.
 
-**Owed too.** A destructive verb has no confirmation today:
-`vinga-server config delete agent kids` deletes without asking, whether
-or not anybody is watching. The standard is a confirmation when stdin is
-a terminal, `--force` (or `--yes`) to skip it, and no prompt at all when
-stdin is not a terminal, so a script is never blocked by one. A
-`--no-input` flag that disables every prompt at once belongs with it.
+**And the confirmation, paid.** A destructive verb asks when stdin is a
+terminal, takes `--force` to skip the asking, and asks nothing at all
+when stdin is not a terminal, so a script is never blocked by one.
+`--no-input` disables every prompt in the grammar, and the asymmetry is
+deliberate: it refuses a destructive verb, because a confirmation has no
+other way to be answered and `--force` is that other way, and it does
+not refuse a secret write, because a secret has three doors and
+disabling one leaves two. `--force` alone and not a `--force`/`--yes`
+pair: two words for one act is what the verb rules forbid. Which verbs
+are destructive is a fact on the registration row, and the line it
+draws is that a verb destroys when its effect cannot be undone by
+running another command with information the operator still has: a
+delete destroys the body, a `set` does not as long as an `export`
+exists, and a rebinding is an overwrite the API acknowledges.
 
 ### Where to reach, in a stated order, with no flag that weakens it
 
@@ -688,7 +736,11 @@ thought through.
   "Split" with an unexplained Where column would be one.
 - **Tension recorded.** The merged code contradicts a rule this page
   states, and the contradiction is written down rather than argued
-  away. One row, and the two tensions in the practices above.
+  away. No row carries it today: the one that did (clig 61) and the two
+  tensions in the practices above were all closed by #289, #290 and the
+  #223 re-cut. The word stays in the vocabulary because the next
+  contradiction wants a name, and because a page with nowhere to record
+  one would argue it away instead.
 - **N/A.** Out of scope for a configuration CLI.
 
 ### ThoughtWorks, "Elevate developer experiences with CLI design guidelines"
@@ -699,8 +751,8 @@ under one heading and they are dispositioned separately, as 6a, 6b and
 
 | # | Guideline | Disposition | Where |
 | --- | --- | --- | --- |
-| 1 | Be consistent in structure and follow common naming; `platform-cli [noun] [verb]` | Adopted | The settled decision; owed until the #223 re-cut |
-| 2 | Prompt if you can, but never mandate; confirmation prompts for critical actions; a force flag | Split | Adopted: prompt where there is somebody to ask, never require it. Owed: the confirmation half and its force flag |
+| 1 | Be consistent in structure and follow common naming; `platform-cli [noun] [verb]` | Adopted | Noun first, since the #223 re-cut |
+| 2 | Prompt if you can, but never mandate; confirmation prompts for critical actions; a force flag | Adopted | Prompt where there is somebody to ask, never require it; a destructive verb confirms at a terminal and `--force` answers it |
 | 3 | Use expressive flags; one argument fine, two questionable, three never | Adapted | Identity addressing: the cap applies to identity segments, not to flags |
 | 4 | Avoid implicit steps; inform or split the command | Adopted | A write says what it did and when it takes effect; `apply` never deletes; a write never reloads by itself |
 | 5 | Always provide help: command, arguments and flags described, examples most read | Split | Adopted: the whole tree's help is the committed reference, every command, argument and flag described. Owed: examples, which are the recipes region rather than the command pages |
@@ -722,7 +774,7 @@ Ninety-six guidelines, in the document's own section order.
 | 4 | Send messaging to stderr | Adopted | Same |
 | 5 | Display extensive help text when asked | Adopted | Every command's `--help`, and the whole tree as the committed reference |
 | 6 | Display concise help text by default | Adopted | One lowercase sentence per row in the command listing |
-| 7 | Show full help on `-h` and `--help` | Owed | `--help` only today; `-h` is unbound |
+| 7 | Show full help on `-h` and `--help` | Adopted | Both, on every page of the tree |
 | 8 | Provide a support path for feedback and issues | Rejected | Pre-release and self-hosted: there is no support channel to name, and the refusals carry the fix instead of pointing at one. Revisit when there is a channel |
 | 9 | Link to the web version of the documentation in help | Adapted | Help names the command that prints the document (`Full descriptions: vinga-server config schema provider`), because the documents ship with the CLI and a URL would date |
 | 10 | Lead with examples | Split | Adapted: examples lead the reference, generated from `vinga-server/examples/` rather than hand-written. Owed: examples on the command pages |
@@ -730,7 +782,7 @@ Ninety-six guidelines, in the document's own section order.
 | 12 | Most common flags and commands at the start of the help | Adopted | The command listing order is the table's, restored after Typer's own ordering |
 | 13 | Use formatting in your help text | Rejected | `rich_markup_mode=None` and `color=False`: the help pages are a committed artifact CI diffs byte for byte |
 | 14 | If you can guess what they meant, suggest it | Rejected | A suggestion is built from the typed word. Closed deliberately in the #194 review rounds; see the refusal practice |
-| 15 | A command expecting a pipe, run at a TTY, shows help and quits | Split | Adopted, and improved on: `set-secret` prompts rather than quitting. Owed: `-f -`, which blocks at a terminal |
+| 15 | A command expecting a pipe, run at a TTY, shows help and quits | Adapted | A secret set prompts rather than quitting, which is better; `-f -` quits with one sentence pointing at the help rather than printing a page, so every mistake in the grammar has one shape |
 | 16 | Provide web-based documentation | Adopted | `docs/reference/cli.md` |
 | 17 | Provide terminal-based documentation | Adopted | `--help`, plus `schema`, `reference`, `openapi`, `cli-reference` |
 | 18 | Consider providing man pages | N/A | The deployment surface is a container image |
@@ -761,22 +813,22 @@ Ninety-six guidelines, in the document's own section order.
 | 43 | Only use one-letter flags for commonly used flags | Adopted | `-f` is the only one |
 | 44 | Multiple arguments are fine for simple actions against multiple things | Adopted | `bind-device <mac> <agent>...` takes a variable-length agent list |
 | 45 | Two or more arguments for different things is probably wrong | Adopted | It is the rule that governs payload positionals: one group, last, homogeneous, and anything heterogeneous is a flag. The identity segments in front of it are capped separately, at three |
-| 46 | Use standard names for flags where a standard exists | Adopted | `-f/--file`, and the owed `--force`; `--json` is reserved rather than renamed |
+| 46 | Use standard names for flags where a standard exists | Adopted | `-f/--file`, `--force`, `--no-input`; `--json` is reserved rather than renamed |
 | 47 | Make the default the right thing for most users | Adopted | The API address defaults to loopback on the port the file half names, which is the in-container case |
 | 48 | Prompt for user input | Adopted | `set-secret` at a terminal |
 | 49 | Never require a prompt | Adopted | `--from-env` and stdin |
-| 50 | Confirm before doing anything dangerous | Owed | No confirmation on `delete` today |
+| 50 | Confirm before doing anything dangerous | Adopted | Eight rows carry `destroys`, and each confirms at a terminal |
 | 51 | Support `-` to read from stdin or write to stdout | Adopted | `-f -` |
 | 52 | If a flag takes an optional value, allow a word like "none" | Adapted | `default_agent: null` in a document; the command form is a verb of its own (`clear-default-agent`) rather than a magic value |
 | 53 | Make arguments, flags and subcommands order-independent where possible | Adopted | `--config` and `--api-url` are accepted before and after the command word, and a value given before it survives a command that was not given one |
 | 54 | Do not read secrets directly from flags | Adopted | A credential is never an argument |
 | 55 | Only prompt if stdin is an interactive terminal | Adopted | `isatty` decides between the no-echo prompt and a plain read |
-| 56 | If `--no-input` is passed, do not prompt | Owed | With the confirmation prompts |
+| 56 | If `--no-input` is passed, do not prompt | Adopted | Every prompt in the grammar, with the destructive verb refusing rather than proceeding |
 | 57 | Do not print a password as it is typed | Adopted | `getpass` |
 | 58 | Let the user escape | Adopted | Nothing is trapped; Ctrl-C is the interpreter's |
 | 59 | Be consistent across subcommands | Adopted | And mechanically: the rows are generated from the descriptor registry |
 | 60 | Use consistent names for multiple levels of subcommand | Adopted | The noun word is spelled the same under every verb |
-| 61 | Do not have ambiguous or similarly-named commands | Tension recorded | `bind-device` and `add-device` are two ways to bind one board, told apart only by their help text. Noun first is where this is fixed: they are two verbs of `device`, addressed by a MAC and by an activation code |
+| 61 | Do not have ambiguous or similarly-named commands | Adopted | `bind-device` and `add-device` were two ways to bind one board told apart only by their help text; they are `device bind` and `device pending claim` since #223, on two sub-nouns, so what each addresses tells them apart |
 | 62 | Validate user input | Adopted | The same pydantic models validate a write and the read of the answer |
 | 63 | Responsive is more important than fast | Owed | The progress line |
 | 64 | Show progress if something takes a long time | Owed | Same |
@@ -804,7 +856,7 @@ Ninety-six guidelines, in the document's own section order.
 | 86 | Read environment variables from `.env` where appropriate | Adopted | `load_dotenv(find_dotenv(usecwd=True))` at the entry point, with the real environment winning |
 | 87 | Do not use `.env` as a substitute for a configuration file | Adopted | The file half is the configuration; `.env` carries variables only |
 | 88 | Do not read secrets from environment variables | Rejected | The API token and `--from-env` are both environment reads, deliberately. On a container deployment the alternatives are a file on disk or an argument, and both are worse. The environment is how a credential is handed over once; the encrypted store is where it lives |
-| 89 | Make it a simple, memorable word | Adopted | `vinga`, which the rename delivers |
+| 89 | Make it a simple, memorable word | Adopted | `vinga`, the console script #223 added |
 | 90 | Use only lowercase letters, and dashes if you need them | Adopted | |
 | 91 | Keep it short | Adopted | |
 | 92 | Make it easy to type | Adopted | |
@@ -832,7 +884,7 @@ the end.
 | 10 | Descriptions for all topics and commands | Adopted | Every row in `GROUPS` and `COMMANDS` |
 | 11 | Descriptions fit 80-column screens | Adopted | `REFERENCE_WIDTH` |
 | 12 | Descriptions begin with a lowercase character | Adopted | All forty-eight rows |
-| 13 | Descriptions do not end in a period | Split | Adopted, and owed on one row: none ends in a period, and `apply` carries two full stops inside it. Normalization rides the re-cut, which rewrites every spelling anyway |
+| 13 | Descriptions do not end in a period | Adopted | None ends in one and none carries one inside it, `apply` included since #223, and a test holds every row and group to it |
 | 14 | Flags are preferred to arguments | Adapted | Identity addressing |
 | 15 | Descriptions for all flags | Adopted | |
 | 16 | Flag descriptions lowercase | Adopted | |
@@ -864,7 +916,7 @@ Twelve factors.
 | --- | --- | --- | --- |
 | 1 | Great help is essential: in-CLI and web, every spelling shows it, examples matter most | Split | Adopted and owed as clig 5 to 17 records it. One deliberate deviation: `vinga-server config` with nothing after it is a mistake in the grammar, not a request for help, so it answers with a sentence pointing at `--help` and exit 1, the way every other mistake does |
 | 2 | Prefer flags to args; one type fine, two suspect, three never; support `--` | Adapted | Identity addressing; `--` is accepted, and the reference's rebuild section uses it |
-| 3 | Make the version reachable several ways | Owed | There is no `--version`. The running server answers `version` and `revision` on `/health` and in the OTA reply, and stamps both on every session record, while the CLI cannot be asked at all, which is the wrong way round for the thing an operator has in their hand |
+| 3 | Make the version reachable several ways | Adopted | `--version` prints the installed distribution and its version; the running server answers `version` and `revision` on `/healthz` and in the OTA reply, and stamps both on every session record |
 | 4 | Mind the streams: stdout is for output, stderr is for messaging | Adopted | Data on stdout, notices on stderr |
 | 5 | Handle things going wrong: informative errors, a traceback or debug mode, error logs without ANSI | Split | Informative fixed sentences adopted; the traceback and debug-dump half rejected, per clig 39 |
 | 6 | Be fancy: colors, spinners, OS notifications, with fallbacks and `NO_COLOR` respected | Split | Rejected: colors, ASCII art, emoji and OS notifications, under output determinism. Owed: the progress line, which the determinism practice licenses as an interactive affordance |
@@ -908,9 +960,9 @@ practice above, restated as the question to ask.
 10. **Is any part of it written twice?** A verb list, a field name, a
     section name or an address that also exists on a model is derived
     from that model, not restated.
-11. **If it destroys something**, does it confirm at a terminal and
-    take `--force`? (Owed today, and a new destructive verb is where
-    the debt gets paid rather than grown.)
+11. **If it destroys something**, does its row say so, so that it
+    confirms at a terminal and takes `--force`? And is it destructive
+    by the line the practice draws, rather than merely alarming?
 
 And the rule that outranks the list: this page never outranks
 [`principles.md`](principles.md). A command that reads beautifully and

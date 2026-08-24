@@ -5,6 +5,72 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-08-25
+
+### Changed
+
+- **The configuration grammar is noun first** (#223). `vinga-server
+  config set provider llm local` is `vinga-server config provider set
+  llm local`, and every command word in the grammar moved with it:
+  `bind-device` is `device bind`, `add-device` is `device pending
+  claim`, `pending` is `device pending list`, `set-secret provider` is
+  `provider secret set`, `set-default-agent` is `default-agent set`,
+  `prompt` is `agent preview`, and each of the five configuration kinds
+  carries its own `set`, `show`, `export` and `delete`. The flat verbs
+  are unchanged, because their subject is the whole deployment or
+  nothing stored at all: `apply`, `export`, `show`, `list`, `reload`,
+  `status`, `ota-url`, `schema`, `reference`, `openapi`,
+  `cli-reference`. How deep the tree goes is derived from the API's own
+  paths rather than decided per command: a path segment followed by an
+  identity of its own is a sub-noun, which is what makes `provider
+  secret set` and `device pending claim` three words, and a trailing
+  segment with no identity is an attribute, which is what makes `agent
+  preview` a verb. `docs/reference/cli.md`, `domain-config.md`,
+  `api-openapi.json` and `events.md` all move with the grammar, the
+  last of them because two shipped OTA warnings name the command that
+  binds a board.
+- **Every description in the command tree is one lowercase sentence**
+  with no full stop in it, `apply` included, and a test holds every row
+  and every group to it.
+
+### Added
+
+- **`vinga` is a console script of its own** (#223). `vinga provider set
+  llm local` and `vinga-server config provider set llm local` are the
+  same command through the same entry function; the short spelling drops
+  the `config` word because it has no server to dispatch away from.
+  Both read a `.env` file at the invocation directory, with the real
+  environment still winning. Everything this repository generates is
+  rendered in the short spelling whatever invocation rendered it, since
+  a generated document may no more vary with the entry point than with
+  the terminal; a live `--help` prints the spelling it was reached by.
+- **`diff` says what the store holds that the running server is not
+  serving** (#223, filling the seat #193 reserved), kind by kind, with
+  the boundary each kind's changes reach a conversation at. Names and
+  labels only: no bodies, no values, no masks and no secret marks cross
+  the surface.
+- **A destructive verb confirms at a terminal** (#223). The eight rows
+  that delete something ask before they do it, take `--force` to skip
+  the asking, and ask nothing at all when stdin is not a terminal, so a
+  script is never blocked. `--no-input` disables every prompt in the
+  grammar: it refuses a destructive verb, because a confirmation has no
+  other way to be answered and `--force` is that other way, and it does
+  not refuse a secret write, because a secret has three doors and
+  disabling one leaves two. The question and both refusals are fixed
+  sentences carrying no address and no other value from the command
+  line.
+- **`--version`, and `-h` beside `--help`** (#223). `--version` prints
+  the installed distribution and its version and exits 0; `-h` answers
+  on every page of the tree.
+
+### Fixed
+
+- **`-f -` at a terminal with nothing piped in no longer hangs**
+  (#223). It read standard input unconditionally, so a person who typed
+  it at a prompt met a cursor and no explanation. It answers one
+  sentence pointing at the help and exits 1, which is what every other
+  mistake in the grammar answers with.
+
 ## 2026-08-24
 
 ### Added
