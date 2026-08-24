@@ -347,10 +347,11 @@ CLI surfaces once in M1.
   Design footprint: deletes the hand-rolled precedent the pattern
   replaces, and adds the first nested model whose door is shut, which
   is what makes two of decision 3's four pointer shapes testable.
-- [ ] **M3: openai_compatible, the escape hatch.**
-  Decision 4. Design footprint: the one model whose `extra`
+- [x] [**M3: openai_compatible, the escape hatch.**](2026-08-24-typed-provider-options-implementation.md#m3-openai_compatible)
+  (PR TBD) Decision 4. Design footprint: the one model whose `extra`
   stays open, stated on the model, with the fixture untouched as
-  the proof.
+  the proof; and the one builder that gained a behavior, since a
+  hatch nothing travels through is a hatch in name only.
 
 ## Plan review round
 

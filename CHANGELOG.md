@@ -29,6 +29,25 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   generalizes: a `voice_settings` reader with its own key tables and
   its own two type checks, and a separate function that parsed the
   output format. Both said something the model now says once.
+- **`openai_compatible` declares its options too, and now honours what
+  it does not declare** (#88, M3). Its `base_url`, `model` and
+  `max_tokens` are a pydantic model like the other two types', so it is
+  documented in the same four places, but its door stays open: a key the
+  model does not declare is kept rather than refused, because the type
+  exists to reach a server this repository has never seen and every one
+  of them takes parameters no other does. The change an operator will
+  notice is what happens to such a key next. Until now the builder
+  refused every option it did not read, so a server-specific parameter
+  could not be configured at all; it now travels into the outgoing
+  request body, so `top_p: 0.9` on the entry reaches the endpoint
+  alongside the model and the messages. The fields vinga composes for
+  every request (`model`, `max_tokens`, `messages`, `stream`,
+  `stream_options`, `tools`, `tool_choice`) are the exception and are
+  refused when the entry is written, naming the one that was written:
+  a key by one of those names would rewrite the request rather than
+  configure the server. What the hatch does not open is a way past
+  anything else: a passthrough key that looks like a secret, or holds a
+  URL with a credential in it, is refused exactly as it was.
 - **A declared type's options are documented in all four places the
   configuration is documented** (#88, M1). `vinga-server config schema
   provider asr faster_whisper` prints the contract as JSON Schema;
@@ -45,6 +64,22 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **`openai_compatible` entries are validated more strictly than they
+  were, and one thing loosens** (#88, M3). What the type accepts is
+  otherwise unchanged in kind, held by the same table-driven parity test
+  taken call by call off the reader it replaces: `base_url` and `model`
+  are still required and still may not be blank, and `max_tokens` is
+  still an integer and never a bool, a float or the digits written as a
+  string. The loosening is the hatch: a key the type does not declare
+  used to fail the build naming it, and is now accepted and forwarded to
+  the endpoint. Two things tighten. A stored entry whose options the
+  model refuses is now refused on read as well as on write, which a
+  deployment meets as a boot refusal naming the entry;
+  `vinga-server config --local delete provider llm <name>` is the way
+  out. And a passthrough key naming one of the request's own fields is
+  refused rather than silently losing to them. A `base_url` that is not
+  a URL is unaffected: that rule was never the reader's and still runs
+  at build, where all three stages speaking this dialect ask it.
 - **`elevenlabs` entries are validated more strictly than they were**
   (#88, M2). What the type accepts is unchanged in kind, held by the
   same table-driven parity test taken call by call off the reader it
