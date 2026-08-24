@@ -9,6 +9,31 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **The CLI has a design guide, and the grammar is noun first** (#285).
+  `docs/architecture/cli-guide.md` records the settled decision that a
+  command names the thing before it names what to do to it (`vinga
+  provider set llm local`, `vinga agent show kids`), the reasoning that
+  chose it over the verb-first shape (kubectl's closed verb set works
+  because a new resource inherits every verb; vinga's periphery is
+  noun-specific and its noun set is the growing one, which is the shape
+  docker had before it moved to management commands), and the rules for
+  naming a new noun or verb. Beside them sit eleven practices, each
+  with an example and a counterexample from the merged CLI: the
+  stdout/stderr split, refusals as fixed sentences that quote nothing
+  back, one sentence and exit 1, notices that say when a write takes
+  effect, credentials that are never an argument, the export/apply
+  round trip as the machine interface, deterministic output, prompts
+  that are never mandatory, the resolution order with no flag that
+  weakens the transport, bounded waits, and a grammar derived from the
+  models it addresses. The practices were produced by an audit of four
+  published guides (ThoughtWorks, clig.dev, Heroku, 12 Factor CLI
+  Apps), and the audit is committed with them: every guideline in every
+  source has a row saying adopted, adapted, owed, rejected or not
+  applicable, with the reason. A `--json` output flag is deferred, with
+  the case written out. Rules the CLI does not satisfy yet are marked
+  owed rather than described as though they held: noun-verb itself,
+  confirmation on destructive verbs, a progress line for the unbounded
+  waits, `-h`, `--version`, and `-f -` at a terminal.
 - **A provider type can declare what it accepts, and `faster_whisper`
   is the first that does** (#88, M1). Its fourteen options are a
   pydantic model in a new `config/provider_options.py`, with the
