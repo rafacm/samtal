@@ -1184,13 +1184,15 @@ Options:
 ### `vinga-server config schema`
 
 ```
-Usage: vinga-server config schema [OPTIONS] [ENTITY]
+Usage: vinga-server config schema [OPTIONS] [ENTITY] [STAGE] [TYPE]
 
   the JSON Schema of one entity, or of the whole domain half
 
 Arguments:
   ENTITY  provider, mcp-server, prompt-fragment, agent, agent-defaults, mcp-
           grant, filler, domain (default: domain)
+  STAGE   with TYPE, the options of one provider type: llm, asr, tts or vad
+  TYPE    with STAGE, the provider type whose options to print
 
 Options:
   --help  Show this message and exit.

@@ -146,10 +146,14 @@ vinga-server config set provider <stage> <name> -f fragment.yaml
 | `egress` | `bool \| null` | `null` | Whether this entry sends session data off the host, asserted by the operator for the types whose configuration decides it rather than their name (openai_compatible, and the openai ASR and TTS types, whose base_url may be local or a vendor). Under server.local_only such an entry must declare egress: false; a type that knows its own egress rejects the key. |
 | ... | | | Passed through to the provider implementation. |
 
-A provider entry carries whatever options its `type` takes, and those are
-passed through rather than declared, so no schema can list them. Until typed
-option models land (#88) they are documented in the example fragments below,
-which is also where the measured numbers behind each default are kept.
+A provider entry carries whatever options its `type` takes. A type that
+declares an option model has them checked when the entry is written, refused
+by name, and printed by `vinga-server config schema provider <stage> <type>`;
+in the asr stage the faster_whisper type is declared that way. Every other
+type has its options passed through rather than declared, so no schema can
+list those, and until the rest are typed (#88) they are documented in the
+example fragments below, which is also where the measured numbers behind each
+default are kept.
 
 Examples:
 

@@ -66,19 +66,34 @@ from vinga_server.config.models import (
 EXAMPLES = "../../vinga-server/examples"
 CONFIG_FILE = "../../vinga-server/config.example.yaml"
 
-# What schema generation cannot describe, and where it is described
-# instead. A provider entry passes every key beyond the declared ones
-# through to its implementation (`extra="allow"`), so no schema can
-# enumerate them until typed option models land.
+# What schema generation describes, what it cannot, and where the
+# remainder is described instead. A provider entry passes every key
+# beyond the declared ones through to its implementation
+# (`extra="allow"`), so a type that has not declared an option model yet
+# is one no schema can enumerate.
+#
+# The list of declared types is written here rather than read off the
+# registry, and the reason is an import edge: this module is what
+# `docgen` renders the reference from, and that rendering is held to
+# loading the models and this registry and nothing else, while the
+# provider registry sits inside a package that re-exports the whole
+# provider layer. So the sentence is prose, and
+# `test_config_entities.py` holds it to the registry's own answer, which
+# is the gate that keeps the two from drifting as the types convert
+# (#88).
 #
 # Two renderings of one claim, differing only in how they point at the
 # fragments: the reference lists them further down its own page, the
 # OpenAPI document has no page to point down. Built from one string, so
 # the two cannot come to say different things.
 _OPTIONS_CONTRACT = (
-    "A provider entry carries whatever options its `type` takes, and those are "
-    "passed through rather than declared, so no schema can list them. Until typed "
-    "option models land (#88) they are documented in the example fragments"
+    "A provider entry carries whatever options its `type` takes. A type that "
+    "declares an option model has them checked when the entry is written, refused "
+    "by name, and printed by `vinga-server config schema provider <stage> <type>`; "
+    "in the asr stage the faster_whisper type is declared that way. Every other "
+    "type has its options passed through rather than declared, so no schema can "
+    "list those, and until the rest are typed (#88) they are documented in the "
+    "example fragments"
 )
 _OPTIONS_WHERE = ", which is also where the measured numbers behind each default are kept."
 OPTIONS_NOTE = f"{_OPTIONS_CONTRACT} below{_OPTIONS_WHERE}"
