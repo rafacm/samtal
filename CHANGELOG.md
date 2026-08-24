@@ -29,9 +29,11 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   weakens the transport, bounded waits, and a grammar derived from the
   models it addresses. The practices were produced by an audit of four
   published guides (ThoughtWorks, clig.dev, Heroku, 12 Factor CLI
-  Apps), and the audit is committed with them: every guideline in every
-  source has a row saying adopted, adapted, owed, rejected or not
-  applicable, with the reason. A `--json` output flag is deferred, with
+  Apps), and the audit is committed with them: 153 rows covering every
+  guideline in every source, each carrying exactly one disposition from
+  a declared vocabulary of eight (adopted, adapted, owed, rejected,
+  deferred, split, tension recorded, not applicable) and the reason for
+  it. A `--json` output flag is deferred, with
   the case written out. Rules the CLI does not satisfy yet are marked
   owed rather than described as though they held: noun-verb itself,
   confirmation on destructive verbs, a progress line for the long
