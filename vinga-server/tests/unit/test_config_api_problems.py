@@ -221,6 +221,26 @@ REFUSALS = [
         ["/voice_settings"],
     ),
     Refusal(
+        "a passthrough key naming a field of the request",
+        "/providers/llm/local",
+        {
+            "type": "openai_compatible",
+            "base_url": "http://localhost:11434/v1",
+            "model": "qwen3:8b",
+            "messages": [{"role": "user", "content": SENTINEL}],
+        },
+        lambda store, fragment: store.set_provider("llm", "local", fragment),
+        "providers.llm.local",
+        # The escape-hatch type, whose model keeps what it does not
+        # declare. `messages` is the one thing it may not keep: the
+        # conversation is composed per request, and a key by that name
+        # would rewrite it rather than configure a server. The pointer
+        # names it because the reserved set is this repository's own
+        # seven words, published in the schema; what was written under
+        # it is the caller's and is nowhere.
+        ["/messages"],
+    ),
+    Refusal(
         "a filler switched on with no phrases",
         "/agents/sam",
         {"prompt": "You are Sam.", "filler": {"enabled": True}},
@@ -606,6 +626,17 @@ PLANTED_KEYS = [
             "voice_settings": {KEY_SENTINEL: 1},
         },
         lambda store, fragment: store.set_provider("tts", "voice", fragment),
+    ),
+    PlantedKey(
+        "a secret-shaped key a type's own model would have kept",
+        "/providers/llm/local",
+        {
+            "type": "openai_compatible",
+            "base_url": "http://localhost:11434/v1",
+            "model": "qwen3:8b",
+            KEY_SENTINEL: 1,
+        },
+        lambda store, fragment: store.set_provider("llm", "local", fragment),
     ),
     PlantedKey(
         "a secret-shaped key in an MCP server's env",

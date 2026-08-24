@@ -734,10 +734,24 @@ def test_a_provider_url_carrying_a_credential_is_refused(store: ConfigStore) -> 
     is read back on every display path and copied into the manifest of
     every capture and conversation record made against the provider, so
     it is refused where it is chosen."""
+    # `model` rides along on the openai_compatible fragments because that
+    # type declares its options now, and the options are checked before
+    # this rule is asked: a fragment missing a required field would be
+    # refused for the wrong reason and prove nothing about this one.
     refused = [
-        {"type": "openai_compatible", "base_url": f"https://user:{SECRET}@host/v1"},
-        {"type": "openai_compatible", "base_url": f"https://{SECRET}@host/v1"},
-        {"type": "openai_compatible", "base_url": f"https://host/v1?api_key={SECRET}"},
+        {"type": "openai_compatible", "model": "m", "base_url": f"https://user:{SECRET}@host/v1"},
+        {"type": "openai_compatible", "model": "m", "base_url": f"https://{SECRET}@host/v1"},
+        {"type": "openai_compatible", "model": "m", "base_url": f"https://host/v1?api_key={SECRET}"},
+        # And in a key that type does not declare at all, which is the
+        # question its escape hatch raises: an option nobody declared is
+        # kept and forwarded now, so the rules that read values rather
+        # than fields have to keep reading it (#88).
+        {
+            "type": "openai_compatible",
+            "model": "m",
+            "base_url": "https://host/v1",
+            "fallback_url": f"https://user:{SECRET}@other/v1",
+        },
         # An option can be a structure, so the rule looks at every depth.
         {"type": "mock", "connection": {"endpoint": f"https://user:{SECRET}@host"}},
         {"type": "mock", "endpoints": [f"https://user:{SECRET}@host"]},
@@ -761,7 +775,9 @@ def test_an_ordinary_provider_url_is_accepted(store: ConfigStore) -> None:
         "http://127.0.0.1:8080/v1?model=small",
         "ws://[2001:db8::1]:9000/stream",
     ):
-        store.set_provider("llm", "vendor", {"type": "openai_compatible", "base_url": base_url})
+        store.set_provider(
+            "llm", "vendor", {"type": "openai_compatible", "model": "m", "base_url": base_url}
+        )
         assert store.read_provider("llm", "vendor").entry.options["base_url"] == base_url
 
 
