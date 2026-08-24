@@ -253,7 +253,7 @@ def reference() -> str:
         "environment variable holding the value (`api_key_env` on a provider,",
         "`$NAME` in an MCP server's `env` or `headers`), and the models refuse",
         "anything else. The other form is a value encrypted in the database,",
-        "written with `vinga-server config set-secret`, which reads it from stdin",
+        "written with `vinga-server config <kind> secret set`, which reads it from stdin",
         "or from a named variable and never from an argument. A stored secret takes",
         "precedence over an environment reference for the same slot.",
         "",
@@ -640,7 +640,7 @@ def _sentence(description: str | None) -> str:
 # beside it. The files already name their own commands: each fragment
 # quotes the `set` that installs it, each preset quotes the `apply` that
 # writes it whole, and the ones that can hold a credential quote the
-# `set-secret` that fills the slot. Those quoted lines are the recipes,
+# `secret set` that fills the slot. Those quoted lines are the recipes,
 # collected and grouped, so a recipe cannot come to name a file that
 # moved or an entity name the file no longer uses.
 #
@@ -748,13 +748,18 @@ _SECRET_TOPIC = (
 # listed. Everything else is one of these three, and a command that is
 # none of them is a file quoting something this has never rendered,
 # which is a refusal rather than a line dropped on the floor.
-_TOPIC_VERBS: dict[str, str] = {
-    "apply": PRESET_DIR,
-    "bind-device": "devices",
-    "add-device": "devices",
-    "set-default-agent": "devices",
-    "clear-default-agent": "devices",
-    "set-secret": "secrets",
+# The commands that are not one kind's own write, as the words that name
+# them: a noun path and a verb, or one flat verb. Matched by longest
+# prefix, because the tree is not one depth and `device pending claim`
+# and `device bind` are the same topic reached at two.
+_TOPIC_COMMANDS: dict[tuple[str, ...], str] = {
+    ("apply",): PRESET_DIR,
+    ("device", "bind"): "devices",
+    ("device", "pending", "claim"): "devices",
+    ("default-agent", "set"): "devices",
+    ("default-agent", "clear"): "devices",
+    ("provider", "secret", "set"): "secrets",
+    ("mcp-server", "secret", "set"): "secrets",
 }
 
 
@@ -910,21 +915,22 @@ def _topic(source: Traversable, argv: str) -> str:
     """Which topic one quoted command belongs to.
 
     Read off the command itself rather than off the file it was found
-    in, because a fragment quotes the `set-secret` that fills its slot
+    in, because a fragment quotes the `secret set` that fills its slot
     as readily as the `set` that installs it, and the two belong under
     different headings.
     """
     from vinga_server.config.loader import ConfigError
 
-    words = argv.split()
-    if words[:1] == ["set"] and len(words) > 1:
+    words = tuple(argv.split())
+    if words[1:2] == ("set",):
         for candidate in COMMANDED:
-            if candidate.name == words[1]:
+            if candidate.name == words[0]:
                 return candidate.name
-    topic = _TOPIC_VERBS.get(words[0] if words else "")
-    if topic is None:
-        raise ConfigError(UNKNOWN_TOPIC.format(name=source.name))
-    return topic
+    for length in range(min(len(words), 3), 0, -1):
+        topic = _TOPIC_COMMANDS.get(words[:length])
+        if topic is not None:
+            return topic
+    raise ConfigError(UNKNOWN_TOPIC.format(name=source.name))
 
 
 def recipe_lines(program: str) -> list[str]:

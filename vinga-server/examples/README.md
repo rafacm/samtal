@@ -3,8 +3,8 @@
 Two tiers of file, for the two shapes a document can have.
 
 A **fragment** is the body of a single entity, in the shape
-`vinga-server config set` takes it: one file per entity or provider
-type. A **preset**, under [`presets/`](presets/), is a whole deployment
+`vinga-server config <noun> set` takes it: one file per entity or
+provider type. A **preset**, under [`presets/`](presets/), is a whole deployment
 in one document, in the shape `vinga-server config apply` takes it:
 several kinds at once, written in one transaction. Neither is a
 configuration the server reads. The domain half of the configuration
@@ -20,7 +20,7 @@ edit, run:
 
 ```bash
 vinga-server config apply -f examples/presets/local-stack.yaml
-vinga-server config set provider llm claude -f examples/llm-anthropic.yaml
+vinga-server config provider set llm claude -f examples/llm-anthropic.yaml
 ```
 
 Those headers are also where the recipes in
@@ -48,7 +48,7 @@ name is left alone, and the same document twice changes nothing.
   written and refused by name, and they are documented everywhere the
   fields are: a table per type in
   [`docs/reference/domain-config.md`](../../docs/reference/domain-config.md),
-  a component in the API document, the epilog of `config set provider`,
+  a component in the API document, the epilog of `config provider set`,
   and `vinga-server config schema provider <stage> <type>`. The types
   declared that way, as the stage and type that address one, are
   `llm openai_compatible`, `asr faster_whisper` and `tts elevenlabs`.
@@ -73,7 +73,7 @@ The other way to hold a credential is encrypted in the database, which
 never passes through a file at all:
 
 ```bash
-vinga-server config set-secret provider llm claude api_key
+vinga-server config provider secret set llm claude api_key
 ```
 
 The value is read from stdin (not echoed at a terminal) or from a named
@@ -105,6 +105,6 @@ the reference it displaces.
 | `agent.yaml` | `agents`, one agent |
 
 Devices and the default agent have no fragments: they are written with
-`config bind-device` and `config set-default-agent`, which take
+`config device bind` and `config default-agent set`, which take
 arguments rather than a document. A preset carries neither, because
 which board reaches which agent is the one thing a preset cannot know.

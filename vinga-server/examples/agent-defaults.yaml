@@ -1,7 +1,7 @@
 # What every agent uses unless it names something else. One entry for
 # the whole deployment, written like an agent without a prompt:
 #
-#   vinga-server config set agent-defaults -f examples/agent-defaults.yaml
+#   vinga-server config agent-defaults set -f examples/agent-defaults.yaml
 #
 # There is deliberately no prompt here. A prompt is what makes an agent
 # that agent, and inheriting one silently would make two agents the same

@@ -96,8 +96,8 @@ vinga() { docker exec -i vinga vinga-server "$@"; }
 vinga config apply -f - < vinga-server/examples/presets/local-stack.yaml
 
 # Which agent an unknown device reaches. Bind specific devices instead
-# with: vinga config bind-device aa:bb:cc:dd:ee:ff assistant
-vinga config set-default-agent assistant
+# with: vinga config device bind aa:bb:cc:dd:ee:ff assistant
+vinga config default-agent set assistant
 
 vinga config list
 ```
@@ -124,8 +124,8 @@ vinga doctor             # says what a device would be told, or what is wrong
 **7. Bind the board.** Step 2 set a `default_agent`, so any board that reaches the server is covered: press the button and talk. Leave it unset instead and an unbound board shows and speaks a six-digit code, and one command binds it; the device polls while it waits, so it connects seconds later.
 
 ```bash
-vinga config pending                       # which board is showing what
-vinga config add-device 418293 assistant   # bind the one showing 418293
+vinga config device pending list                     # which board is showing what
+vinga config device pending claim 418293 assistant   # bind the one showing 418293
 ```
 
 Every serial gotcha is in [`docs/xiaozhi-notes.md`](docs/xiaozhi-notes.md). vinga has no versioned releases yet: images are tagged `latest`, the build time (`2026-08-03-1200`, UTC), and the commit SHA (`sha-3f9362a`). Only `latest` moves; deploy from one of the other two.

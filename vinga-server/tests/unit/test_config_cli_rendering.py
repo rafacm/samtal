@@ -56,7 +56,7 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 def test_pending_lists_nothing_when_nothing_is_waiting(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert run("pending") == 0
+    assert run("device", "pending", "list") == 0
 
     assert capsys.readouterr().out.startswith("no device is waiting to be claimed")
 
@@ -69,7 +69,7 @@ def test_pending_lists_the_code_each_device_is_showing(
     first = _showing(run)
     second = _showing(run, "11:22:33:44:55:66")
 
-    assert run("pending") == 0
+    assert run("device", "pending", "list") == 0
 
     printed = capsys.readouterr().out
     assert printed.splitlines()[0].split() == ["code", "device", "board", "firmware", "expires"]
@@ -297,7 +297,7 @@ def test_prompt_prints_each_block_its_size_and_the_total(
     )
     monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: body)
 
-    assert run("prompt", "poet") == 0
+    assert run("agent", "preview", "poet") == 0
 
     printed = capsys.readouterr().out
     assert "persona (4 characters)" in printed
@@ -322,7 +322,7 @@ def test_prompt_never_truncates_a_block(
     )
     monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: body)
 
-    assert run("prompt", "poet") == 0
+    assert run("agent", "preview", "poet") == 0
 
     printed = capsys.readouterr().out
     assert tail in printed
@@ -341,7 +341,7 @@ def test_prompt_keeps_the_newlines_and_replaces_the_control_characters(
     body = _assembled(_prompt_block(text=text, characters=len(text)))
     monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: body)
 
-    assert run("prompt", "poet") == 0
+    assert run("agent", "preview", "poet") == 0
 
     printed = capsys.readouterr().out
     assert "first line\n\tindented?[31mred?" in printed
@@ -370,7 +370,7 @@ def test_prompt_sanitizes_a_published_prompts_name(
     )
     monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: body)
 
-    assert run("prompt", "poet") == 0
+    assert run("agent", "preview", "poet") == 0
 
     printed = capsys.readouterr().out
     assert "server_prompt:home:1 (8 characters), the server prompt named house?[31m_style" in (
@@ -384,7 +384,7 @@ def test_prompt_names_nothing_beside_a_block_that_has_no_name(
 ) -> None:
     monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: _assembled())
 
-    assert run("prompt", "poet") == 0
+    assert run("agent", "preview", "poet") == 0
 
     assert "persona (4 characters)\n" in capsys.readouterr().out
 
@@ -396,13 +396,13 @@ def test_prompt_says_what_the_server_answered_for_an_unserved_agent(
     operator to the reload that installs an agent."""
     run.runtime["agent_prompt"] = _previewing(_assembled())
 
-    assert run("prompt", "stranger") == 1
+    assert run("agent", "preview", "stranger") == 1
 
     assert "config reload" in capsys.readouterr().err
 
 
 def test_prompt_without_a_server_says_so(run, capsys: pytest.CaptureFixture[str]) -> None:
-    assert run("prompt", "poet") == 1
+    assert run("agent", "preview", "poet") == 1
 
     assert "no running server" in capsys.readouterr().err
 
@@ -427,7 +427,7 @@ def test_prompt_prints_nothing_from_an_answer_of_the_wrong_shape(
 ) -> None:
     monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: body)
 
-    assert run("prompt", "poet") == 1
+    assert run("agent", "preview", "poet") == 1
 
     captured = capsys.readouterr()
     assert cli.UNRECOGNIZED_ANSWER in captured.err

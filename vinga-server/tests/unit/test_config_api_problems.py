@@ -757,7 +757,7 @@ def test_the_cli_prints_the_same_sentence_for_a_problem_document(
 
     run = runner(tmp_path, monkeypatch)
 
-    assert run("set", "provider", "llm", "claude", "-f", "-", stdin="model: m\n") == 1
+    assert run("provider", "set", "llm", "claude", "-f", "-", stdin="model: m\n") == 1
 
     assert capsys.readouterr().err.rstrip("\n") == str(caught.value)
 
@@ -783,10 +783,7 @@ def test_the_cli_prints_a_typed_options_refusal_without_the_value(
 
     assert (
         run(
-            "set",
-            "provider",
-            "asr",
-            "ears",
+            "provider", "set", "asr", "ears",
             "-f",
             "-",
             stdin=f"type: faster_whisper\nbeam_size: {SENTINEL}\n",
@@ -830,10 +827,7 @@ def test_the_cli_prints_a_url_credential_refusal_without_the_key(
 
     assert (
         run(
-            "set",
-            "provider",
-            "llm",
-            "local",
+            "provider", "set", "llm", "local",
             "-f",
             "-",
             stdin=(

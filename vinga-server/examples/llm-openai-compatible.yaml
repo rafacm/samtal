@@ -1,7 +1,7 @@
 # The LLM stage on any endpoint that speaks the OpenAI chat completions
 # API: a local runner (Ollama, llama.cpp, vLLM) or a hosted gateway.
 #
-#   vinga-server config set provider llm local -f examples/llm-openai-compatible.yaml
+#   vinga-server config provider set llm local -f examples/llm-openai-compatible.yaml
 
 type: openai_compatible
 

@@ -208,7 +208,7 @@ def test_a_device_arriving_at_the_mint_budget_is_answered_as_it_was_before(
         assert body["websocket"]["token"] == ""
         assert "was offered no activation code" in caplog.text
         assert str(MINT_BUDGET) in caplog.text
-        assert "bind-device" in caplog.text
+        assert "device bind" in caplog.text
 
 
 def test_the_cap_names_itself_when_it_is_what_fired(
@@ -243,7 +243,7 @@ def test_the_code_is_logged_with_the_command_that_binds_it(
         with caplog.at_level(logging.WARNING):
             code = check_in(client)["activation"]["code"]
 
-        assert f"add-device {code}" in caplog.text
+        assert f"device pending claim {code}" in caplog.text
         record = next(one for one in caplog.records if one.__dict__.get("event") == "ota_check")
         assert record.__dict__["code"] == code
 

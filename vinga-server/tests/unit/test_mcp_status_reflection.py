@@ -166,7 +166,7 @@ def cli_prompt(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> str:
-    """`vinga-server config prompt assistant`, and everything it
+    """`vinga-server config agent preview assistant`, and everything it
     printed on either stream. The one command that prints whole blocks
     rather than a glimpse of them, which is what makes it the surface
     worth checking here."""
@@ -182,7 +182,7 @@ def cli_prompt(
         )
 
     monkeypatch.setattr(cli, "build_client", factory)
-    assert cli.main(["prompt", "assistant"]) == 0
+    assert cli.main(["agent", "preview", "assistant"]) == 0
     captured = capsys.readouterr()
     return captured.out + captured.err
 

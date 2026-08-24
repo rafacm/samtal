@@ -155,6 +155,13 @@ _HISTORICAL_PATHS = (
     "docs/adr/",
     "spikes/",
     "CHANGELOG.md",
+    # And the differential: its transcript is a capture of what the
+    # grammar answered on the commit before the rename, and the module
+    # beside it names, in the old spelling, exactly what the rename
+    # licensed to move. Respelling either would destroy the only thing
+    # they are for.
+    "vinga-server/tests/unit/data/cli-respelling.txt",
+    "vinga-server/tests/unit/test_config_cli_respelling.py",
 )
 
 # The CLI guide is the one page that is both. It states the standard in
@@ -321,7 +328,7 @@ def manifest() -> str:
 # names is `tests.support.config_cli.registered`, the one matcher the
 # live lane and the wheel lane read too; what this adds is the other
 # thing prose legitimately quotes, which is a group word with no verb
-# after it (`the vinga-server config set-secret commands`). A group is
+# after it (`the vinga-server config provider secret commands`). A group is
 # a node of the same tree, so it is read off the same table.
 
 

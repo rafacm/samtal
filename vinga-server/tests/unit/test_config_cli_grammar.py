@@ -64,11 +64,19 @@ def test_the_two_ways_to_bind_a_board_say_which_is_which(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A pair a person picks wrongly once and then remembers wrongly,
-    so each names what the other takes."""
-    help_text = printed_help(run, capsys)
+    so each names what the other takes.
 
-    assert "by the MAC you already know" in help_text
-    assert "showing this activation code" in help_text
+    They sit on two pages now rather than one, which is half the fix:
+    binding by a MAC is a verb of the board and claiming a code is a
+    verb of the boards that are waiting. The help text is the other
+    half, and it still points at the sibling from each side.
+    """
+    board = printed_help(run, capsys, "device")
+    waiting = printed_help(run, capsys, "device", "pending")
+
+    assert "by the MAC you already know" in board
+    assert "showing this activation code" in waiting
+    assert "use device bind when you know the MAC instead" in waiting
 
 
 def test_a_mistake_in_the_grammar_exits_one_like_every_other_failure(
@@ -80,7 +88,7 @@ def test_a_mistake_in_the_grammar_exits_one_like_every_other_failure(
     for argv in (
         ("nonsense",),
         (),
-        ("set", "provider", "llm"),
+        ("provider", "set", "llm"),
         ("show", "provider"),
         ("list", "--nope"),
     ):
@@ -95,7 +103,7 @@ def test_an_extra_argument_is_refused_without_echoing_it(
 ) -> None:
     """The mistake this covers is typing the secret after the slot,
     which is where Click would otherwise echo it back."""
-    assert run("set-secret", "provider", "llm", "claude", "api_key", SECRET) == 1
+    assert run("provider", "secret", "set", "llm", "claude", "api_key", SECRET) == 1
 
     captured = capsys.readouterr()
     assert "unrecognized extra arguments" in captured.err
@@ -126,7 +134,7 @@ def test_asking_for_help_is_not_a_failure(run, capsys: pytest.CaptureFixture[str
 # `__suppress_context__`, which stops a traceback being printed and
 # leaves `__context__` exactly where it was, so the leak survives every
 # assertion made about a stream.
-HELPED = [("the group",), ("show",), ("set", "provider"), ("schema",)]
+HELPED = [("the group",), ("provider",), ("provider", "secret"), ("schema",)]
 
 
 @pytest.mark.parametrize(
@@ -135,9 +143,9 @@ HELPED = [("the group",), ("show",), ("set", "provider"), ("schema",)]
 def test_asking_for_help_carries_no_library_exception_with_it(
     run, capsys: pytest.CaptureFixture[str], words: tuple[str, ...]
 ) -> None:
-    """At the root and at a leaf, and at the one group word that is also
-    a command: help leaves through exit 0 with both chain slots empty,
-    so nothing walking the chain finds a Typer exception behind it."""
+    """At the root, at a noun, at a sub-noun and at a leaf: help leaves
+    through exit 0 with both chain slots empty, so nothing walking the
+    chain finds a Typer exception behind it."""
     asked = () if words == ("the group",) else words
 
     with pytest.raises(SystemExit) as caught:
@@ -172,7 +180,7 @@ def test_asking_for_help_carries_no_library_exception_with_it(
 PLANTED: list[tuple[str, tuple[str, ...], str]] = [
     (
         "an argument too many",
-        ("set-secret", "provider", "llm", "claude", "api_key", SECRET),
+        ("provider", "secret", "set", "llm", "claude", "api_key", SECRET),
         "unrecognized extra arguments",
     ),
     ("a command that is not one", (SECRET,), "that is not a command"),
@@ -183,15 +191,15 @@ PLANTED: list[tuple[str, tuple[str, ...], str]] = [
     ),
     (
         "an option with no value",
-        ("set-secret", "provider", "llm", SECRET, "api_key", "--from-env"),
+        ("provider", "secret", "set", "llm", SECRET, "api_key", "--from-env"),
         "an option was given without its value",
     ),
     (
         "an argument that is missing",
-        ("set-secret", "provider", "llm", SECRET),
+        ("provider", "secret", "set", "llm", SECRET),
         "a required argument is missing",
     ),
-    ("a command that is missing", ("set",), "a command is missing"),
+    ("a command that is missing", ("provider",), "a command is missing"),
 ]
 
 

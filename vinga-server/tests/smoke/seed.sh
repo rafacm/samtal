@@ -26,35 +26,35 @@ trap on_interrupt INT
 trap on_terminate TERM
 start_server
 
-vinga-server config set provider llm mock -f - <<'YAML'
+vinga-server config provider set llm mock -f - <<'YAML'
 type: mock
 reply: "You said {text}."
 YAML
 
-vinga-server config set provider asr mock -f - <<'YAML'
+vinga-server config provider set asr mock -f - <<'YAML'
 type: mock
 text: hello
 YAML
 
-vinga-server config set provider tts mock -f - <<'YAML'
+vinga-server config provider set tts mock -f - <<'YAML'
 type: mock
 YAML
 
-vinga-server config set provider vad mock -f - <<'YAML'
+vinga-server config provider set vad mock -f - <<'YAML'
 type: mock
 YAML
 
-vinga-server config set agent-defaults -f - <<'YAML'
+vinga-server config agent-defaults set -f - <<'YAML'
 llm: mock
 asr: mock
 tts: mock
 vad: mock
 YAML
 
-vinga-server config set agent assistant -f - <<'YAML'
+vinga-server config agent set assistant -f - <<'YAML'
 prompt: A smoke test assistant.
 YAML
 
-vinga-server config set-default-agent assistant
+vinga-server config default-agent set assistant
 
 stop_server

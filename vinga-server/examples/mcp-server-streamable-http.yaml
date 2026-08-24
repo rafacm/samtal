@@ -3,7 +3,7 @@
 # transport's fields (a `command` here) is an error rather than a
 # silently ignored key.
 #
-#   vinga-server config set mcp-server weather -f examples/mcp-server-streamable-http.yaml
+#   vinga-server config mcp-server set weather -f examples/mcp-server-streamable-http.yaml
 #
 # The entry name is what its tools are prefixed with in the merged tool
 # list (`weather__forecast`), so it must be a plain [A-Za-z0-9_-]+ name
@@ -21,7 +21,7 @@ url: http://localhost:8000/mcp
 # and any secret-bearing key must use that form. The encrypted
 # alternative addresses the same slot by its dotted path:
 #
-#   vinga-server config set-secret mcp-server weather headers.Authorization
+#   vinga-server config mcp-server secret set weather headers.Authorization
 #
 headers:
   Authorization: $WEATHER_TOKEN
@@ -56,7 +56,7 @@ instructions: |
 #
 # Whatever comes in this way is capped at 4000 characters per block,
 # skipped whole rather than truncated if it is longer, and reported by
-# `vinga-server config prompt <agent>` under its own provenance, so you
+# `vinga-server config agent preview <agent>` under its own provenance, so you
 # can see whose words are in the prompt and what they cost.
 
 # The handshake channel. Turning this on applies at the next reload

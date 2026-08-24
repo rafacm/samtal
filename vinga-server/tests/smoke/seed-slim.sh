@@ -28,38 +28,38 @@ trap on_interrupt INT
 trap on_terminate TERM
 start_server
 
-vinga-server config set provider llm claude -f - <<'YAML'
+vinga-server config provider set llm claude -f - <<'YAML'
 type: anthropic
 api_key_env: ANTHROPIC_API_KEY
 model: claude-sonnet-4-5
 YAML
 
-vinga-server config set provider asr cloud -f - <<'YAML'
+vinga-server config provider set asr cloud -f - <<'YAML'
 type: openai
 api_key_env: OPENAI_API_KEY
 YAML
 
-vinga-server config set provider tts cloud -f - <<'YAML'
+vinga-server config provider set tts cloud -f - <<'YAML'
 type: openai
 api_key_env: OPENAI_API_KEY
 voice: alloy
 YAML
 
-vinga-server config set provider vad silero -f - <<'YAML'
+vinga-server config provider set vad silero -f - <<'YAML'
 type: silero
 YAML
 
-vinga-server config set agent-defaults -f - <<'YAML'
+vinga-server config agent-defaults set -f - <<'YAML'
 llm: claude
 asr: cloud
 tts: cloud
 vad: silero
 YAML
 
-vinga-server config set agent assistant -f - <<'YAML'
+vinga-server config agent set assistant -f - <<'YAML'
 prompt: A slim-image boot check.
 YAML
 
-vinga-server config set-default-agent assistant
+vinga-server config default-agent set assistant
 
 stop_server

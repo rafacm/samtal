@@ -236,7 +236,7 @@ this ceremony.
   onboarding URL through its portal, showed the server host over a
   6-digit code, polled in the documented 3-second bursts, and went from
   code-on-screen to activated in 36 seconds after a live
-  `config add-device`, with no server restart, no power cycle, and no
+  `config device pending claim`, with no server restart, no power cycle, and no
   button press. The stock-firmware Touch-LCD-1.54 (2.4.0), pointed at
   the same server over USB-written NVS, ran the identical ceremony
   through the restart flow (its agent was created after boot). The one

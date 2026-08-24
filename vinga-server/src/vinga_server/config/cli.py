@@ -201,7 +201,7 @@ UNREADABLE_WRITE = (
 # rather than a mapping: the mask is not a value that could be written
 # back, and saying so in the document is more honest than rendering it
 # as though it could.
-SECRETS_HEADING = "# stored secrets, set with: vinga-server config set-secret"
+SECRETS_HEADING = f"# stored secrets, set with: {PROGRAM} <kind> secret set"
 
 # The pending listing's columns. Headings a person reads rather than
 # field names: what the body has to carry to be read as a listing at all
@@ -209,9 +209,9 @@ SECRETS_HEADING = "# stored secrets, set with: vinga-server config set-secret"
 PENDING_COLUMNS = ("code", "device", "board", "firmware", "expires")
 
 NOTHING_CONFIGURED = (
-    "this server has no MCP servers configured. An entry is written with "
-    "`vinga-server config set mcp-server`, and an agent reaches it by naming it in "
-    "its mcp list"
+    f"this server has no MCP servers configured. An entry is written with "
+    f"`{PROGRAM} mcp-server set`, and an agent reaches it by naming it in "
+    f"its mcp list"
 )
 
 NOTHING_APPLIED = (
@@ -231,7 +231,7 @@ OTA_URL_GUIDANCE = (
     "Type this into the device's captive portal, under its advanced settings, as the "
     "server address. If the board then shows a six-digit activation code, it has no "
     "agent yet: bind "
-    "it with vinga-server config add-device <code> <agent>. A deployment with "
+    f"it with {PROGRAM} device pending claim <code> <agent>. A deployment with "
     "default_agent set covers every board already, so its boards show no code and start "
     "talking as soon as they connect."
 )
@@ -305,7 +305,7 @@ def _parsed(argv: Sequence[str]) -> None:
 # with a did-you-mean built from it, a bad value is repeated back, an
 # unknown command names the word. A secret is never an argument of this
 # CLI, and the mistake that would make one (typing the value after
-# `set-secret ... api_key`) lands in exactly those sentences, so none of
+# `provider secret set ... api_key`) lands in exactly those sentences, so none of
 # them is passed through. Each shape gets a fixed sentence of this
 # grammar's own, and a shape not recognized gets the vague one, because
 # a message this code has not seen is a message that may carry a value.
@@ -338,8 +338,8 @@ _USAGE_PROBLEMS: tuple[tuple[type[BaseException], str], ...] = (
 # built never to see: typing the secret after the slot is where an
 # operator meets this, and where Click would have quoted it back.
 SECRET_NEVER_AN_ARGUMENT = (
-    "unrecognized extra arguments. A secret is never given as an argument: set-secret "
-    "reads it from stdin, or from the variable named with --from-env"
+    "unrecognized extra arguments. A secret is never given as an argument: a secret "
+    "set reads it from stdin, or from the variable named with --from-env"
 )
 
 _USAGE_SHAPES: tuple[tuple[str, str], ...] = (
@@ -412,8 +412,10 @@ class Invocation:
     slot: str = ""
 
     # Which kind of entity a command that covers two of them was asked
-    # about: the word under `set-secret` and `clear-secret`, which is
-    # what decides where a credential is addressed.
+    # about, which is what decides where a credential is addressed. Read
+    # off the row rather than off the words, because a command's noun
+    # path and the kind it addresses are not the same thing once the
+    # tree is more than two words deep.
     kind: str = ""
 
     # The rest of what a command can carry: the agents a binding names,
@@ -948,7 +950,7 @@ def _permitted(url: str, source: str) -> Address:
 
     The bearer token crosses every request and grants everything the API
     can do, secret writes included, so loopback-or-TLS is the rule for
-    the whole client rather than a set-secret footnote. There is
+    the whole client rather than a secret-write footnote. There is
     deliberately no flag to override it: such a flag's only purpose would
     be sending the token in clear.
 
@@ -980,7 +982,7 @@ def _permitted(url: str, source: str) -> Address:
         raise ConfigError(
             f"{source} names {shown}, a plain http:// connection to a host that is not "
             f"a loopback address (127.0.0.1, ::1 or localhost), and the bearer token "
-            f"would cross it in clear along with anything set-secret sends. Use "
+            f"would cross it in clear along with anything a secret write sends. Use "
             f"https://, put a TLS-terminating tunnel in front, or exec into the "
             f"running container and reach the API on loopback. There is deliberately "
             f"no flag to override this."
@@ -1171,7 +1173,7 @@ EXPORT_HEADER = f"""\
 # `{PROGRAM} apply` takes. Reproduce it in two steps, in this order:
 #
 #   1. {PROGRAM} apply -f <this file>
-#   2. the set-secret commands at the foot of this file, if any
+#   2. the secret set commands at the foot of this file, if any
 #
 # A stored credential never travels in a read, which is what the second
 # step is for. Applying is additive: a section this document does not
@@ -1184,11 +1186,11 @@ EXPORT_SECRETS_HEADING = (
 
 EXPORT_SLOTS_HEADING = (
     "# Stored credentials are not exported. These slots hold one, and each is entered\n"
-    f"# with `{PROGRAM} set-secret`:"
+    f"# with `{PROGRAM} <kind> secret set`:"
 )
 
 # Which kind holds a stored secret of each addressable kind, read off
-# the registry: the word a `set-secret` command takes and the parameters
+# the registry: the noun a secret command sits under and the parameters
 # that address one entry of it are the descriptor's, so the command an
 # annotation names cannot come to disagree with the command that exists.
 _SECRET_HOLDER: dict[str, entities.EntityDescriptor] = {
@@ -1228,7 +1230,7 @@ def _set_secret_words(stored: Mapping[str, object]) -> list[str]:
     `--` after the command's own words, and it is not decoration.
     Nothing about a name forbids a leading dash: the write path refuses
     a slash and a control character, and `--from-env` is a legal
-    provider name that a `set-secret` would otherwise read as an option
+    provider name that a secret write would otherwise read as an option
     and refuse. The marker is the shape an operator has to use to write
     such a name in the first place, so the exported command is the
     command they typed.
@@ -1236,8 +1238,9 @@ def _set_secret_words(stored: Mapping[str, object]) -> list[str]:
     holder = _SECRET_HOLDER[str(stored["kind"])]
     return [
         *PROGRAM.split(),
-        "set-secret",
         holder.name,
+        "secret",
+        "set",
         "--",
         *addressed(holder, str(stored["identity"])),
         str(stored["slot"]),
@@ -1638,14 +1641,14 @@ def _mcp_server_summary(body: Mapping[str, object]) -> str:
 def _prompt_fragment_summary(body: Mapping[str, object]) -> str:
     """The size rather than the text: this is the tree, and what an
     operator reads it for is which fragments exist and what each of them
-    costs the prompt budget. `show prompt-fragment` prints one whole,
-    and `prompt <agent>` prints what an agent adds up to."""
+    costs the prompt budget. `prompt-fragment show` prints one whole,
+    and `agent preview <name>` prints what an agent adds up to."""
     return f" ({len(str(body.get('text', '')))} characters)"
 
 
 def _agent_summary(body: Mapping[str, object]) -> str:
     """What the agent overrides, which is its body without the prompt:
-    that is what the line has room for, and `show agent` is where the
+    that is what the line has room for, and `agent show` is where the
     prompt is read."""
     layer = {key: value for key, value in body.items() if key != "prompt"}
     return f": {_inline(layer)}" if layer else ""
@@ -2522,8 +2525,8 @@ PAIRS_HELP = (
 # the reason an inline value is the wrong place for one even when the
 # key would have been accepted.
 SECRET_NOT_A_PAIR = (
-    "A credential is never a key=value argument: arguments land in shell history and "
-    "in the process list. Store one with `vinga-server config set-secret`, which reads "
+    f"A credential is never a key=value argument: arguments land in shell history and "
+    f"in the process list. Store one with `{PROGRAM} <kind> secret set`, which reads "
     "it from stdin or from the variable --from-env names, and never echoes it."
 )
 
@@ -2607,9 +2610,18 @@ class Command:
     """One command of the grammar."""
 
     # Where it sits: the words that name it, root first. One word is a
-    # command of the group itself, two is a command under one of the
-    # groups named in `GROUPS`.
+    # command of the group itself; anything longer is a command under
+    # the noun path its leading words name, and every such path is a
+    # key of `GROUPS`.
     words: tuple[str, ...]
+
+    # Which entity kind it addresses, for the commands that cover more
+    # than one. An explicit fact rather than a position in `words`: a
+    # provider's secret rows are three words deep and their kind is the
+    # first of them, while `device pending claim` is three words deep
+    # and its kind is the device the first word names, so no positional
+    # rule reads both correctly.
+    kind: str = ""
 
     # What it does. An act is a request to the configuration API; the
     # commands that reach no API carry their own function instead.
@@ -2702,9 +2714,8 @@ def _invocation(
         config=resolved.config,
         api_url=resolved.api_url,
         # Which kind a command that covers several of them was asked
-        # about is its last word, which is the same string the registry
-        # keys that kind under.
-        kind=row.words[-1] if len(row.words) > 1 else "",
+        # about, declared on the row: see `Command.kind`.
+        kind=row.kind,
         **addressed,
     )
 
@@ -3043,28 +3054,6 @@ def _rendered(row: Command) -> Callable[..., None]:
     return run
 
 
-def _whole_or_one(row: Command) -> Callable[..., None]:
-    """The one group word that is also a command: `show` alone is the
-    whole configuration, `show <kind>` is one entity.
-
-    Its options are accepted in its own position either way, so when a
-    kind follows they are folded into what the command under it reads
-    rather than acted on here.
-    """
-
-    def run(
-        context: typer.Context,
-        config: ConfigOption = None,
-        api_url: ApiUrlOption = None,
-    ) -> None:
-        if context.invoked_subcommand is not None:
-            context.obj = _resolved(context).merged(config=config, api_url=api_url)
-            return
-        row.perform(_invocation(row, context, config, api_url))
-
-    return run
-
-
 # What a command listing says about one entity kind's command: the verb,
 # and where in the configuration document the kind lives. Read off the
 # descriptor, so a kind cannot come to be described one way in the help
@@ -3096,88 +3085,224 @@ def _set_epilog(name: str) -> str:
     return "\n".join([*warning, "", docgen.fragment_help(name)])
 
 
-# The four groups that are only groups, and the one that is also a
-# command. A group's own help is the one fact a leaf row cannot carry,
-# so it is stated here; everything else about the shape of the tree is
-# derived from the words in the table below.
-GROUPS: dict[str, str] = {
-    "set": "create or replace one entity, from a YAML fragment or from key=value arguments",
-    "delete": "delete one entity",
-    "set-secret": "store one credential, encrypted, read from stdin or a variable",
-    "clear-secret": "remove one stored credential",
-    "show": "everything, or one entity",
-    "export": "the stored configuration as a document apply takes, or one entity's fragment",
+# The groups of the tree, keyed by the noun path they sit at
+#
+# A group's own help is the one fact a leaf row cannot carry, so it is
+# stated here; everything else about the shape of the tree is derived
+# from the words in the table below, which is what makes a three-word
+# row a row rather than a special case.
+#
+# The five entity nouns are derived, through the same `_about` the rows'
+# own help comes from, so a new kind arrives as a noun carrying its four
+# verbs rather than as five edits. What stays written out is what the
+# registry cannot supply: the device, the boards waiting under it, the
+# default agent, and the two secret sub-nouns.
+#
+# A sub-noun is not invented per command. A path segment followed by an
+# identity of its own is a sub-noun (`/providers/{stage}/{name}/secrets/
+# {slot}`, `/devices/pending/{code}`); a trailing segment with no
+# identity after it is an attribute of its parent, and reading one is a
+# verb on the parent, which is what `agent preview` is.
+GROUPS: dict[tuple[str, ...], str] = {
+    **{(kind.name,): _about("read and write", kind) for kind in entities.ENTITIES},
+    ("provider", "secret"): "credentials stored on providers.<stage>.<name>",
+    ("mcp-server", "secret"): "credentials stored on mcp_servers.<name>",
+    ("device",): "read and write devices.<mac>, which agents a board reaches",
+    ("device", "pending"): "the boards waiting to be claimed, and claiming one",
+    ("default-agent",): "the agent an unbound device reaches",
 }
 
 
-COMMANDS: tuple[Command, ...] = (
-    *(
+def _entity_rows(kind: entities.EntityDescriptor) -> tuple[Command, ...]:
+    """One entity kind's four verbs, in the order a reader meets them.
+
+    Built from the descriptor rather than written out, which is the
+    whole of what noun first buys here: a kind that arrives in the
+    registry arrives in the grammar with a page per verb, and none of
+    the four can come to be described one way in the help and another
+    way in the reference.
+    """
+    addressed_write = _staged_write if kind.addressing == ("stage", "name") else (
+        _named_write if kind.addressing else _written
+    )
+    addressed_read = _staged if kind.addressing == ("stage", "name") else (
+        _named if kind.addressing else _plain
+    )
+    rows = [
         Command(
-            words=("set", kind.name),
+            words=(kind.name, "set"),
+            kind=kind.name,
             does=SET_ENTITY[kind.name],
-            declare=_staged_write if kind.addressing == ("stage", "name") else (
-                _named_write if kind.addressing else _written
-            ),
+            declare=addressed_write,
             help=_about("create or replace", kind),
             epilog=_set_epilog(kind.name),
-        )
-        for kind in entities.ENTITIES
-    ),
-    *(
+        ),
         Command(
-            words=("delete", kind.name),
-            does=DELETE_ENTITY[kind.name],
-            declare=_staged if kind.addressing == ("stage", "name") else _named,
-            help=_about("delete", kind),
+            words=(kind.name, "show"),
+            kind=kind.name,
+            does=SHOW_ENTITY[kind.name],
+            declare=addressed_read,
+            help=_about("print", kind),
+        ),
+        Command(
+            words=(kind.name, "export"),
+            kind=kind.name,
+            does=EXPORT_ENTITY[kind.name],
+            declare=addressed_read,
+            help=_about("export", kind),
+        ),
+    ]
+    if kind.has_delete:
+        rows.append(
+            Command(
+                words=(kind.name, "delete"),
+                kind=kind.name,
+                does=DELETE_ENTITY[kind.name],
+                declare=addressed_read,
+                help=_about("delete", kind),
             )
-        for kind in entities.ENTITIES
-        if kind.has_delete
+        )
+    return tuple(rows)
+
+
+COMMANDS: tuple[Command, ...] = (
+    *(row for kind in entities.ENTITIES for row in _entity_rows(kind)),
+    # A stored credential is addressed under the entity that holds it,
+    # in the slot it fills, and `secrets` is followed by `{slot}` on the
+    # API, so it is a sub-noun of the kind rather than a verb of it.
+    Command(
+        words=("provider", "secret", "set"),
+        kind="provider",
+        does=SET_SECRET,
+        declare=_provider_secret,
+        help="store a credential on providers.<stage>.<name>",
     ),
     Command(
-        words=("delete", "device"),
-        does=DELETE_DEVICE,
-        declare=_by_mac,
-        help="delete devices.<mac>, so the board it names reaches the default agent",
+        words=("provider", "secret", "clear"),
+        kind="provider",
+        does=CLEAR_SECRET,
+        declare=_provider_slot,
+        help="remove a stored credential from providers.<stage>.<name>",
     ),
+    Command(
+        words=("mcp-server", "secret", "set"),
+        kind="mcp-server",
+        does=SET_SECRET,
+        declare=_mcp_secret,
+        help="store a credential on mcp_servers.<name>",
+    ),
+    Command(
+        words=("mcp-server", "secret", "clear"),
+        kind="mcp-server",
+        does=CLEAR_SECRET,
+        declare=_mcp_slot,
+        help="remove a stored credential from mcp_servers.<name>",
+    ),
+    # The read of the running server that belongs to one agent: what is
+    # stored is `agent show`, and what a new session would be sent is
+    # this. A verb rather than the noun `prompt`, because a noun in the
+    # verb slot reads as a possessive and hides what the command does.
+    Command(
+        words=("agent", "preview"),
+        kind="agent",
+        does=PROMPT,
+        declare=_named,
+        help=(
+            "the system prompt a new session as this agent would be sent, block by "
+            "block with the size of each and the total; a conversation already running "
+            "holds what it assembled when it started"
+        ),
+    ),
+    # The device is a noun the registry does not describe: a binding is
+    # a domain-level field written with verbs of its own rather than
+    # from a fragment.
+    #
     # Two ways to bind a board, and which one an operator wants depends
     # on what they are holding: a MAC they already know, or a device in
-    # front of them showing six digits. The help text says exactly that,
-    # because the pair is otherwise the kind of thing a person picks
-    # wrongly once and then remembers wrongly.
+    # front of them showing six digits. Two verbs of one noun now, on
+    # two different sub-nouns, so the pair is told apart by what it
+    # addresses rather than by its help text alone.
     Command(
-        words=("bind-device",),
+        words=("device", "bind"),
+        kind="device",
         does=BIND_DEVICE,
         declare=_bound_by_mac,
         help="bind a device by the MAC you already know, to one or more agents",
     ),
     Command(
-        words=("add-device",),
+        words=("device", "show"),
+        kind="device",
+        does=SHOW_DEVICE,
+        declare=_by_mac,
+        help="print devices.<mac>: the agents that board is bound to",
+    ),
+    Command(
+        words=("device", "delete"),
+        kind="device",
+        does=DELETE_DEVICE,
+        declare=_by_mac,
+        help="delete devices.<mac>, so the board it names reaches the default agent",
+    ),
+    Command(
+        words=("device", "pending", "list"),
+        kind="device",
+        does=PENDING,
+        declare=_plain,
+        help="the devices showing an activation code, and the code each is showing",
+    ),
+    Command(
+        words=("device", "pending", "claim"),
+        kind="device",
         does=ADD_DEVICE,
         declare=_bound_by_code,
         help=(
             "bind the device showing this activation code, which is the six digits on "
-            "its screen; use bind-device when you know the MAC instead"
+            "its screen; use device bind when you know the MAC instead"
         ),
     ),
+    # The setting that is a noun with two verbs. `<name>` is payload
+    # rather than address: `/default-agent` has no path parameter.
+    Command(
+        words=("default-agent", "set"),
+        does=SET_DEFAULT_AGENT,
+        declare=_named,
+        help="the agent an unbound device reaches",
+    ),
+    Command(
+        words=("default-agent", "clear"),
+        does=CLEAR_DEFAULT_AGENT,
+        declare=_plain,
+        help="unset it, leaving the devices map as the allowlist",
+    ),
+    # The flat verbs: their subject is the whole deployment, or nothing
+    # stored at all. Inventing a noun to put in front of them would
+    # invent a word for the thing the program is already about.
+    #
     # The one write that carries the whole configuration. Its own row
-    # rather than a flag on `set`, because what it takes is a document
-    # and what it promises is one transaction over all of it.
+    # rather than a flag on a noun's `set`, because what it takes is a
+    # document and what it promises is one transaction over all of it.
     Command(
         words=("apply",),
         does=APPLY,
         declare=_applied_document,
         help=(
-            "write a whole document: every entity, binding and setting it names, in one "
-            "transaction, refused whole if anything in it will not resolve. Applying is "
-            "additive and never deletes, and the same document twice changes nothing. "
-            "This waits for the server's answer however long the transaction takes"
+            "write a whole document in one transaction, refused whole if anything in "
+            "it will not resolve; additive, never deleting, and waiting for the "
+            "server's answer however long the transaction takes"
         ),
     ),
+    Command(words=("list",), does=LIST, declare=_plain, help="a summary tree"),
     Command(
-        words=("pending",),
-        does=PENDING,
+        words=("show",),
+        does=SHOW_ALL,
         declare=_plain,
-        help="the devices showing an activation code, and the code each is showing",
+        help="print the whole stored configuration, with its stored secrets masked",
+    ),
+    Command(
+        words=("export",),
+        does=EXPORT_ALL,
+        declare=_plain,
+        help="the stored configuration as a document apply takes",
     ),
     # A read of the running server rather than of the database: there is
     # no state to report when there is no server to ask.
@@ -3189,19 +3314,6 @@ COMMANDS: tuple[Command, ...] = (
             "what each configured MCP server is doing on the running server: connected, "
             "down, or unused because no agent references it, since when, and which "
             "tools it published"
-        ),
-    ),
-    # The other read of the running server, and the one that answers
-    # what the model is actually given: the configuration says what an
-    # agent is made of, and this says what that adds up to.
-    Command(
-        words=("prompt",),
-        does=PROMPT,
-        declare=_named,
-        help=(
-            "the system prompt a new session as this agent would be sent, block by "
-            "block with the size of each and the total; a conversation already running "
-            "holds what it assembled when it started"
         ),
     ),
     # The one command that changes what the server is doing rather than
@@ -3226,48 +3338,11 @@ COMMANDS: tuple[Command, ...] = (
             "configuration and the device-auth secret, and it contacts nothing"
         ),
     ),
-    Command(
-        words=("set-default-agent",),
-        does=SET_DEFAULT_AGENT,
-        declare=_named,
-        help="the agent an unbound device reaches",
-    ),
-    Command(
-        words=("clear-default-agent",),
-        does=CLEAR_DEFAULT_AGENT,
-        declare=_plain,
-        help="unset it, leaving the devices map as the allowlist",
-    ),
-    Command(
-        words=("set-secret", "provider"),
-        does=SET_SECRET,
-        declare=_provider_secret,
-        help="store a credential on providers.<stage>.<name>",
-    ),
-    Command(
-        words=("set-secret", "mcp-server"),
-        does=SET_SECRET,
-        declare=_mcp_secret,
-        help="store a credential on mcp_servers.<name>",
-    ),
-    Command(
-        words=("clear-secret", "provider"),
-        does=CLEAR_SECRET,
-        declare=_provider_slot,
-        help="remove a stored credential from providers.<stage>.<name>",
-    ),
-    Command(
-        words=("clear-secret", "mcp-server"),
-        does=CLEAR_SECRET,
-        declare=_mcp_slot,
-        help="remove a stored credential from mcp_servers.<name>",
-    ),
-    Command(words=("list",), does=LIST, declare=_plain, help="a summary tree"),
     # Read-only and offline: these three render the models and the
     # API's own routes, so they take no --config, open no database,
     # reach no server and need no encryption key. Keep it that way: the
-    # documentation lane runs `config reference` and `config openapi`
-    # from a plain sync, with no database, no key and no token anywhere.
+    # documentation lane runs `reference` and `openapi` from a plain
+    # sync, with no database, no key and no token anywhere.
     Command(
         words=("schema",),
         does=_schema,
@@ -3295,55 +3370,12 @@ COMMANDS: tuple[Command, ...] = (
             "example fragments, and every command's own help page"
         ),
     ),
-    Command(
-        words=("show",),
-        does=SHOW_ALL,
-        declare=_whole_or_one,
-        help=GROUPS["show"],
-    ),
-    *(
-        Command(
-            words=("show", kind.name),
-            does=SHOW_ENTITY[kind.name],
-            declare=_staged if kind.addressing == ("stage", "name") else (
-                _named if kind.addressing else _plain
-            ),
-            help=_about("print", kind),
-            )
-        for kind in entities.ENTITIES
-    ),
-    Command(
-        words=("show", "device"),
-        does=SHOW_DEVICE,
-        declare=_by_mac,
-        help="print devices.<mac>: the agents that board is bound to",
-    ),
-    # The writable projection of the same reads. `show` is the display
-    # one and this is the one that goes back in, which is the whole
-    # difference between them: what this adds to a read is the header
-    # saying how to reproduce the deployment and the credentials named
-    # as the commands that enter them.
-    Command(
-        words=("export",),
-        does=EXPORT_ALL,
-        declare=_whole_or_one,
-        help=GROUPS["export"],
-    ),
-    *(
-        Command(
-            words=("export", kind.name),
-            does=EXPORT_ENTITY[kind.name],
-            declare=_staged if kind.addressing == ("stage", "name") else (
-                _named if kind.addressing else _plain
-            ),
-            help=_about("export", kind),
-        )
-        for kind in entities.ENTITIES
-    ),
 )
 
 
-# The order a reader meets the commands in, which is the table's own.
+# The order a reader meets the top level in, which is the table's own:
+# the nouns in the registry's order, then the device and the default
+# agent, then the flat verbs.
 _ORDER = tuple(dict.fromkeys(row.words[0] for row in COMMANDS))
 
 
@@ -3371,13 +3403,13 @@ def command() -> TyperGroup:
         rich_markup_mode=None,
     )
     app.callback()(_root)
-    groups = {word: typer.Typer(no_args_is_help=False, rich_markup_mode=None) for word in GROUPS}
+    # One group per noun path, built before anything is attached, so a
+    # row three words deep finds the group its leading words name rather
+    # than being registered under the first of them with the word in the
+    # middle discarded.
+    groups = {path: typer.Typer(no_args_is_help=False, rich_markup_mode=None) for path in GROUPS}
     for row in COMMANDS:
-        declared = row.declare(row)
-        if len(row.words) == 1 and row.words[0] in groups:
-            groups[row.words[0]].callback(invoke_without_command=True)(declared)
-            continue
-        under = groups[row.words[0]] if len(row.words) > 1 else app
+        under = groups[row.words[:-1]] if len(row.words) > 1 else app
         under.command(
             row.words[-1],
             cls=_Verbatim,
@@ -3389,14 +3421,14 @@ def command() -> TyperGroup:
             # than a truncation of it.
             short_help=row.help,
             epilog=row.epilog,
-        )(declared)
-    for word, described in GROUPS.items():
-        app.add_typer(
-            groups[word],
-            name=word,
-            help=described,
-            short_help=described,
-            invoke_without_command=any(row.words == (word,) for row in COMMANDS),
+        )(row.declare(row))
+    # Deepest first, so a sub-noun is attached to its parent before that
+    # parent is attached to the tree above it.
+    for path in sorted(GROUPS, key=len, reverse=True):
+        described = GROUPS[path]
+        above = groups[path[:-1]] if len(path) > 1 else app
+        above.add_typer(
+            groups[path], name=path[-1], help=described, short_help=described
         )
     grammar = typer.main.get_command(app)
     # Typer registers every command before every group, which would put

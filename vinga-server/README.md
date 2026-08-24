@@ -165,7 +165,7 @@ notices.
 ### OpenAI transcription
 
 ```bash
-vinga-server config set provider asr ears -f - <<'YAML'
+vinga-server config provider set asr ears -f - <<'YAML'
 type: openai
 api_key_env: OPENAI_API_KEY
 prompt: vinga
@@ -358,7 +358,7 @@ markedly better than Piper. It needs two things: a key, and a voice
 id.
 
 ```bash
-vinga-server config set provider tts eleven -f - <<'YAML'
+vinga-server config provider set tts eleven -f - <<'YAML'
 type: elevenlabs
 voice_id: PUT_YOUR_VOICE_ID_HERE
 api_key_env: ELEVENLABS_API_KEY
@@ -418,7 +418,7 @@ already on OpenAI: the same key serves the LLM stage, and the voices
 are the stock ones, so there is nothing to pick out of a library.
 
 ```bash
-vinga-server config set provider tts openai_voice -f - <<'YAML'
+vinga-server config provider set tts openai_voice -f - <<'YAML'
 type: openai
 voice: alloy
 api_key_env: OPENAI_API_KEY
@@ -528,7 +528,7 @@ its siblings have. Each server's tools are offered under its entry name
 defines are supported:
 
 ```bash
-vinga-server config set mcp-server home -f - <<'YAML'
+vinga-server config mcp-server set home -f - <<'YAML'
 transport: stdio
 command: mcp-proxy
 args: ["http://homeassistant.local:8123/mcp_server/sse"]
@@ -536,7 +536,7 @@ env:
   API_ACCESS_TOKEN: $HOME_ASSISTANT_TOKEN
 YAML
 
-vinga-server config set mcp-server weather -f - <<'YAML'
+vinga-server config mcp-server set weather -f - <<'YAML'
 transport: streamable_http
 url: http://localhost:8000/mcp
 headers:
@@ -569,7 +569,7 @@ which is the whole server, or an object naming the server and the tools
 of it that layer may reach:
 
 ```bash
-vinga-server config set agent kids -f - <<'YAML'
+vinga-server config agent set kids -f - <<'YAML'
 prompt: You are the assistant in the kids' room.
 mcp:
   - weather
@@ -616,7 +616,7 @@ was granted it. An entry's `instructions` is that text, injected into
 the system prompt of every agent the entry is granted to:
 
 ```bash
-vinga-server config set mcp-server home -f - <<'YAML'
+vinga-server config mcp-server set home -f - <<'YAML'
 transport: stdio
 command: mcp-proxy
 args: ["http://homeassistant.local:8123/mcp_server/sse"]
@@ -763,7 +763,7 @@ An agent's system prompt is assembled from more than one place now, so
 there is a command that says what it adds up to:
 
 ```console
-$ vinga-server config prompt house
+$ vinga-server config agent preview house
 persona (133 characters)
 You are the assistant in the living room. Answer in the language you
 were spoken to, and keep answers short: this is spoken out loud.
@@ -810,8 +810,8 @@ know: it goes into `prompt_fragments` under a name, and each agent that
 should carry it names that fragment in its `prompt_includes`.
 
 ```bash
-vinga-server config set prompt-fragment household -f examples/prompt-fragment.yaml
-vinga-server config set agent house -f agent.yaml   # prompt_includes: [household]
+vinga-server config prompt-fragment set household -f examples/prompt-fragment.yaml
+vinga-server config agent set house -f agent.yaml   # prompt_includes: [household]
 ```
 
 The alternative is copying the same paragraph into every persona prompt
@@ -915,11 +915,11 @@ restart and every conversation on the server. `vinga-server config
 reload` builds the next snapshot and swaps to it instead:
 
 ```console
-$ vinga-server config set mcp-server weather -f weather.yaml
+$ vinga-server config mcp-server set weather -f weather.yaml
 wrote mcp-server weather
 This applies when the running server is asked to reload: run
 `vinga-server config reload`, which ...
-$ vinga-server config set agent house -f house.yaml
+$ vinga-server config agent set house -f house.yaml
 $ vinga-server config reload
 mcp:
   started: weather
@@ -1193,7 +1193,7 @@ deployment that reaches no vendor and the same thing on vendor APIs:
 
 ```bash
 vinga-server config apply -f examples/presets/cloud-stack.yaml
-vinga-server config bind-device aa:bb:cc:dd:ee:ff assistant
+vinga-server config device bind aa:bb:cc:dd:ee:ff assistant
 vinga-server config list
 ```
 
@@ -1209,7 +1209,7 @@ writing one at a time with `config set`, which is what editing a
 deployment looks like once it exists.
 
 A board in front of you needs neither its MAC nor that `bind-device`
-line: `config pending` lists what is waiting and `config add-device`
+line: `config device pending list` lists what is waiting and `config device pending claim`
 binds one by the code on its screen. That is
 [Onboarding a device](#onboarding-a-device).
 
@@ -1384,7 +1384,7 @@ POST                /api/runtime/config/reload
 The first answers the system prompt a session opening now as that agent
 would be sent, block by block with the size of each, which [What the
 model is actually sent](#what-the-model-is-actually-sent) describes and
-`vinga-server config prompt` prints. The second answers what the
+`vinga-server config agent preview` prints. The second answers what the
 database holds that this server is not serving, kind by kind: the names
 added, removed and changed, and for each kind whether its changes reach
 a conversation at the next reload or at a device's
@@ -1541,7 +1541,7 @@ forms are supported:
   from a named variable with `--from-env`, and never from an argument:
 
   ```bash
-  vinga-server config set-secret provider llm claude api_key
+  vinga-server config provider secret set llm claude api_key
   ```
 
   Encryption uses `VINGA_MASTER_KEY`, one or more Fernet keys, newest
@@ -1685,7 +1685,7 @@ localhost or at a cloud vendor, so under `local_only` they must carry
 your own declaration:
 
 ```bash
-vinga-server config set provider llm local -f - <<'YAML'
+vinga-server config provider set llm local -f - <<'YAML'
 type: openai_compatible
 base_url: http://localhost:11434/v1
 model: qwen3:8b
@@ -1753,7 +1753,7 @@ where users ask "are you there?". Humans hold exactly this gap with a
 filled pause, and an agent can too:
 
 ```bash
-vinga-server config set agent-defaults -f - <<'YAML'
+vinga-server config agent-defaults set -f - <<'YAML'
 filler:
   # off by default
   enabled: true
@@ -2260,7 +2260,7 @@ docker run -d --name vinga \
   ghcr.io/rafacm/vinga-server:latest
 
 docker exec -i vinga vinga-server \
-  config set provider llm claude -f - < examples/llm-anthropic.yaml
+  config provider set llm claude -f - < examples/llm-anthropic.yaml
 
 docker restart vinga
 ```
@@ -2324,7 +2324,7 @@ after a rebuild every one of them was written under the key in use.
 encryption always uses the newest and decryption tries them in order. A
 new key therefore only affects secrets written after it, so every old
 key must stay in the list for as long as any token written under it
-remains in the database. Re-running `config set-secret` for each stored
+remains in the database. Re-running `config <kind> secret set` for each stored
 secret rewrites it under the newest key, which is the interim path
 until a re-encrypt command exists.
 
@@ -2443,7 +2443,7 @@ docker run --rm -v vinga-data:/data --entrypoint sh \
 docker run -d --name vinga ...          # the run command from above
 docker exec -i vinga vinga-server config apply -f - < deployment.yaml
 docker exec -i vinga vinga-server \
-  config set-secret provider -- llm claude api_key
+  config provider secret set -- llm claude api_key
 ```
 
 The `-wal` and `-shm` files go with the database because the database is
@@ -2620,14 +2620,14 @@ instead of a token: the firmware shows it and speaks it, and re-checks
 every half minute to two minutes, so the number on the screen is always
 the current one. A board a `default_agent` already covers shows no code
 and connects straight away, which is the case just below.
-`vinga-server config pending` lists every board waiting, with the board
+`vinga-server config device pending list` lists every board waiting, with the board
 type and firmware version each one reported, which is how two boards on
 one desk are told apart.
 
 **5. Bind it, by the code rather than by the MAC:**
 
 ```bash
-vinga-server config add-device 418293 assistant
+vinga-server config device pending claim 418293 assistant
 # wrote device aa:bb:cc:dd:ee:ff bound to assistant
 ```
 

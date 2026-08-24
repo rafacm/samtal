@@ -1118,7 +1118,7 @@ class ProviderConfig(BaseModel):
             "The name of the environment variable holding this provider's "
             "credential, never the credential itself. Left unset for a local engine "
             "or a keyless self-hosted endpoint. A credential stored with "
-            "`config set-secret` fills the same slot and takes precedence."
+            "`config provider secret set` fills the same slot and takes precedence."
         ),
     )
 
@@ -1352,7 +1352,8 @@ class McpServerConfig(BaseModel):
             "reload without restarting the connection, and turning it off stops the "
             "injection at the next activation. A block longer than 4000 characters is "
             "skipped whole rather than truncated. The block sits after this entry's own "
-            "guidance, and `vinga-server config prompt <agent>` reports it under "
+            "guidance, and `vinga-server config agent preview <agent>` reports it "
+            "under "
             "`server_instructions:<entry>`, so an operator can see whose words they are "
             "reading."
         ),
@@ -1508,7 +1509,8 @@ class PromptFragmentConfig(BaseModel):
             "whole assembled prompt, which is also what the inspection surface reports. "
             "It sits after the agent's own prompt and before any MCP guidance, in the "
             "order the including layer lists it. There is no length cap: what each "
-            "block costs is reported by `vinga-server config prompt <agent>`, and the "
+            "block costs is reported by `vinga-server config agent preview "
+            "<agent>`, and the "
             "operator is the one who knows what their model tolerates."
         )
     )

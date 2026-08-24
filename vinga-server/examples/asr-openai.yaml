@@ -6,7 +6,7 @@
 # https://platform.openai.com/docs/api-reference/audio/createTranscription
 # https://platform.openai.com/docs/guides/speech-to-text
 #
-#   vinga-server config set provider asr ears -f examples/asr-openai.yaml
+#   vinga-server config provider set asr ears -f examples/asr-openai.yaml
 
 type: openai
 

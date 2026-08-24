@@ -2,7 +2,7 @@
 # and every stage must resolve to a provider (here or in agent_defaults)
 # for the server to start, so a typical agent is a prompt and a voice.
 #
-#   vinga-server config set agent assistant -f examples/agent.yaml
+#   vinga-server config agent set assistant -f examples/agent.yaml
 #
 # The same file installed under a second name is a second agent; edit
 # the prompt and the voice and nothing else has to move.
@@ -51,7 +51,7 @@ mcp:
 # agent_defaults list, which is what most agents want.
 #
 # The blocks are injected after this agent's prompt, in the order listed
-# here, exactly as they were written. `vinga-server config prompt
+# here, exactly as they were written. `vinga-server config agent preview
 # <name>` prints what they add up to.
 prompt_includes:
   - household

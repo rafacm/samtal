@@ -271,14 +271,14 @@ vinga-server config apply -f examples/presets/local-stack.yaml
 One engine, named so agents can reference it.
 
 ```bash
-vinga-server config set provider llm claude -f examples/llm-anthropic.yaml
-vinga-server config set provider llm local -f examples/llm-openai-compatible.yaml
-vinga-server config set provider asr whisper -f examples/asr-faster-whisper.yaml
-vinga-server config set provider asr ears -f examples/asr-openai.yaml
-vinga-server config set provider tts piper -f examples/tts-piper.yaml
-vinga-server config set provider tts eleven -f examples/tts-elevenlabs.yaml
-vinga-server config set provider tts openai_voice -f examples/tts-openai.yaml
-vinga-server config set provider vad silero -f examples/vad-silero.yaml
+vinga-server config provider set llm claude -f examples/llm-anthropic.yaml
+vinga-server config provider set llm local -f examples/llm-openai-compatible.yaml
+vinga-server config provider set asr whisper -f examples/asr-faster-whisper.yaml
+vinga-server config provider set asr ears -f examples/asr-openai.yaml
+vinga-server config provider set tts piper -f examples/tts-piper.yaml
+vinga-server config provider set tts eleven -f examples/tts-elevenlabs.yaml
+vinga-server config provider set tts openai_voice -f examples/tts-openai.yaml
+vinga-server config provider set vad silero -f examples/vad-silero.yaml
 ```
 
 ### MCP server
@@ -288,8 +288,8 @@ vinga-server config set provider vad silero -f examples/vad-silero.yaml
 One MCP server, named so agents can reference it.
 
 ```bash
-vinga-server config set mcp-server home -f examples/mcp-server-stdio.yaml
-vinga-server config set mcp-server weather -f examples/mcp-server-streamable-http.yaml
+vinga-server config mcp-server set home -f examples/mcp-server-stdio.yaml
+vinga-server config mcp-server set weather -f examples/mcp-server-streamable-http.yaml
 ```
 
 ### Prompt fragment
@@ -299,7 +299,7 @@ vinga-server config set mcp-server weather -f examples/mcp-server-streamable-htt
 One named block of prompt text, shared by the agents that include it.
 
 ```bash
-vinga-server config set prompt-fragment household -f examples/prompt-fragment.yaml
+vinga-server config prompt-fragment set household -f examples/prompt-fragment.yaml
 ```
 
 ### Agent
@@ -309,7 +309,7 @@ vinga-server config set prompt-fragment household -f examples/prompt-fragment.ya
 One agent: a prompt, plus whichever stages it overrides.
 
 ```bash
-vinga-server config set agent assistant -f examples/agent.yaml
+vinga-server config agent set assistant -f examples/agent.yaml
 ```
 
 ### Agent defaults
@@ -319,7 +319,7 @@ vinga-server config set agent assistant -f examples/agent.yaml
 What every agent uses unless it names something else.
 
 ```bash
-vinga-server config set agent-defaults -f examples/agent-defaults.yaml
+vinga-server config agent-defaults set -f examples/agent-defaults.yaml
 ```
 
 ### Devices and the default agent
@@ -330,8 +330,8 @@ Which board reaches which agent, which is the one thing a preset cannot know.
 A binding applies at that device's next check-in rather than at a reload.
 
 ```bash
-vinga-server config bind-device aa:bb:cc:dd:ee:ff assistant
-vinga-server config set-default-agent assistant
+vinga-server config device bind aa:bb:cc:dd:ee:ff assistant
+vinga-server config default-agent set assistant
 ```
 
 ### Stored credentials
@@ -342,10 +342,10 @@ from an argument. A stored secret wins over an environment reference written
 for the same slot.
 
 ```bash
-vinga-server config set-secret provider llm brain api_key
-vinga-server config set-secret provider llm claude api_key
-vinga-server config set-secret mcp-server home env.API_ACCESS_TOKEN
-vinga-server config set-secret mcp-server weather headers.Authorization
+vinga-server config provider secret set llm brain api_key
+vinga-server config provider secret set llm claude api_key
+vinga-server config mcp-server secret set home env.API_ACCESS_TOKEN
+vinga-server config mcp-server secret set weather headers.Authorization
 ```
 
 <!-- end generated: cli recipes -->
@@ -373,75 +373,59 @@ Options:
   --help         Show this message and exit.
 
 Commands:
-  set                  create or replace one entity, from a YAML fragment or
-                       from key=value arguments
-  delete               delete one entity
-  bind-device          bind a device by the MAC you already know, to one or more
-                       agents
-  add-device           bind the device showing this activation code, which is
-                       the six digits on its screen; use bind-device when you
-                       know the MAC instead
-  apply                write a whole document: every entity, binding and setting
-                       it names, in one transaction, refused whole if anything
-                       in it will not resolve. Applying is additive and never
-                       deletes, and the same document twice changes nothing.
-                       This waits for the server's answer however long the
-                       transaction takes
-  pending              the devices showing an activation code, and the code each
-                       is showing
-  status               what each configured MCP server is doing on the running
-                       server: connected, down, or unused because no agent
-                       references it, since when, and which tools it published
-  prompt               the system prompt a new session as this agent would be
-                       sent, block by block with the size of each and the total;
-                       a conversation already running holds what it assembled
-                       when it started
-  reload               apply the stored configuration to the running server,
-                       without a restart and without dropping a conversation
-  ota-url              the URL to type into a device's captive portal; derived
-                       from this configuration and the device-auth secret, and
-                       it contacts nothing
-  set-default-agent    the agent an unbound device reaches
-  clear-default-agent  unset it, leaving the devices map as the allowlist
-  set-secret           store one credential, encrypted, read from stdin or a
-                       variable
-  clear-secret         remove one stored credential
-  list                 a summary tree
-  schema               the JSON Schema of one entity, or of the whole domain
-                       half
-  reference            the markdown reference, generated from the models
-  openapi              the configuration API's OpenAPI document, generated from
-                       its routes
-  cli-reference        the generated half of the CLI reference: the recipes read
-                       out of the example fragments, and every command's own
-                       help page
-  show                 everything, or one entity
-  export               the stored configuration as a document apply takes, or
-                       one entity's fragment
+  provider         read and write providers.<stage>.<name>
+  mcp-server       read and write mcp_servers.<name>
+  prompt-fragment  read and write prompt_fragments.<name>
+  agent            read and write agents.<name>
+  agent-defaults   read and write agent_defaults
+  device           read and write devices.<mac>, which agents a board reaches
+  default-agent    the agent an unbound device reaches
+  apply            write a whole document in one transaction, refused whole if
+                   anything in it will not resolve; additive, never deleting,
+                   and waiting for the server's answer however long the
+                   transaction takes
+  list             a summary tree
+  show             print the whole stored configuration, with its stored secrets
+                   masked
+  export           the stored configuration as a document apply takes
+  status           what each configured MCP server is doing on the running
+                   server: connected, down, or unused because no agent
+                   references it, since when, and which tools it published
+  reload           apply the stored configuration to the running server, without
+                   a restart and without dropping a conversation
+  ota-url          the URL to type into a device's captive portal; derived from
+                   this configuration and the device-auth secret, and it
+                   contacts nothing
+  schema           the JSON Schema of one entity, or of the whole domain half
+  reference        the markdown reference, generated from the models
+  openapi          the configuration API's OpenAPI document, generated from its
+                   routes
+  cli-reference    the generated half of the CLI reference: the recipes read out
+                   of the example fragments, and every command's own help page
 ```
 
-### `vinga-server config set`
+### `vinga-server config provider`
 
 ```
-Usage: vinga-server config set [OPTIONS] COMMAND [ARGS]...
+Usage: vinga-server config provider [OPTIONS] COMMAND [ARGS]...
 
-  create or replace one entity, from a YAML fragment or from key=value arguments
+  read and write providers.<stage>.<name>
 
 Options:
   --help  Show this message and exit.
 
 Commands:
-  provider         create or replace providers.<stage>.<name>
-  mcp-server       create or replace mcp_servers.<name>
-  prompt-fragment  create or replace prompt_fragments.<name>
-  agent            create or replace agents.<name>
-  agent-defaults   create or replace agent_defaults
+  set     create or replace providers.<stage>.<name>
+  show    print providers.<stage>.<name>
+  export  export providers.<stage>.<name>
+  delete  delete providers.<stage>.<name>
+  secret  credentials stored on providers.<stage>.<name>
 ```
 
-### `vinga-server config set provider`
+### `vinga-server config provider set`
 
 ```
-Usage: vinga-server config set provider [OPTIONS] {STAGE} {NAME} [KEY=VALUE]
+Usage: vinga-server config provider set [OPTIONS] {STAGE} {NAME} [KEY=VALUE]
 
   create or replace providers.<stage>.<name>
 
@@ -463,9 +447,9 @@ Options:
   --help           Show this message and exit.
 
 A credential is never a key=value argument: arguments land in shell history
-and in the process list. Store one with `vinga-server config set-secret`,
-which reads it from stdin or from the variable --from-env names, and never
-echoes it.
+and in the process list. Store one with `vinga-server config <kind> secret
+set`, which reads it from stdin or from the variable --from-env names, and
+never echoes it.
 
 fragment fields for provider (providers.<stage>.<name>):
 
@@ -570,10 +554,142 @@ see vinga-server/examples/ for those types' options.
 Full descriptions: vinga-server config schema provider
 ```
 
-### `vinga-server config set mcp-server`
+### `vinga-server config provider show`
 
 ```
-Usage: vinga-server config set mcp-server [OPTIONS] {NAME} [KEY=VALUE]
+Usage: vinga-server config provider show [OPTIONS] {STAGE} {NAME}
+
+  print providers.<stage>.<name>
+
+Arguments:
+  STAGE  llm, asr, tts, vad  [required]
+  NAME   [required]
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --help         Show this message and exit.
+```
+
+### `vinga-server config provider export`
+
+```
+Usage: vinga-server config provider export [OPTIONS] {STAGE} {NAME}
+
+  export providers.<stage>.<name>
+
+Arguments:
+  STAGE  llm, asr, tts, vad  [required]
+  NAME   [required]
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --help         Show this message and exit.
+```
+
+### `vinga-server config provider delete`
+
+```
+Usage: vinga-server config provider delete [OPTIONS] {STAGE} {NAME}
+
+  delete providers.<stage>.<name>
+
+Arguments:
+  STAGE  llm, asr, tts, vad  [required]
+  NAME   [required]
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --help         Show this message and exit.
+```
+
+### `vinga-server config provider secret`
+
+```
+Usage: vinga-server config provider secret [OPTIONS] COMMAND [ARGS]...
+
+  credentials stored on providers.<stage>.<name>
+
+Options:
+  --help  Show this message and exit.
+
+Commands:
+  set    store a credential on providers.<stage>.<name>
+  clear  remove a stored credential from providers.<stage>.<name>
+```
+
+### `vinga-server config provider secret set`
+
+```
+Usage: vinga-server config provider secret set [OPTIONS] {STAGE} {NAME} {SLOT}
+
+  store a credential on providers.<stage>.<name>
+
+Arguments:
+  STAGE  llm, asr, tts, vad  [required]
+  NAME   [required]
+  SLOT   the option it fills, such as api_key  [required]
+
+Options:
+  --from-env VAR  read the value from this variable (default: stdin, read
+                  without echo at a terminal)
+  --config PATH   path to the YAML config file naming server.port and
+                  server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL   base URL of the configuration API (default: $VINGA_API_URL,
+                  then http://127.0.0.1:<server.port>/api)
+  --help          Show this message and exit.
+```
+
+### `vinga-server config provider secret clear`
+
+```
+Usage: vinga-server config provider secret clear [OPTIONS] {STAGE} {NAME} {SLOT}
+
+  remove a stored credential from providers.<stage>.<name>
+
+Arguments:
+  STAGE  llm, asr, tts, vad  [required]
+  NAME   [required]
+  SLOT   the option it fills, such as api_key  [required]
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --help         Show this message and exit.
+```
+
+### `vinga-server config mcp-server`
+
+```
+Usage: vinga-server config mcp-server [OPTIONS] COMMAND [ARGS]...
+
+  read and write mcp_servers.<name>
+
+Options:
+  --help  Show this message and exit.
+
+Commands:
+  set     create or replace mcp_servers.<name>
+  show    print mcp_servers.<name>
+  export  export mcp_servers.<name>
+  delete  delete mcp_servers.<name>
+  secret  credentials stored on mcp_servers.<name>
+```
+
+### `vinga-server config mcp-server set`
+
+```
+Usage: vinga-server config mcp-server set [OPTIONS] {NAME} [KEY=VALUE]
 
   create or replace mcp_servers.<name>
 
@@ -594,9 +710,9 @@ Options:
   --help           Show this message and exit.
 
 A credential is never a key=value argument: arguments land in shell history
-and in the process list. Store one with `vinga-server config set-secret`,
-which reads it from stdin or from the variable --from-env names, and never
-echoes it.
+and in the process list. Store one with `vinga-server config <kind> secret
+set`, which reads it from stdin or from the variable --from-env names, and
+never echoes it.
 
 fragment fields for mcp server (mcp_servers.<name>):
 
@@ -634,10 +750,136 @@ fragment fields for mcp server (mcp_servers.<name>):
 Full descriptions: vinga-server config schema mcp-server
 ```
 
-### `vinga-server config set prompt-fragment`
+### `vinga-server config mcp-server show`
 
 ```
-Usage: vinga-server config set prompt-fragment [OPTIONS] {NAME} [KEY=VALUE]
+Usage: vinga-server config mcp-server show [OPTIONS] {NAME}
+
+  print mcp_servers.<name>
+
+Arguments:
+  NAME  [required]
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --help         Show this message and exit.
+```
+
+### `vinga-server config mcp-server export`
+
+```
+Usage: vinga-server config mcp-server export [OPTIONS] {NAME}
+
+  export mcp_servers.<name>
+
+Arguments:
+  NAME  [required]
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --help         Show this message and exit.
+```
+
+### `vinga-server config mcp-server delete`
+
+```
+Usage: vinga-server config mcp-server delete [OPTIONS] {NAME}
+
+  delete mcp_servers.<name>
+
+Arguments:
+  NAME  [required]
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --help         Show this message and exit.
+```
+
+### `vinga-server config mcp-server secret`
+
+```
+Usage: vinga-server config mcp-server secret [OPTIONS] COMMAND [ARGS]...
+
+  credentials stored on mcp_servers.<name>
+
+Options:
+  --help  Show this message and exit.
+
+Commands:
+  set    store a credential on mcp_servers.<name>
+  clear  remove a stored credential from mcp_servers.<name>
+```
+
+### `vinga-server config mcp-server secret set`
+
+```
+Usage: vinga-server config mcp-server secret set [OPTIONS] {NAME} {SLOT}
+
+  store a credential on mcp_servers.<name>
+
+Arguments:
+  NAME  [required]
+  SLOT  env.<KEY> or headers.<KEY>  [required]
+
+Options:
+  --from-env VAR  read the value from this variable (default: stdin, read
+                  without echo at a terminal)
+  --config PATH   path to the YAML config file naming server.port and
+                  server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL   base URL of the configuration API (default: $VINGA_API_URL,
+                  then http://127.0.0.1:<server.port>/api)
+  --help          Show this message and exit.
+```
+
+### `vinga-server config mcp-server secret clear`
+
+```
+Usage: vinga-server config mcp-server secret clear [OPTIONS] {NAME} {SLOT}
+
+  remove a stored credential from mcp_servers.<name>
+
+Arguments:
+  NAME  [required]
+  SLOT  env.<KEY> or headers.<KEY>  [required]
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --help         Show this message and exit.
+```
+
+### `vinga-server config prompt-fragment`
+
+```
+Usage: vinga-server config prompt-fragment [OPTIONS] COMMAND [ARGS]...
+
+  read and write prompt_fragments.<name>
+
+Options:
+  --help  Show this message and exit.
+
+Commands:
+  set     create or replace prompt_fragments.<name>
+  show    print prompt_fragments.<name>
+  export  export prompt_fragments.<name>
+  delete  delete prompt_fragments.<name>
+```
+
+### `vinga-server config prompt-fragment set`
+
+```
+Usage: vinga-server config prompt-fragment set [OPTIONS] {NAME} [KEY=VALUE]
 
   create or replace prompt_fragments.<name>
 
@@ -658,9 +900,9 @@ Options:
   --help           Show this message and exit.
 
 A credential is never a key=value argument: arguments land in shell history
-and in the process list. Store one with `vinga-server config set-secret`,
-which reads it from stdin or from the variable --from-env names, and never
-echoes it.
+and in the process list. Store one with `vinga-server config <kind> secret
+set`, which reads it from stdin or from the variable --from-env names, and
+never echoes it.
 
 fragment fields for prompt fragment (prompt_fragments.<name>):
 
@@ -674,10 +916,84 @@ fragment fields for prompt fragment (prompt_fragments.<name>):
 Full descriptions: vinga-server config schema prompt-fragment
 ```
 
-### `vinga-server config set agent`
+### `vinga-server config prompt-fragment show`
 
 ```
-Usage: vinga-server config set agent [OPTIONS] {NAME} [KEY=VALUE]
+Usage: vinga-server config prompt-fragment show [OPTIONS] {NAME}
+
+  print prompt_fragments.<name>
+
+Arguments:
+  NAME  [required]
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --help         Show this message and exit.
+```
+
+### `vinga-server config prompt-fragment export`
+
+```
+Usage: vinga-server config prompt-fragment export [OPTIONS] {NAME}
+
+  export prompt_fragments.<name>
+
+Arguments:
+  NAME  [required]
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --help         Show this message and exit.
+```
+
+### `vinga-server config prompt-fragment delete`
+
+```
+Usage: vinga-server config prompt-fragment delete [OPTIONS] {NAME}
+
+  delete prompt_fragments.<name>
+
+Arguments:
+  NAME  [required]
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --help         Show this message and exit.
+```
+
+### `vinga-server config agent`
+
+```
+Usage: vinga-server config agent [OPTIONS] COMMAND [ARGS]...
+
+  read and write agents.<name>
+
+Options:
+  --help  Show this message and exit.
+
+Commands:
+  set      create or replace agents.<name>
+  show     print agents.<name>
+  export   export agents.<name>
+  delete   delete agents.<name>
+  preview  the system prompt a new session as this agent would be sent, block by
+           block with the size of each and the total; a conversation already
+           running holds what it assembled when it started
+```
+
+### `vinga-server config agent set`
+
+```
+Usage: vinga-server config agent set [OPTIONS] {NAME} [KEY=VALUE]
 
   create or replace agents.<name>
 
@@ -698,9 +1014,9 @@ Options:
   --help           Show this message and exit.
 
 A credential is never a key=value argument: arguments land in shell history
-and in the process list. Store one with `vinga-server config set-secret`,
-which reads it from stdin or from the variable --from-env names, and never
-echoes it.
+and in the process list. Store one with `vinga-server config <kind> secret
+set`, which reads it from stdin or from the variable --from-env names, and
+never echoes it.
 
 fragment fields for agent (agents.<name>):
 
@@ -736,10 +1052,100 @@ fragment fields for agent (agents.<name>):
 Full descriptions: vinga-server config schema agent
 ```
 
-### `vinga-server config set agent-defaults`
+### `vinga-server config agent show`
 
 ```
-Usage: vinga-server config set agent-defaults [OPTIONS] [KEY=VALUE]
+Usage: vinga-server config agent show [OPTIONS] {NAME}
+
+  print agents.<name>
+
+Arguments:
+  NAME  [required]
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --help         Show this message and exit.
+```
+
+### `vinga-server config agent export`
+
+```
+Usage: vinga-server config agent export [OPTIONS] {NAME}
+
+  export agents.<name>
+
+Arguments:
+  NAME  [required]
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --help         Show this message and exit.
+```
+
+### `vinga-server config agent delete`
+
+```
+Usage: vinga-server config agent delete [OPTIONS] {NAME}
+
+  delete agents.<name>
+
+Arguments:
+  NAME  [required]
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --help         Show this message and exit.
+```
+
+### `vinga-server config agent preview`
+
+```
+Usage: vinga-server config agent preview [OPTIONS] {NAME}
+
+  the system prompt a new session as this agent would be sent, block by block
+  with the size of each and the total; a conversation already running holds what
+  it assembled when it started
+
+Arguments:
+  NAME  [required]
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --help         Show this message and exit.
+```
+
+### `vinga-server config agent-defaults`
+
+```
+Usage: vinga-server config agent-defaults [OPTIONS] COMMAND [ARGS]...
+
+  read and write agent_defaults
+
+Options:
+  --help  Show this message and exit.
+
+Commands:
+  set     create or replace agent_defaults
+  show    print agent_defaults
+  export  export agent_defaults
+```
+
+### `vinga-server config agent-defaults set`
+
+```
+Usage: vinga-server config agent-defaults set [OPTIONS] [KEY=VALUE]
 
   create or replace agent_defaults
 
@@ -759,9 +1165,9 @@ Options:
   --help           Show this message and exit.
 
 A credential is never a key=value argument: arguments land in shell history
-and in the process list. Store one with `vinga-server config set-secret`,
-which reads it from stdin or from the variable --from-env names, and never
-echoes it.
+and in the process list. Store one with `vinga-server config <kind> secret
+set`, which reads it from stdin or from the variable --from-env names, and
+never echoes it.
 
 fragment fields for agent defaults (agent_defaults):
 
@@ -795,120 +1201,57 @@ fragment fields for agent defaults (agent_defaults):
 Full descriptions: vinga-server config schema agent-defaults
 ```
 
-### `vinga-server config delete`
+### `vinga-server config agent-defaults show`
 
 ```
-Usage: vinga-server config delete [OPTIONS] COMMAND [ARGS]...
+Usage: vinga-server config agent-defaults show [OPTIONS]
 
-  delete one entity
+  print agent_defaults
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --help         Show this message and exit.
+```
+
+### `vinga-server config agent-defaults export`
+
+```
+Usage: vinga-server config agent-defaults export [OPTIONS]
+
+  export agent_defaults
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --help         Show this message and exit.
+```
+
+### `vinga-server config device`
+
+```
+Usage: vinga-server config device [OPTIONS] COMMAND [ARGS]...
+
+  read and write devices.<mac>, which agents a board reaches
 
 Options:
   --help  Show this message and exit.
 
 Commands:
-  provider         delete providers.<stage>.<name>
-  mcp-server       delete mcp_servers.<name>
-  prompt-fragment  delete prompt_fragments.<name>
-  agent            delete agents.<name>
-  device           delete devices.<mac>, so the board it names reaches the
-                   default agent
+  bind     bind a device by the MAC you already know, to one or more agents
+  show     print devices.<mac>: the agents that board is bound to
+  delete   delete devices.<mac>, so the board it names reaches the default agent
+  pending  the boards waiting to be claimed, and claiming one
 ```
 
-### `vinga-server config delete provider`
+### `vinga-server config device bind`
 
 ```
-Usage: vinga-server config delete provider [OPTIONS] {STAGE} {NAME}
-
-  delete providers.<stage>.<name>
-
-Arguments:
-  STAGE  llm, asr, tts, vad  [required]
-  NAME   [required]
-
-Options:
-  --config PATH  path to the YAML config file naming server.port and
-                 server.api.secret_env (default: $VINGA_CONFIG)
-  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
-                 then http://127.0.0.1:<server.port>/api)
-  --help         Show this message and exit.
-```
-
-### `vinga-server config delete mcp-server`
-
-```
-Usage: vinga-server config delete mcp-server [OPTIONS] {NAME}
-
-  delete mcp_servers.<name>
-
-Arguments:
-  NAME  [required]
-
-Options:
-  --config PATH  path to the YAML config file naming server.port and
-                 server.api.secret_env (default: $VINGA_CONFIG)
-  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
-                 then http://127.0.0.1:<server.port>/api)
-  --help         Show this message and exit.
-```
-
-### `vinga-server config delete prompt-fragment`
-
-```
-Usage: vinga-server config delete prompt-fragment [OPTIONS] {NAME}
-
-  delete prompt_fragments.<name>
-
-Arguments:
-  NAME  [required]
-
-Options:
-  --config PATH  path to the YAML config file naming server.port and
-                 server.api.secret_env (default: $VINGA_CONFIG)
-  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
-                 then http://127.0.0.1:<server.port>/api)
-  --help         Show this message and exit.
-```
-
-### `vinga-server config delete agent`
-
-```
-Usage: vinga-server config delete agent [OPTIONS] {NAME}
-
-  delete agents.<name>
-
-Arguments:
-  NAME  [required]
-
-Options:
-  --config PATH  path to the YAML config file naming server.port and
-                 server.api.secret_env (default: $VINGA_CONFIG)
-  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
-                 then http://127.0.0.1:<server.port>/api)
-  --help         Show this message and exit.
-```
-
-### `vinga-server config delete device`
-
-```
-Usage: vinga-server config delete device [OPTIONS] {MAC}
-
-  delete devices.<mac>, so the board it names reaches the default agent
-
-Arguments:
-  MAC  [required]
-
-Options:
-  --config PATH  path to the YAML config file naming server.port and
-                 server.api.secret_env (default: $VINGA_CONFIG)
-  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
-                 then http://127.0.0.1:<server.port>/api)
-  --help         Show this message and exit.
-```
-
-### `vinga-server config bind-device`
-
-```
-Usage: vinga-server config bind-device [OPTIONS] {MAC} {AGENT}
+Usage: vinga-server config device bind [OPTIONS] {MAC} {AGENT}
 
   bind a device by the MAC you already know, to one or more agents
 
@@ -924,17 +1267,132 @@ Options:
   --help         Show this message and exit.
 ```
 
-### `vinga-server config add-device`
+### `vinga-server config device show`
 
 ```
-Usage: vinga-server config add-device [OPTIONS] {CODE} {AGENT}
+Usage: vinga-server config device show [OPTIONS] {MAC}
+
+  print devices.<mac>: the agents that board is bound to
+
+Arguments:
+  MAC  [required]
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --help         Show this message and exit.
+```
+
+### `vinga-server config device delete`
+
+```
+Usage: vinga-server config device delete [OPTIONS] {MAC}
+
+  delete devices.<mac>, so the board it names reaches the default agent
+
+Arguments:
+  MAC  [required]
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --help         Show this message and exit.
+```
+
+### `vinga-server config device pending`
+
+```
+Usage: vinga-server config device pending [OPTIONS] COMMAND [ARGS]...
+
+  the boards waiting to be claimed, and claiming one
+
+Options:
+  --help  Show this message and exit.
+
+Commands:
+  list   the devices showing an activation code, and the code each is showing
+  claim  bind the device showing this activation code, which is the six digits
+         on its screen; use device bind when you know the MAC instead
+```
+
+### `vinga-server config device pending list`
+
+```
+Usage: vinga-server config device pending list [OPTIONS]
+
+  the devices showing an activation code, and the code each is showing
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --help         Show this message and exit.
+```
+
+### `vinga-server config device pending claim`
+
+```
+Usage: vinga-server config device pending claim [OPTIONS] {CODE} {AGENT}
 
   bind the device showing this activation code, which is the six digits on its
-  screen; use bind-device when you know the MAC instead
+  screen; use device bind when you know the MAC instead
 
 Arguments:
   CODE   the six digits the device is showing and speaking  [required]
   AGENT  [required]
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --help         Show this message and exit.
+```
+
+### `vinga-server config default-agent`
+
+```
+Usage: vinga-server config default-agent [OPTIONS] COMMAND [ARGS]...
+
+  the agent an unbound device reaches
+
+Options:
+  --help  Show this message and exit.
+
+Commands:
+  set    the agent an unbound device reaches
+  clear  unset it, leaving the devices map as the allowlist
+```
+
+### `vinga-server config default-agent set`
+
+```
+Usage: vinga-server config default-agent set [OPTIONS] {NAME}
+
+  the agent an unbound device reaches
+
+Arguments:
+  NAME  [required]
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --help         Show this message and exit.
+```
+
+### `vinga-server config default-agent clear`
+
+```
+Usage: vinga-server config default-agent clear [OPTIONS]
+
+  unset it, leaving the devices map as the allowlist
 
 Options:
   --config PATH  path to the YAML config file naming server.port and
@@ -949,10 +1407,9 @@ Options:
 ```
 Usage: vinga-server config apply [OPTIONS]
 
-  write a whole document: every entity, binding and setting it names, in one
-  transaction, refused whole if anything in it will not resolve. Applying is
-  additive and never deletes, and the same document twice changes nothing. This
-  waits for the server's answer however long the transaction takes
+  write a whole document in one transaction, refused whole if anything in it
+  will not resolve; additive, never deleting, and waiting for the server's
+  answer however long the transaction takes
 
 Options:
   -f, --file PATH  YAML document to apply, or - to read it from stdin: the
@@ -965,12 +1422,42 @@ Options:
   --help           Show this message and exit.
 ```
 
-### `vinga-server config pending`
+### `vinga-server config list`
 
 ```
-Usage: vinga-server config pending [OPTIONS]
+Usage: vinga-server config list [OPTIONS]
 
-  the devices showing an activation code, and the code each is showing
+  a summary tree
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --help         Show this message and exit.
+```
+
+### `vinga-server config show`
+
+```
+Usage: vinga-server config show [OPTIONS]
+
+  print the whole stored configuration, with its stored secrets masked
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --help         Show this message and exit.
+```
+
+### `vinga-server config export`
+
+```
+Usage: vinga-server config export [OPTIONS]
+
+  the stored configuration as a document apply takes
 
 Options:
   --config PATH  path to the YAML config file naming server.port and
@@ -988,26 +1475,6 @@ Usage: vinga-server config status [OPTIONS]
   what each configured MCP server is doing on the running server: connected,
   down, or unused because no agent references it, since when, and which tools it
   published
-
-Options:
-  --config PATH  path to the YAML config file naming server.port and
-                 server.api.secret_env (default: $VINGA_CONFIG)
-  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
-                 then http://127.0.0.1:<server.port>/api)
-  --help         Show this message and exit.
-```
-
-### `vinga-server config prompt`
-
-```
-Usage: vinga-server config prompt [OPTIONS] {NAME}
-
-  the system prompt a new session as this agent would be sent, block by block
-  with the size of each and the total; a conversation already running holds what
-  it assembled when it started
-
-Arguments:
-  NAME  [required]
 
 Options:
   --config PATH  path to the YAML config file naming server.port and
@@ -1044,166 +1511,6 @@ Usage: vinga-server config ota-url [OPTIONS]
 Options:
   --config PATH  path to the YAML config file naming server.port and
                  server.api.secret_env (default: $VINGA_CONFIG)
-  --help         Show this message and exit.
-```
-
-### `vinga-server config set-default-agent`
-
-```
-Usage: vinga-server config set-default-agent [OPTIONS] {NAME}
-
-  the agent an unbound device reaches
-
-Arguments:
-  NAME  [required]
-
-Options:
-  --config PATH  path to the YAML config file naming server.port and
-                 server.api.secret_env (default: $VINGA_CONFIG)
-  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
-                 then http://127.0.0.1:<server.port>/api)
-  --help         Show this message and exit.
-```
-
-### `vinga-server config clear-default-agent`
-
-```
-Usage: vinga-server config clear-default-agent [OPTIONS]
-
-  unset it, leaving the devices map as the allowlist
-
-Options:
-  --config PATH  path to the YAML config file naming server.port and
-                 server.api.secret_env (default: $VINGA_CONFIG)
-  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
-                 then http://127.0.0.1:<server.port>/api)
-  --help         Show this message and exit.
-```
-
-### `vinga-server config set-secret`
-
-```
-Usage: vinga-server config set-secret [OPTIONS] COMMAND [ARGS]...
-
-  store one credential, encrypted, read from stdin or a variable
-
-Options:
-  --help  Show this message and exit.
-
-Commands:
-  provider    store a credential on providers.<stage>.<name>
-  mcp-server  store a credential on mcp_servers.<name>
-```
-
-### `vinga-server config set-secret provider`
-
-```
-Usage: vinga-server config set-secret provider [OPTIONS] {STAGE} {NAME} {SLOT}
-
-  store a credential on providers.<stage>.<name>
-
-Arguments:
-  STAGE  llm, asr, tts, vad  [required]
-  NAME   [required]
-  SLOT   the option it fills, such as api_key  [required]
-
-Options:
-  --from-env VAR  read the value from this variable (default: stdin, read
-                  without echo at a terminal)
-  --config PATH   path to the YAML config file naming server.port and
-                  server.api.secret_env (default: $VINGA_CONFIG)
-  --api-url URL   base URL of the configuration API (default: $VINGA_API_URL,
-                  then http://127.0.0.1:<server.port>/api)
-  --help          Show this message and exit.
-```
-
-### `vinga-server config set-secret mcp-server`
-
-```
-Usage: vinga-server config set-secret mcp-server [OPTIONS] {NAME} {SLOT}
-
-  store a credential on mcp_servers.<name>
-
-Arguments:
-  NAME  [required]
-  SLOT  env.<KEY> or headers.<KEY>  [required]
-
-Options:
-  --from-env VAR  read the value from this variable (default: stdin, read
-                  without echo at a terminal)
-  --config PATH   path to the YAML config file naming server.port and
-                  server.api.secret_env (default: $VINGA_CONFIG)
-  --api-url URL   base URL of the configuration API (default: $VINGA_API_URL,
-                  then http://127.0.0.1:<server.port>/api)
-  --help          Show this message and exit.
-```
-
-### `vinga-server config clear-secret`
-
-```
-Usage: vinga-server config clear-secret [OPTIONS] COMMAND [ARGS]...
-
-  remove one stored credential
-
-Options:
-  --help  Show this message and exit.
-
-Commands:
-  provider    remove a stored credential from providers.<stage>.<name>
-  mcp-server  remove a stored credential from mcp_servers.<name>
-```
-
-### `vinga-server config clear-secret provider`
-
-```
-Usage: vinga-server config clear-secret provider [OPTIONS] {STAGE} {NAME} {SLOT}
-
-  remove a stored credential from providers.<stage>.<name>
-
-Arguments:
-  STAGE  llm, asr, tts, vad  [required]
-  NAME   [required]
-  SLOT   the option it fills, such as api_key  [required]
-
-Options:
-  --config PATH  path to the YAML config file naming server.port and
-                 server.api.secret_env (default: $VINGA_CONFIG)
-  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
-                 then http://127.0.0.1:<server.port>/api)
-  --help         Show this message and exit.
-```
-
-### `vinga-server config clear-secret mcp-server`
-
-```
-Usage: vinga-server config clear-secret mcp-server [OPTIONS] {NAME} {SLOT}
-
-  remove a stored credential from mcp_servers.<name>
-
-Arguments:
-  NAME  [required]
-  SLOT  env.<KEY> or headers.<KEY>  [required]
-
-Options:
-  --config PATH  path to the YAML config file naming server.port and
-                 server.api.secret_env (default: $VINGA_CONFIG)
-  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
-                 then http://127.0.0.1:<server.port>/api)
-  --help         Show this message and exit.
-```
-
-### `vinga-server config list`
-
-```
-Usage: vinga-server config list [OPTIONS]
-
-  a summary tree
-
-Options:
-  --config PATH  path to the YAML config file naming server.port and
-                 server.api.secret_env (default: $VINGA_CONFIG)
-  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
-                 then http://127.0.0.1:<server.port>/api)
   --help         Show this message and exit.
 ```
 
@@ -1256,244 +1563,5 @@ Usage: vinga-server config cli-reference [OPTIONS]
 
 Options:
   --help  Show this message and exit.
-```
-
-### `vinga-server config show`
-
-```
-Usage: vinga-server config show [OPTIONS] COMMAND [ARGS]...
-
-  everything, or one entity
-
-Options:
-  --config PATH  path to the YAML config file naming server.port and
-                 server.api.secret_env (default: $VINGA_CONFIG)
-  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
-                 then http://127.0.0.1:<server.port>/api)
-  --help         Show this message and exit.
-
-Commands:
-  provider         print providers.<stage>.<name>
-  mcp-server       print mcp_servers.<name>
-  prompt-fragment  print prompt_fragments.<name>
-  agent            print agents.<name>
-  agent-defaults   print agent_defaults
-  device           print devices.<mac>: the agents that board is bound to
-```
-
-### `vinga-server config show provider`
-
-```
-Usage: vinga-server config show provider [OPTIONS] {STAGE} {NAME}
-
-  print providers.<stage>.<name>
-
-Arguments:
-  STAGE  llm, asr, tts, vad  [required]
-  NAME   [required]
-
-Options:
-  --config PATH  path to the YAML config file naming server.port and
-                 server.api.secret_env (default: $VINGA_CONFIG)
-  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
-                 then http://127.0.0.1:<server.port>/api)
-  --help         Show this message and exit.
-```
-
-### `vinga-server config show mcp-server`
-
-```
-Usage: vinga-server config show mcp-server [OPTIONS] {NAME}
-
-  print mcp_servers.<name>
-
-Arguments:
-  NAME  [required]
-
-Options:
-  --config PATH  path to the YAML config file naming server.port and
-                 server.api.secret_env (default: $VINGA_CONFIG)
-  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
-                 then http://127.0.0.1:<server.port>/api)
-  --help         Show this message and exit.
-```
-
-### `vinga-server config show prompt-fragment`
-
-```
-Usage: vinga-server config show prompt-fragment [OPTIONS] {NAME}
-
-  print prompt_fragments.<name>
-
-Arguments:
-  NAME  [required]
-
-Options:
-  --config PATH  path to the YAML config file naming server.port and
-                 server.api.secret_env (default: $VINGA_CONFIG)
-  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
-                 then http://127.0.0.1:<server.port>/api)
-  --help         Show this message and exit.
-```
-
-### `vinga-server config show agent`
-
-```
-Usage: vinga-server config show agent [OPTIONS] {NAME}
-
-  print agents.<name>
-
-Arguments:
-  NAME  [required]
-
-Options:
-  --config PATH  path to the YAML config file naming server.port and
-                 server.api.secret_env (default: $VINGA_CONFIG)
-  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
-                 then http://127.0.0.1:<server.port>/api)
-  --help         Show this message and exit.
-```
-
-### `vinga-server config show agent-defaults`
-
-```
-Usage: vinga-server config show agent-defaults [OPTIONS]
-
-  print agent_defaults
-
-Options:
-  --config PATH  path to the YAML config file naming server.port and
-                 server.api.secret_env (default: $VINGA_CONFIG)
-  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
-                 then http://127.0.0.1:<server.port>/api)
-  --help         Show this message and exit.
-```
-
-### `vinga-server config show device`
-
-```
-Usage: vinga-server config show device [OPTIONS] {MAC}
-
-  print devices.<mac>: the agents that board is bound to
-
-Arguments:
-  MAC  [required]
-
-Options:
-  --config PATH  path to the YAML config file naming server.port and
-                 server.api.secret_env (default: $VINGA_CONFIG)
-  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
-                 then http://127.0.0.1:<server.port>/api)
-  --help         Show this message and exit.
-```
-
-### `vinga-server config export`
-
-```
-Usage: vinga-server config export [OPTIONS] COMMAND [ARGS]...
-
-  the stored configuration as a document apply takes, or one entity's fragment
-
-Options:
-  --config PATH  path to the YAML config file naming server.port and
-                 server.api.secret_env (default: $VINGA_CONFIG)
-  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
-                 then http://127.0.0.1:<server.port>/api)
-  --help         Show this message and exit.
-
-Commands:
-  provider         export providers.<stage>.<name>
-  mcp-server       export mcp_servers.<name>
-  prompt-fragment  export prompt_fragments.<name>
-  agent            export agents.<name>
-  agent-defaults   export agent_defaults
-```
-
-### `vinga-server config export provider`
-
-```
-Usage: vinga-server config export provider [OPTIONS] {STAGE} {NAME}
-
-  export providers.<stage>.<name>
-
-Arguments:
-  STAGE  llm, asr, tts, vad  [required]
-  NAME   [required]
-
-Options:
-  --config PATH  path to the YAML config file naming server.port and
-                 server.api.secret_env (default: $VINGA_CONFIG)
-  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
-                 then http://127.0.0.1:<server.port>/api)
-  --help         Show this message and exit.
-```
-
-### `vinga-server config export mcp-server`
-
-```
-Usage: vinga-server config export mcp-server [OPTIONS] {NAME}
-
-  export mcp_servers.<name>
-
-Arguments:
-  NAME  [required]
-
-Options:
-  --config PATH  path to the YAML config file naming server.port and
-                 server.api.secret_env (default: $VINGA_CONFIG)
-  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
-                 then http://127.0.0.1:<server.port>/api)
-  --help         Show this message and exit.
-```
-
-### `vinga-server config export prompt-fragment`
-
-```
-Usage: vinga-server config export prompt-fragment [OPTIONS] {NAME}
-
-  export prompt_fragments.<name>
-
-Arguments:
-  NAME  [required]
-
-Options:
-  --config PATH  path to the YAML config file naming server.port and
-                 server.api.secret_env (default: $VINGA_CONFIG)
-  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
-                 then http://127.0.0.1:<server.port>/api)
-  --help         Show this message and exit.
-```
-
-### `vinga-server config export agent`
-
-```
-Usage: vinga-server config export agent [OPTIONS] {NAME}
-
-  export agents.<name>
-
-Arguments:
-  NAME  [required]
-
-Options:
-  --config PATH  path to the YAML config file naming server.port and
-                 server.api.secret_env (default: $VINGA_CONFIG)
-  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
-                 then http://127.0.0.1:<server.port>/api)
-  --help         Show this message and exit.
-```
-
-### `vinga-server config export agent-defaults`
-
-```
-Usage: vinga-server config export agent-defaults [OPTIONS]
-
-  export agent_defaults
-
-Options:
-  --config PATH  path to the YAML config file naming server.port and
-                 server.api.secret_env (default: $VINGA_CONFIG)
-  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
-                 then http://127.0.0.1:<server.port>/api)
-  --help         Show this message and exit.
 ```
 <!-- end generated: cli reference -->
