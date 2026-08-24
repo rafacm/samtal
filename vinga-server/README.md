@@ -2114,10 +2114,13 @@ control this release has.** Until per-user controls exist, enabling text
 storage on a device a household shares stores what guests say to it,
 which is the same statement the capture section makes about audio.
 Attributing a session on a shared device to one member needs voiceprint
-identification, which does not exist here yet, so the deletion unit that
-is enforceable today is the session, and the session id is surfaced
-everywhere: on the events, on the capture triplet's filenames, and on
-every row the store keeps.
+identification, which does not exist here yet, so the session is the
+unit deletion is expressed in: it is what retention takes whole and what
+the erasure API will address. Erasing one named session on demand is not
+enforceable in this release at all, which the deletion section below
+says in full. The session id is surfaced everywhere regardless: on the
+events, on the capture triplet's filenames, and on every row the store
+keeps.
 
 Retention is 90 days by default: whole sessions older than the window
 are deleted, row and children together, at startup and at each session
