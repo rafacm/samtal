@@ -240,3 +240,189 @@ extras change), per the standing rule.
   install-story rewrite. Design footprint: test assets and
   documentation; the lane becomes the standing proof the thin
   install stays thin.
+
+## Plan review round
+
+External review of commit `cfbba43d`, 2026-08-24. Backend: codex
+CLI 0.149.0, model `gpt-5.6-sol`, read-only sandbox, runtime
+7m56s. Verdict as received: NOT READY, on the strength of finding
+1's rejection of the re-scope and finding 3's import reality.
+Fifteen findings. Findings 2, 3, 4, 6, 8, 9, 10, 11, 12, 13, 14
+and 15 hold under EITHER architecture and are amended below, each
+in its own commit. Findings 1, 5 and 7 are maintainer decisions,
+deliberately left OPEN on this plan's initial PR at the
+maintainer's request, with the evidence both ways recorded under
+each.
+
+1. **P1: the single-package re-scope contradicts the issue's
+   package boundary.** The reviewer holds the second distribution
+   to be settled by the issue and prescribes the inversion the
+   plan did not consider: an in-repo `vinga-cli` package owning
+   the remote grammar and client, with `vinga-server` DEPENDING ON
+   or extending it for its legacy entry point and `--local`
+   recovery. "Sharing one command grammar does not require sharing
+   one distribution."
+
+   *Resolution: OPEN, the maintainer's call on the initial PR.*
+   The two shapes on the table: (a) this plan's thin-default
+   install of one package (`uv tool install vinga-server` is the
+   client; `[serve]` is the server), whose case is the census
+   (same four families on both sides of `--local`; six movable
+   names; no second lockfile or workspace migration); (b) the
+   reviewer's `vinga-cli` package holding the remote grammar,
+   models and client, with `vinga-server` depending on it, whose
+   case is the issue's letter, a real artifact boundary third
+   parties can install by name, and a wheel that does not carry
+   server source, migrations and recovery code into every laptop
+   install. Shape (b)'s cost, stated honestly: the client package
+   becomes the de facto contracts home (the descriptors, the
+   config models and the response shapes move into it, since the
+   grammar derives from them), which is the shared-contracts
+   refactor by another name, with the server importing its own
+   domain models from its CLI's package. Whichever shape wins,
+   findings 2 through 15's amendments apply.
+
+2. **P1: the light closure omitted `pydantic-settings`.**
+   `config/models.py` imports it eagerly and the CLI imports the
+   models eagerly.
+
+   *Resolution* (this commit): `pydantic-settings` joins the
+   client tier in decision 1's inventory rule (every current
+   dependency assigned a tier with a reason), and the tier proof
+   imports the CLI from a genuinely minimal environment rather
+   than probing three named absences (see finding 12's amendment).
+
+3. **P1: `vinga-server config` cannot reach the friendly refusal
+   as planned.** `main.py` imports FastAPI, uvicorn, composition,
+   boot, onboarding and providers before dispatch, and
+   `DrainingServer` subclasses `uvicorn.Server` at module import.
+
+   *Resolution* (this commit): decision 2 now extracts the whole
+   serve lifecycle (`DrainingServer`, uvicorn configuration,
+   startup, shutdown, the banner, every serve-only import) into a
+   server-runtime module imported only after config-command
+   dispatch, a split that passes the deletion test by owning the
+   serve lifecycle responsibility; `main.py` keeps dispatch and
+   the boundary sentences.
+
+4. **P1: the bare-wheel inventory includes commands needing
+   FastAPI.** `openapi` reaches `config.api`; `ota-url` reaches
+   the onboarding package whose init imports FastAPI.
+
+   *Resolution* (this commit): decision 5 defines the standalone
+   inventory explicitly: the remote verbs plus `schema`,
+   `reference` and `cli-reference`; `openapi` and `ota-url` are
+   server-gated (present in the grammar, refusing with the
+   install-the-extra sentence from a thin install, exercised in
+   the lane), and the wheel completeness assertion runs against
+   the explicit inventory, both ways.
+
+5. **P1: the Python generator evaluation was removed.** The issue
+   says evaluate `openapi-python-client` with the M5 method; the
+   plan declined it on the strength of the working hand-written
+   shapes.
+
+   *Resolution: OPEN, the maintainer's call on the initial PR,*
+   beside finding 1 (the answer partly depends on the
+   architecture: under shape (b) a generated transport competes
+   with moving the hand-written shapes; under shape (a) it
+   replaces working code with a toolchain). If the maintainer
+   wants the spike, it becomes its own milestone with the M5
+   method verbatim (pinned generator, determinism proof, strict
+   fixtures, per-criterion results, accept/reject recorded); the
+   final choice may still be hand-written.
+
+6. **P1: the `diff` remote verb is missing.** #193's endpoint
+   exists (`GET /runtime/config/diff`); the CLI seat reserved for
+   it was never filled, and the issue assigns it to the standalone
+   client once #193 lands, which it did.
+
+   *Resolution* (this commit): a new grammar deliverable joins M1:
+   the `diff` command (typed response model from the committed
+   document's shapes, action, renderer in the house rendering
+   style, registration, help), with live-lane, wheel-lane and
+   refusal coverage and the reference regenerated.
+
+7. **P1: the plan does not ship an installable-by-name artifact.**
+   `uv tool install vinga-server` presumes a published package;
+   nothing publishes one.
+
+   *Resolution: OPEN, the maintainer's call on the initial PR.*
+   Publication needs decisions and credentials only the
+   maintainer holds: the published name (which finding 1 decides),
+   index ownership, trusted publishing setup, and a release
+   process. Until then the plan documents the honest local paths
+   (`uvx --from` a checkout or wheel) and claims nothing shipped;
+   the publication work, when authorized, is its own follow-up
+   issue with an install-from-index smoke test.
+
+8. **P2: the hand-written client is never independently checked
+   against the document.** Client and server import the same
+   response classes, so they can drift together.
+
+   *Resolution* (this commit): decision 5 gains an independent
+   contract check: a test that reads `docs/reference/
+   api-openapi.json` as data (no `config.api` import) and holds
+   every Act's method, path template, and response model fields
+   against the document's operations and component schemas, both
+   ways, so the client's contract is proven against the committed
+   bytes rather than against the code that generated them.
+
+9. **P2: the direct `vinga` entry point loses `.env` loading.**
+
+   *Resolution* (this commit): decision 3 moves idempotent
+   client-environment loading (`find_dotenv(usecwd=True)`, real
+   env winning) into `cli.main` itself so both spellings behave
+   identically, tested from a temporary directory carrying URL
+   and secret values with sentinel assertions on every stream.
+
+10. **P2: the lane was allowed to abandon completeness.**
+
+    *Resolution* (this commit): full registered-inventory coverage
+    is mandatory in the wheel lane; the runtime paragraph now
+    prescribes fixture reuse and one shared venv, never a
+    representative subset.
+
+11. **P2: the wheel test does not prove provenance.**
+
+    *Resolution* (this commit): the lane runs from a temporary
+    directory outside the checkout, scrubs `PYTHONPATH`, and
+    asserts the resolved package file sits inside the clean venv
+    before any command runs, the existing wheel steps' pattern.
+
+12. **P2: the negative dependency proof was three names.**
+
+    *Resolution* (this commit): the tier proof asserts the
+    installed distribution set against an explicit allowed
+    closure (positive and negative), derived from the pyproject
+    tiers, so a heavy default install cannot pass by missing only
+    the three named probes.
+
+13. **P2: the `[serve]` migration has no upgrade sweep.**
+
+    *Resolution* (this commit): decision 6 gains the inventory:
+    every documented install and sync site (AGENTS.md commands,
+    both READMEs, provider-extra examples, Dockerfile, every CI
+    sync, config.deploy prose) is listed and updated to name
+    `[serve]` where serving is meant, with one documented server
+    installation path exercised in CI.
+
+14. **P2: the light homes were vague and one was a pass-through.**
+
+    *Resolution* (this commit): decision 2 names
+    `config/transport.py` as the home of the recursive
+    transportability policy (`check_transportable`,
+    `APPLY_LOCATION`, helpers), imported by both store and CLI;
+    `reference_value` inlines into its sole CLI caller instead of
+    moving; `addressed` stays with the descriptors and
+    `provider_identity` with the secrets vocabulary as multiple
+    consumers warrant, `MASK` beside `is_secret_option`.
+
+15. **P2: invocation-aware naming needs a no-leak design.**
+
+    *Resolution* (this commit): decision 3 maps only known entry
+    points to two fixed canonical strings (`vinga`,
+    `vinga-server config`); raw `argv[0]` is never interpolated
+    anywhere, and a hostile-`argv[0]` sentinel case covers help,
+    recipes, export output, the reference, logs and exception
+    text.
