@@ -260,3 +260,58 @@ CLI surfaces once in M1.
   Decision 4. Design footprint: the one model whose `extra`
   stays open, stated on the model, with the fixture untouched as
   the proof.
+
+## Plan review round
+
+External review of commit `c4a75c3c`, 2026-08-24. Backend: codex
+CLI 0.149.0, model `gpt-5.6-sol`, read-only sandbox, runtime
+8m42s. Verdict as received: ready after the P1/P2 amendments.
+Eleven findings; each amendment is its own commit with a
+resolution note here.
+
+1. **P1: the OpenAPI deliverable had no structural path.** The
+   provider PUT takes RawBody referencing only `ProviderConfig`,
+   and models held in a side table would be absent from
+   components and undiscoverable from the write route.
+
+2. **P1: the escape hatch never made passthrough take effect.**
+   The current builder refuses every leftover and assembles
+   requests from a fixed dictionary, so removing `finish()`
+   without forwarding `model_extra` silently ignores
+   configuration, the exact failure the issue exists to remove.
+
+3. **P1: pydantic failures introduce a secret-bearing exception
+   path the tests did not cover.** A ValidationError retains
+   rejected input; the plan's tests asserted rendering surfaces
+   only, not causes, contexts, boot output or reload logs.
+
+4. **P2: the parallel OPTION_MODELS table violates the registry
+   decision and the locality rule.** Two stage/type tables held
+   together by a one-way test are the design guide's pending bug.
+
+5. **P2: `/options/<field>` is not a pointer into a provider
+   fragment.** Options are flat siblings of `type`; the pointer
+   addressed a key absent from the submitted JSON.
+
+6. **P2: `config schema provider <type>` cannot represent the
+   stage axis.** `openai` exists in ASR and TTS and `mock` in
+   every stage.
+
+7. **P2: nested models need explicit serialization and recursive
+   documentation.** Engines and JSON take dictionaries;
+   `_table` and `fragment_help` enumerate one level.
+
+8. **P2: coercion parity was unspecified.** The reader rejects
+   booleans as numbers, numeric strings as integers, empty lists,
+   and accepts scalar temperature; ordinary pydantic fields do
+   not reproduce that set.
+
+9. **P2: the stored-body gate bypasses typed validation.** The
+   bodies suite validates through stage-blind `ProviderConfig`
+   with a hard-coded `llm` identity, and `_body` has no stage.
+
+10. **P2: `VadParameters(extra="forbid")` closes an engine escape
+    hatch on the evidence of one documented key.**
+
+11. **P2: the faster_whisper builder tests would be skipped in
+    default CI**, which installs no optional extras.
