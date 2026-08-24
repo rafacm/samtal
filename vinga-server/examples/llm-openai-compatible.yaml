@@ -10,13 +10,14 @@ base_url: http://localhost:11434/v1
 model: qwen3:8b
 
 # Any other key is sent to the endpoint as part of the request, and this
-# is the one provider type that works that way. It is what the type is
-# for: every server speaking this dialect takes parameters no other one
-# does, so an option vinga has never heard of travels rather than being
-# refused. The exceptions are the fields vinga composes for every
-# request, which it refuses here because writing one of them would
-# rewrite the request rather than configure the server: model,
-# max_tokens, messages, stream, stream_options, tools and tool_choice.
+# is the one provider type that works that way. That is what the type is
+# there for: every server speaking this dialect takes parameters no
+# other one does, so an option vinga has never heard of travels rather
+# than being refused. The exceptions are the fields vinga composes for
+# every request. Two of them are options above, model and max_tokens;
+# the other five are messages, stream, stream_options, tools and
+# tool_choice, and writing one of those is refused, because it would
+# rewrite the request rather than configure the server.
 # top_p: 0.9
 
 # Whether an openai_compatible endpoint sends session data off the host

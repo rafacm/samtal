@@ -729,9 +729,9 @@ From `vinga-server/`, at the tip.
 
 ### What was done
 
-Five commits: the model, the builder and the forwarding, the tests, the
-three documents with the fragment, and this record with the changelog
-and the tick.
+Six commits: the model, the builder and the forwarding, the tests, the
+three documents with the fragment, this record with the changelog and
+the tick, and the one the fragment's own prose asked for.
 
 **The model.** `OpenaiCompatibleOptions` declares the three options the
 builder read, with the example fragment's own sentence on each field,
@@ -844,6 +844,30 @@ the builder reads and the write path refuses, which is an honest
 statement of the contract with a defect visible beside it rather than a
 contract quietly narrowed to fit the defect.
 
+**An open door lets a sentence become an option.** The fragment's
+uncommenting case is a scan, and a scan cannot tell a documented key
+from a sentence that happens to contain one: a paragraph reading `That
+is what the type is for: every server ...` wraps so that a line begins
+`for: every server ...`, which is a `key:` line to the regular
+expression. Under a type whose model shuts its door the mistake is
+caught by the install, loudly, which is how M2 found the `Default:` and
+`API:` paragraphs. Under this one it is not caught at all: the model
+keeps what it does not declare, so `for` would have installed, and it
+would have been sent to the endpoint on every request.
+
+Found while writing the fragment, and fixed twice over: the sentence is
+worded so no line begins that way, and
+`test_an_open_doors_fragment_documents_only_real_options` compares the
+keys that survive the uncommenting against what the type declares, with
+the one documented passthrough (`top_p`) named rather than counted.
+Restoring the earlier wording fails it on `for`. The rule this depends
+on, that a documented key is a line of its own rather than a phrase
+inside a sentence, is not held repository-wide: four other fragments
+have prose lines the same scan misreads, all of them under types that
+declare no model, so none of them is uncommented by anything today. A
+general check belongs with whichever milestone converts one of those
+types.
+
 **The untyped-type scan in the options note matched on a substring.**
 `test_the_options_note_names_the_types_that_declare_a_model` checked
 that no untyped type name appears in `OPTIONS_NOTE`, by asking whether
@@ -932,7 +956,7 @@ the two the plan says must not move did not.
 - `docs/reference/events.md`, `docs/reference/conversations-schema.md`:
   byte-identical, checked at the tip by regenerating both and by
   `git diff origin/main HEAD`, which lists neither.
-- Beside the six: `examples/llm-openai-compatible.yaml` (+10) documents
+- Beside the six: `examples/llm-openai-compatible.yaml` (+11) documents
   the hatch and `top_p` as its one commented example, and
   `examples/README.md` (+6, -2) names all three declared types and says
   which of them keeps its door open.
@@ -950,8 +974,8 @@ From `vinga-server/`, at the tip of the milestone.
 - `uv run ruff check .`: `All checks passed!`
 - `uv run mypy`: `Success: no issues found in 4 source files`
 - `uv run pytest tests/unit -q -n auto --dist loadfile`:
-  `3366 passed, 19 skipped in 43.94s`
-- `uv run pytest tests/integration -q`: `126 passed in 191.37s (0:03:11)`
+  `3367 passed, 19 skipped in 44.79s`
+- `uv run pytest tests/integration -q`: `126 passed in 190.89s (0:03:10)`
 - The six drift checks as CI runs them: all six clean, including the two
   that must not move.
 - `uv sync --frozen`: `Checked 99 packages`
