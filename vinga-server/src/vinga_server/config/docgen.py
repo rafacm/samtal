@@ -34,8 +34,12 @@ whole-domain model used to be declared in `store.py`, so this module's
 import list pulled SQLAlchemy and cryptography in to reach one class;
 it is declared in `models.py` now and this imports it from there. The
 `vinga-server config` commands still pay for both, because `cli.py`
-imports `ConfigStore` for the paths that do open a database. What the
-removed edge buys is that the markdown reference and the JSON Schema
+imports three pure helpers from `store.py` (the transportability check,
+the apply location and the identity splitter) and so loads that module.
+It opens no database with them: since #281 removed the break-glass path
+the CLI holds no repository, no database opener and no key loader at
+all. What the removed edge buys is that the markdown reference and the
+JSON Schema
 render with nothing loaded but the models and the registry;
 `openapi()` is the deliberate exception and says so where it is
 defined. `test_config_docgen.py` pins that in a child interpreter, so
