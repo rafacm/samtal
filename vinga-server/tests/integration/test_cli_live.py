@@ -922,6 +922,14 @@ def test_the_running_server_is_read_after_a_reload(
     # given, which is the difference between this read and `show agent`.
     assert "The bins go out on Tuesday." in assembled
 
+    # And the third read of the process: what the store still holds
+    # that this server is not serving, which after the reload above is
+    # nothing to name.
+    assert run("diff") == 0
+    compared = capsys.readouterr().out
+    assert "providers: applies at reload" in compared
+    assert "devices: applies at check-in" in compared
+
     assert run("status") == 0
     running = capsys.readouterr().out
     # Configured, and connected for nobody: no agent grants either
@@ -1309,6 +1317,7 @@ REFUSALS: tuple[Refusal, ...] = (
     Refusal(("list",), ("list", "extra"), USAGE, False),
     Refusal(("show",), ("show", "extra"), USAGE, False),
     Refusal(("export",), ("export", "extra"), USAGE, False),
+    Refusal(("diff",), ("diff", "extra"), USAGE, False),
     Refusal(
         ("schema",),
         ("schema", "nonsense"),

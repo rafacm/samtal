@@ -1,11 +1,12 @@
 """What the CLI prints from an answer, and what it refuses to print.
 
-Four commands ask the running server rather than the database: `pending`
-lists the boards waiting to be claimed, `status` says what each MCP
-server is doing, `reload` applies a changed registry and says what it
-did, and `prompt` assembles an agent's prompt block by block. None of
-them writes anything, and all four are rendered rather than relayed, so
-this is where the rendering rules live.
+Five commands ask the running server rather than the database: `device
+pending list` lists the boards waiting to be claimed, `status` says what
+each MCP server is doing, `reload` applies a changed registry and says
+what it did, `agent preview` assembles an agent's prompt block by block,
+and `diff` says what the store holds that the server is not serving.
+None of them writes anything, and all five are rendered rather than
+relayed, so this is where the rendering rules live.
 
 Since #139 the shape of an answer is the pydantic model `api.py`
 declares it answers with, read in strict mode, unknown fields dropped
@@ -33,7 +34,14 @@ from tests.support.config_cli import chain as _chain
 from tests.support.config_cli import runner
 from tests.support.config_cli import showing as _showing
 from vinga_server.config import Config, cli, printing
-from vinga_server.config.cli import RELOAD_SECTIONS, flags, outcomes
+from vinga_server.config.cli import (
+    DIFF_SECTIONS,
+    RELOAD_SECTIONS,
+    flags,
+    named_lists,
+    nested,
+    outcomes,
+)
 from vinga_server.config.loader import ConfigError
 from vinga_server.config.responses import (
     AgentsReload,
@@ -647,3 +655,111 @@ def test_reload_prints_nothing_from_an_answer_of_the_wrong_shape(
     assert cli.UNRECOGNIZED_ANSWER in captured.err
     assert ANSWERED not in captured.err + captured.out
     assert "Traceback" not in captured.err
+
+
+# The comparison
+#
+# Names and closed tokens by construction: no bodies, no values, no
+# masks and no secret marks cross this surface, which is what makes its
+# no-leak claim structural. What is left to check is that every kind is
+# printed and that every field of every kind is printed, because a kind
+# or a field that dropped out would read as one with nothing pending.
+
+DIFF_EMPTY: dict[str, object] = {
+    "providers": {"applies": "reload", "added": [], "removed": [], "changed": []},
+    "mcp_servers": {"applies": "reload", "added": [], "removed": [], "changed": []},
+    "prompt_fragments": {"applies": "reload", "added": [], "removed": [], "changed": []},
+    "agent_defaults": {"applies": "reload", "changed": False},
+    "agents": {
+        "applies": "reload",
+        "added": [],
+        "removed": [],
+        "changed": [],
+        "grants": {"applies": "reload", "changed": []},
+        "prompt": {"applies": "reload", "changed": []},
+        "filler": {"applies": "reload", "changed": []},
+    },
+    "devices": {"applies": "check-in"},
+    "default_agent": {"applies": "check-in"},
+}
+
+
+def test_the_comparison_prints_every_kind_and_its_boundary() -> None:
+    """Every kind, including the ones with nothing to name.
+
+    A kind silently missing from the output would read as a kind with
+    nothing pending rather than as one this read reports without lists,
+    and which of those it is is exactly what the label says.
+    """
+    rendered = cli._diff_listing(DIFF_EMPTY)
+
+    for kind in DIFF_SECTIONS:
+        assert f"{kind}: applies at " in rendered
+    assert "devices: applies at check-in" in rendered
+    assert "providers: applies at reload" in rendered
+
+
+def test_the_comparison_names_what_moved_and_where_it_reaches() -> None:
+    """The three clocks an agent's entry has, each printed under the
+    agent kind that holds them."""
+    body = {**DIFF_EMPTY}
+    body["agents"] = {
+        **DIFF_EMPTY["agents"],  # type: ignore[dict-item]
+        "changed": ["sam"],
+        "prompt": {"applies": "reload", "changed": ["sam"]},
+    }
+
+    rendered = cli._diff_listing(body)
+
+    assert "  changed: sam" in rendered
+    assert "  prompt: applies at reload" in rendered
+    assert "    changed: sam" in rendered
+
+
+def test_the_comparison_renders_every_field_of_every_kind() -> None:
+    """The named failure to test for: a field that is neither a list of
+    names, nor a flag, nor a kind's own sub-section would drop silently
+    out of the rendering, and an operator would be reading an answer
+    with a hole in it.
+
+    Read off the models rather than listed here, so a field added to the
+    comparison is either rendered or fails this. The walk follows the
+    nested sections too, since that is where three of the fields are.
+    """
+    unwalked = list(DIFF_SECTIONS.values())
+    while unwalked:
+        shape = unwalked.pop()
+        rendered = set(named_lists(shape)) | set(flags(shape)) | set(nested(shape))
+        unwalked += [
+            cli._section(shape.model_fields[name].annotation) for name in nested(shape)
+        ]
+        # `applies` is the label on the block's own heading rather than
+        # a line under it, which is the one field the three rules do not
+        # claim and this pin states.
+        assert set(shape.model_fields) - rendered == {"applies"}
+
+
+def test_the_comparison_refuses_an_answer_it_cannot_read(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A body missing a kind is a body this client cannot read as a
+    comparison, and it meets the fixed sentence rather than rendering
+    most of an answer."""
+    monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: {"providers": {}})
+
+    assert run("diff") == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == cli.UNREADABLE_READ + "\n"
+
+
+def test_diff_prints_the_refusal_the_api_answered(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """No server to compare against is a refusal with a sentence rather
+    than an empty comparison, which would say that everything stored is
+    already in effect."""
+    assert run("diff") == 1
+
+    assert "no running server" in capsys.readouterr().err
