@@ -93,6 +93,7 @@ from vinga_server.config.models import (
     DomainConfig,
     FieldProblem,
 )
+from vinga_server.config.provider_options import component_name, declared_options
 from vinga_server.config.responses import (
     Acknowledgement,
     AppliedDocument,
@@ -1614,6 +1615,50 @@ def _runtime(api: FastAPI) -> None:
         return await diff()
 
 
+# How a client finds the options a provider write may carry
+#
+# The body is taken unread (`RawBody`), for the reason the module
+# docstring gives: FastAPI's own validation echoes what it rejected, and
+# a fragment can carry a pasted credential. So the route cannot declare a
+# discriminated request schema keyed on `type`, and a client reading the
+# document would find `ProviderConfig` with its `extra` open and nothing
+# more.
+#
+# The mapping is what closes that gap without reopening the refusal
+# question: the description names, per declared stage and type, the
+# component that states what that type accepts, and those components are
+# injected beside the entity models. Derived from the declaration, so a
+# type converting in a later PR appears here by existing (#88).
+_PROVIDER_WRITE = (
+    "Create or replace one provider from a fragment in the shape the YAML section "
+    "had. The running server builds it again at the next reload, and the "
+    "conversations that open after that speak through the new one."
+)
+
+_PROVIDER_OPTIONS_MAPPING = (
+    "The options a fragment may carry beyond the fields of `ProviderConfig` are "
+    "whatever its `type` takes. This body is validated by the server rather than "
+    "described as a discriminated schema here, so the types that declare their "
+    "options state them as components of their own, named for the stage and the "
+    "type: {mapping}. Every other type passes its options through undeclared, and "
+    "the example fragments shipped with the server document those."
+)
+
+
+def _provider_write_description() -> str:
+    """The provider PUT's description, with the component mapping under
+    it. One sentence per declared pair, in the declaration's order."""
+    mapping = ", ".join(
+        f"an entry in the `{stage}` stage with `type: {type_name}` carries "
+        f"`{component_name(stage, type_name)}`"
+        for stage, type_name, _ in declared_options()
+    )
+    return f"{_PROVIDER_WRITE}\n\n{_PROVIDER_OPTIONS_MAPPING.format(mapping=mapping)}"
+
+
+PROVIDER_WRITE_DESCRIPTION = _provider_write_description()
+
+
 def _entity_writes(api: FastAPI) -> None:
     """Every commanded kind's writes, deletes and credential slots.
 
@@ -1641,10 +1686,18 @@ def _entity_writes(api: FastAPI) -> None:
         response_model=Acknowledgement,
         responses=_problems(401, 409, 422, 500),
         openapi_extra=_request_body(_PROVIDER.model),
+        description=PROVIDER_WRITE_DESCRIPTION,
     )
     def write_provider(
         stage: str, name: str, body: RawBody, store: StoreDep
     ) -> dict[str, Any]:
+        # The description is passed rather than left as this docstring,
+        # which is the one route in this file where the two differ. What
+        # a client needs here is not only what the write does but which
+        # component states the options for the stage and type it is
+        # writing, and that list is derived from the declaration rather
+        # than typed into a docstring that would go stale as the types
+        # convert (#88).
         """Create or replace one provider from a fragment in the shape
         the YAML section had. The running server builds it again at the
         next reload, and the conversations that open after that speak
@@ -2583,12 +2636,24 @@ def _entity_schemas() -> dict[str, Any]:
     their request bodies name these components through `openapi_extra`
     while the running code keeps validating in exactly one place, the
     repository.
+
+    The provider option models ride in the same way and under a name of
+    their own, `<Stage><Type>Options`, because their class name is not
+    the address: what selects one is the stage and the type together
+    (#88). They are the structural half of what the provider PUT's
+    description says in words; without them a client reading this
+    document would be told that a type declares its options and given no
+    way to read them.
     """
     schemas: dict[str, Any] = {}
     for model in ENTITY_MODELS + REQUEST_MODELS + DOCUMENT_MODELS + PROBLEM_MODELS:
         schema = model.model_json_schema(ref_template="#/components/schemas/{model}")
         schemas.update(schema.pop("$defs", {}))
         schemas[model.__name__] = schema
+    for stage, type_name, model in declared_options():
+        schema = model.model_json_schema(ref_template="#/components/schemas/{model}")
+        schemas.update(schema.pop("$defs", {}))
+        schemas[component_name(stage, type_name)] = schema
     return schemas
 
 

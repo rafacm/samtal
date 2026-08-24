@@ -331,6 +331,11 @@ def reference() -> str:
 
     for candidate in ENTITIES:
         lines += _entity_section(candidate)
+        # The one kind with a tier under it, which is what a `type` key
+        # means: the entry above documents every provider, and the
+        # sections below document what each declared type accepts.
+        if candidate.name == PROVIDER:
+            lines += _options_sections()
 
     lines += ["## Domain-level settings", ""]
     for setting in SETTINGS:
@@ -347,6 +352,82 @@ def reference() -> str:
         "",
     ]
     return "\n".join(lines).rstrip("\n") + "\n"
+
+
+# The provider's second tier
+#
+# Every other kind is one model and one table. A provider is a model
+# whose remaining keys belong to whatever its `type` names, so the kinds
+# above cannot describe it on their own, and the types that declare an
+# options model are documented here, under the kind they are a type of.
+#
+# Grouped by stage and then by type because that is how one is
+# addressed: `providers.<stage>.<name>` with a `type`, and the same
+# stage-then-type pair the schema command takes. Rendered recursively,
+# so a nested section's own fields appear rather than only the name of
+# the section: a reader looking for `min_silence_duration_ms` finds it
+# here, which is the whole difference between documenting a contract and
+# naming it.
+
+
+def _options_sections() -> list[str]:
+    """One subsection per typed provider type, in the declaration's own
+    order."""
+    lines: list[str] = []
+    for stage, type_name, model in declared_options():
+        lines += [
+            f"#### `{stage}` options for `type: {type_name}`",
+            "",
+            f"`providers.{stage}.<name>`",
+            "",
+            *_paragraph(_lead(model)),
+            "",
+            *_options_tables(model),
+        ]
+    return lines
+
+
+def _options_tables(model: type[BaseModel], parent: str = "") -> list[str]:
+    """One model's fields as a table, and then a table per nested model
+    under it.
+
+    Depth-first and after the parent, so a reader meets the section
+    before its contents. The nesting is named by the field path rather
+    than by the nested class, since what a fragment writes is the path.
+    """
+    lines = [*_table(model), ""]
+    for name, info in model.model_fields.items():
+        nested = _nested_model(info.annotation)
+        if nested is None:
+            continue
+        below = f"{parent}{name}"
+        lines += [f"Fields of `{below}`:", ""]
+        lines += _options_tables(nested, f"{below}.")
+    return lines
+
+
+def _nested_model(annotation: object) -> type[BaseModel] | None:
+    """The model a field holds one of, or None for a field that holds a
+    value. A union is looked through, so an optional section is found the
+    way a required one is."""
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return annotation
+    if get_origin(annotation) in (Union, UnionType, Annotated):
+        for argument in get_args(annotation):
+            found = _nested_model(argument)
+            if found is not None:
+                return found
+    return None
+
+
+def _lead(model: type[BaseModel]) -> str:
+    """A model's docstring down to its first paragraph, on one line.
+
+    The whole docstring is what the JSON Schema carries, and it runs to
+    the reasoning behind a default; what belongs in a reference table's
+    heading is the sentence that says what the thing is."""
+    text = (model.__doc__ or "").strip().split("\n\n")[0]
+    return " ".join(text.split())
 
 
 def _entity_section(candidate: DocumentedShape) -> list[str]:
@@ -491,10 +572,38 @@ def fragment_help(name: str) -> str:
     """
     candidate = entity(name)
     lines = [f"fragment fields for {candidate.title.lower()} ({candidate.location}):", ""]
-    for field_name, info in candidate.model.model_fields.items():
+    lines += _help_fields(candidate.model)
+    if candidate.name == PROVIDER:
+        for stage, type_name_, model in declared_options():
+            lines += ["", f"options for {stage} type {type_name_}:", ""]
+            lines += _help_fields(model)
+    if candidate.model.model_config.get("extra") == "allow":
+        lines += [
+            "",
+            "Any other key is an option for a type that declares none of its own;",
+            "see vinga-server/examples/ for those types' options.",
+        ]
+    lines += [
+        "",
+        "Full descriptions: vinga-server config schema " + candidate.name,
+    ]
+    return "\n".join(lines)
+
+
+def _help_fields(model: type[BaseModel], prefix: str = "") -> list[str]:
+    """One model's fields as the epilog lists them, and then the fields
+    of every model nested under it.
+
+    Recursive for the reason the reference's tables are: a section
+    listed by name alone tells a reader a mapping goes there and not
+    what may go in it. A nested field is written at its own path, since
+    that is how a fragment writes it.
+    """
+    lines: list[str] = []
+    for field_name, info in model.model_fields.items():
         given = default(info)
         held = "required" if given == "required" else f"default: {given}"
-        lines.append(f"  {field_name}: {type_name(info.annotation)}  ({held})")
+        lines.append(f"  {prefix}{field_name}: {type_name(info.annotation)}  ({held})")
         lines += textwrap.wrap(
             _sentence(info.description),
             width=HELP_WIDTH,
@@ -503,17 +612,11 @@ def fragment_help(name: str) -> str:
             break_long_words=False,
             break_on_hyphens=False,
         )
-    if candidate.model.model_config.get("extra") == "allow":
-        lines += [
-            "",
-            "Any other key is an option for the provider implementation; see",
-            "vinga-server/examples/ for each type's options.",
-        ]
-    lines += [
-        "",
-        "Full descriptions: vinga-server config schema " + candidate.name,
-    ]
-    return "\n".join(lines)
+    for field_name, info in model.model_fields.items():
+        nested = _nested_model(info.annotation)
+        if nested is not None:
+            lines += _help_fields(nested, f"{prefix}{field_name}.")
+    return lines
 
 
 def _sentence(description: str | None) -> str:
