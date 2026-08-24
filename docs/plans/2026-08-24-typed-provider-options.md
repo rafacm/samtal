@@ -111,9 +111,24 @@ model-less types nothing changes: the factory keeps its
 retires naturally as the remaining types convert in their own
 PRs. `read_voice_settings` and its two hand-rolled key tables are
 deleted in the elevenlabs PR, replaced by a nested
-`VoiceSettings` model; `vad_parameters`, today an unvalidated
-mapping, becomes a nested `VadParameters` model with
-faster-whisper's documented keys and `extra="forbid"`.
+`VoiceSettings` model carrying exactly the five keys the hand
+check accepts today. `vad_parameters` becomes a nested
+`VadParameters` model that declares the documented key and KEEPS
+`extra="allow"`: the existing contract deliberately passes engine
+VAD tuning through unchanged, the example documents a single key,
+and closing the hatch on that evidence would make a running
+deployment's valid faster-whisper setting unreadable on upgrade;
+the model documents what we vouch for and the hatch stays stated
+on it, mirroring decision 4's pattern in miniature.
+
+Nested models cross two boundaries and both are stated: on the
+way to an engine or a request body they are dumped with
+`exclude_unset=True`, so an operator's explicit values (nulls
+included) travel and injected defaults do not; in the
+documentation they render recursively, so leaf names like
+`min_silence_duration_ms` and `stability` are asserted present in
+the schema, the reference, the OpenAPI components and the CLI
+help, not just their parents.
 
 Validation errors raised at BUILD time (boot, reload) keep
 today's refusal channel (`ProviderError` naming the entry), with
@@ -177,9 +192,25 @@ Its model declares what the builder reads (`base_url` required,
 with `extra="allow"`: a server-specific passthrough key remains
 legal, is still checked by the inline-secret and URL-credential
 rules that walk extras today, and the schema says so in one
-sentence on that model alone. The compatibility fixture
-(`every-field.json`) parses unchanged, which is the recorded
-reason no bodies decision is needed in this batch.
+sentence on that model alone.
+
+An accepted key must also take EFFECT, or the hatch is silently
+ignored configuration, the exact failure the issue exists to
+remove (today the builder's `finish()` refuses every leftover, so
+nothing was ever ignored; dropping `finish()` without forwarding
+would regress that honesty). The extras therefore forward into
+the outgoing request through the API's own escape door: they ride
+as the request body's `extra_body`-style top-level parameters,
+merged UNDER the fixed fields so a passthrough key can never
+override `model`, `messages`, `stream`, the tools array or the
+options this model declares; the reserved-name set is stated on
+the model and a passthrough key colliding with it is refused at
+validation with the field named. The M3 fake-client case asserts
+a server-specific option (`top_p`, say) reaches the outgoing
+request body, and a reserved collision is refused. The
+compatibility fixture (`every-field.json`) parses unchanged and
+its options now demonstrably travel, which is the recorded reason
+no bodies decision is needed in this batch.
 
 ### 5. The artifacts learn a per-type axis, minimally
 
@@ -299,6 +330,11 @@ resolution note here.
    without forwarding `model_extra` silently ignores
    configuration, the exact failure the issue exists to remove.
 
+   *Resolution* (this commit): decision 4 forwards extras into
+   the outgoing request merged under the fixed fields, states the
+   reserved-name set on the model with collisions refused by
+   name, and M3 gains the fake-client reach-the-wire case.
+
 3. **P1: pydantic failures introduce a secret-bearing exception
    path the tests did not cover.** A ValidationError retains
    rejected input; the plan's tests asserted rendering surfaces
@@ -337,6 +373,10 @@ resolution note here.
    documentation.** Engines and JSON take dictionaries;
    `_table` and `fragment_help` enumerate one level.
 
+   *Resolution* (this commit): decision 2 dumps nested models
+   with `exclude_unset=True` at both boundaries and renders them
+   recursively, with leaf names asserted in all four artifacts.
+
 8. **P2: coercion parity was unspecified.** The reader rejects
    booleans as numbers, numeric strings as integers, empty lists,
    and accepts scalar temperature; ordinary pydantic fields do
@@ -354,6 +394,11 @@ resolution note here.
 
 10. **P2: `VadParameters(extra="forbid")` closes an engine escape
     hatch on the evidence of one documented key.**
+
+    *Resolution* (this commit): the nested model keeps
+    `extra="allow"`, declaring the documented key and stating the
+    hatch, decision 4's pattern in miniature; the existing
+    pass-through contract survives.
 
 11. **P2: the faster_whisper builder tests would be skipped in
     default CI**, which installs no optional extras.
