@@ -183,6 +183,11 @@ ELEVENLABS_PARITY: list[tuple[str, object, bool]] = [
     ("model", "eleven_multilingual_v2", True),
     ("model", 5, False),
     ("model", None, False),
+    # And the blank that is NOT a spelling of absence here, unlike the
+    # first converted type: this reader had no `or <default>` after it,
+    # so an empty string travelled to the API as an empty model id and
+    # still does.
+    ("model", "", True),
     ("language_code", "sv", True),
     ("language_code", None, True),
     ("language_code", 5, False),
@@ -193,6 +198,9 @@ ELEVENLABS_PARITY: list[tuple[str, object, bool]] = [
     ("output_format", "pcm_", False),
     ("output_format", 24000, False),
     ("output_format", None, False),
+    # Refused by the format rule then, refused by it now, and not a
+    # spelling of absence for the same reason `model` is not.
+    ("output_format", "", False),
     # a number: an int or a float, never a bool, never a string. Null
     # was refused by the reader too, since `number` measured whatever it
     # popped rather than falling back on it.
@@ -206,7 +214,10 @@ ELEVENLABS_PARITY: list[tuple[str, object, bool]] = [
     ("voice_settings", {"stability": 0.5, "use_speaker_boost": True}, True),
     ("voice_settings", [], False),
     ("voice_settings", "0.5", False),
-    ("voice_settings", None, False),
+    # the one spelling of absence this type's reader swallowed: the same
+    # `mapping()` call `vad_parameters` went through answered {} for a
+    # key that was not there.
+    ("voice_settings", None, True),
     # and its five keys, each with the rule the hand check gave it. A
     # null under one of them was skipped by that check and travelled, so
     # it still does.
@@ -270,7 +281,7 @@ BLANK_DEFAULTED = [
 def test_a_blank_option_reads_as_the_default(
     name: str, expected: object, written: object
 ) -> None:
-    options = accept(**{name: written})
+    options = whisper(**{name: written})
 
     assert getattr(options, name) == expected
     # And as UNWRITTEN, not as the default written out, which is what
@@ -283,10 +294,29 @@ def test_a_null_vad_section_reads_as_no_section() -> None:
     """The fifth spelling, whose consequence is not a value but a key
     the engine never sees: `mapping()` answered `{}` for a missing key
     and the builder passed `vad_parameters` only when it was truthy."""
-    options = accept(vad_parameters=None)
+    options = whisper(vad_parameters=None)
 
     assert options.vad_parameters.model_dump(exclude_unset=True) == {}
     assert "vad_parameters" not in options.model_fields_set
+
+
+def test_a_null_voice_settings_section_reads_as_no_section() -> None:
+    """The same spelling under the second converted type, and the only
+    one it has: `voice_settings` went through the same `mapping()` call,
+    and the builder put the key in the request body only when the
+    mapping was truthy, so a null section and a missing one produced the
+    same request.
+
+    Its neighbours in this type deliberately have no such case. `model`
+    and `output_format` were read without the `or <default>` that made a
+    blank mean nothing elsewhere, so an empty string there is a value
+    and the parity rows say so.
+    """
+    options = elevenlabs(voice_settings=None)
+
+    assert options.voice_settings.model_dump(exclude_unset=True) == {}
+    assert "voice_settings" not in options.model_fields_set
+    assert elevenlabs(model="").model == ""
 
 
 def test_a_scalar_temperature_becomes_a_ladder_of_one() -> None:
