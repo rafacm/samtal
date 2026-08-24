@@ -15,6 +15,7 @@ refusal a build can still raise.
 """
 
 import asyncio
+import json
 
 import httpx
 import pytest
@@ -215,6 +216,119 @@ async def test_the_type_marks_egress_and_rejects_a_declaration(
         await build_tts(
             type="elevenlabs", voice_id="voice-1", api_key_env="ELEVEN_KEY", egress=False
         )
+
+
+# --- a configured entry, built and asked to speak --------------------
+#
+# The cases below construct `ElevenLabsTts` themselves, which is the
+# right shape for asking what the class does with what it holds and the
+# wrong shape for asking whether the builder gives it what the entry
+# says: every one of them would stay green if `build` stopped forwarding
+# an option. So these two go the whole way, from a fragment through
+# `build_entry` to the bytes on the wire, with the transport put in by
+# replacing the client class the builder reaches for rather than by
+# reaching into the object it built (#88).
+
+
+def transported(
+    monkeypatch: pytest.MonkeyPatch, handler: object
+) -> list[httpx.Request]:
+    """Every client the builder makes from here on, answering from the
+    handler instead of from the network.
+
+    The seam is the class the module names, so what is under test stays
+    the real `build`: the arguments it passes, `timeout` included, are
+    the ones the client is made with, and a request carries its client's
+    timeout in `extensions`.
+    """
+    seen: list[httpx.Request] = []
+
+    def watching(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return handler(request)  # type: ignore[operator]
+
+    real = httpx.AsyncClient
+
+    def client(**arguments: object) -> httpx.AsyncClient:
+        return real(transport=httpx.MockTransport(watching), **arguments)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(httpx, "AsyncClient", client)
+    return seen
+
+
+async def test_a_configured_entry_puts_every_option_on_the_wire(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """What the fragment said, in the request the API receives.
+
+    Every value here is deliberately not the default, so a forwarding
+    that was dropped shows up as the default arriving rather than as
+    nothing arriving. The voice setting is an explicit null for the same
+    reason it is legal: the vendor's own default is what a null asks
+    for, and `exclude_unset` is what lets one travel.
+    """
+    monkeypatch.setenv("ELEVEN_KEY", "secret-from-the-environment")
+    seen = transported(monkeypatch, lambda request: httpx.Response(200, content=b"\x00\x01"))
+
+    built = await build_tts(
+        type="elevenlabs",
+        api_key_env="ELEVEN_KEY",
+        voice_id="voice-9",
+        model="eleven_multilingual_v2",
+        output_format="pcm_16000",
+        language_code="sv",
+        voice_settings={"stability": 0.4, "style": None},
+        timeout_s=12.5,
+    )
+    assert isinstance(built, ElevenLabsTts)
+    assert await collect(built, "Hej hej") == b"\x00\x01"
+
+    (request,) = seen
+    body = json.loads(request.content)
+
+    assert request.url.path == "/v1/text-to-speech/voice-9/stream"
+    assert request.url.params["output_format"] == "pcm_16000"
+    assert request.headers["xi-api-key"] == "secret-from-the-environment"
+    assert body["model_id"] == "eleven_multilingual_v2"
+    assert body["language_code"] == "sv"
+    assert body["voice_settings"] == {"stability": 0.4, "style": None}
+    # The timeout is not a body field: it is what the client was built
+    # with, and httpx puts it on every request that client sends.
+    assert request.extensions["timeout"] == {
+        "connect": 12.5,
+        "pool": 12.5,
+        "read": 12.5,
+        "write": 12.5,
+    }
+    # And the rate the stage passes downstream is the one the format
+    # asked for, which is the builder's other translation.
+    assert built.sample_rate == 16000
+
+
+async def test_a_configured_entry_sends_no_settings_it_was_not_given(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other half of `exclude_unset`, on the wire: a fragment that
+    writes no `voice_settings` sends no `voice_settings` key, so the
+    vendor keeps deciding all five, and the defaults the model injects
+    stay this repository's business."""
+    monkeypatch.setenv("ELEVEN_KEY", "secret")
+    seen = transported(monkeypatch, lambda request: httpx.Response(200, content=b""))
+
+    built = await build_tts(type="elevenlabs", api_key_env="ELEVEN_KEY", voice_id="voice-1")
+    assert isinstance(built, ElevenLabsTts)
+    await collect(built)
+
+    (request,) = seen
+    body = json.loads(request.content)
+
+    assert "voice_settings" not in body
+    assert "language_code" not in body
+    # The defaults the model does carry are the ones the entry is
+    # running on, so they are on the wire rather than absent from it.
+    assert body["model_id"] == "eleven_flash_v2_5"
+    assert request.url.params["output_format"] == "pcm_24000"
+    assert request.extensions["timeout"]["read"] == DEFAULT_TIMEOUT_S
 
 
 # --- the request -----------------------------------------------------
