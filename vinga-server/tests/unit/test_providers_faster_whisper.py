@@ -20,8 +20,8 @@ from types import SimpleNamespace
 import pytest
 
 from vinga_server.config.models import ProviderConfig
+from vinga_server.config.provider_options import FasterWhisperOptions
 from vinga_server.providers import ProviderError, build_entry
-from vinga_server.providers.options import FasterWhisperOptions
 
 HAS_FASTER_WHISPER = importlib.util.find_spec("faster_whisper") is not None
 

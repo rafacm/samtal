@@ -34,15 +34,17 @@ from pydantic import BaseModel
 
 from vinga_server.config.loader import ConfigError
 from vinga_server.config.models import ProviderConfig
-from vinga_server.providers import ProviderError, registry
-from vinga_server.providers.mock import MockAsr
-from vinga_server.providers.options import (
+from vinga_server.config.provider_options import (
+    DECLARED_OPTIONS,
     FasterWhisperOptions,
     OptionsRefused,
     VadParameters,
     checked_options,
+    declared_options,
     options_model,
 )
+from vinga_server.providers import ProviderError, registry
+from vinga_server.providers.mock import MockAsr
 
 # Not a credential, and shaped so a substring check for it cannot match
 # by accident. Planted as a value and as a key, because a key is as good
@@ -266,6 +268,36 @@ def test_a_refusal_names_no_key_and_no_value_anywhere_in_its_chain() -> None:
     assert refusal.__context__ is None
 
 
+def test_every_declared_pair_names_a_registered_type() -> None:
+    """The one direction the derivation cannot check itself.
+
+    The registry reads its `options` out of `DECLARED_OPTIONS`, so a
+    type that has a factory and no model is an ordinary untyped type and
+    nothing is wrong. The other way round is wrong and silent: a key
+    naming a stage or a type the registry does not have declares a
+    contract nothing dispatches on, and every surface would document
+    options no entry can carry. A typo in either half of a key looks
+    exactly like that.
+    """
+    missing = [
+        f"{stage} {type_name}"
+        for (stage, type_name) in DECLARED_OPTIONS
+        if registry.registration(stage, type_name) is None
+    ]
+
+    assert not missing, f"declared options for types no registry entry has: {missing}"
+
+
+def test_the_registry_carries_the_model_it_was_declared_with() -> None:
+    """And the derivation itself, which is one line and worth one
+    assertion: what the table dispatches on is the declaration rather
+    than a copy of it."""
+    for stage, type_name, model in declared_options():
+        found = registry.registration(stage, type_name)
+        assert found is not None
+        assert found.options is model
+
+
 def test_a_type_with_no_model_is_not_checked_at_all() -> None:
     """Which is what makes converting the types one at a time a
     non-event: every other type behaves exactly as it did."""
@@ -427,11 +459,12 @@ def test_the_selector_needs_the_stage_because_a_type_name_is_not_unique() -> Non
 # What a write costs to import
 #
 # `config/store.py` validates a written provider through
-# `providers/options.py`, and that module is inside a package whose
-# `__init__` re-exports the whole provider layer. What must not happen is
-# an engine loading: writing a faster-whisper entry on a server that has
-# never transcribed anything must not import faster-whisper, numpy or
-# any client library. In a subprocess, because this suite's own
+# `config/provider_options.py`. What must not happen is an engine
+# loading, or the provider package with it: writing a faster-whisper
+# entry on a server that has never transcribed anything must import
+# neither faster-whisper nor numpy nor any client library, and the whole
+# provider layer is what `test_onboarding_import_weight.py` holds the
+# CLI to staying clear of. In a subprocess, because this suite's own
 # `sys.modules` has the whole server in it already.
 _WRITE = """
 import json, sys, tempfile
@@ -456,11 +489,8 @@ print(json.dumps({
         for name in ("faster_whisper", "numpy", "torch", "ctranslate2", "openai", "anthropic")
         if name in sys.modules
     ),
-    "implementations": sorted(
-        name
-        for name in sys.modules
-        if name.startswith("vinga_server.providers.")
-        and name not in ("vinga_server.providers.options", "vinga_server.providers.registry")
+    "providers": sorted(
+        name for name in sys.modules if name.startswith("vinga_server.providers")
     ),
 }))
 """
@@ -477,7 +507,8 @@ def test_writing_a_provider_loads_no_engine() -> None:
 
     assert written["stored"] == "faster_whisper"
     assert written["engines"] == []
-    # `base` and `world` ride in on the package's own `__init__`, which
-    # is the cost this deferral does not remove; what it removes is the
-    # implementation module of the type being written.
-    assert "vinga_server.providers.faster_whisper" not in written["implementations"]
+    # And not the provider layer either, which is what the models living
+    # on the config side buys: a write validates against the type's own
+    # contract without the package that builds the type being loaded at
+    # all.
+    assert written["providers"] == []

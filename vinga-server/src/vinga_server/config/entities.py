@@ -59,6 +59,7 @@ from vinga_server.config.models import (
     is_mcp_secret_key,
     is_secret_option,
 )
+from vinga_server.config.provider_options import declared_options
 
 # Where the example fragments and the configuration file live, relative
 # to the committed reference (docs/reference/domain-config.md). Printed
@@ -72,28 +73,30 @@ CONFIG_FILE = "../../vinga-server/config.example.yaml"
 # (`extra="allow"`), so a type that has not declared an option model yet
 # is one no schema can enumerate.
 #
-# The list of declared types is written here rather than read off the
-# registry, and the reason is an import edge: this module is what
-# `docgen` renders the reference from, and that rendering is held to
-# loading the models and this registry and nothing else, while the
-# provider registry sits inside a package that re-exports the whole
-# provider layer. So the sentence is prose, and
-# `test_config_entities.py` holds it to the registry's own answer, which
-# is the gate that keeps the two from drifting as the types convert
-# (#88).
+# Which types are declared is read out of the declaration rather than
+# written here, which is possible because that module weighs nothing:
+# `provider_options` is pydantic and `models`, so the reference can
+# render this sentence with no database, no key and no engine loaded.
+# The list and the tables further down the page therefore cannot come to
+# disagree about which types are typed (#88).
 #
 # Two renderings of one claim, differing only in how they point at the
 # fragments: the reference lists them further down its own page, the
 # OpenAPI document has no page to point down. Built from one string, so
 # the two cannot come to say different things.
+_DECLARED_TYPES = ", ".join(
+    f"{stage} {type_name}" for stage, type_name, _ in declared_options()
+)
+
 _OPTIONS_CONTRACT = (
-    "A provider entry carries whatever options its `type` takes. A type that "
-    "declares an option model has them checked when the entry is written, refused "
-    "by name, and printed by `vinga-server config schema provider <stage> <type>`; "
-    "in the asr stage the faster_whisper type is declared that way. Every other "
-    "type has its options passed through rather than declared, so no schema can "
-    "list those, and until the rest are typed (#88) they are documented in the "
-    "example fragments"
+    "A provider entry carries whatever options its `type` takes. The types that "
+    f"declare an option model, as stage and type, are: {_DECLARED_TYPES}. Their "
+    "options are checked when the entry is written and refused by name, they are "
+    "printed by `vinga-server config schema provider <stage> <type>`, and the "
+    "reference lists their fields under the provider section. Every other type has "
+    "its options passed through rather than declared, so no schema can list those, "
+    "and until the rest are typed (#88) they are documented in the example "
+    "fragments"
 )
 _OPTIONS_WHERE = ", which is also where the measured numbers behind each default are kept."
 OPTIONS_NOTE = f"{_OPTIONS_CONTRACT} below{_OPTIONS_WHERE}"

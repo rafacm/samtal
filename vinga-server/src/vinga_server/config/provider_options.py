@@ -9,19 +9,39 @@ A type that declares a model here states the same contract in one
 place, and the write path, the builder, the JSON Schema and the
 refusals all read it from that place (#88).
 
-Two things live here and nothing else. The model CLASSES, which are
-pydantic and the standard library and deliberately nothing heavier:
-`config/store.py` validates a written fragment through this module, so
-an import that reached an engine would put `faster_whisper` behind a
-`config set`. And the SANITIZER, which is the one function that turns a
+Three things live here and nothing else. The model CLASSES; the
+`DECLARED_OPTIONS` mapping, which is the one statement of which stage's
+type has which model; and the SANITIZER, the one function that turns a
 stage, a type and a mapping into either a validated instance or a
 value-free refusal, so the write path, the read-back and the build path
 consult one implementation rather than three.
 
-The topology is not here. Which type has which model is the registry's
-one table (`registry.Registration`), read below through a deferred
-import, because the registry imports this module for the classes and a
-second edge at module scope would close the cycle.
+It is one topology and everything derives from it, including the
+provider registry, whose `Registration` reads its options model out of
+this mapping when the table is built. That is the direction, and it goes
+this way rather than the other because of what this module is allowed to
+weigh. Pydantic and `config.models`, and nothing else: no provider
+package, no engine, no database driver, no cryptography. Three committed
+pins depend on that, and each of them is a promise this repository makes
+about where its code can run.
+
+- The reference and the JSON Schema render from the models alone, in a
+  child interpreter with no database and no key
+  (`test_config_docgen.py`). They document these options now, so this
+  module is on that path.
+- Rendering the OpenAPI document loads no part of a conversation
+  (`test_onboarding_import_weight.py`). It carries these models as
+  components now.
+- `vinga-server config` loads no engine. It prints these fields in the
+  epilog of `set provider`, built when the command table is.
+
+A home inside the provider package could satisfy none of the three: the
+package's `__init__` re-exports the whole provider layer, so importing
+one pydantic module from it pulls in the engine base classes, the
+provider world and, through the secret store, cryptography. Hence this
+address. What lives on the provider side is the half that is genuinely
+the provider layer's: which factory builds a type, and the reading of a
+validated instance inside a builder.
 
 Field descriptions carry the example fragment's factual sentence, which
 is what makes the schema and the reference say what the fragment says.
@@ -44,7 +64,7 @@ from pydantic import (
     ValidationError,
 )
 
-from vinga_server.config.models import FieldProblem, validation_problems
+from vinga_server.config.models import PROVIDER_STAGES, FieldProblem, validation_problems
 
 # What a coercion rule says when it refuses.
 #
@@ -266,20 +286,64 @@ class OptionsRefused(Exception):
         super().__init__(sentence)
 
 
+# Which stage's type declares which model, and the one place that is
+# written down.
+#
+# Keyed by the pair because the provider registry is: `openai` is an ASR
+# type and a TTS type, `mock` is all four, and a type name on its own
+# addresses nothing in particular. The registry builds its own table's
+# `options` out of this rather than repeating it, so there is one
+# statement of the topology and one direction of derivation; a key here
+# naming a stage-and-type the registry does not have is caught by a
+# one-way test rather than by silence.
+#
+# Empty for a stage with no declared type, which is every stage but one
+# while the conversion runs type by type (#88).
+DECLARED_OPTIONS: dict[tuple[str, str], type[BaseModel]] = {
+    ("asr", "faster_whisper"): FasterWhisperOptions,
+}
+
+
 def options_model(stage: str, type_name: str) -> type[BaseModel] | None:
     """The options model one stage's type declares, or None for a type
     that declares none.
 
-    Read off the registry's one table rather than a second one here, and
-    imported inside the call because the registry imports this module
-    for the classes it names. A type with no model is the ordinary case
-    while the conversion runs type by type: the caller falls back to
-    what it did before.
+    A type with no model is the ordinary case while the conversion runs
+    type by type: the caller falls back to what it did before.
     """
-    from vinga_server.providers.registry import registration
+    return DECLARED_OPTIONS.get((stage, type_name))
 
-    found = registration(stage, type_name)
-    return found.options if found is not None else None
+
+def declared_options() -> tuple[tuple[str, str, type[BaseModel]], ...]:
+    """Every declared model as stage, type and model, grouped by stage
+    in the pipeline's own order and by type name under it.
+
+    The enumeration every rendering reads: the reference's per-type
+    tables, the OpenAPI components, the `set provider` epilog and the
+    sentence that says which types are declared. Ordered here rather
+    than at each of them, because four renderings sorting for themselves
+    is four chances for a committed document to move on a dictionary's
+    insertion order.
+    """
+    return tuple(
+        (stage, type_name, DECLARED_OPTIONS[(stage, type_name)])
+        for stage in PROVIDER_STAGES
+        for type_name in sorted(
+            declared for one, declared in DECLARED_OPTIONS if one == stage
+        )
+    )
+
+
+def component_name(stage: str, type_name: str) -> str:
+    """What one type's options are called where a document names its
+    shapes: `AsrFasterWhisperOptions`.
+
+    Built from the pair rather than from the class, so the name a reader
+    meets carries the two things that address the model and cannot
+    collide across stages the way a class name could.
+    """
+    words = (stage, *type_name.split("_"))
+    return "".join(word[:1].upper() + word[1:] for word in words) + "Options"
 
 
 def checked_options(
@@ -304,8 +368,21 @@ def checked_options(
     and a `ValidationError`'s errors carry the whole rejected mapping.
     """
     model = options_model(stage, type_name)
-    if model is None:
-        return None
+    return None if model is None else validated(headline, model, options)
+
+
+def validated(
+    headline: str, model: type[BaseModel], options: Mapping[str, object]
+) -> BaseModel:
+    """One mapping through one model, refused in this repository's
+    words.
+
+    Taken as the model rather than looked up, for the caller that has
+    already resolved it: the provider registry holds the model on the
+    registration it is about to build with, and resolving it a second
+    time from a stage and a type would be a second lookup that can
+    answer differently from the first.
+    """
     sentence: str | None = None
     problems: tuple[FieldProblem, ...] = ()
     entry: BaseModel | None = None
@@ -319,11 +396,15 @@ def checked_options(
 
 
 __all__ = [
+    "DECLARED_OPTIONS",
     "NUMBERS_RULE",
     "NUMBER_RULE",
     "FasterWhisperOptions",
     "OptionsRefused",
     "VadParameters",
     "checked_options",
+    "component_name",
+    "declared_options",
     "options_model",
+    "validated",
 ]

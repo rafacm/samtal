@@ -16,7 +16,7 @@ options are the middle ground, detecting when needed and trusting a
 detection only as far as its confidence earns.
 
 What this type accepts is declared once, as `FasterWhisperOptions` in
-`providers/options.py`, and reaches the builder below already
+`config/provider_options.py`, and reaches the builder below already
 validated. The decode options mirror `WhisperModel.transcribe`
 arguments of the same name and keep the engine's defaults when unset,
 with one exception: `beam_size` defaults to greedy decoding (1),
@@ -30,8 +30,8 @@ import numpy as np
 from faster_whisper import WhisperModel
 
 from vinga_server.config.models import ProviderConfig
+from vinga_server.config.provider_options import FasterWhisperOptions
 from vinga_server.providers.base import AsrProvider, AsrResult, Operations
-from vinga_server.providers.options import FasterWhisperOptions
 
 logger = logging.getLogger(__name__)
 

@@ -30,6 +30,7 @@ import pytest
 from tests.support.configs import config_with
 from vinga_server.config import Config
 from vinga_server.config.models import ProviderConfig
+from vinga_server.config.provider_options import FasterWhisperOptions
 from vinga_server.providers import (
     Provider,
     ProviderError,
@@ -40,7 +41,6 @@ from vinga_server.providers import (
 from vinga_server.providers import world as provider_world
 from vinga_server.providers.base import Operations
 from vinga_server.providers.mock import MockTts, MockVad
-from vinga_server.providers.options import FasterWhisperOptions
 
 # --- what a build owns -------------------------------------------------
 

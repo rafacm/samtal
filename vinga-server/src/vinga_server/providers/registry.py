@@ -1,8 +1,9 @@
 """Constructing providers from their configuration entries.
 
-Each stage maps type names to a `Registration`: how the type is built,
-and the options model it declares, which is the one table every other
-surface reads that question off. Heavyweight implementations
+Each stage maps type names to a `Registration`: the factory that builds
+the type, and the options model it declares, read out of
+`config/provider_options.py` rather than restated here. Heavyweight
+implementations
 import their engine inside the factory, so the core install only pays
 for what the configuration references, and a missing optional
 dependency becomes an error naming the extra to install rather than an
@@ -21,6 +22,12 @@ from pydantic import BaseModel
 
 from vinga_server.config import ConfigError
 from vinga_server.config.models import ProviderConfig
+from vinga_server.config.provider_options import (
+    DECLARED_OPTIONS,
+    FasterWhisperOptions,
+    OptionsRefused,
+    validated,
+)
 from vinga_server.config.secrets import (
     ProviderSecrets,
     SecretStore,
@@ -33,11 +40,6 @@ from vinga_server.providers.base import (
     ProviderError,
     TtsProvider,
     VadProvider,
-)
-from vinga_server.providers.options import (
-    FasterWhisperOptions,
-    OptionsRefused,
-    checked_options,
 )
 
 
@@ -143,11 +145,20 @@ class Registration:
     """What one stage's type name is: how it is built, and what it
     accepts.
 
-    One table rather than two. The options model used to have nowhere to
-    live but a second stage-and-type mapping beside this one, and two
-    mappings that must agree about which types exist are one mapping
-    with a bug pending; construction, write-time validation, read-back
-    and the documentation all read this.
+    One topology, in one direction. `options` is not written out beside
+    the factory: it is READ, when the table below is built, out of
+    `config.provider_options.DECLARED_OPTIONS`, which is where a type's
+    contract is declared. Two mappings that must agree about which types
+    exist would be one mapping with a bug pending, so the second is
+    derived from the first and a key declaring options for a type this
+    table does not have is caught by a test rather than by silence.
+
+    Which way round is decided by weight rather than by taste. The
+    models are documented by surfaces that must load neither an engine
+    nor a database driver (`config/provider_options.py` says which), and
+    reaching this module means importing the provider package. So the
+    declaration lives where the light readers can reach it, and the
+    factory, which is the genuinely provider-side half, lives here.
 
     The factory comes in two shapes, and which one is which is decided
     by `options` rather than by a flag: a type that declares a model is
@@ -233,58 +244,58 @@ def _piper(label: str, config: ProviderConfig) -> object:
 def _registrations() -> dict[str, dict[str, Registration]]:
     # Imported here rather than at module top because the implementation
     # modules import the OptionsReader above; the table itself is tiny.
-    # `options` is imported at module scope instead, which is the whole
-    # point of that module being pydantic and nothing else: reading this
-    # table for what a type accepts costs no engine.
+    # `provider_options` is imported at module scope instead, which is
+    # what that module being pydantic and nothing else buys: the
+    # declaration is readable from here without this module being
+    # readable from there.
     from vinga_server.providers import mock
 
     return {
         "llm": {
-            "mock": Registration(mock.build_llm),
-            "anthropic": Registration(_anthropic),
-            "openai_compatible": Registration(_openai_compatible),
+            "mock": _for("llm", "mock", mock.build_llm),
+            "anthropic": _for("llm", "anthropic", _anthropic),
+            "openai_compatible": _for("llm", "openai_compatible", _openai_compatible),
         },
         "asr": {
-            "mock": Registration(mock.build_asr),
-            "faster_whisper": Registration(_faster_whisper, FasterWhisperOptions),
-            "openai": Registration(_openai_asr),
+            "mock": _for("asr", "mock", mock.build_asr),
+            "faster_whisper": _for("asr", "faster_whisper", _faster_whisper),
+            "openai": _for("asr", "openai", _openai_asr),
         },
         "tts": {
-            "mock": Registration(mock.build_tts),
-            "elevenlabs": Registration(_elevenlabs),
-            "openai": Registration(_openai_tts),
-            "piper": Registration(_piper),
+            "mock": _for("tts", "mock", mock.build_tts),
+            "elevenlabs": _for("tts", "elevenlabs", _elevenlabs),
+            "openai": _for("tts", "openai", _openai_tts),
+            "piper": _for("tts", "piper", _piper),
         },
-        "vad": {"mock": Registration(mock.build_vad), "silero": Registration(_silero)},
+        "vad": {
+            "mock": _for("vad", "mock", mock.build_vad),
+            "silero": _for("vad", "silero", _silero),
+        },
     }
+
+
+def _for(stage: str, type_name: str, factory: Factory) -> Registration:
+    """One entry of the table: the factory written here, and the options
+    model read out of the declaration.
+
+    The derivation, in the one line that performs it. A type appears in
+    this table because it can be built, and it validates because its
+    contract is declared; neither fact is stated twice.
+    """
+    return Registration(factory, DECLARED_OPTIONS.get((stage, type_name)))
 
 
 def registration(stage: str, type_name: str) -> Registration | None:
     """What the table says about one stage's type, or None for a stage
     or a type it does not have.
 
-    The read every other surface goes through. `construct_provider`
-    below asks it what to build with; `providers/options.py` asks it
-    which model to validate against, which is how the write path, the
-    read-back and the build path share one answer.
+    The read the build path goes through: `construct_provider` below
+    asks it what to build with, and what to validate against on the way.
+    A surface that wants only the contract asks
+    `config.provider_options` instead, which is the module this reads
+    from and the one a document can afford to load.
     """
     return _registrations().get(stage, {}).get(type_name)
-
-
-def declared_options() -> tuple[tuple[str, str, type[BaseModel]], ...]:
-    """Every type that declares an options model, as stage, type and
-    model, in the table's own order.
-
-    The enumeration the documentation renders from, so that what a
-    schema, a reference table or a help page lists is what the registry
-    dispatches on rather than a second list of converted types.
-    """
-    return tuple(
-        (stage, type_name, entry.options)
-        for stage, types in _registrations().items()
-        for type_name, entry in types.items()
-        if entry.options is not None
-    )
 
 
 def construct_provider(
@@ -331,10 +342,11 @@ def construct_provider(
     # options, and this sentence is printed to an operator as it is.
     options: BaseModel | None = None
     refused: str | None = None
-    try:
-        options = checked_options(f"invalid {label}:", stage, config.type, config.options)
-    except OptionsRefused as exc:
-        refused = str(exc)
+    if entry.options is not None:
+        try:
+            options = validated(f"invalid {label}:", entry.options, config.options)
+        except OptionsRefused as exc:
+            refused = str(exc)
     if refused is not None:
         raise ProviderError(refused)
     # Every other failure in this function names the entry that caused
