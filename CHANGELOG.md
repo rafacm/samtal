@@ -94,6 +94,26 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   domain half (`config.deploy.example.sh`) is one applied document too,
   carrying the same measured values and now binding its device in the
   document rather than in a command after it.
+- **The container image starts with no configuration file mounted**
+  (#194, M4). It used to set `VINGA_CONFIG=/config/config.yaml` as an
+  environment variable, and a named file that is not there is refused,
+  so `docker run` with no `-v` failed on a file the operator had never
+  named. That refusal is right and stays: naming a path and having the
+  typo in it ignored would serve a configuration nobody wrote. What
+  changed is that the image no longer names the path on the operator's
+  behalf. Its entrypoint names `/config/config.yaml` when a file is
+  mounted there and nothing when there is not, so a container started
+  with only `VINGA_SERVER__*` variables comes up on the defaults.
+  Setting `VINGA_CONFIG` yourself still wins either way, and every
+  existing `docker run` that mounts a YAML behaves exactly as before.
+- **The example fragments and presets ship inside the package** (#194,
+  M4). They were beside `src/` and so in neither the wheel nor the
+  image, which left `vinga-server config cli-reference` unable to run
+  from either: its recipes are read out of those files. The build now
+  carries the directory into the package, the renderer prefers the
+  packaged copy over a checkout, and CI renders the reference from the
+  built wheel to prove the copy arrived. `vinga-server/examples/` is
+  still the one directory anybody edits.
 
 ## 2026-08-23
 
