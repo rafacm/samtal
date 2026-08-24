@@ -329,12 +329,18 @@ CLI surfaces once in M1.
 
 ## Milestones
 
-- [ ] **M1: the machinery and faster_whisper.**
-  Decisions 1, 2, 3, 5 and the first conversion. Design
+- [x] [**M1: the machinery and faster_whisper.**](2026-08-24-typed-provider-options-implementation.md#m1-the-machinery-and-faster_whisper)
+  (PR TBD) Decisions 1, 2, 3, the schema selector and the
+  disclaimers of 5, and the first conversion. Design
   footprint: adds `providers/options.py` (one home for what each
-  type accepts); deepens `store._parsed` and `construct_provider`
-  (both consult one table instead of trusting a ladder); deletes
-  faster_whisper's reader ladder.
+  type accepts); deepens the provider kind's storage checks and
+  `construct_provider` (both consult one table instead of trusting a
+  ladder); deletes faster_whisper's reader ladder. The reference's
+  per-type tables, the OpenAPI injection and the per-type CLI help
+  are NOT in it: two committed import-weight pins put the registry's
+  table out of reach of the surfaces that render them, which the
+  implementation doc records with the measurements and leaves to this
+  milestone's review round.
 - [ ] **M2: elevenlabs.**
   The conversion plus the deletion of `read_voice_settings` and
   its key tables; the output-format rule moves into the model.

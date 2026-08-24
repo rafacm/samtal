@@ -9,6 +9,38 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **A provider type can declare what it accepts, and `faster_whisper`
+  is the first that does** (#88, M1). Its fourteen options are a
+  pydantic model in a new `providers/options.py`, with the example
+  fragment's own sentence on each field, and the registry's table
+  carries the model beside the factory so construction, write-time
+  validation, read-back and the schema all read one place. A typo in
+  an option is refused when the entry is written, with the field named
+  and the value never quoted back, instead of at the next build with
+  only the entry named. `vinga-server config schema provider asr
+  faster_whisper` prints the whole contract, nested definitions
+  included. Nothing changes for the types that declare no model yet:
+  their factories are called as before and their options are still
+  passed through.
+
+### Changed
+
+- **`faster_whisper` entries are validated more strictly than they
+  were** (#88, M1). What the type accepts is unchanged in kind, and the
+  parity is held by a table-driven test taken call by call off the
+  reader it replaces: a boolean is still not a number, `"5"` is still
+  not an integer, an empty temperature ladder is still refused and a
+  scalar one is still taken as a ladder of one. Two things do tighten.
+  An explicit `null` written where a defaulted option sits (`model`,
+  `device`, `compute_type`, `language_detect`) is refused rather than
+  silently read as the default. And a stored entry carrying an option
+  the type does not declare is now refused on read as well as on write,
+  which a deployment that wrote one meets as a boot refusal naming the
+  entry and the field; `vinga-server config --local delete provider asr
+  <name>` is the way out, and it does not read the row it removes. The
+  engine's own `vad_parameters` are unaffected: that section keeps its
+  door open on purpose and forwards every key it is given.
+
 - **The config CLI has a documentation home, and half of it is
   generated** (#194, M4). `docs/reference/cli.md` joins the four
   committed references. Its head is written by hand and covers what no
