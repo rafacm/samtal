@@ -22,6 +22,7 @@ registry's own envelope so that nobody is left not knowing what is
 running.
 """
 
+import logging
 import sqlite3
 from pathlib import Path
 
@@ -321,6 +322,146 @@ def test_a_body_that_is_not_this_api_s_own_is_not_relayed(
     assert "answered 502" in captured.err
     assert SECRET not in captured.err
     assert "<html>" not in captured.err
+
+
+# What happens after a URL is accepted
+#
+# The policy above refuses a credential written into the userinfo, and
+# says nothing about one written into the query, which is the other form
+# vendors accept. So an address carrying `?token=<secret>` is accepted
+# and then reached, and every sentence about what happened at it is a
+# sentence naming an address that holds a credential (#290).
+
+
+REACHABLE_NOWHERE = f"https://127.0.0.1:1/api?token={SECRET}"
+
+# The same address as the one above, as it may be printed.
+REACHABLE_NOWHERE_SHOWN = "https://127.0.0.1:1/api"
+
+
+def _written(caplog: pytest.LogCaptureFixture) -> str:
+    """Every record this server wrote, rendered as anything reading them
+    would.
+
+    Only this server's channels, for the reason `tests/support/events.py`
+    gives: httpx logs the request line of every request it makes, and
+    what the HTTP client says about a URL it was handed is not something
+    this CLI chose to write anywhere.
+    """
+    return "\n".join(
+        f"{record.getMessage()}\n{record.args!r}\n{record.exc_info!r}"
+        for record in caplog.records
+        if record.name.startswith("vinga_server")
+    )
+
+
+def test_an_accepted_url_keeps_its_query_credential_only_for_the_request() -> None:
+    """The seam the two failures below read: what is reached and what
+    may be shown are two strings, and only one of them holds the
+    credential."""
+    address = cli._permitted(REACHABLE_NOWHERE, "--api-url")
+
+    assert address.reached == REACHABLE_NOWHERE
+    assert address.shown == REACHABLE_NOWHERE_SHOWN
+    assert SECRET not in address.shown
+
+
+def test_a_transport_failure_after_an_accepted_url_names_it_sanitized(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The real client against a port nothing is listening on, which is
+    the failure an operator meets most and retries in front of a
+    terminal.
+
+    The address is still named, because a refusal that named no address
+    would leave nobody knowing which one was tried; what it names is the
+    address without the credential.
+    """
+    monkeypatch.delenv("VINGA_CONFIG", raising=False)
+    monkeypatch.setenv("VINGA_SERVER__DATABASE__DIR", str(tmp_path / "db"))
+    monkeypatch.setenv(API_SECRET_ENV, TOKEN)
+
+    with caplog.at_level(logging.DEBUG):
+        assert cli.main(["--api-url", REACHABLE_NOWHERE, "list"]) == 1
+
+    captured = capsys.readouterr()
+    both = captured.out + captured.err
+    assert f"cannot reach the configuration API at {REACHABLE_NOWHERE_SHOWN}" in captured.err
+    assert SECRET not in both
+    assert "?token=" not in both
+    assert "Traceback" not in captured.err
+    assert SECRET not in _written(caplog)
+
+
+def test_an_unreadable_answer_from_an_accepted_url_names_it_sanitized(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The other sentence that names the address: something answered,
+    and what it sent is not this API's own output.
+
+    Driven over a mock transport, since the body has to be a page no
+    application here would send.
+    """
+    monkeypatch.delenv("VINGA_CONFIG", raising=False)
+    monkeypatch.setenv("VINGA_SERVER__DATABASE__DIR", str(tmp_path / "db"))
+    monkeypatch.setenv(API_SECRET_ENV, TOKEN)
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(502, html="<html>502 from the gateway</html>")
+
+    def factory(base_url: str, token: str) -> httpx.Client:
+        return httpx.Client(base_url=base_url, transport=httpx.MockTransport(answer))
+
+    monkeypatch.setattr(cli, "build_client", factory)
+
+    with caplog.at_level(logging.DEBUG):
+        assert cli.main(["--api-url", REACHABLE_NOWHERE, "list"]) == 1
+
+    captured = capsys.readouterr()
+    both = captured.out + captured.err
+    assert f"the configuration API at {REACHABLE_NOWHERE_SHOWN} answered 502" in captured.err
+    assert SECRET not in both
+    assert "?token=" not in both
+    assert SECRET not in _written(caplog)
+
+
+def test_neither_failure_carries_the_credential_in_its_chain() -> None:
+    """The chain, not just the message: httpx's own exceptions carry the
+    request, and the request carries the URL that was reached.
+
+    White-box, for the reason the URL parser's chain test above is: a
+    `__cause__` or a `__context__` is not printed, and is reachable only
+    from where the refusal is raised.
+    """
+    address = cli._permitted(REACHABLE_NOWHERE, "--api-url")
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    client = httpx.Client(base_url=address.reached, transport=httpx.MockTransport(refuse))
+    try:
+        with pytest.raises(ConfigError) as unreachable:
+            cli._sent(client, "GET", "/agents", cli._NOTHING, address)
+    finally:
+        client.close()
+
+    assert SECRET not in _chain(unreachable.value)
+    assert unreachable.value.__cause__ is None
+    assert unreachable.value.__context__ is None
+
+    answered = httpx.Response(502, html=f"<html>{SECRET}</html>")
+    with pytest.raises(ConfigError) as unreadable:
+        cli._answer(answered, address)
+
+    assert SECRET not in _chain(unreadable.value)
+    assert unreadable.value.__cause__ is None
+    assert unreadable.value.__context__ is None
 
 
 def test_the_read_timeout_outlasts_the_database_s_busy_timeout() -> None:
