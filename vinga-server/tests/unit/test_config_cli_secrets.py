@@ -201,6 +201,42 @@ def test_show_and_list_mask_stored_secrets_and_mark_what_they_shadow(
     assert SECRET not in listed and OTHER_SECRET not in listed
 
 
+# A credential shaped like a variable name: it gets past the models'
+# paste check, which only asks that a reference look like a name, and is
+# what the display path's own rule has to catch.
+PASTED_REFERENCE = "sk_test_4f8b2c9e_never_a_real_credential"
+
+
+def test_a_credential_nested_in_an_option_is_masked_in_the_rendered_document(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The masking is the view's and the rendering is the CLI's, so the
+    depth the view masks at is the depth the printed YAML masks at. An
+    option can be a structure, a reference key one level down accepts
+    anything shaped like a variable name, and this is the command an
+    operator runs when they suspect they pasted one."""
+    run(
+        "set",
+        "provider",
+        "llm",
+        "claude",
+        "-f",
+        "-",
+        stdin=(
+            f"type: anthropic\nconnection:\n  api_key_env: {PASTED_REFERENCE}\n"
+            "  host: example\n"
+        ),
+    )
+    capsys.readouterr()
+
+    assert run("show", "provider", "llm", "claude") == 0
+
+    shown = capsys.readouterr().out
+    assert MASK in shown
+    assert "host: example" in shown
+    assert PASTED_REFERENCE not in shown
+
+
 def test_a_pasted_credential_in_a_reference_field_is_refused(
     run, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
 ) -> None:

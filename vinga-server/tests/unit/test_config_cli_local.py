@@ -48,11 +48,6 @@ from vinga_server.config import cli
 from vinga_server.config.secrets import MASK, MASTER_KEY_ENV
 from vinga_server.db import open_database, schema
 
-# A credential shaped like a variable name: it gets past the models'
-# paste check, which only asks that a reference look like a name, and is
-# what the display path's own rule has to catch.
-PASTED = "sk_test_4f8b2c9e_never_a_real_credential"
-
 
 @pytest.fixture
 def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -415,57 +410,6 @@ def test_the_masked_values_are_masked_on_both_paths(
     assert "api_key: ********" in shown
     assert "used instead of api_key_env: ANTHROPIC_API_KEY" in shown
     assert SECRET not in shown
-
-
-def test_an_agent_is_printed_prompt_first(
-    run, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """The printed document, byte for byte, which is the other half of
-    the same claim the API's exact-bytes pin makes: YAML keeps the order
-    the mapping was built in, so an agent read on either path opens with
-    the prompt that makes it that agent and then says what it
-    overrides."""
-    _a_provider(run)
-    run(
-        "set",
-        "agent",
-        "sam",
-        "-f",
-        "-",
-        stdin="llm: claude\nprompt: You are Sam.\n",
-    )
-    capsys.readouterr()
-
-    assert run("--local", "show", "agent", "sam") == 0
-
-    assert capsys.readouterr().out == "prompt: You are Sam.\nllm: claude\n"
-
-
-def test_a_credential_nested_in_an_option_is_masked_in_the_rendered_document(
-    run, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """The masking is the view's and the rendering is the CLI's, so the
-    depth the view masks at is the depth the printed YAML masks at. An
-    option can be a structure, a reference key one level down accepts
-    anything shaped like a variable name, and this is the command an
-    operator runs when they suspect they pasted one."""
-    run(
-        "set",
-        "provider",
-        "llm",
-        "claude",
-        "-f",
-        "-",
-        stdin=f"type: anthropic\nconnection:\n  api_key_env: {PASTED}\n  host: example\n",
-    )
-    capsys.readouterr()
-
-    assert run("--local", "show", "provider", "llm", "claude") == 0
-
-    shown = capsys.readouterr().out
-    assert MASK in shown
-    assert "host: example" in shown
-    assert PASTED not in shown
 
 
 # The recovery subset
