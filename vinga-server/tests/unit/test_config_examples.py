@@ -28,6 +28,7 @@ import typing
 from pathlib import Path
 
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
@@ -216,6 +217,34 @@ def test_the_uncommenting_is_doing_something() -> None:
     for fragment in _typed_fragments():
         text = fragment.read_text(encoding="utf-8")
         assert _uncommented(text) != text, f"{fragment.name} documents no commented key"
+
+
+def test_an_open_doors_fragment_documents_only_real_options() -> None:
+    """The case above cannot hold the one type that accepts anything.
+
+    Uncommenting is a scan, and a scan cannot tell a documented key from
+    a sentence that happens to contain one: a line of prose reading
+    `there for: every server ...` is a `key:` line to a regular
+    expression. For a type whose model shuts its door that mistake is
+    caught by the install, loudly, which is what the `Default:` and
+    `API:` paragraphs turned up while the second type was converted. For
+    the escape hatch it is not caught at all, because the model keeps
+    what it does not declare: the stray key would install, and it would
+    be sent to the endpoint.
+
+    So the keys that survive the uncommenting are checked against what
+    the type actually declares. The one passthrough the file documents
+    is named here rather than counted, so documenting a second one is a
+    line of this test and a sentence of that file moving together.
+    """
+    from vinga_server.config.models import ProviderConfig
+    from vinga_server.config.provider_options import OpenaiCompatibleOptions
+
+    fragment = EXAMPLES / "llm-openai-compatible.yaml"
+    written = yaml.safe_load(_uncommented(fragment.read_text(encoding="utf-8")))
+    declared = set(ProviderConfig.model_fields) | set(OpenaiCompatibleOptions.model_fields)
+
+    assert set(written) - declared == {"top_p"}
 
 
 def test_every_fragment_is_listed_in_the_examples_readme() -> None:
