@@ -180,7 +180,7 @@ def mask(value: object) -> object:
     reference names a variable and that is not a secret. Everything
     else becomes the mask: valid ciphertext, malformed envelopes, and
     stray strings alike, since a malformed value in a secret slot may
-    be a plaintext secret and showing it would make the recovery path
+    be a plaintext secret and showing it would make the display path
     the leak."""
     if isinstance(value, str) and (
         _DOLLAR_REFERENCE_RE.match(value) or _BARE_REFERENCE_RE.match(value)
