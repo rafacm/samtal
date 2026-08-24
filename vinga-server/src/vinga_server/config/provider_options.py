@@ -55,11 +55,13 @@ behind a default) stays in the fragment under `examples/`, per the
 standing documentation decision.
 """
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Annotated, Literal
 
 from pydantic import (
+    AfterValidator,
     BaseModel,
     BeforeValidator,
     ConfigDict,
@@ -86,6 +88,21 @@ NUMBER_RULE = "must be a number"
 
 NUMBERS_RULE = "must be a number or a non-empty list of numbers"
 
+# A required name with nothing in it is the same mistake as a missing
+# one, and the reader said so: `required_string` refused a blank as
+# loudly as an absent key. Said as a rule rather than as a value,
+# because the value is the blank.
+NONBLANK_RULE = "must not be blank"
+
+# The formats this stage can pass through. Only the PCM ones are usable:
+# the TTS interface's contract is s16le PCM, and decoding mp3 or opus
+# just to re-encode it would add both a dependency and latency.
+# `pcm_44100` and up need a paid vendor tier, which is the API's error to
+# report rather than ours to predict.
+PCM_FORMAT_RULE = "must be one of the pcm_<rate> formats, since this stage streams raw PCM"
+
+_PCM_FORMAT = re.compile(r"^pcm_(\d+)$")
+
 
 def _as_number(value: object) -> object:
     """A number the way the reader took one: an int or a float, never a
@@ -111,12 +128,43 @@ def _as_numbers(value: object) -> object:
     raise ValueError(NUMBERS_RULE)
 
 
-# The three shapes a declared option comes in, as annotations rather
-# than as a rule repeated per field. The strict spellings are pydantic's
-# own and their messages name the type they wanted; the two numeric ones
-# are ours, because lax pydantic would take a bool for a number and a
-# numeric string for an integer and the reader never did.
+def _as_optional_number(value: object) -> object:
+    """A number, or nothing at all: the reader's `optional_number`, for a
+    knob whose absence means the vendor's own default rather than one of
+    ours, and which an operator may therefore write as an explicit
+    null."""
+    return None if value is None else _as_number(value)
+
+
+def _nonblank(value: str) -> str:
+    """A string with something in it, which is what the reader's
+    `required_string` demanded."""
+    if not value.strip():
+        raise ValueError(NONBLANK_RULE)
+    return value
+
+
+def _as_pcm_format(value: str) -> str:
+    """An output format this stage can stream, refused by the rule rather
+    than by quoting what was written."""
+    if _PCM_FORMAT.match(value) is None:
+        raise ValueError(PCM_FORMAT_RULE)
+    return value
+
+
+# The shapes a declared option comes in, as annotations rather than as a
+# rule repeated per field. The strict spellings are pydantic's own and
+# their messages name the type they wanted; the numeric ones are ours,
+# because lax pydantic would take a bool for a number and a numeric
+# string for an integer and the reader never did.
 Number = Annotated[float, BeforeValidator(_as_number)]
+
+# The same rule with nothing written as a legal answer, for a knob whose
+# absence means the vendor's own default rather than one of ours. No
+# input type is declared beside it, unlike the ladder below, because
+# there is nothing to declare: what the validator takes and what the
+# annotation says are both "a number, or null".
+OptionalNumber = Annotated[float | None, BeforeValidator(_as_optional_number)]
 
 # What a validator accepts and what the schema says it accepts are two
 # statements of one contract, and a `BeforeValidator` is exactly where
@@ -138,6 +186,10 @@ Numbers = Annotated[
         json_schema_input_type=float | Annotated[list[float], Field(min_length=1)] | None,
     ),
 ]
+
+Nonblank = Annotated[StrictStr, AfterValidator(_nonblank)]
+
+PcmFormat = Annotated[StrictStr, AfterValidator(_as_pcm_format)]
 
 
 class VadParameters(BaseModel):
@@ -336,6 +388,124 @@ class FasterWhisperOptions(BaseModel):
     )
 
 
+class VoiceSettings(BaseModel):
+    """The vendor's own voice tuning, forwarded as written.
+
+    Five keys and no more, which is the contract the type had before it
+    had a model: `read_voice_settings` listed exactly these and refused
+    anything else, on the stated grounds that a typo the API silently
+    ignores is a knob that never took effect. The door stays shut here
+    for that reason, and this is the difference from `VadParameters`
+    above, whose keys are read by an engine that documents more of them
+    than vinga does.
+
+    What travels is what was written: the mapping is dumped with
+    `exclude_unset=True` into the request body, so an operator's explicit
+    values reach the API and an injected default does not.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    stability: OptionalNumber = Field(
+        default=None,
+        description="Higher is more monotone and more predictable.",
+    )
+    similarity_boost: OptionalNumber = Field(
+        default=None,
+        description="Higher holds the synthesis closer to the reference voice.",
+    )
+    style: OptionalNumber = Field(
+        default=None,
+        description="Style exaggeration, applied to voices that carry one.",
+    )
+    speed: OptionalNumber = Field(
+        default=None,
+        description="A multiplier around 1.0, which the API caps at 0.7 to 1.2.",
+    )
+    use_speaker_boost: StrictBool | None = Field(
+        default=None,
+        description=(
+            "Sharpens the resemblance to the reference speaker, and costs latency."
+        ),
+    )
+
+
+class ElevenlabsOptions(BaseModel):
+    """The options the `elevenlabs` TTS type accepts.
+
+    Every one of them is passed to the vendor's streaming endpoint, whose
+    reference documents all of them. The two rules this type has of its
+    own are here rather than in the builder: a voice id is required
+    because there is nothing to synthesize with without one, and the
+    output format has to be a `pcm_<rate>` because the stage streams raw
+    PCM and the rate the request asks for is the rate the session
+    resamples from.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    voice_id: Nonblank = Field(
+        description=(
+            "Voice id from your ElevenLabs voice library: the id, not the display "
+            "name, and account-specific even for the stock voices."
+        ),
+    )
+    model: StrictStr = Field(
+        default="eleven_flash_v2_5",
+        description=(
+            "The synthesis model. The default is the low-latency one (~75 ms to "
+            "first byte, 32 languages); eleven_multilingual_v2 sounds better and "
+            "answers slower, which a conversation feels."
+        ),
+    )
+    output_format: PcmFormat = Field(
+        default="pcm_24000",
+        description=(
+            "Audio asked of the API. Only the pcm_<rate> formats work here, since "
+            "the stage streams raw PCM; the default matches the rate devices are "
+            "spoken at, so nothing is resampled. pcm_44100 and up need a paid "
+            "ElevenLabs tier."
+        ),
+    )
+    language_code: StrictStr | None = Field(
+        default=None,
+        description=(
+            "Pin the spoken language (ISO 639-1) instead of letting the model infer "
+            "it from the text."
+        ),
+    )
+    voice_settings: VoiceSettings = Field(
+        default_factory=VoiceSettings,
+        description=(
+            "Voice tuning, passed to the API as given. Only what the fragment sets "
+            "is sent."
+        ),
+    )
+    # 30 seconds is what `providers/kit.py` calls a request's default
+    # patience, and it cannot be imported here: the kit speaks httpx, and
+    # this module is on three paths that load no client library. Stated
+    # as the number and pinned against the kit's constant by a case in
+    # `test_providers_elevenlabs.py`, which is on the side that may
+    # import both.
+    timeout_s: Number = Field(
+        default=30.0,
+        description="Seconds before a synthesis request is abandoned.",
+    )
+
+    @property
+    def sample_rate(self) -> int:
+        """The rate the chosen format produces, which is what the stage
+        passes downstream.
+
+        A property rather than a field: it is not an option, it is the
+        one thing `output_format` means to everything past the request.
+        Safe to read off the string because the field's own validator is
+        what admitted the string, so the shape is decided before this
+        can be called.
+        """
+        return int(self.output_format.removeprefix("pcm_"))
+
+
 class OptionsRefused(Exception):
     """One entry's options, refused, in the two renderings a refusal
     needs and in neither of the two a leak needs.
@@ -430,7 +600,7 @@ PROVIDER_TYPES: dict[str, dict[str, ProviderType]] = {
         "mock": ProviderType("mock", "build_tts"),
         # No extra to guard: the provider speaks the API over httpx,
         # which the core install already carries.
-        "elevenlabs": ProviderType("elevenlabs_tts"),
+        "elevenlabs": ProviderType("elevenlabs_tts", options=ElevenlabsOptions),
         # No extra to guard: the openai client is a core dependency,
         # carried for the openai_compatible LLM type, and speech is a
         # method on it.
@@ -543,11 +713,15 @@ def validated(
 
 __all__ = [
     "PROVIDER_TYPES",
+    "NONBLANK_RULE",
     "NUMBERS_RULE",
     "NUMBER_RULE",
+    "PCM_FORMAT_RULE",
+    "ElevenlabsOptions",
     "FasterWhisperOptions",
     "OptionsRefused",
     "VadParameters",
+    "VoiceSettings",
     "checked_options",
     "ProviderType",
     "component_name",
