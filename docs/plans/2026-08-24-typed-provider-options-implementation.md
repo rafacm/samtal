@@ -628,3 +628,99 @@ From `vinga-server/`, at the tip of the milestone.
   none of the three). No allow-list moved: `ElevenlabsOptions` lives in
   the module M1 already added to them, which is what one home for the
   declaration buys per type from here on.
+
+### PR review round
+
+External review of PR #276, 2026-08-24. Four findings, verdict mergeable
+after fixes; each fix is its own commit and each is recorded here with
+what it changed and what proves it.
+
+**1 (P2): the published schemas accepted what the model refuses.**
+`Nonblank` and `PcmFormat` are `AfterValidator`s, and an annotation
+carrying one describes an unrestricted string, so the document told a
+client that any `voice_id` and any `output_format` would do while the
+server refused a blank one and a non-PCM one. The same contradiction
+M1's own round resolved for the temperature ladder, in the shape an
+`AfterValidator` produces it.
+
+*Resolution.* Each rule is one constant used twice: the validator runs
+it and `WithJsonSchema` publishes it, as `\S` and `^pcm_[0-9]+$`.
+Published rather than enforced a second time, because pydantic's pattern
+message names a regex and what an operator should read is "must not be
+blank"; the format pattern lost its capture group with nothing lost,
+since the rate is read with `removeprefix`. Asserted on both published
+surfaces and against the patterns themselves, so a drift either way
+fails: what each pattern matches is accepted and what it excludes is
+refused. `api-openapi.json` moved by the two lines this adds.
+
+**2 (P2): `examples/README.md` still named one declared type.** A reader
+editing `tts-elevenlabs.yaml` was told its options are passed through
+when they are checked at the write and refused by name. The reference's
+own note could not lag that way because a test reads the declaration for
+it; this prose had no such test, which is exactly why it lagged.
+
+*Resolution.* The sentence lists the stage-and-type pairs, and a new
+case in `test_config_examples.py` holds it to the declaration with the
+same two halves `test_config_entities.py` uses on the note: every
+declared pair is named, and no type that declares nothing is. Checked by
+removing the type from the sentence, which fails the case. M3's type
+cannot lag the same way.
+
+**3 (P2): the request cases bypassed the converted handoff.** They
+construct `ElevenLabsTts` directly, which asks what the class does with
+what it holds and cannot ask whether the builder gives it what the entry
+says. So the one thing this milestone changed was the one thing they did
+not cover.
+
+*Resolution.* Two cases go from a fragment through `build_entry` to the
+bytes on the wire, with the transport put in by replacing the client
+class the builder reaches for rather than by reaching into the object it
+built, which keeps `build` the real one and puts `timeout_s` in reach
+(a timeout is not a body field; it is what a request carries from the
+client it was made by). Every value is deliberately non-default, so a
+dropped forwarding shows up as the default arriving.
+
+The proof, run by breaking one forwarding at a time and running the two
+new cases beside the two old ones:
+
+| Broken | The new pair | The old pair |
+| --- | --- | --- |
+| `model` not forwarded | 1 failed, 1 passed | 2 passed |
+| `output_format` not forwarded | 1 failed, 1 passed | 2 passed |
+| `language_code` not forwarded | 1 failed, 1 passed | 2 passed |
+| `timeout_s` not forwarded | 1 failed, 1 passed | 2 passed |
+| `voice_settings` not forwarded | 1 failed, 1 passed | 2 passed |
+| `exclude_unset` dropped | 2 failed | 2 passed |
+| `sample_rate` not forwarded | 1 failed, 1 passed | 2 passed |
+| nothing (restored) | 2 passed | 2 passed |
+
+The right-hand column is the finding, measured: seven ways of deleting
+this milestone's work, and the cases that were there before catch none
+of them.
+
+**4 (P2): the one widening was recorded and not pinned.** Sharing one
+notion of blank with `vad_parameters` took `voice_settings: ""` from
+refused to unwritten. This document said so; no parity row and no
+changelog line did, so the only thing in the milestone that accepts more
+than the reader did was the one thing a reader of either could not find.
+
+*Resolution.* A parity row, a `model_fields_set` assertion beside the
+null that did not move, and a changelog sentence. It stays deliberate
+and cheap: a mapping written as `voice_settings:` with nothing after it
+is a null in YAML, so the spelling this widens is one nobody writes.
+
+### Verification after the review round
+
+From `vinga-server/`, at the tip.
+
+- `uv run ruff check .`: `All checks passed!`
+- `uv run mypy`: `Success: no issues found in 4 source files`
+- `uv run pytest tests/unit -q -n auto --dist loadfile`:
+  `3330 passed, 19 skipped in 43.76s`
+- `uv run pytest tests/integration -q`: `126 passed in 175.02s (0:02:55)`
+- The six drift checks as CI runs them: all six clean. Only
+  `api-openapi.json` moved across the round (+2, -0), which is finding
+  1's two patterns; the two that must not move did not.
+- `uv sync --frozen`: `Checked 99 packages in 1ms`
+- The three import-weight pins: green, and their files untouched by the
+  round (`git diff 14ed7f7f HEAD` lists none of the three).
