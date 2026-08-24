@@ -5422,9 +5422,13 @@
           "temperature": {
             "anyOf": [
               {
+                "type": "number"
+              },
+              {
                 "items": {
                   "type": "number"
                 },
+                "minItems": 1,
                 "type": "array"
               },
               {
