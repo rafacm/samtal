@@ -1198,7 +1198,8 @@ the four drift checks clean with nothing regenerated, and
 
 Six commits: two presets, two renderers behind one new verb, the
 committed page and its drift lane, the live runs of both, and the
-documentation sweep in two halves.
+documentation sweep in two halves. The review round below adds six
+more, two of which withdraw a deviation recorded here.
 
 **The presets** (`f8790996`). `examples/presets/local-stack.yaml` and
 `cloud-stack.yaml`, each a complete apply document: providers, the
@@ -1256,6 +1257,13 @@ in the same breath. The plan's "its own drift lane like the other
 generated documents" is satisfied by the lane existing and biting, not
 by the file count.
 
+*Corrected by the review round below (finding 4).* Two of everything was
+the wrong trade to weigh: the missing piece was not a second file, it
+was a check that reads the recipes through the renderer that builds them
+rather than through the composer that pastes them in. That is one marker
+pair, one test and one CI step inside the region this reason is about,
+and it costs no second document.
+
 **One region, because the rebuild is simpler than an extraction.** The
 check keeps everything up to and including the opening marker,
 regenerates the region, closes it, and diffs the whole file. That is
@@ -1309,17 +1317,30 @@ drift lane like the other generated documents"). They share `cli.md`'s,
 for the three reasons above. The lane bites either way: a changed
 example header moves the generated region and fails the check.
 
+*Withdrawn by the review round below (finding 4).* Sharing the lane was
+not equivalent, and the round says why: the shared check regenerates the
+whole region through the page composer, so a composer that dropped or
+reordered the recipes moves both sides together and passes. The recipes
+have their own marker pair, their own test and their own CI step now,
+inside the region the outer lane still owns.
+
 **`docgen` reads a directory now**, which nothing above it in that
 module does. The module's standing claim is about its import graph (the
 models and the registry, no repository, no application) and that is
 untouched: `pathlib` and `re` are the standard library, and the
 child-interpreter pin is byte for byte what M3 left. What is new is that
-one rendering needs the example files to be beside the package, which
-they are in a checkout and are not in a built wheel, so
-`docgen.MISSING_EXAMPLES` is a fixed sentence rather than a traceback.
+one rendering needs the example files to be where it can read them.
 Recorded as a cost rather than hidden: the alternative was a registry
 that carried a second copy of every example's own command, which is the
 drift decision 9 exists to prevent.
+
+*Half withdrawn by the review round below (finding 3).* This first said
+the fragments are beside the package in a checkout and absent from a
+built wheel, and left `config cli-reference` refusing there. The build
+carries them into the package now, and the renderer prefers the
+packaged copy; the reading itself is still a directory read, and the
+round's finding 1 put it behind the same no-leak boundary as every
+other file this package reads.
 
 **No filler recipe.** Decision 9's topic list names fillers. A filler is
 a `NestedShape`: it has no command, no route and no example file of its
@@ -1337,6 +1358,13 @@ the preset from stdin: the container image ships the CLI but not
 `examples/`, so a `-f examples/presets/local-stack.yaml` inside the
 container would name a file that is not there. `-f -` with the preset
 redirected in is the same one line and is true.
+
+*Still true after the round, for a smaller reason.* Finding 3 puts the
+fragments inside the package, so the image does carry them, at a path
+under the installed package rather than at a working directory a `-f
+examples/...` would resolve against. The redirect stays, and finding 2
+corrected the path it redirects from, which named a file the reader had
+no way to have.
 
 ### Discoveries
 
@@ -1366,21 +1394,30 @@ exactly as it was meant to.
 
 ### The inventory
 
-| File | Lines | What |
-| --- | --- | --- |
-| `docs/reference/cli.md` | 1495 | new; 225 hand-written, the rest generated |
-| `examples/presets/cloud-stack.yaml` | 96 | new |
-| `examples/presets/local-stack.yaml` | 86 | new |
-| `src/vinga_server/config/cli.py` | 3431 | +141: the renderer, the verb, its row |
-| `src/vinga_server/config/docgen.py` | 701 | +217: the recipes |
-| `tests/unit/test_config_docgen.py` | 428 | +135: the presets tier, the recipes, the drift lane |
-| `tests/integration/test_cli_live.py` | 1278 | +117: the presets and the recipes over the wire |
-| `config.deploy.example.sh` | 143 | seven writes became one applied document |
+Every number below is `wc -l` at the milestone's tip and `git diff
+--numstat main..HEAD` beside it, both rerun at the tip that carries the
+review round; the counts this section first carried were taken before
+the rebase and described a tree that no longer existed. The whole
+section is derived the same way, including the two test counts in the
+verification below.
+
+| File | Lines | Against `main` | What |
+| --- | --- | --- | --- |
+| `docs/reference/cli.md` | 1510 | new | 236 hand-written, the rest generated |
+| `examples/presets/cloud-stack.yaml` | 96 | new | a deployment on vendor APIs |
+| `examples/presets/local-stack.yaml` | 86 | new | a deployment that reaches no vendor |
+| `src/vinga_server/config/cli.py` | 3463 | +173 / -4 | the two renderers, the verb, its row |
+| `src/vinga_server/config/docgen.py` | 797 | +313 | the recipes and their boundary |
+| `tests/unit/test_config_docgen.py` | 631 | +338 / -4 | the presets tier, the recipes, both drift lanes, the planted-secret cases |
+| `tests/unit/test_docker_entrypoint.py` | 131 | new | the image's config-file decision |
+| `tests/integration/test_cli_live.py` | 1682 | +116 / -1 | the presets and the recipes over the wire |
+| `config.deploy.example.sh` | 143 | +104 / -86 | seven writes became one applied document |
+| `docker-entrypoint.sh` | 36 | new | names the mounted config, or nothing |
 
 Plus the sweep: `README.md`, `vinga-server/README.md`,
 `config.example.yaml`, `config.deploy.example.yaml`,
-`examples/README.md`, `examples/tts-piper.yaml`, and the workflow's
-fifth drift step.
+`examples/README.md`, `examples/tts-piper.yaml`, `Dockerfile`,
+`pyproject.toml`, and the workflow's three new steps.
 
 ### The sweep's checklist
 
@@ -1414,22 +1451,26 @@ All from `vinga-server/`.
 - `uv run mypy` (the scoped `events` lane):
   `Success: no issues found in 4 source files`.
 - `uv run pytest tests/unit -q -n auto --dist loadfile`:
-  `3146 passed, 20 skipped in 43.69s` at the rebased tip, where M3's
-  reviewed tip was `3137 passed, 20 skipped` (this milestone's own
-  first record said 3,146 against 3,079, numbers taken before M2's
-  and M3's review rounds landed beneath it; refreshed here after the
-  rebase, per the rule those rounds each had to restate).
+  `3158 passed, 20 skipped in 42.45s`, where M3's reviewed tip was
+  `3137 passed, 20 skipped`. (Rerun at the tip that carries the review
+  round. This milestone's own first record said 3,146 against 3,079,
+  numbers taken before M2's and M3's review rounds landed beneath it;
+  refreshed after the rebase, and refreshed again here.)
 - `uv run pytest tests/integration -q`:
-  `126 passed in 190.27s (0:03:10)` at the rebased tip, where M3's
-  reviewed tip was `121 passed` (its round added a synthetic
-  leak-check case). The CLI lane's own runtime is ~4 s: the five new
-  cases add roughly a second, most of it the two extra server boots
-  the preset cases need.
-- **All five drift checks**, run exactly as the CI steps run them:
+  `126 passed in 175.62s (0:02:55)`, where M3's reviewed tip was
+  `121 passed`. The CLI lane's own runtime is `65 passed in 4.25s`: the
+  six new cases add roughly a second, most of it the two extra server
+  boots the preset cases need.
+- **All six drift checks**, run exactly as the CI steps run them:
   `domain-config.md`, `conversations-schema.md`, `events.md`,
-  `api-openapi.json` and `cli.md`, all clean. Only `cli.md` is new;
-  none of the other four moved, which is what the risks section asks
-  each milestone to assert.
+  `api-openapi.json`, `cli.md` and `cli.md`'s recipe region, all clean.
+  Only the last two are new; none of the other four moved, which is what
+  the risks section asks each milestone to assert.
+- **Both wheel renders**, built and run the way CI does, outside the
+  checkout with the source tree off `sys.path`: the OpenAPI document,
+  and the CLI reference, whose step also asserts that the example
+  fragments resolved from inside the installed package. Both match
+  their committed copies.
 - `uv sync --frozen`: `Checked 99 packages in 1ms`. No dependency
   moved: the renderer uses the Typer already in the tree.
 - The child-interpreter import pin is untouched and green:
@@ -1458,14 +1499,184 @@ release, and gives the checkout and wheel forms instead. Both of those
 were run by hand; neither is in a lane, and the packaged form belongs
 with the standalone CLI issue that will publish one.
 
-**`config cli-reference` from a built wheel.** It reads the example
-files, which a wheel does not carry, so it refuses with
-`docgen.MISSING_EXAMPLES` there. The other four rendering commands run
-from a wheel and one of them is checked that way in CI; this one is
-deliberately a repository command, and the CI step that runs it runs it
-from the checkout.
-
 **The presets against real engines.** Both apply green and read back,
 which is a claim about the configuration rather than about Ollama,
 faster-whisper or a vendor key. Whether the deployment they describe
 answers is what a device checkpoint is for.
+
+**The container image.** The review round changed the `Dockerfile`, and
+no lane on a pull request builds an image: the image job is skipped on
+`pull_request` events and runs on a push to `main` or a manual dispatch.
+What that leaves unproved here is that the entrypoint wrapper lands
+executable and on the entrypoint, that a container with no mount comes
+up, and that the smoke lane still finds its mounted YAML. The wrapper's
+own decision is proved without an image (`test_docker_entrypoint.py`),
+and the image itself needs a dispatch run before this merges.
+
+## PR review round, M4 (PR #274)
+
+External review of the PR diff, 2026-08-24. Verdict as received:
+mergeable after fixes. Six findings, one P1, three P2 and two P3, each
+fixed in its own commit. Two of them reversed decisions this section
+had recorded as deliberate, and both reversals are right: a deviation is
+only as good as the reasoning under it, and in each case the reasoning
+had weighed the wrong thing.
+
+### 1. P1: the recipe renderer was outside the no-leak boundary
+
+Reading an example file caught nothing, so an `OSError` or a
+`UnicodeDecodeError` left through `cli.main` as a library traceback; and
+the unknown-topic refusal quoted the command word it was rejecting.
+
+*Resolution* (`1d25e8d9`): reading records its category inside the
+handler and raises a fixed sentence after it, so nothing is chained.
+Three categories, because they are three different things to fix, and
+each names the file, which is a filename the registry owns; the
+unknown-topic refusal names the file and no longer the word.
+
+The two families caught are exactly the two that carry a file's
+contents: an `OSError` carries the operating system's message, and a
+`UnicodeDecodeError` carries the byte it stopped on and the whole buffer
+on its `object` attribute. A file under `examples/` is a file somebody
+edits, so a credential pasted where a variable name belongs can be in
+its bytes as readily as in a fragment.
+
+*Load-bearing:* four cases plant a credential where each shape would
+have put one and assert it reaches none of stdout, stderr, the log in
+both renderings, or the exception chain. Reverted one at a time, all
+four fail.
+
+### 2. P2: the fileless quick start was documented and not delivered
+
+The repository README still mounted a mandatory configuration file, and
+it had to: the image set `VINGA_CONFIG=/config/config.yaml` as an
+environment variable, and the loader refuses a named file that is not
+there, so `docker run` with no `-v` failed. The finding also caught a
+redirect reading `local-stack.yaml` from a path the reader had no way to
+have.
+
+*Resolution* (`1dffdcef`): the mechanism is an entrypoint wrapper, and
+the reason it is the honest one is that the loader's refusal is right
+and had to survive. An operator who passes `--config` or sets
+`VINGA_CONFIG` has said which file they mean, and silently ignoring a
+typo in it would serve a configuration nobody wrote. What was wrong is
+that the image made that statement on the operator's behalf. So the
+image no longer sets the variable, and a three-line wrapper sets it only
+when `/config/config.yaml` is actually mounted; an explicit
+`VINGA_CONFIG` still wins either way, still refuses a path that is not
+there, and the wrapper ends in `exec` so the server is still PID 1 and
+`docker stop` still runs the drain.
+
+The other two mechanisms were considered and rejected. Making the loader
+tolerate a missing named file would remove the typo refusal for every
+caller, not just the image. Making the entry point guess a path would
+put a container convention inside the server.
+
+The quick start is now one `docker run` with the server half in
+`VINGA_SERVER__*` variables and no mounted file, the preset piped from
+its real path in this repository, and its steps renumbered by one. The
+server README says the mount is optional in the two places that said it
+was required.
+
+*Load-bearing:* `test_docker_entrypoint.py` proves the decision without
+an image: both branches, an explicit variable winning over a mounted
+file, and the command line reaching the server unchanged. What it cannot
+prove is the packaging, which is under "Not verified here" above.
+
+### 3. P2: `cli-reference` could not run from either shipped installation
+
+The image copies `src/` and the wheel packaged `src/vinga_server`, while
+the fragments the recipes are read out of sit beside `src/`. An operator
+who installed the CLI as a tool would have met the refusal first.
+
+*Resolution* (`7bc32cbb`): the build carries the directory into the
+package, and the renderer prefers the packaged copy, falling back to the
+checkout beside `src/`. That order is the load-bearing half: a wheel
+missing its fragments has to fail rather than quietly find the tree it
+was built from.
+
+It is not a second home. `vinga-server/examples/` stays where every
+documented `-f examples/...` and every documentation link already points,
+and the packaged copy is derived from it at build time the way the
+package is derived from `src/`. No recorded decision stood against
+shipping them: the wheel target names `src/vinga_server` and nothing
+anywhere says the fragments are deliberately withheld.
+
+Walking the directory moved to the resource contract, which has neither
+a glob nor an ordering, so the files are listed and sorted by name; that
+sort is what keeps the render deterministic.
+
+*Load-bearing:* CI renders the reference from the built wheel, outside
+the checkout with the source tree off `sys.path`, asserts the fragments
+resolved from inside the installed package, and diffs the result against
+the committed page. Run here by hand as well as added to the workflow.
+
+### 4. P2: the recipes needed a drift check the page's could not give
+
+The plan's M4 entry asks the recipe renderer for its own drift lane and
+this milestone folded it into the page's, with reasons recorded above
+and no amendment reviewed.
+
+*Resolution* (`fcd2beda`): a second marker pair inside the region,
+around the recipes alone, and a check that compares those committed
+bytes against the recipe renderer rather than against the page composer.
+The outer check still owns the whole region and the inner markers are
+inside it, so neither is looking at bytes the other is not.
+
+The finding is right and the recorded reasoning was weighing the wrong
+thing. What the shared lane could not catch is a composer that dropped,
+truncated or reordered the recipes: the committed page and the fresh
+render move together and the check passes green.
+
+*Load-bearing:* proved to bite the way only it can. With the composer
+truncating the recipe list and the page regenerated from it, the
+whole-region check passes and this one fails.
+
+### 5. P3: the inventory still reported pre-rebase numbers
+
+The milestone's own record said `tests/integration/test_cli_live.py` was
+1,278 lines and `+117`, against 1,682 and `+116/-1` at the reviewed tip.
+The second time this class of drift appeared in this section.
+
+*Resolution* (this commit): every number in the M4 section is re-derived
+from `wc -l` and `git diff --numstat main..HEAD` at the tip that carries
+this round, the inventory says so where a reader meets it, and the
+verification counts are the reruns below rather than earlier ones
+carried forward.
+
+### 6. P3: the reference's opening was true of most commands, not all
+
+It said every command needs a running server, and then spent two
+sections on the ones that do not.
+
+*Resolution* (`13eee792`): the opening says the API is the normal path
+that almost every command is on, and names both exceptions where a
+reader meets them first: the four `--local` covers, and the five that
+render a document or derive a URL and contact nothing. The paragraph
+about the page's two halves now names the marker pair it means, since
+the recipes gained one of their own.
+
+### Verification after the round
+
+All from `vinga-server/`, at the tip.
+
+- `uv run ruff check .`: `All checks passed!`, at each commit.
+- `uv run mypy`: `Success: no issues found in 4 source files`
+- `uv run pytest tests/unit -q -n auto --dist loadfile`:
+  `3158 passed, 20 skipped in 42.45s` (12 more than before the round:
+  four planted-secret cases, two drift and resolution cases, and the six
+  the entrypoint wrapper brought).
+- `uv run pytest tests/integration -q`:
+  `126 passed in 175.62s (0:02:55)`, unchanged in count: nothing this
+  round added runs against a server.
+- The CLI live lane alone: `65 passed in 4.25s`.
+- **All six drift checks**, run as the CI steps run them: the four
+  committed documents, `cli.md`'s whole region, and `cli.md`'s recipe
+  region. All clean, and none of the four older documents moved.
+- **Both wheel renders**, built and installed the way CI does and run
+  outside the checkout with `-P`: the OpenAPI document, and the CLI
+  reference with its assertion that the fragments came from inside the
+  installed package. Both match their committed copies.
+- `uv sync --frozen`: `Checked 99 packages in 1ms`. No dependency moved;
+  the packaging change is a build-time include.
+- The child-interpreter import pin is untouched and green.
