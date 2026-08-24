@@ -21,6 +21,7 @@ can report that they have never met before, and which of the two ways to
 bind a board takes a MAC and which takes an activation code.
 """
 
+import io
 import logging
 from pathlib import Path
 
@@ -523,11 +524,11 @@ LEAF_EXCLUSIONS: dict[tuple[str, ...], frozenset[str]] = {
 
 
 def test_the_root_position_takes_every_global_option() -> None:
-    """Read off the root rather than listed, so a third global option
-    joins the matrix below by being declared. The two are named here
-    because they are what exists, and a third is a deliberate edit to
+    """Read off the root rather than listed, so a fifth global option
+    joins the matrix below by being declared. The four are named here
+    because they are what exists, and a fifth is a deliberate edit to
     this line rather than a silent widening."""
-    assert ROOT_OPTIONS == {"--config", "--api-url"}
+    assert ROOT_OPTIONS == {"--config", "--api-url", "--force", "--no-input"}
 
 
 @pytest.mark.parametrize(
@@ -575,11 +576,26 @@ def _configured(tmp_path: Path, port: int) -> str:
     return str(path)
 
 
-# Every global option carries a value, so every one of them can
-# conflict with a copy of itself in the other position. Derived from
-# what the root declares rather than listed a second time, and sorted so
-# the parametrization has an order.
-VALUE_OPTIONS = tuple(sorted(ROOT_OPTIONS))
+# The globals split two ways, because a value and a flag can be given
+# wrongly in different ways. An option carrying a value can conflict
+# with a copy of itself in the other position; a flag cannot, since its
+# two positions can only agree, and the conflict worth checking for the
+# two flags is with each other, which
+# `test_config_cli_confirmation.py` holds.
+#
+# Both halves are derived from what the root declares rather than listed
+# a second time, so a fifth global option inherits whichever matrix its
+# shape puts it in.
+FLAG_OPTIONS = tuple(
+    sorted(
+        spelling
+        for parameter in cli.command().params
+        for spelling in parameter.opts
+        if spelling != "--help" and getattr(parameter, "is_flag", False)
+    )
+)
+
+VALUE_OPTIONS = tuple(sorted(ROOT_OPTIONS - set(FLAG_OPTIONS)))
 
 
 @pytest.mark.parametrize("option", VALUE_OPTIONS)
@@ -618,4 +634,61 @@ def test_a_value_after_the_command_beats_one_before_it(
     assert run(option, before, "list", option, after) == 0
 
     assert run.reached[-1] == reached
+
+
+# The same three positions for the two flags
+#
+# What a flag says is read where it is acted on rather than off the
+# client it built, because a flag builds no client: at a terminal, a
+# destructive verb either asks, proceeds without asking, or refuses, and
+# which of those it does is the whole of what these two options decide.
+
+
+class _Terminal(io.StringIO):
+    """A stdin that says it is a terminal, which is what the
+    confirmation branches on."""
+
+    def isatty(self) -> bool:
+        return True
+
+
+def _flag_answer(option: str) -> int:
+    """What one flag makes a destructive verb answer at a terminal.
+
+    A third flag would have no answer here, and says so by failing
+    rather than by quietly taking another flag's.
+    """
+    if option == "--force":
+        return 0
+    assert option == "--no-input", option
+    return 1
+
+
+def _a_deletable_agent(run) -> None:
+    assert run("agent", "set", "kids", "-f", "-", stdin="prompt: You are kids.\n") == 0
+
+
+@pytest.mark.parametrize("option", FLAG_OPTIONS)
+def test_a_flag_before_the_command_survives_a_command_that_names_none(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], option: str
+) -> None:
+    """The merge, for the half that is a boolean: an absent copy at the
+    command position must not overwrite what the root position said,
+    which an ordinary boolean default would do by arriving as False."""
+    _a_deletable_agent(run)
+    capsys.readouterr()
+    monkeypatch.setattr("sys.stdin", _Terminal("y\n"))
+
+    assert run(option, "agent", "delete", "kids") == _flag_answer(option)
+
+
+@pytest.mark.parametrize("option", FLAG_OPTIONS)
+def test_a_flag_after_the_command_is_taken_on_its_own(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], option: str
+) -> None:
+    _a_deletable_agent(run)
+    capsys.readouterr()
+    monkeypatch.setattr("sys.stdin", _Terminal("y\n"))
+
+    assert run("agent", "delete", "kids", option) == _flag_answer(option)
 
