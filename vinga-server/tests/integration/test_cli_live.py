@@ -5,9 +5,15 @@ five neighbours) runs the same entry point against the same application,
 with one thing replaced: `cli.build_client` hands back a `TestClient`
 instead of opening a connection. That is the right seam for those suites
 and it is exactly what this one may not do. Here `build_client` is
-untouched, so every command below resolves an address, applies the
-transport policy, opens a socket, sends a bearer token a real ASGI server
-checks, and reads an answer a real uvicorn wrote.
+untouched, so every command that reaches a server resolves an address,
+applies the transport policy, opens a socket, sends a bearer token a real
+ASGI server checks, and reads an answer a real uvicorn wrote.
+
+Four of the grammar's commands reach nothing at all by design (`schema`,
+`reference`, `openapi`, `ota-url`). They run in this lane too, in the
+same environment as the rest, and what is asserted about them is the
+opposite claim: that an environment naming a running server and a
+database directory leaves them opening neither.
 
 What that buys, and what nothing in-process can show:
 
@@ -29,11 +35,11 @@ states that as a claim rather than leaving it a property of a fixture.
 
 Coverage is derived rather than declared. `run` records the row of
 `cli.COMMANDS` each command line names, and only when the command
-succeeded, so what the recording holds is "this command completed over
-the wire" and not "this command line was typed". The last test in the
-file holds that recording to the registration table, which is what makes
-a command added to the table and not to this lane a failing test rather
-than an omission nobody sees.
+succeeded, so what the recording holds is "this command completed" and
+not "this command line was typed". The last test in the file holds that
+recording to the registration table, which is what makes a command added
+to the table and not to this lane a failing test rather than an omission
+nobody sees.
 
 Ordering: the tests below share one server and one store on purpose,
 because what they describe is one operator's session against one
@@ -1302,7 +1308,7 @@ def test_a_fragment_that_will_not_parse_never_travels(
     assert document(capsys.readouterr().out)["prompt"] == "You are Sam."
 
 
-# The two bounds `apply` rides, on a real connection
+# The two bounds `apply` rides, over real HTTP
 #
 # Both of them are about a transaction whose length nothing about the
 # request predicts, and both are what a mock transport cannot show: one
@@ -1316,8 +1322,8 @@ def test_a_fragment_that_will_not_parse_never_travels(
 # A read bound short enough that this server cannot meet it. Deliberately
 # short so the test finishes, the way `test_config_api.py` shortens the
 # database's busy timeout for the same reason: what is being compared is
-# `apply` against an ordinary read, on the same server, over the same
-# connection, with the same store behind it.
+# `apply` against an ordinary read, on the same server, through the same
+# client implementation, with the same store behind it.
 IMPATIENT_S = 0.005
 
 
@@ -1354,10 +1360,12 @@ def test_a_large_document_is_waited_out_however_long_it_takes(
     committed would leave nobody able to say what is stored.
 
     The comparison is what makes that observable in a lane's wall clock.
-    An ordinary read of this same server, over the same connection, with
-    its bound cut to a value this server cannot meet, gives up and says
-    so. The apply, whose request demonstrably took longer than that
-    bound, does not.
+    An ordinary read of this same server, through the same client
+    implementation, with its bound cut to a value this server cannot
+    meet, gives up and says so. The apply, whose request demonstrably
+    took longer than that bound, does not. (Each command builds a client
+    of its own and closes it, so what the two share is the server and
+    the code that talks to it, not one open connection.)
     """
     entries = APPLY_LIMIT - 1
     many = {f"agent-{number:03d}": {"prompt": "You are one of many."} for number in range(entries)}
@@ -1551,7 +1559,7 @@ def test_the_lane_drove_every_command_of_the_registration_table(
     missing = sorted(" ".join(row.words) for row in cli.COMMANDS if row.words not in DRIVEN)
     assert not missing, (
         "these commands are registered in cli.COMMANDS and no case in this lane ran "
-        f"them successfully over a real connection: {missing}"
+        f"them successfully: {missing}"
     )
 
     # And every group word was reached through one of them, which is the

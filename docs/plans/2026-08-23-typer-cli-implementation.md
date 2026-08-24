@@ -861,8 +861,8 @@ composes is unchanged.
 
 **The two apply-bound proofs** (`9439910d`), on a store of their own.
 `APPLY_LIMIT - 1` entries are applied while an ordinary read of the same
-server, over the same connection, with its bound cut to something this
-server cannot meet, gives up and says so. The over-limit document is
+server, through the same client implementation, with its bound cut to
+something this server cannot meet, gives up and says so. The over-limit document is
 refused with the limit named, nothing of it quoted, and the store read
 back empty.
 
@@ -871,10 +871,16 @@ and the completeness test.
 
 ### The coverage map
 
-Twenty families, forty-one commands, every one of them driven to a
-successful answer over the wire. The `family` column is
-`row.words[0]` for `row in cli.COMMANDS`, which is what the refusal
-table is held to; the `commands` column is that family's rows.
+Twenty families, forty-one commands, every one of them run in this lane
+and answered successfully. Thirty-seven of them reach the server, and
+for those "answered" means over real HTTP: an address resolved, the
+transport policy applied, a socket opened, a bearer token checked by a
+real ASGI server. The other four (`schema`, `reference`, `openapi`,
+`ota-url`) reach nothing by design, and what the lane asserts about them
+is that opposite claim, in an environment that names a running server
+and a database directory. The `family` column is `row.words[0]` for
+`row in cli.COMMANDS`, which is what the refusal table is held to; the
+`commands` column is that family's rows.
 
 | Family | Commands | Driven by |
 | --- | --- | --- |
@@ -948,7 +954,10 @@ reaches a request only through the act on a command's row (`_call`'s
 default and `Act.read_timeout_s` are both bound at import, so patching
 `cli.READ_TIMEOUT_S` changes nothing), so the case monkeypatches
 `cli.COMMANDS` with `show`'s row rebuilt at a 5 ms bound and compares
-the two commands against the same server over the same connection. The
+the two commands against the same server through the same client
+implementation (each command builds a client of its own and closes it,
+so what they share is the server and the code that talks to it rather
+than one open connection). The
 threshold is deliberately short so the test finishes, which is the same
 move `test_config_api.py` makes with the database's busy timeout and for
 the same reason. Measured: the apply of 499 entries takes ~145 ms and

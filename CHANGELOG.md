@@ -22,11 +22,19 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   rather than declared: the suite records which command each successful
   run named and holds that recording to the registration table, so a
   command added to the grammar and not to the suite fails a test instead
-  of quietly skipping the lane. All forty-one registered commands
-  complete over the wire, each of the twenty command families has a
-  refusal asserted as it arrived, and every one of those refusals is run
-  a second time against an address nothing listens on, which is what
-  says whether it was the server or the client that composed it. Two
+  of quietly skipping the lane. All forty-one registered commands run in
+  the lane and answer successfully: the thirty-seven that reach a server
+  do it over real HTTP, and the four that deliberately reach nothing
+  (`config schema`, `reference`, `openapi` and `ota-url`) are held to
+  that opposite claim in an environment that names a running server and
+  a database directory. Each of the twenty command families has a
+  refusal asserted as the whole of what it printed, and every one of
+  those refusals is run a second time against an address nothing listens
+  on, which is what says whether it was the server or the client that
+  composed it. A credential-shaped value is planted in the inputs whose
+  shape can hold one, and it is looked for on every surface a refusal
+  can come out on: both streams, the log records any thread made while
+  the command ran, and the exception the refusal is carried by. Two
   claims that need a real connection are proven here for the first time:
   a document one entry under the limit is applied while an ordinary read
   of the same server under a bound this server cannot meet gives up, so
