@@ -1041,3 +1041,121 @@ From `vinga-server/`, at the tip of the milestone.
   its own). No allow-list moved: `OpenaiCompatibleOptions` lives in the
   module M1 already added to them, which is the third time a converted
   type has cost nothing there.
+
+### PR review round
+
+External review of PR #278, 2026-08-24. Four findings, one of them P1,
+verdict mergeable after fixes; each fix is its own commit and each is
+recorded here with what it changed and what proves it.
+
+**1 (P1): a credential-shaped option KEY reached the URL refusal.** The
+URL-credential rule built its sentence by joining the entry's location
+to the option key (`providers.llm.local.<key>`), and an option key is
+the caller's. A credential pasted as the key of an option whose value is
+a credential-bearing URL was therefore rendered into the sentence an
+operator reads, the 422 body the API answers with, and the log.
+
+*Resolution.* The rule names an option only when the type declares it,
+which is `safe_location`'s policy reaching the one refusal in the
+configuration package still built out of string joins. Descending sets
+the same flag `_check_no_inline_secrets` sets and leaves the path where
+it was: once a segment is the caller's, everything under it is addressed
+relative to a name that cannot be printed, so the honest answer is the
+deepest declared parent, which for a top-level option is the entry. The
+two sentences are otherwise untouched, and the unnamed one still carries
+the entry, the rule and the remedy. The plant is one sentinel written as
+the key AND inside the URL that key holds, spelled without any of the
+six secret-shaped fragments so that it gets past the rule that would
+otherwise refuse it first, and it is looked for in the API body, every
+pointer, every message, the CLI's stderr, both log formats and the whole
+exception chain.
+
+*Scope, said out loud.* This predates the hatch: `ProviderConfig` has
+always been `extra="allow"`, so an option key has always been the
+caller's. What changed is that an undeclared key used to be a mistake on
+its way to a refusal and is now a supported shape, which is what makes
+this milestone the one that owes the fix rather than a later one.
+
+*Blast radius, checked rather than assumed.* The MCP entries are a
+SEPARATE site and are already correct: `McpServerConfig._secret_problems`
+names the declared group (`env`, `headers`) and the closed fragment the
+key matched, points at the group, and never renders the key.
+`_refuse_url_credentials` has exactly one caller, the provider kind's
+`inside_write`, so nothing else in `_STORAGE` shared the defect. One
+thing worth its own issue rather than this round: an MCP server's `url`
+is a declared field and gets no URL-credential check at all, so
+`url: https://user:pw@host/mcp` is stored as written. No key leaks
+there, which is why it is not this finding, but the value does.
+
+*Revert proof.* Restoring either join (the top-level one or the nested
+one) fails all three of the new assertions: the HTTP case, the exception
+case and the CLI case.
+
+**2 (P2): the published schema permitted what the model refuses, and
+the prose had drifted.** `additionalProperties: true` says a key may be
+written and stops there, so a client generating from the document would
+write `messages` and meet a refusal the document never mentioned.
+
+*Resolution.* `propertyNames` carries the exclusion, which is the
+keyword for what a key may be CALLED, and the description carries the
+same names in words; both come from one classmethod,
+`refused_passthrough()`, which the validator also reads. The set is
+exact rather than the whole of `RESERVED_REQUEST_FIELDS`, and that
+difference is the drift the finding names: two of those seven are
+options this model declares, so a key by one of them is the option
+rather than a passthrough, and publishing `model` as forbidden would
+have told a client not to write a field that is required. The changelog
+said seven and the fragment said "two of them are options above" when
+only one is above at all, since `max_tokens` came out of the file with
+#277; both say five now, and a case holds the fragment's sentence to the
+model rather than to a copy of it. The committed OpenAPI document moved
+by eleven lines.
+
+*Revert proof.* Dropping the keyword fails the new case on a missing
+key; publishing the whole reserved set fails it on the set; removing a
+name from the fragment fails the examples case.
+
+**3 (P2): the historical body's claim stopped at `model_extra`.** The
+recorded reason `every-field.json` needed no compatibility decision is
+that its four unread options now travel, and the bodies suite showed
+only that they survive validation.
+
+*Resolution.* The fixture goes through `build_entry` to the wire, with
+the transport put where a factory-built provider finds it (the client
+class the builder reaches for) rather than assigned over the object the
+factory returned, so `build` and `__init__` stay real: a forwarding
+dropped between the entry and the constructor is invisible to any case
+that supplies its own client. Keys and values both.
+
+*Revert proof.* Filtering any one of `stop`, `connection`,
+`temperature` or `max_reply_length` out of the passthrough fails it, and
+so does an `exclude_unset` reflex that strips the null under
+`connection.timeout_s`.
+
+**4 (P2): the required names were unpinned.** The parity harness merges
+every case over a fragment carrying both required options, so omitting
+one is unwritable as a row, and only the missing endpoint was pinned
+anywhere.
+
+*Resolution.* Three cases at the three places the answer has to hold:
+the sanitizer refuses either name by the name it omitted, the build path
+refuses a fragment with no model and names the entry, and both published
+schemas list the two under `required`.
+
+*Revert proof.* Giving `model` a default fails all three.
+
+### Verification after the review round
+
+From `vinga-server/`, at the tip.
+
+- `uv run ruff check .`: `All checks passed!`
+- `uv run mypy`: `Success: no issues found in 4 source files`
+- `uv run pytest tests/unit -q -n auto --dist loadfile`:
+  `3381 passed, 19 skipped in 44.71s`
+- `uv run pytest tests/integration -q`: `126 passed in 191.43s (0:03:11)`
+- The six drift checks as CI runs them: all six clean. Only
+  `api-openapi.json` moved across the round (+12, -1), which is finding
+  2's keyword and its sentence; the two that must not move did not.
+- `uv sync --frozen`: `Checked 99 packages in 1ms`
+- The three import-weight pins: green, and their files untouched by the
+  round (`git diff a8ca4448 HEAD` lists none of the three).
