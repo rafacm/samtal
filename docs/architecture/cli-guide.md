@@ -129,9 +129,9 @@ stops being able to guess the fifth.
 
 ### Identity addressing
 
-The words after the verb are not arguments in the sense the published
-guides mean. They are the address of one row, in the order the API's
-own URL uses.
+The **leading** words after the verb are not arguments in the sense the
+published guides mean. They are the address of one row, in the order
+the API's own URL uses.
 
 ```bash
 vinga provider set llm local     # providers.llm.local
@@ -146,6 +146,26 @@ are what makes the entry one entry. The CLI does not choose them.
 addressed by two segments on the API is addressed by two segments on
 the command line and cannot come to differ.
 
+**Not every positional is an address, and the code says so.** In the
+second line above, the MAC addresses the request and `assistant` is
+the body of it: `bind-device` declares `AGENT` as a variable-length
+positional, so `vinga device bind aa:bb:cc:dd:ee:ff kids guest` binds
+one board to two agents. `Invocation` separates the two in its own
+field list, with `stage`, `name`, `mac`, `code` and `slot` under "what
+addresses one entry" and `agents`, `file` and `pairs` under "the rest
+of what a command can carry". The `KEY=VALUE` pairs a `set` takes are
+the same shape: a payload, positional, and as many as the entity has
+fields.
+
+The rule that keeps that from becoming the mess the published guides
+warn about is homogeneity, and it is the one both clig.dev and 12
+Factor state: several arguments of *one* kind read fine, and two
+arguments of *different* kinds do not. So a command may carry at most
+one payload group; it comes last, after the whole address; every
+element of it is the same kind of thing; and anything heterogeneous is
+a flag instead. `-f/--file` is a flag precisely because a document is
+not one more agent.
+
 This is why the published rule of thumb (one argument is fine, two are
 questionable, three are never good) is adapted here rather than
 adopted. That rule is about *options wearing positional clothes*, where
@@ -154,9 +174,11 @@ An identity segment carries no such ambiguity: the order is the
 resource's own, and it is printed in the help, in the URL and in the
 generated reference identically.
 
-What the rule caps here is identity depth. Three segments under a verb
-is the floor of what is already needed (`set-secret provider llm claude
-api_key` addresses a stage, a name and a slot, and its route is
+What the rule caps here is identity depth, and it counts address
+segments only: a payload group is not one of them, however many words
+it runs to. Three segments under a verb is the floor of what is already
+needed (`set-secret provider llm claude api_key` addresses a stage, a
+name and a slot, and its route is
 `/providers/{stage}/{name}/secrets/{slot}`) and it is the ceiling. A
 fourth segment means the noun is wrong: something in the middle of that
 address is a thing in its own right and should be the noun.
@@ -670,7 +692,7 @@ Ninety-six guidelines, in the document's own section order.
 | 42 | Have full-length versions of all flags | Adopted | `--config`, `--api-url`, `--file`, `--from-env` |
 | 43 | Only use one-letter flags for commonly used flags | Adopted | `-f` is the only one |
 | 44 | Multiple arguments are fine for simple actions against multiple things | Adopted | `bind-device <mac> <agent>...` takes a variable-length agent list |
-| 45 | Two or more arguments for different things is probably wrong | Adapted | The identity-segment cap |
+| 45 | Two or more arguments for different things is probably wrong | Adopted | It is the rule that governs payload positionals: one group, last, homogeneous, and anything heterogeneous is a flag. The identity segments in front of it are capped separately, at three |
 | 46 | Use standard names for flags where a standard exists | Adopted | `-f/--file`, and the owed `--force`; `--json` is reserved rather than renamed |
 | 47 | Make the default the right thing for most users | Adopted | The API address defaults to loopback on the port the file half names, which is the in-container case |
 | 48 | Prompt for user input | Adopted | `set-secret` at a terminal |
@@ -795,8 +817,10 @@ practice above, restated as the question to ask.
 2. **If it introduces a noun**, is that the configuration's own word
    for the thing, lowercase, kebab-case, and singular or plural
    according to whether it addresses one entry?
-3. **Are the positionals an identity**, in the same order and with the
-   same names the API's path uses, and are there at most three?
+3. **Do the leading positionals form the address**, in the same order
+   and with the same names the API's path uses, and are there at most
+   three of them? If a payload follows, is there exactly one group of
+   it, is it last, and is every element the same kind of thing?
 4. **Is everything it prints on stdout about the artifact, and
    everything on stderr about the run?** A document that explains
    itself is still the artifact; a count of what this invocation did is
