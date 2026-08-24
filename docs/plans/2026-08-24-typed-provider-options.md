@@ -123,37 +123,52 @@ reload path keeps withholding detail exactly as it does.
 
 ### 3. Write-time refusal names the field, by construction
 
-`ProviderConfig` gains an after-validator that, when
-`OPTION_MODELS` declares a model for `(the entry's stage is not
-known inside the model, so:)` -- the dispatch cannot live on
-`ProviderConfig`, which does not know its stage (`llm.local` and
-`tts.local` parse through the same model). The hook is therefore
-in the write funnel and the read-back path where the stage is in
-hand:
+The dispatch cannot live on `ProviderConfig`, which does not know
+its stage (`llm.local` and `tts.local` parse through the same
+model). One dependency-light sanitizer therefore owns the whole
+job: a function in `providers/options.py` (beside the classes it
+dispatches over, reading the registry's one table) that takes
+stage, type and the options mapping, validates when a model is
+declared, and returns either the validated instance or a
+value-free refusal. It builds the sentence and the `FieldProblem`
+tuple INSIDE the handler and raises OUTSIDE it, discarding the
+`ValidationError` entirely, so no cause and no context carries
+the rejected input; the store wraps it as `ConfigError`, the
+build path as `ProviderError`, and both surfaces get direct
+assertions on `str`, `repr`, `__cause__`, `__context__`, the
+structured field problems, the boot output and the reload log,
+with planted secret-shaped keys AND values.
 
-- `store._parsed` (the write funnel) validates
-  `entry.options` through `OPTION_MODELS[stage][entry.type]` when
-  declared, after the entry parses and before the kind's
-  `inside_write` check. A failure raises `ConfigError` with the
-  same sentence-and-`FieldProblem` shape `_load` produces, the
-  pointer being `/options/<field>` spelled directly from the
-  per-type model's own declared names: `safe_location`'s
-  truncation exists to avoid printing undeclared caller text, and
-  a name the per-type model declares is by definition not caller
-  text, so the sentence names it. Unknown keys render as the
-  fixed `an unrecognized key is not permitted` sentence at the
-  deepest DECLARED pointer, exactly the existing policy.
-- `store._body` (read-back) and the loader run the same check, so
-  a stored body predating a stricter model fails the bodies suite
-  and forces the recorded compatibility decision that suite
-  exists to force; with the three types chosen here, no committed
-  fixture trips.
-- Boot and reload get the check a third time through
-  `construct_provider` (decision 2), which is not duplication but
-  the same table consulted at each gate.
+The pointer shapes, stated for the fragment that is actually
+submitted (options are flat siblings of `type`, not children of
+an `options` key): a declared top-level option points at
+`/<field>`; a declared nested field at `/<parent>/<field>`; an
+unknown top-level option falls back to the empty pointer; an
+unknown nested key falls back to its deepest declared parent.
+`safe_location`'s contract (never print an undeclared segment) is
+untouched: the sanitizer names only names the per-type model
+declares, and the unrecognized-key sentence stays fixed. The
+pointer-inversion tests assert these exact request-body pointers.
 
-The masked-fragment path is unchanged: validation runs after
-substitution inside the transaction, as it does today.
+The gates, all reading the registry's one table:
+
+- `store._parsed` (the write funnel) runs the sanitizer after the
+  entry parses and before the kind's `inside_write` check; the
+  masked-fragment path is unchanged (validation after
+  substitution inside the transaction, as today).
+- Read-back runs it where row identity is structurally in hand,
+  `_from_row` for providers (which has stage and name), NOT by
+  parsing a dotted location inside `_body`. The bodies suite
+  extends to carry stage and type per fixture and to run the same
+  public validator production runs, with a historical body added
+  for every converted type; a stored row a stricter model refuses
+  is a recorded break whose recovery path (boot refusal sentence,
+  reload refusal, `--local delete` of the offending entry) gets
+  its own test, because the pre-release stance prices the
+  BREAKAGE at zero, not the operator's way out of it.
+- Boot and reload get the check through `construct_provider`
+  (decision 2): the same sanitizer consulted at each gate, not a
+  reimplementation.
 
 ### 4. `openai_compatible` keeps the door open
 
@@ -289,6 +304,13 @@ resolution note here.
    rejected input; the plan's tests asserted rendering surfaces
    only, not causes, contexts, boot output or reload logs.
 
+   *Resolution* (this commit): one dependency-light sanitizer in
+   `providers/options.py` owns validation, dispatch, pointers and
+   the value-free sentence, discards the ValidationError before
+   raising, and both wrappers get direct chain assertions with
+   planted secret-shaped keys and values across store, API, CLI,
+   boot and reload.
+
 4. **P2: the parallel OPTION_MODELS table violates the registry
    decision and the locality rule.** Two stage/type tables held
    together by a one-way test are the design guide's pending bug.
@@ -301,6 +323,11 @@ resolution note here.
 5. **P2: `/options/<field>` is not a pointer into a provider
    fragment.** Options are flat siblings of `type`; the pointer
    addressed a key absent from the submitted JSON.
+
+   *Resolution* (this commit): decision 3 states the four pointer
+   shapes for the flat fragment (`/<field>`, `/<parent>/<field>`,
+   empty for unknown top-level, deepest declared parent for
+   unknown nested), asserted as exact request-body pointers.
 
 6. **P2: `config schema provider <type>` cannot represent the
    stage axis.** `openai` exists in ASR and TTS and `mock` in
@@ -318,6 +345,12 @@ resolution note here.
 9. **P2: the stored-body gate bypasses typed validation.** The
    bodies suite validates through stage-blind `ProviderConfig`
    with a hard-coded `llm` identity, and `_body` has no stage.
+
+   *Resolution* (this commit): read-back validation lands in
+   `_from_row` where stage is structural; the bodies fixtures
+   carry stage and type and run the production validator, a
+   historical body joins per converted type, and the
+   refused-stored-row recovery path gets its own test.
 
 10. **P2: `VadParameters(extra="forbid")` closes an engine escape
     hatch on the evidence of one documented key.**
