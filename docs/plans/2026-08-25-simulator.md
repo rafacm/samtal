@@ -1365,7 +1365,7 @@ it.
 
 ## Milestones
 
-- [ ] **M1: the board and its check-in.** Decisions 2, 2a, 3, 3a, 4, 5,
+- [x] **[M1: the board and its check-in](2026-08-25-simulator-implementation.md#m1-the-board-and-its-check-in)** (PR TBD). Decisions 2, 2a, 3, 3a, 4, 5,
   7 and 8: the `simulator` noun with its `GROUPS` entry; `check-in` with
   its URL positional, `--mac` and its derived default, and `--claim`;
   the board's identity, both halves, with the client id a UUID5 over the
