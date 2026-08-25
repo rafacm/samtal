@@ -25,6 +25,12 @@ missing, and the committed [`api-openapi.json`](api-openapi.json) is
 where that workstation reads the contract instead. What to do when there
 is no server to ask has a section of its own below.
 
+One more command asks for something a bare install does not carry, and
+it is a different kind of asking: `simulator run` needs an extra rather
+than the server half, because it speaks a websocket and the
+configuration client has no library for one. It says which extra, and
+the installation section below names it.
+
 ## The two spellings
 
 The same command has two spellings, and both resolve.
@@ -120,6 +126,22 @@ most needs the two variables the next section is about. The two
 server-half commands named above are not on this door: run those in the
 container or from a checkout.
 
+One command on that door asks for more than the client half, and it asks
+by name rather than by needing the server. `simulator run` holds a
+conversation over a websocket, and the configuration client has no
+websocket library, so it lives behind a `sim` extra carrying exactly one
+distribution:
+
+```bash
+uvx --from "vinga-server[sim] @ git+https://github.com/rafacm/vinga#subdirectory=vinga-server" \
+  vinga simulator run https://voice.example/xiaozhi/ota/
+```
+
+Who it is for: anybody who wants to hear a deployment answer without
+owning a board. `simulator check-in` needs none of it and works from the
+plain door above; asked for the conversation without the extra, `run`
+says which extra to install and stops before it sends anything.
+
 What that door resolves to is exercised on every run of the test suite,
 and it is worth saying what the exercise covers, because it is stronger
 than a smoke test and weaker than a promise about the network. The wheel
@@ -127,11 +149,11 @@ is built, installed into a clean environment with no extras, and the
 `vinga` binary it puts there is run as a program, from a directory
 outside the checkout, against a running server. Every command of the
 grammar is run that way rather than imported: the ones that reach the
-API are asserted to answer, and the two server-half commands are
-asserted to print their one sentence. So a wheel missing a file it
-needs, an entry point that stopped being written, a heavy import that
-crept back into a command's own arm, and a command that quietly left or
-joined the server-half pair are each a failing test. What it does not
+API are asserted to answer, and the three that need a half a bare
+install does not have are asserted to print the sentence naming it. So a
+wheel missing a file it needs, an entry point that stopped being
+written, a heavy import that crept back into a command's own arm, and a
+command that quietly left or joined that set are each a failing test. What it does not
 cover is the `git+` resolution itself, which needs the network and the
 published branch.
 

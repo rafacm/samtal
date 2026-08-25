@@ -764,7 +764,7 @@ list rather than a shrug:
   loop has no non-terminal path at all, which the determinism practice
   requires of any interactive affordance; and no CI runner has an audio
   device, so it would ship as a headline feature no lane can drive.
-  Filed as its own issue by M2's implementation section.
+  Filed as its own issue by M2's implementation section, which is #301.
 - **Anything but the one packaged sentence.** There is no way to supply
   your own audio in v1; `-f` is the fragment flag and giving it a second
   meaning here would be worse than the limit.
@@ -1394,7 +1394,7 @@ it.
   have two homes; deepens `config/cli.py` by two rows and one
   `Invocation` field, and `protocol/messages.py` by making one fact
   public. No extra, nothing gated.
-- [ ] **M2: the conversation.** Decisions 1, 1a, 5, 5a, 6 and 7: the
+- [x] **[M2: the conversation](2026-08-25-simulator-implementation.md#m2-the-conversation)** (PR TBD). Decisions 1, 1a, 5, 5a, 6 and 7: the
   `run` verb, including the four-step ceremony whose fourth step is the
   second check-in; the `sim` extra carrying `websockets`, the dev group
   naming `vinga-server[serve,sim]`, and the tier VOCABULARY grown by a
