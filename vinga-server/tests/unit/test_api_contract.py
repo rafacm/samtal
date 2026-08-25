@@ -136,41 +136,72 @@ def covered() -> dict[tuple[str, str], list[cli.Command]]:
 # carries.
 
 
-def _document_shape(schema: Any) -> str | None:
-    """What one schema in the document names, as a client reads it."""
-    if not isinstance(schema, dict):
-        return None
-    if "$ref" in schema:
-        return str(schema["$ref"]).rsplit("/", 1)[-1]
-    inner = schema.get("additionalProperties")
-    if schema.get("type") == "object" and inner is not None:
-        named = _document_shape(inner)
-        return None if named is None else f"mapping of {named}"
-    return None
+class _Absent:
+    """What an act that sends no body is, and what an operation that
+    declares none is.
+
+    A sentinel of its own, and that is the load-bearing part rather than
+    a nicety. Both readers below used to answer None for a shape they
+    could not name, and None was also the answer for "there is no body
+    at all", so an array, a primitive, a union or a declared type
+    nothing here has a rule for compared EQUAL to a request that sends
+    nothing. Two facts sharing one value is two facts nobody is
+    checking; a shape this cannot name is now a failure with the schema
+    in it.
+    """
+
+    def __repr__(self) -> str:  # pragma: no cover - read only when a case fails
+        return "(no body)"
 
 
-def _declared_shape(shape: object) -> str | None:
-    """The same, for a shape declared on an act."""
+ABSENT = _Absent()
+
+
+def _document_shape(schema: Any) -> str:
+    """What one schema in the document names, as a client reads it.
+
+    Two shapes have names: a component reference, and an object whose
+    values are all one thing. Anything else fails here rather than
+    reading as an absence, because the whole point of this file is that
+    a shape nobody compared is a shape that can drift.
+    """
+    if isinstance(schema, dict):
+        if "$ref" in schema:
+            return str(schema["$ref"]).rsplit("/", 1)[-1]
+        inner = schema.get("additionalProperties")
+        if schema.get("type") == "object" and inner is not None:
+            return f"mapping of {_document_shape(inner)}"
+    raise AssertionError(f"the document carries a schema this contract check cannot name: {schema}")
+
+
+def _declared_shape(shape: object) -> str:
+    """The same, for a shape declared on an act, and failing the same
+    way: an act that grew a shape with no rule here is an act whose
+    contract stopped being compared."""
     if isinstance(shape, type) and issubclass(shape, BaseModel):
         return shape.__name__
     if get_origin(shape) is dict:
         key, value = get_args(shape)
         if key is str:
-            named = _declared_shape(value)
-            return None if named is None else f"mapping of {named}"
-    return None
+            return f"mapping of {_declared_shape(value)}"
+    raise AssertionError(f"an act declares a shape this contract check cannot name: {shape!r}")
 
 
-def _request(where: tuple[str, str]) -> str | None:
-    """The shape the document says an operation's body is, or None where
-    it declares no body."""
+def _named(shape: object) -> str | _Absent:
+    """One act's declared shape, or the absence sentinel."""
+    return ABSENT if shape is None else _declared_shape(shape)
+
+
+def _request(where: tuple[str, str]) -> str | _Absent:
+    """The shape the document says an operation's body is, or the
+    absence sentinel where it declares no body."""
     body = DOCUMENT["paths"][where[1]][where[0].lower()].get("requestBody")
     if body is None:
-        return None
+        return ABSENT
     return _document_shape(body["content"]["application/json"]["schema"])
 
 
-def _success(where: tuple[str, str]) -> str | None:
+def _success(where: tuple[str, str]) -> str:
     """The shape the document says an operation answers with."""
     answers = DOCUMENT["paths"][where[1]][where[0].lower()]["responses"]
     codes = sorted(code for code in answers if code.startswith("2"))
@@ -237,7 +268,7 @@ def test_the_request_body_is_the_shape_the_document_declares(where: tuple[str, s
     and the four bodies with adapters in front of them are exactly the
     ones it leaves free.
     """
-    declared = {_declared_shape(row.does.sends) for row in COVERED[where]}  # type: ignore[union-attr]
+    declared = {_named(row.does.sends) for row in COVERED[where]}  # type: ignore[union-attr]
     sent = {row.does.sends for row in COVERED[where]}  # type: ignore[union-attr]
 
     assert len(sent) == 1, f"{where} is addressed by rows that disagree about the body"
@@ -266,8 +297,8 @@ def test_every_shape_an_act_names_is_a_component_of_the_document(where: tuple[st
         act = row.does
         assert isinstance(act, cli.Act)
         for shape in (act.sends, act.answers):
-            named = _declared_shape(shape)
-            if named is None:
+            named = _named(shape)
+            if isinstance(named, _Absent):
                 continue
             assert named.removeprefix("mapping of ") in schemas, (row.words, named)
 
