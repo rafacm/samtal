@@ -24,6 +24,14 @@ where a deployment's own short URL comes from, which is
 `onboarding.origin` and is imported inside the branch that needs it,
 for the reason written beside that import.
 
+What it no longer owns is how to talk to such an address at all. The
+policy, the stand-in name, the timeouts, the request lifecycle and the
+websocket URL rule are `device_endpoint.py`, because `vinga simulator`
+stands where this command stands and asks a different question of the
+same kind of address. Two implementations of that would be two chances
+to leak on the one surface where a mistake is a leak. What stays here is
+what this command is: the four verdicts, and the GET that produces them.
+
 Everything printed here treats what arrived as text nobody vouched for.
 A URL an operator passes may be the deployment's secret `ota_path`, so
 no verdict repeats it. A body that came back may be a proxy's, a
@@ -34,12 +42,10 @@ reason: what an operator mistypes at this command is a URL.
 """
 
 import argparse
-import logging
 import re
 import sys
 from collections.abc import Mapping, Sequence
 from typing import NoReturn
-from urllib.parse import urlsplit
 
 import httpx
 
@@ -50,19 +56,24 @@ from vinga_server.config.loader import (
     load_file_config,
 )
 from vinga_server.config.models import ServerConfig
-from vinga_server.config.printing import parsed_url, printable, shown_url
-from vinga_server.logs import quieted
-
-# What a URL given to this command is called in every line it prints.
-#
-# The one URL it may show is the derived short one, whose key is the
-# recorded exception to "a path segment in front of the token issuer is
-# a credential". A URL an operator passes is not that: the documented
-# way to check a deployment with onboarding turned off is to pass the
-# legacy `ota_path` URL, which is exactly the segment nothing may print.
-# So a supplied URL is never displayed, in any verdict, and this stands
-# in for it.
-SUPPLIED_ENDPOINT = "the supplied OTA endpoint"
+from vinga_server.config.printing import printable
+from vinga_server.device_endpoint import (
+    # Imported rather than restated, which is what makes them one fact
+    # each: the stand-in every verdict names, the two loggers a request
+    # is held quiet around, the two bounds it waits, the seam this
+    # command's suite replaces, and the address type and the boundary
+    # itself. `doctor.SUPPLIED_ENDPOINT` and the rest stay the names
+    # every test and every sentence here reach for.
+    CONNECT_TIMEOUT_S,
+    READ_TIMEOUT_S,
+    REQUEST_LOGGERS,
+    SUPPLIED_ENDPOINT,
+    Endpoint,
+    build_client,
+    downgraded,
+    reported_websocket,
+    requested,
+)
 
 # What to do when there is no URL to derive and none was given.
 ONBOARDING_OFF_FOR_DOCTOR = "Give the URL to check as an argument: vinga-server doctor URL."
@@ -79,38 +90,6 @@ UNRECOGNIZED_ANSWER = "a body this client does not recognize"
 # for is a megabyte of anything, which nothing should walk a pattern
 # over.
 PARSED_BODY_LENGTH = 4096
-
-# The libraries that would narrate this request, and how quiet they are
-# held while it is made.
-#
-# `httpx` writes one line per request at INFO carrying the method, the
-# URL and the status, which `logs.py` names where it floors the vendor
-# libraries and keeps deliberately, since for every other caller in this
-# server it says nothing that is not already public. For this one it
-# says the whole of what every verdict below refuses to print: a
-# supplied OTA URL can be the deployment's secret `ota_path`, and a log
-# record is a retained surface in a way a terminal is not. `httpcore`
-# traces the connection under it and is held with it.
-#
-# WARNING rather than off, so a library that has something genuinely
-# wrong to say can still say it, and scoped to the request rather than
-# set once, so nothing this command does changes what a process that
-# imported it logs afterwards.
-REQUEST_LOGGERS = ("httpx", "httpcore")
-
-QUIET_LEVEL = logging.WARNING
-
-# How long this command waits, and the reason is its own. One GET of a
-# static description: a bounded connect, so an address nothing listens
-# on is reported in seconds rather than at the read bound, and a
-# generous read, because the network a device sits on is the thing being
-# diagnosed and a slow answer is still an answer. The values are the
-# ones this probe has always used. What they are no longer tied to is
-# the configuration API client's margin above the database's busy
-# timeout, which was never this command's reason for either of them.
-CONNECT_TIMEOUT_S = 5.0
-
-READ_TIMEOUT_S = 30.0
 
 # The endpoint's own description of itself, which is what tells a
 # vinga-server from anything else answering at that address. Parsed
@@ -251,17 +230,11 @@ def _doctor(args: argparse.Namespace) -> None:
     reported = _describe(response.text)
     if reported is None:
         raise ConfigError(_not_vinga_server(shown, response))
-    answered = _reported_websocket(reported["websocket"])
+    answered = reported_websocket(reported["websocket"])
     if answered is None:
         raise ConfigError(_unreadable_websocket(shown))
     scheme, websocket = answered
-    # Both sides normalized, and the probe's side read from the response
-    # rather than from the string an operator typed: `HTTPS://` is the
-    # same scheme as `https://`, and the client has already lowered the
-    # one the request went out with. No redirect is followed, so the
-    # response came from the address that was asked and this is that
-    # address's scheme.
-    if response.url.scheme == "https" and scheme == "ws":
+    if downgraded(response.url.scheme, scheme):
         raise ConfigError(_plain_websocket(shown, websocket))
     print(
         f"{shown} is vinga-server {printable(reported['version'])}, and sends devices "
@@ -320,196 +293,51 @@ def _server_config(args: argparse.Namespace) -> ServerConfig:
 
 # Reaching the endpoint
 #
-# One request, built behind a seam the suite replaces with a test
-# client, so the same entry point runs against a canned endpoint with no
-# socket. What the seam does not cover is the refusals in front of it,
-# which are what most of those tests are checking.
+# One request, and everything about making one is `device_endpoint`: the
+# policy in front of it, the client seam, the logging boundary, the
+# refused redirect and the close. What is this command's own is which
+# METHOD it makes, and that is a rule rather than a default.
 
-
-def build_client(url: str) -> httpx.Client:
-    """The connection to the OTA endpoint, and the one seam here.
-
-    `main()` is and stays synchronous, and httpx's ASGI transport is
-    async-only, so the tests replace this with Starlette's TestClient:
-    itself a synchronous `httpx.Client` subclass that drives an ASGI
-    application through its own portal.
-
-    There is no token parameter, and the absence is the point rather
-    than an omission. The OTA endpoint is the token issuer, so it cannot
-    require a credential, and this request goes wherever an operator
-    typed: a client that cannot carry an Authorization header cannot
-    hand the configuration API's bearer token to whatever answers at a
-    device-facing address.
-    """
-    return httpx.Client(
-        base_url=url,
-        timeout=httpx.Timeout(READ_TIMEOUT_S, connect=CONNECT_TIMEOUT_S),
-    )
+# What a URL handed to the probe is called if the policy has anything to
+# say about it, which by then it does not: `_doctor` has already run it.
+PROBED_URL = "the URL this probe was given"
 
 
 def _device_url(url: str, source: str) -> str:
     """A URL this client may GET the way a device would.
 
-    The configuration API's transport policy (`config/cli.py`)
-    deliberately does not apply. It exists because the bearer token
-    rides on every request to that API, and this request carries no
-    credential at all: the OTA endpoint is the token issuer, so it
-    cannot require one. Refusing a plain http:// address here would
-    refuse the ordinary LAN deployment, which is exactly what a device
-    is pointed at.
-
-    What does apply is the rest of the policy: a URL that cannot be read
-    is refused, and userinfo is refused rather than carried, because
-    anything in a URL ends up in shell history, in process lists and in
-    access logs.
-
-    No refusal repeats the address, not even with the userinfo taken
-    off, which is where this is stricter than that policy: an OTA URL
-    carries the path segment that stands in front of the token issuer,
-    and on a deployment with onboarding turned off that segment is the
-    whole protection the endpoint has.
+    The policy is `device_endpoint.Endpoint.parsed`, which is where it
+    lives now that `vinga simulator` stands where this command stands and
+    asks a different question of the same kind of address. What comes
+    back is the address exactly as it was given, trailing slash included:
+    the short path and the OTA path both end in one, and a device sends
+    what it was handed.
     """
-    # Before anything parses it: `urlsplit` deletes tabs, carriage
-    # returns and newlines rather than refusing them (WHATWG's rule), so
-    # a URL carrying one parses cleanly here and then reaches httpx,
-    # which raises InvalidURL naming the character and its position. A
-    # URL a person could have typed has no control characters and no
-    # spaces in it, so this is where they stop.
-    if any(character.isspace() or not character.isprintable() for character in url):
-        raise ConfigError(
-            f"{source} carries a space, a newline or another character a URL cannot "
-            f"hold. It is not quoted back, both because an OTA URL can be the "
-            f"deployment's own secret and because repeating a control character is how "
-            f"one line of output becomes two."
-        )
-    parsed = parsed_url(url, source)
-    if parsed.scheme not in ("http", "https") or not parsed.hostname:
-        raise ConfigError(
-            f"{source} is not an http:// or https:// URL with a host. It is not quoted "
-            f"back, since an OTA URL can be the deployment's own secret."
-        )
-    if parsed.username or parsed.password:
-        raise ConfigError(
-            f"{source} carries a username or a password in the URL, which is refused: the "
-            f"OTA endpoint takes no credential in its URL, and anything in one ends up in "
-            f"shell history, process lists and access logs. The address is not repeated "
-            f"here either."
-        )
-    # Returned exactly as it was given, trailing slash included: the
-    # short path and the OTA path both end in one, and a device types
-    # what it is given.
-    return url
+    return Endpoint.parsed(url, source, SUPPLIED_ENDPOINT).given
 
 
 def _probed(url: str, shown: str) -> httpx.Response:
     """One GET of the OTA endpoint, and never anything else.
 
     A GET is the handler that describes the endpoint; the POST beside it
-    is a device's check-in, which mints an activation code for an
-    unbound MAC. A diagnosis that could put a number on a board's screen
-    and spend the mint budget would be a diagnosis nobody could run
-    twice, so this method is not a default but a rule.
+    is a device's check-in, which mints an activation code for an unbound
+    MAC. A diagnosis that could put a number on a board's screen and
+    spend the mint budget would be a diagnosis nobody could run twice, so
+    this method is not a default but a rule.
 
-    One request, and no redirect is followed at all. Since the hardware
-    checkpoint of 2026-08-13 every device-facing route answers both
-    spellings of its path directly, because the firmware does not follow
-    a redirect on that request either, so a redirect from that address
-    is by definition something other than a current deployment
-    answering, and where it points is that something's choice. Following
-    it would let whatever answers at an address decide which host this
-    request reaches next, which inside the network a deployment sits in
-    is worth refusing rather than reasoning about.
+    That rule is the whole of what this decides, and it is why the line
+    is here rather than folded into its caller: it binds the method and
+    this command's own client seam, which its suite replaces, to a
+    boundary two commands share.
 
-    Building the client is inside the boundary with the request and the
-    close. httpx validates a URL when it is given one, so construction
-    is a place a URL refused by a library rather than by the check above
-    would otherwise leave as a traceback with the address in it.
-
-    The whole of it is inside a logging boundary as well, and that is
-    the one thing here that is not about what reaches a terminal. The
-    client library writes a line per request naming the URL, which for
-    every other caller in this server is a fact worth keeping and for
-    this one is the deployment's own secret arriving in a retained
-    record. `REQUEST_LOGGERS` above says which loggers and why.
+    The address is split again here rather than carried down from
+    `_doctor`, because the boundary composes from parsed parts and the
+    seam is handed a string. The policy that split applies has already
+    passed, so none of its refusals is reachable from this call; what is
+    wanted is the split.
     """
-    problem: str | None = None
-    client: httpx.Client | None = None
-    answered: httpx.Response | None = None
-    with quieted(REQUEST_LOGGERS, QUIET_LEVEL):
-        try:
-            try:
-                client = build_client(url)
-                answered = client.request("GET", url, follow_redirects=False)
-                if answered.is_redirect:
-                    answered, problem = None, _redirect_refused(shown)
-            except (httpx.HTTPError, httpx.InvalidURL, ValueError) as exc:
-                # The exception's class name and nothing else. httpx puts
-                # the request into its exceptions, its InvalidURL quotes
-                # the character it refused, and drivers put whatever they
-                # like into their messages; the class is the part that
-                # says what happened. Raised after the handler, so nothing
-                # walking a chain finds the original behind it.
-                # ValueError covers the UnicodeError an IDNA host raises
-                # on its way down.
-                problem = (
-                    f"cannot reach {shown}: the request did not complete "
-                    f"({type(exc).__name__}). Check that the server is running, that this "
-                    f"is the address it serves, and that the network a device sits on can "
-                    f"reach it."
-                )
-        finally:
-            # The close is a step of the probe rather than tidying after
-            # it, so it answers a sentence instead of raising: an
-            # exception out of a `finally` leaves this boundary
-            # altogether, taking whatever a driver wrote into its message
-            # with it, and it would replace a refusal already in flight.
-            # Whatever failed first is what is reported.
-            problem = problem or _close_failed(client, shown)
-    if answered is None or problem is not None:
-        # Every path that gets here left a sentence: a request that
-        # produced no response, a redirect refused, or a close that
-        # would not complete after a response that did arrive.
-        raise ConfigError(problem)
-    return answered
+    return requested("GET", Endpoint.parsed(url, PROBED_URL, shown), build=build_client)
 
-
-def _close_failed(client: httpx.Client | None, shown: str) -> str | None:
-    """Give the connection back, and say so when it will not go.
-
-    Answered rather than raised, for the reason the caller's `finally`
-    states, and named by its class rather than quoted, for the reason
-    every other failure here is: a transport failing on its way out can
-    put the address, a header or a driver's own text into its message.
-
-    A close that fails ends the command rather than being swallowed.
-    What this command answers is what one address said when it was asked
-    cleanly, and a probe that could not be finished is not something to
-    report a healthy endpoint from; a diagnostic that quietly dropped a
-    failure would be the wrong tool twice over.
-    """
-    if client is None:
-        return None
-    try:
-        client.close()
-    except Exception as exc:
-        return (
-            f"{shown} answered, but the connection to it could not be closed "
-            f"({type(exc).__name__}), so no verdict is printed: a probe that did not "
-            f"finish cleanly is not one to call an endpoint healthy from. What the "
-            f"library said is not repeated here."
-        )
-    return None
-
-
-def _redirect_refused(shown: str) -> str:
-    return (
-        f"{shown} answered with a redirect this command does not follow. Following it "
-        f"would let whatever answers there choose which host this request reaches next, "
-        f"and this command runs inside the network a deployment sits in. Every "
-        f"device-facing route answers both spellings of its path directly, so a redirect "
-        f"from that address is something else answering. The target is not repeated here: "
-        f"ask the address you meant directly."
-    )
 
 # Reading what answered
 
@@ -560,37 +388,6 @@ def _plain_websocket(shown: str, websocket: str) -> str:
     )
 
 
-def _reported_websocket(url: str) -> tuple[str, str] | None:
-    """The websocket URL a response named: its normalized scheme and the
-    form that may be printed, or None when it is not a websocket URL
-    this command can read.
-
-    The scheme is returned rather than re-derived by the caller, and it
-    is the parser's normalized one, because a comparison against the
-    literal `ws://` is a comparison a `WS://` walks past.
-
-    What arrived is whatever the far end sent, and identifying the far
-    end is the whole point of the command, so it is parsed before it is
-    shown: bounded, made printable, and stripped of any credential
-    written into it. There is deliberately no fallback to the raw
-    string. A URL that will not parse is exactly the one whose userinfo
-    could not be taken off, so falling back would print the credential
-    in precisely the case the stripping exists for.
-    """
-    try:
-        parsed = urlsplit(url)
-        # Read here, since it parses on access and raises for a port
-        # that is not a number in range.
-        _ = parsed.port
-    except ValueError:
-        return None
-    # `urlsplit` lower-cases the scheme it parsed, which is what makes
-    # this a normalization rather than a hope.
-    if parsed.scheme not in ("ws", "wss") or not parsed.hostname:
-        return None
-    return parsed.scheme, printable(shown_url(parsed))
-
-
 def _unreadable_websocket(shown: str) -> str:
     return (
         f"{shown} answers as vinga-server, but the websocket URL it reports is not a "
@@ -600,4 +397,17 @@ def _unreadable_websocket(shown: str) -> str:
     )
 
 
-__all__ = ["build_client", "main"]
+# The names this module answers to. The three bounds and the two loggers
+# are `device_endpoint`'s facts, imported rather than restated, and they
+# are listed here because this is where a caller and this command's own
+# suite read them: what the probe waits and which loggers it holds quiet
+# are questions about `vinga-server doctor`, whatever module owns the
+# answer.
+__all__ = [
+    "CONNECT_TIMEOUT_S",
+    "READ_TIMEOUT_S",
+    "REQUEST_LOGGERS",
+    "SUPPLIED_ENDPOINT",
+    "build_client",
+    "main",
+]
