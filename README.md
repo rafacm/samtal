@@ -150,7 +150,7 @@ Which image tag to deploy from, and the slim variant that carries neither local 
 | --- | --- |
 | [`vinga-server/`](vinga-server/) | The conversation server (Python): OTA/config endpoint, WebSocket audio channel, VAD → ASR → LLM → TTS pipeline with pluggable providers, MCP tools, device authentication. Published as a multi-arch container image. |
 | [`vinga-esp32/`](vinga-esp32/) | Thin firmware customization: vinga server as default endpoint, English wake word, minimal UI changes. 🚧 |
-| [`docs/`](docs/README.md) | Research notes on the upstream architecture and the device↔server protocol, plus the plans and implementation notes behind each milestone. |
+| [`docs/`](docs/README.md) | The reference pages (the CLI, every configuration field, the API contract, the events), the per-board device guides, the architecture and its principles, and the record: research notes, plans, features and decisions. |
 | `vendor/` | Reference clones of the upstream projects (not committed). |
 
 ## Credits
