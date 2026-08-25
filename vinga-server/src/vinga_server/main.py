@@ -18,7 +18,6 @@ from types import FrameType
 from typing import NoReturn
 
 import uvicorn
-from dotenv import find_dotenv, load_dotenv
 from fastapi import FastAPI
 
 from vinga_server import logs, onboarding
@@ -26,7 +25,7 @@ from vinga_server.app import StartupFailed, create_app, startup_failure
 from vinga_server.composition import Composition
 from vinga_server.config import Config, ConfigError
 from vinga_server.config.boot import load_boot_config
-from vinga_server.config.loader import CONFIG_ENV_VAR
+from vinga_server.config.loader import CONFIG_ENV_VAR, load_environment_file
 from vinga_server.providers import ProviderError
 from vinga_server.registry import CLOSE_MARGIN_S
 
@@ -365,9 +364,21 @@ def _usage_problem(message: str) -> str:
 def main() -> None:
     # Read a .env file into the environment before anything looks at it, so
     # it can carry VINGA_* overrides, VINGA_CONFIG, and provider secrets.
-    # Real environment variables keep priority over .env values. usecwd makes
-    # the search start from the invocation directory, not this file's.
-    load_dotenv(find_dotenv(usecwd=True))
+    # Real environment variables keep priority over .env values, and the
+    # search starts from the invocation directory rather than this
+    # file's.
+    #
+    # Behind the loader's boundary, which is the same one the config CLI
+    # reads it through: a `.env` is where a deployment's credentials are
+    # kept, and a file that will not open or will not decode would
+    # otherwise leave this entry point as a traceback holding those
+    # bytes. One sentence and exit 1, which is what every other
+    # configuration failure here answers with.
+    try:
+        load_environment_file()
+    except ConfigError as exc:
+        print(exc, file=sys.stderr)
+        raise SystemExit(1) from None
 
     # The floor under the libraries that narrate somebody else's bytes
     # (#124), before any command below opens a database or a socket.

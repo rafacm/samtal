@@ -59,7 +59,6 @@ from urllib.parse import quote, urlunsplit
 import httpx
 import typer
 import yaml
-from dotenv import find_dotenv, load_dotenv
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
 # Typer ships its own copy of Click rather than importing the installed
@@ -83,7 +82,12 @@ from typer._click.exceptions import (
 from typer.core import TyperCommand, TyperGroup
 
 from vinga_server.config import docgen, entities, views
-from vinga_server.config.loader import CONFIG_ENV_VAR, ConfigError, load_file_config
+from vinga_server.config.loader import (
+    CONFIG_ENV_VAR,
+    ConfigError,
+    load_environment_file,
+    load_file_config,
+)
 from vinga_server.config.models import (
     API_MOUNT_PATH,
     PROVIDER_STAGES,
@@ -301,9 +305,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     script never reaches that function. Read into the environment before
     anything looks at it, with the real environment winning, and
     searched from the invocation directory rather than from this file's.
+
+    It is read INSIDE the boundary, which is the whole of why the read
+    is a function of the loader's rather than two library calls here: a
+    `.env` that will not open or will not decode is a failure on a path
+    nobody validated, holding the variables an API token and the
+    provider credentials come from, and outside the boundary it would
+    leave as a traceback with those bytes on the exception.
     """
-    load_dotenv(find_dotenv(usecwd=True))
     try:
+        load_environment_file()
         _parsed(
             sys.argv[1:] if argv is None else argv,
             CONSOLE_SCRIPT if argv is None else DISPATCHED,
