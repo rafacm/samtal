@@ -8,7 +8,7 @@ Upstream reference: `docs/websocket.md` in 78/xiaozhi-esp32.
 """
 
 import json
-from typing import Literal
+from typing import Literal, get_args, get_type_hints
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -83,7 +83,18 @@ class UnknownMessage(BaseModel):
 
 DeviceMessage = DeviceHello | ListenMessage | AbortMessage | McpMessage | UnknownMessage
 
-_MESSAGE_TYPES: dict[str, type[BaseModel]] = {
+# Which model each device-to-server type parses as, and the public
+# inventory of that half of the wire.
+#
+# Public since #248, because a second reader arrived. `vinga simulator`
+# states what it supports and what it does not, and it states it at
+# (type, state, mode) granularity, off these models' own `Literal`
+# members: a type-level claim would have called `listen` supported and
+# published a claim two thirds false, since `start` and `stop` in
+# `manual` sit beside `detect`, `auto` and `realtime`, which a simulator
+# cannot do at all. A private name reached from another module is a fact
+# with no home.
+MESSAGE_TYPES: dict[str, type[BaseModel]] = {
     "hello": DeviceHello,
     "listen": ListenMessage,
     "abort": AbortMessage,
@@ -140,7 +151,7 @@ def parse_message(text: str | bytes) -> DeviceMessage:
     if not isinstance(message_type, str) or not message_type:
         raise ProtocolError('a protocol message must carry a string "type"')
 
-    model = _MESSAGE_TYPES.get(message_type)
+    model = MESSAGE_TYPES.get(message_type)
     if model is None:
         return UnknownMessage(type=message_type, data=data)
     try:
@@ -187,3 +198,30 @@ def tts_message(
     if text is not None:
         message["text"] = text
     return json.dumps(message)
+
+
+# What the server can send, which this module builds and does not yet
+# model.
+#
+# The asymmetry is `messages.py`'s own and it is recorded rather than
+# hidden: the device-to-server half is modelled above, and the
+# server-to-device half is the three builders below plus the `mcp`
+# envelopes in `protocol/mcp.py`. That was fine while the only reader was
+# the server, which never parses what it just wrote; the simulator is the
+# first reader of the other direction, and M2 of the #248 plan gives this
+# half frozen models and a parser beside `parse_message`.
+#
+# Until then this is the inventory that half has, and the one fact in it
+# with a home already is derived rather than restated: the `tts` states
+# are read off `tts_message`'s own annotation, so a fourth state added
+# there appears here without anybody remembering to add it.
+SERVER_MESSAGE_TYPES: tuple[str, ...] = ("hello", "stt", "tts", "mcp")
+
+
+def server_states(message_type: str) -> tuple[str, ...]:
+    """The states one server-sent message type declares, or `()` for a
+    type that has none."""
+    if message_type != "tts":
+        return ()
+    state = get_type_hints(tts_message)["state"]
+    return tuple(str(member) for member in get_args(state))
