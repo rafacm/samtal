@@ -487,6 +487,73 @@ def test_the_guides_rejected_shapes_still_appear() -> None:
     assert sorted(_GUIDE_REJECTED) == sorted(set(_GUIDE_REJECTED) & quoted)
 
 
+# What a generated document may be spelled as
+#
+# One spelling, whatever rendered it, which is the rule the whole
+# canonical constant exists for: a document may no more vary with the
+# invocation than with the terminal. The drift checks cannot see this.
+# They regenerate an artifact and diff it, so a description carrying the
+# wrong program word moves the committed copy and the fresh render
+# together and passes green forever.
+#
+# One exception, and it is a different fact rather than a loosening.
+# `events.md` renders the event catalog's message templates, and those
+# are sentences a SERVER composes: a server runs inside the image, where
+# `vinga-server` is what a shell answers to, and the settled rule sends
+# such a sentence to the long spelling. What is generated there is the
+# document, not the sentence.
+_SERVER_COMPOSED = ("docs/reference/events.md",)
+
+# And what the rule is not about at all: a captured experiment. The
+# spike artifacts under `spikes/` were rendered on the day they were
+# run, against the grammar of that day, and nothing regenerates them.
+# Holding a frozen capture to today's spelling would be asking a
+# photograph to age.
+_CAPTURED = ("spikes/",)
+
+
+def mis_spelled(rows: list[Spelling]) -> list[str]:
+    """Every generated invocation that is not in the canonical
+    spelling."""
+    return [
+        row.rendered()
+        for row in rows
+        if row.kind == "generated"
+        and not row.path.startswith(_SERVER_COMPOSED + _CAPTURED)
+        and not row.invocation.startswith(f"{cli.PROGRAM} ")
+    ]
+
+
+def test_a_generated_document_carries_one_spelling() -> None:
+    """The standing guard over the artifacts this repository renders."""
+    assert mis_spelled(census()) == []
+
+
+def test_the_long_spelling_inside_a_generated_region_is_flagged() -> None:
+    """And the guard held to going red, which is the half a passing
+    assertion cannot show: this is the text the review round found in
+    two committed artifacts, and it is a finding rather than a pass."""
+    page = "\n".join(
+        [
+            _GENERATED_REGION[0],
+            "| `tools` | which is the name `vinga-server config status` shows |",
+            _GENERATED_REGION[1],
+        ]
+    )
+
+    flagged = mis_spelled(_matches(_HALF_GENERATED, page, _command_words()))
+
+    assert [row.split("  ")[-1] for row in flagged] == ["vinga-server config status"]
+
+
+def test_a_server_composed_document_keeps_the_long_spelling() -> None:
+    """The exception, held to being one: an event message names the
+    invocation a server has, and the guard leaves it alone."""
+    page = "device %s has no agent; bind it with: vinga-server config device pending claim"
+
+    assert mis_spelled(_matches("docs/reference/events.md", page, _command_words())) == []
+
+
 def test_every_class_is_one_of_the_three() -> None:
     """The vocabulary, kept closed. A fourth class would be a
     classification nobody stated a rule for."""

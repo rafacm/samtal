@@ -76,6 +76,30 @@ PROVIDER_STAGES = ("llm", "asr", "tts", "vad")
 # validator has to reserve it: the OTA route is registered before the
 # API is mounted, so a route matching under this prefix would be found
 # first and would answer a request the API's token gate never saw.
+# How a command of this grammar is spelled in anything this repository
+# generates: the CLI reference and its recipes, the export header, the
+# domain reference these field descriptions render into, and the OpenAPI
+# document beside it. One constant, because a generated document may no
+# more vary with the invocation than with the terminal.
+#
+# Here rather than beside the descriptors that carry the command
+# strings, because the field descriptions below name commands too and
+# this module is the one every renderer already reaches through:
+# `entities` imports it, `docgen` imports both, and `cli` imports all
+# three. `entities` re-exports it, so there is one string and not two.
+PROGRAM = "vinga"
+
+# And how the same command is spelled by a sentence a SERVER composes:
+# a boot refusal, a runtime refusal, an event message. A server runs
+# inside the image, where `vinga-server` is what a shell answers to and
+# `config` is the word that dispatches away from serving, so that is
+# what a sentence composed there tells an operator to type. The two
+# names are the same grammar reached two ways, and which of them a
+# surface uses is decided by who composes it rather than by what it
+# says.
+SERVER_PROGRAM = "vinga-server config"
+
+
 API_MOUNT_PATH = "/api"
 
 # Where the onboarding short route is served: /x/<key>/, the alias of the
@@ -1118,7 +1142,7 @@ class ProviderConfig(BaseModel):
             "The name of the environment variable holding this provider's "
             "credential, never the credential itself. Left unset for a local engine "
             "or a keyless self-hosted endpoint. A credential stored with "
-            "`config provider secret set` fills the same slot and takes precedence."
+            f"`{PROGRAM} provider secret set` fills the same slot and takes precedence."
         ),
     )
 
@@ -1352,8 +1376,8 @@ class McpServerConfig(BaseModel):
             "reload without restarting the connection, and turning it off stops the "
             "injection at the next activation. A block longer than 4000 characters is "
             "skipped whole rather than truncated. The block sits after this entry's own "
-            "guidance, and `vinga-server config agent preview <agent>` reports it "
-            "under "
+            f"guidance, and `{PROGRAM} agent preview <agent>` reports it "
+            f"under "
             "`server_instructions:<entry>`, so an operator can see whose words they are "
             "reading."
         ),
@@ -1509,8 +1533,8 @@ class PromptFragmentConfig(BaseModel):
             "whole assembled prompt, which is also what the inspection surface reports. "
             "It sits after the agent's own prompt and before any MCP guidance, in the "
             "order the including layer lists it. There is no length cap: what each "
-            "block costs is reported by `vinga-server config agent preview "
-            "<agent>`, and the "
+            f"block costs is reported by `{PROGRAM} agent preview "
+            f"<agent>`, and the "
             "operator is the one who knows what their model tolerates."
         )
     )
@@ -1610,7 +1634,7 @@ class McpGrant(BaseModel):
     Tools are named by the published name without its entry prefix
     (`turn_on_light` grants `home__turn_on_light`), matched exactly. That
     identifier is this application's own: it has been through the
-    publishing rule, it is what `vinga-server config status` shows and
+    publishing rule, it is what `vinga status` shows and
     what the model calls, so an operator writes down the name they read.
     What a server listed before the rule got to it never appears on a
     vinga surface, and cannot be granted by.
@@ -1641,7 +1665,7 @@ class McpGrant(BaseModel):
         description=(
             "Which of that server's tools this layer may reach, by the published name "
             "without its entry prefix (turn_on_light for home__turn_on_light), which "
-            "is the name `vinga-server config status` shows. Leaving it out grants "
+            f"is the name `{PROGRAM} status` shows. Leaving it out grants "
             "the whole server, exactly as naming the server as a plain string does. A "
             "name that matches nothing the server published is not an error at write "
             "time, since only a live connection knows the list; it is logged when the "
