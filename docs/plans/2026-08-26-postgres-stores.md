@@ -506,3 +506,126 @@ nothing half-applied.
   releasable, cut from M1 so the cutover diff stays reviewable;
   M1's PR body names the one-PR lag. Design footprint: none, by
   design.
+
+## Plan review round
+
+External review of commit `91e9bd2d`, 2026-08-26. Backend: codex
+CLI 0.149.1, model `gpt-5.6-sol`, read-only sandbox, runtime
+~10m (reconstructed from file times). Verdict as received: ready
+after the P1/P2 amendments. Findings condensed but faithful:
+
+1. **P1: Alembic cannot create the schemas from inside the
+   baselines.** With `version_table_schema` configured, Alembic
+   creates the schema-qualified version table before the
+   baseline's `upgrade()` runs, so `CREATE SCHEMA` as the
+   baseline's first operation is too late; and schema-qualified
+   autogeneration and drift comparison need
+   `include_schemas=True`. Create or verify each schema in
+   `upgrade_to_head` under the chain's advisory lock before
+   Alembic runs; state the required privileges; prove migration
+   from a truly blank database without the init script.
+
+2. **P1: the shared test fixture can truncate a developer's real
+   database.** Fixed database names plus defaults-only redirection
+   mean an exported `VINGA_DB_URL` or `VINGA_DB_*` in the
+   developer's environment can point the fixture's `TRUNCATE` or
+   `DROP DATABASE ... FORCE` at a non-test database, and fixed
+   names collide across concurrent pytest runs. Generate a unique
+   per-run prefix shared with workers, explicitly clear or
+   override the production variables, and verify
+   `current_database()` equals the generated test target before
+   every destructive statement.
+
+3. **P1: a migrated template cannot test fresh migration, and a
+   transaction-scoped lock cannot wrap `CREATE DATABASE`.**
+   Cloning the migrated template cannot exercise the fresh
+   migrations `test_db_open` pins, and Postgres forbids
+   `CREATE DATABASE` inside a transaction, so the product's
+   transaction-scoped advisory lock cannot coordinate template
+   creation. Use a session-level advisory lock on an autocommit
+   maintenance connection; clone the template only for ordinary
+   tests; create migration subjects empty (from `template0`) and
+   run both chains through the product opener.
+
+4. **P1: the image smoke lane is omitted and will stop working.**
+   The image job seeds and smokes real containers that currently
+   share SQLite through `/data`; after the cutover every one of
+   them needs a reachable Postgres, and a runner-localhost service
+   is not reachable as localhost from nested `docker run`
+   containers. Include the image job and `tests/smoke` in M1,
+   provide a Docker-network-reachable instance, pass per-scenario
+   `VINGA_DB_*`, and require a pre-merge manual-dispatch image run
+   because the image job does not run on pull requests.
+
+5. **P1: the provisioning script breaks for a configured server
+   user and after database reset.** `ALTER DEFAULT PRIVILEGES FOR
+   ROLE vinga` hardcodes the role decision 2 makes configurable; a
+   `dropdb`/`createdb` reset removes schemas and database-local
+   default privileges while `vinga_ro` (instance-level) survives,
+   so an unconditional `CREATE ROLE` fails on rerun; and default
+   privileges alone do not cover tables that already exist when
+   provisioning runs after migration. Parameterize the server
+   role, make the script repeatable (role create-or-rotate, grants
+   on current plus future tables), document rerun-after-reset, add
+   `docker-compose.yml` and `deploy/**` to the CI path filters,
+   and assert in the integration lane that `vinga_ro` reads every
+   conversations table, inherits a later-created one, and cannot
+   touch the domain schema.
+
+6. **P1: `VINGA_DB_URL` is neither constrained to the chosen
+   driver nor safely redacted.** An unrestricted SQLAlchemy URL
+   admits `postgresql://` (psycopg2 dialect), `sqlite://`, or any
+   other backend, against the issue's decisions; and
+   `render_as_string(hide_password=True)` leaves sensitive query
+   values (`sslpassword`) in place. Accept only `postgresql` and
+   `postgresql+psycopg`, normalize the former to psycopg 3, refuse
+   every other scheme with a fixed value-free sentence, never
+   render the URL or discrete values on any error surface, and
+   extend the sentinel to URL authority and query credentials,
+   invalid-URL parsing, discrete fields, connection and migration
+   failures, chains, and both log formats.
+
+7. **P1: M1 publishes a breaking image while the operator
+   instructions remain SQLite-only.** The workflow publishes every
+   push to `main`; a one-PR documentation lag means the published
+   image's own README still promises an empty local database
+   suffices. And the planned recovery test starts from a Postgres
+   template, proving Postgres reset rather than the cutover.
+   Land quickstart, deployment prerequisites, export-before-
+   upgrade ordering, reset, backup, read-only access and old-file
+   disposition in the same releasable milestone as the image; test
+   replaying a committed pre-cutover export into a truly empty
+   Postgres database; state plainly that conversation history is
+   not migrated and what happens to the SQLite file and sidecars.
+
+8. **P2: `psycopg[binary]` in `serve` defeats the promised
+   source-install option.** Any `serve` install would pull
+   `psycopg-binary` even where the deployment docs recommend the
+   source-backed implementation. Put base `psycopg` in `serve`,
+   the binary implementation behind a development or image door,
+   and document the source install's system prerequisites.
+
+9. **P2: the MVCC deletion and nonblocking-reader claims are
+   false as written.** A repeatable-read transaction opened before
+   a deletion commits keeps seeing the row; and readers take locks
+   that block DDL, so a long analyst transaction can make a
+   migration hit `lock_timeout`. Promise disappearance to
+   transactions started after the deletion commits, test a held
+   snapshot across retention, narrow "readers never block writers"
+   to ordinary DML, and consider role-level timeouts for
+   `vinga_ro`.
+
+10. **P2: `lock_timeout` is not a ten-second bound on a
+    transaction or response.** It applies separately to each lock
+    acquisition; a transaction can wait ten seconds on the
+    advisory lock and again on later locks, plus unbounded
+    execution. State only that one acquisition is bounded and
+    yields the retryable refusal; treat the CLI and shutdown
+    numbers as independent policy margins, not derived maxima.
+
+11. **P3: `db/chain.py` fails the deletion test.** A file holding
+    one small dataclass and two constants, placed by line count,
+    is a pass-through; and keeping both advisory keys there
+    contradicts decision 1's claim that each store owns its chain
+    declaration. Keep the type beside the opener and each concrete
+    chain beside its store.
