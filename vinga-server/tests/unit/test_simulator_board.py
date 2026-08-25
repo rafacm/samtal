@@ -579,10 +579,14 @@ def test_a_claim_is_four_requests_and_the_last_one_mints_the_token(
 
     assert endpoint.targets() == [URL, ACTIVATION_URL, URL]
     # One identity across every request of the ceremony, asserted off the
-    # recorded requests rather than off the function that makes it.
+    # recorded requests rather than off the function that makes it, and
+    # required of every one of them rather than allowed to be absent
+    # from any: the token is signed for the MAC and the client id
+    # together, so a request carrying half the identity is a request the
+    # claim cannot be held to.
     identity = board.Identity.of(board.DEFAULT_MAC)
-    assert set(endpoint.headers("Device-Id")) == {identity.mac}
-    assert set(endpoint.headers("Client-Id")) == {identity.client_id, ""}
+    assert endpoint.headers("Device-Id") == [identity.mac] * len(endpoint.requests)
+    assert endpoint.headers("Client-Id") == [identity.client_id] * len(endpoint.requests)
     # The poll is the firmware's version-1 shape: the version header and
     # an empty object, which upstream's own server reads nothing of.
     assert endpoint.headers("Activation-Version") == ["", "1", ""]
