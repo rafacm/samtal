@@ -331,8 +331,17 @@ explicitly.
    against the branch before merge, recorded in the PR body.
 
 10. **The image gains the driver and loses the directory; the
-    entrypoint stays dumb.** `psycopg[binary]` joins the `serve`
-    extra (`pyproject.toml:43-75`); the Dockerfile drops
+    entrypoint stays dumb.** Base `psycopg` joins the `serve`
+    extra (`pyproject.toml:43-75`); the binary implementation is a
+    door, not a default: the dev dependency group carries
+    `psycopg[binary]` for the zero-prerequisite loop, the image
+    installs it explicitly in the Dockerfile, and a `serve`
+    install from the wheel stays source-backed, with the system
+    prerequisite (a `libpq` at runtime, or `psycopg[binary]` by
+    choice) documented where the wheel install is. This is what
+    keeps the issue's source-wheel option real instead of having
+    every `serve` install pull `psycopg-binary`. The Dockerfile
+    drops
     `VINGA_SERVER__DATABASE__DIR` and its SQLite comment
     (`Dockerfile:109-123`) while `/data` stays for model caches;
     `docker-entrypoint.sh` gains no wait loop, because a boot
@@ -720,6 +729,10 @@ after the P1/P2 amendments. Findings condensed but faithful:
    source-backed implementation. Put base `psycopg` in `serve`,
    the binary implementation behind a development or image door,
    and document the source install's system prerequisites.
+   *Resolution*: decision 10 amended exactly so: base `psycopg` in
+   `serve`, `psycopg[binary]` in the dev group and the Dockerfile,
+   and the `libpq` prerequisite documented beside the wheel
+   install.
 
 9. **P2: the MVCC deletion and nonblocking-reader claims are
    false as written.** A repeatable-read transaction opened before
