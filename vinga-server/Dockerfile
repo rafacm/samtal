@@ -21,6 +21,12 @@
 # variants. That name lives here and in the contributor's dev group and
 # nowhere else. An operator runs this image and installs nothing.
 #
+# The `sim` extra is deliberately not here, and that is a decision rather
+# than an oversight. It carries the websocket client `vinga simulator
+# run` speaks, which is a thing a person does FROM a workstation TO a
+# deployment; an image that carried it would be a server that could
+# pretend to be a board talking to itself.
+#
 # Measured on arm64: 883 MB default against 494 MB slim. Most of the
 # difference is not piper but faster-whisper, which brings its own
 # inference stack rather than reusing the onnxruntime pysilero-vad

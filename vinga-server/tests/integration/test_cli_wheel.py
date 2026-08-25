@@ -102,11 +102,11 @@ import yaml
 
 from tests.support.config_cli import registered
 from tests.support.deployment import Live, check_in, serving
-from tests.support.tiers import SERVE_MODULES, declared, requirement_names
+from tests.support.tiers import SERVE_MODULES, SIM_MODULES, declared, requirement_names
 from vinga_server.config import cli
 from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
 from vinga_server.ota import OTA_PATH
-from vinga_server.simulator import board
+from vinga_server.simulator import board, utterance
 
 PROJECT = Path(__file__).resolve().parents[2]
 
@@ -156,11 +156,27 @@ SCRATCH: dict[str, object] = {
     "agent.yaml": {"prompt": "You are scratch."},
 }
 
-# The two commands the grammar keeps and a client install cannot answer.
+# The three commands the grammar keeps and a BARE install cannot answer.
 # Named as the expected inventory rather than discovered, because the
-# completeness assertion below is two-way: a third gated command fails
+# completeness assertion below is two-way: a fourth gated command fails
 # this lane from the side it joined.
-GATED = frozenset({("openapi",), ("ota-url",)})
+#
+# Two of them need the server half and one needs the `sim` extra, and
+# they answer two different sentences, which is why each row carries the
+# sentence it must print rather than the lane holding one constant for
+# all three.
+#
+# `simulator run` carries arguments as well, and that is not decoration:
+# a command line missing a required positional never reaches its own
+# body, so a gated row driven without one would be asserting about
+# Click's usage error instead of about the gate. The address is a port
+# nothing listens on, and nothing reaches it: the gate fires before any
+# request goes out.
+GATED: dict[tuple[str, ...], tuple[str, tuple[str, ...]]] = {
+    ("openapi",): (cli.NEEDS_THE_SERVER_HALF, ()),
+    ("ota-url",): (cli.NEEDS_THE_SERVER_HALF, ()),
+    ("simulator", "run"): (cli.NEEDS_THE_SIM_EXTRA, ("http://127.0.0.1:9/x/ABCDEFGH/",)),
+}
 
 # What this lane actually ran and got an answer from, recorded off each
 # command line rather than declared beside it, exactly as the in-process
@@ -377,7 +393,7 @@ def test_the_wheel_asks_for_exactly_the_client_tier(wheel: Path) -> None:
     default install than anything else here would notice, and one the
     declaration has and the wheel does not is a client that cannot run.
     """
-    client, _ = declared()
+    client, _, _ = declared()
 
     assert _requires_dist(wheel)[""] == client
 
@@ -387,7 +403,7 @@ def test_the_wheel_gates_exactly_the_serve_tier_behind_the_extra(wheel: Path) ->
     escaped its marker would be an unconditional requirement, which the
     case above catches; one that went missing from the extra would be an
     image build that installs a server without a server."""
-    _, serve = declared()
+    _, serve, _ = declared()
 
     assert _requires_dist(wheel)["serve"] == serve
 
@@ -422,7 +438,7 @@ def test_the_serve_half_is_absent_from_the_environment_the_wheel_made(
     metadata while its module is importable through something that
     vendored it, which is exactly what a name check alone would miss.
     """
-    _, serve = declared()
+    _, serve, _ = declared()
     assert set(SERVE_MODULES) == serve, "the import-name map has drifted from the tier"
 
     reported = _ran(
@@ -641,28 +657,101 @@ def test_the_documents_render_from_the_installed_wheel(run) -> None:
 
 
 def test_the_gated_commands_refuse_from_the_bare_install(run) -> None:
-    """They are in the grammar, so they parse; they need the server
-    half, so they refuse; and they refuse with the sentence rather than
-    with an ImportError.
+    """They are in the grammar, so they parse; they need a half the bare
+    install does not have, so they refuse; and they refuse with their own
+    sentence rather than with an ImportError.
 
     Run rather than imported, which is the whole point of naming them:
-    both reach their heavy import inside their own arm, so importing
+    all three reach their heavy import inside their own arm, so importing
     `cli` would have passed a broken one in either direction.
     """
     for words in sorted(GATED):
-        finished = run(*words)
+        sentence, arguments = GATED[words]
+        finished = run(*words, *arguments)
         assert finished.returncode == 1, (words, finished.stdout, finished.stderr)
-        assert finished.stderr.strip() == cli.NEEDS_THE_SERVER_HALF, words
+        assert finished.stderr.strip() == sentence, words
         assert finished.stdout == "", words
         assert "Traceback" not in finished.stderr, words
 
 
-def test_the_gated_pair_is_what_the_table_says_it_is() -> None:
+def test_the_gated_set_is_what_the_table_says_it_is() -> None:
     """The inventory held closed against the registration table, so a
     command that left the gated set fails from the side it left."""
-    assert GATED <= {row.words for row in cli.COMMANDS}
+    assert set(GATED) <= {row.words for row in cli.COMMANDS}
     for words in GATED:
         assert registered(list(words)) == words
+
+
+def test_the_wheel_gates_exactly_the_sim_tier_behind_its_extra(wheel: Path) -> None:
+    """The third requirement block, held both ways like the other two.
+
+    This is the half the review round named. A `sim` extra declared in
+    `pyproject.toml` and missing from the wheel's own metadata would pass
+    the tier closure lane, which syncs from the lock, because the
+    metadata a resolver actually consults is the wheel's; and an install
+    of `vinga-server[sim]` would then quietly be a bare install with a
+    command that cannot run.
+    """
+    _, _, sim = declared()
+
+    assert _requires_dist(wheel)["sim"] == sim
+
+
+def test_the_websocket_client_is_absent_from_the_bare_wheel_install(
+    installed: Path, elsewhere: Path, live: Live
+) -> None:
+    """The negative half of the same tier, checked from the environment
+    the artifact made, as a distribution and as an importable module.
+
+    The second is not the first said twice, and `websockets` is the one
+    distribution here where that matters most: it arrives transitively
+    through `uvicorn[standard]` as well as directly, so a tiering mistake
+    would show up as an importable module before it showed up as a
+    declared one.
+    """
+    _, _, sim = declared()
+    assert set(SIM_MODULES) == sim, "the import-name map has drifted from the tier"
+
+    reported = _ran(
+        installed,
+        elsewhere,
+        live,
+        "python",
+        "-c",
+        "import json,sys;from importlib.metadata import distributions;"
+        "sys.stdout.write(json.dumps(sorted("
+        "d.metadata['Name'].lower().replace('_','-') for d in distributions())))",
+    )
+    assert reported.returncode == 0, reported.stderr
+    assert sim & set(json.loads(reported.stdout)) == set()
+
+    for module in sorted(SIM_MODULES.values()):
+        finished = _ran(installed, elsewhere, live, "python", "-c", f"import {module}")
+        assert finished.returncode != 0, f"{module} is importable from the wheel install"
+
+
+def test_the_packaged_utterance_is_inside_the_built_wheel(wheel: Path) -> None:
+    """The asset, read out of the archive itself.
+
+    It needs no `force-include` because it lives inside the package
+    hatchling already carries, and an absence declared nowhere is an
+    absence nothing would notice. So the claim is made here instead, at
+    the one place that reads the built file: both names are in the
+    archive, and the asset is the bytes its manifest describes.
+    """
+    carried = {
+        name: zipfile.ZipFile(wheel).read(name)
+        for name in zipfile.ZipFile(wheel).namelist()
+        if "simulator/data/" in name
+    }
+
+    where = f"vinga_server/simulator/{utterance.DATA}"
+    assert set(carried) == {f"{where}/{utterance.ASSET}", f"{where}/{utterance.MANIFEST}"}
+
+    said = utterance.understood(
+        carried[f"{where}/{utterance.MANIFEST}"], carried[f"{where}/{utterance.ASSET}"]
+    )
+    assert said.packets == utterance.packaged().packets
 
 
 def defined_here() -> set[str]:
@@ -697,9 +786,9 @@ def test_the_lane_ran_every_command_of_the_registration_table(
         pytest.skip("only part of the lane was selected, so only part of it was driven")
 
     rows = {row.words for row in cli.COMMANDS}
-    assert GATED & DRIVEN == set(), "a gated command answered, which it must not"
+    assert set(GATED) & DRIVEN == set(), "a gated command answered, which it must not"
 
-    missing = sorted(" ".join(words) for words in rows - GATED - DRIVEN)
+    missing = sorted(" ".join(words) for words in rows - set(GATED) - DRIVEN)
     assert not missing, (
         "these commands are registered in cli.COMMANDS and no case in this lane ran "
         f"them successfully from the installed wheel: {missing}"

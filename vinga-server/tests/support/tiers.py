@@ -1,5 +1,5 @@
-"""What each dependency tier is declared to be, and what each serve
-distribution imports as.
+"""What each dependency tier is declared to be, and what each extra's
+distributions import as.
 
 Two lanes ask. The tier closure lane proves what the DECLARATION
 resolves to, by syncing an environment against the lock and comparing it
@@ -14,7 +14,15 @@ The import-name map is written out rather than derived. A
 distribution's import name is not in its requirement string, and
 guessing it by replacing hyphens is how a typo becomes a check that
 always passes; each lane holds the map to covering the declared tier
-exactly, so a dependency added to `serve` without a name here fails.
+exactly, so a dependency added to `serve` or to `sim` without a name here
+fails.
+
+This module is the one home both lanes read a tier from, which is why
+`sim` had to arrive HERE and not only as a third fixture. `declared()`
+returning two sets while `pyproject.toml` declared three would have let
+an extra missing from the wheel's own metadata pass every lane, which is
+exactly the gap the wheel's metadata check was added to close for
+`serve`.
 """
 
 import tomllib
@@ -41,6 +49,20 @@ SERVE_MODULES = {
     "uvicorn": "uvicorn",
 }
 
+# And the same map for the `sim` extra, which is one distribution.
+#
+# Its import name happens to be its distribution name, and it is still
+# written out rather than derived, for the reason above: a map that
+# computed the name would agree with itself about a typo.
+#
+# It is separate from `SERVE_MODULES` rather than merged into it because
+# the negative checks are separate questions: a client install carries
+# neither, a `[sim]` install carries this one and none of those, and a
+# lane that could not tell them apart could not say either sentence.
+SIM_MODULES = {
+    "websockets": "websockets",
+}
+
 
 def requirement_names(entries: Sequence[str]) -> set[str]:
     """The distribution names out of a list of requirement strings,
@@ -54,16 +76,24 @@ def requirement_names(entries: Sequence[str]) -> set[str]:
     return names
 
 
-def declared() -> tuple[set[str], set[str]]:
-    """The two tiers' DIRECT dependencies, read off `pyproject.toml`.
+def declared() -> tuple[set[str], set[str], set[str]]:
+    """The three tiers' DIRECT dependencies, read off `pyproject.toml`.
 
     The independent oracle both lanes keep beside whatever they compute:
-    six names and ten, written by hand in the declaration under test, so
-    a closure or a metadata block is checked against something that came
-    from somewhere else. Either alone would be a graph agreeing with
-    itself.
+    six names, ten and one, written by hand in the declaration under
+    test, so a closure or a metadata block is checked against something
+    that came from somewhere else. Either alone would be a graph agreeing
+    with itself.
+
+    Three rather than two since #248. The two `faster-whisper` and
+    `piper` extras are deliberately not among them: they are provider
+    options a deployment chooses, installed into an image that already
+    has the server half, and no lane holds an environment to either. The
+    three here are the three DOORS into this package, and each has a lane
+    that syncs it.
     """
     project = tomllib.loads((PROJECT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
     client = requirement_names(project["dependencies"])
     serve = requirement_names(project["optional-dependencies"]["serve"])
-    return client, serve
+    sim = requirement_names(project["optional-dependencies"]["sim"])
+    return client, serve, sim
