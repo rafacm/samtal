@@ -26,6 +26,8 @@ from pydantic_settings.exceptions import SettingsError
 from vinga_server.config import entities
 from vinga_server.config.models import (
     DOMAIN_KEYS,
+    PROGRAM,
+    SERVER_PROGRAM,
     Config,
     FieldProblem,
     FileConfig,
@@ -48,9 +50,31 @@ ENV_PREFIX = "VINGA_"
 # together by nothing, which is the duplication the descriptor's
 # `command` exists to end. One entry per key in DOMAIN_KEYS, which is
 # what a kind's `moved_key` and a setting's `name` are.
+#
+# In the server's own spelling, which is the one thing not read off the
+# descriptor. These sentences refuse a BOOT: what reads them is an
+# operator watching a container fail to start, and inside that container
+# `vinga-server` is what a shell answers to while the short script is
+# not installed at all. A descriptor's `command` is canonical because a
+# generated document may not vary with the invocation; a refusal is the
+# opposite case, because the invocation is exactly what its reader has.
+# The verb and the noun are the descriptor's either way, so the two
+# renderings cannot come to name different commands.
+
+
+def served(command: str) -> str:
+    """One command as a sentence composed by a server spells it.
+
+    The canonical program word swapped for the invocation an image has,
+    and nothing else touched: what follows is the grammar, and the
+    grammar is one grammar.
+    """
+    return f"{SERVER_PROGRAM}{command.removeprefix(PROGRAM)}"
+
+
 MOVED_KEY_COMMANDS: dict[str, str] = {
-    descriptor.moved_key: descriptor.command for descriptor in entities.ENTITIES
-} | {setting.name: setting.command for setting in entities.SETTINGS}
+    descriptor.moved_key: served(descriptor.command) for descriptor in entities.ENTITIES
+} | {setting.name: served(setting.command) for setting in entities.SETTINGS}
 
 # Where the reference for the moved half is, quoted in the refusal
 # because that document is what a reader needs next.

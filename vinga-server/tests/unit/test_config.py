@@ -4,7 +4,7 @@ import pytest
 
 from tests.support.configs import load_config_from_data
 from vinga_server.config import Config, ConfigError, load_file_config
-from vinga_server.config.entities import PROGRAM
+from vinga_server.config.entities import PROGRAM, SERVER_PROGRAM
 from vinga_server.config.models import DOMAIN_KEYS, NOT_A_MAC, normalize_mac
 from vinga_server.conversations.store import RETENTION_DAYS_DEFAULT
 
@@ -398,7 +398,14 @@ def test_a_domain_section_left_in_the_file_names_where_it_moved(
         load_file_config(path)
     message = str(excinfo.value)
     assert f"{key}: moved to the database" in message
-    assert f"{PROGRAM} {command}" in message
+    # The long spelling, and pinned rather than derived from whatever
+    # the loader happens to render: this refuses a BOOT, so its reader
+    # is an operator watching a container fail to start and the
+    # invocation they have is the image's. A generated document goes the
+    # other way, and the rule inverting silently is exactly what a pin
+    # of one literal sentence stops.
+    assert f"{SERVER_PROGRAM} {command}" in message
+    assert f"{PROGRAM} {command}" not in message
     assert "docs/reference/domain-config.md" in message
 
 
@@ -416,7 +423,7 @@ def test_a_moved_environment_override_names_where_it_moved(
         load_file_config()
     message = str(excinfo.value)
     assert f"{variable}: {key} moved to the database" in message
-    assert PROGRAM in message
+    assert SERVER_PROGRAM in message
 
 
 @pytest.mark.parametrize(
