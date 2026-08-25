@@ -474,3 +474,97 @@ def test_a_declined_delete_leaves_the_entry_where_it_was(
 
     assert run("agent", "show", "kids") == 0
     assert _document(capsys.readouterr().out)["prompt"] == "You are kids."
+
+
+# A terminal that will not answer
+#
+# The question is printed and the answer never arrives. Two ways: the
+# stream has gone, which is an `OSError`, and the bytes will not decode
+# under the terminal's encoding, which is a `UnicodeError` and so not an
+# `OSError` at all. The second is the one that matters most, because
+# what it retains is the bytes it could not read, off a terminal
+# somebody is typing a delete into.
+
+
+class _Failing(io.StringIO):
+    """A terminal whose read raises whatever it was built with."""
+
+    def __init__(self, raised: BaseException) -> None:
+        super().__init__("")
+        self._raised = raised
+
+    def isatty(self) -> bool:
+        return True
+
+    def readline(self, *args: object, **kwargs: object) -> str:
+        raise self._raised
+
+
+UNREADABLE_TERMINAL = [
+    ("the stream has gone", OSError(5, "Input/output error", PLANTED_NAME)),
+    (
+        "bytes the terminal will not decode",
+        UnicodeDecodeError("utf-8", PLANTED_SLOT.encode() + b"\xff", 41, 42, "invalid"),
+    ),
+    ("a value the reader refuses", ValueError(f"cannot read {PLANTED_MAC}")),
+]
+
+
+@pytest.mark.parametrize(
+    "raised",
+    [raised for _, raised in UNREADABLE_TERMINAL],
+    ids=[what for what, _ in UNREADABLE_TERMINAL],
+)
+def test_a_terminal_that_will_not_answer_deletes_nothing_and_says_so(
+    run,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    raised: BaseException,
+) -> None:
+    """One fixed sentence, exit 1, and the entry still there: a read
+    that failed is not an answer, and the safe reading of no answer is
+    the one that changes nothing.
+
+    Each failure carries a credential-shaped value of its own, and none
+    of them reaches any of the four surfaces.
+    """
+    an_agent(run)
+    capsys.readouterr()
+    monkeypatch.setattr("sys.stdin", _Failing(raised))
+
+    with caplog.at_level(logging.DEBUG):
+        assert run("agent", "delete", "kids") == 1
+
+    captured = capsys.readouterr()
+    assert captured.err == cli.CONFIRMATION + cli.CONFIRMATION_UNREADABLE + "\n"
+    assert captured.out == ""
+    assert "Traceback" not in captured.err
+    for sentinel in (PLANTED_NAME, PLANTED_SLOT, PLANTED_MAC):
+        assert sentinel not in captured.err + captured.out + _logged(caplog)
+
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    assert still_stored(run, capsys)
+
+
+@pytest.mark.parametrize(
+    "raised",
+    [raised for _, raised in UNREADABLE_TERMINAL],
+    ids=[what for what, _ in UNREADABLE_TERMINAL],
+)
+def test_the_unreadable_terminal_refusal_carries_nothing_on_its_chain(
+    monkeypatch: pytest.MonkeyPatch, raised: BaseException
+) -> None:
+    """The half no assertion about a stream can make. A decoding failure
+    holds the bytes it was given, and an operating-system error holds
+    what it was reading from; neither is behind the sentence."""
+    monkeypatch.setattr("sys.stdin", _Failing(raised))
+
+    with pytest.raises(cli.ConfigError) as caught:
+        cli._permitted_to_destroy(cli.Invocation())
+
+    assert str(caught.value) == cli.CONFIRMATION_UNREADABLE
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    for sentinel in (PLANTED_NAME, PLANTED_SLOT, PLANTED_MAC):
+        assert sentinel not in _chain(caught.value)
