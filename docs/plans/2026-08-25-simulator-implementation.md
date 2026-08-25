@@ -349,8 +349,9 @@ tiers, then the lanes, then the documents.
   missing from the wheel's own metadata would otherwise have passed
   every lane.
 - The grammar: a second row on the noun, the same argument declarer as
-  `check-in` (one URL, `--mac`, `--claim`), and the gate deepened by its
-  second caller. `_from_the_server_half` became
+  `check-in` (one URL, `--mac`, `--claim`), the firmware block reported
+  in `run`'s own admitted block the way `_reported` reports it for
+  `check-in`, and the gate deepened by its second caller. `_from_the_server_half` became
   `_from_an_installed_half(answered, missing)`, because the server half
   is somewhere you go and an extra is something you install, and a second
   copy of it would have been a second chance to get the ImportError
@@ -485,13 +486,51 @@ reason, which a tier carrying `av` would remove). Barge-in stays out
 whatever it decides. The reasons that keep the tier off the list are
 recorded in `simulator/capabilities.py` and stay there.
 
+### The rebase onto M1's fix round
+
+M1 merged with a six-finding review round these nine commits were
+written before, so they were rebased onto it rather than merged with it.
+Four conflicts, each resolved by intent:
+
+- **`capabilities.py` auto-merged and was checked rather than trusted.**
+  The fix round added a SUPPORTED row for reading the reply's firmware
+  block and re-worded the permanent unsupported row to be about fetching
+  one. Neither was on the third side, so this milestone's flip is
+  orthogonal to both, and the assertion that retires the third side
+  still holds: after the flip the table is supported and unsupported and
+  nothing else.
+- **`config/cli.py`**: the fix round rewrote `_reported`'s signature to
+  take the endpoint (activation fields now cross through
+  `Endpoint.repeated`, a redaction door) and added `_firmware`. Both
+  kept, with `run`'s own admitted block gaining the same firmware line,
+  because a verdict that reported the block for one verb and dropped it
+  for the other would be the help true of half the noun.
+- **`tests/unit/test_simulator_board.py`**: the fix round turned
+  `stopped_clock` from a list into a record with a `slept` field and
+  added the poll-budget cases; this milestone appended a `run` section
+  after the last case. Both kept, and the two stale assertion lines this
+  milestone carried at the seam were dropped for the fix round's own
+  copies of them.
+- **`cli.md` and `command-spellings.txt`** are generated, so both were
+  resolved by regenerating rather than by merging hunks: the reference
+  tail through the workflow's own procedure at each conflicting commit,
+  and the census once at the end.
+
+Nothing in `board.py`, `device_endpoint.py`, `logs.py` or
+`config/store.py` conflicted: this milestone touches none of them, and
+`conversation.py` calls `logs.quieted` through the same signature the
+RLock serialization kept.
+
 ### Verification
 
-From `vinga-server/` on the milestone head: `uv run ruff check .` clean;
-`uv run pytest tests/unit -q -n auto --dist loadfile` 3966 passed, 19
-skipped; `uv run pytest tests/integration -q` 190 passed; the openapi,
-events and cli reference drift checks byte-clean locally, with `cli.md`
-the only generated document that moved. The image and the smoke lane are
-CI's to prove, and no run has yet been made against a real ASR: every
-ASR in every lane is a mock that transcribes whatever it is handed, so
-the suite proves the wire and cannot prove intelligibility.
+From `vinga-server/` on the milestone head, after the rebase onto M1's
+fix round: `uv run ruff check .` clean; `uv run pytest tests/unit -q -n
+auto --dist loadfile` **3990 passed, 19 skipped** (3966 before the
+rebase; the 24 are the fix round's own cases arriving under this
+branch); `uv run pytest tests/integration -q` **190 passed**; the
+openapi, events and domain-config drift checks byte-clean, with `cli.md`
+the only generated document that moved and the census regenerated. The
+image and the smoke lane are CI's to prove, and no run has yet been made
+against a real ASR: every ASR in every lane is a mock that transcribes
+whatever it is handed, so the suite proves the wire and cannot prove
+intelligibility.
