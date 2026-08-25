@@ -386,7 +386,17 @@ explicitly.
     instance-level `vinga_ro` survives: the role is
     create-or-rotate (a `DO` block that creates it when missing
     and `ALTER ROLE ... PASSWORD` otherwise), the schemas are
-    `IF NOT EXISTS`, and the grants cover current tables
+    `IF NOT EXISTS` **with `AUTHORIZATION` to the server role**,
+    so the server role owns them whoever executes the file: an
+    infra administrator running it would otherwise own the
+    schemas themselves, and database `CREATE` does not grant the
+    server role `CREATE` on an existing schema, which would leave
+    Alembic unable to create its tables. The file's header and
+    the deployment docs state the executor's own requirement
+    (create roles and schemas in that database: a superuser or
+    the database owner), and the default-privileges statement
+    names the server role because the server role is the actual
+    table creator. The grants cover current tables
     (`GRANT SELECT ON ALL TABLES IN SCHEMA conversations`) as well
     as future ones (the `ALTER DEFAULT PRIVILEGES FOR ROLE
     <server role> IN SCHEMA conversations` grant), so running it
