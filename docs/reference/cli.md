@@ -180,6 +180,13 @@ vinga() { docker exec -i vinga vinga-server "$@"; }
 vinga config list
 ```
 
+**That function shadows an installed `vinga` for as long as the shell
+defining it lives**, and every command typed in it goes to the container
+rather than to the client on the PATH. It is for a shell that
+administers a deployment from inside, so a workstation using the client
+above is not where to define it; `unset -f vinga` puts the binary back
+in a shell that already has.
+
 Nothing about this door goes around the API. It is the same client
 making the same requests, running where the token already is, which is
 what makes it the answer for a deployment that deliberately does not
