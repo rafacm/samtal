@@ -424,3 +424,137 @@ def test_a_slot_that_is_not_a_credential_slot_is_refused_without_printing_it(
     written = [record for record in caplog.records if record.name.startswith("vinga_server")]
     assert all(PASTED not in str(record.__dict__) for record in written)
     assert all(SECRET not in str(record.__dict__) for record in written)
+
+
+# A stream that will not give the secret
+#
+# The three interactive reads in this grammar can each fail in ways no
+# argument of theirs decides, and the secret's two are the ones a
+# credential is being typed into. `EOFError` is what the no-echo prompt
+# raises when the stream ends under it and is not an `OSError`; a stream
+# that has gone is an `OSError`; bytes the terminal's encoding will not
+# decode leave as a `UnicodeError`, which is a `ValueError` and not an
+# `OSError` either. Each of them carries something, and a decoding
+# failure carries the worst of it: the bytes somebody just typed.
+
+FAILING_READS = [
+    ("the prompt met the end of the stream", EOFError(f"reading {PASTED}")),
+    ("the stream has gone", OSError(5, "Input/output error", PASTED)),
+    (
+        "bytes the terminal will not decode",
+        UnicodeDecodeError("utf-8", SECRET.encode() + b"\xff", 41, 42, "invalid"),
+    ),
+    ("a value the reader refuses", ValueError(f"cannot read {SECRET}")),
+]
+
+
+class _FailingTerminal(io.IOBase):
+    """A terminal whose read raises whatever it was built with."""
+
+    def __init__(self, raised: BaseException) -> None:
+        super().__init__()
+        self._raised = raised
+
+    def isatty(self) -> bool:
+        return True
+
+    def read(self, *args: object, **kwargs: object) -> str:
+        raise self._raised
+
+    def readline(self, *args: object, **kwargs: object) -> str:
+        raise self._raised
+
+
+class _FailingPipe(_FailingTerminal):
+    """The same, through a pipe, which takes the other of the two
+    reads."""
+
+    def isatty(self) -> bool:
+        return False
+
+
+@pytest.mark.parametrize(
+    ("through", "raised"),
+    [
+        (shape, raised)
+        for shape in (_FailingTerminal, _FailingPipe)
+        for _, raised in FAILING_READS
+    ],
+    ids=[
+        f"{name} {what}"
+        for name in ("at a terminal", "through a pipe")
+        for what, _ in FAILING_READS
+    ],
+)
+def test_a_secret_that_cannot_be_read_is_a_sentence_rather_than_a_traceback(
+    run,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    through: type,
+    raised: BaseException,
+) -> None:
+    """Both mechanisms, both failing, and one fixed sentence out of
+    each. Nothing is stored, nothing is quoted, and neither the value
+    the failure held nor a traceback reaches any of the four surfaces.
+    """
+    assert run(
+        "provider", "set", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n"
+    ) == 0
+    capsys.readouterr()
+    monkeypatch.setattr(sys, "stdin", through(raised))
+    monkeypatch.setattr("getpass.getpass", lambda *_a, **_k: raised_by(raised))
+
+    with caplog.at_level(logging.DEBUG):
+        assert run("provider", "secret", "set", "llm", "claude", "api_key") == 1
+
+    captured = capsys.readouterr()
+    assert captured.err == cli.SECRET_UNREADABLE + "\n"
+    assert captured.out == ""
+    assert "Traceback" not in captured.err
+    for sentinel in (SECRET, PASTED):
+        assert sentinel not in captured.err + captured.out + _logged(caplog)
+
+
+def raised_by(raised: BaseException) -> str:
+    raise raised
+
+
+@pytest.mark.parametrize(
+    "raised", [raised for _, raised in FAILING_READS], ids=[what for what, _ in FAILING_READS]
+)
+def test_the_unreadable_secret_refusal_carries_nothing_on_its_chain(
+    monkeypatch: pytest.MonkeyPatch, raised: BaseException
+) -> None:
+    """The half no assertion about a stream can make. A decoding failure
+    retains the bytes it was given, and a prompt's end-of-file retains
+    what it was reading from; neither is behind the sentence."""
+    monkeypatch.setattr(sys, "stdin", _FailingPipe(raised))
+
+    with pytest.raises(ConfigError) as caught:
+        cli._read_secret(cli.Invocation())
+
+    assert str(caught.value) == cli.SECRET_UNREADABLE
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    for sentinel in (SECRET, PASTED):
+        assert sentinel not in _chain(caught.value)
+
+
+def test_no_input_at_a_failing_terminal_never_reaches_the_read(
+    run, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The path the flag opened, held to not reaching the boundary at
+    all: what a terminal with prompting disabled answers is the empty
+    secret, and a read that never happens cannot fail."""
+    assert run(
+        "provider", "set", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n"
+    ) == 0
+    capsys.readouterr()
+    monkeypatch.setattr(sys, "stdin", _FailingTerminal(OSError(5, "gone", PASTED)))
+
+    assert run("provider", "secret", "set", "llm", "claude", "api_key", "--no-input") == 1
+
+    captured = capsys.readouterr()
+    assert captured.err == cli.SECRET_EMPTY + "\n"
+    assert PASTED not in captured.err
