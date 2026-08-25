@@ -74,7 +74,17 @@ class Canned:
         return self.answers[min(len(self.requests) - 1, len(self.answers) - 1)](request)
 
     def client(self, url: str) -> httpx.Client:
-        return httpx.Client(base_url=url, transport=httpx.MockTransport(self._handle))
+        # The bounds are the production ones, because what this seam
+        # replaces is where a request goes and not how long it may take:
+        # a client built with httpx's own defaults would make every
+        # assertion about a timeout an assertion about the library.
+        return httpx.Client(
+            base_url=url,
+            transport=httpx.MockTransport(self._handle),
+            timeout=httpx.Timeout(
+                device_endpoint.READ_TIMEOUT_S, connect=device_endpoint.CONNECT_TIMEOUT_S
+            ),
+        )
 
     def targets(self) -> list[str]:
         return [str(request.url) for request in self.requests]
@@ -161,8 +171,27 @@ def far_side(monkeypatch: pytest.MonkeyPatch) -> Callable[..., Canned]:
     return canned
 
 
+class Clock:
+    """Time as this file's cases hold it: what was slept, and a hand to
+    move it by anything else that takes time."""
+
+    def __init__(self) -> None:
+        self.slept: list[float] = []
+        self.now = 0.0
+
+    def sleeping(self, seconds: float) -> None:
+        self.slept.append(seconds)
+        self.now += seconds
+
+    def advance(self, seconds: float) -> None:
+        """What a request that took a while does to a bound, which a
+        mock transport otherwise does not: it answers instantly, so a
+        case about time spent inside one has to spend it."""
+        self.now += seconds
+
+
 @pytest.fixture
-def stopped_clock(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[float]]:
+def stopped_clock(monkeypatch: pytest.MonkeyPatch) -> Iterator[Clock]:
     """A clock the case controls, so a cadence is asserted rather than
     waited out.
 
@@ -171,16 +200,10 @@ def stopped_clock(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[float]]:
     Both names are read out of `board`, which is where they were imported
     to, so this replaces the seam and not the standard library.
     """
-    slept: list[float] = []
-    now = [0.0]
-
-    def sleeping(seconds: float) -> None:
-        slept.append(seconds)
-        now[0] += seconds
-
-    monkeypatch.setattr(board, "sleep", sleeping)
-    monkeypatch.setattr(board, "monotonic", lambda: now[0])
-    yield slept
+    clock = Clock()
+    monkeypatch.setattr(board, "sleep", clock.sleeping)
+    monkeypatch.setattr(board, "monotonic", lambda: clock.now)
+    yield clock
 
 
 # The board's identity, both halves
@@ -741,7 +764,7 @@ def test_the_poll_keeps_the_firmware_s_cadence_exactly(
 
     polls = [target for target in endpoint.targets() if target == ACTIVATION_URL]
     assert len(polls) == board.POLL_ATTEMPTS
-    assert stopped_clock == [board.POLL_INTERVAL_S] * (board.POLL_ATTEMPTS - 1)
+    assert stopped_clock.slept == [board.POLL_INTERVAL_S] * (board.POLL_ATTEMPTS - 1)
     # The claim's own notice comes first, because the claim happened.
     assert capsys.readouterr().err.splitlines()[-1] == cli.NOT_ADMITTED_YET
 
@@ -759,5 +782,77 @@ def test_a_smaller_far_side_bound_shortens_the_burst(
 
     assert run("simulator", "check-in", URL, "--claim", "sam") == 1
 
-    assert sum(stopped_clock) <= 6.0
-    assert len(stopped_clock) < board.POLL_ATTEMPTS - 1
+    assert sum(stopped_clock.slept) <= 6.0
+    assert len(stopped_clock.slept) < board.POLL_ATTEMPTS - 1
+
+
+def test_a_poll_may_not_wait_past_the_ceiling_it_is_inside(
+    run, far_side, stopped_clock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The bound applies to the request and not only to the sleeping
+    between requests.
+
+    A poll's own read bound is the doctor's thirty seconds, so a
+    ceremony a far side asked to be six seconds long could spend thirty
+    of them inside the first poll and only then find the deadline behind
+    it. The bound this asserts is the one the request was GIVEN, read
+    off the request the transport recorded, because a mock transport
+    answers instantly and would satisfy any timeout at all.
+
+    Held to going red by dropping the budget: without it every poll
+    carries the flat thirty-second read bound whatever is left of the
+    six.
+    """
+    code = bound(run)
+    endpoint = far_side(
+        answering(body=activating(code=code, timeout_ms=6000)),
+        answering(status=202, text=""),
+    )
+    capsys.readouterr()
+
+    assert run("simulator", "check-in", URL, "--claim", "sam") == 1
+
+    polls = [
+        request.extensions["timeout"]
+        for request in endpoint.requests
+        if str(request.url) == ACTIVATION_URL
+    ]
+    assert polls
+    for bounds in polls:
+        assert bounds["read"] <= 6.0
+        assert bounds["connect"] <= 6.0
+    # And the check-in before them, which no ceiling covers, kept the
+    # generous read the doctor's reason picked.
+    assert endpoint.requests[0].extensions["timeout"]["read"] == device_endpoint.READ_TIMEOUT_S
+
+
+def test_a_poll_that_spends_the_ceiling_ends_the_burst(
+    run, far_side, stopped_clock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A request that consumes the whole budget is a request the next
+    one may not be made after.
+
+    The time is spent inside the answer, which is where a slow far side
+    spends it, and the assertion is that the burst stops rather than
+    running its ten attempts on a deadline that has already passed.
+
+    This one pins the property rather than biting: the check after an
+    answer already stopped the burst here, and what did not exist before
+    the budget is a bound on the waiting inside the request itself,
+    which is the case above.
+    """
+    code = bound(run)
+
+    def slow(request: httpx.Request) -> httpx.Response:
+        stopped_clock.advance(board.ACTIVATION_CEILING_S)
+        return httpx.Response(202, text="")
+
+    endpoint = far_side(answering(body=activating(code=code)), slow)
+    capsys.readouterr()
+
+    assert run("simulator", "check-in", URL, "--claim", "sam") == 1
+
+    polls = [target for target in endpoint.targets() if target == ACTIVATION_URL]
+    assert len(polls) == 1
+    assert stopped_clock.slept == []
+    assert capsys.readouterr().err.splitlines()[-1] == cli.NOT_ADMITTED_YET

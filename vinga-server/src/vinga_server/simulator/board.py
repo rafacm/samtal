@@ -518,12 +518,22 @@ def polled(endpoint: Endpoint, identity: Identity, hint: Any) -> Poll:
     The clock is `monotonic` and `sleep`, imported into this module so a
     suite can hold both and assert the cadence exactly rather than
     waiting out half a minute of real time.
+
+    The ceiling bounds the requests as well as the waits between them.
+    Each poll is given what is left of it, because a request's own read
+    bound is thirty seconds and a ceremony allowed six would otherwise
+    spend thirty inside the first poll and discover it afterwards: a
+    bound checked only between requests is a bound on the sleeping and
+    not on the waiting.
     """
     target = endpoint.activation()
     deadline = monotonic() + activation_ceiling(hint)
     for attempt in range(POLL_ATTEMPTS):
         problem: str | None = None
         answered: httpx.Response | None = None
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            break
         try:
             answered = requested(
                 "POST",
@@ -533,6 +543,7 @@ def polled(endpoint: Endpoint, identity: Identity, hint: Any) -> Poll:
                 # What a version-1 poll sends, which upstream's own
                 # manager-api reads nothing of.
                 body={},
+                budget_s=remaining,
             )
         except ConfigError as refusal:
             problem = str(refusal)
