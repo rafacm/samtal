@@ -558,10 +558,20 @@ Seven.
   the whole of the diff.
 
 - **The tier closure costs about 45 seconds** of the integration lane,
-  which is 3m33s with it on this machine against the 3m11s the lane cost
-  before this milestone. Three environments built once per module, and
-  the largest single items are the serve install's boot and the
+  which is 3m23s with it on this machine against the 3m11s the lane
+  cost before this milestone. Three environments built once per module,
+  and the largest single items are the serve install's boot and the
   thirty-odd `--help` subprocesses that run the ungated inventory.
+
+- **`uv pip install` and `uv sync` do not install the same thing.**
+  The first re-resolves from the index; the second installs the lock.
+  On this tree `uv pip install ".[serve]"` produced `httpx2`,
+  `httpcore2` and `truststore`, none of which the lock reaches, which
+  is why the closure comparison had to move onto `uv sync --frozen`
+  before it could be exact. The laptop door really is a fresh
+  resolution (`uvx --from git+...` carries no lockfile), so what this
+  lane proves is the declared graph rather than whatever PyPI resolves
+  on the day; the plan already records that difference.
 
 ### Resolutions of what the plan left open
 
@@ -576,15 +586,93 @@ Seven.
   the tiering by construction; a second glob would be a second thing to
   keep true.
 
+### The PR review round
+
+External review of PR #296's diff (`main...b71790b2`), 2026-08-25.
+Backend: codex CLI 0.149.1, model `gpt-5.6-sol`, read-only sandbox.
+Verdict as received: not mergeable, on two P1 findings and one P2. All
+three are adopted, one commit each.
+
+1. **P1: transport refusals leaked rejected identities and mapping
+   keys.** The walk joined each mapping key into the path it reported,
+   and the CLI built the location out of the stage and the name the
+   command line carried, so a rejected value under a credential-shaped
+   key printed both. The paste that produces this refusal most often is
+   a credential typed one argument early, which made the sentence print
+   exactly the value it exists to protect.
+
+   *Resolution:* a key is never said. A mapping step is the fixed word
+   `transport.FIELD` (`<field>`) and a list step is its index, which is
+   a fact about the document's shape rather than about anything written
+   in it; an operator can still count the steps to the value.
+   `check_transportable` takes the fixed section (`providers`) rather
+   than the addressed location (`providers.<stage>.<name>`), and a case
+   holds every call site to a word with no separator in it.
+   `models.safe_location` was checked first, as the reviewer asked, and
+   is deliberately not the mechanism: it keeps the prefix a pydantic
+   model declares, and there is no model in hand in front of
+   validation, of a fragment whose kind may not be known yet.
+   `tests/unit/test_config_cli_untransportable.py` plants five
+   sentinels (stage, name, key, nested key, value) over stdout, stderr,
+   the requests the client would have sent (bodies and headers), the
+   log records whole and the exception chain; reverting the fix turns
+   six of its nine cases red.
+
+2. **P1: a bare install tracebacked from `vinga-server doctor` with no
+   URL.** The derivation imports the onboarding package, whose
+   `__init__` reaches FastAPI, outside the missing-half boundary, and
+   the tier proof ran only `doctor --help`, which never enters that
+   branch.
+
+   *Resolution:* the gate goes on the derivation and not on the
+   command, which is the half of this that matters. A workstation
+   diagnosing a deployment it does not host passes the URL: it opens a
+   socket, reads what answers and wants nothing of the server half, and
+   that is the laptop case the thin install exists for. Only deriving
+   the URL reads the onboarding key, so only that answers
+   `NEEDS_THE_SERVER_HALF`, recorded inside the handler and raised
+   outside it. Both halves are now driven for real from the bare client
+   environment, and both from the serve environment to show the gate
+   opens. Four-surface sentinels in
+   `tests/unit/test_missing_server_half.py`; the changelog entry names
+   four gated sites and the case that pins the division was rewritten
+   to say that `doctor` gates one branch inside itself rather than at
+   the dispatch.
+
+3. **P2: the tier "closure" checked a subset.** The six direct client
+   names had to be present and the ten direct serve names absent, which
+   says nothing about a transitive distribution, and that is the shape
+   a heavy dependency comes back in.
+
+   *Resolution:* the expected set is the recursive walk of `uv.lock`
+   from each tier's roots, extras and markers included, compared to the
+   installed set with `==` in both directions. Markers are evaluated
+   against the environment being installed into, read from that
+   interpreter with the standard library alone, and the walk carries
+   `(name, extra)` pairs, since `uvicorn[standard]` and a bare uvicorn
+   install different sets. The environments moved from
+   `uv pip install` to `uv sync --frozen --no-dev --no-editable`, which
+   is what makes the comparison possible at all: `uv pip install`
+   re-resolves from the index and had produced three distributions
+   (`httpx2`, `httpcore2`, `truststore`) that the lock does not reach,
+   so it was being compared to a graph it did not come from. It is also
+   what the image build and a contributor run. The six direct client
+   names stay as an independent oracle read from `pyproject.toml`, and
+   a bite case doctors the expected set in each direction to prove the
+   comparison rejects what it claims to. `packaging` becomes a declared
+   dev dependency, since the walk imports it; the lock moves two
+   dev-group lines and no version resolves differently, so the image
+   build is untouched.
+
 ### Verification
 
 From `vinga-server/`, on the rebased tree, everything green:
 
 - `uv run ruff check .`: `All checks passed!`
 - `uv run mypy`: `Success: no issues found in 4 source files`
-- `uv run pytest tests/unit -q -n auto --dist loadfile`: `3663 passed,
-  19 skipped in 43.17s`
-- `uv run pytest tests/integration -q`: `148 passed in 213.22s`
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: `3676 passed,
+  19 skipped in 44.04s`
+- `uv run pytest tests/integration -q`: `154 passed in 203.17s`
 - The six drift checks exactly as CI runs them (`domain-config.md`,
   `conversations-schema.md`, `events.md`, `api-openapi.json`, `cli.md`,
   and the recipes inside it), each regenerated under its own lane and
@@ -597,16 +685,19 @@ From `vinga-server/`, on the rebased tree, everything green:
   FastAPI, SQLAlchemy, cryptography or Alembic. Importing `main` loads
   12 and none of them either.
 - Both tiers into clean environments, which is
-  `tests/integration/test_tier_closure.py` (17 cases) and also run by
-  hand: the client install resolves to its own `site-packages`, carries
-  all 6 client distributions and none of the 10 serve ones, imports
-  `config.cli`, answers `vinga --version`, prints a help page for every
-  ungated row of `COMMANDS` as a subprocess, refuses `openapi`,
-  `ota-url` and `vinga-server conversations schema` with the fixed
-  sentence and exit 1, and still answers `events reference` and
-  `doctor`; the serve install carries both tiers, renders the
-  conversations schema, and reaches the boot rather than the
-  cannot-serve sentence.
+  `tests/integration/test_tier_closure.py` (23 cases) and also run by
+  hand: the client install resolves to its own `site-packages`, holds
+  exactly the 22 distributions the lock's client closure reaches and
+  not one more, carries all 6 direct client names and none of the 10
+  serve ones, imports `config.cli`, answers `vinga --version`, prints a
+  help page for every ungated row of `COMMANDS` as a subprocess,
+  refuses `openapi`, `ota-url`, `vinga-server conversations schema` and
+  `vinga-server doctor` with no URL with the fixed sentence and exit 1,
+  and still answers `events reference` and
+  `vinga-server doctor <url>`; the serve install holds exactly the 56
+  the serve closure reaches, renders the conversations schema, derives
+  an onboarding URL, and reaches the boot rather than the cannot-serve
+  sentence.
 - The contributor smoke: `uv sync --frozen` into an environment of the
   test's own, the whole serve tier present, and `vinga-server` reaching
   the boot.
