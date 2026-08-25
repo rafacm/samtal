@@ -318,23 +318,49 @@ plain HTTP off loopback because the API bearer token crosses every
 request. Two policies, two reasons, and neither is the other's default.
 
 That policy exists once today, as `doctor._device_url` and
-`doctor.SUPPLIED_ENDPOINT` (`doctor.py:65, 350-402`). A second copy in
-the simulator would be a duplication of exactly the surface the no-leak
-discipline governs, so **it is extracted into a new module,
-`vinga_server/device_endpoint.py`**, read by `doctor` and by the
-simulator. It owns: the parse, the scheme and host check, the userinfo
-refusal, the bound-and-printable display form, the stand-in name a
-verdict uses instead of the URL, and a small frozen `Endpoint(reached,
-shown)`.
+`doctor.SUPPLIED_ENDPOINT` (`doctor.py:65, 350-402`), and it is not the
+whole of what the doctor knows about talking to such an address: the
+request itself sits inside a boundary that quiets the request loggers,
+builds the client inside the try, refuses a redirect, catches
+construction, request and close failures, names an exception by its
+class alone and raises after the handler so nothing walks a chain back
+to the URL (`doctor._probed`, `doctor.py:404-480`). **A simulator that
+copied the address rule and then rebuilt that boundary from memory would
+be duplicating the one surface in this issue where a mistake is a leak.**
+
+So the extraction is **the address AND the request lifecycle**, into a
+new module `vinga_server/device_endpoint.py`, read by `doctor` and by
+the simulator. It owns:
+
+- **A parsed endpoint, not two strings.** The first draft's
+  `Endpoint(reached, shown)` was justified as a base for "a single
+  POST", which is wrong twice over: the activation poll POSTs
+  repeatedly to a path with `/activate` appended, and a supplied URL may
+  carry a query string, so a string type offers no safe rule for where
+  the segment goes. The type keeps the parsed parts, and composition is
+  an operation on it: `endpoint.activation()` appends the segment to the
+  PATH and carries the query and the fragment through untouched, which
+  is the same discipline `Address.endpoint(path)` uses on the API side
+  and the same reason it exists there.
+- The parse, the scheme and host check, the userinfo refusal, and the
+  bound-and-printable display form, which is what every sentence names.
+- The stand-in name a verdict uses instead of the URL.
+- **The request lifecycle**: one request, no redirect followed, the
+  logger quieting, the client built inside the boundary, the close
+  reported rather than raised, and every failure a fixed sentence naming
+  a class and never a value. The doctor's GET and the simulator's two
+  POSTs are three callers of one boundary rather than two
+  implementations of it.
+- The websocket URL rule of the paragraph below, since it is the same
+  question asked of a different address.
 
 `config/cli.Address` is deliberately NOT reused, and the reason is
 recorded so it is not rediscovered. Moving `Address` down out of
 `cli.py` is #287's territory (the CLI's types stay behind the shapes a
-generated client would emit), nothing under `vinga_server` may import
-`config.cli` except `main.py`, and the two types answer different
-questions anyway: `Address` carries a query the API client composes
-paths onto, while an `Endpoint` carries a device-facing base a single
-POST is made to.
+generated client would emit), and nothing under `vinga_server` may
+import `config.cli` except `main.py`. The two types stay separate
+because their transport policies are opposites: one refuses plain HTTP
+off loopback and the other requires it to be allowed.
 
 The extraction is proven behavior-preserving before anything new is
 added, by the existing `tests/unit/test_doctor.py` cases running
@@ -841,9 +867,14 @@ it.
   one file, carried into the wheel by a `force-include` entry beside the
   one that carries `examples/`.
 - `vinga_server/device_endpoint.py`: **new (M1).** A device-facing
-  address a person typed: the policy, the display stand-in, the fixed
-  refusals and the `Endpoint` type. Two readers, `doctor` and the
-  simulator.
+  address a person typed, and what it takes to make a request to one:
+  the parsed `Endpoint` with its `activation()` composition, the policy,
+  the display stand-in, the fixed refusals, and the request lifecycle
+  (one request, no redirect, the logger quieting, the boundary and the
+  close). Three callers, the doctor's GET and the simulator's two POSTs.
+  Deletion test: inlining it puts one address policy and one request
+  boundary in two modules, and the two would drift on exactly the
+  surface the no-leak discipline governs.
 - `vinga_server/doctor.py`: loses the policy and the stand-in, keeps its
   verdicts, imports both.
 - `vinga_server/protocol/framing.py`: gains `frames(version, data)`
@@ -894,7 +925,15 @@ it.
   device-token case is the one a review would otherwise not think to
   ask for, because nobody typed it.
 - The endpoint extraction proven behavior-preserving: every existing
-  `test_doctor.py` case green against the moved function, unchanged.
+  `test_doctor.py` case green against the moved function and the moved
+  boundary, unchanged.
+- **A supplied URL carrying both a secret path segment and a query
+  string, driven through both requests**, with the exact request target
+  asserted for each: the check-in POSTs to the path as given with the
+  query preserved, and the poll POSTs to that path plus `/activate` with
+  the query still after it and the segment still before it. Every
+  retained surface is checked for both the segment and the query, which
+  is the case a two-string type could not have been given.
 - The live lane's new family refusal, its driven row, and the wheel
   lane's driven row.
 - The import inventory widened, deliberately, with the new set written
@@ -1178,6 +1217,25 @@ between alternatives the choice is recorded with its reason.
    lifecycle, give it an activation-target operation, and test a secret
    path plus a query against both requests with exact request targets
    and every retained surface.
+
+   *Resolution* (this commit): adopted as prescribed, and the module's
+   scope grows with it. `device_endpoint.py` owns a PARSED endpoint
+   rather than two strings, with `activation()` as an operation on it
+   that appends the segment to the path and carries the query and the
+   fragment through, which is the discipline `Address.endpoint(path)`
+   already uses on the API side; and it owns the request lifecycle as
+   well as the address rule, so the doctor's GET and the simulator's two
+   POSTs are three callers of one boundary rather than two
+   implementations of it. The paragraph names what that boundary carries
+   (one request, no redirect, the logger quieting, the client built
+   inside the try, the close reported rather than raised, and a failure
+   named by class alone and raised after its handler) and says why
+   rebuilding it from memory is the one duplication in this issue where
+   a mistake is a leak. M1's test list gains the secret-path-plus-query
+   case driven through both requests with exact request targets and
+   every retained surface asserted, which is the case a two-string type
+   could not have been given. The module layout entry and its deletion
+   test are rewritten to match.
 
 6. **P2: a far-side `timeout_ms` is not a real bound.** The plan derives
    the activation wait from the response's own `activation.timeout_ms`,
