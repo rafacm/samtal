@@ -1,0 +1,63 @@
+# The database vinga stores both of its halves in, for development.
+#
+# `docker compose up -d --wait` is the whole of the local loop: the
+# server migrates on boot, so a fresh volume is a current schema with no
+# init command to forget. `--wait` matters rather than being tidiness,
+# because the server refuses a database it cannot reach and restarting
+# is the orchestrator's job rather than the entrypoint's.
+#
+# Every variable below carries the same default the server's own
+# configuration carries, so one `.env` feeds both sides of the loop: the
+# names are the `VINGA_DB_*` family the server reads, and compose maps
+# them onto the image's `POSTGRES_*` names here so that neither side
+# holds the connection facts twice.
+#
+# The defaults are a development convenience on an instance bound to
+# loopback, and nothing else. A deployment sets real values, and the
+# deployment documentation says so where it names the same variables.
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${VINGA_DB_NAME:-vinga}
+      POSTGRES_USER: ${VINGA_DB_USER:-vinga}
+      POSTGRES_PASSWORD: ${VINGA_DB_PASSWORD:-vinga}
+      # The provisioning file below reads these two through psql's
+      # `\getenv`, which reads the executing process's environment.
+      # Compose substitution alone puts nothing there, so both are
+      # passed into the container explicitly even though the first is
+      # already spelled above: `POSTGRES_USER` is the image's name for
+      # it and `\getenv` cannot see a compose variable.
+      VINGA_DB_USER: ${VINGA_DB_USER:-vinga}
+      VINGA_DB_RO_PASSWORD: ${VINGA_DB_RO_PASSWORD:-vinga_ro}
+    ports:
+      # Loopback, so an instance carrying a deployment's conversations
+      # is not reachable from the network the moment it starts. The host
+      # port is overridable for a developer who already runs a Postgres
+      # on 5432; the container port is not, because it is the image's.
+      - "127.0.0.1:${VINGA_DB_PORT:-5432}:5432"
+    volumes:
+      - vinga-postgres:/var/lib/postgresql/data
+      # Executed once, when the data directory is initialized, which is
+      # the same file an infra repository runs by hand against its own
+      # instance. It is mounted read-only: what runs here is what is
+      # committed.
+      - ./deploy/postgres-init.sql:/docker-entrypoint-initdb.d/postgres-init.sql:ro
+    healthcheck:
+      # What `--wait` waits for. `-U`/`-d` so the check asks about the
+      # database the server will use rather than about the default pair
+      # the image would otherwise assume.
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${VINGA_DB_USER:-vinga} -d ${VINGA_DB_NAME:-vinga}",
+        ]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
+
+volumes:
+  # Named rather than a bind mount: what is in it is a database, and a
+  # `docker compose down -v` is the documented reset.
+  vinga-postgres:
