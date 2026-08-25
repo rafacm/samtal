@@ -57,9 +57,17 @@ def test_the_loader_quotes_each_kinds_command_in_full(tmp_path: Path) -> None:
     `test_config.py` covers the same refusals at the level of which
     command is named; this is what says the string reaches the sentence
     neither truncated nor reworded.
+
+    In the server's spelling, because this refusal is a boot failure and
+    its reader is watching a container. What the descriptor decides is
+    the noun, the verb and everything after them; the program word is
+    the loader's, and `served` is the one place it is put on.
     """
-    commands = {descriptor.moved_key: descriptor.command for descriptor in entities.ENTITIES}
-    commands |= {setting.name: setting.command for setting in entities.SETTINGS}
+    commands = {
+        descriptor.moved_key: loader.served(descriptor.command)
+        for descriptor in entities.ENTITIES
+    }
+    commands |= {setting.name: loader.served(setting.command) for setting in entities.SETTINGS}
     assert sorted(commands) == sorted(DOMAIN_KEYS), "a moved key has no command to quote"
 
     for key, command in commands.items():
