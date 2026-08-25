@@ -30,8 +30,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.support.config_cli import SECRET, runner
 from tests.support.config_cli import chain as _chain
-from tests.support.config_cli import runner
 from tests.support.config_cli import showing as _showing
 from vinga_server.config import Config, cli, printing
 from vinga_server.config.cli import (
@@ -763,3 +763,68 @@ def test_diff_prints_the_refusal_the_api_answered(
     assert run("diff") == 1
 
     assert "no running server" in capsys.readouterr().err
+
+
+# What a body may put where a closed token belongs
+#
+# Nothing bounds it. `applies` is declared as one of three words and a
+# body is free to answer a list, an object, a number or a word this
+# client has never heard of, and each of those used to reach the same
+# line: an unhashable value used as a dictionary key raises a
+# `TypeError` out of the boundary that catches validation errors, which
+# is a traceback holding the value that caused it.
+#
+# The case that removes a field cannot catch this, which is why these
+# are separate: a body missing a kind never reaches the token at all.
+
+DIFF_TOKENS = [
+    ("a list", []),
+    ("an object", {}),
+    ("a number", 4),
+    ("nothing at all", None),
+    ("a word this client does not know", "whenever"),
+    ("a credential pasted where a token belongs", SECRET),
+]
+
+
+@pytest.mark.parametrize(
+    ("answered"), [answered for _, answered in DIFF_TOKENS], ids=[what for what, _ in DIFF_TOKENS]
+)
+def test_a_token_the_comparison_cannot_read_is_a_sentence(
+    run,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    answered: object,
+) -> None:
+    """One fixed sentence and exit 1, whatever the shape, and neither
+    the value nor a traceback on either stream."""
+    body = {**DIFF_EMPTY}
+    body["providers"] = {**DIFF_EMPTY["providers"], "applies": answered}  # type: ignore[dict-item]
+    monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: body)
+
+    assert run("diff") == 1
+
+    captured = capsys.readouterr()
+    assert captured.err == cli.UNREADABLE_READ + "\n"
+    assert captured.out == ""
+    assert "Traceback" not in captured.err
+    assert SECRET not in captured.err
+
+
+@pytest.mark.parametrize(
+    ("answered"), [answered for _, answered in DIFF_TOKENS], ids=[what for what, _ in DIFF_TOKENS]
+)
+def test_no_token_the_comparison_refuses_is_retained_on_its_chain(answered: object) -> None:
+    """The half no assertion about a stream can make: what the refusal
+    carries behind it. A validation error retains the input it rejected,
+    and a `TypeError` from a lookup retains the key it was given."""
+    body = {**DIFF_EMPTY}
+    body["providers"] = {**DIFF_EMPTY["providers"], "applies": answered}  # type: ignore[dict-item]
+
+    with pytest.raises(ConfigError) as caught:
+        cli._diff_listing(body)
+
+    assert str(caught.value) == cli.UNREADABLE_READ
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert SECRET not in _chain(caught.value)
