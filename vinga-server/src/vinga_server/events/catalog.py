@@ -1961,7 +1961,7 @@ class OnboardingKeyMismatch(Variant):
         "a request reached the onboarding path carrying %d characters shaped "
         "like a key, and not this server's; neither is repeated here. Check "
         "the URL typed into the device's captive portal against the one "
-        "vinga-server config ota-url prints"
+        "printed by vinga-server config ota-url"
     )
     ARGS: ClassVar[tuple[str, ...]] = ("attempted_length",)
 

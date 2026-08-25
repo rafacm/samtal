@@ -1341,7 +1341,7 @@ repeated.
 #### Variant 1: `vinga_server.onboarding` at WARNING
 
 ```text
-a request reached the onboarding path carrying %d characters shaped like a key, and not this server's; neither is repeated here. Check the URL typed into the device's captive portal against the one vinga-server config ota-url prints
+a request reached the onboarding path carrying %d characters shaped like a key, and not this server's; neither is repeated here. Check the URL typed into the device's captive portal against the one printed by vinga-server config ota-url
 ```
 
 | # | Argument | Nullable | Constraint | Note |
