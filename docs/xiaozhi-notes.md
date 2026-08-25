@@ -240,8 +240,12 @@ this ceremony.
   button press. The stock-firmware Touch-LCD-1.54 (2.4.0), pointed at
   the same server over USB-written NVS, ran the identical ceremony
   through the restart flow (its agent was created after boot). The one
-  firmware behavior the simulator could not have shown is the redirect
-  intolerance recorded in the captive-portal bullet above.
+  firmware behavior the sdk-based test simulator could not have shown is
+  the redirect intolerance recorded in the captive-portal bullet above;
+  `vinga simulator check-in` can, and does. It follows no redirect at
+  all, answers one of its own fixed refusals when it meets one, and its
+  own lane asserts that exactly one request is made and the target is
+  never fetched (issue #248).
 - **The OTA response cannot set the device language.** The parser reads
   exactly `activation`, `mqtt`, `websocket`, `server_time` and
   `firmware`; screen chrome, jingle and digit voices are all compiled

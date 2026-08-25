@@ -7,6 +7,38 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ## 2026-08-25
 
+### Added
+
+- **`vinga simulator check-in URL` puts a simulated board in the
+  grammar** (#248). Trying a deployment used to need hardware; the
+  protocol a board speaks is HTTP and a websocket, and this command
+  speaks the HTTP half. It performs the real OTA check-in that a board
+  makes on every boot, with the two headers the handler reads and the
+  system-info body the firmware sends, and prints what a board at that
+  address would be handed. Both halves of the board's identity are
+  derived rather than stored: `--mac` defaults to the documented
+  `02:00:00:00:00:01`, whose leading octet carries the
+  locally-administered bit, so a binding sticks across runs with nothing
+  written to disk, and a second board is `--mac 02:00:00:00:00:02`.
+  The reply is read into four states, and the fourth is the one that
+  costs an evening: a board whose MAC is not bound is answered `200 OK`
+  with an empty token and no activation section, which this reports as
+  a board that may not speak rather than as a success. `--claim AGENT`
+  binds the board through the configuration API, waits where a waiting
+  board waits, and checks in again, which is the only thing that mints a
+  token. Without the flag no API token is read and no API request is
+  made. **What it does not do is on its own help page**, in both
+  directions and rendered from the same table the tests read, so nobody
+  debugs a deployment believing this is a board: the conversation half
+  is not in this version and says so.
+- **`vinga-server doctor` and the simulator share one device-facing
+  address module** (#248). The policy that permits a plain `http://`
+  address to any host (which is what a board on a LAN is pointed at),
+  the stand-in name every verdict uses instead of the URL, and the
+  request lifecycle that holds the request loggers quiet, follows no
+  redirect and names a failure by its class alone now live in one place
+  rather than in two. Nothing changes about what `doctor` does.
+
 ### Changed
 
 - **The default install of `vinga-server` is the configuration client**
