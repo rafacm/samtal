@@ -513,18 +513,59 @@ So `simulator/board.py` reads the reply into a closed tagged result and
 the two verbs branch on it. Four states, and the fourth is the one that
 costs people an evening:
 
-| State | The reply | What it means |
-| --- | --- | --- |
-| `Activating` | `activation` present, token empty | unclaimed; the code, the message and the challenge, exactly as the screen would show them |
-| `Admitted` | token non-empty | bound; the websocket URL, the token's presence (never its value) and the protocol version |
-| `Unwelcome` | no `activation`, token empty | it checked in and it may not speak: onboarding is off, or nothing resolves this MAC and no default agent covers it |
-| `Refused` | 4xx with the endpoint's fixed sentence | the request itself was rejected |
+| State | Reached when | What it means | Exit |
+| --- | --- | --- | --- |
+| `Activating` | a valid reply whose `activation` is not None and whose token is empty | unclaimed; the code, the message and the challenge, exactly as the screen would show them | 0 |
+| `Admitted` | a valid reply whose token is a non-empty string | bound; the websocket URL, the token's presence (never its value) and the protocol version | 0 |
+| `Unwelcome` | a valid reply whose `activation` is None and whose token is empty | it checked in and it may not speak: onboarding is off, or nothing resolves this MAC and no default agent covers it | 0 |
+| `Refused` | the endpoint answered and this client will not read the answer as a reply | the fixed sentence for the category, and nothing quoted | 1 |
 
 `Unwelcome` names the trap rather than reporting a success, and its
 sentence says the two configurations that produce it, which is the
 diagnosis the notes say nothing in the reply gives. A closed set at the
 decision site is the standing lens; a boolean "did I get a token" would
 have folded the fourth state into the first.
+
+**The states are the outcomes; how a reply reaches one is a schema and a
+precedence, and both are written down.** The first draft defined the
+normal combinations and left everything else to be discovered, which is
+how a truthiness check ends up standing in for a seam.
+
+The schema is strict, in the shape `config/responses.py` is read with:
+the reply is an object; `websocket` is an object; `websocket.url` and
+`websocket.token` are strings where present; `websocket.version` is an
+integer this side knows; `activation` is either absent or an object
+whose `code`, `message` and `challenge` are strings and whose
+`timeout_ms` is read per decision 3a. Unknown fields are ignored, so a
+newer server stays readable. Anything that fails the schema is
+`Refused`, not a state.
+
+The precedence, in the order it is checked, so two readers cannot
+disagree about a contradictory reply:
+
+1. **transport and status first.** A redirect is `Refused` and is not
+   followed; so is any 3xx, 4xx or 5xx, each by its own fixed category
+   sentence, and a status is a number this side prints because it is
+   this side's reading rather than the far side's words.
+2. **the body must parse and must meet the schema**, or `Refused`.
+3. **contradiction is refused, not resolved.** An `activation` present
+   BESIDE a non-empty token is a reply no vinga-server produces, and
+   guessing which half to believe is how a client teaches itself to
+   accept a shape the server never promised. It is `Refused` with the
+   fixed sentence for it.
+4. **then, and only then, `activation is not None`** decides
+   `Activating` against the other two, written as `is not None` and not
+   as truthiness, because `activation={}` is an object that is falsy and
+   is not an absent key. That distinction is the honest-seam lens and it
+   is the one this table exists to make unwritable.
+5. **then the token**, a non-empty string, decides `Admitted` against
+   `Unwelcome`. A token that is not a string at all is a schema failure
+   at step 2 rather than an empty one here.
+
+Every outcome has one exit code, pinned in the table above and in a
+case: the three valid states are all exit 0, because a simulated board
+reporting the state it is in is a command that worked, and `Refused` is
+the grammar's one sentence and exit 1.
 
 ### 5. What the simulator is honest about not being
 
@@ -945,7 +986,17 @@ it.
 - The four check-in states, each driven against a real server in the
   state that produces it: unclaimed with onboarding on, bound, checked
   in with nothing servable and onboarding off, and the endpoint's own
-  400 for a malformed `Device-Id`.
+  400 for a malformed `Device-Id`. The exit code of each is asserted,
+  per decision 4's table.
+- **The reader's precedence, table-driven against hostile replies a real
+  server never sends**, because real-server cases cannot reach any of
+  them: `activation={}` (the case a truthiness check passes and
+  `is not None` fails), `activation` present beside a non-empty token,
+  a token that is a number, a missing `websocket` object, a `websocket`
+  that is a string, an unknown protocol version, invalid JSON, an empty
+  body, a 500, and a 307. Each names the outcome it must reach and the
+  exit code it must leave with, and the `activation={}` case is held to
+  going red if the seam is written as truthiness.
 - The capability table's four both-ways assertions (decision 5), each
   held to going red by removing one entry, by putting one on both sides,
   and by emptying the unsupported half.
@@ -1327,6 +1378,24 @@ between alternatives the choice is recorded with its reason.
    transport outcomes through fixed refusals outside the valid-response
    set, pin an exit code per outcome, and add table-driven hostile
    responses including `activation={}`.
+
+   *Resolution* (this commit): adopted as prescribed. The four outcome
+   states are kept and the table gains an exit column, three zeros and
+   one, pinned in a case: a simulated board reporting the state it is in
+   is a command that worked. Beneath it decision 4 now states the strict
+   schema, in the shape `config/responses.py` is read with and with
+   unknown fields ignored so a newer server stays readable, and a
+   five-step precedence: transport and status first with a redirect
+   refused and not followed, then the schema, then contradiction refused
+   rather than resolved (an `activation` beside a non-empty token is a
+   shape no vinga-server produces, and guessing which half to believe
+   teaches a client to accept what the server never promised), then
+   `activation is not None` written as `is not None` and not as
+   truthiness, then the token. `activation={}` is named as the case that
+   separates the two, since it is falsy and is not an absent key. M1's
+   tests gain the table-driven hostile replies, ten of them, each with
+   its outcome and its exit code, because real-server cases cannot reach
+   any of them.
 
 8. **P2: the acceptance tests cannot prove two advertised properties.**
    The M2 case claims to prove the `Protocol-Version` handshake header,
