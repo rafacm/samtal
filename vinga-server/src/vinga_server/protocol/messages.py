@@ -1,14 +1,29 @@
-"""JSON control messages of the xiaozhi websocket protocol.
+"""JSON control messages of the xiaozhi websocket protocol, both
+directions.
 
-Only the message types the server acts on are modelled. Anything else
-parses to `UnknownMessage`, so the session can log and move on, mirroring
+Only the message types either side acts on are modelled. Anything else
+parses to `UnknownMessage`, so a reader can log and move on, mirroring
 the firmware, which logs JSON it does not understand and drops it.
+
+The two halves are symmetric since #248, and the asymmetry that came
+before is worth recording because it explains the shape. The
+device-to-server half was modelled from the start; the server-to-device
+half was three `json.dumps` calls, which is fine while the only reader is
+the server, because a server never parses what it just wrote. `vinga
+simulator run` is the first thing in this repository that READS the
+server's half, and a client hand-rolling `data.get("type") == "tts"` would
+be a second encoding of the wire in the one module whose whole
+justification is that it holds none.
+
+So both halves have models, both have a parser, and the three builders
+are derived from the models rather than written beside them, which is
+what stops the models and the wire from disagreeing.
 
 Upstream reference: `docs/websocket.md` in 78/xiaozhi-esp32.
 """
 
 import json
-from typing import Literal, get_args, get_type_hints
+from typing import Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -168,23 +183,163 @@ def parse_message(text: str | bytes) -> DeviceMessage:
     raise ProtocolError(refusal)
 
 
+# What the server sends
+#
+# Frozen, because a parsed message is a record of what arrived and
+# nothing downstream has any business editing it; `extra="ignore"` like
+# their device-side siblings, so a newer server stays readable rather
+# than becoming a refusal.
+#
+# The field ORDER is part of each model. A builder below dumps the model
+# and the dump follows the declaration, so these four lines are the wire
+# layout every device in the field already reads.
+
+
+class ServerHello(BaseModel):
+    """The handshake acknowledgement. xiaozhi-sdk indexes `session_id`
+    and every `audio_params` field without defaults, so none are
+    optional, and a client that did not get a session id has nothing to
+    put in the messages it sends next."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    type: Literal["hello"] = "hello"
+    transport: str = "websocket"
+    session_id: str
+    audio_params: AudioParams = Field(default_factory=AudioParams)
+
+
+class SttMessage(BaseModel):
+    """The transcription of what the user said, which the device shows on
+    its display while the reply is being prepared."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    session_id: str = ""
+    type: Literal["stt"] = "stt"
+    text: str
+
+
+class TtsMessage(BaseModel):
+    """A TTS state change; `sentence_start` carries the text the device
+    shows on its display.
+
+    `text` is `None` for a state that has none, and the builder drops it
+    rather than sending a null: the firmware reads the field where it
+    expects a string, and a null is not one.
+    """
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    session_id: str = ""
+    type: Literal["tts"] = "tts"
+    state: Literal["start", "stop", "sentence_start"]
+    text: str | None = None
+
+
+# Which model each server-to-device type parses as, and the public
+# inventory of that half of the wire.
+#
+# The read side is closed exactly as the send side is, and both are read
+# the same way: `vinga simulator` states what it supports at (type,
+# state, mode) granularity off these models' own `Literal` members, so a
+# fourth TTS state added here appears in that help as an unclassified row
+# rather than as a silently supported one.
+#
+# The `mcp` envelope is `McpMessage` in both directions because it IS one
+# structure: a JSON-RPC envelope with a session id, carried unchanged
+# whichever way it travels. A second model of it would be the pending bug
+# the design guide names.
+SERVER_MESSAGE_TYPES: dict[str, type[BaseModel]] = {
+    "hello": ServerHello,
+    "stt": SttMessage,
+    "tts": TtsMessage,
+    "mcp": McpMessage,
+}
+
+ServerMessage = ServerHello | SttMessage | TtsMessage | McpMessage | UnknownMessage
+
+
+def parse_server_message(text: str | bytes) -> ServerMessage:
+    """Parse one text frame the server sent, with the boundary discipline
+    `parse_message` has and for the same reason.
+
+    Pydantic renders a `ValidationError` with `input_value=` in it, so a
+    server that put a credential where a `session_id` belongs would
+    otherwise put it into this sentence, and a client's sentences reach a
+    terminal and a log record alike. What comes out names the message
+    type, where it broke and which rule it broke, and nothing that
+    arrived.
+    """
+    read: list[object] = []
+    unreadable = ""
+    try:
+        read.append(json.loads(text))
+    except (ValueError, UnicodeDecodeError) as exc:
+        # By its class, not by its text: `json`'s own message quotes the
+        # document around the character it stopped at, and what a SERVER
+        # wrote is far-side bytes. Recorded here and raised below, so
+        # nothing walking a chain finds the decoder's message behind it.
+        unreadable = f"not valid JSON ({type(exc).__name__})"
+    if unreadable:
+        raise ProtocolError(unreadable)
+    data = read[0]
+    if not isinstance(data, dict):
+        raise ProtocolError("a protocol message must be a JSON object")
+
+    message_type = data.get("type")
+    if not isinstance(message_type, str) or not message_type:
+        raise ProtocolError('a protocol message must carry a string "type"')
+
+    model = SERVER_MESSAGE_TYPES.get(message_type)
+    if model is None:
+        return UnknownMessage(type=message_type, data=data)
+    try:
+        parsed = model.model_validate(data)
+    except ValidationError as exc:
+        refusal = _refusal(message_type, model, exc)
+    else:
+        # Narrowed here rather than at the return, because
+        # `model_validate` on a variable of type `type[BaseModel]` says
+        # only that a model came back.
+        assert isinstance(parsed, ServerHello | SttMessage | TtsMessage | McpMessage)
+        return parsed
+    # Raised outside the handler, for the reason `parse_message` gives:
+    # inside it the `ValidationError` becomes this one's `__context__`
+    # even under `from None`, and anything walking that chain has the
+    # rejected value back.
+    raise ProtocolError(refusal)
+
+
+# The three builders, derived from the models above
+#
+# Derived rather than written beside them, which is what stops a field
+# added to a model from being a field the wire never carries. What may
+# not change is the bytes: `tests/unit/test_protocol_messages.py`
+# transcribes all three and compares whole strings, because every device
+# in the field reads them.
+#
+# `json.dumps` over the dump rather than `model_dump_json`, and the
+# difference is exactly those bytes. Pydantic's own serializer writes
+# compact separators and emits non-ASCII raw, so it would rewrite every
+# one of these messages while changing nothing about what they mean. The
+# models are still the single home of the shape, which is the property
+# the derivation was for; the encoder is the stdlib's, which is the one
+# these messages have always been written by.
+
+
+def _built(message: BaseModel) -> str:
+    """One message as its bytes. `exclude_none` is what drops a `text`
+    nobody gave rather than sending a null in its place."""
+    return json.dumps(message.model_dump(exclude_none=True))
+
+
 def server_hello(session_id: str, audio_params: AudioParams) -> str:
-    """The handshake acknowledgement. xiaozhi-sdk indexes `session_id` and
-    every `audio_params` field without defaults, so none are optional."""
-    return json.dumps(
-        {
-            "type": "hello",
-            "transport": "websocket",
-            "session_id": session_id,
-            "audio_params": audio_params.model_dump(),
-        }
-    )
+    return _built(ServerHello(session_id=session_id, audio_params=audio_params))
 
 
 def stt_message(session_id: str, text: str) -> str:
-    """The transcription of what the user said, which the device shows
-    on its display while the reply is being prepared."""
-    return json.dumps({"session_id": session_id, "type": "stt", "text": text})
+    return _built(SttMessage(session_id=session_id, text=text))
 
 
 def tts_message(
@@ -192,36 +347,37 @@ def tts_message(
     state: Literal["start", "stop", "sentence_start"],
     text: str | None = None,
 ) -> str:
-    """A TTS state change; `sentence_start` carries the text the device
-    shows on its display."""
-    message: dict[str, object] = {"session_id": session_id, "type": "tts", "state": state}
-    if text is not None:
-        message["text"] = text
-    return json.dumps(message)
+    return _built(TtsMessage(session_id=session_id, state=state, text=text))
 
 
-# What the server can send, which this module builds and does not yet
-# model.
+# The state and mode inventory, off the models themselves
 #
-# The asymmetry is `messages.py`'s own and it is recorded rather than
-# hidden: the device-to-server half is modelled above, and the
-# server-to-device half is the three builders below plus the `mcp`
-# envelopes in `protocol/mcp.py`. That was fine while the only reader was
-# the server, which never parses what it just wrote; the simulator is the
-# first reader of the other direction, and M2 of the #248 plan gives this
-# half frozen models and a parser beside `parse_message`.
-#
-# Until then this is the inventory that half has, and the one fact in it
-# with a home already is derived rather than restated: the `tts` states
-# are read off `tts_message`'s own annotation, so a fourth state added
-# there appears here without anybody remembering to add it.
-SERVER_MESSAGE_TYPES: tuple[str, ...] = ("hello", "stt", "tts", "mcp")
+# One home for "what values does this facet of this message type
+# declare", read by both directions of the capability table. The
+# alternative is a list of states written beside the models, which is two
+# structures that must agree.
 
 
-def server_states(message_type: str) -> tuple[str, ...]:
-    """The states one server-sent message type declares, or `()` for a
-    type that has none."""
-    if message_type != "tts":
+def declared_values(model: type[BaseModel], field: str) -> tuple[str, ...]:
+    """The `Literal` members one field of one message model declares, or
+    `()` where the model has no such field or the field is not a closed
+    set.
+
+    Flattened out of the union an optional field is, so
+    `Literal[...] | None` answers the members and not the `None` beside
+    them; whether an absent value is itself a case is the caller's
+    question, and `ListenMessage.mode` is the field that makes it one.
+    """
+    if field not in model.model_fields:
         return ()
-    state = get_type_hints(tts_message)["state"]
-    return tuple(str(member) for member in get_args(state))
+    return _members(model.model_fields[field].annotation)
+
+
+def _members(annotation: object) -> tuple[str, ...]:
+    found: list[str] = []
+    for member in get_args(annotation) or ():
+        if isinstance(member, str):
+            found.append(member)
+            continue
+        found.extend(_members(member))
+    return tuple(found)
