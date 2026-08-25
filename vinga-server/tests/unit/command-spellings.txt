@@ -851,7 +851,7 @@ vinga-server/examples/tts-elevenlabs.yaml:5  respell  vinga provider set tts ele
 vinga-server/examples/tts-openai.yaml:8  respell  vinga provider set tts
 vinga-server/examples/tts-piper.yaml:3  respell  vinga provider set tts piper
 vinga-server/examples/vad-silero.yaml:5  respell  vinga provider set vad silero
-vinga-server/pyproject.toml:128  respell  config cli-reference
+vinga-server/pyproject.toml:134  respell  config cli-reference
 vinga-server/src/vinga_server/config/api.py:407  respell  vinga-server config device pending list
 vinga-server/src/vinga_server/config/api.py:426  respell  vinga-server config list
 vinga-server/src/vinga_server/config/api.py:539  respell  vinga-server config reload

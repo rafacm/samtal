@@ -101,6 +101,12 @@ vinga = "vinga_server.config.cli:main"
 dev = [
     "vinga-server[serve]",
     "httpx2>=2.9.1",
+    # PEP 508 marker evaluation, for the tier lane's closure: it walks
+    # `uv.lock` and has to decide which dependencies this platform
+    # actually takes. It arrived transitively through pytest already;
+    # direct because a test imports it, and an undeclared import is a
+    # break waiting for the day the transitive edge goes.
+    "packaging>=24",
     # Validates the committed OpenAPI document (Apache-2.0), so that
     # "the API generates a document" means one a client generator will
     # accept rather than one that happens to be JSON. Tests only: the
