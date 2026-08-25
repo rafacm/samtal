@@ -144,6 +144,17 @@ packages = ["src/vinga_server"]
 # derived from `src/`. CI renders the reference from the built wheel and
 # diffs it against the committed page, which is what says the copy
 # arrived.
+#
+# The packaged utterance needs no entry here and the absence is worth a
+# line, because it is the same requirement answered by a different fact.
+# `vinga simulator run` sends one sentence of Opus encoded at build time,
+# and a command that shipped with nothing to say would be the audio half
+# of the same failure; but that asset lives at
+# `src/vinga_server/simulator/data/`, INSIDE the package above, so
+# `packages` already carries it and a force-include of it is refused as a
+# second file at one path. What says it arrived is the lane rather than
+# the declaration: the wheel lane reads the built archive for it, and the
+# `[sim]` environment runs the command that reads it.
 [tool.hatch.build.targets.wheel.force-include]
 "examples" = "vinga_server/examples"
 
