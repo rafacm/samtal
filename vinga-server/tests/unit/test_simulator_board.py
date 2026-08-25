@@ -29,6 +29,8 @@ from vinga_server import device_endpoint
 from vinga_server.config import cli
 from vinga_server.config.loader import ConfigError
 from vinga_server.config.models import NOT_A_MAC
+from vinga_server.config.store import ALREADY_BOUND, ConfigStore
+from vinga_server.db import open_database
 from vinga_server.device_endpoint import SUPPLIED_ENDPOINT
 from vinga_server.simulator import board
 
@@ -601,6 +603,53 @@ def test_a_claim_performs_the_act_the_grammar_already_has(
     assert len(run.reached) - reached_before == 1
     monkeypatch.setattr(cli, "_act", dispatch)
     assert run("device", "show", board.DEFAULT_MAC) == 0
+
+
+def test_a_claim_the_configuration_superseded_says_the_condition_and_no_address(
+    run,
+    far_side,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The race the repository's transaction exists to lose safely, met
+    from the command that types no MAC at all.
+
+    Deterministic rather than timed: the competing binding is written
+    through a second repository on the same database, which is exactly
+    what another process is and what the pending table cannot be told
+    about, so the code survives to be claimed and the conditional write
+    is what has to refuse. The refusal is the repository's own sentence,
+    relayed by the API and printed by this command.
+
+    Held to going red by a sentence built over the MAC: this command
+    addresses the claim by six digits, so an address in the answer is one
+    the refusal resolved rather than one anybody sent.
+    """
+    code = bound(run)
+    engine = open_database(tmp_path / "db")
+    try:
+        ConfigStore(engine).bind_device(board.DEFAULT_MAC, ["sam"])
+    finally:
+        engine.dispose()
+    far_side(answering(body=activating(code=code)))
+    capsys.readouterr()
+
+    with caplog.at_level(logging.DEBUG):
+        caplog.clear()
+        assert run("simulator", "check-in", URL, "--claim", "sam") == 1
+    captured = capsys.readouterr()
+    with pytest.raises(ConfigError) as caught:
+        cli._parsed(["simulator", "check-in", URL, "--mac", "not-a-mac"], cli.DISPATCHED)  # noqa: SLF001
+    surfaces = {
+        "stdout": captured.out,
+        "stderr": captured.err,
+        "logs": logged(caplog),
+        "chain": chain(caught.value),
+    }
+
+    assert captured.err.strip() == ALREADY_BOUND
+    assert [name for name, text in surfaces.items() if board.DEFAULT_MAC in text] == []
 
 
 def test_without_the_flag_no_api_token_is_read_and_no_api_request_is_made(

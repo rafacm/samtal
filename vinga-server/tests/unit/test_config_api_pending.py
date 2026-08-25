@@ -31,7 +31,7 @@ from vinga_server.config.api import (
 )
 from vinga_server.config.loader import DatabaseBusyError
 from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
-from vinga_server.config.store import ConfigStore
+from vinga_server.config.store import ALREADY_BOUND, ALREADY_COVERED, ConfigStore
 from vinga_server.db import open_database
 from vinga_server.onboarding import CODE_TTL_S, PendingDevices
 
@@ -432,7 +432,12 @@ def test_a_claim_will_not_replace_a_binding_made_underneath_it(
     refused = _claim(client, code, "assistant")
 
     assert refused.status_code == 404
-    assert "has been bound since it started showing" in refused.json()["detail"]
+    # The whole sentence, and it names no address. This is the one write
+    # here a caller reaches without sending the MAC, so a sentence
+    # interpolating it would hand the caller the address the race
+    # resolved, in a body and in every log that keeps one.
+    assert refused.json()["detail"] == ALREADY_BOUND
+    assert MAC not in refused.text
     # The newer decision stands.
     assert client.get(f"/devices/{MAC}").json()["entity"] == {
         "agents": ["written-since-boot"]
@@ -452,8 +457,42 @@ def test_a_claim_will_not_bind_a_device_a_default_agent_now_covers(
     refused = _claim(client, code, "written-since-boot")
 
     assert refused.status_code == 404
-    assert "a default agent has been set" in refused.json()["detail"]
+    assert refused.json()["detail"] == ALREADY_COVERED
+    assert MAC not in refused.text
     assert client.get("/devices").json() == {}
+
+
+def test_a_superseded_claim_leaves_the_address_on_no_surface(
+    client: TestClient,
+    pending: PendingDevices,
+    directory: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The refusal a race produces, on every surface it reaches.
+
+    Deterministic rather than timed: the competing write is made through
+    a second repository on the same database, which is exactly what a
+    second process is, and the claim that meets it is the one this route
+    then refuses.
+
+    The MAC is the sentinel because nobody sent it. A caller addresses
+    this route by the six digits on a screen, so every spelling of the
+    address in the answer is one the refusal resolved and handed back.
+    """
+    code = _waiting(pending)
+    with _beside(directory) as store:
+        store.bind_device(MAC, ["written-since-boot"])
+
+    with caplog.at_level(logging.DEBUG):
+        caplog.clear()
+        refused = _claim(client, code, "assistant")
+
+    records = "\n".join(
+        f"{record.getMessage()}\n{record.args!r}\n{record.exc_info!r}"
+        for record in caplog.records
+    )
+    assert MAC not in refused.text
+    assert MAC not in records
 
 
 def test_binding_a_device_by_its_mac_takes_it_out_of_the_listing(
