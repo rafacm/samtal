@@ -44,8 +44,11 @@ the turn, then the artifacts, then the prose.
 
 ### The census, in numbers
 
-567 matches over 94 files, after the rename and after the rebase: 186
-`respell`, 193 `historical`, 188 `generated`. Before the rename the same tool found 525
+1003 matches over 124 files, after the rename, the rebase and the
+review round that strengthened the recognizer: 253 `respell`, 573
+`historical`, 177 `generated`. The round's own numbers and what moved
+them are in its section above; before it, the same sweep reported 567
+matches over 94 files. Before the rename the same tool found 525
 matches over 92 files (200 `respell`, 148 `historical`, 177
 `generated`). The manifest grew rather than shrank, which is the
 expected shape: the new grammar's noun words are recognized invocation
@@ -109,6 +112,51 @@ substitutions and no others, and its transcript is byte-unchanged: the
 fix round's new sentences are the transport ones, and the differential
 drives no transport failure, so nothing in it moved for a reason other
 than the rename.
+
+### The sol round on PR #295
+
+Seven findings, four P1 and three P2, all adopted as prescribed, one
+commit each. Four were bugs this milestone introduced or left open, and
+three were tests that were not testing what they said.
+
+- **The `.env` was read in front of the boundary.** A file that would
+  not open left as a traceback and one that would not decode left as
+  one holding somebody's credentials. It is read through
+  `loader.load_environment_file` now, which both entry points call:
+  `vinga-server` had the same hole in front of its own dispatch, and
+  the fix in `config/cli.py` alone would have closed it for one
+  spelling of two.
+- **A malformed token in a comparison escaped as a `TypeError`.** The
+  lookup used the answer as a dictionary key and nothing bounds what a
+  body puts where a token belongs; a list or an object there is
+  unhashable. Only a string is looked up now, and every other shape
+  meets strict validation.
+- **The confirmation's read had nothing around it.** A terminal that
+  had gone or bytes it would not decode left through `main` as a
+  traceback holding what was typed at a delete.
+- **Three kinds of prescription outlived the grammar**: `cli.md`'s
+  hand-written recovery step, a runtime refusal in `store.py`, and the
+  server README's operator vocabulary. The refusal builds its command
+  from the kind's descriptor now, so it cannot go stale again; no test
+  pinned its old wording, so nothing had to be moved deliberately.
+- **The census guard had four gaps**, two in each direction, and
+  closing them is what surfaced the sweep above: a quote was not a
+  terminator, a backtick forbade the shorthand it claimed to cover,
+  `cli.md` was classified generated whole though half of it is prose,
+  and a group reference was accepted by leading prefix so `vinga
+  provider frobnicate` passed. A fifth family joined the four: a
+  compound this grammar coined and then took away, quoted alone.
+- **Both model-derived `set` help tests were vacuous**, selecting rows
+  whose first word is `set`, of which the turn left none.
+- **Three acceptance cases the plan named were missing**: the hostile
+  `argv[0]` across its six surfaces, the `.env` sentinels, and a stage
+  sentinel in every provider-shaped confirmation case.
+
+The census numbers moved a long way with the guard, which is the
+finding rather than a side effect: it now reports 1003 matches over 124
+files (253 `respell`, 573 `historical`, 177 `generated`), against 567
+over 94 before. The `generated` count fell because `cli.md`'s prose half
+stopped counting as rendering.
 
 ### Deviations from the plan
 
@@ -210,8 +258,8 @@ Six, each with what was done and why.
 From `vinga-server/`, everything green:
 
 - `uv run ruff check .`
-- `uv run pytest tests/unit -q -n auto --dist loadfile`: 3570 passed,
-  21 skipped
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: 3623 passed,
+  19 skipped
 - `uv run pytest tests/integration -q`: 131 passed
 - `uv run mypy`: no issues in 4 source files
 - The six drift checks exactly as CI runs them (`domain-config.md`,
