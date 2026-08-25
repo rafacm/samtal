@@ -2329,31 +2329,67 @@ def _permitted_to_destroy(args: Invocation) -> None:
         raise ConfigError(DECLINED)
 
 
+# What an interactive read can fail as, and the shape every one of them
+# is made behind.
+#
+# Three reads in this grammar ask a person for something: the
+# confirmation before a destructive verb, the no-echo prompt a secret is
+# typed at, and the plain read of a piped one. Each of them can fail in
+# ways no argument of theirs decides. `EOFError` is what a prompt raises
+# when the stream ends under it, and it is not an `OSError`; a stream
+# that has gone is an `OSError`; bytes the encoding will not decode
+# leave as a `UnicodeError`, which is a `ValueError` and not an
+# `OSError` at all. An arm catching one family lets the other two out.
+#
+# What they carry is why they are caught rather than merely handled: a
+# decoding failure holds the bytes it could not read, and those bytes
+# came off a terminal somebody was typing a credential or a delete into.
+# So the sentence is built inside the handler and raised after it, and
+# nothing walking the chain finds the failure, or what it held, behind
+# the refusal.
+_INPUT_FAILURES = (EOFError, OSError, UnicodeError, ValueError)
+
+
+def _read_from(reader: Callable[[], str], problem: str) -> str:
+    """One interactive read, or this grammar's own sentence for a stream
+    that would not give one.
+
+    One shape for the three, because they differ only in the sentence:
+    what a caller cannot supply is the boundary, and three copies of it
+    would be three chances to catch two families out of three.
+    """
+    failed: str | None = None
+    try:
+        return reader()
+    except _INPUT_FAILURES:
+        failed = problem
+    raise ConfigError(failed)
+
+
 def _answered() -> str:
     """What was typed at the confirmation, or the sentence for a
     terminal that would not give it.
 
     The one read in this grammar that happens after something has
-    already been printed, and the only one whose failure would otherwise
-    leave through `main` as a traceback. Both families are caught for
-    the reason `-f`'s reader catches both: a stream that has gone is an
-    `OSError`, and bytes the encoding will not decode leave as a
-    `UnicodeError`, which is a `ValueError` and not an `OSError` at all.
-
-    Built inside the handler and raised after it, so the exception that
-    holds those bytes is not on the chain of what leaves.
+    already been printed, which is the whole of what makes its sentence
+    its own rather than the secret read's.
     """
-    problem: str | None = None
-    try:
-        return sys.stdin.readline()
-    except (OSError, UnicodeError, ValueError):
-        problem = CONFIRMATION_UNREADABLE
-    raise ConfigError(problem)
+    return _read_from(sys.stdin.readline, CONFIRMATION_UNREADABLE)
 
 
 # What an empty secret says. Named rather than written at its raise
 # site, because two paths answer with it now: a read that gave nothing,
 # and a terminal that was never read because prompting was disabled.
+# What a secret that could not be read at all says. Distinct from the
+# empty one, because they are different facts about a run: an empty
+# secret is a stream that answered with nothing, and this is a stream
+# that did not answer. Neither says what it held.
+SECRET_UNREADABLE = (
+    "the secret could not be read from this terminal, and nothing was stored. What "
+    "could not be read is not repeated here, and neither is what the system said "
+    "about it. Pipe the value in, or name the variable holding it with --from-env"
+)
+
 SECRET_EMPTY = (
     "the secret is empty; pipe it in, type it at the prompt, or name the "
     "variable holding it with --from-env"
@@ -2390,9 +2426,11 @@ def _read_secret(args: Invocation) -> str:
     if at_a_terminal and args.no_input:
         raise ConfigError(SECRET_EMPTY)
     if at_a_terminal:
-        secret = getpass.getpass("Secret (not echoed): ")
+        secret = _read_from(
+            lambda: getpass.getpass("Secret (not echoed): "), SECRET_UNREADABLE
+        )
     else:
-        secret = _stdin()
+        secret = _read_from(_stdin, SECRET_UNREADABLE)
     # The trailing newline is the shell's, not the secret's.
     secret = secret.rstrip("\r\n")
     if not secret:
