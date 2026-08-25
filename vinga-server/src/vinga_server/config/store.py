@@ -1161,7 +1161,7 @@ def _prepare(
     check = _STORAGE[descriptor.name].before_parse
     if check is not None:
         check(identity[-1])
-    data = _readable(location, fragment)
+    data = _readable(location, descriptor.moved_key, fragment)
     marks = tuple(_masked_paths(data, descriptor.secret_key))
     return _Prepared(
         descriptor=descriptor,
@@ -2261,7 +2261,7 @@ def _binding(mac: str, agents: Sequence[str]) -> dict[str, list[str]]:
     return {key: [str(agent).strip() for agent in bound] for key, bound in binding.items()}
 
 
-def _readable(location: str, fragment: object) -> dict[str, object]:
+def _readable(location: str, section: str, fragment: object) -> dict[str, object]:
     """A fragment as a mapping this repository can walk, or the refusal
     for one that is not.
 
@@ -2272,6 +2272,13 @@ def _readable(location: str, fragment: object) -> dict[str, object]:
     encoder. It runs before the unchanged-value marker below for a
     reason the marker's walk depends on: what comes back is a finite
     tree of string keys, so a walk over it terminates.
+
+    Two names for where, because they answer to different rules. The
+    shape refusal names the addressed `location`, which is what every
+    refusal about a stored entry has always named. The transportability
+    refusal names the fixed `section` instead, since it is reached with
+    an unvalidated value in hand and the address is built out of the
+    identity that value may have been typed into.
     """
     if fragment is None:
         fragment = {}
@@ -2279,7 +2286,7 @@ def _readable(location: str, fragment: object) -> dict[str, object]:
         raise ConfigError(
             f"invalid {location}: expected a mapping of keys, got {type(fragment).__name__}"
         )
-    check_transportable(location, fragment)
+    check_transportable(section, fragment)
     return dict(fragment)
 
 

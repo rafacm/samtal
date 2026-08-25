@@ -2651,16 +2651,19 @@ def _fragment_body(
 
     One body for both ways of writing one, which is the whole of what
     the inline form is: the pairs assemble the mapping the fragment
-    would have held, and everything after that is the same. Where it is
-    being written is the kind's own section of the configuration
-    document and the identity under it, which is what such a refusal
-    names.
+    would have held, and everything after that is the same.
+
+    Where it is being written is named as the kind's own section and no
+    further. The addressed form (`providers.<stage>.<name>`) used to be
+    built here, out of the stage and the name this command line carried,
+    and a refusal is exactly where those must not be said: the mistake
+    that reaches this one is a value nothing has validated, typed where
+    an identity or a credential goes.
     """
 
     def body(args: Invocation) -> object:
         fragment = _written_entity(args)
-        location = ".".join((descriptor.moved_key, *_identity(descriptor, args)))
-        check_transportable(location, fragment)
+        check_transportable(descriptor.moved_key, fragment)
         return fragment
 
     return body
