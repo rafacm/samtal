@@ -334,3 +334,234 @@ From `vinga-server/`, everything green:
 
 Not verified here, and not claimed: the image smoke lane, which needs a
 `workflow_dispatch` run, and anything on hardware. Neither is M1's.
+
+## M2: the tiers and the thin client
+
+PR TBD.
+
+### What landed
+
+- `config/transport.py`, the recursive transportability policy, read by
+  the store and by the CLI.
+- Four light names out of heavy modules: `addressed` and
+  `provider_identity` to `entities.py`, `MASK` to `models.py`,
+  `reference_value` inlined into its only caller. `secrets.py` keeps the
+  two re-exports its many server-side readers ask it for.
+- `vinga_server/serving.py`, the whole serve lifecycle, so `main.py`
+  holds dispatch and its sentences and weighs pydantic and dotenv.
+- The two gated commands, `openapi` and `ota-url`, and the one sentence
+  they share; the serve refusal in `main.py` and the sentence it
+  answers with.
+- The tiers in `pyproject.toml`: the client half as the default
+  install, `serve` as an extra, and the dev group's `vinga-server[serve]`
+  entry that keeps the contributor door one command.
+- The `serve` extra named at the image build and at the two CI wheel
+  steps, with each `uv sync` site's tier stated.
+- The three #287 structure tests
+  (`tests/unit/test_cli_import_weight.py`), the missing-half refusals
+  with their sentinels (`tests/unit/test_missing_server_half.py`), and
+  the tier closure with the contributor smoke
+  (`tests/integration/test_tier_closure.py`).
+- Decision 13's M2 prose: `cli.md`'s installation head, the server
+  README's two classified sites, and the changelog.
+
+### The dependency inventory, every entry with its tier
+
+The plan's list was the expectation and this is the finding: every one
+of the sixteen runtime dependencies is where the plan said it would be,
+and nothing was in a third category. The inventory is worth writing out
+anyway, because the reason is what a future dependency is classified
+against.
+
+| Distribution | Tier | Why |
+| --- | --- | --- |
+| `httpx` | client | the transport the grammar speaks the configuration API over |
+| `pydantic` | client | the models the grammar is derived from and validates against |
+| `pydantic-settings` | client | `models.py` imports it eagerly for the file half, and the CLI imports the models |
+| `python-dotenv` | client | both entry points read a `.env` file before anything looks at the environment |
+| `pyyaml` | client | fragments in, documents out |
+| `typer` | client | the argument layer of the grammar itself |
+| `alembic` | serve | the migrations, run on every database open |
+| `anthropic` | serve | an LLM SDK |
+| `av` | serve | the Opus codec on the device socket |
+| `cryptography` | serve | Fernet, for the stored secrets |
+| `fastapi` | serve | the application, the API and the onboarding routers |
+| `mcp` | serve | the tool clients |
+| `openai` | serve | an LLM, ASR and TTS SDK |
+| `pysilero-vad` | serve | the VAD, on every audio frame whichever ASR is configured |
+| `sqlalchemy` | serve | the repository behind the API |
+| `uvicorn[standard]` | serve | what serves it |
+| `faster-whisper`, `piper` | their own extras, unchanged | weight and licensing, which is what an optional engine is |
+
+The dev group gains one entry, `vinga-server[serve]`, and keeps the
+eight it had.
+
+### The `[serve]` sweep, site by site
+
+Every documented install and sync site, classified before it was
+touched, per decision 8.
+
+| Site | Audience | What happened |
+| --- | --- | --- |
+| `Dockerfile`, both `uv sync` steps | image build | names `--extra serve`, for both variants |
+| `.github/workflows/vinga-server.yml`, three `uv sync --frozen` | contributor | unchanged, with the tier stated in a comment: the dev group carries the extra, and a plain sync is exactly what a contributor types |
+| the workflow's wheel install | image-adjacent | installs `[serve]` explicitly, because the steps migrate a database and render the API document |
+| `AGENTS.md` Commands | contributor | **not edited**, per settled decision 3. It is a proof instead: the sync-then-run smoke runs that exact string, and a test holds the string to being the one written down |
+| `README.md` (root) | operator throughout | **not edited.** It starts a container and configures it through the shim; it never installs a Python package |
+| `vinga-server/README.md` provider table | contributor | kept, with a sentence saying whose column it is and what "core" now means |
+| `vinga-server/README.md` Development | contributor | kept, with a paragraph saying why a plain `uv sync` is still the whole of it |
+| `vinga-server/README.md` slim-refusal quote | quoted output | unchanged; it is what the server prints, and the paragraph under it already says a container's answer is a different image |
+| `vinga-server/README.md` `ota-url` `uvx` door | operator | **removed.** See the deviation below |
+| `docs/reference/cli.md` installation head | all three | rewritten around the three doors |
+| `config.deploy.example.{sh,yaml}`, `config.example.yaml` | operator | **no install or sync line in any of them**, checked rather than assumed |
+
+### Deviations from the plan
+
+Six.
+
+1. **The sweep found a site the plan did not name, and it was broken
+   rather than stale.** `vinga-server/README.md` documented
+   `uvx --from git+... vinga-server config --config ./config.yaml
+   ota-url` as the door for "a machine with neither a checkout nor an
+   installed server". Gating `ota-url` closes exactly that door. The
+   paragraph now names the two doors that remain (the container and a
+   checkout) and says why the third went, which is decision 9's own
+   reasoning: it is a server-host command by nature, since the file half
+   it reads is the one a workstation does not have. This is the plan's
+   finding-5 classification working: the site was operator-facing, so it
+   was replaced rather than re-tiered into
+   `uvx --from "git+...[serve]"`.
+
+2. **`serving.py` owns the boot, not only the serve.** The plan gives it
+   "the serve lifecycle, `DrainingServer`, the uvicorn configuration,
+   startup, shutdown, the banner and every serve-only import" and leaves
+   the boot's home unstated. It went in too, as `serving.run(config_path)
+   -> int`, because `load_boot_config` opens a database and `create_app`
+   builds a FastAPI application: a `main.py` that kept them would import
+   SQLAlchemy and FastAPI before dispatch, which is the whole thing the
+   split exists to prevent. `main.py` keeps the argument parsing, since
+   `--config` is its own option and the refusals for a mistake in it are
+   its own sentences.
+
+3. **The transportability walk became public.** The plan says
+   `transport.py` owns "`check_transportable`, `APPLY_LOCATION` and
+   their helpers". The walk is not only a helper of
+   `check_transportable`: the store asks it directly with
+   `numbers_only=True`, of a stored row rather than of a fragment. A
+   private name reached from another module is a fact with no home, so
+   it is `untransportable` rather than `_untransportable`.
+
+4. **The onboarding import-weight case inverted rather than moved.**
+   `test_the_configuration_cli_loads_no_conversation_either` asserted
+   the CLI imports `onboarding.origin` at module scope, which is what
+   #143 bought and what this milestone gives back. It now asserts the
+   CLI loads none of that package, which is the stronger claim the lazy
+   import made true, with the reason on it. The whole inventory is in
+   the new import-weight test; that case stays where the cost of
+   importing the package is measured.
+
+5. **The help strings of the two gated commands are unchanged**, so
+   `cli.md`'s generated region is byte-identical after M2. Saying "needs
+   the server half" on a help page would move an artifact the plan's
+   move list gives to M1 alone, and the fact belongs to the installation
+   rather than to the command: inside the image and from a checkout,
+   which is where those pages are read, both commands work exactly as
+   they did.
+
+6. **Three stale spellings in `cli.md`'s hand-written head were fixed
+   here.** They are M1's territory and M1 missed them, and one of them
+   is a live `vinga-server config set-secret provider -- llm claude
+   api_key` telling a reader to run a command the tree no longer has.
+   Fixed in M2 because M2 edits that head and the image publishes on
+   this merge. Why the guard did not catch them is a discovery below.
+
+### Discoveries
+
+- **The census classifies `docs/reference/cli.md` `generated`, and half
+  of it is not.** The page is written by hand above the marker and
+  generated below it, so the standing guard covers the half that cannot
+  drift and skips the half that can. That is how a `set-secret`
+  invocation survived the rename inside the very document the rename
+  regenerates. The classification is by path, so the fix is a
+  by-region one, which is M1's tool to change.
+
+- **`registered` matches a prefix and stops**, so a quoted
+  `export agent assistant` resolves to the flat `export` row and the
+  guard reports it as naming something. One other match in the tree is
+  stale for that reason and was left alone as not this milestone's:
+  `tests/unit/test_docker_entrypoint.py:128` drives
+  `("config", "show", "provider", "llm", "claude")`, which is the old
+  grammar, in a test whose subject is that the entrypoint passes argv
+  through unchanged.
+
+- **`vinga-server conversations schema` on a client-only install ends in
+  an ImportError traceback.** It is outside the plan's gated inventory,
+  which is the `vinga` grammar's own tree, and outside the wheel lane's
+  coverage for the same reason. It takes no value from the command line,
+  so nothing leaks; what it does is answer with a traceback on a path
+  where every other answer out of that entry point is a sentence. Left
+  as it is, because a third gated site is a decision the plan does not
+  make, and recorded here so it is decided rather than rediscovered.
+  `events reference` and `doctor` both run fine from that install.
+
+- **A dependency group can name its own project's extra.** `dev =
+  ["vinga-server[serve]", ...]` resolves, and it is what keeps
+  AGENTS.md's row a proof rather than an edit. `uv.lock` moves by
+  twenty-five lines and no version resolves differently: the tiering is
+  the whole of the diff.
+
+- **The tier closure costs about 45 seconds** of the integration lane,
+  which went from a measured 3m11s to 3m22s on this machine. Two
+  environments built once per module, and the largest single item is the
+  thirty-odd `--help` subprocesses that run the ungated inventory.
+
+### Resolutions of what the plan left open
+
+- **Which top-level module each serve distribution installs** is written
+  out rather than derived, because a distribution's import name is not
+  in its requirement string and guessing it by replacing hyphens is how
+  a typo becomes a check that always passes. The map is held to covering
+  the declared tier exactly, so a dependency added to `serve` without a
+  name here fails the lane.
+- **The cache globs did not change.** `uv.lock` still moves whenever a
+  tier does, so `cache-dependency-glob: "vinga-server/uv.lock"` covers
+  the tiering by construction; a second glob would be a second thing to
+  keep true.
+
+### Verification
+
+From `vinga-server/`, everything green:
+
+- `uv run ruff check .`: `All checks passed!`
+- `uv run mypy`: `Success: no issues found in 4 source files`
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: `3580 passed,
+  21 skipped in 43.15s`
+- `uv run pytest tests/integration -q`: `145 passed in 202.15s`
+- The six drift checks exactly as CI runs them (`domain-config.md`,
+  `conversations-schema.md`, `events.md`, `api-openapi.json`, `cli.md`,
+  and the recipes inside it), each regenerated under its own lane and
+  diffed: all six identical.
+- Both tiers into clean environments, which is
+  `tests/integration/test_tier_closure.py` and also run by hand: the
+  client install resolves to its own `site-packages`, carries all six
+  client distributions and none of the ten serve ones, imports
+  `config.cli`, answers `vinga --version`, prints a help page for every
+  ungated row of `COMMANDS` as a subprocess, and refuses `openapi` and
+  `ota-url` with the fixed sentence and exit 1; the serve install
+  carries both tiers and reaches the boot rather than the cannot-serve
+  sentence.
+- The contributor smoke: `uv sync --frozen` into an environment of the
+  test's own, the whole serve tier present, and `vinga-server` reaching
+  the boot.
+
+Not verified here, and not claimed:
+
+- **The image build.** `docker` is on this machine and its daemon is
+  not running, so neither variant was built or booted locally. The
+  Dockerfile changed, so the pre-merge `workflow_dispatch` run is what
+  covers it, per the standing rule.
+- **The `uvx --from git+...` invocation itself**, which needs the branch
+  to be pushed and the network. What it resolves to is the bare wheel's
+  closure, and that closure is what the client half of the tier lane
+  installs and drives.
+- Anything on hardware. None of it is M2's.
