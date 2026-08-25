@@ -1000,13 +1000,18 @@ Six.
    installed artifact can show, which is that the wheel carries them,
    and the reference render says that in one assertion.
 
-6. **The progress-line issue is not filed.** The plan's M3 entry says
-   this section files the owed TTY progress line for `apply` and
-   `reload` as its own issue. This run has no write access to the
-   tracker, so it is recorded here instead and is owed: the deliverable
-   is a progress line at a terminal for the two long waits, with a
-   determinism proof of its own (the non-terminal path byte-identical),
-   which is the reason decision 7 left it owed rather than riding M1.
+6. **The progress-line issue was filed from outside this run**, which
+   is the only part of it that deviates. The plan's M3 entry says this
+   section files the owed TTY progress line for `apply` and `reload` as
+   its own issue; the run that wrote this section has no write access to
+   the tracker, so it recorded the deliverable here and the maintainer
+   filed it as
+   [#297](https://github.com/rafacm/vinga/issues/297), carrying the
+   determinism licence the plan attaches to it: a progress line at a
+   terminal for the two unbounded waits, and the non-terminal path
+   byte-identical, which is the test surface that made decision 7 leave
+   it owed rather than ride M1. The owed item now has a home, which is
+   the whole of what the plan asked for.
 
 ### Resolutions of what the plan left open
 
