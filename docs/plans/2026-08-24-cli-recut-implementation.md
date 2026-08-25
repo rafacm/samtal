@@ -44,9 +44,10 @@ the turn, then the artifacts, then the prose.
 
 ### The census, in numbers
 
-1003 matches over 124 files, after the rename, the rebase and the
-review round that strengthened the recognizer: 253 `respell`, 573
-`historical`, 177 `generated`. The round's own numbers and what moved
+1000 matches over 124 files, after the rename, the rebase and the two
+review rounds: 247 `respell`, 576 `historical`, 177 `generated`. The
+second round moved six of them from `respell` to `historical` by
+respelling the descriptions that fed the generated documents. The round's own numbers and what moved
 them are in its section above; before it, the same sweep reported 567
 matches over 94 files. Before the rename the same tool found 525
 matches over 92 files (200 `respell`, 148 `historical`, 177
@@ -158,6 +159,48 @@ files (253 `respell`, 573 `historical`, 177 `generated`), against 567
 over 94 before. The `generated` count fell because `cli.md`'s prose half
 stopped counting as rendering.
 
+### The terra re-review on PR #295
+
+Four more, two P1 and two P2, all adopted as prescribed. Two were the
+same hole in a second place, and two were the canonical-spelling rule
+applied in the wrong direction.
+
+- **`--no-input` at a terminal still blocked.** It fell through to a
+  plain read of stdin, and a plain read of a real terminal waits for an
+  end-of-file only a person can send, so the flag that exists to remove
+  the person made the command need one. It answers the empty-secret
+  sentence immediately now, which is the value such a read would
+  eventually have yielded. The case drives a stdin that fails if it is
+  read and a prompt that fails if it is printed, because a preloaded
+  buffer cannot tell "read it" from "did not read it".
+- **Neither secret read had a boundary**, though the confirmation's had
+  just been given one. `EOFError` is what a prompt raises when the
+  stream ends underneath and is in none of the families the other arms
+  catch. The three interactive reads share one boundary now rather than
+  three copies of it, and an unreadable secret gets its own sentence,
+  because a stream that answered with nothing and a stream that did not
+  answer are different facts.
+- **Five field descriptions and two paragraphs of generated prose named
+  commands in the long spelling**, and rendered into `domain-config.md`
+  and `api-openapi.json`. The drift checks structurally cannot catch
+  this: they regenerate and diff, so a wrong program word moves the
+  committed copy and the fresh render together. The spelling guard
+  catches it instead, held to going red on exactly the text that was
+  committed. `PROGRAM` moved one module down to `models.py`, the only
+  module the descriptions, the descriptors, the renderer and the CLI all
+  reach, and `SERVER_PROGRAM` joined it.
+- **Boot refusals inherited the canonical spelling** through the
+  descriptors, so a domain section left in the YAML file told an
+  operator to run a script the image does not install. The two rules are
+  one rule read from both ends: a document may not vary with the
+  invocation because its reader has none, and a refusal names the
+  invocation because that is what its reader has. `loader.served()` is
+  the one place the program word is swapped, and one sentence is pinned
+  to the long form and to not carrying the short one.
+
+Two artifacts moved deliberately with this round, `domain-config.md`
+and `api-openapi.json`, each regenerated under its own lane.
+
 ### Deviations from the plan
 
 Six, each with what was done and why.
@@ -258,7 +301,7 @@ Six, each with what was done and why.
 From `vinga-server/`, everything green:
 
 - `uv run ruff check .`
-- `uv run pytest tests/unit -q -n auto --dist loadfile`: 3623 passed,
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: 3640 passed,
   19 skipped
 - `uv run pytest tests/integration -q`: 131 passed
 - `uv run mypy`: no issues in 4 source files
