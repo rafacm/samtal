@@ -286,6 +286,34 @@ because they are offered everywhere (M1 deviation 3 of the re-cut) and
 are inert here, since neither verb prompts and neither destroys.
 `--version` is the root's alone, as it is for every row.
 
+### 2a. The board's identity is two values, and both are derived
+
+The MAC is half of a board's identity and the plan derived only that
+half, saying `board.py` "owns the client id" and leaving what it is to
+the implementation. That is not a detail: the OTA reply signs its token
+for the MAC **and** the client id together, and `ws.py:103` verifies the
+token against both, so a client id that differed between the check-in
+and the handshake would produce a `bad_token` refusal with nothing on
+either side saying why. The re-check-in of decision 3 makes it worse,
+because the same value has to survive four requests.
+
+So the client id is derived by a stated rule, from the one value that
+already identifies this board: **a UUID version 5 over the normalized
+MAC under a fixed namespace UUID this repository owns**, so it is a pure
+function of the MAC, stable across invocations with nothing written
+anywhere, and distinct for two simulated boards. Version 5 rather than a
+random version 4 because the whole property wanted here is determinism,
+and rather than a hand-rolled hash because a UUID is what the header
+carries and `uuid.uuid5` is in the standard library.
+
+Normalized first, so `AA:BB:...` and `aa:bb:...` are one board rather
+than two, which is the same normalization `ws.signed_device_id` applies
+before it verifies. The namespace is a constant beside the rule, so the
+mapping is reproducible from the source and a reader can compute it.
+
+One value flows through all four requests of the ceremony and the
+handshake after them, and that is the property the cases assert.
+
 ### 3. Three credentials, two transport policies, one of them extracted
 
 The recorded decision keeps two credentials distinct. **There are
@@ -456,7 +484,7 @@ with the empty token from step 1 would be refused at the handshake with
 `no_token`, which is the exact confusion the notes warn about from the
 other side. The same client id across all four steps is load-bearing,
 because the token is signed for the MAC and the client id together
-(decision 10a).
+(decision 2a).
 
 ### 3a. Every wait is bounded here, and a far-side number may only shorten one
 
@@ -972,7 +1000,8 @@ it.
 - `vinga_server/simulator/__init__.py`: **new (M1).** The package doc
   and what the grammar reaches. Imports nothing that is not client tier.
 - `vinga_server/simulator/board.py`: **new (M1).** The simulated board:
-  its identity (the derived MAC, the client id), the system-info body
+  its identity (the derived MAC and the client id derived from it,
+  decision 2a), the system-info body
   and headers a check-in sends, the POST, and the closed four-state
   reading of the reply. Deletion test: inlined into `cli.py` it would
   put the OTA protocol inside the grammar module and give two verbs two
@@ -1056,8 +1085,13 @@ it.
 - The capability table's four both-ways assertions (decision 5), each
   held to going red by removing one entry, by putting one on both sides,
   and by emptying the unsupported half.
-- The MAC derivation: the default is stable across runs, carries the
-  locally-administered bit, and a given `--mac` overrides it.
+- The board's identity, both halves (decision 2a): the default MAC is
+  stable across runs and carries the locally-administered bit, a given
+  `--mac` overrides it, the client id is a pure function of the
+  normalized MAC so two spellings of one MAC give one id, two MACs give
+  two ids, and **one client id is carried by every request of the
+  ceremony and by the handshake**, asserted off the recorded requests
+  rather than off the function that makes it.
 - `--claim`: it performs the act `device pending claim` performs, sends
   no other request, and reads no API token when the flag is absent.
 - No-leak, on all four surfaces the existing sentinel cases use (stdout,
@@ -1535,6 +1569,24 @@ between alternatives the choice is recorded with its reason.
     across invocations, its distinctness between two simulated MACs, and
     its reuse across activation, re-check-in and the websocket
     handshake.
+
+    *Resolution* (this commit): new decision 2a. The client id is a UUID
+    version 5 over the normalized MAC under a fixed namespace constant
+    this repository owns: a pure function of the MAC, stable across
+    invocations with nothing written anywhere, distinct for two
+    simulated boards, and reproducible by a reader from the source.
+    Version 5 rather than version 4 because determinism is the whole
+    property wanted, and a UUID rather than a hand-rolled hash because a
+    UUID is what the header carries and `uuid.uuid5` is in the standard
+    library. Normalized first, matching `ws.signed_device_id`, so two
+    spellings of one MAC are one board. The decision states why it is not
+    a detail: the token is signed for the MAC and the client id together
+    and `ws.py:103` verifies against both, so a drifting client id
+    produces a `bad_token` refusal with nothing on either side saying
+    why, and decision 3's re-check-in makes the value survive four
+    requests. M1's test line covers both halves and asserts the single
+    id off the recorded requests rather than off the function that makes
+    it.
 
 11. **P2: the committed audio asset still has an unresolved licensing
     and wire-format fork.** The risk section leaves the source as either
