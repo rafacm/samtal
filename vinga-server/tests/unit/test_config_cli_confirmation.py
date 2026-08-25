@@ -291,19 +291,73 @@ def test_the_command_position_wins_where_both_said_something(
 # confirmation's.
 
 
-def test_no_input_reads_a_secret_from_stdin_rather_than_prompting(
-    run, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """It does not refuse. What the flag disables is prompting, and a
-    value is still reachable: this is the non-terminal path taken at a
-    terminal."""
+class _NeverRead(io.IOBase):
+    """A terminal that fails the case if anything reads it.
+
+    A preloaded `StringIO` cannot tell "read it and got a value" from
+    "did not read it", and the difference is the whole of what is being
+    checked: a real terminal has nothing in it until a person types, so
+    a read of one waits rather than answering. This one has no value to
+    hand back and says so by failing loudly, which is what a real
+    terminal does slowly.
+    """
+
+    def isatty(self) -> bool:
+        return True
+
+    def read(self, *args: object, **kwargs: object) -> str:
+        raise AssertionError("a terminal was read while prompting was disabled")
+
+    def readline(self, *args: object, **kwargs: object) -> str:
+        raise AssertionError("a terminal was read while prompting was disabled")
+
+
+def a_provider(run) -> None:
     assert run(
         "provider", "set", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n"
     ) == 0
-    capsys.readouterr()
-    monkeypatch.setattr("sys.stdin", Terminal("sk-not-a-real-credential\n"))
 
-    assert run("provider", "secret", "set", "llm", "claude", "api_key", "--no-input") == 0
+
+def test_no_input_at_a_terminal_answers_without_reading_it(
+    run, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """It does not refuse with a flag's own sentence, and it does not
+    read: a terminal nobody may type at holds nothing, so the answer is
+    the empty secret it would have yielded, arrived at without the wait.
+
+    The stdin double fails the case if it is read at all, and the
+    prompt does the same, so "it did not block" is asserted rather than
+    inferred from a value a preloaded buffer happened to hold.
+    """
+    a_provider(run)
+    capsys.readouterr()
+    monkeypatch.setattr("sys.stdin", _NeverRead())
+    monkeypatch.setattr(
+        "getpass.getpass",
+        lambda *_a, **_k: pytest.fail("a prompt was printed while prompting was disabled"),
+    )
+
+    assert run("provider", "secret", "set", "llm", "claude", "api_key", "--no-input") == 1
+
+    captured = capsys.readouterr()
+    assert captured.err == cli.SECRET_EMPTY + "\n"
+    assert captured.out == ""
+
+
+def test_no_input_through_a_pipe_reads_it_plainly(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The half the flag leaves alone. A pipe has the value in it
+    already, so nothing waits and nothing prompts, and disabling
+    prompting changes nothing about the read."""
+    a_provider(run)
+    capsys.readouterr()
+
+    assert run(
+        "provider", "secret", "set", "llm", "claude", "api_key",
+        "--no-input",
+        stdin="sk-not-a-real-credential\n",
+    ) == 0
 
     assert "wrote " in capsys.readouterr().out
 
