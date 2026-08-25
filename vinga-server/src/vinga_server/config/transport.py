@@ -36,6 +36,31 @@ from vinga_server.config.loader import ConfigError
 # against the same rule and the two must say one thing.
 APPLY_LOCATION = "document"
 
+# What a mapping key becomes in a reported path.
+#
+# The whole of finding 1 of this PR's review round is here. A path built
+# by walking a fragment and joining the keys it finds reports the keys
+# themselves, and a fragment refused by these rules is one nothing has
+# validated: its keys are bytes a caller wrote. The mistake that
+# produces this refusal most often is a credential pasted a line early,
+# where the key beside it is the operator's own word for the credential.
+#
+# So a key is never said. What is said is that a field was reached, and
+# how deep: a mapping step is this fixed word and a list step is its
+# index, which is a structural fact about the shape rather than
+# anything anybody typed. An operator counting the steps can find the
+# value; a log holding the sentence holds nothing of it.
+#
+# `models.safe_location` is the repository's other answer to this
+# question and it is deliberately NOT the one used here. It walks a
+# location against a pydantic model and keeps the prefix the model
+# declares, which is a stronger answer where a model is in hand. There
+# is none in hand here: this check runs in front of validation, of a
+# fragment whose kind may not even be known yet (the CLI applies it to
+# a whole document), and its whole job is to run before anything that
+# needs a model can.
+FIELD = "<field>"
+
 # NaN and the infinities are not JSON, whatever a YAML parser accepts.
 # The message names where the value sits and the rule, which is all
 # there is to say about it.
@@ -64,11 +89,32 @@ _NON_STRING_KEY = (
 )
 
 
-def check_transportable(location: str, fragment: object) -> None:
-    """A fragment refused if JSON cannot carry it as it is."""
+def _where(path: str) -> str:
+    """A path as a refusal names it, and the root's own name."""
+    return path or "the fragment"
+
+
+def _under(path: str, segment: str) -> str:
+    """One structural step further in. The segment is either `FIELD` or a
+    list index, and never anything read out of the value."""
+    return f"{_where(path)}.{segment}"
+
+
+def check_transportable(section: str, fragment: object) -> None:
+    """A fragment refused if JSON cannot carry it as it is.
+
+    `section` is the fixed word for the part of the configuration being
+    written, which is `APPLY_LOCATION` or a kind's `moved_key`, and it is
+    a section rather than an address on purpose. The addressed form
+    (`providers.<stage>.<name>`) is built out of the stage and the name
+    the command line carried, which is where a credential lands when it
+    is typed one argument early, and this refusal is reached with a
+    value nothing has validated in hand. A test holds every call site to
+    passing one of the fixed words.
+    """
     problem = untransportable(fragment)
     if problem is not None:
-        raise ConfigError(f"invalid {location}: {problem}")
+        raise ConfigError(f"invalid {section}: {problem}")
 
 
 def untransportable(
@@ -96,17 +142,17 @@ def untransportable(
     written at all.
     """
     if not numbers_only and id(value) in ancestors:
-        return _RECURSIVE.format(where=path or "the fragment")
+        return _RECURSIVE.format(where=_where(path))
     if isinstance(value, Mapping):
         below = ancestors | {id(value)}
         for key, nested in value.items():
             if not numbers_only and not isinstance(key, str):
-                return _NON_STRING_KEY.format(
-                    where=path or "the fragment", kind=type(key).__name__
-                )
+                return _NON_STRING_KEY.format(where=_where(path), kind=type(key).__name__)
+            # `FIELD` and not the key. A key here is bytes a caller
+            # wrote and this walk runs in front of validation.
             found = untransportable(
                 nested,
-                f"{path}.{key}" if path else str(key),
+                _under(path, FIELD),
                 below,
                 numbers_only=numbers_only,
             )
@@ -116,9 +162,11 @@ def untransportable(
     if isinstance(value, (list, tuple)):
         below = ancestors | {id(value)}
         for position, item in enumerate(value):
+            # A position is structural: it is a fact about the shape of
+            # the document rather than about anything written in it.
             found = untransportable(
                 item,
-                f"{path}.{position}" if path else str(position),
+                _under(path, str(position)),
                 below,
                 numbers_only=numbers_only,
             )
@@ -137,9 +185,7 @@ def untransportable(
     # subclass of int and neither needs naming twice.
     if value is None or isinstance(value, (str, bool, int, float)):
         return None
-    return _NOT_TRANSPORTABLE.format(
-        where=path or "the fragment", kind=type(value).__name__
-    )
+    return _NOT_TRANSPORTABLE.format(where=_where(path), kind=type(value).__name__)
 
 
-__all__ = ["APPLY_LOCATION", "check_transportable", "untransportable"]
+__all__ = ["APPLY_LOCATION", "FIELD", "check_transportable", "untransportable"]
