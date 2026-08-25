@@ -486,10 +486,13 @@ explicitly.
   `read_engine(settings)`, `write_engine`, `upgrade_to_head`, the
   advisory-lock listeners, `LOCK_TIMEOUT_MS`, and the one busy
   classifier; `database_path`, `existing_engine`, `Superseded` and
-  the filename constants delete.
-- `vinga-server/src/vinga_server/db/chain.py` (or beside the
-  opener if it stays under 40 lines): `StoreChain`, the two
-  advisory keys.
+  the filename constants delete. `StoreChain` is declared here,
+  beside the opener that takes it: invariant-preserving parameter
+  grouping, not a module of its own (a file holding one dataclass
+  fails the deletion test). Each concrete chain constant lives
+  beside its own store, with its own advisory key: the domain
+  chain in this package, the conversations chain in
+  `conversations/store.py`.
 - `vinga-server/src/vinga_server/db/schema.py`,
   `conversations/schema.py`: schema-qualified metadata; identity
   cursor columns; SQLite comments rewritten.
@@ -792,3 +795,7 @@ after the P1/P2 amendments. Findings condensed but faithful:
     contradicts decision 1's claim that each store owns its chain
     declaration. Keep the type beside the opener and each concrete
     chain beside its store.
+    *Resolution*: the module dies before it is born: `StoreChain`
+    is declared beside `open_at` in `db/__init__.py` as parameter
+    grouping, and each store declares its own chain constant with
+    its own advisory key beside its metadata and migrations.
