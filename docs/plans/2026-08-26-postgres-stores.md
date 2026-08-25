@@ -73,13 +73,25 @@ explicitly.
    files set `version_table_schema` to their own schema, so the two
    chains keep separate version tables inside one database (today
    they are separate only by being separate files,
-   `db/__init__.py:158-161`). Each baseline's first operation is
-   `CREATE SCHEMA IF NOT EXISTS`, so a database provisioned without
-   the initdb file still migrates; a database provisioned with it
-   already has the schemas, owned by the server's role, and the
-   statement is a no-op. Table metadata carries the schema
-   explicitly (`MetaData(schema=...)`), never a `search_path`
-   trick: the schema a table lives in is a fact with one home.
+   `db/__init__.py:158-161`). The schema itself is created (or
+   verified) by `upgrade_to_head`, with
+   `CREATE SCHEMA IF NOT EXISTS` executed under the chain's
+   advisory lock before Alembic runs: Alembic creates the
+   schema-qualified version table before any baseline's
+   `upgrade()` executes, so a baseline cannot be the schema's
+   creator. The server role therefore needs `CREATE` on the
+   database, which the compose superuser and any
+   database-owner-role deployment have by construction, and the
+   deployment docs state it. Both `env.py` files configure
+   `version_table_schema` and `include_schemas=True`, and so do
+   the autogen entry point and the metadata-drift tests, which
+   schema-qualified comparison requires. A database provisioned
+   without the initdb file still migrates from truly blank, and a
+   test proves exactly that (no init script, empty database, both
+   chains to head through the product opener). Table metadata
+   carries the schema explicitly (`MetaData(schema=...)`), never a
+   `search_path` trick: the schema a table lives in is a fact with
+   one home.
 
 2. **Connection settings live in the server section; the env
    spellings are the `VINGA_DB_*` names; the password is
@@ -524,6 +536,12 @@ after the P1/P2 amendments. Findings condensed but faithful:
    `upgrade_to_head` under the chain's advisory lock before
    Alembic runs; state the required privileges; prove migration
    from a truly blank database without the init script.
+   *Resolution*: decision 1 amended exactly so: `upgrade_to_head`
+   owns schema creation under the advisory lock,
+   `version_table_schema` plus `include_schemas=True` configured
+   in both environments, the autogen entry point and the drift
+   tests, the `CREATE` privilege stated for the deployment docs,
+   and the blank-database proof named in Tests.
 
 2. **P1: the shared test fixture can truncate a developer's real
    database.** Fixed database names plus defaults-only redirection
