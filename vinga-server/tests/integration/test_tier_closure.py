@@ -37,8 +37,20 @@ M3 widens that to the full registered inventory
 against a live server; what is here is the tier, and a command that
 moved between the two sets fails from whichever side it left.
 
-The environments are built once for the whole module and reused, which
-is what keeps this affordable: two `uv venv` calls and two installs.
+**The closure is computed, not enumerated.** The expected set for each
+tier is the recursive walk of `uv.lock` from that tier's roots, extras
+and markers included, and the installed set is compared to it exactly
+in both directions. A subset check would pass a transitive distribution
+nobody declared, which is the shape a heavy dependency comes back in.
+The six direct client names stay beside it as an independent oracle
+read from `pyproject.toml`, so the lock is checked against something
+that did not come from the lock.
+
+The environments are built once for the whole module and reused, and
+they are built with `uv sync --frozen` rather than `uv pip install`
+because only the first installs what the lock says: the second
+re-resolves from the index, and an environment built that way cannot be
+compared exactly to a graph it did not come from.
 """
 
 import json
@@ -51,6 +63,7 @@ from collections.abc import Iterator, Sequence
 from pathlib import Path
 
 import pytest
+from packaging.markers import Marker
 
 from tests.support.config_cli import registered
 from vinga_server.config import cli
@@ -100,12 +113,13 @@ def _requirement_names(entries: Sequence[str]) -> set[str]:
 
 @pytest.fixture(scope="module")
 def tiers() -> tuple[set[str], set[str]]:
-    """The two tiers, read off the project's own declaration.
+    """The two tiers' DIRECT dependencies, read off `pyproject.toml`.
 
-    Read rather than restated, which is what makes this a closure: a
-    dependency moved between the tiers moves both halves of the
-    assertion at once, and a dependency added to neither is a
-    dependency this lane will notice.
+    The independent oracle, kept beside the lock closure below rather
+    than derived from it. Six names and ten, written by hand in the
+    declaration under test, so a closure computed from a lock this
+    repository also wrote is checked against something that came from
+    somewhere else. Either alone would be a graph agreeing with itself.
     """
     declared = tomllib.loads((PROJECT / "pyproject.toml").read_text(encoding="utf-8"))
     client = _requirement_names(declared["project"]["dependencies"])
@@ -113,44 +127,166 @@ def tiers() -> tuple[set[str], set[str]]:
     return client, serve
 
 
-def _venv(where: Path, *extras: str) -> Path:
-    """A clean environment with this project installed into it, and the
-    path of its interpreter.
+# The closure, computed from the lock
+#
+# The whole of finding 3 of this PR's review round. The lane used to
+# check that the six direct client names were a subset of what was
+# installed and that the ten direct serve names were not among it,
+# which says nothing at all about a transitive distribution: FastAPI
+# arriving under a new name, or SQLAlchemy pulled in by something that
+# grew a dependency on it, passed both halves. So the recursive closure
+# is computed from `uv.lock`, extras and markers included, and the
+# installed set is compared to it EXACTLY, both ways.
 
-    Installed from the project directory rather than from a built wheel,
-    which is the difference between this lane and M3's: what is being
-    proven here is the declaration, and the artifact that carries it is
-    M3's subject.
+# What the environment reports about itself, in PEP 508's own names,
+# printed by the interpreter being asked about. Read from the child
+# rather than from this process, because a marker is evaluated against
+# the environment it is being installed into; stdlib only, because the
+# client tier has nothing else.
+_ENVIRONMENT_SOURCE = """
+import json, os, platform, sys
+
+print(json.dumps({
+    "implementation_name": sys.implementation.name,
+    "implementation_version": platform.python_version(),
+    "os_name": os.name,
+    "platform_machine": platform.machine(),
+    "platform_release": platform.release(),
+    "platform_system": platform.system(),
+    "platform_version": platform.version(),
+    "python_full_version": platform.python_version(),
+    "platform_python_implementation": platform.python_implementation(),
+    "python_version": ".".join(platform.python_version_tuple()[:2]),
+    "sys_platform": sys.platform,
+}))
+"""
+
+
+def _normalized(name: str) -> str:
+    """A distribution name as both sides of the comparison spell it."""
+    return name.lower().replace("_", "-")
+
+
+def _marker_environment(python: Path) -> dict[str, str]:
+    finished = subprocess.run(
+        [str(python), "-c", _ENVIRONMENT_SOURCE], check=True, capture_output=True, text=True
+    )
+    environment: dict[str, str] = json.loads(finished.stdout)
+    return environment
+
+
+@pytest.fixture(scope="module")
+def locked() -> dict[str, dict[str, object]]:
+    """Every package `uv.lock` resolves, by its normalized name."""
+    lock = tomllib.loads((PROJECT / "uv.lock").read_text(encoding="utf-8"))
+    return {_normalized(package["name"]): package for package in lock["package"]}
+
+
+def _closure(
+    packages: dict[str, dict[str, object]],
+    roots: Sequence[tuple[str, str]],
+    environment: dict[str, str],
+) -> set[str]:
+    """Every distribution reachable from these roots, transitively.
+
+    A root and a step are both `(name, extra)`, because an extra is not
+    a property of a package but of the way it was asked for:
+    `uvicorn[standard]` installs uvicorn's own dependencies AND its
+    `standard` group, and the same package reached bare elsewhere
+    installs only the first. Walking pairs rather than names is what
+    keeps a package reached both ways from losing half its edges.
+
+    A marker is evaluated against the target environment, with `extra`
+    bound to the one being resolved, so a dependency this platform does
+    not take is not expected to be installed on it.
+    """
+    seen: set[tuple[str, str]] = set()
+    reached: set[str] = set()
+    work = list(roots)
+    while work:
+        name, extra = work.pop()
+        name = _normalized(name)
+        if (name, extra) in seen:
+            continue
+        seen.add((name, extra))
+        reached.add(name)
+        package = packages.get(name)
+        if package is None:
+            continue
+        entries = list(package.get("dependencies", []))
+        if extra:
+            entries += package.get("optional-dependencies", {}).get(extra, [])
+        for entry in entries:
+            marker = entry.get("marker")
+            if marker and not Marker(marker).evaluate({**environment, "extra": extra or ""}):
+                continue
+            for wanted in entry.get("extra") or [""]:
+                work.append((entry["name"], wanted))
+    return reached
+
+
+def _tier_closure(
+    packages: dict[str, dict[str, object]], environment: dict[str, str], *extras: str
+) -> set[str]:
+    """What the lock says one tier of this project installs, the project
+    itself included."""
+    project = packages["vinga-server"]
+    roots = [
+        (entry["name"], wanted)
+        for entry in project["dependencies"]
+        for wanted in entry.get("extra") or [""]
+    ]
+    for extra in extras:
+        roots += [
+            (entry["name"], wanted)
+            for entry in project["optional-dependencies"][extra]
+            for wanted in entry.get("extra") or [""]
+        ]
+    return _closure(packages, roots, environment) | {"vinga-server"}
+
+
+def _synced(where: Path, *extras: str) -> Path:
+    """A clean environment holding exactly what the lock says this tier
+    is, and the path of its interpreter.
+
+    `uv sync --frozen` and not `uv pip install`, and the difference is
+    the reason this lane can compare anything exactly: `uv pip install`
+    re-resolves from the index, so it can install a newer release whose
+    own requirements differ from the locked ones, and an environment
+    built that way cannot be held to a graph it did not come from. It
+    is also what the image build and a contributor run, so the tier
+    being proven is the tier that ships.
+
+    `--no-dev`, because the dev group pulls the serve extra and would
+    make every tier the same tier. `--no-editable`, so the project is
+    installed rather than linked and the provenance assertion below has
+    something to be true of.
     """
     if shutil.which("uv") is None:  # pragma: no cover - uv is how this repo runs
         pytest.skip("uv is not on PATH, and it is what builds an environment here")
+    environment = dict(os.environ) | {"UV_PROJECT_ENVIRONMENT": str(where)}
+    environment.pop("VIRTUAL_ENV", None)
     subprocess.run(
-        ["uv", "venv", "--python", "3.12", str(where)],
+        ["uv", "sync", "--frozen", "--no-dev", "--no-editable", *extras],
+        cwd=PROJECT,
+        env=environment,
         check=True,
         capture_output=True,
         text=True,
     )
-    python = where / "bin" / "python"
-    target = f"{PROJECT}[{','.join(extras)}]" if extras else str(PROJECT)
-    subprocess.run(
-        ["uv", "pip", "install", "--python", str(python), target],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return python
+    return where / "bin" / "python"
 
 
 @pytest.fixture(scope="module")
 def client_env(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """The laptop door: no extras at all."""
-    return _venv(tmp_path_factory.mktemp("client") / "venv")
+    return _synced(tmp_path_factory.mktemp("client") / "venv")
 
 
 @pytest.fixture(scope="module")
 def serve_env(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """The image-build door: the same project with `[serve]`."""
-    return _venv(tmp_path_factory.mktemp("serve") / "venv", "serve")
+    return _synced(tmp_path_factory.mktemp("serve") / "venv", "--extra", "serve")
 
 
 def _installed(python: Path) -> set[str]:
@@ -206,19 +342,76 @@ def test_the_client_install_resolves_to_itself(client_env: Path) -> None:
     assert str(PROJECT / "src") not in finished.stdout
 
 
+def test_the_client_install_is_exactly_the_locked_client_closure(
+    client_env: Path, locked: dict[str, dict[str, object]]
+) -> None:
+    """The closure, compared exactly and in both directions.
+
+    Exactly is the whole point. A subset check says every name it was
+    given is present and nothing about the names it was not given, so a
+    transitive distribution nobody declared passes it, and that is the
+    shape a heavy dependency comes back in: not `fastapi` written into
+    `pyproject.toml`, but something small growing a dependency on it.
+
+    Both directions, because each is a different failure. Something
+    installed that the lock does not reach is a dependency arriving
+    from nowhere; something reached that is not installed is a closure
+    that has stopped describing this environment, and an oracle that
+    describes nothing is worse than none.
+    """
+    expected = _tier_closure(locked, _marker_environment(client_env))
+
+    assert _installed(client_env) == expected
+
+
+def test_the_serve_install_is_exactly_the_locked_serve_closure(
+    serve_env: Path, locked: dict[str, dict[str, object]]
+) -> None:
+    expected = _tier_closure(locked, _marker_environment(serve_env), "serve")
+
+    assert _installed(serve_env) == expected
+
+
+def test_a_distribution_nobody_declared_would_turn_this_lane_red(
+    client_env: Path, locked: dict[str, dict[str, object]]
+) -> None:
+    """The bite, proven rather than asserted.
+
+    A comparison is only worth what it rejects, and the one above
+    replaced a subset check that rejected almost nothing. So the
+    expected set is doctored in each direction and the comparison is
+    asked about it: one extra name and one missing name must both fail.
+    """
+    expected = _tier_closure(locked, _marker_environment(client_env))
+    installed = _installed(client_env)
+
+    assert installed != expected | {"a-transitive-distribution-nobody-declared"}
+    assert installed != expected - {"httpx"}
+    # And the undoctored comparison is the one that holds, so the two
+    # above are failing for the reason they claim.
+    assert installed == expected
+
+
 def test_the_client_install_carries_every_client_dependency(
     client_env: Path, tiers: tuple[set[str], set[str]]
 ) -> None:
+    """The independent oracle: the six names written by hand in
+    `pyproject.toml`, checked against the environment without going
+    through the lock at all."""
     client, _ = tiers
+    assert len(client) == 6, client
     assert client <= _installed(client_env)
 
 
 def test_the_client_install_carries_no_serve_distribution(
     client_env: Path, tiers: tuple[set[str], set[str]]
 ) -> None:
-    """The negative half of the closure, over the whole declared serve
-    tier rather than over three names somebody remembered."""
+    """And the ten, by name. Implied by the exact comparison above and
+    kept anyway: this is the sentence the milestone claims, and a
+    reader of a failure should not have to diff two closures to see
+    that FastAPI came back."""
     _, serve = tiers
+    assert len(serve) == 10, serve
     assert serve & _installed(client_env) == set()
 
 
