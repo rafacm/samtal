@@ -959,6 +959,17 @@ def is_secret_option(name: str) -> bool:
     return secret_option_fragment(name) is not None
 
 
+# What a value stored under such a name renders as, wherever a read
+# shows one. Beside the predicate that decides which names those are,
+# because the two are one rule: what is masked and what the mask looks
+# like are read by the display, by the API's own examples, and by the
+# write path that reads a resubmitted mask as keep-what-is-stored.
+#
+# Fixed rather than derived from the value: a mask whose length tracks
+# the secret's is a length oracle.
+MASK = "********"
+
+
 def url_credential(value: object) -> str | None:
     """Which credential a URL-shaped value carries, or None.
 

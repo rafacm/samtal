@@ -388,18 +388,6 @@ def device_body(agents: Sequence[str]) -> dict[str, object]:
     return {"agents": list(agents)}
 
 
-def reference_value(body: Mapping[str, object], key: str) -> object:
-    """What an entity writes under one of its reference-carrying keys,
-    addressed the way a stored secret addresses it: a dotted key reaches
-    into an MCP server's env or headers, a bare one is a provider's own
-    key. Masked already, because the body it reads is."""
-    group, dotted, name = key.partition(".")
-    if not dotted:
-        return body.get(key)
-    nested = body.get(group)
-    return nested.get(name) if isinstance(nested, Mapping) else None
-
-
 def _body(kind: str, entry: object) -> dict[str, object]:
     """One entry as its kind is shown: the one builder above, given the
     kind's descriptor.
@@ -470,5 +458,4 @@ __all__ = [
     "provider_record",
     "providers",
     "recorded_option",
-    "reference_value",
 ]

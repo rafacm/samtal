@@ -46,15 +46,19 @@ from typing import Literal
 
 from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 
+from vinga_server.config.entities import provider_identity
 from vinga_server.config.loader import ConfigError
-from vinga_server.config.models import resolve_env_references
+from vinga_server.config.models import MASK, resolve_env_references
+
+# `MASK` and `provider_identity` are re-exported rather than defined
+# here. Both are facts about how an entity is named and displayed rather
+# than about how a value is encrypted, and their definitions sit where
+# the CLI can reach them without a key: the mask beside the predicate
+# that decides which names are masked, the identity beside the
+# addressing it flattens. The names stay in this module's vocabulary
+# because its many server-side readers already ask it for them.
 
 MASTER_KEY_ENV = "VINGA_MASTER_KEY"
-
-# What an encrypted value renders as in `config show` and `config list`.
-# Fixed rather than derived from the value: a mask whose length tracks
-# the secret's is a length oracle.
-MASK = "********"
 
 # The single key of the stored envelope object. Short, and distinct
 # from anything a model field is called, so a stored envelope is
@@ -67,19 +71,6 @@ ENVELOPE_KEY = "enc"
 _PAYLOAD_VERSION = 1
 
 EntityKind = Literal["provider", "mcp_server"]
-
-
-def provider_identity(stage: str, name: str) -> str:
-    """A provider's identity: its stage and its name together, since two
-    stages may hold the same name.
-
-    One home for the string, because two callers have to agree about it:
-    the location a stored secret is written under, below, and anything
-    asking this store what it holds for that provider. A second spelling
-    would ask about an entity nothing has ever written to, and the empty
-    answer that comes back looks exactly like nothing stored.
-    """
-    return f"{stage}.{name}"
 
 
 @dataclass(frozen=True)
@@ -515,6 +506,7 @@ def resolve_mcp_values(
 
 __all__ = [
     "MASK",
+    "provider_identity",
     "MASTER_KEY_ENV",
     "ProviderSecrets",
     "SecretLocation",

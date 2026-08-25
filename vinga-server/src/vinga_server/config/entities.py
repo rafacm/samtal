@@ -617,6 +617,55 @@ def setting(name: str) -> Setting:
     return _SETTINGS_BY_NAME[name]
 
 
+# How an entity is addressed
+#
+# Both directions of one fact, and they live here because this module is
+# where the addressing itself is declared: a kind's `addressing` tuple
+# says which parameters name one of its entries, and these two are that
+# tuple read forwards and backwards. Everything that has to agree about
+# an address (the store, the API, the display, the CLI's export) reaches
+# one of them rather than spelling a join of its own.
+#
+# Here rather than beside the secrets, which is where `provider_identity`
+# used to sit on the strength of its many readers. That is a reason to
+# re-export it, which `secrets.py` does, and not a reason to leave the
+# definition inside a module that imports cryptography: the CLI is one of
+# the readers and it holds no key.
+
+
+def provider_identity(stage: str, name: str) -> str:
+    """A provider's identity: its stage and its name together, since two
+    stages may hold the same name.
+
+    One home for the string, because two callers have to agree about it:
+    the location a stored secret is written under, and anything asking
+    the store what it holds for that provider. A second spelling would
+    ask about an entity nothing has ever written to, and the empty
+    answer that comes back looks exactly like nothing stored.
+    """
+    return f"{stage}.{name}"
+
+
+def addressed(descriptor: EntityDescriptor, identity: str) -> tuple[str, ...]:
+    """One entry's identity back as the parameters that address it.
+
+    The inverse of the dotted join every surface names an entry by, and
+    one home for it because three of them ask: an applied document,
+    which names an entry by that join; a stored secret's location, whose
+    identity is the same join; and the CLI's export, which renders a
+    location back into the `secret set` command that fills it.
+
+    Split at the first separator only, and only as many times as the
+    kind has parameters, which is what keeps a name holding a dot still
+    one name: `providers.llm.claude.v2` is the `claude.v2` of the `llm`
+    stage, and nothing about a name forbids the dot. A kind addressed by
+    nothing is the singleton, whose identity is the empty one.
+    """
+    if not descriptor.addressing:
+        return ()
+    return tuple(identity.split(".", len(descriptor.addressing) - 1))
+
+
 __all__ = [
     "SERVER_PROGRAM",
     "API_OPTIONS_NOTE",
@@ -641,6 +690,8 @@ __all__ = [
     "EntityDescriptor",
     "NestedShape",
     "Setting",
+    "addressed",
     "descriptor",
+    "provider_identity",
     "setting",
 ]
