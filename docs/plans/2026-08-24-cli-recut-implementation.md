@@ -337,7 +337,7 @@ Not verified here, and not claimed: the image smoke lane, which needs a
 
 ## M2: the tiers and the thin client
 
-PR TBD.
+PR #296.
 
 ### What landed
 
