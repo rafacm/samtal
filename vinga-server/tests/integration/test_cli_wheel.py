@@ -565,13 +565,14 @@ def test_every_destructive_verb_runs_without_a_prompt(run) -> None:
         finished = run(*argv, stdin=stdin)
         assert answered(finished, *argv).startswith("wrote "), argv
         assert "?" not in finished.stderr, f"{argv} asked something with nobody there"
-
-    # And nothing either credential write printed carries the value it
-    # was given, which is the one no-leak claim a subprocess lane can
-    # honestly make: it is about the streams, and the streams are what
-    # it can see.
-    shown = run("provider", "show", "llm", "brain")
-    assert SECRET not in shown.stdout + shown.stderr
+        # The one no-leak claim a subprocess lane can honestly make,
+        # asserted about the command that was GIVEN the value rather
+        # than about a later read of something else. A read of a
+        # provider that never held the credential would have passed
+        # while both writes echoed it, which is an assertion aimed at
+        # the wrong process.
+        if stdin is not None:
+            assert stdin not in finished.stdout + finished.stderr, argv
 
 
 # The commands that reach no server at all
