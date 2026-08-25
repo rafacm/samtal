@@ -235,7 +235,16 @@ class Identity:
         }
 
     def poll_headers(self) -> dict[str, str]:
-        """What a board puts on an activation poll.
+        """What a board puts on an activation poll: the same headers
+        again, and one more.
+
+        Derived from `headers` rather than written beside it, because
+        the firmware's own `Ota` sets its header block once and every
+        request it makes carries it; two lists here would be one list
+        with an omission pending, and the omission it had was the client
+        id. One identity has to cross every request of the ceremony, so
+        a poll that dropped half of it would be a poll no recording
+        could hold the claim against.
 
         `Activation-Version: 1` is what a consumer board with no eFuse
         key burned announces, and the body that goes with it is `{}`,
@@ -243,7 +252,7 @@ class Identity:
         its HMAC are not available to any simulator: the key is burned
         into a device's eFuses and only the vendor's cloud has a copy.
         """
-        return {"Device-Id": self.mac, "Activation-Version": "1"}
+        return {**self.headers(), "Activation-Version": "1"}
 
     def system_info(self) -> dict[str, object]:
         """The body a board POSTs with its check-in.
