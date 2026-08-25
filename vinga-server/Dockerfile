@@ -11,8 +11,15 @@
 # the same server, and the only difference is which optional extras are
 # installed.
 #
-# pysilero-vad stays in both. It is a core dependency, it is light, and
-# it runs on every audio frame whichever ASR provider is configured.
+# pysilero-vad stays in both. It is part of the serve extra rather than
+# one of the optional engines, it is light, and it runs on every audio
+# frame whichever ASR provider is configured.
+#
+# The serve extra is what makes this an image of a server rather than of
+# the configuration client: the package's default install is the client
+# half, and both sync steps below name `--extra serve` for both
+# variants. That name lives here and in the contributor's dev group and
+# nowhere else. An operator runs this image and installs nothing.
 #
 # Measured on arm64: 883 MB default against 494 MB slim. Most of the
 # difference is not piper but faster-whisper, which brings its own
@@ -60,14 +67,14 @@ RUN set -eu; \
 # Dependencies first, from the lockfile alone, so editing the server does
 # not re-resolve or re-download a single wheel.
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-install-project --no-dev --no-editable $(cat /tmp/extras)
+RUN uv sync --frozen --no-install-project --no-dev --no-editable --extra serve $(cat /tmp/extras)
 
 COPY src ./src
 COPY README.md ./
 # The wheel force-includes examples/ (the recipe fragments ship inside
 # the package), so the build needs them where hatchling looks.
 COPY examples ./examples
-RUN uv sync --frozen --no-dev --no-editable $(cat /tmp/extras)
+RUN uv sync --frozen --no-dev --no-editable --extra serve $(cat /tmp/extras)
 
 
 FROM python:3.12-slim-bookworm

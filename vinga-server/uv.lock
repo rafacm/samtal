@@ -1648,22 +1648,12 @@ name = "vinga-server"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "alembic" },
-    { name = "anthropic" },
-    { name = "av" },
-    { name = "cryptography" },
-    { name = "fastapi" },
     { name = "httpx" },
-    { name = "mcp" },
-    { name = "openai" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
-    { name = "pysilero-vad" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
-    { name = "sqlalchemy" },
     { name = "typer" },
-    { name = "uvicorn", extra = ["standard"] },
 ]
 
 [package.optional-dependencies]
@@ -1672,6 +1662,18 @@ faster-whisper = [
 ]
 piper = [
     { name = "piper-tts" },
+]
+serve = [
+    { name = "alembic" },
+    { name = "anthropic" },
+    { name = "av" },
+    { name = "cryptography" },
+    { name = "fastapi" },
+    { name = "mcp" },
+    { name = "openai" },
+    { name = "pysilero-vad" },
+    { name = "sqlalchemy" },
+    { name = "uvicorn", extra = ["standard"] },
 ]
 
 [package.dev-dependencies]
@@ -1683,31 +1685,32 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "pytest-xdist" },
     { name = "ruff" },
+    { name = "vinga-server", extra = ["serve"] },
     { name = "xiaozhi-sdk" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "alembic", specifier = ">=1.18.5" },
-    { name = "anthropic", specifier = ">=0.120.0" },
-    { name = "av", specifier = ">=18.0.0" },
-    { name = "cryptography", specifier = ">=49.0.0" },
-    { name = "fastapi", specifier = ">=0.115" },
+    { name = "alembic", marker = "extra == 'serve'", specifier = ">=1.18.5" },
+    { name = "anthropic", marker = "extra == 'serve'", specifier = ">=0.120.0" },
+    { name = "av", marker = "extra == 'serve'", specifier = ">=18.0.0" },
+    { name = "cryptography", marker = "extra == 'serve'", specifier = ">=49.0.0" },
+    { name = "fastapi", marker = "extra == 'serve'", specifier = ">=0.115" },
     { name = "faster-whisper", marker = "extra == 'faster-whisper'", specifier = ">=1.2" },
     { name = "httpx", specifier = ">=0.28" },
-    { name = "mcp", specifier = ">=1.24,<2" },
-    { name = "openai", specifier = ">=2.48.0" },
+    { name = "mcp", marker = "extra == 'serve'", specifier = ">=1.24,<2" },
+    { name = "openai", marker = "extra == 'serve'", specifier = ">=2.48.0" },
     { name = "piper-tts", marker = "extra == 'piper'", specifier = ">=1.6" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "pydantic-settings", specifier = ">=2.6" },
-    { name = "pysilero-vad", specifier = ">=3.4" },
+    { name = "pysilero-vad", marker = "extra == 'serve'", specifier = ">=3.4" },
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "sqlalchemy", specifier = ">=2.0.51" },
+    { name = "sqlalchemy", marker = "extra == 'serve'", specifier = ">=2.0.51" },
     { name = "typer", specifier = ">=0.27.1" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.34" },
+    { name = "uvicorn", extras = ["standard"], marker = "extra == 'serve'", specifier = ">=0.34" },
 ]
-provides-extras = ["faster-whisper", "piper"]
+provides-extras = ["serve", "faster-whisper", "piper"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1718,6 +1721,7 @@ dev = [
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "ruff", specifier = ">=0.9" },
+    { name = "vinga-server", extras = ["serve"] },
     { name = "xiaozhi-sdk", specifier = ">=0.5.1" },
 ]
 
