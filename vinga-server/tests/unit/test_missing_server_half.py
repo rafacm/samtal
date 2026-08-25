@@ -49,7 +49,11 @@ from tests.support.config_cli import chain, logged
 from vinga_server import doctor
 from vinga_server import main as entrypoint
 from vinga_server.config import cli
-from vinga_server.config.loader import NEEDS_THE_SERVER_HALF, ConfigError
+from vinga_server.config.loader import (
+    NEEDS_THE_SERVER_HALF,
+    NEEDS_THE_SIM_EXTRA,
+    ConfigError,
+)
 
 # One per field that could carry a pasted credential, so a leak says
 # which field it came out of. None of them is a real credential and each
@@ -234,7 +238,7 @@ def test_the_gated_refusal_carries_no_exception_chain(
     with monkeypatch.context() as patched:
         _refuses("vinga_server.config.api")(patched)
         with pytest.raises(ConfigError) as refused:
-            cli._from_the_server_half(cli.docgen.openapi)
+            cli._from_an_installed_half(cli.docgen.openapi, cli.NEEDS_THE_SERVER_HALF)
 
     assert str(refused.value) == cli.NEEDS_THE_SERVER_HALF
     assert refused.value.__cause__ is None
@@ -252,12 +256,13 @@ def test_the_gated_sentence_names_no_value_at_all() -> None:
 
 
 def test_the_gated_pair_is_exactly_two(offline: Path) -> None:
-    """The inventory, held closed from the production side.
+    """The SERVER-HALF inventory, held closed from the production side.
 
     A third command that grew a server-side import would be a command
     the wheel lane runs and finds refusing, which is a failure a long
     way from its cause. Named here instead, beside the reason each is
-    gated.
+    gated. The grammar's other gate is an extra rather than this half,
+    and it has an inventory of its own at the foot of this file.
     """
     assert {argv[-1] for _, argv in _gated(offline)} == {"openapi", "ota-url"}
 
@@ -411,3 +416,122 @@ def test_one_sentence_answers_every_command_that_needs_the_other_half() -> None:
     Two strings for one fact is the duplication the design guide names,
     and it is the shape this started in."""
     assert cli.NEEDS_THE_SERVER_HALF is NEEDS_THE_SERVER_HALF
+
+
+# The other gate, which is an EXTRA rather than the server half
+#
+# `simulator run` speaks a websocket and the configuration client has no
+# library for one, so it is gated the same way and answers a different
+# sentence: the server half is somewhere you go, and an extra is
+# something you install. The gate is one function taking its sentence
+# rather than two functions with a constant each, which is what puts
+# both refusals on one containment.
+
+# The address the gated command is pointed at, carrying a
+# credential-shaped segment in the place a real OTA URL carries the
+# deployment's own secret. Nothing reaches it: the gate refuses before
+# any request is made, which is exactly what this asserts.
+OTA_URL_SENTINEL = "sk-otaurl-2c4e6a-never-a-real-credential"
+
+
+def _without_the_extra(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The websocket client made unimportable, as though the extra were
+    not installed.
+
+    A meta-path finder rather than a patched `builtins.__import__`, for
+    the reason the finder above exists: a module resolved by name never
+    reaches the builtin, and `websockets.sync.client` is reached through
+    the package.
+    """
+    _refuses("websockets")(monkeypatch)
+
+
+def test_the_conversation_verb_without_its_extra_answers_its_own_sentence(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Run rather than imported, which is the whole point of a gate whose
+    import sits inside one arm: importing `cli` proves nothing about it.
+
+    The command is given an address nothing is listening on and it never
+    gets that far: the extra is missing, so the refusal is the extra's
+    and not the network's.
+    """
+    with monkeypatch.context() as patched:
+        _without_the_extra(patched)
+        assert cli.main(["simulator", "run", f"http://127.0.0.1:9/x/{OTA_URL_SENTINEL}/"]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.err.strip() == cli.NEEDS_THE_SIM_EXTRA
+    assert "Traceback" not in captured.err
+
+
+def test_the_extra_s_refusal_leaks_neither_the_module_path_nor_the_address(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Two sentinels, one per field that could carry one.
+
+    An ImportError's text is a module path, which is the value most
+    likely to be relayed by accident, and the address this command is
+    given can be the deployment's own secret. Neither reaches any of the
+    four surfaces.
+    """
+    with monkeypatch.context() as patched, caplog.at_level(0):
+        _without_the_extra(patched)
+        assert cli.main(["simulator", "run", f"http://127.0.0.1:9/x/{OTA_URL_SENTINEL}/"]) == 1
+
+    captured = capsys.readouterr()
+    for sentinel in (IMPORT_SENTINEL, OTA_URL_SENTINEL):
+        for surface in (captured.out, captured.err, logged(caplog)):
+            assert sentinel not in surface
+
+
+def test_the_extra_s_refusal_carries_no_exception_chain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The fourth surface, read where a walker would find it: the raise
+    itself, driven through the one function both gates share."""
+    with monkeypatch.context() as patched:
+        _without_the_extra(patched)
+        with pytest.raises(ConfigError) as refused:
+
+            def imports_the_extra() -> None:
+                from websockets.sync.client import connect  # noqa: F401
+
+            cli._from_an_installed_half(imports_the_extra, cli.NEEDS_THE_SIM_EXTRA)
+
+    assert str(refused.value) == cli.NEEDS_THE_SIM_EXTRA
+    assert refused.value.__cause__ is None
+    assert refused.value.__context__ is None
+    assert IMPORT_SENTINEL not in chain(refused.value)
+
+
+def test_the_two_gates_are_one_function_with_two_sentences() -> None:
+    """What keeps the containment in one place.
+
+    Both refusals go through `_from_an_installed_half`, which records the
+    ImportError inside its handler and raises outside it; a second copy
+    of that with its own constant would have been a second chance to get
+    it wrong on the one surface where getting it wrong relays a module
+    path. The sentences are two because they send a reader to two
+    different places.
+    """
+    assert cli.NEEDS_THE_SIM_EXTRA is NEEDS_THE_SIM_EXTRA
+    assert cli.NEEDS_THE_SIM_EXTRA != cli.NEEDS_THE_SERVER_HALF
+    for sentence in (cli.NEEDS_THE_SIM_EXTRA,):
+        assert "{" not in sentence
+        assert "%s" not in sentence
+
+
+def test_the_gated_commands_of_the_grammar_are_exactly_three() -> None:
+    """The inventory across both gates, held closed from the production
+    side.
+
+    Two need the server half and one needs the `sim` extra. A fourth
+    would be a command the wheel lane runs and finds refusing, which is
+    a failure a long way from its cause.
+    """
+    gated = {("openapi",), ("ota-url",), ("simulator", "run")}
+
+    assert gated <= {row.words for row in cli.COMMANDS}

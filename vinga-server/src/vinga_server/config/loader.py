@@ -67,6 +67,20 @@ NEEDS_THE_SERVER_HALF = (
     "checkout, where the whole server is present"
 )
 
+# And the other half of the same shape: a command behind an EXTRA rather
+# than behind the server half.
+#
+# Two sentences rather than one, because they send a reader to two
+# different places. The server half is a thing you go somewhere that has,
+# and the sim extra is a thing you install: `vinga simulator run` speaks a
+# websocket, which the configuration client has no library for, and the
+# board's own check-in needs none of it.
+NEEDS_THE_SIM_EXTRA = (
+    "holding a conversation needs a websocket client, and this installation carries the "
+    "configuration client alone. Install this package with its `sim` extra and run the "
+    "command again; `simulator check-in` needs none of it and works as it is"
+)
+
 # The prefix a configuration override carries. Only the domain names
 # below are scanned for: everything else under this prefix is either a
 # key the file half still owns or a variable that carries a value rather

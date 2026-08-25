@@ -92,6 +92,7 @@ from vinga_server.config.loader import (
     # `loader` is below both readers. `cli.NEEDS_THE_SERVER_HALF` stays
     # the name every test and both wheel lanes reach for.
     NEEDS_THE_SERVER_HALF,
+    NEEDS_THE_SIM_EXTRA,
     ConfigError,
     load_environment_file,
     load_file_config,
@@ -126,10 +127,12 @@ from vinga_server.logs import quieted
 # package's `__init__`, which carries a docstring and no re-exports.
 # Both are client-tier pure: `board` reaches `device_endpoint`, the
 # models and `protocol`, and `capabilities` reaches `protocol.messages`.
-# The conversation half M2 adds is deliberately NOT reachable from here,
-# because it is the only module that imports `websockets` and the
+# The conversation half is deliberately NOT imported here, because it is
+# the only module in this package that imports `websockets` and the
 # extra's gate depends on that import happening inside `run`'s own arm.
-from vinga_server.simulator import board, capabilities
+# `utterance` is here because it is stdlib and `protocol` and reads a
+# file the wheel carries, so nothing about it is behind the extra.
+from vinga_server.simulator import board, capabilities, utterance
 
 # Where the API is, when nothing says otherwise: the loopback address of
 # this machine, on the port the server half of the configuration names,
@@ -540,14 +543,23 @@ class Invocation:
 # without opening a database, reaching a server or needing a key.
 
 
-def _from_the_server_half[T](answered: Callable[[], T]) -> T:
-    """One command's answer, or the fixed sentence when the server half
+def _from_an_installed_half[T](answered: Callable[[], T], missing: str) -> T:
+    """One command's answer, or the given sentence when the half it needs
     is not installed.
 
-    The gate for the two commands that read a server-side module. They
-    are the only two: everything else in this grammar is either a
+    The gate for every command in this grammar that reaches a module the
+    default install does not carry. There are three: `ota-url` and
+    `openapi` read the server half, and `simulator run` reads the
+    websocket client behind the `sim` extra. Everything else is either a
     request, which needs no such module, or a render off the models,
     which are the client half.
+
+    The SENTENCE is a parameter rather than this function's own constant,
+    because the two halves send a reader to two different places: one is
+    a thing you go somewhere that has, the other is a thing you install.
+    A second copy of this function with its own constant would have been
+    a second chance to get the ImportError containment wrong, on the one
+    surface where getting it wrong relays a module path.
 
     Recorded inside the handler and raised outside it, the way every
     boundary in this module raises. An ImportError's text is the module
@@ -556,8 +568,8 @@ def _from_the_server_half[T](answered: Callable[[], T]) -> T:
     raising after the handler leaves neither a cause nor a context.
 
     Only ImportError is caught, and only around the call: a
-    `ConfigError` out of the derivation itself is this grammar's own
-    refusal and travels as one.
+    `ConfigError` out of the answer itself is this grammar's own refusal
+    and travels as one.
     """
     answers: list[T] = []
     try:
@@ -565,7 +577,7 @@ def _from_the_server_half[T](answered: Callable[[], T]) -> T:
     except ImportError:
         pass
     if not answers:
-        raise ConfigError(NEEDS_THE_SERVER_HALF)
+        raise ConfigError(missing)
     return answers[0]
 
 
@@ -608,7 +620,9 @@ def _ota_url(args: Invocation) -> None:
     other notice does.
     """
     config = _server_config(args)
-    url, origin = _from_the_server_half(lambda: _derived_ota_url(config))
+    url, origin = _from_an_installed_half(
+        lambda: _derived_ota_url(config), NEEDS_THE_SERVER_HALF
+    )
     print(url)
     sys.stdout.flush()
     print(OTA_URL_GUIDANCE, file=sys.stderr)
@@ -640,7 +654,7 @@ def _openapi(args: Invocation) -> None:
     gated commands. What it renders is committed at
     `docs/reference/api-openapi.json`, which is where a client-only
     installation reads the contract instead."""
-    print(_from_the_server_half(docgen.openapi), end="")
+    print(_from_an_installed_half(docgen.openapi, NEEDS_THE_SERVER_HALF), end="")
 
 
 def _cli_reference(args: Invocation) -> None:
@@ -3157,6 +3171,118 @@ def _claimed(
     return admitted
 
 
+# What `run` says beyond what `check-in` says.
+#
+# The conversation is what this verb exists for, so the transcript and
+# the reply's sentences go to stdout as they arrive: they are far-side
+# text, and they are the artifact the command exists to print. Everything
+# else about the exchange is a count, a duration or a name this side
+# chose.
+
+RUN_HELP = (
+    "check in to an OTA URL as a board would, then hold one conversation over the "
+    "websocket: say the packaged sentence, and print the transcript and the reply as "
+    "they arrive"
+)
+
+# What a board that may not speak is told when it was asked to speak.
+# `check-in` reports those two states and exits 0, because reporting the
+# state a board is in is the answer; `run` was asked for a conversation
+# and cannot have one, so the same states are a refusal here.
+CANNOT_CONVERSE = (
+    "this board is not admitted, so there is no conversation to hold. Run "
+    f"`{PROGRAM} simulator check-in` against the same address to see which of the states "
+    f"it is in, and pass --claim <agent> to bind it."
+)
+
+
+def _simulator_run(args: Invocation) -> None:
+    """Check in as a board, then hold one turn of a conversation.
+
+    Everything before the socket is `check-in`'s, exactly: the same
+    endpoint, the same identity, the same four-step ceremony behind
+    --claim. The token and the websocket address this opens with are the
+    LAST check-in reply's, which is the only thing that mints either.
+
+    The gate comes FIRST, before any request goes out. An installation
+    without the extra can never hold a conversation whatever the address
+    answers, so making it check in, claim a board and sit through an
+    activation poll to be told it needs a websocket client would be the
+    wrong answer arrived at slowly.
+    """
+    held = _from_an_installed_half(_the_conversation_half, NEEDS_THE_SIM_EXTRA)
+    endpoint = device_endpoint.Endpoint.parsed(
+        args.endpoint, board.GIVEN_URL, device_endpoint.SUPPLIED_ENDPOINT
+    )
+    identity = board.Identity.of(args.mac)
+    state = board.check_in(endpoint, identity)
+    if args.agents:
+        state = _claimed(args, endpoint, identity, state)
+    if isinstance(state, board.Refused):
+        raise ConfigError(state.problem)
+    if not isinstance(state, board.Admitted):
+        raise ConfigError(CANNOT_CONVERSE)
+    said = utterance.packaged()
+    print(
+        f"{device_endpoint.SUPPLIED_ENDPOINT} admitted this board, and the conversation is "
+        f"open on {device_endpoint.REPORTED_WEBSOCKET}, which is not printed.\n"
+        f"protocol version: {state.protocol_version}\n"
+        f"{_firmware(state.firmware)}\n"
+        f"saying: {said.sentence}"
+    )
+    sys.stdout.flush()
+    _conversed(held, state, identity, said)
+
+
+def _the_conversation_half():
+    """The websocket half of the simulator, imported here and nowhere
+    else in this module.
+
+    That is the whole of what makes `sim` an extra: `conversation.py`
+    holds the only `websockets` import in the package, nothing imports it
+    at module scope, and a bare install reaching this line gets an
+    ImportError the gate turns into a sentence naming the extra.
+    """
+    from vinga_server.simulator import conversation
+
+    return conversation
+
+
+def _conversed(
+    held, state: board.Admitted, identity: board.Identity, said: utterance.Utterance
+) -> None:
+    """One turn, and what is said about it afterwards.
+
+    `held` is the module the gate handed back, passed in rather than
+    imported here so that this function names no module the client half
+    does not have. Its `Reply` is unannotated for the same reason, which
+    is the gate's cost rather than an omission.
+    """
+    reply = held.converse(
+        target=state.websocket,
+        token=state.token,
+        identity=identity,
+        version=state.protocol_version,
+        said=said,
+        say=_as_it_arrives,
+    )
+    print(
+        f"reply: {reply.packets} frames, {reply.audio_bytes} bytes, about "
+        f"{reply.audio_ms} ms of audio, which is counted rather than decoded\n"
+        f"the conversation reached: {reply.state}\n"
+        f"close: {reply.closed}"
+    )
+    for surprise in reply.surprises:
+        print(f"out of order: {surprise}", file=sys.stderr)
+
+
+def _as_it_arrives(line: str) -> None:
+    """One line of the conversation, as it happens rather than at the
+    end. Flushed, because the whole point is watching it."""
+    print(line)
+    sys.stdout.flush()
+
+
 def _reported(state: board.CheckIn, endpoint: "device_endpoint.Endpoint") -> None:
     """What the board was handed, on stdout, and what to do about it on
     stderr.
@@ -4388,6 +4514,13 @@ COMMANDS: tuple[Command, ...] = (
         epilog=capabilities.epilog(docgen.HELP_WIDTH),
     ),
     Command(
+        words=("simulator", "run"),
+        does=_simulator_run,
+        declare=_simulated_board,
+        help=RUN_HELP,
+        epilog=capabilities.epilog(docgen.HELP_WIDTH),
+    ),
+    Command(
         words=("schema",),
         does=_schema,
         declare=_of_an_entity,
@@ -4487,4 +4620,11 @@ def command() -> TyperGroup:
     return grammar
 
 
-__all__ = ["COMMANDS", "NEEDS_THE_SERVER_HALF", "build_client", "command", "main"]
+__all__ = [
+    "COMMANDS",
+    "NEEDS_THE_SERVER_HALF",
+    "NEEDS_THE_SIM_EXTRA",
+    "build_client",
+    "command",
+    "main",
+]

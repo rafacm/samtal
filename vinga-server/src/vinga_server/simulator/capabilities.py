@@ -6,16 +6,22 @@ renders that epilog, and the tests read the same rows. A claim that
 appeared in prose and not in the table is impossible, because there is
 no prose.
 
-The table has three sides rather than two, and the third is temporary by
-construction. Every merge to `main` is releasable and the image
-publishes on it, so a table that landed advertising a websocket
-handshake nothing has written yet would be help that lies for the length
-of a milestone, which is the exact failure an honest capability
-statement exists to prevent. So a row is `SUPPORTED`, which may only be
-claimed of what has shipped and which names the verb that has it;
-`UNSUPPORTED`, which is permanent and carries the reason that keeps it
-off the list rather than a shrug; or `PENDING`, which names the verb
-that will bring it and is empty once that verb lands.
+The table has three sides rather than two, and the third is empty. Every
+merge to `main` is releasable and the image publishes on it, so a table
+that landed advertising a websocket handshake nothing had written yet
+would be help that lies for the length of a milestone, which is the exact
+failure an honest capability statement exists to prevent. So a row is
+`SUPPORTED`, which may only be claimed of what has shipped and which
+names the verb that has it; `UNSUPPORTED`, which is permanent and carries
+the reason that keeps it off the list rather than a shrug; or `PENDING`,
+which names the verb that will bring it.
+
+`PENDING` carried the whole conversation while `check-in` was the only
+verb, and `run` emptied it in the change that landed. The side stays
+declared, and a case asserts it empty: that is what makes it a place a
+future row can be declared honestly rather than a place a claim gets
+parked, and deleting the machinery would leave the next milestone with
+nowhere to be honest from.
 
 The message rows are derived rather than written. `protocol/messages.py`
 is the one home of what a control message is, and the inventory here is
@@ -216,11 +222,7 @@ def named_message(row: tuple[str, str, str], direction: str) -> str:
 
 
 def _message_rows() -> tuple[Capability, ...]:
-    """Both halves of the wire, classified.
-
-    Everything not refused is the conversation, which is `run`'s, so it
-    sits on the third side until that verb exists.
-    """
+    """Both halves of the wire, classified."""
     rows: list[Capability] = []
     for row in sent_messages():
         reason = _matched(row, _SENT_REFUSALS)
@@ -232,9 +234,16 @@ def _message_rows() -> tuple[Capability, ...]:
 
 
 def _classified(what: str, reason: str) -> Capability:
+    """A message row on the side its reason puts it.
+
+    Everything not refused is the conversation, which `run` holds, so it
+    is that verb's. It sat on the third side until that verb existed and
+    moved to the first in the change that landed it, which is what stops
+    a milestone advertising the next one's work.
+    """
     if reason:
         return Capability(what=what, side=UNSUPPORTED, reason=reason)
-    return Capability(what=what, side=PENDING, verb=RUN)
+    return Capability(what=what, side=SUPPORTED, verb=RUN)
 
 
 # Everything that is not a message, written out because it is not
@@ -283,31 +292,39 @@ _PROSE_ROWS: tuple[Capability, ...] = (
     ),
     Capability(
         what="the websocket handshake with its Authorization, Device-Id, Client-Id and "
-        "Protocol-Version headers",
-        side=PENDING,
+        "Protocol-Version headers; the last is sent because the firmware sends it and "
+        "this server reads nothing from it",
+        side=SUPPORTED,
         verb=RUN,
     ),
     Capability(
         what="the hello exchange, announcing whichever framing version the check-in "
         "reply named, as a websocket text frame",
-        side=PENDING,
+        side=SUPPORTED,
         verb=RUN,
     ),
     Capability(
-        what="one packaged utterance of Opus, sent under the negotiated framing",
-        side=PENDING,
+        what="one packaged utterance of Opus, paced the way a microphone delivers it and "
+        "sent under the negotiated framing",
+        side=SUPPORTED,
         verb=RUN,
     ),
     Capability(
         what="binary reply frames, counted, size-checked and unwrapped, with the reply's "
         "duration computed from the frame count",
-        side=PENDING,
+        side=SUPPORTED,
         verb=RUN,
     ),
     Capability(
         what="the close, reported by its code compared against the closed set this side "
         "knows and named in this side's own words",
-        side=PENDING,
+        side=SUPPORTED,
+        verb=RUN,
+    ),
+    Capability(
+        what="one turn and one only: the reply is read to its end and then the socket is "
+        "closed",
+        side=SUPPORTED,
         verb=RUN,
     ),
     Capability(
