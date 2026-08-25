@@ -350,21 +350,39 @@ class CaptureConfig(BaseModel):
 
 
 class DatabaseConfig(BaseModel):
-    """Where the domain half of the configuration is stored.
+    """Which Postgres database this server keeps its state in.
 
-    The directory rather than the file is the key, mirroring memory.dir
-    and capture.dir, so database-adjacent artifacts later need no second
-    path key. One SQLite file named vinga.db lives inside it.
+    Four discrete facts rather than one connection string, because
+    naming a host is what a deployment does with a database and
+    assembling a URL is not. `VINGA_DB_HOST`, `VINGA_DB_PORT`,
+    `VINGA_DB_NAME` and `VINGA_DB_USER` override these four from the
+    environment, and those are the documented spellings: the compose
+    file feeds the image's own `POSTGRES_*` names from the same four, so
+    one `.env` flows into both sides of the development loop. The
+    generic `VINGA_SERVER__DATABASE__*` spelling is refused with a
+    sentence naming the short one, so a fact does not grow two names.
 
-    The default is the generic one, not what any particular deployment
-    runs with: a container image whose writable volume is elsewhere
-    points this at that volume, and a development machine that cannot
-    write to /var/lib either gets an error naming this key.
+    The password has no key here at all. It is `VINGA_DB_PASSWORD` and
+    only that: a credential in a config file is what the
+    no-secrets-in-YAML stance exists to prevent, and a field on this
+    model would be a value that every configuration read, diff and
+    generated reference would then have to remember not to print.
+    `VINGA_DB_URL` has no key here either, for the same reason and one
+    more: it carries a password in its authority and can carry another
+    in its query.
+
+    The defaults are the development instance `docker compose up -d
+    --wait` starts, so a checkout runs with no configuration at all. A
+    deployment names its own, and the deployment documentation says
+    that the shipped password default is a loopback-only convenience.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    dir: Path = Path("/var/lib/vinga")
+    host: str = "127.0.0.1"
+    port: int = Field(default=5432, ge=1, le=65535)
+    name: str = "vinga"
+    user: str = "vinga"
 
 
 class ConversationsConfig(BaseModel):
@@ -375,10 +393,12 @@ class ConversationsConfig(BaseModel):
     conversation text on disk, so nothing here can turn it on by
     accident. The section has to exist and the flag has to say so.
 
-    No directory of its own. `conversations.db` lands beside vinga.db in
-    `database.dir` above, because it is the same data volume, the same
-    backup and the same access control, and a second path key would be a
-    second thing to point somewhere writable.
+    No connection of its own. The record lives in the `conversations`
+    schema of the database `database` above names, beside the domain
+    half's `domain` schema: the same instance, the same backup and the
+    same credentials, with a read-only role scoped to this schema alone
+    so that an analyst reads what was said without reaching the stored
+    secrets next door.
 
     The two storage switches under the flag are independent, and every
     combination is a supported configuration: metrics without text is the
@@ -508,19 +528,20 @@ class ServerConfig(BaseModel):
 
     limits: LimitsConfig = Field(default_factory=LimitsConfig)
 
-    # Where `vinga-server config` writes the domain configuration, and
-    # where the server reads it at each start.
+    # The Postgres database this server keeps both of its halves in:
+    # the domain configuration `vinga-server config` writes and the
+    # server reads at each start, and the conversation record below.
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
 
     # Absent, or present with enabled off, means no session is ever
     # recorded. Absent is the default.
     capture: CaptureConfig | None = None
 
-    # Absent, or present with enabled off, means nothing is written to
-    # the conversation store and no conversations.db is created. Absent
-    # is the default. An existing file is still migrated at boot, because
-    # a deployment that recorded last month and records nothing today
-    # still has to be able to read what it kept.
+    # Absent, or present with enabled off, means no session is ever
+    # recorded and no writer is started. Absent is the default. The
+    # schema is still migrated at boot either way, because a deployment
+    # that recorded last month and records nothing today still has to be
+    # able to read what it kept, and empty tables are not a recording.
     conversations: ConversationsConfig | None = None
 
     # Refuse to boot any provider that sends session data off this host.

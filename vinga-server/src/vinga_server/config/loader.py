@@ -29,6 +29,7 @@ from vinga_server.config.models import (
     PROGRAM,
     SERVER_PROGRAM,
     Config,
+    DatabaseConfig,
     FieldProblem,
     FileConfig,
     yaml_file_var,
@@ -125,6 +126,35 @@ MOVED_KEY_COMMANDS: dict[str, str] = {
 # because that document is what a reader needs next.
 DOMAIN_REFERENCE = "docs/reference/domain-config.md"
 
+# The database section's own environment spellings.
+#
+# One key, one variable, and the variable is the short one. The generic
+# `VINGA_SERVER__DATABASE__HOST` would work by accident of the nesting
+# scheme, and letting it would give every connection fact two names: the
+# compose file feeds the Postgres image from the short spellings, which
+# is the whole point of having them, and two spellings that must agree
+# are one spelling with a bug pending.
+#
+# Outside the section scheme rather than inside it, the way
+# `VINGA_MASTER_KEY` is: what these name is where the server's own state
+# lives, which a deployment sets beside its credentials rather than in
+# the file it edits.
+DATABASE_SECTION = "database"
+
+DATABASE_ENV_PREFIX = f"{ENV_PREFIX}DB_"
+
+# The four the YAML also carries. The password and the whole-URL
+# override have no YAML key at all and are read where the URL is built
+# (`vinga_server.db`), so they are deliberately not here: this table is
+# what maps a field of `DatabaseConfig` onto its variable, and neither
+# of those is a field.
+DATABASE_ENV_NAMES: dict[str, str] = {
+    "host": f"{DATABASE_ENV_PREFIX}HOST",
+    "port": f"{DATABASE_ENV_PREFIX}PORT",
+    "name": f"{DATABASE_ENV_PREFIX}NAME",
+    "user": f"{DATABASE_ENV_PREFIX}USER",
+}
+
 
 class ConfigError(Exception):
     """A configuration problem, with a message meant to be shown as is.
@@ -176,9 +206,9 @@ class DeviceAlreadyBoundError(ConfigError):
 
 
 class DatabaseBusyError(ConfigError):
-    """Another process held the write lock for longer than the busy
-    timeout allows. Nothing was changed, and the same call may be
-    retried."""
+    """A lock this call needed did not arrive inside the lock timeout,
+    because another connection was holding it. Nothing was changed, and
+    the same call may be retried."""
 
 
 class ReloadInProgressError(ConfigError):
@@ -327,13 +357,14 @@ def load_file_config(path: str | Path | None = None) -> FileConfig:
         path = Path(path)
 
     _check_moved_environment()
+    _check_database_environment()
     if path is not None:
         _check_config_file(path)
 
     token = yaml_file_var.set(path)
     problem: str | None = None
     try:
-        return FileConfig()
+        return _with_database_environment(FileConfig())
     except ValidationError as exc:
         # Rendered from the error locations and messages only, never
         # from str(exc), which quotes the rejected input back
@@ -433,8 +464,92 @@ def _check_moved_keys(path: Path, data: dict) -> None:
     raise ConfigError(
         f"invalid config in {path}:\n{problems}\n"
         f"  Remove these sections from the file: the domain half of the "
-        f"configuration lives in the database under server.database.dir. "
-        f"See {DOMAIN_REFERENCE}."
+        f"configuration lives in the database the {DATABASE_ENV_PREFIX}* variables "
+        f"name. See {DOMAIN_REFERENCE}."
+    )
+
+
+def _with_database_environment(file_half: FileConfig) -> FileConfig:
+    """The file half with `VINGA_DB_*` applied over its database section.
+
+    Applied here rather than through pydantic-settings, for the reason
+    the moved-key check below is written by hand: the nesting scheme
+    derives a variable name from a field path, and these four names are
+    deliberately not derived from theirs. What the scheme would have
+    produced is refused instead, by `_check_database_environment`.
+
+    A model copy rather than a second `FileConfig()`, which would re-read
+    every source and could pick up a file that changed underneath.
+    """
+    section = file_half.server.database
+    overrides = {
+        field: os.environ[name]
+        for field, name in DATABASE_ENV_NAMES.items()
+        if os.environ.get(name)
+    }
+    if not overrides:
+        return file_half
+    problem: str | None = None
+    try:
+        applied = section.model_copy(
+            update={
+                field: int(value) if field == "port" else value
+                for field, value in overrides.items()
+            }
+        )
+        # Copies do not validate, so the section is put back through its
+        # own model. A port of 0 or 99999 is a refusal here rather than
+        # a connection failure with a fixed sentence later.
+        applied = DatabaseConfig.model_validate(applied.model_dump())
+    except (ValueError, ValidationError):
+        # The value is not repeated, because one of these variables is
+        # read beside a password and a refusal that echoes its input is
+        # a refusal one typo away from echoing the wrong one.
+        problem = (
+            f"invalid database environment: {DATABASE_ENV_NAMES['port']} has to be a "
+            f"port number between 1 and 65535, and the other {DATABASE_ENV_PREFIX}* "
+            f"variables plain strings. What was set is not quoted back"
+        )
+    if problem is not None:
+        raise ConfigError(problem)
+    server = file_half.server.model_copy(update={"database": applied})
+    return file_half.model_copy(update={"server": server})
+
+
+def _check_database_environment() -> None:
+    """The generic spelling of a database key, refused in favour of the
+    short one.
+
+    `VINGA_SERVER__DATABASE__HOST` would otherwise work, silently, as a
+    second name for what `VINGA_DB_HOST` names, and the two would come to
+    disagree the moment somebody set both. It is refused rather than
+    honored because the short names are the ones the compose file feeds
+    the database image from, so they are the ones a `.env` holds.
+
+    Matched without regard to case, for the reason the check below is:
+    pydantic-settings reads the whole variable name case-insensitively,
+    so a case-sensitive scan would leave exactly the spellings that do
+    apply unrefused.
+    """
+    prefix = f"{ENV_PREFIX}SERVER__{DATABASE_SECTION.upper()}__"
+    found = [name for name in sorted(os.environ) if name.upper().startswith(prefix)]
+    if not found:
+        return
+    problems = "\n".join(
+        f"  - {name}: use "
+        + DATABASE_ENV_NAMES.get(
+            name.upper().removeprefix(prefix).lower(), f"{DATABASE_ENV_PREFIX}*"
+        )
+        + " instead"
+        for name in found
+    )
+    raise ConfigError(
+        f"invalid configuration environment:\n{problems}\n"
+        f"  Unset these variables: the database connection is named by the "
+        f"{DATABASE_ENV_PREFIX}* variables, which the compose file and a deployment's "
+        f"own environment both use, so a second spelling of the same fact is not "
+        f"honored. {DATABASE_ENV_PREFIX}PASSWORD and {DATABASE_ENV_PREFIX}URL carry "
+        f"the credentials and have no configuration key at all."
     )
 
 
@@ -474,7 +589,8 @@ def _check_moved_environment() -> None:
     raise ConfigError(
         f"invalid configuration environment:\n{problems}\n"
         f"  Unset these variables: the domain half of the configuration lives in "
-        f"the database under server.database.dir. See {DOMAIN_REFERENCE}."
+        f"the database the {DATABASE_ENV_PREFIX}* variables name. "
+        f"See {DOMAIN_REFERENCE}."
     )
 
 
