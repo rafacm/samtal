@@ -1,0 +1,12 @@
+{
+  "provenance": "Synthesized with Piper using en_US-ljspeech-high (rhasspy/piper-voices, MIT weights), trained on the LJ Speech Dataset (public domain).",
+  "sentence": "Hello, can you hear me?",
+  "sample_rate": 16000,
+  "channels": 1,
+  "frame_duration_ms": 60,
+  "stored_framing_version": 2,
+  "packets": 28,
+  "duration_ms": 1680,
+  "bytes": 10254,
+  "sha256": "6edd0d5cb85ac5f983eb9275dad577ac01ed7e396fe2b6a43f42b66e44a50d77"
+}
