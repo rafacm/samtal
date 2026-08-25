@@ -372,7 +372,11 @@ explicitly.
     installs it explicitly in the Dockerfile, and a `serve`
     install from the wheel stays source-backed, with the system
     prerequisite (a `libpq` at runtime, or `psycopg[binary]` by
-    choice) documented where the wheel install is. This is what
+    choice) documented where the wheel install is, and scoped to
+    the audience that install already has: contributors and
+    custom image builders. Operators deploy the image and install
+    nothing on hosts, which is the package policy's standing
+    model (`pyproject.toml:47-53`), untouched here. This is what
     keeps the issue's source-wheel option real instead of having
     every `serve` install pull `psycopg-binary`. The Dockerfile
     drops
