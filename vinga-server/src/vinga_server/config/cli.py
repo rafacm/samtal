@@ -81,7 +81,7 @@ from typer._click.exceptions import (
 )
 from typer.core import TyperCommand, TyperGroup
 
-from vinga_server.config import docgen, entities, views
+from vinga_server.config import docgen, entities
 from vinga_server.config.loader import (
     CONFIG_ENV_VAR,
     ConfigError,
@@ -90,6 +90,7 @@ from vinga_server.config.loader import (
 )
 from vinga_server.config.models import (
     API_MOUNT_PATH,
+    MASK,
     PROVIDER_STAGES,
     FileConfig,
     ServerConfig,
@@ -106,8 +107,6 @@ from vinga_server.config.responses import (
     McpServerStatus,
     PendingDevice,
 )
-from vinga_server.config.secrets import MASK, provider_identity
-from vinga_server.config.store import addressed
 from vinga_server.config.transport import APPLY_LOCATION, check_transportable
 from vinga_server.logs import quieted
 
@@ -1361,7 +1360,7 @@ def _set_secret_words(stored: Mapping[str, object]) -> list[str]:
         "secret",
         "set",
         "--",
-        *addressed(holder, str(stored["identity"])),
+        *entities.addressed(holder, str(stored["identity"])),
         str(stored["slot"]),
     ]
 
@@ -1426,15 +1425,27 @@ def _shadow_note(body: Mapping[str, object], shadows: str | None) -> str:
     """What a stored secret displaces, when the entity also carries a
     reference for the same slot. Ciphertext wins, and making that
     visible is what keeps the precedence from being silent."""
-    reference = views.reference_value(body, shadows) if shadows else None
+    reference = _reference_value(body, shadows) if shadows else None
     return f"  (used instead of {shadows}: {reference})" if reference else ""
+
+
+def _reference_value(body: Mapping[str, object], key: str) -> object:
+    """What an entity writes under one of its reference-carrying keys,
+    addressed the way a stored secret addresses it: a dotted key reaches
+    into an MCP server's env or headers, a bare one is a provider's own
+    key. Masked already, because the body it reads is."""
+    group, dotted, name = key.partition(".")
+    if not dotted:
+        return body.get(key)
+    nested = body.get(group)
+    return nested.get(name) if isinstance(nested, Mapping) else None
 
 
 def _bodies(config: Mapping[str, object]) -> dict[tuple[str, str], Mapping[str, object]]:
     """The masked body of every entity that can hold a stored secret,
     keyed the way a secret location names it."""
     bodies = {
-        ("provider", provider_identity(stage, name)): body
+        ("provider", entities.provider_identity(stage, name)): body
         for stage, entries in config["providers"].items()
         for name, body in entries.items()
     }
@@ -1785,7 +1796,7 @@ def _summary(document: Mapping[str, object]) -> str:
         lines.append(f"  {stage}:")
         lines += [
             f"    {name}{_summarized('provider', body)}"
-            + _slots(stored, "provider", provider_identity(stage, name))
+            + _slots(stored, "provider", entities.provider_identity(stage, name))
             for name, body in config["providers"].get(stage, {}).items()
         ] or ["    (none)"]
 

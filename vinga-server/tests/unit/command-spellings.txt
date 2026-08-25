@@ -856,17 +856,17 @@ vinga-server/src/vinga_server/config/api.py:407  respell  vinga-server config de
 vinga-server/src/vinga_server/config/api.py:426  respell  vinga-server config list
 vinga-server/src/vinga_server/config/api.py:539  respell  vinga-server config reload
 vinga-server/src/vinga_server/config/api.py:540  respell  vinga-server config list
-vinga-server/src/vinga_server/config/cli.py:1773  respell  config list
+vinga-server/src/vinga_server/config/cli.py:1785  respell  config list
+vinga-server/src/vinga_server/config/cli.py:1785  respell  config list
+vinga-server/src/vinga_server/config/cli.py:1785  respell  config list
 vinga-server/src/vinga_server/config/docgen.py:191  respell  config schema
 vinga-server/src/vinga_server/config/docgen.py:576  respell  config schema
-vinga-server/src/vinga_server/config/models.py:1637  respell  vinga status
-vinga-server/src/vinga_server/config/models.py:2224  respell  config schema
+vinga-server/src/vinga_server/config/models.py:1648  respell  vinga status
+vinga-server/src/vinga_server/config/models.py:2235  respell  config schema
 vinga-server/src/vinga_server/config/responses.py:9  respell  config schema
 vinga-server/src/vinga_server/config/responses.py:9  respell  config reference
 vinga-server/src/vinga_server/config/secrets.py:9  respell  vinga-server config provider secret set
-vinga-server/src/vinga_server/config/secrets.py:54  respell  config show
-vinga-server/src/vinga_server/config/secrets.py:54  respell  config list
-vinga-server/src/vinga_server/config/store.py:582  respell  vinga-server config device show
+vinga-server/src/vinga_server/config/store.py:558  respell  vinga-server config device show
 vinga-server/src/vinga_server/config/views.py:29  respell  config show
 vinga-server/src/vinga_server/config/views.py:115  respell  config show
 vinga-server/src/vinga_server/device/session.py:721  respell  config schema

@@ -43,7 +43,7 @@ from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.sql.elements import ColumnElement
 
 from vinga_server.config import entities
-from vinga_server.config.entities import EntityDescriptor
+from vinga_server.config.entities import EntityDescriptor, addressed
 from vinga_server.config.loader import (
     ConfigError,
     DatabaseBusyError,
@@ -1879,26 +1879,6 @@ def _write_secrets(
             f"{_missing(holder)}; create it first with "
             f"{SERVER_PROGRAM} {holder.name} set"
         )
-
-
-def addressed(descriptor: EntityDescriptor, identity: str) -> tuple[str, ...]:
-    """One entry's identity back as the parameters that address it.
-
-    The inverse of the dotted join every surface names an entry by, and
-    one home for it because three of them ask: an applied document,
-    which names an entry by that join; a stored secret's location, whose
-    identity is the same join; and the CLI's export, which renders a
-    location back into the `secret set` command that fills it.
-
-    Split at the first separator only, and only as many times as the
-    kind has parameters, which is what keeps a name holding a dot still
-    one name: `providers.llm.claude.v2` is the `claude.v2` of the `llm`
-    stage, and nothing about a name forbids the dot. A kind addressed by
-    nothing is the singleton, whose identity is the empty one.
-    """
-    if not descriptor.addressing:
-        return ()
-    return tuple(identity.split(".", len(descriptor.addressing) - 1))
 
 
 def _secret_section(location: SecretLocation) -> str:
