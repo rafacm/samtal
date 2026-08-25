@@ -25,6 +25,7 @@ same seam, which is the only thing a real sleep would have added.
 """
 
 import json
+import time
 from collections.abc import Iterator
 
 import pytest
@@ -64,6 +65,28 @@ def unpaced(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[float]]:
     slept: list[float] = []
     monkeypatch.setattr(conversation, "sleep", slept.append)
     yield slept
+
+
+@pytest.fixture
+def opened(monkeypatch: pytest.MonkeyPatch) -> list:
+    """The connection this side opened, recorded at the module's own
+    seam.
+
+    `connect` is imported into `conversation`, so replacing the module's
+    name replaces the seam and not the library. A case that has to know
+    when the far side has finished closing needs the object holding that
+    answer, and there is no other way to reach it from outside.
+    """
+    held: list = []
+    real = conversation.connect
+
+    def connecting(*arguments, **named):
+        socket = real(*arguments, **named)
+        held.append(socket)
+        return socket
+
+    monkeypatch.setattr(conversation, "connect", connecting)
+    return held
 
 
 @pytest.fixture
@@ -555,3 +578,66 @@ def test_the_refusals_of_this_module_are_built_rather_than_formatted() -> None:
         assert "SomeError" in built
     for name in conversation.CLOSE_NAMES.values():
         assert "{" not in name and "%s" not in name
+
+
+def test_a_peer_that_goes_away_mid_utterance_is_a_sentence_not_a_traceback(
+    unpaced,
+    identity,
+    said,
+    opened: list,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The send that is likeliest to fail, and the one that used to fail
+    loudest.
+
+    The utterance is the longest thing this command sends, so a
+    disconnect during it is the ordinary way a run ends badly. It used to
+    go out through a bare `socket.send`, which meant a `ConnectionClosed`
+    left this module with its own message, its traceback and its chain
+    intact; every other send in the file has always gone through the
+    boundary.
+
+    The peer waits for the FIRST audio frame before closing with a
+    credential-shaped reason, and the pacing hook waits for that close to
+    complete before letting the next packet go. Both halves are load
+    bearing: a peer that closed after greeting would fail the `listen
+    start` instead, which is a control send and has always been guarded,
+    and a hook that did not wait would race the close against the
+    remaining twenty-seven packets.
+
+    Bite: with `_send_audio` reverted to a bare `socket.send`, what
+    leaves this module is a `ConnectionClosedError` whose own message is
+    "received 1011 (internal error) <reason>", so the raise is not a
+    `ConfigError` at all and the reason reaches the chain.
+    """
+    def script(connection, recorded: Recorded) -> None:
+        greet(connection, recorded)
+        for received in connection:
+            if isinstance(received, bytes):
+                recorded.frames.append(received)
+                break
+            recorded.texts.append(received)
+        connection.close(code=1011, reason=CLOSE_REASON)
+
+    def wait_for_the_close(_seconds: float) -> None:
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            if opened and opened[0].close_code is not None:
+                return
+            time.sleep(0.01)
+
+    monkeypatch.setattr(conversation, "sleep", wait_for_the_close)
+
+    with caplog.at_level(0):
+        with peer(script) as (url, _), pytest.raises(ConfigError) as refused:
+            held(url, identity, said)
+
+    assert str(refused.value) == conversation.cannot_speak("ConnectionClosedError")
+    assert refused.value.__cause__ is None and refused.value.__context__ is None
+    captured = capsys.readouterr()
+    surfaces = (captured.out, captured.err, logged(caplog), chain(refused.value))
+    for surface in surfaces:
+        assert CLOSE_REASON not in surface
+        assert DEVICE_TOKEN not in surface
