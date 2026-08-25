@@ -321,7 +321,12 @@ explicitly.
    advisory lock (`pg_advisory_lock` on the maintenance
    database), because `CREATE DATABASE` cannot run inside a
    transaction, so the product's transaction-scoped lock cannot
-   coordinate it. The lane refuses at session start with one sentence
+   coordinate it. Creating databases needs `CREATEDB`, which the
+   runtime contract deliberately does not include: the test lane
+   and the autogen entry point run on a development or test
+   maintenance connection (the compose superuser, or any role
+   with `CREATEDB`), documented beside them, and the deployment
+   env contract never asks for it. The lane refuses at session start with one sentence
    naming `docker compose up -d --wait` when the instance is
    unreachable: a skip would shrink the suite silently and read
    green while proving nothing. The runtime budget is acceptance
