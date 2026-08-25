@@ -49,6 +49,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+import pytest
+
 from tests.support.config_cli import registered
 from vinga_server.config import cli
 
@@ -116,7 +118,7 @@ def _command_words() -> frozenset[str]:
 # The rest of the line stops at the characters that end a command line
 # in prose or in a shell: a closing backtick, a pipe, a redirect, a
 # comment, a separator. What is captured is what a reader would type.
-_TERMINATORS = "`;|&<>#\n"
+_TERMINATORS = "`'\";|&<>#\n"
 
 _INVOCATION = re.compile(
     r"(?<![\w./-])(vinga-server config|vinga config|vinga)(?![\w-])"
@@ -128,13 +130,41 @@ _INVOCATION = re.compile(
 # because it is the same shape with the prefix removed, and the spans
 # the family above claimed are skipped so one line is not counted twice.
 _SHORTHAND = re.compile(
-    rf"(?<![\w./`-])(config)(?![\w-])[ \t]+([^{re.escape(_TERMINATORS)}]*)"
+    rf"(?<![\w./-])(config)(?![\w-])[ \t]+([^{re.escape(_TERMINATORS)}]*)"
 )
+
+# The fifth family: a command word no tree has any more, quoted alone.
+#
+# The four families above recognize an invocation, which is a program
+# word and the command after it. Prose refers to a command by its word
+# alone at least as often (`bind-device` is the same write for a MAC you
+# already know), and a word the re-cut retired is stale in that form
+# too: no spelling of the grammar answers to it, so a sentence naming
+# one tells a reader to run something that does not exist.
+#
+# Two conditions, and both are what keep this from matching English. It
+# must be inside backticks, which is how this repository quotes a
+# command in prose; and it must be one of the COMPOUNDS this grammar
+# coined, which is `retired()` below: a word the old top level had, that
+# no row or group of the tree carries at any depth, and that is
+# hyphenated. `prompt` and `pending` are retired command words and
+# ordinary English besides, so a rule that caught them would be a rule
+# about the language rather than about the grammar; `bind-device` and
+# `set-secret` are words nothing else in any sentence means.
+_RETIRED = re.compile(r"`([a-z][a-z0-9]*(?:-[a-z0-9]+)+)`")
 
 # Regenerated from the command tree, so a hand edit here is reverted by
 # the next render and hides the render that should have happened.
+# The page that is half generated, and the markers that say which
+# half. Its head, its installation section and its recovery procedure
+# are prose nobody generates, and they prescribe commands like any other
+# page: classifying the whole file as generated was what let a stale
+# recovery step publish for a milestone.
+_HALF_GENERATED = "docs/reference/cli.md"
+
+_GENERATED_REGION = ("<!-- generated: cli reference -->", "<!-- end generated: cli reference -->")
+
 _GENERATED_PATHS = (
-    "docs/reference/cli.md",
     "docs/reference/events.md",
     "docs/reference/domain-config.md",
     "docs/reference/api-openapi.json",
@@ -162,6 +192,12 @@ _HISTORICAL_PATHS = (
     # they are for.
     "vinga-server/tests/unit/data/cli-respelling.txt",
     "vinga-server/tests/unit/test_config_cli_respelling.py",
+    # And this tool, which names the retired spellings because naming
+    # them is what it is for: its rules are written about `bind-device`
+    # and `set-secret`, and its negative fixtures are invocations no
+    # tree answers to. A guard that flagged its own examples would be a
+    # guard nobody could state a rule in.
+    "vinga-server/tests/unit/test_command_spellings.py",
 )
 
 # The CLI guide is the one page that is both. It states the standard in
@@ -220,7 +256,19 @@ def _text(path: str) -> str | None:
         return None
 
 
-def _classified(path: str, program: str, invocation: str) -> str:
+def _generated_region(text: str) -> tuple[int, int] | None:
+    """The line numbers the generated markers enclose, or None."""
+    lines = text.splitlines()
+    opened = closed = None
+    for number, line in enumerate(lines, start=1):
+        if line.strip() == _GENERATED_REGION[0]:
+            opened = number
+        if line.strip() == _GENERATED_REGION[1]:
+            closed = number
+    return (opened, closed) if opened is not None and closed is not None else None
+
+
+def _classified(path: str, program: str, invocation: str, inside: bool) -> str:
     """Which of the three classes one match belongs to.
 
     Path first, because a generated artifact is generated whatever it
@@ -230,6 +278,10 @@ def _classified(path: str, program: str, invocation: str) -> str:
     """
     if path.startswith(_GENERATED_PATHS) or _GENERATED_DIRECTORY in f"/{path}":
         return "generated"
+    if path == _HALF_GENERATED:
+        # Generated between the markers and prose outside them, which is
+        # what the page says about itself in its own head.
+        return "generated" if inside else "respell"
     if path.startswith(_HISTORICAL_PATHS):
         return "historical"
     if path == _GUIDE:
@@ -267,10 +319,27 @@ def _bare(word: str) -> bool:
     return bool(word) and word[0].isalpha() and word.replace("-", "").isalnum()
 
 
+def retired(words: frozenset[str]) -> frozenset[str]:
+    """The compounds the re-cut took away.
+
+    A word the old top level had, that no row and no group of the tree
+    carries at any depth, and that this grammar coined by joining two
+    words with a hyphen. The last condition is what makes the set
+    checkable rather than a list: an ordinary word cannot be in it, and
+    a compound nothing answers to any more can be nothing else.
+    """
+    live = {word for row in cli.COMMANDS for word in row.words}
+    live |= {word for path in cli.GROUPS for word in path}
+    return frozenset(word for word in _RETIRED_WORDS if "-" in word and word not in live)
+
+
 def _matches(path: str, text: str, words: frozenset[str]) -> list[Spelling]:
-    """Every recognized invocation in one file."""
+    """Every recognized invocation in one file, and every retired word."""
     found: list[Spelling] = []
+    region = _generated_region(text) if path == _HALF_GENERATED else None
+    gone = retired(words)
     for number, line in enumerate(text.splitlines(), start=1):
+        inside = region is not None and region[0] < number < region[1]
         claimed: list[tuple[int, int]] = []
         for match in _INVOCATION.finditer(line):
             quoted = _command_line(match.group(1), match.group(2).strip(), words)
@@ -282,7 +351,7 @@ def _matches(path: str, text: str, words: frozenset[str]) -> list[Spelling]:
                     path=path,
                     line=number,
                     invocation=quoted,
-                    kind=_classified(path, match.group(1), quoted),
+                    kind=_classified(path, match.group(1), quoted, inside),
                 )
             )
         for match in _SHORTHAND.finditer(line):
@@ -296,7 +365,18 @@ def _matches(path: str, text: str, words: frozenset[str]) -> list[Spelling]:
                     path=path,
                     line=number,
                     invocation=quoted,
-                    kind=_classified(path, "config", quoted),
+                    kind=_classified(path, "config", quoted, inside),
+                )
+            )
+        for match in _RETIRED.finditer(line):
+            if match.group(1) not in gone:
+                continue
+            found.append(
+                Spelling(
+                    path=path,
+                    line=number,
+                    invocation=match.group(1),
+                    kind=_classified(path, "word", match.group(1), inside),
                 )
             )
     return found
@@ -354,12 +434,20 @@ def _typed(invocation: str) -> tuple[str, ...]:
 
 def names_something(invocation: str) -> bool:
     """Whether one quoted invocation names a command or a group the
-    tree actually has."""
+    tree actually has.
+
+    A command is matched by longest registered prefix, because what
+    follows its words is an address and an option list. A group is
+    matched EXACTLY, because a group takes nothing after it: `vinga
+    provider` is a legitimate way for prose to name the noun, and
+    `vinga provider frobnicate` is a command that does not exist. A
+    leading-prefix rule accepted both, which is the half of this guard
+    that was accepting invalid spellings.
+    """
     typed = _typed(invocation)
     if registered(typed) is not None:
         return True
-    nodes = _nodes()
-    return any(typed[:length] in nodes for length in range(len(typed), 0, -1))
+    return typed in _nodes()
 
 
 def test_the_manifest_is_the_census() -> None:
@@ -408,3 +496,109 @@ def test_every_class_is_one_of_the_three() -> None:
 if __name__ == "__main__":  # pragma: no cover - the regeneration entry point
     MANIFEST.write_text(manifest(), encoding="utf-8")
     sys.stdout.write(f"wrote {MANIFEST}\n")
+
+
+# The shapes this recognizer got wrong, kept as cases
+#
+# Every one of these is a real miss or a real false accept, found by
+# holding the guard against the tree it guards. Written as synthetic
+# lines rather than as file paths, so a fixture cannot go stale when the
+# site it was found at is fixed, and so what is being checked is the
+# rule rather than today's tree.
+
+WORDS = _command_words()
+
+
+def found_in(line: str, path: str = "docs/somewhere.md") -> list[Spelling]:
+    return _matches(path, line, WORDS)
+
+
+def test_a_quote_ends_a_command_line() -> None:
+    """The miss that let a stale runtime refusal publish: the sentence
+    was assembled in an f-string, the closing quote was not a terminator,
+    and the last word came out as `set"`, which is no command word, so
+    the whole line was dropped."""
+    [found] = found_in('            f"vinga-server config set"')
+
+    assert found.invocation == "vinga-server config set"
+
+
+def test_a_backtick_opens_a_shorthand_rather_than_forbidding_one() -> None:
+    """The family claimed to cover prose in backticks and then excluded
+    exactly that: a backtick before `config` made the match fail."""
+    [found] = found_in("written one at a time with `config apply`, which is")
+
+    assert found.invocation == "config apply"
+
+
+def test_a_retired_compound_is_recognized_on_its_own() -> None:
+    """Prose names a command by its word alone at least as often as by
+    an invocation, and a compound this grammar coined and then took
+    away is stale in that form too."""
+    [found] = found_in("`bind-device` is the same write for a MAC you know")
+
+    assert found.invocation == "bind-device"
+    assert not names_something(found.invocation)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "the prompt an agent is sent",
+        "a `pending` device is one waiting",
+        "`mcp-server` is a noun of the grammar",
+        "`default-agent` too",
+    ],
+    ids=["an ordinary word", "a retired word that is ordinary", "a noun", "another noun"],
+)
+def test_the_retired_family_matches_neither_english_nor_a_live_noun(line: str) -> None:
+    """The two conditions that keep it a rule about the grammar rather
+    than about the language: backticks, and a compound nothing answers
+    to any more."""
+    assert [row.invocation for row in found_in(line)] == []
+
+
+def test_the_half_generated_page_is_classified_by_its_markers() -> None:
+    """`cli.md` is prose above the marker and rendering below it.
+    Classifying the whole file as generated is what let a stale recovery
+    step publish for a milestone: nothing regenerates that half, so
+    nothing would ever have corrected it."""
+    page = "\n".join(
+        [
+            "prose: vinga-server config apply -f deployment.yaml",
+            _GENERATED_REGION[0],
+            "rendered: vinga-server config apply -f deployment.yaml",
+            _GENERATED_REGION[1],
+            "prose again: vinga-server config apply -f deployment.yaml",
+        ]
+    )
+
+    assert [row.kind for row in _matches(_HALF_GENERATED, page, WORDS)] == [
+        "respell",
+        "generated",
+        "respell",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("invocation", "names"),
+    [
+        ("vinga provider", True),
+        ("vinga provider secret", True),
+        ("vinga provider frobnicate", False),
+        ("vinga provider secret frobnicate", False),
+        ("vinga frobnicate", False),
+        ("vinga provider set llm local", True),
+        ("vinga-server config device pending list", True),
+        ("vinga device pending frobnicate", False),
+    ],
+)
+def test_a_group_is_named_exactly_and_a_command_by_its_words(
+    invocation: str, names: bool
+) -> None:
+    """A command is matched by longest registered prefix, because what
+    follows its words is an address. A group takes nothing after it, so
+    it is matched exactly: the leading-prefix rule accepted
+    `vinga provider frobnicate`, which is the half of this guard that
+    was accepting invalid spellings rather than missing valid ones."""
+    assert names_something(invocation) is names
