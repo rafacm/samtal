@@ -209,23 +209,23 @@ saying how to reproduce the deployment.
 
 ```bash
 vinga-server config export > deployment.yaml
-vinga-server config export agent assistant > assistant.yaml
+vinga-server config agent export assistant > assistant.yaml
 ```
 
 A credential never travels in a read, so an exported document does not
-carry one. What it carries instead is the `set-secret` command that
+carry one. What it carries instead is the `secret set` command that
 enters each stored credential, as comment lines at the foot of the file.
 Reproducing a deployment is therefore two steps, in this order:
 
 ```bash
 vinga-server config apply -f deployment.yaml
-# then the set-secret commands the export listed, one per stored slot
+# then the secret set commands the export listed, one per stored slot
 ```
 
 That order is not a nicety. A masked value is not something a creating
 write would accept, so an export that injected masks into the bodies
 would fail to apply onto an empty store, which is the one place an
-export most has to work; and `set-secret` addresses an entity, so it
+export most has to work; and a secret set addresses an entity, so it
 cannot run before the entity exists.
 
 ## When the server will not start
@@ -242,9 +242,9 @@ rebuild the store rather than to operate on it.
 # 3. Start it again, which boots clean on an empty one.
 # 4. Put the configuration back.
 vinga-server config apply -f deployment.yaml
-# 5. Re-enter each stored credential, one per set-secret command the
+# 5. Re-enter each stored credential, one per secret set command the
 #    export listed at the foot of that file.
-vinga-server config set-secret provider -- llm claude api_key
+vinga-server config provider secret set -- llm claude api_key
 ```
 
 The document in step 4 is a `vinga-server config export` taken while the
@@ -254,7 +254,7 @@ does not carry is the credentials themselves: a stored credential never
 travels in a read, so what the export carries is the command that enters
 each of them, and step 5 is running those commands. The values come from
 wherever the deployment keeps its secrets, the same place the first
-`set-secret` read them from.
+secret set read them from.
 
 This is a rebuild and not a repair, and the difference matters: it puts
 back what the export says and nothing else, so a row nobody knew about

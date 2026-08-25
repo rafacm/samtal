@@ -1205,10 +1205,10 @@ the defaults naming them and the agent inheriting them all arrive
 together and nothing is ever half applied. Applying is additive and
 never deletes, and the same document twice changes nothing.
 [`examples/`](examples/) holds a commented fragment per entity for
-writing one at a time with `config set`, which is what editing a
+writing one at a time with a noun's own `set`, which is what editing a
 deployment looks like once it exists.
 
-A board in front of you needs neither its MAC nor that `bind-device`
+A board in front of you needs neither its MAC nor that `device bind`
 line: `config device pending list` lists what is waiting and `config device pending claim`
 binds one by the code on its screen. That is
 [Onboarding a device](#onboarding-a-device).
@@ -1522,7 +1522,7 @@ and every command's own help page, is
 deployment whose server will not start is recovered by rebuilding its
 store rather than by editing it: stop the server, delete the database,
 boot clean, apply a kept `config export`, and re-enter each stored
-credential through the `set-secret` commands that export listed at its
+credential through the `secret set` commands that export listed at its
 foot. The full procedure is in the deployment notes, under
 [When the server will not start](#when-the-server-will-not-start).
 
@@ -1536,8 +1536,8 @@ forms are supported:
   ANTHROPIC_API_KEY`), an MCP server writes `$NAME` where the secret
   goes. The server reads the variable at startup and fails the boot when
   it is unset, rather than failing every conversation later.
-- **A value encrypted in the database**, written with `config
-  set-secret`, which reads it from stdin (not echoed at a terminal) or
+- **A value encrypted in the database**, written with a noun's own
+  `secret set`, which reads it from stdin (not echoed at a terminal) or
   from a named variable with `--from-env`, and never from an argument:
 
   ```bash
@@ -1563,8 +1563,8 @@ forms are supported:
 
 Instance configs stay out of the repository; `*.local.yaml` and `.env`
 are gitignored for local experiments, and the domain half of a local
-experiment is a short script of `config set` calls against a database
-directory of its own.
+experiment is a short script of `config <noun> set` calls against a
+database directory of its own.
 
 ## Security
 
@@ -2408,7 +2408,7 @@ told otherwise. Three answers, in the order they are worth reaching for:
 
 **Loopback or TLS, for the whole API and not only for secret writes.**
 The bearer token rides on every request and grants everything the API
-can do, `set-secret` included, so a plain `http://` request to it from
+can do, a secret set included, so a plain `http://` request to it from
 another machine puts the token on the wire in clear. This is a rule the
 client enforces rather than recommends: `vinga-server config` refuses a
 plain `http://` URL whose host is not a loopback address, with no flag
@@ -2427,7 +2427,7 @@ config command is a request to a server that is not answering. The way
 back is not a surgical edit: stop the server, delete the database, start
 it again on the empty one, apply the export taken while the deployment
 was healthy, and re-enter each stored credential through the
-`set-secret` commands that export listed at its foot.
+`secret set` commands that export listed at its foot.
 
 ```bash
 # Stop the container that will not serve, and take the database away.
@@ -2632,9 +2632,9 @@ vinga-server config device pending claim 418293 assistant
 ```
 
 The device polls every three seconds while it waits, so it connects
-seconds later with no restart and no power cycle. `bind-device` is the
-same write for a MAC you already know; `add-device` is for the board in
-front of you.
+seconds later with no restart and no power cycle. `device bind` is the
+same write for a MAC you already know; `device pending claim` is for the
+board in front of you.
 
 **Which devices are offered a code.** Exactly those the database
 resolves to nothing: no binding row of their own, and no

@@ -210,10 +210,10 @@ docs/reference/cli.md:107  generated  vinga-server config list
 docs/reference/cli.md:146  generated  vinga-server config list
 docs/reference/cli.md:155  generated  vinga-server config apply
 docs/reference/cli.md:211  generated  vinga-server config export
-docs/reference/cli.md:212  generated  vinga-server config export agent assistant
+docs/reference/cli.md:212  generated  vinga-server config agent export assistant
 docs/reference/cli.md:221  generated  vinga-server config apply
 docs/reference/cli.md:244  generated  vinga-server config apply
-docs/reference/cli.md:247  generated  vinga-server config set-secret provider
+docs/reference/cli.md:247  generated  vinga-server config provider secret set
 docs/reference/cli.md:250  generated  vinga-server config export
 docs/reference/cli.md:269  generated  vinga cli-reference
 docs/reference/cli.md:290  generated  vinga apply
@@ -499,7 +499,7 @@ vinga-server/src/vinga_server/onboarding/origin.py:253  respell  vinga-server co
 vinga-server/src/vinga_server/tools/mcp/manager.py:515  respell  vinga-server config status
 vinga-server/src/vinga_server/tools/mcp/manager.py:709  respell  vinga-server config status
 vinga-server/src/vinga_server/tools/publish.py:24  respell  vinga-server config status
-vinga-server/tests/integration/test_cli_live.py:1277  respell  vinga-server config device pending list
+vinga-server/tests/integration/test_cli_live.py:1278  respell  vinga-server config device pending list
 vinga-server/tests/smoke/seed-local-engines.sh:19  respell  vinga-server config provider set llm mock
 vinga-server/tests/smoke/seed-local-engines.sh:23  respell  vinga-server config provider set asr whisper
 vinga-server/tests/smoke/seed-local-engines.sh:28  respell  vinga-server config provider set tts mock

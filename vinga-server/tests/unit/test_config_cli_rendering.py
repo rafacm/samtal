@@ -273,7 +273,7 @@ def test_a_status_refusal_carries_nothing_of_the_body() -> None:
 
 # The assembled prompt
 #
-# The renderer is the point of these: `config prompt` is an inspection
+# The renderer is the point of these: `agent preview` is an inspection
 # command, so it prints whole blocks, and everything else in this module
 # prints through a renderer that strips and truncates.
 

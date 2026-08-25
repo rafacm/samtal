@@ -2,7 +2,7 @@
 real MCP server.
 
 Round-tripping an envelope proves the cryptography; it does not prove
-that a credential written with `config set-secret` reaches the client
+that a credential written with `a noun's own `secret set`` reaches the client
 that has to send it. So these build the providers the registry builds
 and spawn the stdio server the MCP tests spawn, and then look at where
 the plaintext ended up: in the client and in the child process's
@@ -101,7 +101,7 @@ async def test_a_stored_credential_reaches_a_real_openai_compatible_client() -> 
 async def test_ciphertext_wins_over_the_reference_written_for_the_same_slot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """set-secret is the later and more deliberate act. The reference is
+    """A secret set is the later and more deliberate act. The reference is
     not even read, so an unset variable behind it does not fail the boot
     the stored secret was set to fix."""
     monkeypatch.delenv("VINGA_TEST_KEY", raising=False)
