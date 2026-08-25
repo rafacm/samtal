@@ -199,14 +199,29 @@ class ServerHello(BaseModel):
     """The handshake acknowledgement. xiaozhi-sdk indexes `session_id`
     and every `audio_params` field without defaults, so none are
     optional, and a client that did not get a session id has nothing to
-    put in the messages it sends next."""
+    put in the messages it sends next.
+
+    `audio_params` is required for the same reason and it is worth saying
+    why it is not a `default_factory`, since that is what it was. A
+    default manufactures the whole object out of nothing, so a hello that
+    named no audio parameters at all parsed as one that named this
+    client's own guesses, and a reader would then pace and announce a
+    conversation by numbers the far side never sent. The fields INSIDE it
+    keep their defaults, which is a different question: a server that
+    omits `channels` is telling a device the ordinary thing, and a server
+    that omits the block is telling it nothing.
+
+    Requiring it is safe for the one real peer there is: `server_hello`
+    below takes the parameters as an argument rather than defaulting
+    them, and the server's only call site passes its own `OUTPUT_AUDIO`.
+    """
 
     model_config = ConfigDict(extra="ignore", frozen=True)
 
     type: Literal["hello"] = "hello"
     transport: str = "websocket"
     session_id: str
-    audio_params: AudioParams = Field(default_factory=AudioParams)
+    audio_params: AudioParams
 
 
 class SttMessage(BaseModel):
