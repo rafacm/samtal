@@ -1394,7 +1394,7 @@ it.
   have two homes; deepens `config/cli.py` by two rows and one
   `Invocation` field, and `protocol/messages.py` by making one fact
   public. No extra, nothing gated.
-- [x] **[M2: the conversation](2026-08-25-simulator-implementation.md#m2-the-conversation)** (PR TBD). Decisions 1, 1a, 5, 5a, 6 and 7: the
+- [x] **[M2: the conversation](2026-08-25-simulator-implementation.md#m2-the-conversation)** (PR #302). Decisions 1, 1a, 5, 5a, 6 and 7: the
   `run` verb, including the four-step ceremony whose fourth step is the
   second check-in; the `sim` extra carrying `websockets`, the dev group
   naming `vinga-server[serve,sim]`, and the tier VOCABULARY grown by a
