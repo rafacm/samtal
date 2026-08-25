@@ -291,8 +291,13 @@ explicitly.
    the controller and shared with workers), created and migrated
    once per worker from a same-prefixed template database; between
    tests it issues one `TRUNCATE ... RESTART IDENTITY CASCADE`
-   across both schemas' tables, which is milliseconds, preserves
-   the fresh-database-per-test property the throwaway directories
+   over the application tables enumerated from the two
+   `schema.py` metadata objects, which do not contain the
+   `alembic_version` tables, so the migration stamps survive by
+   construction rather than by an exclusion list (truncating them
+   would make the next opener rerun a baseline against populated
+   schemas). The statement is milliseconds, preserves the
+   fresh-database-per-test property the throwaway directories
    gave, and keeps re-opens cheap (an already-migrated database is
    a version-table check, exactly as today). The suite's
    connection settings are its own: the session conftest clears
