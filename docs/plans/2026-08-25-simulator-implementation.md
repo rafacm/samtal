@@ -133,6 +133,154 @@ verified against the tree:
   router module imports FastAPI, which the client half does not
   carry; the test is what keeps two spellings one fact.
 
+### PR review round
+
+External review of PR #299's diff (`main...06e15721`), 2026-08-25.
+Backend: codex CLI, model `gpt-5.6-sol`, read-only sandbox. Verdict as
+received: mergeable after the listed fixes. Six findings, three P1 and
+three P2. Five are adopted as prescribed and one is adopted as a
+convention change with its severity declined, recorded under the
+finding rather than left as a silent difference. One commit each, and
+every fix that closes a leak names the shape it is red against.
+
+1. **P1: the activation fields could reflect the secret OTA URL to
+   stdout.** `printable` bounds far-side text and takes the control
+   characters out of it, and a supplied address is perfectly printable
+   and perfectly short, so an endpoint that echoed the request's own
+   path or query into `code`, `message` or `challenge` would publish
+   through this command's stdout the segment no sentence here prints.
+   The four-surface cases covered refused replies only, despite the
+   plan's exhaustive claim.
+
+   *Resolution* (`664b345f`): `Endpoint` gains the inventory of its own
+   parts a reply may not hand back (the path and the query, whole and
+   in their parts, longest first) and one door those three fields go
+   through, `repeated`, which redacts the inventory case-insensitively
+   and then bounds and makes printable, so the two rules cannot be
+   applied by halves. The host is deliberately not in the inventory:
+   the activation message carries the deployment's origin on purpose,
+   because that is the line the firmware draws for a person to type
+   into a browser. Parts shorter than four characters are left alone,
+   since those are what a path is made of (`/x/`, `/v1/`) rather than
+   what it hides, and matching them as substrings would take a letter
+   out of the middle of an ordinary word. Redaction rather than refusal
+   because a deployment whose `public_url` carries a path would
+   otherwise have a correct reply refused. Bite: rendering the three
+   fields through `printable` alone fails the new case in all three of
+   its parametrizations.
+
+2. **P1: a superseded claim exposed the rejected `--mac` in the HTTP
+   body and the CLI error.** `claim_device`'s two `DeviceAlreadyBound`
+   refusals interpolated the normalized MAC, which the API places in a
+   response body and the CLI relays to stderr.
+
+   *Resolution* (`a1a06106`): the mechanism is adopted and the severity
+   is declined. **The leak framing does not hold**, and the evidence is
+   in this repository: the plan's own decision 2 says in as many words
+   that a MAC is not a credential (it is printed on the box and
+   broadcast in the clear in every Wi-Fi frame), and the same route
+   answers a SUCCESSFUL claim with `device <mac> bound to <agent>`, on
+   purpose and under a case that says why ("the thing the operator did
+   not have to go and find"), which the simulator's own claim prints to
+   stdout. What does hold is the convention: every other refusal in the
+   configuration store names its condition without the value
+   (`NO_SUCH_DEVICE`), these two were the exception, this is the one
+   write here a caller reaches without sending the MAC, and its
+   sentence travels further than any other in that file. So both become
+   public fixed constants, `ALREADY_BOUND` and `ALREADY_COVERED`. The
+   two existing pins moved from a substring of the old sentence to the
+   whole constant with the address asserted absent, and two cases
+   joined them: the superseded claim over the API body and the log
+   records, and the same race met through the simulator's claim over
+   stdout, stderr, the records and the exception chain. Bite:
+   prefixing either refusal with `devices.{written}: ` again fails the
+   simulator's case on the sentence assertion.
+
+3. **P1: concurrent requests could undo the logger quieting.**
+   `logs.quieted` recorded in its own docstring that two threads over
+   the same names would restore each other's levels, as a limit rather
+   than a defect, and `device_endpoint.requested` relies on it.
+
+   *Resolution* (`f1fc5f0c`): the whole block, from raising the level
+   to putting it back, is taken under one module-level reentrant lock,
+   which is the mechanism the review prescribed. Reentrant so that a
+   caller already inside one boundary opening another does not
+   deadlock; what it costs is that two threads quieting the same
+   loggers take turns, which is the shape both callers already have.
+   The failure is a leak rather than a cosmetic one and the new case
+   shows it whole: the first thread in saves the loud level, the second
+   saves the quiet one, and the first OUT restores the loud level under
+   a request the second is still making. Bite: with the lock removed
+   the interleaving assertion fails, and past it the second request's
+   URL is in a captured httpx record and both loggers end at WARNING
+   rather than the INFO they started at.
+
+4. **P2: the activation ceiling did not bound an in-flight poll.** The
+   deadline was checked between polls while every poll carried the flat
+   thirty-second read bound, so a valid `timeout_ms=6000` could still
+   hold the first poll for thirty seconds. The existing case summed
+   mocked sleeps and passed either way.
+
+   *Resolution* (`aec95a1c`): the remaining budget is computed before
+   each poll and passed to the request, and `device_endpoint` shortens
+   that request's connect and read bounds to it, never lengthens them,
+   which is the direction the rule about a far side's own number
+   already runs in. The cap is set on the client the seam built, since
+   the seam takes an address alone and a suite's replacement is
+   entitled to build whatever client it likes. The suite's clock grew a
+   hand for time spent inside an answer, because a mock transport
+   answers instantly. Bite: with the budget dropped, the new case reads
+   a thirty-second read bound off a poll made inside a six-second
+   ceiling. The companion case (a transport that consumes the whole
+   budget ends the burst) pins the property and says in its own
+   docstring that it does not bite, since the check after an answer
+   already stopped the burst there.
+
+5. **P2: the identity case permitted the missing `Client-Id` it claimed
+   to prohibit.** The poll sent the MAC alone, and the case accepted
+   `{client_id, ""}`.
+
+   *Resolution* (`be96626f`): the poll's headers are derived from the
+   check-in's rather than written beside them, with the activation
+   version added, which is what the firmware's own `Ota` does (one
+   header block, every request under it) and what stops a second list
+   being the first with something missing. The recording is held to the
+   whole of it: every request of the ceremony carries exactly the
+   derived MAC and exactly the derived client id. Bite: restoring the
+   two-header poll fails at the second request, where the client id is
+   the empty string.
+
+6. **P2: the capability help said the firmware block is read and
+   reported, and it was discarded.** The reviewer offered the fork
+   explicitly; the maintainer's instruction named it too. **Modelling
+   it was chosen over dropping the claim**, because decision 5 is about
+   the table being true of a simulator that claims fidelity, the
+   server's OTA reply does send the block on every check-in, and a real
+   board reads it: that block is where a deployment says "you are up to
+   date", by naming the version the board just reported with no URL, or
+   offers an image by naming one. Dropping the claim would have made
+   the simulator less faithful to buy the same honesty.
+
+   *Resolution* (`f5e25013`): the block is modelled and read, and what
+   crosses into the state is the two facts a board acts on rather than
+   the strings, since what a board does with the block is decide and
+   not display: an image was offered or it was not, and the version
+   named back is this board's own or it is not. So a verdict says
+   something true about it without repeating a word of it, and an
+   address this simulator will never open is one it never holds. The
+   table gains a supported row for the reading and keeps an unsupported
+   row for the fetching, which is the half that stays false. `cli.md`
+   and the spelling census follow the epilog. Bite: with the block
+   discarded, three of the five rows of the new table report the wrong
+   sentence.
+
+One thing the round left behind rather than fixed, recorded because it
+is a trap and not a defect: a prose row of the capability table whose
+text begins `reading ` or `sending ` is read as a message row by the
+both-ways pin, which tells the two halves of the wire apart by those
+prefixes. The firmware row is worded around it with the reason beside
+it.
+
 ### Verification
 
 From `vinga-server/` on the milestone head `c984a122`: `uv run ruff
@@ -144,3 +292,12 @@ probe times out instead of refusing; it passes in CI); `uv run pytest
 tests/integration -q` 175 passed; the openapi, events and cli
 reference drift checks byte-clean locally. The image and smoke lane
 are CI's to prove.
+
+After the review round, on `f5e25013`: `uv run ruff check .` clean;
+`uv run pytest tests/unit -q -n auto --dist loadfile` 3904 passed, 19
+skipped, nothing failed, the network-dependent case above included
+this time; `uv run pytest tests/integration -q` 175 passed; `cli.md`
+regenerated through the workflow's own procedure and the spelling
+census regenerated, with `events.md`, `domain-config.md` and
+`api-openapi.json` byte-identical, which is the closed move list this
+milestone declared.
