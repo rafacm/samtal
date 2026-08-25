@@ -6,7 +6,8 @@ answerable only by an installation that has that half, and each of them
 is answered with a fixed sentence rather than with an ImportError:
 `vinga-server` with nothing after it, which means serve, and the two
 commands of the configuration grammar that read the server's own
-modules, `openapi` and `ota-url`, which the commit after this one gates.
+modules, `openapi` (which builds the API application to describe it) and
+`ota-url` (which derives a URL through the onboarding package).
 
 Two sentences and not three: serving is one fact and a gated command is
 another, and `openapi` and `ota-url` are the same fact as each other.
@@ -30,11 +31,14 @@ and the clean-venv lane is where the real absence is proven.
 
 import builtins
 from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 
 from tests.support.config_cli import chain, logged
 from vinga_server import main as entrypoint
+from vinga_server.config import cli
+from vinga_server.config.loader import ConfigError
 
 # One per field that could carry a pasted credential, so a leak says
 # which field it came out of. None of them is a real credential and each
@@ -115,3 +119,118 @@ def test_the_serve_refusal_leaks_nothing_it_was_given(
     for sentinel in (IMPORT_SENTINEL, CONFIG_PATH_SENTINEL, ARGV0_SENTINEL):
         for surface in surfaces:
             assert sentinel not in surface, sentinel
+
+
+# The two gated commands
+
+
+@pytest.fixture
+def offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A machine with the device-auth secret and a file half, and no
+    server, no token and no database anywhere. Both gated commands need
+    none of those, which is what makes their refusal about the missing
+    half and nothing else."""
+    monkeypatch.delenv("VINGA_CONFIG", raising=False)
+    monkeypatch.delenv("VINGA_API_SECRET", raising=False)
+    monkeypatch.delenv(cli.API_URL_ENV, raising=False)
+    monkeypatch.setenv("VINGA_AUTH_SECRET", "a-fixed-secret-for-the-vector")
+    monkeypatch.setenv("VINGA_SERVER__DATABASE__DIR", str(tmp_path / "db"))
+    named = tmp_path / f"{CONFIG_PATH_SENTINEL}.yaml"
+    named.write_text("server:\n  public_url: https://voice.example\n", encoding="utf-8")
+    return named
+
+
+def _gated(named: Path) -> tuple[tuple[str, list[str]], ...]:
+    """The two, each with the module whose absence gates it and the
+    command line that reaches it."""
+    return (
+        ("vinga_server.config.api", ["openapi"]),
+        ("vinga_server.onboarding.origin", ["--config", str(named), "ota-url"]),
+    )
+
+
+def test_both_gated_commands_answer_the_same_one_sentence(
+    offline: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """One sentence for the pair, because it says one thing: this
+    command needs the server half. Two sentences for one fact would be
+    the duplication the design guide names."""
+    said = []
+    for module, argv in _gated(offline):
+        with monkeypatch.context() as patched:
+            _refuses(module)(patched)
+            assert cli.main(argv) == 1, argv
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        said.append(captured.err.strip())
+
+    assert said == [cli.NEEDS_THE_SERVER_HALF, cli.NEEDS_THE_SERVER_HALF]
+
+
+def test_a_gated_refusal_leaks_nothing_it_was_given(
+    offline: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Every field this pair can be given, one sentinel each.
+
+    `openapi` takes nothing at all, so its own surface is the
+    ImportError; `ota-url` takes the path of the file half, which is the
+    file a deployment keeps its secrets beside, and it is named here
+    with a credential-shaped path so that a sentence quoting the path
+    would fail.
+    """
+    for module, argv in _gated(offline):
+        caplog.clear()
+        with monkeypatch.context() as patched, caplog.at_level(0):
+            _refuses(module)(patched)
+            assert cli.main(argv) == 1, argv
+        captured = capsys.readouterr()
+        surfaces = (captured.out, captured.err, logged(caplog))
+        for sentinel in (IMPORT_SENTINEL, CONFIG_PATH_SENTINEL):
+            for surface in surfaces:
+                assert sentinel not in surface, (argv, sentinel)
+
+
+def test_the_gated_refusal_carries_no_exception_chain(
+    offline: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The fourth surface, read where a walker would find it.
+
+    `cli.main` prints the refusal and returns, so the exception is not
+    available through it: the sentence is raised by the command function
+    and caught by the boundary. This drives the command function
+    directly to hold the raise itself to carrying no ImportError
+    behind it, which is the whole reason the answer is recorded inside
+    the handler and raised outside it.
+    """
+    with monkeypatch.context() as patched:
+        _refuses("vinga_server.config.api")(patched)
+        with pytest.raises(ConfigError) as refused:
+            cli._from_the_server_half(cli.docgen.openapi)
+
+    assert str(refused.value) == cli.NEEDS_THE_SERVER_HALF
+    assert refused.value.__cause__ is None
+    assert refused.value.__context__ is None
+    assert IMPORT_SENTINEL not in chain(refused.value)
+
+
+def test_the_gated_sentence_names_no_value_at_all() -> None:
+    """The two constants, held to being constants. A sentence assembled
+    from an invocation would pass every case above on the day it was
+    written and leak on the first command that carried something else."""
+    for sentence in (cli.NEEDS_THE_SERVER_HALF, entrypoint.CANNOT_SERVE):
+        assert "{" not in sentence
+        assert "%s" not in sentence
+
+
+def test_the_gated_pair_is_exactly_two(offline: Path) -> None:
+    """The inventory, held closed from the production side.
+
+    A third command that grew a server-side import would be a command
+    the wheel lane runs and finds refusing, which is a failure a long
+    way from its cause. Named here instead, beside the reason each is
+    gated.
+    """
+    assert {argv[-1] for _, argv in _gated(offline)} == {"openapi", "ota-url"}
