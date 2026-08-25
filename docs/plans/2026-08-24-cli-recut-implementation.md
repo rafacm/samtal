@@ -349,9 +349,10 @@ PR TBD.
   two re-exports its many server-side readers ask it for.
 - `vinga_server/serving.py`, the whole serve lifecycle, so `main.py`
   holds dispatch and its sentences and weighs pydantic and dotenv.
-- The two gated commands, `openapi` and `ota-url`, and the one sentence
-  they share; the serve refusal in `main.py` and the sentence it
-  answers with.
+- The three gated sites, `openapi`, `ota-url` and the
+  `vinga-server conversations` group, and the one sentence they share
+  (`loader.NEEDS_THE_SERVER_HALF`); the serve refusal in `main.py` and
+  the sentence it answers with.
 - The tiers in `pyproject.toml`: the client half as the default
   install, `serve` as an extra, and the dev group's `vinga-server[serve]`
   entry that keeps the contributor door one command.
@@ -359,9 +360,10 @@ PR TBD.
   steps, with each `uv sync` site's tier stated.
 - The three #287 structure tests
   (`tests/unit/test_cli_import_weight.py`), the missing-half refusals
-  with their sentinels (`tests/unit/test_missing_server_half.py`), and
-  the tier closure with the contributor smoke
-  (`tests/integration/test_tier_closure.py`).
+  with their sentinels (`tests/unit/test_missing_server_half.py`, whose
+  simulation is a meta-path finder because a module resolved by name
+  never reaches `builtins.__import__`), and the tier closure with the
+  contributor smoke (`tests/integration/test_tier_closure.py`).
 - Decision 13's M2 prose: `cli.md`'s installation head, the server
   README's two classified sites, and the changelog.
 
@@ -415,9 +417,44 @@ touched, per decision 8.
 | `docs/reference/cli.md` installation head | all three | rewritten around the three doors |
 | `config.deploy.example.{sh,yaml}`, `config.example.yaml` | operator | **no install or sync line in any of them**, checked rather than assumed |
 
+### Rebased onto the merged M1
+
+This milestone was written against M1's branch tip and rebased onto
+`main` at `2238f19b`, after M1 (PR #295) merged with three review
+rounds behind it. Fourteen commits dropped as already upstream; the nine
+of this milestone replayed, four of them with conflicts.
+
+- **`config/cli.py`'s import block.** M1's fix round added
+  `load_environment_file` to the loader import while this branch was
+  dropping `views` from the line above it. Both kept.
+- **`main.py`'s import block.** This branch rewrites the file and M1
+  changed its imports and the head of `main()`. Resolved by keeping
+  this branch's dispatch-only module and M1's `load_environment_file`
+  boundary inside `main()` whole, which is where it already merged.
+- **`docs/reference/cli.md`, three hunks.** M1's finding-4 fix
+  (`f710a3a0`) respelled the same three stale spellings this branch's
+  prose commit had fixed, and spelled two of them differently: no
+  backticks around `secret set` in prose, and `provider secret set --
+  llm claude api_key` with the separator. **Main's respelling was taken
+  at every one of the three**, and this branch's own additions (the
+  three-doors installation head and the paragraph naming the gated
+  commands) kept. M2's deviation 6 below is therefore now about a fix
+  that landed upstream first.
+- **`tests/unit/command-spellings.txt`, at four commits.** A generated
+  artifact, so it was regenerated with its own tool at each step rather
+  than merged.
+
+Nothing of M1 was weakened. The `.env` boundary, `load_environment_file`,
+`_read_from`/`_answered`, the pre-parse `--version`, `PROGRAM` and
+`SERVER_PROGRAM` in `models.py`, `loader.served()` and the strengthened
+census all survive; the last of them is what re-classified
+`docs/reference/cli.md` by marker, which is how its hand-written head
+became fifteen checked `respell` rows instead of one unchecked
+`generated` file.
+
 ### Deviations from the plan
 
-Six.
+Seven.
 
 1. **The sweep found a site the plan did not name, and it was broken
    rather than stale.** `vinga-server/README.md` documented
@@ -460,7 +497,7 @@ Six.
    the new import-weight test; that case stays where the cost of
    importing the package is measured.
 
-5. **The help strings of the two gated commands are unchanged**, so
+5. **The help strings of the gated commands are unchanged**, so
    `cli.md`'s generated region is byte-identical after M2. Saying "needs
    the server half" on a help page would move an artifact the plan's
    move list gives to M1 alone, and the fact belongs to the installation
@@ -469,40 +506,50 @@ Six.
    they did.
 
 6. **Three stale spellings in `cli.md`'s hand-written head were fixed
-   here.** They are M1's territory and M1 missed them, and one of them
-   is a live `vinga-server config set-secret provider -- llm claude
-   api_key` telling a reader to run a command the tree no longer has.
-   Fixed in M2 because M2 edits that head and the image publishes on
-   this merge. Why the guard did not catch them is a discovery below.
+   on both branches.** They are M1's territory, and M1's own third
+   review round fixed them in `f710a3a0` while this branch was fixing
+   them too. Main's spelling was taken at every one of the three on the
+   rebase; the fix is recorded here because it was found from this side,
+   and because the guard's blindness to it is a discovery below.
+
+7. **The plan's gated pair is a gated trio, and the third site is not
+   in the grammar at all.** `vinga-server conversations schema` renders
+   the conversation store's tables off the SQLAlchemy metadata, so on a
+   client-only install it ended in a `ModuleNotFoundError` traceback.
+   The plan enumerates two gated commands, and its inventory is the
+   `vinga` grammar's own tree, which this group is a sibling of rather
+   than a member of; the standard it is held to is the entry point's,
+   and `main.py` has no other answer that is a traceback. So it answers
+   the same sentence, which moved its definition down to
+   `config/loader.py`: `main.py` and `config/cli.py` are its two
+   readers and only the loader is below both. `cli` re-exports it.
+   `config`, `events` and `doctor` are deliberately NOT gated: they are
+   the client half, so an installation that reached `main.py` has them,
+   and gating them would turn a real bug into a sentence saying
+   something untrue about the installation. A case asserts that
+   division from the production side.
 
 ### Discoveries
 
-- **The census classifies `docs/reference/cli.md` `generated`, and half
+- **The census classified `docs/reference/cli.md` `generated`, and half
   of it is not.** The page is written by hand above the marker and
-  generated below it, so the standing guard covers the half that cannot
-  drift and skips the half that can. That is how a `set-secret`
+  generated below it, so the standing guard covered the half that
+  cannot drift and skipped the half that can. That is how a `set-secret`
   invocation survived the rename inside the very document the rename
-  regenerates. The classification is by path, so the fix is a
-  by-region one, which is M1's tool to change.
+  regenerates. M1's third round fixed it by classifying by marker
+  rather than by path, and the head is fifteen checked `respell` rows
+  on this branch.
 
-- **`registered` matches a prefix and stops**, so a quoted
-  `export agent assistant` resolves to the flat `export` row and the
-  guard reports it as naming something. One other match in the tree is
-  stale for that reason and was left alone as not this milestone's:
-  `tests/unit/test_docker_entrypoint.py:128` drives
-  `("config", "show", "provider", "llm", "claude")`, which is the old
-  grammar, in a test whose subject is that the entrypoint passes argv
-  through unchanged.
-
-- **`vinga-server conversations schema` on a client-only install ends in
-  an ImportError traceback.** It is outside the plan's gated inventory,
-  which is the `vinga` grammar's own tree, and outside the wheel lane's
-  coverage for the same reason. It takes no value from the command line,
-  so nothing leaks; what it does is answer with a traceback on a path
-  where every other answer out of that entry point is a sentence. Left
-  as it is, because a third gated site is a decision the plan does not
-  make, and recorded here so it is decided rather than rediscovered.
-  `events reference` and `doctor` both run fine from that install.
+- **`registered` matches the longest registered prefix and stops**,
+  which the marker fix does not reach. A quoted
+  `export agent assistant` resolves to the flat `export` row, and the
+  three words after it are never asked about, though the row itself
+  takes no positional and the tree refuses that line. That is how
+  `tests/unit/test_docker_entrypoint.py:128` kept driving
+  `("config", "show", "provider", "llm", "claude")` after the rename;
+  it is quoted in this milestone's grammar order now, and the matcher
+  is left alone, since the live lane and the wheel lane read it too and
+  changing it under a dependency change is the wrong place for it.
 
 - **A dependency group can name its own project's extra.** `dev =
   ["vinga-server[serve]", ...]` resolves, and it is what keeps
@@ -511,8 +558,9 @@ Six.
   the whole of the diff.
 
 - **The tier closure costs about 45 seconds** of the integration lane,
-  which went from a measured 3m11s to 3m22s on this machine. Two
-  environments built once per module, and the largest single item is the
+  which is 3m33s with it on this machine against the 3m11s the lane cost
+  before this milestone. Three environments built once per module, and
+  the largest single items are the serve install's boot and the
   thirty-odd `--help` subprocesses that run the ungated inventory.
 
 ### Resolutions of what the plan left open
@@ -530,26 +578,35 @@ Six.
 
 ### Verification
 
-From `vinga-server/`, everything green:
+From `vinga-server/`, on the rebased tree, everything green:
 
 - `uv run ruff check .`: `All checks passed!`
 - `uv run mypy`: `Success: no issues found in 4 source files`
-- `uv run pytest tests/unit -q -n auto --dist loadfile`: `3580 passed,
-  21 skipped in 43.15s`
-- `uv run pytest tests/integration -q`: `145 passed in 202.15s`
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: `3663 passed,
+  19 skipped in 43.17s`
+- `uv run pytest tests/integration -q`: `148 passed in 213.22s`
 - The six drift checks exactly as CI runs them (`domain-config.md`,
   `conversations-schema.md`, `events.md`, `api-openapi.json`, `cli.md`,
   and the recipes inside it), each regenerated under its own lane and
   diffed: all six identical.
+- The spelling census over the whole tree: 999 matches over 125 files
+  (243 `respell`, 579 `historical`, 177 `generated`), the manifest
+  regenerated and diffed, and every `respell` this milestone added or
+  moved naming a command the tree has.
+- Importing `config.cli` loads 16 `vinga_server` modules and none of
+  FastAPI, SQLAlchemy, cryptography or Alembic. Importing `main` loads
+  12 and none of them either.
 - Both tiers into clean environments, which is
-  `tests/integration/test_tier_closure.py` and also run by hand: the
-  client install resolves to its own `site-packages`, carries all six
-  client distributions and none of the ten serve ones, imports
+  `tests/integration/test_tier_closure.py` (17 cases) and also run by
+  hand: the client install resolves to its own `site-packages`, carries
+  all 6 client distributions and none of the 10 serve ones, imports
   `config.cli`, answers `vinga --version`, prints a help page for every
-  ungated row of `COMMANDS` as a subprocess, and refuses `openapi` and
-  `ota-url` with the fixed sentence and exit 1; the serve install
-  carries both tiers and reaches the boot rather than the cannot-serve
-  sentence.
+  ungated row of `COMMANDS` as a subprocess, refuses `openapi`,
+  `ota-url` and `vinga-server conversations schema` with the fixed
+  sentence and exit 1, and still answers `events reference` and
+  `doctor`; the serve install carries both tiers, renders the
+  conversations schema, and reaches the boot rather than the
+  cannot-serve sentence.
 - The contributor smoke: `uv sync --frozen` into an environment of the
   test's own, the whole serve tier present, and `vinga-server` reaching
   the boot.
