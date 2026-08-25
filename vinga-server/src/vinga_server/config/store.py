@@ -205,6 +205,37 @@ class LiveBinding:
 # validates them names the field that failed inside this.
 _LIVE_BINDING_LOCATION = "the stored device bindings"
 
+# What a conditional bind refuses with, and why neither sentence names
+# the address it refused.
+#
+# These two are the only refusals in this file reached by a race rather
+# than by a request: a code is addressed by its six digits, and the MAC
+# behind it is resolved here, so a caller learns it from the refusal
+# rather than sending it. The refusal travels furthest of any in this
+# file as well, out of the repository into an API response body, into
+# every log the caller keeps, and onto the stderr of whatever holds the
+# code, which since `vinga simulator check-in --claim` includes a
+# command whose whole discipline is that a device-facing exchange
+# publishes nothing it was handed.
+#
+# So they say the condition and not the value, which is the shape every
+# fixed sentence in this package already has (`NO_SUCH_DEVICE` names no
+# MAC either). What is lost is nothing: the caller is holding the code,
+# and both sentences send them to the command that lists what is bound.
+ALREADY_BOUND = (
+    "devices: this device has been bound since it started showing that activation "
+    "code, so the code binds nothing now. Nothing was changed, and the device reaches "
+    "its agents at its next check. Read what it is bound to with "
+    "`vinga-server config device show <mac>`, or bind it again by its MAC"
+)
+
+ALREADY_COVERED = (
+    "devices: a default agent has been set since this device started showing that "
+    "activation code, and it covers every device that has no binding of its own, so "
+    "the code binds nothing now. Nothing was changed. To give this device an agent of "
+    "its own, bind it by its MAC"
+)
+
 
 @dataclass(frozen=True)
 class Entity[Entry]:
@@ -545,27 +576,21 @@ class ConfigStore:
         the person holding the board knows which is meant. What the
         refusal costs is one command, and the device is configured
         either way: it reaches its agent at its next check.
+
+        Both refusals are fixed sentences naming no address, for the
+        reason recorded where they are written: this is the one path
+        here a caller reaches without sending the MAC, and its sentence
+        travels into an API body, a log and the stderr of whatever holds
+        the code.
         """
         binding = _binding(mac, list(agents))
         written, names = next(iter(binding.items()))
         with self._transaction() as connection:
             domain = _read_domain(connection)
             if written in domain.devices:
-                raise DeviceAlreadyBoundError(
-                    f"devices.{written}: this device has been bound since it started "
-                    f"showing that activation code, so the code binds nothing now. "
-                    f"Nothing was changed, and the device reaches its agents at its "
-                    f"next check. Run `vinga-server config device show {written}` to "
-                    f"see what it is bound to, or bind it again by its MAC"
-                )
+                raise DeviceAlreadyBoundError(ALREADY_BOUND)
             if domain.default_agent is not None:
-                raise DeviceAlreadyBoundError(
-                    f"devices.{written}: a default agent has been set since this device "
-                    f"started showing that activation code, and it covers every device "
-                    f"that has no binding of its own, so the code binds nothing now. "
-                    f"Nothing was changed. To give this device an agent of its own, "
-                    f"bind it by its MAC"
-                )
+                raise DeviceAlreadyBoundError(ALREADY_COVERED)
             domain.devices.update(binding)
             _refuse_unresolved(domain)
             _device_row(written, names).write(connection)
