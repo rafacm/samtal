@@ -31,7 +31,7 @@ from typer._click.core import Context
 
 from tests.support.config_cli import SECRET, chain, runner
 from tests.support.events import both_formats
-from vinga_server.config import cli, docgen
+from vinga_server.config import cli, docgen, entities
 
 
 @pytest.fixture
@@ -468,9 +468,32 @@ def test_every_command_describes_every_parameter_it_declares(
     assert helped.count("[required]") == sum(1 for one in declared if one.required)
 
 
-@pytest.mark.parametrize(
-    "kind", [row.words[1] for row in cli.COMMANDS if row.words[0] == "set"]
-)
+# The rows that write an entity from a fragment
+#
+# Selected by the verb being the LAST word and the kind naming a
+# descriptor, which is what the noun-first turn made of them. Selecting
+# on the FIRST word was what these two parametrizations did before, and
+# after the turn no row has `set` first: pytest built zero cases, and
+# both tests would have passed with every field and the credential
+# warning gone from every page. A parametrization that can empty itself
+# is a test that can stop testing without failing, so the count is
+# asserted below rather than assumed.
+WRITING_KINDS = [
+    row.kind
+    for row in cli.COMMANDS
+    if row.words == (row.kind, "set") and row.kind in set(docgen.entity_names())
+]
+
+
+def test_every_kind_that_takes_a_fragment_has_a_case() -> None:
+    """The guard on the two parametrizations under this: five kinds
+    write from a fragment, and a selection that found none of them would
+    make both of them vacuous rather than red."""
+    assert WRITING_KINDS
+    assert sorted(WRITING_KINDS) == sorted(kind.name for kind in entities.ENTITIES)
+
+
+@pytest.mark.parametrize("kind", WRITING_KINDS)
 def test_a_set_help_lists_the_model_it_writes(
     run, capsys: pytest.CaptureFixture[str], kind: str
 ) -> None:
@@ -484,7 +507,7 @@ def test_a_set_help_lists_the_model_it_writes(
     has to know, and a type and a default with no sentence beside them
     say what a key holds without saying what it is.
     """
-    helped = printed_help(run, capsys, "set", kind)
+    helped = printed_help(run, capsys, kind, "set")
     model = docgen.entity(kind).model
 
     for name, info in model.model_fields.items():
@@ -496,9 +519,7 @@ def test_a_set_help_lists_the_model_it_writes(
         assert _said(_first_sentence(info.description)) in _said(helped), name
 
 
-@pytest.mark.parametrize(
-    "kind", [row.words[1] for row in cli.COMMANDS if row.words[0] == "set"]
-)
+@pytest.mark.parametrize("kind", WRITING_KINDS)
 def test_a_set_help_says_a_credential_is_never_one_of_its_arguments(
     run, capsys: pytest.CaptureFixture[str], kind: str
 ) -> None:
@@ -508,10 +529,10 @@ def test_a_set_help_says_a_credential_is_never_one_of_its_arguments(
     for one even where the key would have been accepted, which is that
     an argument lands in shell history and in the process list, and it
     is on every `set` page because every one of them takes pairs."""
-    helped = printed_help(run, capsys, "set", kind)
+    helped = printed_help(run, capsys, kind, "set")
 
     assert _said(cli.SECRET_NOT_A_PAIR) in _said(helped)
-    assert _said(f"{cli.DISPATCHED} <kind> secret set") in _said(helped)
+    assert _said(f"{cli.PROGRAM} <kind> secret set") in _said(helped)
 
 
 # The two positions a global option is given in
