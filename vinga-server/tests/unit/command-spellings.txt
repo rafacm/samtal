@@ -522,7 +522,11 @@ docs/plans/2026-08-23-typer-cli.md:373  historical  vinga config apply
 docs/plans/2026-08-23-typer-cli.md:586  historical  set-secret
 docs/plans/2026-08-23-typer-cli.md:590  historical  set-secret
 docs/plans/2026-08-24-cli-recut-implementation.md:537  historical  set-secret
-docs/plans/2026-08-24-cli-recut-implementation.md:936  historical  config reference documents
+docs/plans/2026-08-24-cli-recut-implementation.md:941  historical  config reference documents
+docs/plans/2026-08-24-cli-recut-implementation.md:987  historical  vinga list agents
+docs/plans/2026-08-24-cli-recut-implementation.md:988  historical  vinga list
+docs/plans/2026-08-24-cli-recut-implementation.md:1092  historical  vinga-server config ota-url
+docs/plans/2026-08-24-cli-recut-implementation.md:1097  historical  config ota-url
 docs/plans/2026-08-24-cli-recut.md:19  historical  vinga-server config set provider llm
 docs/plans/2026-08-24-cli-recut.md:20  historical  vinga provider set llm local
 docs/plans/2026-08-24-cli-recut.md:73  historical  config bind-device

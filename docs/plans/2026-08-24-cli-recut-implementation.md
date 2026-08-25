@@ -811,10 +811,15 @@ milestone's own record adds.
 
 ### The wheel lane, its shape and its cost
 
-Twelve cases, nineteen seconds on this machine, including the build and
-the install. The shape, in the order it runs:
+Sixteen cases, and about twenty seconds on an idle machine, including
+the build and the install. The shape, in the order it runs:
 
-- **Provenance first**, before any command. `vinga_server` resolves
+- **The artifact's own closure**, read out of the built file:
+  `Requires-Dist` held to the declared client tier and to the `serve`
+  extra in both directions, no undeclared extra, and then the serve half
+  asserted absent from the environment that file made, as distributions
+  and as importable modules.
+- **Provenance next**, before any command. `vinga_server` resolves
   inside the clean environment, does not resolve to `src/`, and the
   installed distribution's `direct_url.json` names the wheel this lane
   built. The third is the one the first two cannot make: an editable
@@ -944,18 +949,85 @@ words stop where an address begins") and what it did not do.
 
 The manifest moved with both: the invocations of addressed commands
 shorten to their command words, so two sites quoting one command with
-different arguments now read as one entry. 1011 matches over 125 files
-(243 `respell`, 591 `historical`, 177 `generated`), against M2's 999
-over 125 before its own fix round; the growth is this milestone's own
-negative fixtures, which live in a file classified `historical` for the
-reason its own comment gives.
+The manifest moved with the arity rule, and moved back with the review
+round: the capture keeps every bare word again, so an addressed command
+reads as the whole line a document quotes. 1024 matches over 124 files
+(242 `respell`, 605 `historical`, 177 `generated`), against M2's 999
+over 125 before its own fix round. The file count fell by one because
+`docs/concepts.md`'s only match was an English phrase that is no longer
+written as one.
 
 No stale `respell` spelling survives, and no site in the tree had to be
 reworded to make that true.
 
+### The sol round on PR #298
+
+Six findings, two P1 and four P2, all adopted as prescribed, one commit
+each. Verdict as received: mergeable after the fixes. Four of the six
+were assertions that were not asserting what they said, which is the
+same shape M1's round found and worth naming as a pattern rather than
+six accidents.
+
+- **The wheel's own closure was never checked.** This milestone claimed
+  the closure proof had been upgraded to the artifact, and the artifact
+  was the one thing nobody opened: the tier lane holds an environment to
+  what the lock says the DECLARATION resolves to, and the metadata a
+  resolver actually consults is the wheel's. A wheel whose
+  `Requires-Dist` said something heavier would have installed it with
+  both lanes green. The lane reads that block out of the built file now
+  and holds it to the declared tiers in both directions, then asserts
+  the serve half is absent from the environment the file made, as
+  distributions and as importable modules. Metadata plus absence rather
+  than a resolver report, because a report is a second re-resolution
+  this lane deliberately does not do and would re-derive the tier lane's
+  claim under another name.
+
+- **The census edited what it read.** The vocabulary-aware capture,
+  which M3 added to keep two prose sites from going red, dropped every
+  word the grammar does not use, so `vinga list agents` was recorded as
+  the valid `vinga list`. The scanner was answering the question the
+  guard exists to ask. Nothing is discarded now; the two sites are fixed
+  where they are, one prose sentence and one event template; and the
+  negative cases drive the scanner rather than calling `names_something`
+  on a string somebody had already shaped, which is why a truncating
+  scanner had left all twelve of them green.
+
+- **The skew policy promised a refusal wrote nothing.** True of the
+  server's half and false of the client's: the answer's shape is checked
+  after the request was sent and answered, so a write a newer server
+  accepted is committed whatever this client could make of the
+  acknowledgement. An operator who believed the sentence would repeat
+  the write. The page and the changelog say a refusal is not a rollback
+  and send the reader to `show` or `diff`.
+
+- **The wheel lane's leak check looked at the wrong process.** Two
+  credential writes ran, both results were thrown away, and the sentinel
+  was looked for in a later read of a provider that never held it. Each
+  write's own streams are checked now, against the value that write was
+  given.
+
+- **An unnameable schema and an absent body were the same value.** Both
+  readers in the contract check answered None for a shape they had no
+  rule for, and None was also "this operation carries no body", so an
+  array, a primitive or a union compared equal to an act that sends
+  nothing. Absence has a sentinel of its own and an unnameable shape is
+  a failure carrying the schema.
+
+- **The owed progress line is filed**, as #297, with the determinism
+  licence the plan attaches to it. The plan's owed row, its milestone
+  line and this record all name it.
+
+Two artifacts moved with this round: `docs/reference/events.md`, because
+the onboarding key-mismatch template was reworded so the verb after the
+command stopped reading as an argument to it, and the census manifest,
+which regenerates whenever a tracked line moves. The `events.md` move is
+a second deliberate one, against the plan's rule that it moves in M1 and
+nowhere else; the alternative was keeping a scanner that edits what it
+reads, which is what the P1 was about.
+
 ### Deviations from the plan
 
-Six.
+Seven, the last of them from the review round.
 
 1. **The renderer-validation move covered five acts rather than four,
    `answers` became required, and two status functions became one.**
@@ -1013,6 +1085,18 @@ Six.
    it owed rather than ride M1. The owed item now has a home, which is
    the whole of what the plan asked for.
 
+7. **`docs/reference/events.md` moved a second time.** The plan gives
+   that artifact one deliberate move, in M1, and its risks section says
+   a stray reword after it must fail. This one is not stray and it is
+   recorded here rather than smuggled: the onboarding key-mismatch
+   template ended `... against the one vinga-server config ota-url
+   prints`, so the verb after the command read as an argument to a
+   command that takes none, and the review round's second P1 was that
+   the census must stop editing such lines instead of the sites being
+   fixed. The template says `against the one printed by vinga-server
+   config ota-url` now. Nothing else in the document moved, and the
+   other three artifacts on the move list did not move at all.
+
 ### Resolutions of what the plan left open
 
 - **Decision 11's "if it turns out larger than it looks it moves to
@@ -1061,38 +1145,38 @@ From `vinga-server/`, everything green:
 - `uv run ruff check .`: `All checks passed!`
 - `uv run mypy`: `Success: no issues found in 4 source files`
 - `uv run pytest tests/unit -q -n auto --dist loadfile`: `3790 passed,
-  19 skipped in 77.64s`. Two later runs of the same lane on the same
-  tree reported one failure,
-  `test_tts_lookahead.py::test_the_frame_cadence_stays_smooth`, and
-  both took seven minutes rather than one: this machine was at a load
-  average of 139 while other worktrees ran their own suites. That case
-  measures wall-clock intervals between audio frames and detects the
-  pacer catching up after a stall, which is what a loaded scheduler
-  produces; it passes alone in 3.42s, and this milestone touches
-  nothing in the TTS or session path. Recorded rather than smoothed
-  over, because a timing case that goes red under load is worth knowing
-  about even when it is not this milestone's.
-- `uv run pytest tests/integration -q`: `166 passed in 221.53s`, of
-  which the wheel lane is 19 seconds
-- The wheel lane on its own: `12 passed in 18.92s`, of which the build
+  19 skipped in 44.53s`. Runs taken while this machine was at a load
+  average of 139, with other worktrees running their own suites,
+  reported one failure apiece and took seven minutes rather than one:
+  `test_tts_lookahead.py::test_the_frame_cadence_stays_smooth` on two of
+  them and `test_session_limits.py`'s late-realtime window case on a
+  third. Both measure wall-clock behaviour, both pass alone, and this
+  milestone touches nothing in the TTS or session path. Recorded rather
+  than smoothed over, because timing cases that go red under load are
+  worth knowing about even when they are not this milestone's.
+- `uv run pytest tests/integration -q`: `170 passed in 224.69s`
+- The wheel lane on its own: `16 passed in 18.62s`, of which the build
   and the install are the module fixtures.
 - The six drift checks exactly as CI runs them (`domain-config.md`,
   `conversations-schema.md`, `events.md`, `api-openapi.json`, `cli.md`,
   and the recipes inside it), each regenerated under its own lane and
-  diffed: all six identical. No artifact moved in this milestone, which
-  is what the plan's move list requires of M3.
+  diffed: all six identical. One artifact moved in this milestone,
+  `events.md`, for the reason deviation 7 gives; the other three on the
+  plan's move list did not.
 - The tier proofs from M2 still green on the rebased tree, including
   its fix round's exact `uv.lock` closure and both real `doctor`
   invocations (`tests/integration/test_tier_closure.py`), and the
   in-process security lane still green and still complete
-  (`tests/integration/test_cli_live.py`, `70 passed in 6.86s`;
-  `tests/integration/test_tier_closure.py`, `23 passed in 77.71s`).
-- The spelling census over the whole tree: 1011 matches over 125 files
-  (243 `respell`, 591 `historical`, 177 `generated`), the manifest
+  (`tests/integration/test_cli_live.py`, `70 passed in 6.77s`;
+  `tests/integration/test_tier_closure.py`, `23 passed in 45.51s`).
+- The spelling census over the whole tree: 1024 matches over 124 files
+  (242 `respell`, 605 `historical`, 177 `generated`), the manifest
   regenerated and diffed, and no `respell` naming a command the tree
   does not have.
 - The contract check held to going red under five separate mutations,
-  one per assertion, run by hand rather than asserted about.
+  one per assertion, run by hand rather than asserted about, and its two
+  shape readers held to refusing an array, a primitive, a union and an
+  undeclared typing shape rather than reading them as an absent body.
 - The wheel lane's completeness case held to going red by removing one
   driven command from the session.
 
