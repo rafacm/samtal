@@ -19,6 +19,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import yaml
+from dotenv import find_dotenv, load_dotenv
 from pydantic import ValidationError
 from pydantic_settings.exceptions import SettingsError
 
@@ -190,6 +191,62 @@ class ProviderRefusedError(ConfigError):
 class StorageError(ConfigError):
     """The stored state cannot be read as configuration, or the database
     could not be read or written at all. Not the caller's mistake."""
+
+
+# The `.env` file, and what a `.env` that will not read says
+#
+# Both entry points read one before anything looks at the environment,
+# so both meet this. It is the second file this process opens on a path
+# nobody validated, and it is the one most likely to be a credential
+# store: what a `.env` holds is exactly the variables the API token and
+# the provider keys come from.
+#
+# So it is read behind the same kind of boundary a fragment is. The
+# sentence names neither the path nor the library's own wording, for the
+# reason `-f`'s does (#289): the path is typed, and a file that will not
+# decode is as likely to be a key or an archive as a mistyped `.env`.
+# What the failure holds is worse here than for a fragment, because a
+# `UnicodeDecodeError` retains the bytes it could not decode and those
+# bytes are somebody's variables.
+DOTENV_UNREADABLE = (
+    "a .env file was found and could not be read. Neither the path nor the system's "
+    "own wording is quoted back, and nothing it holds is decoded far enough to be: a "
+    ".env is where a deployment's credentials are kept, so a file that will not read "
+    "is the last place a refusal may repeat anything. Check that it is UTF-8 text "
+    "this user may read"
+)
+
+# What the read can fail as. `OSError` is the file; `UnicodeError` is
+# the decoding, which is a `ValueError` rather than an `OSError` and so
+# escapes an arm that catches only the first; `ValueError` is what the
+# parser answers a line it cannot make sense of, and the discovery walk
+# raises the same family for a path it cannot resolve.
+_DOTENV_FAILURES = (OSError, UnicodeError, ValueError)
+
+
+def load_environment_file() -> None:
+    """Read a `.env` into the environment, or refuse in one sentence.
+
+    Discovery and loading are both inside the boundary, because both
+    touch the filesystem: `find_dotenv` walks upwards from the
+    invocation directory and can meet a directory it may not read on the
+    way. The real environment still wins over what the file says, which
+    is python-dotenv's own default and the rule this deployment
+    documents.
+
+    The refusal is built inside the handler and raised after it, the way
+    every boundary in this package raises: an exception raised while
+    another is being handled keeps that one on `__context__` for
+    anything walking the chain to find, and here that one holds the
+    bytes of somebody's credentials.
+    """
+    problem: str | None = None
+    try:
+        load_dotenv(find_dotenv(usecwd=True))
+        return
+    except _DOTENV_FAILURES:
+        problem = DOTENV_UNREADABLE
+    raise ConfigError(problem)
 
 
 def load_file_config(path: str | Path | None = None) -> FileConfig:

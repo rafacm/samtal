@@ -1,0 +1,196 @@
+"""The `.env` file, read before anything looks at the environment.
+
+Both spellings read one, because both have to behave identically and
+the console script never reaches `vinga-server.main`. It is the second
+file this process opens on a path nobody validated, and it is the one
+most likely to hold credentials: what a `.env` carries is exactly the
+variables the API token and the provider keys come from.
+
+So what is held here is that it is read behind the refusal boundary and
+not in front of it. A `.env` that will not open leaves as one fixed
+sentence; a `.env` that will not decode leaves as the same one, and the
+exception that carried its bytes is not on the chain of what leaves.
+The sentinels are the values a real `.env` would hold, an address and a
+credential, and both are checked on every surface a value can come out
+on: the two streams, the log records made while the case ran, and the
+exception the refusal is carried by, chain included.
+"""
+
+import logging
+from pathlib import Path
+
+import pytest
+
+from tests.support.config_cli import chain as _chain
+from tests.support.config_cli import logged as _logged
+from tests.support.config_cli import runner
+from vinga_server.config import cli
+from vinga_server.config.loader import DOTENV_UNREADABLE, ConfigError, load_environment_file
+
+# What a `.env` holds, shaped so a substring check for one cannot match
+# by accident. The address is a sentinel too: an operator's API address
+# is a value this CLI refuses to print unsanitized, and a `.env` is
+# where it is most often written down.
+PLANTED_URL = "http://127.0.0.1:9231/api?token=sk-env-4f8b2c9e-never-a-real-credential"
+
+PLANTED_SECRET = "sk-env-7a1d3f60-never-a-real-credential"
+
+PLANTED_PATH = "sk-env-2b6e5c41-never-a-real-credential"
+
+
+@pytest.fixture
+def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    return runner(tmp_path, monkeypatch)
+
+
+def a_dotenv(directory: Path, text: str) -> Path:
+    """One `.env` where the search from the invocation directory finds
+    it, which is the only place this looks."""
+    path = directory / ".env"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def surfaces(
+    capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
+) -> dict[str, str]:
+    """The four places a value can come out on. The chain is read from
+    the boundary directly, which is the only place it exists: `main`
+    catches this exception by design and answers with a sentence."""
+    captured = capsys.readouterr()
+    carried = ""
+    try:
+        load_environment_file()
+    except ConfigError as refusal:
+        carried = _chain(refusal)
+    return {
+        "stdout": captured.out,
+        "stderr": captured.err,
+        "logs": _logged(caplog),
+        "chain": carried,
+    }
+
+
+def test_a_dotenv_is_read_and_the_real_environment_still_wins(
+    run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The behavior the boundary is wrapped around, so a refusal that
+    swallowed the load would fail here rather than pass quietly.
+
+    `VINGA_API_URL` is the variable to prove it with, because what a
+    command does with it is observable: the address the client is built
+    on is recorded by the seam.
+    """
+    a_dotenv(tmp_path, f"{cli.API_URL_ENV}={PLANTED_URL}\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv(cli.API_URL_ENV, raising=False)
+
+    assert run("list") == 0
+
+    # Read from the file, and reached: the query the address carried is
+    # held apart from the base the client is built on.
+    assert run.reached[-1].startswith("http://127.0.0.1:9231/api")
+    capsys.readouterr()
+
+    # And the real environment wins over the file, which is the rule
+    # both entry points document.
+    monkeypatch.setenv(cli.API_URL_ENV, "http://127.0.0.1:9232/api")
+
+    assert run("list") == 0
+
+    assert run.reached[-1] == "http://127.0.0.1:9232/api"
+
+
+def test_a_dotenv_that_is_not_text_is_refused_without_quoting_its_bytes(
+    run,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The failure that retains what it could not read.
+
+    `UnicodeDecodeError` is a `ValueError` rather than an `OSError`, so
+    an arm catching only the second would let it past, and the exception
+    it leaves as holds the buffer it was decoding. That buffer is a
+    `.env`, which is to say somebody's credentials.
+    """
+    (tmp_path / ".env").write_bytes(
+        f"{cli.API_URL_ENV}={PLANTED_URL}\nA_KEY={PLANTED_SECRET}\n".encode() + b"\xff\xfe"
+    )
+    monkeypatch.chdir(tmp_path)
+    capsys.readouterr()
+
+    with caplog.at_level(logging.DEBUG):
+        assert run("list") == 1
+
+    found = surfaces(capsys, caplog)
+    assert found["stderr"] == DOTENV_UNREADABLE + "\n"
+    assert found["stdout"] == ""
+    assert "Traceback" not in found["stderr"]
+    for sentinel in (PLANTED_URL, PLANTED_SECRET):
+        assert [where for where, text in found.items() if sentinel in text] == []
+
+
+@pytest.mark.parametrize(
+    "raised",
+    [
+        OSError(13, "Permission denied", PLANTED_PATH),
+        IsADirectoryError(21, "Is a directory", PLANTED_PATH),
+        ValueError(f"cannot parse {PLANTED_SECRET}"),
+    ],
+    ids=["not readable", "a directory", "a line the parser refuses"],
+)
+def test_every_way_a_dotenv_fails_answers_the_same_sentence(
+    run,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+    raised: BaseException,
+) -> None:
+    """The failures a filesystem produces and a test cannot always ask
+    for, injected at the library call.
+
+    Each of them holds something: an operating-system error holds the
+    path it was given, and the parser's holds the line it choked on.
+    Neither is printed, and neither is on the chain of what leaves.
+    """
+    a_dotenv(tmp_path, f"A_KEY={PLANTED_SECRET}\n")
+    monkeypatch.chdir(tmp_path)
+
+    def refusing(*_args: object, **_kwargs: object) -> bool:
+        raise raised
+
+    monkeypatch.setattr("vinga_server.config.loader.load_dotenv", refusing)
+    capsys.readouterr()
+
+    with caplog.at_level(logging.DEBUG):
+        assert run("list") == 1
+
+    found = surfaces(capsys, caplog)
+    assert found["stderr"] == DOTENV_UNREADABLE + "\n"
+    assert found["stdout"] == ""
+    for sentinel in (PLANTED_SECRET, PLANTED_PATH):
+        assert [where for where, text in found.items() if sentinel in text] == []
+
+
+def test_the_refusal_carries_nothing_of_the_failure_on_its_chain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The half no assertion about a stream can make.
+
+    The sentence is built inside the handler and raised after it, so
+    both chain slots are empty and nothing walking the chain finds the
+    decoding error, or the bytes it held, behind the refusal.
+    """
+    (tmp_path / ".env").write_bytes(f"A_KEY={PLANTED_SECRET}\n".encode() + b"\xff\xfe")
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(ConfigError) as caught:
+        load_environment_file()
+
+    assert str(caught.value) == DOTENV_UNREADABLE
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert PLANTED_SECRET not in _chain(caught.value)
