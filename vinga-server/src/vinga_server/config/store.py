@@ -30,7 +30,6 @@ servers, agents, devices, and default_agent last), so the store
 deliberately validates against the half rather than the whole.
 """
 
-import math
 import re
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -90,6 +89,11 @@ from vinga_server.config.secrets import (
     SecretStore,
     encrypt,
 )
+from vinga_server.config.transport import (
+    APPLY_LOCATION,
+    check_transportable,
+    untransportable,
+)
 from vinga_server.db import schema
 
 # The two groups of an MCP server's dotted secret slots. A slot is
@@ -139,34 +143,6 @@ _HEADER_TOKEN_RE = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
 # situation: the request was fine and the stored state is not.
 _UNREADABLE_ROW = "the row cannot be read as configuration:"
 _UNREADABLE_ROWS = "the stored configuration cannot be read:"
-
-# NaN and the infinities are not JSON, whatever a YAML parser accepts.
-# The message names where the value sits and the rule, which is all
-# there is to say about it.
-_NOT_FINITE = (
-    "{where} is not a finite number, and NaN and infinity cannot be written as JSON, "
-    "so a reader of this configuration would be given null in its place"
-)
-
-# The rest of what YAML can express and JSON cannot. Each names where it
-# is and what kind of thing it is, and never the value: a fragment
-# refused here is one nobody has validated yet, so it may hold anything.
-_NOT_TRANSPORTABLE = (
-    "{where} is a {kind}, which JSON has no way to write, so this configuration "
-    "could not be stored or read back as what it says"
-)
-
-_RECURSIVE = (
-    "{where} contains itself. A configuration that refers to itself has no written "
-    "form, so it cannot be stored or read back"
-)
-
-_NON_STRING_KEY = (
-    "{where} has a key that is a {kind} rather than a string. JSON names every key "
-    "with a string, so such a key would silently become one and a reader would be "
-    "given a key nobody wrote"
-)
-
 
 @dataclass(frozen=True)
 class Snapshot:
@@ -1337,12 +1313,6 @@ def _default_agent_row(name: str | None) -> _Row:
 # a fragment inside one can carry a pasted credential exactly as a
 # fragment sent on its own can.
 
-# Where a refusal about the document rather than about one entry of it
-# is located. Named rather than written out, because the CLI checks the
-# same document against the same rule before it travels and the two must
-# say one thing.
-APPLY_LOCATION = "document"
-
 # How many entries one document may carry. Request hygiene rather than a
 # correctness bound: an applied document is one transaction, and one
 # transaction that never ends is what a caller with a generated file can
@@ -1753,7 +1723,7 @@ def _body[Model: BaseModel](model: type[Model], location: str, body: object) -> 
         problem, _ = validation_problems(f"{location}: {_UNREADABLE_ROW}", model, exc)
     if entry is None:
         raise StorageError(problem)
-    unwritable = _untransportable(entry.model_dump(), numbers_only=True)
+    unwritable = untransportable(entry.model_dump(), numbers_only=True)
     if unwritable is not None:
         raise StorageError(f"{location}: {unwritable}; the row cannot be read as configuration")
     return entry
@@ -2529,28 +2499,6 @@ def _nothing_kept(where: str, dropped: bool) -> str:
     )
 
 
-def check_transportable(location: str, fragment: object) -> None:
-    """A fragment refused if JSON cannot carry it as it is.
-
-    The repository applies this to every fragment it parses; the CLI
-    runs the same check before a fragment travels as a request body.
-    One rule, one wording, met by whichever caller sees the value first,
-    because the alternative is what the encoder does on its own: a
-    TypeError, a ValueError or a RecursionError with a traceback, in
-    place of the sentence this file exists to produce.
-
-    YAML is the wider language, which is the whole reason this is
-    needed. `!!timestamp` produces a date, `!!binary` bytes and `!!set`
-    a set, none of which JSON has; an anchor can make a structure that
-    contains itself; and a non-string mapping key is the quiet one,
-    because JSON would not refuse it at all, it would stringify it and
-    hand a reader a key nobody wrote.
-    """
-    problem = _untransportable(fragment)
-    if problem is not None:
-        raise ConfigError(f"invalid {location}: {problem}")
-
-
 def _load[Model: BaseModel](
     model: type[Model], location: str, data: Mapping[str, object]
 ) -> Model:
@@ -2586,7 +2534,7 @@ def _stored[Model: BaseModel](
     failed and never their values, and is built inside the handler and
     raised outside it, since a ValidationError holds the whole row.
     """
-    unwritable = _untransportable(data, numbers_only=True)
+    unwritable = untransportable(data, numbers_only=True)
     if unwritable is not None:
         raise StorageError(f"{location}: {unwritable}; the row cannot be read as configuration")
     problem: str | None = None
@@ -2599,80 +2547,6 @@ def _stored[Model: BaseModel](
         # structured entry to attach to.
         problem, _ = validation_problems(f"{location}: {_UNREADABLE_ROW}", model, exc)
     raise StorageError(problem)
-
-
-def _untransportable(
-    value: object,
-    path: str = "",
-    ancestors: frozenset[int] = frozenset(),
-    *,
-    numbers_only: bool = False,
-) -> str | None:
-    """What in `value` JSON cannot carry, said without quoting any of it,
-    or None.
-
-    One walk, asked two questions, because the second is the first's
-    float branch and nothing else. A fragment somebody wrote is asked
-    all of it: a YAML file can hold a date, a set, a key that is not a
-    string, and a structure that contains itself, and none of those has
-    a written form JSON reads back as what it says. A stored row is
-    asked about the numbers only, and that is not a narrowing for
-    tidiness: the row came out of a JSON column, so it cannot hold any
-    of the rest, and it must be walked without a cycle rule because a
-    row cannot refer to itself either.
-
-    Cycle-safe by carrying the containers currently above this one
-    rather than every container already seen: two keys pointing at the
-    same anchored mapping is a shape JSON writes out twice and reads
-    back correctly, so refusing it would refuse a legitimate YAML file.
-    A container that is its own ancestor is the one that cannot be
-    written at all.
-    """
-    if not numbers_only and id(value) in ancestors:
-        return _RECURSIVE.format(where=path or "the fragment")
-    if isinstance(value, Mapping):
-        below = ancestors | {id(value)}
-        for key, nested in value.items():
-            if not numbers_only and not isinstance(key, str):
-                return _NON_STRING_KEY.format(
-                    where=path or "the fragment", kind=type(key).__name__
-                )
-            found = _untransportable(
-                nested,
-                f"{path}.{key}" if path else str(key),
-                below,
-                numbers_only=numbers_only,
-            )
-            if found is not None:
-                return found
-        return None
-    if isinstance(value, (list, tuple)):
-        below = ancestors | {id(value)}
-        for position, item in enumerate(value):
-            found = _untransportable(
-                item,
-                f"{path}.{position}" if path else str(position),
-                below,
-                numbers_only=numbers_only,
-            )
-            if found is not None:
-                return found
-        return None
-    if isinstance(value, float) and not math.isfinite(value):
-        # NaN and the infinities have no JSON spelling. A stored one is
-        # serialized as null on the way out, which quietly turns a
-        # configuration into a different one: the option disappears and
-        # the provider falls back to its own default.
-        return _NOT_FINITE.format(where=path or "the value")
-    if numbers_only:
-        return None
-    # bool before int, and both before the refusal, because bool is a
-    # subclass of int and neither needs naming twice.
-    if value is None or isinstance(value, (str, bool, int, float)):
-        return None
-    return _NOT_TRANSPORTABLE.format(
-        where=path or "the fragment", kind=type(value).__name__
-    )
 
 
 def _refuse_unresolved(domain: DomainConfig) -> None:
