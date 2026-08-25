@@ -36,9 +36,9 @@ Three properties this component exists to keep:
 
 - **It never blocks the event loop and never migrates.** Its engine is
   created at app build, after boot has migrated, and reads through
-  ordinary deferred transactions (see `db.read_engine`); every lookup
-  from async code goes through `resolve`, which awaits it on a worker
-  thread.
+  repeatable-read, read-only transactions that take no advisory lock
+  (see `db.read_engine`); every lookup from async code goes through
+  `resolve`, which awaits it on a worker thread.
 - **A failed read is loud, not fatal, and says nothing of the failure
   but its kind.** The OTA endpoint is every device's boot dependency, so
   a `/data` hiccup must not refuse the fleet's check-ins. A lookup that
@@ -63,10 +63,10 @@ from sqlalchemy import Engine
 
 from vinga_server.config.models import normalize_mac
 from vinga_server.config.store import LiveBinding, read_live_binding
-from vinga_server.db import DATABASE_FILENAME, read_engine
+from vinga_server.db import read_engine
 from vinga_server.events import ServerEvents
-from vinga_server.events.catalog import BindingsSnapshotOnly, BindingsUnreadable
-from vinga_server.events.values import ClassName, ConfiguredPath, DeviceId
+from vinga_server.events.catalog import BindingsUnreadable
+from vinga_server.events.values import ClassName, DeviceId
 
 if TYPE_CHECKING:
     # Deferred, and the one import here that is. `generation` reaches
@@ -182,19 +182,19 @@ class DeviceBindings:
         the fallback, and a read engine on the database boot read it
         from.
 
-        A database that is not there is not an error here. It is what a
-        test that composed its configuration in memory has, and the
-        honest view of it is the served world itself, said once at build
-        rather than warned about at every lookup.
+        No arm for a database that is not there. There used to be one,
+        for a file a lookup could find missing; by the time bindings
+        open, boot has either migrated this database or refused to
+        start, so "not there" is not a state this can meet. A composed
+        server that has no store at all builds `snapshot_only` instead,
+        which is a decision made where the composition is rather than a
+        probe made here.
+
+        A read that fails once the server is running is a different
+        thing entirely, and is still loud and not fatal: see
+        `_read_binding`.
         """
-        directory = generations.current().config.server.database.dir
-        path = directory / DATABASE_FILENAME
-        if not path.exists():
-            events.emit(
-                lambda: BindingsSnapshotOnly(path=ConfiguredPath(path))
-            )
-            return cls(generations, None)
-        return cls(generations, read_engine(directory))
+        return cls(generations, read_engine(generations.current().config.server.database))
 
     @classmethod
     def snapshot_only(cls, generations: "Generations") -> "DeviceBindings":

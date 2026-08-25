@@ -90,6 +90,7 @@ from vinga_server.config.loader import (
 from vinga_server.config.models import (
     API_MOUNT_PATH,
     Config,
+    DatabaseConfig,
     DomainConfig,
     FieldProblem,
 )
@@ -632,23 +633,23 @@ class StoreHandle:
 
 
 @contextlib.contextmanager
-def open_store(directory: Path) -> Iterator[StoreHandle]:
-    """Open the configuration database in `directory` and hold it.
+def open_store(database: DatabaseConfig) -> Iterator[StoreHandle]:
+    """Open the configuration database `database` names and hold it.
 
     `open_database` rather than a bare engine, and deliberately: this is
     the only place the schema is brought up to date on the API's path,
-    and an application built over a directory nothing has migrated (a
+    and an application built over a database nothing has migrated (a
     fresh deployment whose first act is an API write, which is what the
     integration lane's API-first path is) has to come up with a schema.
-    `upgrade_to_head` is idempotent and cheap when the database is
+    `upgrade_to_head` is idempotent and cheap when the schema is
     current, so a server that migrated at boot pays one no-op check.
 
-    A directory held by another writer refuses here, as
+    A lock another writer is holding refuses here, as
     `DatabaseBusyError`, which is a `ConfigError` and therefore part of
-    the boot failure taxonomy: a locked database at startup is a boot
+    the boot failure taxonomy: a contended database at startup is a boot
     that refused with a sentence, not a traceback.
     """
-    engine = open_database(directory)
+    engine = open_database(database)
     try:
         yield StoreHandle(engine, load_keys())
     finally:
@@ -680,7 +681,7 @@ def installed(runtime: "ApiRuntime", handle: StoreHandle) -> Iterator[None]:
         runtime.store = None
 
 
-def engine_lifespan(runtime: "ApiRuntime", directory: Path) -> Lifespan[FastAPI]:
+def engine_lifespan(runtime: "ApiRuntime", database: DatabaseConfig) -> Lifespan[FastAPI]:
     """The standalone owner of the engine: this application's own
     lifespan.
 
@@ -699,7 +700,7 @@ def engine_lifespan(runtime: "ApiRuntime", directory: Path) -> Lifespan[FastAPI]
 
     @contextlib.asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        with open_store(directory) as handle, installed(runtime, handle):
+        with open_store(database) as handle, installed(runtime, handle):
             yield
 
     return lifespan
@@ -739,7 +740,7 @@ class ApiRuntime:
 
 def build_api(
     token: str,
-    database_dir: Path,
+    database: DatabaseConfig,
     loaded_agents: ServableAgents | None = None,
     pending: PendingDevices | None = None,
     mcp_servers: McpStatusSource | None = None,
@@ -812,7 +813,7 @@ def build_api(
     route answers 503 rather than reporting that nothing is pending.
     """
     runtime = build_api_runtime(
-        database_dir,
+        database,
         loaded_agents,
         pending,
         mcp_servers,
@@ -826,7 +827,7 @@ def build_api(
     # handle on the runtime above. Mounted on a server, Starlette runs no
     # lifespan here and the parent's does the installing instead, so the
     # engine has exactly one owner either way (#142).
-    api = _application(engine_lifespan(runtime, database_dir))
+    api = _application(engine_lifespan(runtime, database))
     # Attached rather than closed over: the read and write routes take
     # the pieces of it with Depends(...), and milestone 1 had none of
     # them yet. One object rather than one attribute each, so what a
@@ -840,7 +841,7 @@ def build_api(
 
 
 def build_api_runtime(
-    database_dir: Path,
+    database: DatabaseConfig,
     loaded_agents: ServableAgents | None = None,
     pending: PendingDevices | None = None,
     mcp_servers: McpStatusSource | None = None,
@@ -868,13 +869,12 @@ def build_api_runtime(
     """
     return ApiRuntime(
         store=None,
-        # The same directory, read for the other database in it. The
-        # conversation reads need no more runtime fact than this: whether
-        # there is a store to read is whether the file is there, which
-        # `enabled` decides at boot and cannot be asked again here, since
-        # a deployment that has switched recording off still serves what
-        # it recorded.
-        conversations=conversations.reader(database_dir),
+        # The same connection, read for the other schema in it. The
+        # conversation reads need no more runtime fact than this: the
+        # schema is there whether or not recording is on, because boot
+        # migrates it either way, and a deployment that has switched
+        # recording off still serves what it recorded.
+        conversations=conversations.reader(database),
         loaded_agents=_nothing_servable if loaded_agents is None else loaded_agents,
         pending=pending if pending is not None else _empty_pending(),
         mcp_servers=mcp_servers,
