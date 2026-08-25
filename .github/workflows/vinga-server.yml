@@ -116,6 +116,11 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "vinga-server/uv.lock"
 
+      # The contributor tier: the project, the dev group, and through
+      # that group the serve extra, so this lane has the whole server.
+      # A plain `uv sync` and not a named extra, deliberately: this is
+      # exactly what a contributor types, and it is the one door no
+      # other lane would notice breaking.
       - name: Install dependencies
         run: uv sync --frozen
 
@@ -179,6 +184,11 @@ jobs:
           # what the next run's slowest job starts from.
           save-cache: false
 
+      # The contributor tier: the project, the dev group, and through
+      # that group the serve extra, so this lane has the whole server.
+      # A plain `uv sync` and not a named extra, deliberately: this is
+      # exactly what a contributor types, and it is the one door no
+      # other lane would notice breaking.
       - name: Install dependencies
         run: uv sync --frozen
 
@@ -300,7 +310,15 @@ jobs:
         run: |
           uv build --wheel --out-dir "$RUNNER_TEMP/dist"
           uv venv --python 3.12 "$RUNNER_TEMP/wheel-venv"
-          uv pip install --python "$RUNNER_TEMP/wheel-venv/bin/python" "$RUNNER_TEMP"/dist/*.whl
+          # `[serve]` explicitly, and it is the assertion this step
+          # rests on: the wheel's default install is the configuration
+          # client, which carries neither SQLAlchemy nor Alembic, so a
+          # bare install could not open a database at all. The lane that
+          # installs bare on purpose is the tier closure, which asserts
+          # the opposite of this and would otherwise be testing the same
+          # configuration under a different name.
+          uv pip install --python "$RUNNER_TEMP/wheel-venv/bin/python" \
+            "$(echo "$RUNNER_TEMP"/dist/*.whl)[serve]"
           mkdir -p "$RUNNER_TEMP/wheel-run"
           cd "$RUNNER_TEMP/wheel-run"
           "$RUNNER_TEMP/wheel-venv/bin/python" -P - <<'PY'
@@ -553,6 +571,11 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "vinga-server/uv.lock"
 
+      # The contributor tier: the project, the dev group, and through
+      # that group the serve extra, so this lane has the whole server.
+      # A plain `uv sync` and not a named extra, deliberately: this is
+      # exactly what a contributor types, and it is the one door no
+      # other lane would notice breaking.
       - name: Install dependencies
         run: uv sync --frozen
 

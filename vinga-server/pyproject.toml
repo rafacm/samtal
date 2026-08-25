@@ -5,38 +5,74 @@ description = "Vinga conversation server: OTA endpoint, device websocket protoco
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12,<3.13"
+# The client half, which is what the default install is.
+#
+# `vinga` is a configuration client: it reads YAML, validates it against
+# the models, renders it, and sends it to the configuration API. Nothing
+# it does needs a database, an encryption key, a web framework or a
+# model. So the default install is exactly what that takes, and a
+# workstation administering a deployment it does not host gets it with
+# `uvx --from git+...` and pulls no server at all.
+#
+# The server half is the `serve` extra below. It is an image-build and
+# contributor mechanism and never an operator-facing concept: a
+# deployment runs the published image and installs nothing.
 dependencies = [
+    # Direct because the CLI speaks the configuration API over it. It
+    # also arrives with the cloud providers' SDKs, which name their
+    # APIs rather than pulling in a vendor client.
+    "httpx>=0.28",
+    "pydantic>=2.9",
+    # The models import it eagerly: the file half is a settings model
+    # and the CLI imports the models, so this is the client's as much
+    # as the server's.
+    "pydantic-settings>=2.6",
+    # The .env file both entry points read before anything looks at the
+    # environment.
+    "python-dotenv>=1.0",
+    # Fragments, documents and everything this grammar prints.
+    "pyyaml>=6.0",
+    # The argument layer of the configuration grammar. Click arrived
+    # transitively already (uvicorn); this is direct because the grammar
+    # is built on it, and it is a runtime dependency rather than a
+    # development one because the command group ships. It is in the
+    # client tier because the grammar IS the client.
+    "typer>=0.27.1",
+]
+
+[project.optional-dependencies]
+# The server half: everything a conversation, a database or an HTTP
+# server needs, and nothing the CLI reaches.
+#
+# Two doors install it and neither belongs to an operator. The image
+# build names it in the Dockerfile, which is where the name stays; a
+# contributor gets it through the `dev` group below, so `uv sync` keeps
+# yielding a runnable server with no new flags. Nobody installs the
+# server as a Python package on a host: that is #223's ruling, and it is
+# why nothing in the READMEs, in `cli.md` or in the changelog tells an
+# operator to install anything at all.
+serve = [
+    # The migrations, run on every database open.
     "alembic>=1.18.5",
     "anthropic>=0.120.0",
+    # The Opus codec on the device socket.
     "av>=18.0.0",
-    # Fernet, for the domain configuration's secrets at rest. Already
-    # arrived transitively; direct because the server now uses it.
+    # Fernet, for the domain configuration's secrets at rest.
     "cryptography>=49.0.0",
     "fastapi>=0.115",
-    # Direct because the cloud providers speak their APIs over it rather
-    # than pulling in a vendor SDK; it arrives with the LLM SDKs anyway.
-    "httpx>=0.28",
     # 1.24 is the first release carrying streamable_http_client, the
     # replacement for the deprecated wrapper the transport used to call.
     # Capped below 2 because MCP 2 needs httpx 2 and yields a transport
     # this client does not unpack; migrating to it is its own change.
     "mcp>=1.24,<2",
     "openai>=2.48.0",
-    "pydantic>=2.9",
-    "pydantic-settings>=2.6",
+    # The VAD, which runs on every audio frame whichever ASR is
+    # configured. A core dependency of serving rather than an extra of
+    # it, which is why both image variants carry it.
     "pysilero-vad>=3.4",
-    "python-dotenv>=1.0",
-    "pyyaml>=6.0",
     "sqlalchemy>=2.0.51",
-    # The argument layer of the `vinga-server config` command group.
-    # Click arrived transitively already (uvicorn); this is direct
-    # because the grammar is built on it, and it is a runtime dependency
-    # rather than a development one because the command group ships.
-    "typer>=0.27.1",
     "uvicorn[standard]>=0.34",
 ]
-
-[project.optional-dependencies]
 # Local ASR (MIT). Model weights download from Hugging Face at startup.
 faster-whisper = ["faster-whisper>=1.2"]
 # Local TTS. piper-tts is GPL-3.0, which is why it is an optional extra
@@ -53,7 +89,17 @@ vinga-server = "vinga_server.main:main"
 vinga = "vinga_server.config.cli:main"
 
 [dependency-groups]
+# What a checkout gets. `uv sync` installs the default groups and the
+# project, but not its extras, so the serve extra is named here: that is
+# the whole of what keeps the contributor door one command and keeps
+# AGENTS.md's Commands section true without an edit.
+#
+# This is the one place a mistake is invisible to every other lane,
+# because every other lane names its tier explicitly. The sync-then-run
+# smoke in `tests/integration/test_tier_closure.py` is its guard, and it
+# is named as such.
 dev = [
+    "vinga-server[serve]",
     "httpx2>=2.9.1",
     # Validates the committed OpenAPI document (Apache-2.0), so that
     # "the API generates a document" means one a client generator will
