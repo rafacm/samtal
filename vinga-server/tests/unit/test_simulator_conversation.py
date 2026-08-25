@@ -131,7 +131,7 @@ def test_one_turn_reaches_the_end_of_the_reply(unpaced, identity, said) -> None:
     assert reply.sentences == tuple(REPLY)
     assert reply.packets == 5
     assert reply.audio_ms == 5 * AudioParams().frame_duration
-    assert reply.state == conversation.REPLY_COMPLETE
+    assert reply.state == conversation.CLOSED
     assert reply.surprises == ()
     assert reply.closed == conversation.CLOSE_NAMES[1000]
     # As they arrived, which is the difference between watching a
@@ -281,7 +281,7 @@ def test_a_tts_stop_with_no_start_before_it_advances_nothing(
     with peer(script) as (url, _):
         reply, _ = held(url, identity, said)
 
-    assert reply.state == conversation.REPLY_COMPLETE
+    assert reply.state == conversation.CLOSED
     assert reply.sentences == (REPLY[0],)
     assert reply.surprises == (f"tts stop arrived while {conversation.AWAITING_REPLY}",)
 
@@ -304,7 +304,7 @@ def test_a_transcript_after_the_reply_completed_advances_nothing(
     with peer(script) as (url, _):
         reply, printed = held(url, identity, said)
 
-    assert reply.state == conversation.REPLY_COMPLETE
+    assert reply.state == conversation.CLOSED
     assert reply.transcript == ""
     assert printed == []
 
@@ -326,7 +326,7 @@ def test_a_binary_frame_before_the_hello_advances_nothing(unpaced, identity, sai
     with peer(script) as (url, _):
         reply, _ = held(url, identity, said)
 
-    assert reply.state == conversation.REPLY_COMPLETE
+    assert reply.state == conversation.CLOSED
     assert reply.surprises == (f"audio arrived while {conversation.HELLO_SENT}",)
 
 
@@ -406,22 +406,74 @@ def test_a_message_of_a_type_this_client_does_not_model_is_named_not_quoted(
     with peer(script) as (url, _):
         reply, _ = held(url, identity, said)
 
-    assert reply.state == conversation.REPLY_COMPLETE
+    assert reply.state == conversation.CLOSED
     [surprise] = reply.surprises
     assert "does not model" in surprise
     assert HELLO_PLANTED not in surprise
 
 
+def test_a_close_that_will_not_complete_is_a_safe_outcome_rather_than_a_raise(
+    unpaced, identity, said, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other half of the eighth state.
+
+    A close that fails after a reply has been read is not a reason to
+    lose the reply, and an exception out of that `finally` would replace
+    whatever refusal was already in flight and carry the library's own
+    message out with it. So the reply survives whole, the machine does
+    NOT advance to `closed`, and how the connection ended is reported as
+    not this side's to say rather than guessed from a code nobody set.
+
+    Bite: with the close swallowing its failure and advancing anyway,
+    this reports `closed` and "the session ended normally" about a
+    connection whose close never finished.
+
+    The failure is planted on the CONNECTION rather than on the function
+    that closes it, through the same `connect` seam every other case here
+    reaches the socket by, so what is under test is the module's own
+    close and not a stand-in for it.
+    """
+    real = conversation.connect
+
+    def refusing(*arguments, **named):
+        socket = real(*arguments, **named)
+        monkeypatch.setattr(socket, "close", _raising)
+        return socket
+
+    monkeypatch.setattr(conversation, "connect", refusing)
+
+    with peer(conversing(sentences=REPLY)) as (url, _):
+        reply, _ = held(url, identity, said)
+
+    assert reply.sentences == tuple(REPLY)
+    assert reply.state == conversation.REPLY_COMPLETE
+    assert reply.closed == conversation.CLOSE_FAILED
+
+
+def _raising(*arguments: object, **named: object) -> None:
+    """A close that will not go, with a message nothing may repeat."""
+    raise OSError(CLOSE_REASON)
+
+
 def test_the_transitions_are_a_table_rather_than_a_chain() -> None:
     """The machine held to being one, off the declaration rather than off
     a run: every state a transition names is one of the eight, and every
-    event it names is a message this side classifies or audio."""
+    event it names is a message this side classifies, audio, or this
+    side's own close."""
     for (state, _), moved in conversation.TRANSITIONS.items():
         assert state in conversation.STATES
         assert moved in conversation.STATES
     assert conversation.TRANSITIONS[(conversation.SPEAKING, "tts stop")] == (
         conversation.REPLY_COMPLETE
     )
+    # The eighth state, reached through the table like every other, and
+    # from one state only.
+    assert conversation.TRANSITIONS[(conversation.REPLY_COMPLETE, conversation.CLOSE)] == (
+        conversation.CLOSED
+    )
+    assert [
+        state for state, event in conversation.TRANSITIONS if event == conversation.CLOSE
+    ] == [conversation.REPLY_COMPLETE]
     # Nothing may be read in `listening`: this side is sending there, and
     # a machine that accepted a reply mid-utterance would have no order
     # at all.

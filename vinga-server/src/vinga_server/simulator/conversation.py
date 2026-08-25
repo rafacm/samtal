@@ -106,6 +106,13 @@ STATES = (
 # have.
 AUDIO = "audio"
 
+# And what this side's own act of closing is called where an event
+# would be. Not a message: it is the one transition this conversation
+# makes rather than reads, and it is in the table anyway so that the
+# eighth state is reached by the machine rather than by an assignment
+# beside it.
+CLOSE = "close"
+
 # What may arrive in each state, and where it leaves the conversation.
 #
 # A pair not in this table is a surprise: reported, and advancing
@@ -131,6 +138,7 @@ TRANSITIONS: dict[tuple[str, str], str] = {
     (SPEAKING, "tts sentence_start"): SPEAKING,
     (SPEAKING, "tts stop"): REPLY_COMPLETE,
     (SPEAKING, AUDIO): SPEAKING,
+    (REPLY_COMPLETE, CLOSE): CLOSED,
 }
 
 # The bounds, each with the reason that picked it.
@@ -220,6 +228,16 @@ CLOSE_NAMES: dict[int, str] = {
 UNKNOWN_CLOSE = "the connection closed with a code this client does not know"
 
 NEVER_CLOSED = "the connection was still open when this command finished with it"
+
+# And what a close that would not complete says. Separate from the line
+# above because they are different facts: that one is a socket nobody
+# closed, and this is a close that was attempted and did not finish, so
+# how the far side ended it is not this side's to report. Named by no
+# class, because the failure is this side's own act rather than an answer
+# to anything.
+CLOSE_FAILED = (
+    "the connection could not be closed cleanly, so how it ended is not this side's to say"
+)
 
 # What a mode this simulator listens in is called. Manual, and only
 # manual: `auto` re-arms itself after each reply and `realtime` is the
@@ -336,8 +354,8 @@ def converse(
             # close is where the code this side reports comes from, and
             # because a refusal in flight must not leave a socket open
             # behind it.
-            _close(socket)
-    return heard.reply(_close_name(socket.close_code))
+            finished = _close(socket, heard)
+    return heard.reply(_close_name(socket.close_code) if finished else CLOSE_FAILED)
 
 
 def _opened(target: str, token: str, identity: Identity):
@@ -623,18 +641,33 @@ def _guarded(act: Callable[[], None]) -> None:
         raise ConfigError(problem)
 
 
-def _close(socket) -> None:
-    """Give the socket back, and never raise doing it.
+def _close(socket, heard: "_Heard") -> bool:
+    """Give the socket back, say whether it went, and never raise doing
+    it.
 
     A close that fails after a reply has been read is not a reason to
     lose the reply, and an exception out of a `finally` would replace
     whatever refusal was already in flight, taking the library's own
-    message with it. The peer's close reason is not read at all.
+    message with it. So the answer is a boolean and never an exception,
+    and the peer's close reason is not read at all.
+
+    A close that completed is what carries this conversation into its
+    eighth state, through the same table every other transition goes
+    through: `(reply complete, close)` is the only pair that names it, so
+    a close after a turn that never finished advances nothing and the
+    verdict says where it actually stopped. That is the machine's own
+    rule applied to this side's own act, and it is why `CLOSED` is
+    reached rather than assigned.
     """
+    went = False
     try:
         socket.close()
+        went = True
     except Exception:
         pass
+    if went:
+        heard.closed()
+    return went
 
 
 class _Heard:
@@ -682,6 +715,19 @@ class _Heard:
             self.sentences.append(said)
             say(f"said: {said}")
 
+    def closed(self) -> None:
+        """This side's own act, against the same table.
+
+        Silent when the pair is not in the table, unlike an unexpected
+        MESSAGE, and the difference is what is already being reported: a
+        close from any state but `reply complete` happens on the way out
+        of a refusal that is in flight, and a surprise line beside it
+        would be this command narrating its own unwinding.
+        """
+        moved = TRANSITIONS.get((self.state, CLOSE))
+        if moved is not None:
+            self.state = moved
+
     def audio(self, frame: bytes, version: int) -> None:
         """One binary frame of the reply, counted and size-checked.
 
@@ -724,7 +770,9 @@ __all__ = [
     "AUDIO",
     "AWAITING_REPLY",
     "BAD_HELLO",
+    "CLOSE",
     "CLOSED",
+    "CLOSE_FAILED",
     "CLOSE_NAMES",
     "CLOSE_TIMEOUT_S",
     "HELLO_RECEIVED",
