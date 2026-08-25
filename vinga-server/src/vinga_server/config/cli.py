@@ -3095,7 +3095,7 @@ def _simulator_check_in(args: Invocation) -> None:
     state = board.check_in(endpoint, identity)
     if args.agents:
         state = _claimed(args, endpoint, identity, state)
-    _reported(state)
+    _reported(state, endpoint)
 
 
 def _claimed(
@@ -3135,15 +3135,23 @@ def _claimed(
     return admitted
 
 
-def _reported(state: board.CheckIn) -> None:
+def _reported(state: board.CheckIn, endpoint: "device_endpoint.Endpoint") -> None:
     """What the board was handed, on stdout, and what to do about it on
     stderr.
 
-    Everything read out of the reply is bounded and made printable
-    first: the code, the message and the challenge are the artifact this
-    command exists to show and they are still whatever that address
-    returned. The device token and the websocket URL are neither, and
-    are named by their stand-ins.
+    Everything read out of the reply goes out through the endpoint's own
+    door: the code, the message and the challenge are the artifact this
+    command exists to show, and they are still whatever that address
+    returned, so they are bounded, made printable, and stripped of any
+    part of the supplied address they hand back. That last rule is why
+    the endpoint is a parameter here rather than the state alone. A
+    refusal quotes nothing, so these three fields are the only route a
+    supplied URL has to a surface at all, and reflecting a request target
+    into an answer is what a proxy, a captive portal and an error page
+    each do by default.
+
+    The device token and the websocket URL are not that artifact and are
+    named by their stand-ins.
     """
     if isinstance(state, board.Refused):
         raise ConfigError(state.problem)
@@ -3151,9 +3159,9 @@ def _reported(state: board.CheckIn) -> None:
         print(
             f"{device_endpoint.SUPPLIED_ENDPOINT} answered, and this board is not "
             f"claimed yet.\n"
-            f"activation code: {printable(state.code)}\n"
-            f"what a screen would show: {printable(state.message)}\n"
-            f"challenge: {printable(state.challenge)}"
+            f"activation code: {endpoint.repeated(state.code)}\n"
+            f"what a screen would show: {endpoint.repeated(state.message)}\n"
+            f"challenge: {endpoint.repeated(state.challenge)}"
         )
         sys.stdout.flush()
         print(CLAIM_GUIDANCE, file=sys.stderr)

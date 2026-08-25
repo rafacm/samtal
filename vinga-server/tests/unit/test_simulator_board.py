@@ -25,6 +25,7 @@ import httpx
 import pytest
 
 from tests.support.config_cli import API_SECRET_ENV, chain, logged, runner
+from vinga_server import device_endpoint
 from vinga_server.config import cli
 from vinga_server.config.loader import ConfigError
 from vinga_server.config.models import NOT_A_MAC
@@ -409,6 +410,48 @@ def test_every_refusal_of_a_hostile_reply_repeats_nothing_of_it(
         }
         assert [name for name, text in surfaces.items() if PASTED in text] == []
         assert [name for name, text in surfaces.items() if DEVICE_TOKEN in text] == []
+
+
+@pytest.mark.parametrize("field", ["code", "message", "challenge"])
+def test_a_reply_that_hands_the_address_back_publishes_none_of_it(
+    run, far_side, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture, field: str
+) -> None:
+    """The three fields this command exists to SHOW, on a reply it
+    accepts.
+
+    Every refusal here is a fixed sentence that quotes nothing, so these
+    three are the only route a supplied URL has to a surface at all, and
+    reflecting the request target into an answer is what a proxy, a
+    captive portal and an error page each do by default. The reply is a
+    valid activating one, so nothing else in the reading stands between
+    the reflection and stdout.
+
+    Held to going red by rendering these fields through `printable`
+    alone: the bound and the control characters are what that governs,
+    and a supplied address is perfectly printable and perfectly short.
+    """
+    reflection = f"reflected: /x/{SEGMENT}/?token={QUERY_SECRET}"
+    far_side(answering(body=activating(**{field: reflection})))
+    with caplog.at_level(logging.DEBUG):
+        caplog.clear()
+        assert run("simulator", "check-in", URL) == 0
+    captured = capsys.readouterr()
+    with pytest.raises(ConfigError) as caught:
+        cli._parsed(["simulator", "check-in", URL, "--mac", "not-a-mac"], cli.DISPATCHED)  # noqa: SLF001
+    surfaces = {
+        "stdout": captured.out,
+        "stderr": captured.err,
+        "logs": logged(caplog),
+        "chain": chain(caught.value),
+    }
+
+    assert [name for name, text in surfaces.items() if SEGMENT in text] == []
+    assert [name for name, text in surfaces.items() if QUERY_SECRET in text] == []
+    # And the field was still shown, with a stand-in where the address
+    # was: a command that answered by printing nothing would pass the
+    # assertions above and be useless.
+    assert "reflected:" in captured.out
+    assert device_endpoint.WITHHELD in captured.out
 
 
 # The redirect the capability table claims

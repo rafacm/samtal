@@ -17,6 +17,7 @@ import pytest
 
 from vinga_server import device_endpoint
 from vinga_server.config.loader import ConfigError
+from vinga_server.config.printing import GLIMPSE_LENGTH
 from vinga_server.ota.router import ACTIVATE_SEGMENT
 
 # Not a real credential, and shaped so a substring check for it cannot
@@ -167,6 +168,90 @@ def test_the_activation_target_keeps_the_stand_in_name() -> None:
     )
 
     assert endpoint.activation().shown == device_endpoint.SUPPLIED_ENDPOINT
+
+
+# Far-side text that hands the address back
+#
+# A refusal here is a fixed sentence and quotes nothing, so the few
+# fields these commands DO show are the only route a supplied URL has to
+# a surface. Reflecting the request target into an answer is what a
+# proxy, a captive portal and an error page each do by default, which
+# makes this the ordinary case rather than the adversarial one.
+
+
+def _endpoint(url: str) -> device_endpoint.Endpoint:
+    return device_endpoint.Endpoint.parsed(url, "the URL", device_endpoint.SUPPLIED_ENDPOINT)
+
+
+@pytest.mark.parametrize(
+    "reflected",
+    [
+        SEGMENT,
+        f"/x/{SEGMENT}/",
+        f"error at /x/{SEGMENT}/?token={PASTED}",
+        PASTED,
+        f"token={PASTED}",
+        SEGMENT.upper(),
+    ],
+    ids=[
+        "the segment alone",
+        "the path whole",
+        "the request target as a gateway echoes it",
+        "one query value",
+        "the query whole",
+        "the segment lower-cased on its way back",
+    ],
+)
+def test_far_side_text_handing_the_address_back_says_none_of_it(reflected: str) -> None:
+    """Every spelling of a reflection, because a gateway echoes the
+    target it did not recognize and an application echoes the one
+    parameter it read."""
+    said = _endpoint(f"https://voice.example/x/{SEGMENT}/?token={PASTED}").repeated(reflected)
+
+    assert SEGMENT.lower() not in said.lower()
+    assert PASTED not in said
+    assert device_endpoint.WITHHELD in said
+
+
+def test_the_host_is_not_redacted_out_of_what_a_screen_would_show() -> None:
+    """The activation message carries the deployment's origin on
+    purpose: it is the line the firmware draws for a person to type into
+    a browser. Redacting it would take the answer out of the answer."""
+    said = _endpoint(f"https://voice.example/x/{SEGMENT}/").repeated("voice.example\n659505")
+
+    assert "voice.example" in said
+    assert "659505" in said
+
+
+def test_a_part_too_short_to_be_a_secret_is_left_alone() -> None:
+    """A one or two character segment is what a path is made of rather
+    than what it hides, and matching those as substrings would take a
+    letter out of the middle of an ordinary word."""
+    said = _endpoint("https://voice.example/x/v1/").repeated("exactly six digits: 659505")
+
+    assert said == "exactly six digits: 659505"
+
+
+def test_the_bound_and_the_control_characters_still_apply() -> None:
+    """One door, so the two rules cannot be applied by halves: what a
+    terminal would obey and how much of it there may be are governed
+    here as much as the address is."""
+    said = _endpoint("https://voice.example/xiaozhi/ota/").repeated("a\nb\x1b[2J" + "c" * 400)
+
+    assert "\n" not in said
+    assert "\x1b" not in said
+    assert len(said) <= GLIMPSE_LENGTH
+
+
+def test_the_activation_target_withholds_what_it_was_composed_from() -> None:
+    """A composed address is the supplied one with a segment on the end,
+    so a poll's answer is read as carefully as a check-in's."""
+    polled = _endpoint(f"https://voice.example/x/{SEGMENT}/?token={PASTED}").activation()
+
+    said = polled.repeated(f"/x/{SEGMENT}/{ACTIVATE_SEGMENT}?token={PASTED}")
+
+    assert SEGMENT not in said
+    assert PASTED not in said
 
 
 # Reading a websocket URL a reply named
