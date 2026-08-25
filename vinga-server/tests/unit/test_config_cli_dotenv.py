@@ -194,3 +194,109 @@ def test_the_refusal_carries_nothing_of_the_failure_on_its_chain(
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
     assert PLANTED_SECRET not in _chain(caught.value)
+
+
+# The one question that is answered in front of the read
+#
+# `--version` has to succeed whatever else is wrong. It is what an
+# operator asks when they are already comparing two halves of a
+# deployment that disagree, which is exactly when the rest of a machine
+# is not in a state to be relied on, and a `.env` that will not decode
+# is one such state. Reading it first made the one command that must
+# always answer exit 1 with a sentence about a file it was never asked
+# about.
+#
+# Both spellings, because both read a `.env` and the contract is the
+# grammar's rather than one entry point's.
+
+
+def an_unreadable_dotenv(directory: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The refusal case, in the directory the search starts from: bytes
+    no encoding will decode, carrying what a real `.env` carries."""
+    (directory / ".env").write_bytes(
+        f"{cli.API_URL_ENV}={PLANTED_URL}\nA_KEY={PLANTED_SECRET}\n".encode() + b"\xff\xfe"
+    )
+    monkeypatch.chdir(directory)
+
+
+def test_the_version_answers_through_the_dispatch_with_a_broken_dotenv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    an_unreadable_dotenv(tmp_path, monkeypatch)
+
+    with pytest.raises(SystemExit) as left:
+        cli.main(["--version"])
+
+    assert left.value.code == 0
+    captured = capsys.readouterr()
+    assert captured.out == f"{cli.DISTRIBUTION} {cli.installed_version()}\n"
+    assert captured.err == ""
+
+
+def test_the_version_answers_through_the_script_with_a_broken_dotenv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    an_unreadable_dotenv(tmp_path, monkeypatch)
+    monkeypatch.setattr("sys.argv", ["vinga", "--version"])
+
+    with pytest.raises(SystemExit) as left:
+        cli.main()
+
+    assert left.value.code == 0
+    captured = capsys.readouterr()
+    assert captured.out == f"{cli.DISTRIBUTION} {cli.installed_version()}\n"
+    assert captured.err == ""
+
+
+def test_a_root_option_before_the_version_is_still_the_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The root's options are consumed on the way, which is why this
+    reads the declared parameters rather than searching for a string:
+    `--config path --version` asks the root, and the value of an option
+    is never the question."""
+    an_unreadable_dotenv(tmp_path, monkeypatch)
+
+    with pytest.raises(SystemExit) as left:
+        cli.main(["--config", str(tmp_path / "nowhere.yaml"), "--no-input", "--version"])
+
+    assert left.value.code == 0
+    assert capsys.readouterr().out.startswith(cli.DISTRIBUTION)
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ("--config", "--version"),
+        ("list", "--version"),
+        ("agent", "show", "--version"),
+        ("list",),
+        (),
+    ],
+    ids=[
+        "the value of an option",
+        "after a command word",
+        "after a noun and a verb",
+        "not asked",
+        "nothing at all",
+    ],
+)
+def test_everything_else_goes_to_the_parser(argv: tuple[str, ...]) -> None:
+    """What this does not recognize keeps the answer it always had.
+    `--config --version` is an option's value, and a command word ends
+    the root: this grammar declares `--version` nowhere else, so the
+    parser refuses those exactly as it did."""
+    assert cli._version_asked(list(argv)) is False
+
+
+def test_a_broken_dotenv_still_stops_every_other_command(
+    run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The other half, so the exemption is one question and not a hole:
+    a command that needs the environment still meets the sentence."""
+    an_unreadable_dotenv(tmp_path, monkeypatch)
+    capsys.readouterr()
+
+    assert run("list") == 1
+
+    assert capsys.readouterr().err == DOTENV_UNREADABLE + "\n"

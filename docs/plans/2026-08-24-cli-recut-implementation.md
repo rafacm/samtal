@@ -201,6 +201,26 @@ applied in the wrong direction.
 Two artifacts moved deliberately with this round, `domain-config.md`
 and `api-openapi.json`, each regenerated under its own lane.
 
+### The third pass on PR #295
+
+One P2, and it was the `.env` boundary meeting the version contract.
+`--version` has to succeed whatever else is wrong, since it is the
+question an operator asks while already comparing two halves of a
+deployment that disagree; reading the environment first made the one
+command that must always answer exit 1 with a sentence about a file it
+was never asked about.
+
+The root position is recognized before the read now, without a parser,
+which is possible because the root's options are a closed set: the scan
+consumes the flags and the option values the built tree declares and
+stops at the first word it does not recognize. So `--config path
+--version` answers and `--config --version` does not, because there the
+word is the option's value; that distinction is why this reads the
+declared parameters rather than searching the list for a string.
+Everything the scan does not claim goes to the parser with the answer
+it always had, and every other command still meets the `.env` sentence,
+which the same suite holds.
+
 ### Deviations from the plan
 
 Six, each with what was done and why.
@@ -301,7 +321,7 @@ Six, each with what was done and why.
 From `vinga-server/`, everything green:
 
 - `uv run ruff check .`
-- `uv run pytest tests/unit -q -n auto --dist loadfile`: 3640 passed,
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: 3649 passed,
   19 skipped
 - `uv run pytest tests/integration -q`: 131 passed
 - `uv run mypy`: no issues in 4 source files
