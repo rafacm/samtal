@@ -87,15 +87,15 @@ CHANGELOG.md:3523  historical  set-secret
 CHANGELOG.md:3523  historical  clear-secret
 CHANGELOG.md:3528  historical  set-secret
 README.md:50  respell  vinga simulator
-README.md:97  respell  vinga config apply
-README.md:100  respell  vinga config device bind
-README.md:101  respell  vinga config default-agent set assistant
-README.md:103  respell  vinga config list
-README.md:111  respell  vinga config reload
-README.md:119  respell  vinga config ota-url
-README.md:128  respell  vinga config device pending list
-README.md:129  respell  vinga config device pending claim
-README.md:136  respell  vinga simulator run
+README.md:94  respell  vinga list
+README.md:107  respell  vinga apply
+README.md:110  respell  vinga device bind
+README.md:111  respell  vinga default-agent set assistant
+README.md:113  respell  vinga reload
+README.md:123  respell  config ota-url
+README.md:134  respell  vinga device pending list
+README.md:135  respell  vinga device pending claim
+README.md:142  respell  vinga simulator run
 docs/adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md:157  historical  set-secret
 docs/architecture/cli-guide.md:46  respell  vinga provider set llm local
 docs/architecture/cli-guide.md:47  historical  vinga-server config provider set llm local
