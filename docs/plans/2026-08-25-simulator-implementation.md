@@ -304,7 +304,7 @@ milestone declared.
 
 ## M2: the conversation
 
-PR TBD.
+PR #302.
 
 ### What landed
 
