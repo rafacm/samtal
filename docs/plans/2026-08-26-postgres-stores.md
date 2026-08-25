@@ -587,6 +587,13 @@ after the P1/P2 amendments. Findings condensed but faithful:
    maintenance connection; clone the template only for ordinary
    tests; create migration subjects empty (from `template0`) and
    run both chains through the product opener.
+   *Resolution*: adopted in the same decision-8 rewrite as
+   finding 2: the throwaway fixture provisions empty
+   `TEMPLATE template0` databases when fresh migration is the
+   subject and clones the migrated template otherwise, and all
+   database creation runs on an autocommit maintenance connection
+   under a session-level `pg_advisory_lock`, since
+   `CREATE DATABASE` cannot run inside a transaction.
 
 4. **P1: the image smoke lane is omitted and will stop working.**
    The image job seeds and smokes real containers that currently
