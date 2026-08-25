@@ -13,8 +13,17 @@ configuring a deployment from nothing possible at all.
 Five commands are the exception. `schema`, `reference`, `openapi` and
 `cli-reference` render documents out of the models, the routes and the
 command tree, and `ota-url` derives a URL from the file half. Those five
-open no database, need no key and contact nothing at all. What to do
-when there is no server to ask has a section of its own below.
+open no database, need no key and contact nothing at all.
+
+Two of them do need the server half of this package to be installed,
+because what they read is the server's own code: `openapi` builds the
+configuration application in order to describe it, and `ota-url` derives
+its URL through the onboarding package. Run inside the image or from a
+checkout they behave as they always have; on a workstation that
+installed the CLI alone they answer one sentence saying which half is
+missing, and the committed [`api-openapi.json`](api-openapi.json) is
+where that workstation reads the contract instead. What to do when there
+is no server to ask has a section of its own below.
 
 ## The two spellings
 
@@ -64,11 +73,14 @@ fragments separately.
 
 ## Installing it
 
-Three ways in, in the order a deployment meets them.
+Three doors, in the order a deployment meets them. They are three
+different things rather than three spellings of one, and only the middle
+one installs anything on the machine it is typed on.
 
-**Inside the container**, which is the intended one. The image ships the
-CLI, and a container that is already serving has the token and the
-loopback address in its environment, so there is nothing to arrange:
+**A deployment runs the image and installs nothing.** The published
+container image is the server, and it ships this CLI, so a container
+that is already serving has the token and the loopback address in its
+environment and there is nothing to arrange:
 
 ```bash
 docker exec -i vinga vinga-server config list
@@ -88,27 +100,37 @@ One thing does not carry over: a path is resolved inside the container,
 which has the CLI but not `examples/`, so a document that lives on your
 machine is piped in with `-f -` rather than named.
 
-**From a checkout**, which is what a development machine does. Run it
-from `vinga-server/`, where the example fragments are:
+**A workstation installs the CLI**, to administer a deployment it does
+not host. The default install of this package is the client half and
+nothing else: the grammar, the models and the HTTP transport, and none
+of the web framework, the database, the encryption, the model SDKs or
+the audio stack. There is still no published name, and there does not
+need to be, because a git reference is one:
 
 ```bash
+uvx --from "git+https://github.com/rafacm/vinga#subdirectory=vinga-server" \
+  vinga list
+```
+
+Two things about that door are worth knowing before you use it. It
+resolves without this repository's lockfile, so it takes the newest
+dependencies its constraints allow rather than the tested ones. And it
+carries no configuration file, which is why it is the invocation that
+most needs the two variables the next section is about. The two
+server-half commands named above are not on this door: run those in the
+container or from a checkout.
+
+**A checkout runs it from the source**, which is what a development
+machine does. Run it from `vinga-server/`, where the example fragments
+are:
+
+```bash
+uv sync
 uv run vinga-server config list
 ```
 
-**As a tool of its own**, for a workstation that administers a
-deployment it does not host. There is no published package yet, so
-neither `uvx vinga-server` nor `uv tool install vinga-server` resolves a
-release; both take a checkout or a built wheel instead:
-
-```bash
-uvx --from ./vinga-server vinga-server config list
-
-uv tool install ./vinga-server
-vinga-server config list
-```
-
-An installed tool carries no configuration file, so it is the invocation
-that most needs the two variables the next section is about.
+That sync gives the checkout the whole server rather than the client
+half, so the same environment also serves, and every command answers.
 
 ## Reaching a server
 

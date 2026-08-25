@@ -9,6 +9,29 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **The default install of `vinga-server` is the configuration client**
+  (#223). It carries httpx, pydantic, pydantic-settings, python-dotenv,
+  PyYAML and typer, and none of FastAPI, uvicorn, SQLAlchemy, Alembic,
+  cryptography, the LLM SDKs or the audio stack, so a workstation that
+  administers a deployment it does not host installs a client rather
+  than a whole server:
+  `uvx --from "git+https://github.com/rafacm/vinga#subdirectory=vinga-server" vinga list`.
+  Serving from a checkout or an image build needs the new `serve` extra.
+  **The published container image is unaffected and operators do
+  nothing**: the image build names the extra in its own Dockerfile, and
+  a deployment runs the image and installs nothing, as it always has. A
+  checkout is unaffected too: `uv sync` still yields a runnable server
+  with no new flags, because the dev dependency group names the extra.
+- **`openapi` and `ota-url` need the server half installed** (#223).
+  Both read the server's own code, `openapi` by building the
+  configuration application to describe it and `ota-url` by deriving its
+  URL through the onboarding package, so on a client-only install they
+  stay in the grammar and answer one fixed sentence naming the missing
+  half rather than an ImportError. Inside the image and from a checkout
+  they behave exactly as before. The committed
+  `docs/reference/api-openapi.json` is where a client-only install reads
+  the contract, and the laptop-side question `ota-url` is confused with,
+  whether a URL answers, is `vinga-server doctor`'s.
 - **The configuration grammar is noun first** (#223). `vinga-server
   config set provider llm local` is `vinga-server config provider set
   llm local`, and every command word in the grammar moved with it:

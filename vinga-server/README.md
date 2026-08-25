@@ -84,9 +84,16 @@ faster-whisper + Ollama (through `openai_compatible`) + Piper, and
 `server.local_only: true` makes the server refuse to boot anything
 else (see Security below).
 
+The Install column is a checkout's, since a deployment installs nothing:
+both image variants carry `core`, and the default variant carries the
+two extras as well. "Core" here means the server half, which a checkout
+gets from a plain `uv sync` and the image build gets from the `serve`
+extra it names in its Dockerfile. The configuration CLI is the other
+half and carries none of this.
+
 Cloud providers need no extra. They speak their APIs over HTTP, or
-through an SDK the core install already carries for another stage, so
-they are in every install and cost nothing to carry; what makes a
+through an SDK the server install already carries for another stage, so
+they are in every server and cost nothing to carry; what makes a
 provider optional is weight or licensing, and a network client has
 neither.
 
@@ -1056,7 +1063,7 @@ conversation pipeline.
 ## Development
 
 ```bash
-uv sync                             # install dependencies
+uv sync                             # install dependencies, server half included
 uv sync --extra faster-whisper --extra piper  # add the local ASR/TTS engines
 uv run vinga-server                # run the server
 uv run pytest tests/unit -q         # unit tests
@@ -1068,6 +1075,13 @@ uv run ruff check .                 # lint
 # shows up in CI. Local runs are serial by default.
 uv run pytest tests/unit -q -n auto --dist loadfile
 ```
+
+`uv sync` with no flags is deliberately the whole of it. The package's
+default install is the configuration CLI, and the server half is the
+`serve` extra; the dev dependency group names that extra, so a checkout
+gets a runnable server from one command and there is no tier to
+remember. The extras above are the two optional local engines, which is
+what an extra flag is still for.
 
 The test lanes run the whole pipeline on the built-in mock providers, so
 they need no keys, no model downloads, and no network.
@@ -2564,22 +2578,21 @@ are. Inside the container they already are:
 docker exec -i vinga vinga-server config ota-url
 ```
 
-On a machine with neither a checkout nor an installed server, `uvx`
-fetches the CLI, and the file and the secret are yours to hand it:
+In a checkout they are too, and that is the other place it runs:
 
 ```bash
-VINGA_AUTH_SECRET=$(cat ~/.vinga-auth-secret) \
-  uvx --from "git+https://github.com/rafacm/vinga#subdirectory=vinga-server" \
-  vinga-server config --config ./config.yaml ota-url
+uv run vinga-server config --config ./config.yaml ota-url
 ```
 
-That resolves the whole server, dependencies and all, to run a command
-that opens no socket; a slim redistribution of the CLI is a follow-up
-rather than a thing that exists. It also resolves without this
-repository's lockfile, so it takes the newest dependencies its
-constraints allow rather than the tested ones. In a checkout,
-`uv run vinga-server config ota-url` from `vinga-server/` is the
-lockfile's own environment and the one this repository tests.
+Those are the two, and the list is shorter than it used to be. This
+command used to be reachable through `uvx --from git+...` as well, and
+it is not any more: the default install of this package is the
+configuration CLI, and this derivation reads the onboarding package,
+which is the server half. On that install the command is in the grammar
+and answers one sentence saying which half is missing. It is a
+server-host command by nature, since the file half it reads is the one a
+workstation does not have, and the question a workstation actually has
+about a URL, whether anything answers on it, is `vinga-server doctor`'s.
 
 Eight characters, in an alphabet with no `0`/`O` and no `1`/`I`/`l`,
 because this string gets typed on a phone keyboard off a small display.
