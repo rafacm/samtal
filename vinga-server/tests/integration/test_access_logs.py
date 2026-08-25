@@ -24,7 +24,7 @@ import uvicorn
 import websockets
 
 from tests.integration.conftest import booted
-from vinga_server import logs, main
+from vinga_server import logs, serving
 from vinga_server.app import create_app
 from vinga_server.auth import build_device_auth
 from vinga_server.config import Config
@@ -73,7 +73,7 @@ async def _serving(app, config: Config):
     an ephemeral port. The port is overridden on the object rather than
     in the configuration, since the models refuse 0 and that is right
     for a deployment."""
-    served = main.uvicorn_config(app, config)
+    served = serving.uvicorn_config(app, config)
     served.host, served.port = "127.0.0.1", 0
     server = uvicorn.Server(served)
     task = asyncio.create_task(server.serve())
@@ -134,7 +134,7 @@ async def test_no_request_line_reaches_the_log(caplog: pytest.LogCaptureFixture)
 async def test_the_served_configuration_has_no_access_log() -> None:
     """The property behind the assertion above, stated where a future
     change to the uvicorn configuration would meet it."""
-    assert main.uvicorn_config(create_app(CONFIG), CONFIG).access_log is False
+    assert serving.uvicorn_config(create_app(CONFIG), CONFIG).access_log is False
 
 
 @pytest.mark.asyncio

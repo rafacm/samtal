@@ -71,7 +71,7 @@ _STANDARD_ATTRIBUTES = frozenset(
 #   HTTP server's trace, which at debug is the request line and every
 #   request header: the OTA path holds the deployment's secret segment
 #   and a device's handshake carries its bearer token, which is why the
-#   access log is off in the first place (`main.uvicorn_config` says
+#   access log is off in the first place (`serving.uvicorn_config` says
 #   so). uvicorn hands that same logger to the websockets protocol, so
 #   those records also render every device frame's payload, text
 #   decoded.
