@@ -286,16 +286,32 @@ because they are offered everywhere (M1 deviation 3 of the re-cut) and
 are inert here, since neither verb prompts and neither destroys.
 `--version` is the root's alone, as it is for every row.
 
-### 3. Two credentials, two transport policies, one of them extracted
+### 3. Three credentials, two transport policies, one of them extracted
 
-The recorded decision keeps the two credentials distinct. The plan
-keeps their transport policies distinct too, because they are genuinely
-different rules and blurring them is how one of them gets weakened.
+The recorded decision keeps two credentials distinct. **There are
+three**, and the third is the one a plan written from the operator's
+side forgets, because it is never typed by anybody: the OTA reply mints
+a **device token** (`ota/reply.py:273`), and the websocket verifies it
+against the MAC and the client id before accepting the socket
+(`ws.py:103`). Only the first POST is credentialless. Everything after
+it carries a bearer token this CLI was handed, which is a credential in
+exactly the way the API token is, and it is the harder of the two to
+notice leaking because nobody put it on a command line.
 
-**Device-side: no credential at all, and a device-facing address
-policy.** The OTA endpoint is the token issuer, so it cannot require a
-token; a board presents a MAC in a header and nothing else. The address
-policy is therefore `doctor`'s and not the configuration client's:
+So the inventory is three, and each is named with what it is and what
+may never be said about it:
+
+| Credential | Where it comes from | Where it goes | What may be printed |
+| --- | --- | --- | --- |
+| the OTA URL | the positional | the check-in and the activation poll | the stand-in name, never the URL: the path segment is the deployment's own secret |
+| the device token | the check-in reply | the websocket `Authorization` header | that one was issued, never its value and never its length |
+| the API secret | the variable `server.api.secret_env` names | the `--claim` request alone | the variable's name in a missing-value sentence, never the value |
+
+**Device-side: the first POST is credentialless, and it uses a
+device-facing address policy.** The OTA endpoint is the token issuer,
+so it cannot require a token; a board presents a MAC in a header and
+nothing else. The address policy is therefore `doctor`'s and not the
+configuration client's:
 `http://` is permitted to any host, because that is exactly what a board
 on a LAN is pointed at, whereas `config/cli.py`'s `_permitted` refuses
 plain HTTP off loopback because the API bearer token crosses every
@@ -324,6 +340,37 @@ The extraction is proven behavior-preserving before anything new is
 added, by the existing `tests/unit/test_doctor.py` cases running
 unchanged against the moved function. That is the pin-before-reshape
 discipline applied to the one thing in this issue that moves.
+
+**The device token's own transport policy, which is a second address
+this CLI did not type.** The check-in's answer names a websocket URL,
+and that URL is far-side input: it decides where a bearer token this
+process is holding gets sent. It is therefore validated before it is
+used, by the same module and to the same standard as the supplied
+endpoint, plus one rule of its own:
+
+- it parses, names `ws` or `wss`, and carries a host;
+- **it carries no userinfo**, which is refused outright, for the reason
+  `_permitted` refuses it on the API address: a credential in a URL
+  reaches shell history, process lists and access logs;
+- **it may not downgrade.** A `wss://` endpoint reached over `https://`
+  may not answer with a `ws://` URL, which is the check `doctor` already
+  makes and calls out as a failure of its own
+  (`doctor._plain_websocket`). A device token crossing a plain socket
+  from behind TLS is the same mistake the API client has no flag to
+  make;
+- and it is never printed. What a verdict names is the fixed stand-in,
+  the way the supplied endpoint is named.
+
+**Nothing the far side wrote reaches a sentence.** That covers the
+websocket URL above, the peer's close code and close reason, the body
+of any answer, and every exception a websocket library raises: the
+close code is a number this side compares against a closed set and
+reports by its own name, the close reason is read and discarded, and a
+library exception is reported by its class alone, recorded inside the
+handler and raised outside it, the way `doctor._probed` does it. The
+`stt` text and the `tts` sentences are the exception that proves the
+rule: they are the artifact the command exists to print, and everything
+that is not that content is a fixed local sentence.
 
 **Operator-side: `--claim`, and it calls the act the grammar already
 has.** With `--claim assistant` the simulator, after a check-in that
@@ -421,7 +468,9 @@ code:
 - reading `stt`, `tts` in all three states, and binary reply frames:
   counted, size-checked and unwrapped, with the reply's duration
   computed from the frame count and the announced `frame_duration`;
-- the close codes and the reasons the session closes for.
+- the close, reported by the code compared against the closed set this
+  side knows and named in this side's own words. The peer's close reason
+  is read and discarded, because it is far-side bytes.
 
 **Not supported in v1**, each with the reason that keeps it off the
 list rather than a shrug:
@@ -706,11 +755,15 @@ it.
 - No-leak, on all four surfaces the existing sentinel cases use (stdout,
   stderr, the collected log records rendered whole, and the exception
   chain), with one distinct credential-shaped sentinel per field so a
-  leak names its own source: the supplied URL including a secret path
-  segment and a query string, the `--mac` value, each `--claim` value,
-  the API token, and the body the endpoint answered with. The URL case
-  is the load-bearing one, because the OTA path segment is itself the
-  deployment's secret.
+  leak names its own source. **The inventory is the three credentials
+  plus every far-side value that reaches this process**, and it is
+  exhaustive rather than representative: the supplied OTA URL carrying
+  both a secret path segment and a query string, the API secret, the
+  **device token the reply issued**, the **websocket URL the reply
+  named** including a userinfo it is refused for, the `--mac` value,
+  each `--claim` value, and the body the endpoint answered with. The
+  device-token case is the one a review would otherwise not think to
+  ask for, because nobody typed it.
 - The endpoint extraction proven behavior-preserving: every existing
   `test_doctor.py` case green against the moved function, unchanged.
 - The live lane's new family refusal, its driven row, and the wheel
@@ -735,6 +788,15 @@ it.
 - The fixture: `framing.frames` walks it, every packet is non-empty, the
   count and the announced frame duration multiply to the stated
   duration, and the bytes are identical on every machine.
+- **The websocket half's own no-leak inventory**, on the same four
+  surfaces: the device token never printed and never logged; a returned
+  websocket URL carrying a userinfo refused and not shown; a `ws://` URL
+  returned from an `https://` endpoint refused as a downgrade; a
+  malformed server hello answered with a fixed sentence naming no
+  field's value; and a peer close reason of credential-shaped bytes read
+  and never relayed. Each of the five plants its own sentinel, and every
+  websocket library exception is asserted to reach a sentence by class
+  name with no `__context__` behind it.
 - The framing round trip at all three versions, through the server's own
   `wrap` and `unwrap`.
 - Every wait bounded, each with its constant and its reason, and the
@@ -843,6 +905,26 @@ between alternatives the choice is recorded with its reason.
    the API token, the device token, the OTA URL, the returned websocket
    URL and its userinfo, a malformed server hello, and the peer close
    reason.
+
+   *Resolution* (this commit): decision 3 is re-headed "Three
+   credentials" and opens with the inventory as a table: the OTA URL,
+   the device token the reply mints, and the API secret, each with what
+   may be printed about it. The device token gains a transport policy of
+   its own, because the websocket URL is far-side input that decides
+   where a token this process holds gets sent: it must parse, name `ws`
+   or `wss`, carry a host, carry no userinfo, and never downgrade a
+   `wss` endpoint reached over `https` to a plain socket, which is the
+   check `doctor._plain_websocket` already makes. A new paragraph states
+   that nothing the far side wrote reaches a sentence, naming the four
+   sources (the returned URL, the close code and reason, any answer
+   body, and every websocket library exception, reported by class alone,
+   recorded inside its handler and raised outside it) with the `stt` and
+   `tts` content as the stated exception, since that content is the
+   artifact the command exists to print. M1's sentinel inventory becomes
+   the three credentials plus every far-side value, exhaustive rather
+   than representative, and M2 gains a websocket no-leak inventory of
+   five cases. The capability table's close row stops promising to
+   report a peer's reason.
 
 2. **P1: M1 would publish capability help claiming M2 features already
    work.** The supported table includes the websocket handshake, the
