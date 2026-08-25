@@ -1675,6 +1675,9 @@ serve = [
     { name = "sqlalchemy" },
     { name = "uvicorn", extra = ["standard"] },
 ]
+sim = [
+    { name = "websockets" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -1686,7 +1689,7 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "pytest-xdist" },
     { name = "ruff" },
-    { name = "vinga-server", extra = ["serve"] },
+    { name = "vinga-server", extra = ["serve", "sim"] },
     { name = "xiaozhi-sdk" },
 ]
 
@@ -1710,8 +1713,9 @@ requires-dist = [
     { name = "sqlalchemy", marker = "extra == 'serve'", specifier = ">=2.0.51" },
     { name = "typer", specifier = ">=0.27.1" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'serve'", specifier = ">=0.34" },
+    { name = "websockets", marker = "extra == 'sim'", specifier = ">=16.1" },
 ]
-provides-extras = ["serve", "faster-whisper", "piper"]
+provides-extras = ["serve", "sim", "faster-whisper", "piper"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1723,7 +1727,7 @@ dev = [
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "ruff", specifier = ">=0.9" },
-    { name = "vinga-server", extras = ["serve"] },
+    { name = "vinga-server", extras = ["serve", "sim"] },
     { name = "xiaozhi-sdk", specifier = ">=0.5.1" },
 ]
 

@@ -73,6 +73,24 @@ serve = [
     "sqlalchemy>=2.0.51",
     "uvicorn[standard]>=0.34",
 ]
+# What `vinga simulator run` needs, and nothing else.
+#
+# A third tier rather than a line in the client half, because holding a
+# conversation is not what a configuration client does: the default
+# install administers a deployment and needs no websocket for any of it.
+# It is also not the server half, and putting it there would make trying
+# vinga without hardware mean installing a server.
+#
+# One distribution, chosen for being the smallest new root this protocol
+# can be spoken over: `websockets` has an empty dependency closure, ships
+# a pure-Python wheel, and is already in `uv.lock` because
+# `uvicorn[standard]` reaches it, so the tiering costs no new resolution.
+# The alternatives, in the order they were checked: `aiohttp`, a whole
+# HTTP stack for one upgrade; `httpx-ws`, a second httpx-shaped
+# dependency plus wsproto; and hand-rolling RFC 6455, which is a masking
+# and fragmentation implementation nobody asked for in a repository whose
+# posture is that the wire has one home.
+sim = ["websockets>=16.1"]
 # Local ASR (MIT). Model weights download from Hugging Face at startup.
 faster-whisper = ["faster-whisper>=1.2"]
 # Local TTS. piper-tts is GPL-3.0, which is why it is an optional extra
@@ -90,16 +108,16 @@ vinga = "vinga_server.config.cli:main"
 
 [dependency-groups]
 # What a checkout gets. `uv sync` installs the default groups and the
-# project, but not its extras, so the serve extra is named here: that is
-# the whole of what keeps the contributor door one command and keeps
-# AGENTS.md's Commands section true without an edit.
+# project, but not its extras, so both shipped extras are named here:
+# that is the whole of what keeps the contributor door one command and
+# keeps AGENTS.md's Commands section true without an edit.
 #
 # This is the one place a mistake is invisible to every other lane,
 # because every other lane names its tier explicitly. The sync-then-run
 # smoke in `tests/integration/test_tier_closure.py` is its guard, and it
 # is named as such.
 dev = [
-    "vinga-server[serve]",
+    "vinga-server[serve,sim]",
     "httpx2>=2.9.1",
     # PEP 508 marker evaluation, for the tier lane's closure: it walks
     # `uv.lock` and has to decide which dependencies this platform

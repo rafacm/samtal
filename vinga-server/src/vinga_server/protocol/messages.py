@@ -328,18 +328,28 @@ def parse_server_message(text: str | bytes) -> ServerMessage:
 # these messages have always been written by.
 
 
-def _built(message: BaseModel) -> str:
-    """One message as its bytes. `exclude_none` is what drops a `text`
-    nobody gave rather than sending a null in its place."""
+def built(message: BaseModel) -> str:
+    """One control message as its bytes.
+
+    Public because both directions build one. The three builders below
+    are the server's, and `vinga simulator` builds a device hello and a
+    `listen` off the device-side models through this same function, so
+    there is one place that decides what a control message looks like on
+    the wire.
+
+    `exclude_none` is what drops a `text` nobody gave rather than sending
+    a null in its place: the firmware reads the field where it expects a
+    string, and a null is not one.
+    """
     return json.dumps(message.model_dump(exclude_none=True))
 
 
 def server_hello(session_id: str, audio_params: AudioParams) -> str:
-    return _built(ServerHello(session_id=session_id, audio_params=audio_params))
+    return built(ServerHello(session_id=session_id, audio_params=audio_params))
 
 
 def stt_message(session_id: str, text: str) -> str:
-    return _built(SttMessage(session_id=session_id, text=text))
+    return built(SttMessage(session_id=session_id, text=text))
 
 
 def tts_message(
@@ -347,7 +357,7 @@ def tts_message(
     state: Literal["start", "stop", "sentence_start"],
     text: str | None = None,
 ) -> str:
-    return _built(TtsMessage(session_id=session_id, state=state, text=text))
+    return built(TtsMessage(session_id=session_id, state=state, text=text))
 
 
 # The state and mode inventory, off the models themselves

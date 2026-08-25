@@ -189,12 +189,19 @@ def test_an_unsupported_entry_with_no_reason_fails() -> None:
 
 
 def test_a_row_claiming_a_verb_the_tree_does_not_have_fails() -> None:
-    """The bite that would have caught the original plan: M1 shipping a
-    table that says the conversation works."""
+    """The bite that would have caught the original plan: a table
+    claiming what the next milestone will write.
+
+    The verb is invented rather than borrowed, because both of this
+    noun's verbs are now registered and the assertion is about a claim
+    with nothing behind it.
+    """
     lying = (
         *capabilities.rows(),
         capabilities.Capability(
-            what="holding a conversation", side=capabilities.SUPPORTED, verb=capabilities.RUN
+            what="playing the reply out loud",
+            side=capabilities.SUPPORTED,
+            verb=("simulator", "listen"),
         ),
     )
 
@@ -219,15 +226,25 @@ def test_a_pending_row_naming_a_verb_that_already_exists_fails() -> None:
 # What this milestone in particular says
 
 
-def test_this_milestone_claims_the_check_in_and_nothing_of_the_conversation() -> None:
-    """M1's own shape, stated once so that M2's flip is a visible change
-    to this file rather than a silent one to the table."""
-    claimed = {row.verb for row in capabilities.rows() if row.side == capabilities.SUPPORTED}
-    assert claimed == {capabilities.CHECK_IN}
+def test_both_verbs_are_claimed_and_the_third_side_is_empty() -> None:
+    """What retires the third side, and the reason it is an assertion
+    rather than a deletion.
 
-    coming = {row.verb for row in capabilities.rows() if row.side == capabilities.PENDING}
-    assert coming == {capabilities.RUN}
-    assert capabilities.RUN not in {row.words for row in cli.COMMANDS}
+    M1 shipped every conversation row as "not available yet", naming the
+    verb that would bring it, so no commit existed in which the table and
+    the tree disagreed. M2 flipped those rows in the change that landed
+    `run`. What stops the third side becoming a place to park a claim is
+    this: it is asserted EMPTY, and the machinery for it stays so that a
+    future row parked there fails here rather than shipping as help.
+    """
+    claimed = {row.verb for row in capabilities.rows() if row.side == capabilities.SUPPORTED}
+    assert claimed == {capabilities.CHECK_IN, capabilities.RUN}
+
+    assert [row for row in capabilities.rows() if row.side == capabilities.PENDING] == []
+
+    registered = {row.words for row in cli.COMMANDS}
+    assert capabilities.CHECK_IN in registered
+    assert capabilities.RUN in registered
 
 
 def test_the_listening_states_are_told_apart_rather_than_claimed_together() -> None:
@@ -238,8 +255,8 @@ def test_the_listening_states_are_told_apart_rather_than_claimed_together() -> N
         for row in capabilities.rows()
         if row.what.startswith("sending listen")
     }
-    assert listen["sending listen (state=start, mode=manual)"] == capabilities.PENDING
-    assert listen["sending listen (state=stop, mode=manual)"] == capabilities.PENDING
+    assert listen["sending listen (state=start, mode=manual)"] == capabilities.SUPPORTED
+    assert listen["sending listen (state=stop, mode=manual)"] == capabilities.SUPPORTED
     assert listen["sending listen (state=detect, mode=manual)"] == capabilities.UNSUPPORTED
     assert listen["sending listen (state=start, mode=auto)"] == capabilities.UNSUPPORTED
     assert listen["sending listen (state=start, mode=realtime)"] == capabilities.UNSUPPORTED

@@ -60,6 +60,11 @@ SOURCE = Path(__file__).resolve().parents[2] / "src" / "vinga_server"
 # pure: the whole of `protocol` imports `json`, `struct`, `dataclasses`,
 # `collections.abc` and pydantic and nothing else.
 #
+# `simulator.utterance` joined them in M2 of #248: it is what the
+# packaged sentence IS, which is `json`, `dataclasses`,
+# `importlib.resources` and `protocol.framing`, and nothing about
+# reading a file the wheel already carries is behind an extra.
+#
 # `simulator.conversation` is deliberately NOT here, and
 # `test_the_simulator_s_conversation_half_is_not_imported_eagerly` below
 # says so: it is the only module in the tree that imports `websockets`,
@@ -95,6 +100,7 @@ CLI_REACH = frozenset(
         "vinga_server.simulator",
         "vinga_server.simulator.board",
         "vinga_server.simulator.capabilities",
+        "vinga_server.simulator.utterance",
         "vinga_server.tools",
         "vinga_server.tools.names",
     }
