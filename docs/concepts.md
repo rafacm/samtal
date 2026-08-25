@@ -240,8 +240,8 @@ stay isolated in what they learn, except for the profile the user
 chose to share with all of them.
 
 Agent memory is distinct from what an agent appears to know inside one
-conversation; the config reference documents that distinction where
-memory is configured.
+conversation; the configuration reference documents that distinction
+where memory is configured.
 
 ## Meta capabilities
 
