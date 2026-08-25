@@ -162,7 +162,7 @@ UNUSABLE_WEBSOCKET = (
 )
 
 
-def _bad_status(status: int) -> str:
+def bad_status(status: int) -> str:
     """What a status other than a success says.
 
     The number is printed because it is this side's reading of the
@@ -176,7 +176,7 @@ def _bad_status(status: int) -> str:
     )
 
 
-def _bad_poll_status(status: int) -> str:
+def bad_poll_status(status: int) -> str:
     return (
         f"{SUPPLIED_ENDPOINT} answered {status} to an activation poll, and the only two "
         f"answers that endpoint gives are 202 for keep waiting and 200 for activated. "
@@ -409,7 +409,7 @@ def read(answered: httpx.Response, endpoint: Endpoint) -> CheckIn:
     than being an empty one here.
     """
     if not answered.is_success:
-        return Refused(_bad_status(answered.status_code))
+        return Refused(bad_status(answered.status_code))
     payload = _payload(answered)
     if payload is None:
         return Refused(NOT_A_REPLY)
@@ -541,7 +541,7 @@ def polled(endpoint: Endpoint, identity: Identity, hint: Any) -> Poll:
         if answered.status_code == 200:
             return Activated()
         if answered.status_code != 202:
-            return Refused(_bad_poll_status(answered.status_code))
+            return Refused(bad_poll_status(answered.status_code))
         if attempt + 1 == POLL_ATTEMPTS or monotonic() + POLL_INTERVAL_S > deadline:
             break
         sleep(POLL_INTERVAL_S)
@@ -572,6 +572,8 @@ __all__ = [
     "StillWaiting",
     "Unwelcome",
     "activation_ceiling",
+    "bad_poll_status",
+    "bad_status",
     "check_in",
     "polled",
     "read",

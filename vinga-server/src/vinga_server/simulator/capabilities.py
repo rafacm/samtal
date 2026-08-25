@@ -212,8 +212,10 @@ def _matched(row: tuple[str, str, str], refusals: tuple[tuple[_Pattern, str], ..
     return ""
 
 
-def _named(row: tuple[str, str, str], direction: str) -> str:
-    """One message row as a reader meets it."""
+def named_message(row: tuple[str, str, str], direction: str) -> str:
+    """One message row as a reader meets it, which is the name the help
+    prints and the name a test holds the table to. One spelling, so the
+    two cannot drift."""
     message_type, state, mode = row
     facets = [f"state={state}" if state else "", f"mode={mode}" if mode else ""]
     said = ", ".join(part for part in facets if part)
@@ -229,10 +231,10 @@ def _message_rows() -> tuple[Capability, ...]:
     rows: list[Capability] = []
     for row in sent_messages():
         reason = _matched(row, _SENT_REFUSALS)
-        rows.append(_classified(_named(row, "sending"), reason))
+        rows.append(_classified(named_message(row, "sending"), reason))
     for row in received_messages():
         reason = _matched(row, _RECEIVED_REFUSALS)
-        rows.append(_classified(_named(row, "reading"), reason))
+        rows.append(_classified(named_message(row, "reading"), reason))
     return tuple(rows)
 
 
@@ -424,6 +426,7 @@ __all__ = [
     "UNSUPPORTED",
     "Capability",
     "epilog",
+    "named_message",
     "received_messages",
     "rows",
     "sent_messages",
