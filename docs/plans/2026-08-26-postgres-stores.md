@@ -331,16 +331,30 @@ explicitly.
     `docker compose up -d --wait` in the documented loop, per the
     issue. The provisioning SQL lives at `deploy/postgres-init.sql`
     next to the compose file that mounts it, reads
-    `VINGA_DB_RO_PASSWORD` via `psql`'s `\getenv` (available since
-    psql 15; the compose pin is 17) so the same file runs
-    unmodified under compose and in the infra repository, creates
-    both schemas owned by the server role, creates `vinga_ro`, and
-    scopes `USAGE` plus
-    `ALTER DEFAULT PRIVILEGES FOR ROLE vinga IN SCHEMA
-    conversations GRANT SELECT ON TABLES TO vinga_ro` to the
-    conversations schema alone. A database migrated without the
-    file simply has no analyst role, and the deployment docs say
-    so.
+    `VINGA_DB_RO_PASSWORD` and the server role's name
+    (`VINGA_DB_USER`) via `psql`'s `\getenv` (available since psql
+    15; the compose pin is 17) so the same file runs unmodified
+    under compose and in the infra repository and never hardcodes
+    a role decision 2 makes configurable. It is repeatable by
+    construction, because a `dropdb`/`createdb` reset destroys
+    schemas and database-local default privileges while the
+    instance-level `vinga_ro` survives: the role is
+    create-or-rotate (a `DO` block that creates it when missing
+    and `ALTER ROLE ... PASSWORD` otherwise), the schemas are
+    `IF NOT EXISTS`, and the grants cover current tables
+    (`GRANT SELECT ON ALL TABLES IN SCHEMA conversations`) as well
+    as future ones (the `ALTER DEFAULT PRIVILEGES FOR ROLE
+    <server role> IN SCHEMA conversations` grant), so running it
+    before or after migration lands the same place. The recovery
+    docs say to rerun it after any database reset. The integration
+    lane asserts the role's whole contract against the executed
+    file: `vinga_ro` reads every conversations table, inherits
+    `SELECT` on a table created after provisioning, and has
+    neither `USAGE` on the domain schema nor any write. The CI
+    path filters gain `docker-compose.yml` and `deploy/**` so a
+    provisioning edit runs the lanes that execute it. A database
+    migrated without the file simply has no analyst role, and the
+    deployment docs say so.
 
 11. **Engine ownership does not move.** Boot's store open, the
     lifespan-owned API engine, the bindings view's engine and the
@@ -637,6 +651,11 @@ after the P1/P2 amendments. Findings condensed but faithful:
    and assert in the integration lane that `vinga_ro` reads every
    conversations table, inherits a later-created one, and cannot
    touch the domain schema.
+   *Resolution*: decision 10 amended exactly so: the role name
+   parameterized through `\getenv`, create-or-rotate role
+   handling, grants on current plus future tables,
+   rerun-after-reset in the recovery docs, the path filters, and
+   the three integration assertions against the executed file.
 
 6. **P1: `VINGA_DB_URL` is neither constrained to the chosen
    driver nor safely redacted.** An unrestricted SQLAlchemy URL
