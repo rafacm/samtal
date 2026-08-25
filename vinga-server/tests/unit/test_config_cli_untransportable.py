@@ -21,16 +21,21 @@ ever changed, the fragment would be in a body and this is what would
 say so.
 """
 
+import ast
 import json
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import httpx
 import pytest
+from cryptography.fernet import Fernet, MultiFernet
 
 from tests.support.config_cli import chain, logged, runner
-from vinga_server.config import cli, entities, transport
+from vinga_server.config import cli, transport
+from vinga_server.config import store as config_store
 from vinga_server.config.loader import ConfigError
+from vinga_server.config.secrets import generate_key
+from vinga_server.db import open_database
 
 # One per field, none a real credential, each shaped so a substring
 # check for it cannot match by accident.
@@ -194,22 +199,196 @@ def test_the_stored_row_walk_names_no_key_either() -> None:
     assert f"the fragment.{transport.FIELD}.0.{transport.FIELD}" in problem
 
 
-def test_every_caller_names_a_fixed_section() -> None:
-    """The vocabulary, held closed.
+# What every production caller passes, held two ways
+#
+# The round that produced this file left one hole, and the re-review
+# found it: the vocabulary was checked and the CALLERS were not, so a
+# call site that went back to passing `providers.<stage>.<name>` stayed
+# green. Both halves are here now. The walk reads what is written, which
+# catches a reintroduced address the moment it is typed even on a path
+# no test drives; the spies read what arrives, which catches an address
+# assembled somewhere the walk cannot see.
 
-    The sentence is only as safe as what is put in front of it, so what
-    every call site may pass is enumerated: the applied document's own
-    word, and the five sections the registry declares. An address built
-    from an identity is none of them.
+SOURCE = Path(__file__).resolve().parents[2] / "src" / "vinga_server"
+
+GUARDED = "check_transportable"
+
+# The argument expressions a call to it may pass, as they are written.
+# A closed set of source text rather than a rule about shapes: the
+# question here is what a reviewer would read on the line, and three
+# spellings is a short enough list to say out loud.
+#
+# `APPLY_LOCATION` is the applied document's own fixed word.
+# `descriptor.moved_key` is a section this repository declared on a
+# registry entry, which no caller can influence.
+FIXED_ARGUMENTS = frozenset(
+    {
+        "APPLY_LOCATION",
+        "transport.APPLY_LOCATION",
+        "descriptor.moved_key",
+    }
+)
+
+
+def _calls(tree: ast.AST, name: str) -> list[ast.Call]:
+    """Every call to one function in a module, however it is spelled."""
+    found = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        called = node.func
+        if isinstance(called, ast.Attribute) and called.attr == name:
+            found.append(node)
+        elif isinstance(called, ast.Name) and called.id == name:
+            found.append(node)
+    return found
+
+
+def _enclosing(tree: ast.AST, call: ast.Call) -> ast.FunctionDef | None:
+    """The function a call sits inside, which is what a forwarded
+    argument has to be resolved against."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and any(
+            inner is call for inner in ast.walk(node)
+        ):
+            return node
+    return None
+
+
+def _forwarded(tree: ast.AST, holder: ast.FunctionDef, parameter: str) -> list[str]:
+    """What every caller of `holder` puts in the position `parameter`
+    occupies, as written.
+
+    One hop, which is all this tree has: the store's `_readable` takes
+    the section and hands it on, so a guard that stopped at the direct
+    call would be reading a parameter name and calling it fixed.
     """
-    allowed = {transport.APPLY_LOCATION} | {kind.moved_key for kind in entities.ENTITIES}
+    names = [argument.arg for argument in holder.args.args]
+    position = names.index(parameter)
+    passed = []
+    for call in _calls(tree, holder.name):
+        for keyword in call.keywords:
+            if keyword.arg == parameter:
+                passed.append(ast.unparse(keyword.value))
+                break
+        else:
+            passed.append(
+                ast.unparse(call.args[position]) if position < len(call.args) else "<absent>"
+            )
+    return passed or ["<no caller found>"]
 
-    assert transport.APPLY_LOCATION == "document"
-    assert "providers" in allowed and "mcp_servers" in allowed
-    # Every one is one word of this repository's own, with no separator
-    # an addressed form would have needed.
-    for section in allowed:
-        assert "." not in section, section
+
+def _sections_passed() -> dict[str, list[str]]:
+    """Every production call to the guard, and the section expression it
+    receives, resolved through one forwarding hop."""
+    received: dict[str, list[str]] = {}
+    for path in sorted(SOURCE.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for call in _calls(tree, GUARDED):
+            if not call.args:
+                received.setdefault(path.name, []).append("<no argument>")
+                continue
+            written = ast.unparse(call.args[0])
+            if written in FIXED_ARGUMENTS or written.startswith("'"):
+                received.setdefault(path.name, []).append(written)
+                continue
+            holder = _enclosing(tree, call)
+            if holder is None or written not in [a.arg for a in holder.args.args]:
+                received.setdefault(path.name, []).append(written)
+                continue
+            received.setdefault(path.name, []).extend(_forwarded(tree, holder, written))
+    return received
+
+
+def test_every_written_call_passes_a_fixed_section() -> None:
+    """The static half: what the source says, on every path, driven or
+    not.
+
+    Both call sites are named, so a third one arriving is a review event
+    with a name rather than a silent widening, and a call site that
+    disappeared would fail here too: a walk that finds nothing is a
+    guard that proves nothing.
+    """
+    received = _sections_passed()
+
+    assert set(received) == {"cli.py", "store.py"}, received
+    for module, expressions in received.items():
+        for written in expressions:
+            assert written in FIXED_ARGUMENTS, (module, written)
+
+
+def test_the_walk_would_see_an_address_if_one_came_back() -> None:
+    """The walk, held to biting.
+
+    A guard over source text is worth exactly what it rejects, so it is
+    shown rejecting the expression this finding was about: the addressed
+    form the CLI used to build, and the parameter name a forwarding hop
+    would otherwise have been mistaken for a fixed word.
+    """
+    for reintroduced in (
+        "'.'.join((descriptor.moved_key, *_identity(descriptor, args)))",
+        "location",
+        "f'{descriptor.moved_key}.{name}'",
+    ):
+        assert reintroduced not in FIXED_ARGUMENTS
+
+
+@pytest.fixture
+def spy(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Every section a production call actually receives, whichever
+    module made the call."""
+    received: list[str] = []
+
+    def recording(section: str, fragment: object) -> None:
+        received.append(section)
+        transport.check_transportable(section, fragment)
+
+    monkeypatch.setattr(cli, "check_transportable", recording)
+    monkeypatch.setattr(config_store, "check_transportable", recording)
+    return received
+
+
+def test_the_cli_entity_path_receives_the_section_alone(
+    run: Callable[..., int], spy: list[str]
+) -> None:
+    """The runtime half, on the path the finding named: a write
+    addressed by two credential-shaped words, and what the guard is
+    handed is the section."""
+    assert run("provider", "set", STAGE_SENTINEL, NAME_SENTINEL, "-f", "-", stdin=FLAT) == 1
+
+    assert spy == ["providers"]
+    for sentinel in (STAGE_SENTINEL, NAME_SENTINEL):
+        assert not [section for section in spy if sentinel in section]
+
+
+def test_the_cli_apply_path_receives_the_document_word(
+    run: Callable[..., int], spy: list[str], tmp_path: Path
+) -> None:
+    """And the other CLI caller, whose subject is the whole document."""
+    document = tmp_path / "document.yaml"
+    document.write_text(f"providers:\n  llm:\n    {NAME_SENTINEL}:\n      type: anthropic\n")
+
+    run("apply", "-f", str(document))
+
+    assert spy[0] == transport.APPLY_LOCATION
+    for section in spy:
+        assert NAME_SENTINEL not in section
+
+
+def test_the_store_path_receives_the_section_alone(
+    tmp_path: Path, spy: list[str]
+) -> None:
+    """The repository's own caller, which is the one that holds the
+    addressed location for every OTHER refusal it makes. It hands this
+    guard the section and keeps the address for itself."""
+    engine = open_database(tmp_path / "db")
+    try:
+        store = config_store.ConfigStore(engine, MultiFernet([Fernet(generate_key())]))
+        store.set_provider("llm", NAME_SENTINEL, {"type": "anthropic"})
+    finally:
+        engine.dispose()
+
+    assert spy == ["providers"]
 
 
 def test_a_fragment_json_can_carry_still_travels(
