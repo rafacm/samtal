@@ -8,15 +8,16 @@ replacement. The CLI is one caller; the REST API will be the other, and
 it is meant to mount this object behind HTTP rather than restate any of
 it.
 
-A write is one transaction. The engine begins every transaction with
-BEGIN IMMEDIATE (see `vinga_server.db`), so the write lock is taken
-before the snapshot is read: two concurrent writers cannot each
-validate against the state before the other's change and then persist
-over one another. A lock that does not arrive inside the busy timeout
-fails the command with a retryable error rather than half-applying it.
+A write is one transaction. The engine takes the domain chain's
+transaction-scoped advisory lock in its begin listener (see
+`vinga_server.db`), so the lock is held before the snapshot is read:
+two concurrent writers cannot each validate against the state before
+the other's change and then persist over one another. A lock that does
+not arrive inside the lock timeout fails the command with a retryable
+error rather than half-applying it.
 
 Reads run under the same transaction, and so take the same lock. A
-deferred read path was considered and left out: a load is a handful of
+read-only path was considered and left out: a load is a handful of
 small selects, the only readers are a booting server and a CLI
 invocation, and a second connection configuration would be a second
 thing to keep true for a contention these never produce.
@@ -39,7 +40,7 @@ from functools import partial
 from cryptography.fernet import MultiFernet
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import Connection, Engine, Row, Table, delete, insert, select, update
-from sqlalchemy.exc import OperationalError, SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.sql.elements import ColumnElement
 
 from vinga_server.config import entities
@@ -94,7 +95,7 @@ from vinga_server.config.transport import (
     check_transportable,
     untransportable,
 )
-from vinga_server.db import schema
+from vinga_server.db import is_busy, schema
 
 # The two groups of an MCP server's dotted secret slots. A slot is
 # `env.<KEY>` or `headers.<KEY>`, which is where the value would have
@@ -695,10 +696,13 @@ def read_live_binding(engine: Engine, mac: str) -> LiveBinding:
 
     Two differences from the reads above, both about where it runs. It
     takes the engine rather than a `ConfigStore`, because a device path
-    reads through a deferred connection that never migrates and never
-    takes the write lock (`db.read_engine`), and it reads two rows
+    reads through a read-only connection that never migrates and never
+    takes the advisory lock (`db.read_engine`), and it reads two rows
     rather than the whole configuration, in one transaction, so a write
-    landing between them cannot produce a state that never existed.
+    landing between them cannot produce a state that never existed. The
+    engine's repeatable-read isolation is what makes that last part
+    true: under read-committed each of the two statements would take a
+    snapshot of its own, which is exactly the torn read.
 
     Anything unreadable leaves as a `ConfigError`: a `StorageError` for a
     row that does not validate, the usual busy or storage failure for the
@@ -810,17 +814,29 @@ def _shadowed(entry: object, slot: str) -> str | None:
 
 
 def _database_problem(exc: SQLAlchemyError) -> ConfigError:
-    """The busy lock told from everything else, by type as well as by
-    message: one is worth retrying and the other is not, and a caller
-    that answers with a status code cannot be made to read the
-    sentence. The sentences themselves are unchanged."""
-    detail = str(getattr(exc, "orig", "")) or type(exc).__name__
-    if isinstance(exc, OperationalError) and ("locked" in detail or "busy" in detail):
+    """The contended lock told from everything else.
+
+    By type and never by message, and by the one classifier there is:
+    `db.is_busy` walks to the driver's own exception and decides against
+    a closed set. This module used to sniff for "locked" or "busy" in
+    the driver's text, and `db.migration_failure` had a second copy of
+    the same sniff; one question with one home is what replaced them.
+
+    The failure's own text does not travel with the storage sentence.
+    A SQLAlchemy error carries the statement it failed on and the
+    parameters bound to it, and what this module binds into statements
+    is the configuration, ciphertexts included. The exception's class
+    name is what is worth saying and is all that is said.
+    """
+    if is_busy(exc):
         return DatabaseBusyError(
             "the configuration database is busy: another process holds the write "
             "lock. Nothing was changed; run the command again."
         )
-    return StorageError(f"the configuration database could not be read or written: {detail}")
+    return StorageError(
+        "the configuration database could not be read or written "
+        f"({type(exc).__name__})."
+    )
 
 
 # Rows and the kinds they hold

@@ -36,7 +36,7 @@ from vinga_server.config.responses import (
     ConfigReloadResult,
 )
 from vinga_server.config.secrets import SecretStore
-from vinga_server.conversations import ConversationStore, migrate_existing
+from vinga_server.conversations import ConversationStore, open_conversations
 from vinga_server.device.bindings import DeviceBindings
 from vinga_server.events import ServerEvents
 from vinga_server.events.catalog import CaptureDisabled, CaptureEnabled
@@ -233,18 +233,18 @@ async def _build_composition(
     # section exists and says so, which is what keeps recording a
     # conversation something an operator asks for.
     #
-    # The constructor opens and migrates the file, so a directory the
-    # server cannot write fails the boot rather than the first
+    # The constructor opens and migrates the schema, so a database the
+    # server cannot reach fails the boot rather than the first
     # conversation. The stop is registered before the start below: a
     # writer whose thread will not start is exactly the case where the
     # stop has to run anyway.
     conversations_section = config.server.conversations
-    database_dir = config.server.database.dir
+    database = config.server.database
     conversations = (
         None
         if conversations_section is None or not conversations_section.enabled
         else ConversationStore(
-            database_dir,
+            database,
             metrics=conversations_section.metrics,
             text=conversations_section.text,
             retention_days=conversations_section.retention_days,
@@ -253,10 +253,10 @@ async def _build_composition(
     if conversations is None:
         # Recording off still leaves what was recorded readable: an
         # upgraded deployment that recorded last month serves its history
-        # against the schema this server reads with. Migration is
-        # maintenance of what exists and never creation, so a server that
-        # was not asked for a store still leaves no file behind.
-        migrate_existing(database_dir)
+        # against the schema this server reads with. Migrating creates
+        # empty tables, which is not a recording, and no writer is
+        # started: what "recording off" means is that no row is written.
+        open_conversations(database).dispose()
     else:
         stack.callback(conversations.stop)
         # Started here rather than at the end of the build, in front of
@@ -386,7 +386,7 @@ async def _build_composition(
     # nothing until this generator has yielded, so no request can see a
     # half-attached API.
     api_runtime = build_api_runtime(
-        database_dir,
+        database,
         # Which agents this server can be asked for, as a question: an
         # apply installs the stored agent set, so a device write
         # acknowledged against a set captured here would name a restart
@@ -413,18 +413,18 @@ async def _build_composition(
         ),
         # Whether there is a store behind what this process serves. The
         # bindings view decided it once, at the open above, and it is
-        # the same question: a directory with no database in it is a
-        # configuration this server was handed. The two surfaces that
-        # span both sides refuse in that mode, and a device write says
-        # what it can honestly say.
+        # the same question: a server composed from a configuration it
+        # was handed has no store describing its world. The two surfaces
+        # that span both sides refuse in that mode, and a device write
+        # says what it can honestly say.
         bindings.snapshot_authoritative,
     )
     # The configuration database, opened once here rather than on every
     # request (#142), and migrated in the same call because nothing may
     # assume boot ran: an API-first deployment builds this application
-    # over a directory that has no schema yet, and the check is a cheap
+    # over a database that has no schema yet, and the check is a cheap
     # no-op for one that has. The keys the store decrypts with are
-    # derived in the same breath, inside the handle. A directory another
+    # derived in the same breath, inside the handle. A lock another
     # writer is holding refuses here, as the retryable database refusal,
     # which is part of the boot taxonomy the lifespan above turns into
     # one sentence.
@@ -437,7 +437,7 @@ async def _build_composition(
     # open and therefore unwound before it, which is what keeps a request
     # arriving after teardown from finding a handle whose engine would
     # open fresh connections nobody owns.
-    store = stack.enter_context(open_store(database_dir))
+    store = stack.enter_context(open_store(database))
     stack.enter_context(installed(api_runtime, store))
     seed.api.state.api_runtime = api_runtime
     # The one thing on this app's state a handler reads back: the fields
@@ -845,7 +845,7 @@ def create_app(
     # builds none. Until then it answers as an application built without
     # a server around it, which is what `build_api` has always meant by
     # its own defaults.
-    api = build_api(token, config.server.database.dir)
+    api = build_api(token, config.server.database)
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:

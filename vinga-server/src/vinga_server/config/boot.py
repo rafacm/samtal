@@ -3,9 +3,9 @@
 The boot order is fixed and each step exists because of what would
 otherwise fail later:
 
-1. the file half, which is what says where the database is;
-2. open and migrate that database, so a fresh data volume is a current
-   one with no init command to forget;
+1. the file half, which is what says which database this is;
+2. open and migrate that database, so a fresh instance is a current one
+   with no init command to forget;
 3. load the snapshot, models and stored secrets together;
 4. verify every stored secret opens under the configured keys, before
    anything is built, so a missing or wrong key fails with the error
@@ -36,7 +36,15 @@ from vinga_server.config.loader import compose_config, load_file_config
 from vinga_server.config.models import Config, FileConfig, domain_fields
 from vinga_server.config.secrets import SecretStore, load_keys
 from vinga_server.config.store import ConfigStore, verify_secrets
-from vinga_server.db import DATABASE_FILENAME, open_database
+from vinga_server.db import DOMAIN_CHAIN, open_database
+
+# Where the domain half came from, for a problem in it to name.
+#
+# The schema and nothing else. What this used to name was the database
+# file's path, which was where an operator would go and look; the
+# replacement is the schema, because the host, the user and the password
+# are the connection and a validation message is a place values end up.
+DOMAIN_SOURCE = f"the {DOMAIN_CHAIN.schema} schema of the vinga database"
 
 
 @dataclass(frozen=True)
@@ -74,25 +82,23 @@ def reload_domain_config(running: Config) -> BootConfig:
     the stored half composed onto the running server section.
 
     Synchronous, and blocking in a way that matters: `ConfigStore.load`
-    takes the database's write lock and waits out its busy timeout. A
-    caller on the event loop that runs conversations runs this in a
-    worker thread.
+    takes the domain chain's advisory lock and waits out the lock
+    timeout for it. A caller on the event loop that runs conversations
+    runs this in a worker thread.
     """
     return _with_domain_half(FileConfig(server=running.server, memory=running.memory))
 
 
 def _with_domain_half(file_half: FileConfig) -> BootConfig:
-    directory = file_half.server.database.dir
-    engine = open_database(directory)
+    settings = file_half.server.database
+    engine = open_database(settings)
     try:
         snapshot = ConfigStore(engine, load_keys()).load()
     finally:
         engine.dispose()
 
     verify_secrets(snapshot.secrets)
-    config = compose_config(
-        file_half, domain_fields(snapshot.domain), f"{directory / DATABASE_FILENAME}"
-    )
+    config = compose_config(file_half, domain_fields(snapshot.domain), DOMAIN_SOURCE)
     return BootConfig(config, snapshot.secrets)
 
 

@@ -808,14 +808,19 @@ def carried_values(variant: type[Variant]) -> tuple[Declared, ...]:
 
 @dataclass(frozen=True)
 class ConversationsEnabled(Variant):
-    """The store opened, which means this server is recording."""
+    """The store opened, which means this server is recording.
+
+    No value on it since the record moved into the database beside the
+    configuration (#283): what it used to carry was the file's path, and
+    the connection that replaced the file is not something an event may
+    carry. Which database a server is recording into is answered by the
+    server's own configuration, once, rather than by a line per start.
+    """
 
     CHANNEL: ClassVar[str] = CONVERSATIONS_CHANNEL
     LEVEL: ClassVar[int] = logging.WARNING
-    TEMPLATE: ClassVar[str] = "recording conversations to %s"
-    ARGS: ClassVar[tuple[str, ...]] = ("path",)
-
-    path: ConfiguredPath
+    TEMPLATE: ClassVar[str] = "recording conversations"
+    ARGS: ClassVar[tuple[str, ...]] = ()
 
 
 @dataclass(frozen=True)
@@ -2530,19 +2535,12 @@ class DrainIncomplete(Variant):
 
 
 
-@dataclass(frozen=True)
-class BindingsSnapshotOnly(Variant):
-    """There is no configuration database."""
-
-    CHANNEL: ClassVar[str] = BINDINGS_CHANNEL
-    LEVEL: ClassVar[int] = logging.DEBUG
-    TEMPLATE: ClassVar[str] = (
-        "no configuration database at %s: device bindings resolve from the "
-        "configuration this server was built with"
-    )
-    ARGS: ClassVar[tuple[str, ...]] = ("path",)
-
-    path: ConfiguredPath = value()
+# `BindingsSnapshotOnly` was declared here and retired with the file it
+# was about (#283). It said "there is no configuration database at this
+# path", which was a thing that could be true of a file a lookup did not
+# find; a database the server has already migrated at boot is not
+# missing by the time bindings open, so nothing can reach the event and
+# a name in this vocabulary that nothing emits is worse than no name.
 
 
 @dataclass(frozen=True)
@@ -2817,15 +2815,6 @@ DRAIN_INCOMPLETE = declare(
     variants=(DrainIncomplete,),
 )
 
-DEVICE_BINDINGS_SNAPSHOT_ONLY = declare(
-    "device_bindings_snapshot_only",
-    note=(
-        "There is no configuration database, so bindings resolve from the "
-        "world this server is serving."
-    ),
-    variants=(BindingsSnapshotOnly,),
-)
-
 DEVICE_BINDINGS_UNREADABLE = declare(
     "device_bindings_unreadable",
     note="The database could not be read, so the answer is the served world's.",
@@ -2880,7 +2869,6 @@ __all__ = [
     "BargeInMerged",
     "BargeInUnderFloor",
     "BargeInWithoutTranscript",
-    "BindingsSnapshotOnly",
     "BindingsUnreadable",
     "BuiltinToolCall",
     "CAPTURE_CHANNEL",
@@ -2914,7 +2902,6 @@ __all__ = [
     "ConversationsDropped",
     "ConversationsEnabled",
     "ConversationsPruned",
-    "DEVICE_BINDINGS_SNAPSHOT_ONLY",
     "DEVICE_BINDINGS_UNREADABLE",
     "DRAIN_FINISHED",
     "DRAIN_INCOMPLETE",
