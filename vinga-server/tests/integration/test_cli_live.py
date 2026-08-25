@@ -90,7 +90,7 @@ from vinga_server.config.store import APPLY_LIMIT, TOO_MANY_ENTRIES, ConfigStore
 from vinga_server.db import DATABASE_FILENAME, open_database
 from vinga_server.device_endpoint import SUPPLIED_ENDPOINT
 from vinga_server.ota import OTA_PATH
-from vinga_server.simulator import board
+from vinga_server.simulator import board, conversation
 
 # The variable a secret set's `--from-env` is pointed at. Not a real
 # credential, and shaped so a substring check for it cannot match by
@@ -935,6 +935,57 @@ def test_a_simulated_board_checks_in_and_is_claimed_over_the_wire(
     assert leaked(issued.websocket, **surfaces) == []
     # The stand-in is what every line named instead.
     assert SUPPLIED_ENDPOINT in reported.out
+
+
+def test_a_simulated_board_holds_a_conversation_over_the_wire(
+    deployed: Live, capsys: pytest.CaptureFixture[str], watched: Watched
+) -> None:
+    """The whole thing, against a real uvicorn: the second verb's row,
+    and the compatibility claim only a real server can make.
+
+    It runs after the case above, which claimed this board, so the check
+    in front of the socket answers `Admitted` and the token the handshake
+    presents is one this deployment actually minted. What happens next is
+    the real pipeline on mock providers: the endpointer hears the
+    packaged utterance, the ASR announces a transcript, the LLM answers
+    it and the TTS speaks the answer back as frames this side counts.
+
+    A controlled peer can prove the headers and every adversarial answer,
+    and it cannot prove this: that a vinga-server accepts what this
+    client sends and answers something this client can read.
+    """
+    url = f"{deployed.origin}{OTA_PATH}?token={URL_SECRET}"
+
+    assert run("simulator", "run", url, "--mac", SIMULATED_MAC) == 0
+
+    held = capsys.readouterr()
+    assert "is admitted" not in held.out
+    assert "saying: " in held.out
+    # The mock ASR announces a fixed transcript and the mock LLM answers
+    # it, so what came back is the deployment's own words rather than
+    # anything this side made up.
+    assert "heard: " in held.out
+    assert "said: " in held.out
+    assert "reply: " in held.out
+    assert conversation.CLOSE_NAMES[1000] in held.out
+    # Nothing arrived out of order, which is the machine's own claim
+    # against a server that is not trying to break it.
+    assert "out of order:" not in held.err
+
+    # And the three credentials again, on the verb that carries a device
+    # token onto a websocket rather than only reading one.
+    issued = check_in(deployed, SIMULATED_MAC)
+    assert isinstance(issued, board.Admitted)
+    surfaces = {
+        "stdout": held.out,
+        "stderr": held.err,
+        "logs": watched.everything(),
+        "chain": chain_of(("simulator", "run", url, "--mac", "not-a-mac")),
+    }
+    assert leaked(URL_SECRET, **surfaces) == []
+    assert leaked(issued.token, **surfaces) == []
+    assert leaked(SECRET, **surfaces) == []
+    assert leaked(issued.websocket, **surfaces) == []
 
 
 def test_the_device_half_needs_no_api_token_at_all(
