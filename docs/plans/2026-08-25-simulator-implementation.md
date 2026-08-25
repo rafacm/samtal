@@ -8,7 +8,7 @@ so explicitly.
 
 ## M1: the board and its check-in
 
-PR TBD.
+PR #299.
 
 This section was written by the coordinating session from the
 milestone's nine commits after a session interruption ended the
