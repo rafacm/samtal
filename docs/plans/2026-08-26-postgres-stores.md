@@ -184,9 +184,16 @@ explicitly.
    snapshot, which is exactly the torn read that sentence
    promises away. Read-only-by-default turns "creates nothing"
    from a URI trick into a server-enforced property. Readers never
-   block writers and never wait on the advisory lock, which is the
-   WAL snapshot-read property the engine existed for, now held by
-   the backend instead of by ceremony. `device/bindings.py` keeps
+   block ordinary DML and never wait on the advisory lock, which
+   is the WAL snapshot-read property the engine existed for, now
+   held by the backend instead of by ceremony; what a reader's
+   locks can block is DDL, so a long-held analyst or reader
+   transaction can make a boot migration wait out its
+   `lock_timeout` and refuse retryably, which the migration
+   sentence's operator already knows how to answer, and the initdb
+   file caps the analyst side with role-level
+   `statement_timeout` and `idle_in_transaction_session_timeout`
+   settings on `vinga_ro`. `device/bindings.py` keeps
    its per-lookup transactions, its loud-not-fatal fallback and
    its generation pinning; what it loses is the file-existence
    probe (decision 6).
@@ -250,10 +257,17 @@ explicitly.
    `CHECKPOINT_WAIT_MS` and `_truncation_due`
    (`conversations/store.py:158-166,347,797,876-914`) have no
    Postgres analogue and are deleted. The deletion contract
-   restates: a deleted row leaves every query surface at commit,
-   including `vinga_ro`'s; physical reclamation of the freed pages
-   is the database server's own storage maintenance (autovacuum),
-   not a per-delete overwrite. The generated schema reference and
+   restates precisely: a deleted row is invisible to every
+   transaction that starts after the deletion commits, including
+   `vinga_ro`'s; a snapshot opened before it (a repeatable-read
+   transaction already in flight) keeps seeing the row until that
+   transaction ends, which MVCC requires and the docs state
+   rather than paper over; physical reclamation of the freed
+   pages is the database server's own storage maintenance
+   (autovacuum), not a per-delete overwrite. A test holds a
+   repeatable-read transaction across a retention pass and pins
+   both halves: the old snapshot still sees the row, the next
+   transaction does not. The generated schema reference and
    the README say this in those words, because the current
    generated page promises zero-overwrite and checkpoint-truncate
    semantics (`conversations/docgen.py:163-174`) that would be
@@ -743,6 +757,13 @@ after the P1/P2 amendments. Findings condensed but faithful:
    snapshot across retention, narrow "readers never block writers"
    to ordinary DML, and consider role-level timeouts for
    `vinga_ro`.
+   *Resolution*: decisions 4 and 7 amended exactly so: the
+   deletion promise scoped to transactions starting after the
+   commit with the in-flight-snapshot behavior stated, the
+   held-snapshot retention test added, readers-never-block
+   narrowed to ordinary DML with the DDL interaction named, and
+   `vinga_ro` capped with role-level `statement_timeout` and
+   `idle_in_transaction_session_timeout` in the initdb file.
 
 10. **P2: `lock_timeout` is not a ten-second bound on a
     transaction or response.** It applies separately to each lock
