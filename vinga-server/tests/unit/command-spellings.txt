@@ -922,8 +922,8 @@ vinga-server/src/vinga_server/onboarding/origin.py:5  respell  vinga-server conf
 vinga-server/src/vinga_server/onboarding/origin.py:253  respell  vinga-server config ota-url
 vinga-server/src/vinga_server/protocol/framing.py:129  respell  vinga simulator
 vinga-server/src/vinga_server/protocol/messages.py:104  respell  vinga simulator
-vinga-server/src/vinga_server/protocol/messages.py:244  respell  vinga simulator
-vinga-server/src/vinga_server/protocol/messages.py:335  respell  vinga simulator
+vinga-server/src/vinga_server/protocol/messages.py:259  respell  vinga simulator
+vinga-server/src/vinga_server/protocol/messages.py:350  respell  vinga simulator
 vinga-server/src/vinga_server/tools/mcp/manager.py:515  respell  vinga-server config status
 vinga-server/src/vinga_server/tools/mcp/manager.py:709  respell  vinga-server config status
 vinga-server/src/vinga_server/tools/publish.py:24  respell  vinga-server config status
