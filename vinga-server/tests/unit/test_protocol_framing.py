@@ -12,11 +12,13 @@ from vinga_server.protocol.framing import (
     PAYLOAD_OPUS,
     SHORT_V2_FRAME,
     SHORT_V3_FRAME,
+    UNFRAMED_STREAM,
     UNSUPPORTED_VERSION,
     V2_SIZE_MISMATCH,
     V3_SIZE_MISMATCH,
     Frame,
     FramingError,
+    frames,
     unwrap,
     wrap,
 )
@@ -143,3 +145,77 @@ def test_a_lying_v2_header_is_not_quoted_back_by_the_refusal() -> None:
     # And no cause or context carrying it either: the struct's own
     # unpack succeeded, and a chain is the other way a value travels.
     assert raised.value.__cause__ is None and raised.value.__context__ is None
+
+
+# A run of frames stored as a file, which is what the packaged utterance
+# is. Nothing on the wire needs this: a websocket delivers one frame per
+# message, and it is a stored stream that has to be walked.
+
+
+def test_a_run_of_version_2_frames_walks_back_to_the_payloads() -> None:
+    """The round trip the packaged utterance depends on: wrapped one at
+    a time, concatenated, and read back as the same packets in the same
+    order."""
+    packets = [b"first", b"second-packet", b"\x00\xffthird"]
+
+    walked = frames(2, b"".join(wrap(2, packet) for packet in packets))
+
+    assert [frame.payload for frame in walked] == packets
+    assert {frame.payload_type for frame in walked} == {PAYLOAD_OPUS}
+
+
+def test_a_run_of_version_3_frames_walks_the_same_way() -> None:
+    packets = [b"first", b"second-packet"]
+
+    walked = frames(3, b"".join(wrap(3, packet) for packet in packets))
+
+    assert [frame.payload for frame in walked] == packets
+
+
+def test_an_empty_run_is_no_frames_rather_than_a_refusal() -> None:
+    """A file with nothing in it is a file with no frames in it, which
+    is a fact rather than a fault. What refuses an empty asset is the
+    reader that wanted one."""
+    assert frames(2, b"") == ()
+
+
+def test_version_1_has_no_boundaries_to_walk_and_says_so() -> None:
+    """Bare Opus is bare: there is no length anywhere in it, which is
+    the whole reason the asset is stored as version 2 frames. Refused
+    rather than guessed at, and by its own sentence rather than by the
+    unsupported-version one, because 1 is a version this module very
+    much supports for a single frame."""
+    with pytest.raises(FramingError) as raised:
+        frames(1, OPUS_PAYLOAD)
+
+    assert str(raised.value) == UNFRAMED_STREAM
+
+
+def test_a_version_nothing_declares_is_refused() -> None:
+    with pytest.raises(FramingError) as raised:
+        frames(4, b"")
+
+    assert str(raised.value) == UNSUPPORTED_VERSION
+
+
+def test_a_run_ending_inside_a_header_is_refused() -> None:
+    """A truncated file, caught at the header rather than read past."""
+    with pytest.raises(FramingError) as raised:
+        frames(2, wrap(2, OPUS_PAYLOAD) + b"\x00\x02\x00")
+
+    assert str(raised.value) == SHORT_V2_FRAME
+
+
+def test_a_run_ending_inside_a_payload_is_refused_without_quoting_it() -> None:
+    """The other truncation: a header announcing more bytes than the
+    file holds. The announced length is four bytes the far side chose,
+    so the sentence is the category and nothing else, which is the same
+    rule `unwrap` is held to above.
+    """
+    truncated = wrap(2, OPUS_PAYLOAD)[: -len(OPUS_PAYLOAD) + 2]
+
+    with pytest.raises(FramingError) as raised:
+        frames(2, truncated)
+
+    assert str(raised.value) == V2_SIZE_MISMATCH
+    assert str(len(OPUS_PAYLOAD)) not in repr(raised.value.args)

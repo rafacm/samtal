@@ -48,6 +48,17 @@ SHORT_V3_FRAME = "version 3 frame is shorter than its header"
 V2_SIZE_MISMATCH = "version 2 frame carries a different number of payload bytes than it announces"
 V3_SIZE_MISMATCH = "version 3 frame carries a different number of payload bytes than it announces"
 UNSUPPORTED_VERSION = "unsupported binary protocol version"
+UNFRAMED_STREAM = "version 1 carries no frame boundaries, so a run of them cannot be walked"
+
+# Which header a stream of frames is walked by. Both layouts end in
+# `payload_size`, which is the whole of what walking one takes, and both
+# are declared above: a reader that unpacked `>HHIII` for itself would be
+# the second home for a struct this module exists to own.
+_STREAM_HEADERS = {2: _V2_HEADER, 3: _V3_HEADER}
+
+_SHORT_FRAME = {2: SHORT_V2_FRAME, 3: SHORT_V3_FRAME}
+
+_SIZE_MISMATCH = {2: V2_SIZE_MISMATCH, 3: V3_SIZE_MISMATCH}
 
 
 @dataclass(frozen=True)
@@ -107,3 +118,40 @@ def unwrap(version: int, data: bytes) -> Frame:
             raise FramingError(V3_SIZE_MISMATCH)
         return Frame(payload_type, payload)
     raise FramingError(UNSUPPORTED_VERSION)
+
+
+def frames(version: int, data: bytes) -> tuple[Frame, ...]:
+    """Every frame in a run of them, walked by what their headers
+    announce.
+
+    A websocket delivers one frame per message, so nothing on the wire
+    needs this. What does is a run of frames stored as a file, which is
+    how `vinga simulator` carries the packets it sends: a file of bare
+    Opus packets has no boundaries at all, because that is exactly what
+    bare means, and inventing a container for them would put a second
+    length format in a repository whose whole posture is that the wire
+    has one home.
+
+    So a stored utterance is a run of version 2 frames, and this is what
+    reads one. Version 1 is refused rather than guessed at, for the
+    reason above: it is the version with nothing to walk by. Each frame
+    is handed to `unwrap`, so what a payload has to satisfy is checked in
+    the one place that checks it for the wire.
+    """
+    header = _STREAM_HEADERS.get(version)
+    if header is None:
+        raise FramingError(UNFRAMED_STREAM if version == 1 else UNSUPPORTED_VERSION)
+    walked: list[Frame] = []
+    at = 0
+    while at < len(data):
+        if len(data) - at < header.size:
+            raise FramingError(_SHORT_FRAME[version])
+        # The last field of both layouts, which is the one fact a walk
+        # needs and the reason this lives beside the structs.
+        size = header.unpack_from(data, at)[-1]
+        end = at + header.size + size
+        if end > len(data):
+            raise FramingError(_SIZE_MISMATCH[version])
+        walked.append(unwrap(version, data[at:end]))
+        at = end
+    return tuple(walked)
