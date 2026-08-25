@@ -164,7 +164,6 @@ def offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.delenv("VINGA_API_SECRET", raising=False)
     monkeypatch.delenv(cli.API_URL_ENV, raising=False)
     monkeypatch.setenv("VINGA_AUTH_SECRET", "a-fixed-secret-for-the-vector")
-    monkeypatch.setenv("VINGA_SERVER__DATABASE__DIR", str(tmp_path / "db"))
     named = tmp_path / f"{CONFIG_PATH_SENTINEL}.yaml"
     named.write_text("server:\n  public_url: https://voice.example\n", encoding="utf-8")
     return named

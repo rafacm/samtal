@@ -82,6 +82,15 @@ COPY README.md ./
 COPY examples ./examples
 RUN uv sync --frozen --no-dev --no-editable --extra serve $(cat /tmp/extras)
 
+# The Postgres driver's binary implementation, named here rather than in
+# the `serve` extra. That extra carries the plain `psycopg`, so an
+# install of it does not drag a bundled libpq in behind it and the
+# source-backed install a custom image build may want stays available;
+# this image wants the wheel, because it is what makes the runtime stage
+# need no libpq of its own. Pinned to the version the lockfile resolved,
+# so the image and the lane run the same driver.
+RUN uv pip install "psycopg[binary]"
+
 
 FROM python:3.12-slim-bookworm
 
@@ -106,11 +115,17 @@ COPY docker-entrypoint.sh /usr/local/bin/vinga-entrypoint
 # without one runs and reports `unknown`, which is the honest answer.
 ARG VINGA_REVISION=unknown
 
-# The domain half of the configuration lives in a SQLite database, and
-# VINGA_SERVER__DATABASE__DIR is where this image keeps it: on the
-# mounted volume, the one place an unprivileged user with a read-only
-# root filesystem can write. The model default (/var/lib/vinga) is the
-# generic one and is neither created nor writable here.
+# Where the state lives is not this image's to say any more. Both halves
+# of the configuration are in a Postgres database an operator points the
+# VINGA_DB_* variables at, and this image ships no default for them
+# beyond the model's own: an image that named a host would be naming
+# somebody else's deployment. /data stays for the model caches and for
+# anything else an unprivileged user with a read-only root filesystem
+# has to write.
+#
+# There is no wait loop in the entrypoint either. A database that is not
+# reachable is a boot that refuses with a fixed sentence, and restarting
+# is the orchestrator's job rather than a shell script's.
 #
 # VINGA_CONFIG is deliberately not here. The server half needs no file,
 # and naming one that may not exist made the mount mandatory: a named
@@ -120,7 +135,6 @@ ARG VINGA_REVISION=unknown
 # nothing when it is not.
 ENV PATH=/app/.venv/bin:$PATH \
     HOME=/data \
-    VINGA_SERVER__DATABASE__DIR=/data/db \
     VINGA_SERVER__LOG_FORMAT=json \
     VINGA_REVISION=$VINGA_REVISION
 

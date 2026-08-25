@@ -103,7 +103,7 @@ def client(api: FastAPI) -> Iterator[TestClient]:
 @pytest.fixture
 def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """The CLI as its entry point runs it, against a server of its own."""
-    return runner(tmp_path, monkeypatch)
+    return runner(monkeypatch)
 
 
 def _example(name: str) -> object:
@@ -559,7 +559,7 @@ def test_an_exported_document_applies_onto_the_store_it_came_from(
     """The other direction, which is what makes an export safe to keep
     and re-run: applied back onto its own store it changes nothing, and
     the credentials stored on those entities are still there."""
-    run = runner(tmp_path, monkeypatch)
+    run = runner(monkeypatch)
     _seed(run)
     capsys.readouterr()
     run("export")
@@ -580,7 +580,7 @@ def test_one_entity_exports_as_the_fragment_that_writes_it(
     credential named beside it. The fragment does not say where it goes,
     so neither does the annotation: what writes it is the `set` an
     operator chooses."""
-    run = runner(tmp_path, monkeypatch)
+    run = runner(monkeypatch)
     _seed(run)
     capsys.readouterr()
 
@@ -603,7 +603,7 @@ def test_one_entity_exports_as_the_fragment_that_writes_it(
 def test_an_entity_with_no_stored_credential_exports_without_an_annotation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    run = runner(tmp_path, monkeypatch)
+    run = runner(monkeypatch)
     _seed(run)
     capsys.readouterr()
 
@@ -635,7 +635,7 @@ DASHED_SLOT = "api_key"
 def test_an_exported_command_runs_for_a_name_that_begins_with_a_dash(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    run = runner(tmp_path, monkeypatch)
+    run = runner(monkeypatch)
     # Written with the marker, because that is the only way to write it.
     assert run("provider", "set", "--", "llm", DASHED_NAME, "type=mock") == 0
     assert run("provider", "secret", "set", "--", "llm", DASHED_NAME, DASHED_SLOT,
@@ -660,7 +660,7 @@ def test_the_same_command_without_the_marker_does_not_run(
     """The guard on the case above: without the marker the grammar reads
     the name as an option and refuses, which is what the export used to
     render."""
-    run = runner(tmp_path, monkeypatch)
+    run = runner(monkeypatch)
     run("provider", "set", "--", "llm", DASHED_NAME, "type=mock")
     run("provider", "secret", "set", "--", "llm", DASHED_NAME, DASHED_SLOT, stdin="s3cret\n")
     capsys.readouterr()

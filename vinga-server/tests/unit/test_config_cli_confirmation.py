@@ -42,7 +42,7 @@ from vinga_server.config import cli, entities
 
 @pytest.fixture
 def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    return runner(tmp_path, monkeypatch)
+    return runner(monkeypatch)
 
 
 class Terminal(io.StringIO):

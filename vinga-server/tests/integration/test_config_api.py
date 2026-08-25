@@ -52,7 +52,6 @@ def boot_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     way a deployment names it: through the environment the settings
     machinery reads."""
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
-    monkeypatch.setenv("VINGA_SERVER__DATABASE__DIR", str(tmp_path / "db"))
     return tmp_path / "db"
 
 

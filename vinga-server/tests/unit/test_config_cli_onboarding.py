@@ -44,7 +44,6 @@ def _environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(API_SECRET_ENV, raising=False)
     monkeypatch.delenv(cli.API_URL_ENV, raising=False)
     monkeypatch.setenv(AUTH_SECRET_ENV, SECRET)
-    monkeypatch.setenv("VINGA_SERVER__DATABASE__DIR", str(tmp_path / "db"))
 
 
 def _config_file(tmp_path: Path, body: str) -> str:
@@ -120,24 +119,22 @@ def test_it_opens_no_socket_no_database_and_needs_no_token(
     """The point of the command: it answers before there is a server to
     ask, on a machine that may have no route to one.
 
-    The database half is read off the directory rather than off a
-    patched opener: since the CLI stopped being a second way into the
-    database it holds no opener to patch, and a directory that was never
-    created is the stronger statement of the same claim.
+    The database half is refused rather than patched away: since the CLI
+    stopped being a second way into the database it holds no opener to
+    patch, and an instance that is not there is the stronger statement
+    of the same claim.
     """
 
     def refuse(*args: object, **kwargs: object) -> object:
         raise AssertionError("ota-url reached for something it must not need")
 
-    directory = tmp_path / "never-created"
-    monkeypatch.setenv("VINGA_SERVER__DATABASE__DIR", str(directory))
+    monkeypatch.setenv("VINGA_DB_PORT", "1")
     monkeypatch.setattr(cli, "build_client", refuse)
     monkeypatch.setattr(socket, "socket", refuse)
 
     assert cli.main(["ota-url"]) == 0
 
     assert capsys.readouterr().out.strip().endswith(f"/x/{KEY}/")
-    assert not directory.exists()
 
 
 def test_the_url_is_alone_on_stdout_and_the_advice_is_not(

@@ -37,7 +37,9 @@ def run(monkeypatch: pytest.MonkeyPatch):
     directory, no encryption key."""
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
     monkeypatch.delenv(MASTER_KEY_ENV, raising=False)
-    monkeypatch.setenv("VINGA_SERVER__DATABASE__DIR", "/nowhere/at/all")
+    # A port nothing listens on, so a command that opened the database
+    # would refuse here rather than print.
+    monkeypatch.setenv("VINGA_DB_PORT", "1")
 
     def _run(*argv: str) -> int:
         return cli.main(list(argv))

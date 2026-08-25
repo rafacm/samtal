@@ -1,20 +1,25 @@
 """What a boot does about the conversation store, and what it does not.
 
 Three states, and the difference between them is the whole of acceptance
-criterion 1. An enabled section opens and migrates `conversations.db` in
-the lifespan and starts the writer there too. A disabled or absent
-section starts nothing and creates nothing, and the proof that it also
-*changes* nothing is the rest of the unit lane passing unmodified beside
-this file. And a store that is already there is migrated either way,
-because recording being off is not the same as what was recorded being
+criterion 1. An enabled section opens and migrates the `conversations`
+schema in the lifespan and starts the writer there too. A disabled or
+absent section starts no writer, and the proof that it also *changes*
+nothing is the rest of the unit lane passing unmodified beside this
+file. The schema is migrated in every one of the three, because
+recording being off is not the same as what was recorded being
 unreadable.
+
+That last part is where the cutover moved the line (#283). What
+"recording off creates nothing" used to mean was that no file was left
+behind; there is no file, so what it means now is that no writer is
+started and no row is written. Migrating a schema makes empty tables,
+which is not a recording, and the tests below say so in exactly those
+words.
 
 The store's own behaviour (the markers, the bound, retention) has its
 own suites next door. This one is about the wiring.
 """
 
-import sqlite3
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -25,41 +30,44 @@ import vinga_server.app as app_module
 from tests.support.configs import config_with_agent
 from vinga_server.app import create_app
 from vinga_server.config import Config
+from vinga_server.config.models import DatabaseConfig
+from vinga_server.conversations import schema
 from vinga_server.conversations import store as store_module
-from vinga_server.conversations.store import (
-    DATABASE_FILENAME,
-    ConversationStore,
-    conversations_path,
-    open_conversations,
-)
+from vinga_server.conversations.store import ConversationStore, open_conversations
+from vinga_server.db import read_engine
 
 EXPECTED_TABLES = {"sessions", "turns", "tool_invocations", "events"}
 
+SCHEMA = schema.SCHEMA
 
-def recording_config(tmp_path: Path, **conversations: object) -> Config:
-    """A server whose databases live where this test can look at them."""
+
+def recording_config(name: str | None = None, **conversations: object) -> Config:
+    """A server recording into the database this lane provisioned, or
+    into one the caller names."""
     section: dict[str, object] = {"enabled": True}
     section.update(conversations)
+    database = {} if name is None else {"name": name}
     return config_with_agent(
-        server={"database": {"dir": str(tmp_path)}, "conversations": section}
+        server={"database": database, "conversations": section}
     )
 
 
-def quiet_config(tmp_path: Path, section: dict[str, object] | None = None) -> Config:
+def quiet_config(
+    name: str | None = None, section: dict[str, object] | None = None
+) -> Config:
     """The same server with recording off: the section absent, or present
     and saying no."""
-    server: dict[str, object] = {"database": {"dir": str(tmp_path)}}
+    server: dict[str, object] = {"database": {} if name is None else {"name": name}}
     if section is not None:
         server["conversations"] = section
     return config_with_agent(server=server)
 
 
-def head_revision(tmp_path: Path) -> str:
+def head_revision() -> str:
     """What a freshly migrated store is stamped with, read from one this
     test made rather than written down here: the revision moves with the
     chain, and a copy of it in a test would be a second place to update."""
-    directory = tmp_path / "head"
-    engine = open_conversations(directory)
+    engine = open_conversations(DatabaseConfig())
     try:
         return _version(engine)
     finally:
@@ -68,14 +76,36 @@ def head_revision(tmp_path: Path) -> str:
 
 def _version(engine: Any) -> str:
     with engine.connect() as connection:
-        (row,) = connection.execute(text("select version_num from alembic_version"))
+        (row,) = connection.execute(
+            text(f"select version_num from {SCHEMA}.alembic_version")
+        )
     return str(row[0])
 
 
-def _stamped(path: Path) -> tuple[str, set[str]]:
-    engine = open_conversations(path.parent)
+def _stamped(name: str) -> tuple[str, set[str]]:
+    engine = open_conversations(DatabaseConfig(name=name))
     try:
-        return _version(engine), set(inspect(engine).get_table_names())
+        return _version(engine), set(inspect(engine).get_table_names(schema=SCHEMA))
+    finally:
+        engine.dispose()
+
+
+def _migrated(name: str) -> bool:
+    """Whether the conversation schema exists in `name` at all, which is
+    what "nothing was opened" comes to now that no file is left behind.
+
+    Through the read engine, which creates nothing: an opener here would
+    be the very act the test is asserting did not happen.
+    """
+    engine = read_engine(DatabaseConfig(name=name))
+    try:
+        with engine.connect() as connection:
+            return bool(
+                connection.execute(
+                    text("select to_regnamespace(:schema) is not null"),
+                    {"schema": SCHEMA},
+                ).scalar()
+            )
     finally:
         engine.dispose()
 
@@ -84,47 +114,44 @@ def events_named(caplog: pytest.LogCaptureFixture, name: str) -> list[Any]:
     return [r for r in caplog.records if getattr(r, "event", None) == name]
 
 
-def test_an_enabled_boot_creates_and_migrates_the_store(tmp_path: Path) -> None:
-    with TestClient(create_app(recording_config(tmp_path))):
+def test_an_enabled_boot_migrates_the_store(blank_database: str) -> None:
+    with TestClient(create_app(recording_config(blank_database))):
         pass
 
-    path = tmp_path / DATABASE_FILENAME
-    assert path.is_file()
-    version, tables = _stamped(path)
-    assert version == head_revision(tmp_path)
+    version, tables = _stamped(blank_database)
+    assert version == head_revision()
     assert EXPECTED_TABLES <= tables
 
 
-def test_an_enabled_boot_says_it_is_recording(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_an_enabled_boot_says_it_is_recording(caplog: pytest.LogCaptureFixture) -> None:
     # A warning, like capture's, because it means this server is keeping
-    # what is said to it, and it names the file so an operator knows
-    # which one to back up.
+    # what is said to it. It carries no value: what it used to name was
+    # the file to back up, and a connection is not something an event may
+    # carry (#283).
     with caplog.at_level("INFO"):
-        with TestClient(create_app(recording_config(tmp_path))):
+        with TestClient(create_app(recording_config())):
             pass
 
     (enabled,) = events_named(caplog, "conversations_enabled")
     assert enabled.levelname == "WARNING"
-    assert enabled.path == str(tmp_path / DATABASE_FILENAME)
+    assert not hasattr(enabled, "path")
 
 
-def test_nothing_is_opened_before_the_lifespan_runs(tmp_path: Path) -> None:
-    """The store is the lifespan's, file and thread alike (#142): an app
-    that is described and never served opens nothing, so a test lane or
-    an import that builds one leaves no database behind and no thread
-    running. The file is opened and migrated inside the lifespan, which
-    is still boot, so a directory the server cannot write still fails the
-    boot rather than the first conversation."""
-    app = create_app(recording_config(tmp_path))
+def test_nothing_is_opened_before_the_lifespan_runs(blank_database: str) -> None:
+    """The store is the lifespan's, schema and thread alike (#142): an
+    app that is described and never served opens nothing, so a test lane
+    or an import that builds one migrates nothing and leaves no thread
+    running. The schema is created and migrated inside the lifespan,
+    which is still boot, so a database the server cannot reach still
+    fails the boot rather than the first conversation."""
+    app = create_app(recording_config(blank_database))
 
-    assert not (tmp_path / DATABASE_FILENAME).exists()
+    assert not _migrated(blank_database)
 
     with TestClient(app):
         store = app.state.composition.conversations
         assert store is not None
-        assert (tmp_path / DATABASE_FILENAME).is_file()
+        assert _migrated(blank_database)
         # White-box for this file's thread reads: the store's writer
         # thread is what boot starts and shutdown joins, and whether one
         # is running is on no surface. Its absence is what the failures
@@ -136,16 +163,25 @@ def test_nothing_is_opened_before_the_lifespan_runs(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "section", [None, {"enabled": False}, {"enabled": False, "text": True}]
 )
-def test_recording_off_creates_nothing(
-    tmp_path: Path, section: dict[str, object] | None, caplog: pytest.LogCaptureFixture
+def test_recording_off_starts_no_writer_and_writes_no_rows(
+    section: dict[str, object] | None, caplog: pytest.LogCaptureFixture
 ) -> None:
-    # Criterion 1: an absent or disabled section leaves the server as it
-    # was, which starts with leaving no database behind.
+    """Criterion 1, restated for a store with no file (#283): an absent
+    or disabled section leaves the server as it was, which now means no
+    writer, no rows, and nothing said."""
     with caplog.at_level("INFO"):
-        with TestClient(create_app(quiet_config(tmp_path, section))) as client:
+        with TestClient(create_app(quiet_config(section=section))) as client:
             assert client.app.state.composition.conversations is None
 
-    assert not conversations_path(tmp_path).exists()
+    engine = open_conversations(DatabaseConfig())
+    try:
+        with engine.connect() as connection:
+            counted = connection.execute(
+                text(f"select count(*) from {SCHEMA}.sessions")
+            ).scalar()
+    finally:
+        engine.dispose()
+    assert counted == 0
     # And says nothing about it. There is deliberately no disabled-mode
     # event: a new line for a section that is present and off would be
     # exactly the behaviour change the criterion forbids.
@@ -156,33 +192,27 @@ def test_recording_off_creates_nothing(
     ]
 
 
-def test_a_store_that_is_already_there_migrates_on_a_boot_that_records_nothing(
-    tmp_path: Path,
+def test_the_schema_is_migrated_on_a_boot_that_records_nothing(
+    blank_database: str,
 ) -> None:
     """An upgraded deployment that recorded last month and records
     nothing today still has to serve its history against the schema this
-    server reads with. So a file that exists is brought to head even with
-    the section off, which is maintenance of what exists rather than
-    recording.
+    server reads with. So the chain is brought to head even with the
+    section off, which is maintenance rather than recording: what it
+    creates is empty tables.
 
-    The prior revision here is the one before the baseline: an empty
-    file, with no version row at all, which is what any state behind head
-    looks like to the upgrade."""
-    path = conversations_path(tmp_path)
-    tmp_path.mkdir(parents=True, exist_ok=True)
-    sqlite3.connect(path).close()
-    assert path.is_file()
-
-    with TestClient(create_app(quiet_config(tmp_path, {"enabled": False}))):
+    From a blank database, which is what a fresh deployment has and what
+    any state behind head looks like to the upgrade."""
+    with TestClient(create_app(quiet_config(blank_database, {"enabled": False}))):
         pass
 
-    version, tables = _stamped(path)
-    assert version == head_revision(tmp_path)
+    version, tables = _stamped(blank_database)
+    assert version == head_revision()
     assert EXPECTED_TABLES <= tables
 
 
 def test_a_writer_that_cannot_start_leaves_stop_harmless(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A process out of threads is the case the lifespan's guard exists
     for, so what it calls next has to survive it: the thread is kept only
@@ -196,7 +226,7 @@ def test_a_writer_that_cannot_start_leaves_stop_harmless(
         def start(self) -> None:
             raise RuntimeError("no threads left")
 
-    store = ConversationStore(tmp_path)
+    store = ConversationStore(DatabaseConfig())
     monkeypatch.setattr(store_module.threading, "Thread", Refusing)
     with pytest.raises(RuntimeError):
         store.start()
@@ -209,7 +239,7 @@ def test_a_writer_that_cannot_start_leaves_stop_harmless(
 
 
 def test_a_start_failure_in_the_lifespan_still_stops_the_store(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The stop is registered on the lifespan's exit stack the moment the
     store is constructed and before it is started, so the writer that
@@ -235,14 +265,14 @@ def test_a_start_failure_in_the_lifespan_still_stops_the_store(
     monkeypatch.setattr(app_module, "ConversationStore", Failing)
 
     with pytest.raises(RuntimeError):
-        with TestClient(create_app(recording_config(tmp_path))):
+        with TestClient(create_app(recording_config())):
             pass
 
     assert Failing.stopped, "a start that failed was never stopped"
 
 
 def test_a_startup_failure_after_the_writer_started_still_stops_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The writer is started first among the things a startup starts, so
     anything that fails after it (filler synthesis, the MCP connects)
@@ -269,7 +299,7 @@ def test_a_startup_failure_after_the_writer_started_still_stops_it(
     monkeypatch.setattr(app_module, "ConversationStore", recording)
 
     with pytest.raises(RuntimeError):
-        with TestClient(create_app(recording_config(tmp_path))):
+        with TestClient(create_app(recording_config())):
             pass
 
     (store,) = built

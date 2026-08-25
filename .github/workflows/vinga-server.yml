@@ -10,11 +10,18 @@ on:
       # trigger this workflow too. Without it, hand-editing the file
       # would simply pass.
       - "docs/reference/**"
+      # The database both lanes run against, and the provisioning the
+      # integration lane executes and asserts against: an edit to either
+      # has to run the lanes that use them.
+      - "docker-compose.yml"
+      - "deploy/**"
       - ".github/workflows/vinga-server.yml"
   pull_request:
     paths:
       - "vinga-server/**"
       - "docs/reference/**"
+      - "docker-compose.yml"
+      - "deploy/**"
       - ".github/workflows/vinga-server.yml"
   # On-demand full runs against any branch: the image job below skips
   # pull_request events, and a branch that touches the image's own
@@ -108,6 +115,42 @@ jobs:
   # table is what replaces it.
   unit:
     runs-on: ubuntu-latest
+
+    # What the lanes connect with. The same values the fixtures default
+    # to, spelled out because the contract is the point: these five are
+    # what a deployment sets too, and a lane that relied on a default
+    # would not be running the shape it documents.
+    env:
+      VINGA_DB_HOST: 127.0.0.1
+      VINGA_DB_PORT: "5432"
+      VINGA_DB_NAME: vinga
+      VINGA_DB_USER: vinga
+      VINGA_DB_PASSWORD: vinga
+
+    # The database both stores live in. A service container rather than
+    # a step that starts one, so the runner's health gate is what the
+    # steps below wait on and a lane never races the instance.
+    #
+    # No init script here: `deploy/postgres-init.sql` provisions the
+    # read-only analyst role and is mounted by the compose file, which
+    # is a development and an infra artifact. What this lane needs is a
+    # role that may create databases (the test fixtures make one per
+    # worker), which the image's superuser is.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: vinga
+          POSTGRES_USER: vinga
+          POSTGRES_PASSWORD: vinga
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U vinga -d vinga"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+
     steps:
       - uses: actions/checkout@v7
 
@@ -169,6 +212,42 @@ jobs:
   # they cost seconds and this lane finishes well before the other one.
   integration:
     runs-on: ubuntu-latest
+
+    # What the lanes connect with. The same values the fixtures default
+    # to, spelled out because the contract is the point: these five are
+    # what a deployment sets too, and a lane that relied on a default
+    # would not be running the shape it documents.
+    env:
+      VINGA_DB_HOST: 127.0.0.1
+      VINGA_DB_PORT: "5432"
+      VINGA_DB_NAME: vinga
+      VINGA_DB_USER: vinga
+      VINGA_DB_PASSWORD: vinga
+
+    # The database both stores live in. A service container rather than
+    # a step that starts one, so the runner's health gate is what the
+    # steps below wait on and a lane never races the instance.
+    #
+    # No init script here: `deploy/postgres-init.sql` provisions the
+    # read-only analyst role and is mounted by the compose file, which
+    # is a development and an infra artifact. What this lane needs is a
+    # role that may create databases (the test fixtures make one per
+    # worker), which the image's superuser is.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: vinga
+          POSTGRES_USER: vinga
+          POSTGRES_PASSWORD: vinga
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U vinga -d vinga"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+
     steps:
       - uses: actions/checkout@v7
 
@@ -312,44 +391,77 @@ jobs:
           uv venv --python 3.12 "$RUNNER_TEMP/wheel-venv"
           # `[serve]` explicitly, and it is the assertion this step
           # rests on: the wheel's default install is the configuration
-          # client, which carries neither SQLAlchemy nor Alembic, so a
-          # bare install could not open a database at all. The lane that
-          # installs bare on purpose is the tier closure, which asserts
-          # the opposite of this and would otherwise be testing the same
-          # configuration under a different name.
+          # client, which carries neither SQLAlchemy nor Alembic nor a
+          # database driver, so a bare install could not open a database
+          # at all. The lane that installs bare on purpose is the tier
+          # closure, which asserts the opposite of this and would
+          # otherwise be testing the same configuration under a
+          # different name.
+          #
+          # `psycopg[binary]` beside it, which is the other half of the
+          # packaging decision this step exists to check: `[serve]`
+          # carries the plain source distribution, so an install of the
+          # extra alone needs a libpq on the system. The runner has no
+          # guarantee of one, and the image installs the binary wheel
+          # for exactly this reason, so the step does what the image
+          # does.
           #
           # `[sim]` is not named here and has nothing to do with this
           # step: it carries a websocket client and no migration. The
           # tier closure lane is where that extra gets an environment of
           # its own.
           uv pip install --python "$RUNNER_TEMP/wheel-venv/bin/python" \
-            "$(echo "$RUNNER_TEMP"/dist/*.whl)[serve]"
+            "$(echo "$RUNNER_TEMP"/dist/*.whl)[serve]" "psycopg[binary]"
+          # A database of this step's own, so the wheel migrates
+          # something truly blank rather than whatever the lanes left in
+          # the service's default database.
+          PGPASSWORD="$VINGA_DB_PASSWORD" psql \
+            -h "$VINGA_DB_HOST" -p "$VINGA_DB_PORT" -U "$VINGA_DB_USER" \
+            -d "$VINGA_DB_NAME" -v ON_ERROR_STOP=1 \
+            -c 'drop database if exists vinga_wheel' \
+            -c 'create database vinga_wheel'
           mkdir -p "$RUNNER_TEMP/wheel-run"
           cd "$RUNNER_TEMP/wheel-run"
-          "$RUNNER_TEMP/wheel-venv/bin/python" -P - <<'PY'
+          VINGA_DB_NAME=vinga_wheel "$RUNNER_TEMP/wheel-venv/bin/python" -P - <<'PY'
           import pathlib
           import sys
-          import tempfile
 
           import vinga_server
-          from vinga_server.conversations.store import open_conversations
-          from vinga_server.db import open_database
+          from vinga_server.config.models import DatabaseConfig
+          from vinga_server.conversations.store import CONVERSATIONS_CHAIN, open_conversations
+          from vinga_server.db import DOMAIN_CHAIN, open_database
           from sqlalchemy import inspect, text
 
           installed = pathlib.Path(vinga_server.__file__).resolve()
           if "site-packages" not in installed.parts:
               sys.exit(f"the source tree was imported, not the wheel: {installed}")
 
-          engine = open_database(pathlib.Path(tempfile.mkdtemp()) / "db")
+          # The discrete settings are read from the environment by the
+          # loader, which this script does not use, so they are named
+          # here: the point is the migration, not the settings path.
+          import os
+
+          settings = DatabaseConfig(
+              host=os.environ["VINGA_DB_HOST"],
+              port=int(os.environ["VINGA_DB_PORT"]),
+              name=os.environ["VINGA_DB_NAME"],
+              user=os.environ["VINGA_DB_USER"],
+          )
+
+          engine = open_database(settings)
+          domain = DOMAIN_CHAIN.schema
           inspector = inspect(engine)
-          tables = set(inspector.get_table_names())
+          tables = set(inspector.get_table_names(schema=domain))
           columns = {
-              table: {column["name"] for column in inspector.get_columns(table)}
+              table: {column["name"] for column in inspector.get_columns(table, schema=domain)}
               for table in tables
           }
           with engine.connect() as connection:
               domain_revisions = {
-                  row[0] for row in connection.execute(text("select * from alembic_version"))
+                  row[0]
+                  for row in connection.execute(
+                      text(f"select * from {domain}.alembic_version")
+                  )
               }
           engine.dispose()
 
@@ -388,44 +500,55 @@ jobs:
               if "body" not in columns[table]:
                   sys.exit(f"the wheel's migrations gave {table} no body column")
           # And the head of the packaged domain chain, which is one
-          # revision: the chain was squashed to a single baseline, and a
+          # revision: the chain was re-baselined against Postgres, and a
           # wheel carrying anything else is one whose databases this
           # commit's code cannot read.
-          if domain_revisions != {"2001_json_body_baseline"}:
-              sys.exit(f"the wheel's domain chain is at {sorted(domain_revisions)}, not ['2001_json_body_baseline']")
+          if domain_revisions != {"3001_postgres_domain"}:
+              sys.exit(f"the wheel's domain chain is at {sorted(domain_revisions)}, not ['3001_postgres_domain']")
           print(f"migrated a fresh database from {installed.parent}")
 
-          # The conversation store, from the same installed artifact.
-          store = open_conversations(pathlib.Path(tempfile.mkdtemp()) / "db")
+          # The conversation store, from the same installed artifact and
+          # into the same database: one database, two schemas, which is
+          # the arrangement a deployment has.
+          store = open_conversations(settings)
+          conversations = CONVERSATIONS_CHAIN.schema
           with store.connect() as connection:
               revisions = {
-                  row[0] for row in connection.execute(text("select * from alembic_version"))
-              }
-              ddl = {
-                  row[0]: row[1] or ""
+                  row[0]
                   for row in connection.execute(
-                      text("select name, sql from sqlite_master where type = 'table'")
+                      text(f"select * from {conversations}.alembic_version")
                   )
               }
-          store_tables = set(inspect(store).get_table_names())
+              # The cursor tables, whose ids are handed out as pagination
+              # cursors. A sequence never hands out a value twice, which
+              # is the property retention needs because it deletes from
+              # exactly the end a cursor points past, so this is asserted
+              # on what the database was told rather than on the
+              # metadata that asked for it.
+              identity = {
+                  row[0]: row[1]
+                  for row in connection.execute(
+                      text(
+                          "select table_name, is_identity from information_schema.columns "
+                          "where table_schema = :schema and column_name = 'id'"
+                      ),
+                      {"schema": conversations},
+                  )
+              }
+          store_tables = set(inspect(store).get_table_names(schema=conversations))
           store.dispose()
 
           # The head of the packaged chain. A new migration moves this
           # line, deliberately: a wheel that carried an older chain than
           # the one this commit expects is exactly what the check is for.
-          if revisions != {"0001"}:
-              sys.exit(f"the wheel's conversations chain is at {sorted(revisions)}, not ['0001']")
+          if revisions != {"1001_postgres_conversations"}:
+              sys.exit(f"the wheel's conversations chain is at {sorted(revisions)}, not ['1001_postgres_conversations']")
           expected = {"sessions", "turns", "tool_invocations", "events"}
           missing = expected - store_tables
           if missing:
               sys.exit("the wheel's conversations migrations did not create: " + ", ".join(sorted(missing)))
-          # The cursor tables, whose ids are handed out as pagination
-          # cursors. Without AUTOINCREMENT SQLite reuses the deleted
-          # maximum rowid and retention deletes from exactly the end a
-          # cursor points past, so this is asserted on the DDL SQLite
-          # stored rather than on the metadata that asked for it.
           for name in ("sessions", "turns", "events"):
-              if "AUTOINCREMENT" not in ddl[name]:
+              if identity.get(name) != "YES":
                   sys.exit(f"the wheel's {name} table would reuse deleted row ids")
           print(f"migrated a fresh conversation store from {installed.parent}")
           PY
@@ -555,6 +678,21 @@ jobs:
       # configuration API: a server started without it refuses to boot,
       # so every container below that starts a server is given it.
       VINGA_API_SECRET: smoke-lane-api-token-not-a-real-deployment
+      # The database every container below is pointed at. A container of
+      # its own on a named Docker network rather than a service
+      # container, because these servers run under `docker run` and a
+      # runner-localhost service is not reachable as localhost from
+      # inside one. The host name is the container's name on that
+      # network, which is what `--network` gives for free.
+      VINGA_DB_HOST: vinga-postgres
+      VINGA_DB_PORT: "5432"
+      VINGA_DB_USER: vinga
+      VINGA_DB_PASSWORD: smoke-lane-db-password-not-a-real-deployment
+      # One database per scenario, so the three of them never see each
+      # other's rows: the boots-on-external check, the refusal check and
+      # the seeded smoke server all start their own servers against the
+      # same instance.
+      SMOKE_NETWORK: vinga-smoke-net
     steps:
       - uses: actions/checkout@v7
 
@@ -570,6 +708,50 @@ jobs:
       # rather abbreviate to.
       - name: The revision this build is
         run: echo "REVISION=${GITHUB_SHA:0:7}" >> "$GITHUB_ENV"
+
+      # The database the containers below talk to, on a network they
+      # join. Health-gated before anything is provisioned, so a step
+      # never races the instance.
+      - name: Start the database the smoke containers share
+        run: |
+          docker network create "$SMOKE_NETWORK"
+          docker run -d --name "$VINGA_DB_HOST" \
+            --network "$SMOKE_NETWORK" \
+            -e POSTGRES_DB=postgres \
+            -e POSTGRES_USER="$VINGA_DB_USER" \
+            -e POSTGRES_PASSWORD="$VINGA_DB_PASSWORD" \
+            --health-cmd "pg_isready -U $VINGA_DB_USER -d postgres" \
+            --health-interval 2s --health-timeout 3s --health-retries 30 \
+            postgres:17-alpine
+          for _ in $(seq 60); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' "$VINGA_DB_HOST")
+            [ "$status" = "healthy" ] && break
+            [ "$status" = "unhealthy" ] && break
+            sleep 2
+          done
+          [ "$status" = "healthy" ] || {
+            echo "::error::the smoke lane's database never became healthy"
+            docker logs "$VINGA_DB_HOST"
+            exit 1
+          }
+
+      # Postgres initializes only the database it was configured with,
+      # and the server migrates schemas rather than databases, so each
+      # scenario's database is created here before its container runs.
+      # Owned by the server role, which is also the superuser here: the
+      # role a deployment gives the server needs no CREATEDB, and this
+      # step is the development-and-test maintenance connection that
+      # does.
+      - name: Provision the scenario databases
+        run: |
+          for name in vinga_slim_boot vinga_slim_refuse vinga_smoke; do
+            docker run --rm --network "$SMOKE_NETWORK" \
+              -e PGPASSWORD="$VINGA_DB_PASSWORD" \
+              postgres:17-alpine \
+              psql -h "$VINGA_DB_HOST" -U "$VINGA_DB_USER" -d postgres \
+                -v ON_ERROR_STOP=1 \
+                -c "create database $name owner $VINGA_DB_USER"
+          done
 
       - uses: astral-sh/setup-uv@v9.0.0
         with:
@@ -680,16 +862,21 @@ jobs:
       - name: Check the slim image boots on external providers
         if: matrix.variant == 'slim'
         run: |
-          docker run --rm \
+          docker run --rm --network "$SMOKE_NETWORK" \
             -e VINGA_AUTH_SECRET \
             -e VINGA_API_SECRET \
+            -e VINGA_DB_HOST -e VINGA_DB_PORT -e VINGA_DB_USER -e VINGA_DB_PASSWORD \
+            -e VINGA_DB_NAME=vinga_slim_boot \
             -v slim-boot-data:/data \
             -v "$PWD/tests/smoke:/smoke:ro" \
             -v "$PWD/tests/smoke/config.slim.yaml:/config/config.yaml:ro" \
             --entrypoint sh vinga-server:ci-amd64 /smoke/seed-slim.sh
           docker run -d --name slim-boot -p 18003:8003 \
+            --network "$SMOKE_NETWORK" \
             -e VINGA_AUTH_SECRET \
             -e VINGA_API_SECRET \
+            -e VINGA_DB_HOST -e VINGA_DB_PORT -e VINGA_DB_USER -e VINGA_DB_PASSWORD \
+            -e VINGA_DB_NAME=vinga_slim_boot \
             -e ANTHROPIC_API_KEY=not-a-real-key \
             -e OPENAI_API_KEY=not-a-real-key \
             -v slim-boot-data:/data \
@@ -713,16 +900,21 @@ jobs:
       - name: Check the slim image refuses local engines
         if: matrix.variant == 'slim'
         run: |
-          docker run --rm \
+          docker run --rm --network "$SMOKE_NETWORK" \
             -e VINGA_AUTH_SECRET \
             -e VINGA_API_SECRET \
+            -e VINGA_DB_HOST -e VINGA_DB_PORT -e VINGA_DB_USER -e VINGA_DB_PASSWORD \
+            -e VINGA_DB_NAME=vinga_slim_refuse \
             -v slim-refuse-data:/data \
             -v "$PWD/tests/smoke:/smoke:ro" \
             -v "$PWD/tests/smoke/config.local-engines.yaml:/config/config.yaml:ro" \
             --entrypoint sh vinga-server:ci-amd64 /smoke/seed-local-engines.sh
           if docker run --rm --name slim-refuse \
+              --network "$SMOKE_NETWORK" \
               -e VINGA_AUTH_SECRET \
               -e VINGA_API_SECRET \
+              -e VINGA_DB_HOST -e VINGA_DB_PORT -e VINGA_DB_USER -e VINGA_DB_PASSWORD \
+              -e VINGA_DB_NAME=vinga_slim_refuse \
               -v slim-refuse-data:/data \
               -v "$PWD/tests/smoke/config.local-engines.yaml:/config/config.yaml:ro" \
               vinga-server:ci-amd64 > refusal.log 2>&1; then
@@ -750,9 +942,11 @@ jobs:
       # provider and so needs no provider credential.
       - name: Seed the domain configuration
         run: |
-          docker run --rm \
+          docker run --rm --network "$SMOKE_NETWORK" \
             -e VINGA_AUTH_SECRET \
             -e VINGA_API_SECRET \
+            -e VINGA_DB_HOST -e VINGA_DB_PORT -e VINGA_DB_USER -e VINGA_DB_PASSWORD \
+            -e VINGA_DB_NAME=vinga_smoke \
             -v smoke-data:/data \
             -v "$PWD/tests/smoke:/smoke:ro" \
             -v "$PWD/tests/smoke/config.yaml:/config/config.yaml:ro" \
@@ -762,8 +956,11 @@ jobs:
         run: |
           docker run -d --name vinga-smoke \
             -p 8003:8003 \
+            --network "$SMOKE_NETWORK" \
             -e VINGA_AUTH_SECRET \
             -e VINGA_API_SECRET \
+            -e VINGA_DB_HOST -e VINGA_DB_PORT -e VINGA_DB_USER -e VINGA_DB_PASSWORD \
+            -e VINGA_DB_NAME=vinga_smoke \
             -v smoke-data:/data \
             -v "$PWD/tests/smoke/config.yaml:/config/config.yaml:ro" \
             vinga-server:ci-amd64
@@ -814,6 +1011,17 @@ jobs:
       - name: Remove the container
         if: always()
         run: docker rm -f vinga-smoke || true
+
+      # And the database the three scenarios shared, with the network it
+      # was on. `always()` because a job that failed part way still has
+      # a container and a network holding a port and a name, and the
+      # next run on the same runner would collide with them.
+      - name: Remove the database and its network
+        if: always()
+        run: |
+          docker logs "$VINGA_DB_HOST" 2>&1 | tail -50 || true
+          docker rm -f "$VINGA_DB_HOST" || true
+          docker network rm "$SMOKE_NETWORK" || true
 
       - name: Log in to GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

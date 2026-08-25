@@ -40,11 +40,12 @@ from vinga_server import logs
 from vinga_server.app import create_app
 from vinga_server.config import Config
 from vinga_server.config.api import MOUNT_PATH, build_api
+from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations import api as conversations_api
 from vinga_server.conversations import schema
 from vinga_server.conversations.api import LIMIT_DEFAULT, LIMIT_MAX
 from vinga_server.conversations.records import ToolInvocation, TurnLeg, TurnRecord
-from vinga_server.conversations.store import ConversationStore, conversations_path
+from vinga_server.conversations.store import ConversationStore
 
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
 
@@ -118,7 +119,7 @@ def a_turn(**overrides: Any) -> TurnRecord:
 
 
 def recorded(
-    directory: Path,
+    database: DatabaseConfig | None = None,
     sessions: int = 1,
     turns: int = 1,
     device: str = DEVICE_MAC.lower(),
@@ -132,7 +133,9 @@ def recorded(
     included. `stop()` drains, so everything is committed by the time it
     returns.
     """
-    store = ConversationStore(directory, **options)
+    store = ConversationStore(
+        DatabaseConfig() if database is None else database, **options
+    )
     store.start()
     named = []
     try:
@@ -150,8 +153,8 @@ def recorded(
 
 
 @pytest.fixture
-def api(tmp_path: Path) -> FastAPI:
-    return build_api(TOKEN, tmp_path)
+def api() -> FastAPI:
+    return build_api(TOKEN, DatabaseConfig())
 
 
 @pytest.fixture
@@ -250,13 +253,13 @@ def _closed(client: TestClient, bearer: dict[str, str], session: str) -> Any:
 
 
 def test_a_store_that_records_nothing_today_still_serves_what_it_recorded(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Switching recording off stops the writer, not the reader, exactly
     as capture files outlive the capture switch."""
     monkeypatch.setenv(API_SECRET_ENV, TOKEN)
-    recorded(tmp_path, sessions=2)
-    app = create_app(Config(server={"database": {"dir": str(tmp_path)}}))
+    recorded(None, sessions=2)
+    app = create_app(Config())
 
     with TestClient(app) as client:
         listing = client.get(
@@ -271,9 +274,9 @@ def test_a_store_that_records_nothing_today_still_serves_what_it_recorded(
 
 
 def test_the_listing_answers_newest_first_with_a_summary(
-    tmp_path: Path, client: TestClient
+    client: TestClient,
 ) -> None:
-    recorded(tmp_path, sessions=3, turns=2)
+    recorded(None, sessions=3, turns=2)
 
     listing = _get(client, "/conversations")
 
@@ -295,11 +298,11 @@ def test_the_listing_answers_newest_first_with_a_summary(
 
 
 def test_a_walk_through_the_pages_recovers_the_listing_once(
-    tmp_path: Path, client: TestClient
+    client: TestClient,
 ) -> None:
     """The page boundary and the cursor together: two rows at a time
     across five, every session seen exactly once and in order."""
-    recorded(tmp_path, sessions=5)
+    recorded(None, sessions=5)
     seen: list[str] = []
     cursor: int | None = None
     pages = 0
@@ -318,11 +321,11 @@ def test_a_walk_through_the_pages_recovers_the_listing_once(
 
 
 def test_a_page_that_ends_the_listing_exactly_says_there_is_no_more(
-    tmp_path: Path, client: TestClient
+    client: TestClient,
 ) -> None:
     """The boundary a limit-plus-one read exists for: a full page with
     nothing behind it must not offer a cursor onto an empty one."""
-    recorded(tmp_path, sessions=2)
+    recorded(None, sessions=2)
 
     page = _get(client, "/conversations", limit=2)
 
@@ -330,10 +333,11 @@ def test_a_page_that_ends_the_listing_exactly_says_there_is_no_more(
     assert page["next_cursor"] is None
 
 
-def test_an_empty_store_answers_an_empty_page(tmp_path: Path, client: TestClient) -> None:
-    """The file exists and holds nothing, which is a boot that recorded
-    no conversation rather than a deployment with no store."""
-    ConversationStore(tmp_path).stop()
+def test_an_empty_store_answers_an_empty_page(client: TestClient) -> None:
+    """The schema exists and holds nothing, which is what a boot that
+    recorded no conversation leaves and, since the cutover, also what a
+    deployment that never switched recording on has."""
+    ConversationStore(DatabaseConfig()).stop()
 
     page = _get(client, "/conversations")
 
@@ -341,12 +345,12 @@ def test_an_empty_store_answers_an_empty_page(tmp_path: Path, client: TestClient
 
 
 def test_a_cursor_beyond_the_end_answers_an_empty_page(
-    tmp_path: Path, client: TestClient
+    client: TestClient,
 ) -> None:
     """Past the last row rather than at it: an empty page and no
     cursor, not a refusal, because a client reconciling a listing that
     has since been pruned asks exactly this."""
-    sessions = recorded(tmp_path, sessions=2)
+    sessions = recorded(None, sessions=2)
 
     page = _get(client, "/conversations", cursor=1)
     timeline = _get(client, f"/conversations/{sessions[0]}/turns", cursor=9999)
@@ -356,9 +360,9 @@ def test_a_cursor_beyond_the_end_answers_an_empty_page(
 
 
 def test_the_device_filter_answers_only_that_devices_sessions(
-    tmp_path: Path, client: TestClient
+    client: TestClient,
 ) -> None:
-    store = ConversationStore(tmp_path)
+    store = ConversationStore(DatabaseConfig())
     store.start()
     try:
         for session, device in (("mine", DEVICE_MAC.lower()), ("theirs", OTHER_DEVICE)):
@@ -384,12 +388,12 @@ def test_the_device_filter_answers_only_that_devices_sessions(
 
 
 def test_the_detail_answers_every_column_the_row_has(
-    tmp_path: Path, client: TestClient
+    client: TestClient,
 ) -> None:
     """The row whole, not a chosen half: a column added to the schema
     without a thought for this read fails here rather than going
     unserved."""
-    recorded(tmp_path, sessions=1, turns=3)
+    recorded(None, sessions=1, turns=3)
 
     detail = _get(client, "/conversations/session-00")
 
@@ -404,11 +408,11 @@ def test_the_detail_answers_every_column_the_row_has(
 
 
 def test_a_turn_carries_its_calls_in_the_order_the_model_issued_them(
-    tmp_path: Path, client: TestClient
+    client: TestClient,
 ) -> None:
     """Nested by position, which is the model's own order and not the
     order the calls finished in or landed in."""
-    recorded(tmp_path, sessions=1, turns=2)
+    recorded(None, sessions=1, turns=2)
 
     timeline = _get(client, "/conversations/session-00/turns")
 
@@ -429,14 +433,14 @@ def test_a_turn_carries_its_calls_in_the_order_the_model_issued_them(
 
 
 def test_a_handover_turn_carries_a_leg_per_agent(
-    tmp_path: Path, client: TestClient
+    client: TestClient, spare_database: str
 ) -> None:
     """The one place a turn's totals come apart again: they blend agents
     that may use different models, and the legs are where each agent's
     share is. A turn one agent answered whole has null legs, which is
     not an empty list and never becomes one."""
     recorded(
-        tmp_path,
+        None,
         sessions=1,
         turn=a_turn(
             legs=(
@@ -445,12 +449,13 @@ def test_a_handover_turn_carries_a_leg_per_agent(
             )
         ),
     )
-    recorded(tmp_path / "solo", sessions=1)
+    solo_database = DatabaseConfig(name=spare_database)
+    recorded(solo_database, sessions=1)
 
     (handover,) = _get(client, "/conversations/session-00/turns")["items"]
     solo = _get(
         TestClient(
-            build_api(TOKEN, tmp_path / "solo"),
+            build_api(TOKEN, solo_database),
             headers={"Authorization": f"Bearer {TOKEN}"},
         ),
         "/conversations/session-00/turns",
@@ -466,11 +471,11 @@ def test_a_handover_turn_carries_a_leg_per_agent(
 
 
 def test_a_turn_page_holds_the_turns_after_its_cursor(
-    tmp_path: Path, client: TestClient
+    client: TestClient,
 ) -> None:
     """Forwards, unlike the listing: the reconcile direction, which is
     what a client that has read up to a turn asks in."""
-    recorded(tmp_path, sessions=1, turns=3)
+    recorded(None, sessions=1, turns=3)
 
     first = _get(client, "/conversations/session-00/turns", limit=2)
     second = _get(client, "/conversations/session-00/turns", cursor=first["next_cursor"])
@@ -482,9 +487,9 @@ def test_a_turn_page_holds_the_turns_after_its_cursor(
 
 
 def test_one_sessions_timeline_holds_no_other_sessions_turns(
-    tmp_path: Path, client: TestClient
+    client: TestClient,
 ) -> None:
-    recorded(tmp_path, sessions=2, turns=2)
+    recorded(None, sessions=2, turns=2)
 
     timeline = _get(client, "/conversations/session-01/turns")
 
@@ -492,11 +497,11 @@ def test_one_sessions_timeline_holds_no_other_sessions_turns(
 
 
 def test_an_unknown_session_is_a_404_on_both_reads(
-    tmp_path: Path, client: TestClient
+    client: TestClient,
 ) -> None:
     """And on the timeline before the page is built: an empty timeline
     would read like a session that said nothing."""
-    recorded(tmp_path, sessions=1)
+    recorded(None, sessions=1)
 
     for path in ("/conversations/nobody", "/conversations/nobody/turns"):
         response = client.get(path)
@@ -508,11 +513,11 @@ def test_an_unknown_session_is_a_404_on_both_reads(
 
 
 def test_text_off_serves_the_content_columns_as_nulls(
-    tmp_path: Path, client: TestClient
+    client: TestClient,
 ) -> None:
     """Stored as null and served as null, with the session's own `text`
     flag beside it saying which reading the nulls deserve."""
-    recorded(tmp_path, sessions=1, text=False, turn=a_turn(heard=SENTINEL, reply=SENTINEL))
+    recorded(None, sessions=1, text=False, turn=a_turn(heard=SENTINEL, reply=SENTINEL))
 
     detail = _get(client, "/conversations/session-00")
     (turn,) = _get(client, "/conversations/session-00/turns")["items"]
@@ -532,9 +537,9 @@ def test_text_off_serves_the_content_columns_as_nulls(
 
 
 def test_metrics_off_serves_the_numbers_as_nulls_and_no_events(
-    tmp_path: Path, client: TestClient
+    client: TestClient,
 ) -> None:
-    recorded(tmp_path, sessions=1, metrics=False)
+    recorded(None, sessions=1, metrics=False)
 
     detail = _get(client, "/conversations/session-00")
     (turn,) = _get(client, "/conversations/session-00/turns")["items"]
@@ -567,18 +572,29 @@ def test_no_route_answers_without_the_token(api: FastAPI, path: str) -> None:
 
 
 @pytest.mark.parametrize("path", ROUTES)
-def test_a_deployment_that_never_recorded_answers_404_naming_the_key(
-    tmp_path: Path, client: TestClient, path: str
+def test_a_deployment_that_never_recorded_answers_its_ordinary_shapes(
+    client: TestClient, path: str
 ) -> None:
+    """The 404 that retired with the file (#283), stated as the contract
+    change it is.
+
+    It said "there is no conversations.db in this directory, switch
+    recording on to make one", which drew a line between a file that
+    existed and one that did not. There is no file, and boot migrates
+    the schema whether or not recording is on, so what a deployment that
+    never recorded has is empty tables: an empty list is the honest
+    answer to a question about them, and a session id that is not there
+    is the one 404 that remains.
+    """
     response = client.get(path)
 
-    assert response.status_code == 404
-    # The key that switches recording on, which is the whole of what a
-    # deployment that never recorded needs to be told.
-    assert "server.conversations.enabled" in refused(response.json(), 404)
-    # And the read brought no database into existence, which is what
-    # keeps an absent section a server that leaves no file behind.
-    assert not conversations_path(tmp_path).exists()
+    if path.startswith("/conversations/"):
+        # A session id, which really is not there.
+        assert response.status_code == 404
+        assert "no session of that id" in refused(response.json(), 404).lower()
+    else:
+        assert response.status_code == 200
+        assert response.json() == {"items": [], "next_cursor": None}
 
 
 @pytest.mark.parametrize(
@@ -601,7 +617,6 @@ def test_a_deployment_that_never_recorded_answers_404_naming_the_key(
     ],
 )
 def test_a_refused_argument_names_the_rule_and_quotes_nothing(
-    tmp_path: Path,
     client: TestClient,
     caplog: pytest.LogCaptureFixture,
     capsys: pytest.CaptureFixture[str],
@@ -611,7 +626,7 @@ def test_a_refused_argument_names_the_rule_and_quotes_nothing(
     """What arrived is the caller's, and these are the only values these
     routes are handed outside a path segment. A cursor pasted from the
     wrong buffer is the case this is written for."""
-    recorded(tmp_path, sessions=1)
+    recorded(None, sessions=1)
 
     with caplog.at_level(logging.DEBUG):
         response = client.get("/conversations", params={argument: value})
@@ -633,11 +648,11 @@ def test_a_refused_argument_names_the_rule_and_quotes_nothing(
 
 
 def test_the_limit_rules_are_the_ones_the_refusal_names(
-    tmp_path: Path, client: TestClient
+    client: TestClient,
 ) -> None:
     """The boundary values themselves, since the refusal above names an
     argument and this is what the rule behind it is."""
-    recorded(tmp_path, sessions=1)
+    recorded(None, sessions=1)
 
     # The bounds and the default, read off the refusal a broken one
     # answers with: a document that named other numbers would send a
@@ -653,7 +668,6 @@ def test_the_limit_rules_are_the_ones_the_refusal_names(
 
 
 def test_a_sentinel_in_the_path_reaches_no_body_and_no_log(
-    tmp_path: Path,
     client: TestClient,
     caplog: pytest.LogCaptureFixture,
     capsys: pytest.CaptureFixture[str],
@@ -661,7 +675,7 @@ def test_a_sentinel_in_the_path_reaches_no_body_and_no_log(
     """A session id arrives in the path, and the refusal for one that
     addresses nothing says where to look instead rather than repeating
     what was asked for."""
-    recorded(tmp_path, sessions=1)
+    recorded(None, sessions=1)
 
     with caplog.at_level(logging.DEBUG):
         responses = [
@@ -689,7 +703,6 @@ def test_a_sentinel_in_the_path_reaches_no_body_and_no_log(
     ],
 )
 def test_a_stray_trailing_slash_answers_without_quoting_the_request(
-    tmp_path: Path,
     api: FastAPI,
     caplog: pytest.LogCaptureFixture,
     capsys: pytest.CaptureFixture[str],
@@ -705,7 +718,7 @@ def test_a_stray_trailing_slash_answers_without_quoting_the_request(
     follows one would land on the canonical path and see a clean body,
     which is exactly how this went unnoticed.
     """
-    recorded(tmp_path, sessions=1)
+    recorded(None, sessions=1)
     client = TestClient(
         api, headers={"Authorization": f"Bearer {TOKEN}"}, follow_redirects=False
     )
@@ -724,7 +737,6 @@ def test_a_stray_trailing_slash_answers_without_quoting_the_request(
 
 
 def test_a_failure_reaching_the_file_says_nothing_about_it(
-    tmp_path: Path,
     client: TestClient,
     caplog: pytest.LogCaptureFixture,
     capsys: pytest.CaptureFixture[str],
@@ -734,10 +746,10 @@ def test_a_failure_reaching_the_file_says_nothing_about_it(
     is the point of registering them on this application: a driver error
     holds the statement it failed on and the parameters bound to it, and
     none of that reaches the caller or the log."""
-    recorded(tmp_path, sessions=1)
+    recorded(None, sessions=1)
     monkeypatch.setattr(
-        conversations_api.store,
-        "read_conversations",
+        conversations_api,
+        "read_engine",
         _raising(f"unable to open database file near {SENTINEL}"),
     )
 
@@ -759,23 +771,35 @@ def test_a_failure_reaching_the_file_says_nothing_about_it(
 
 
 def _raising(message: str):
-    def raise_it(directory: Path) -> None:
+    def raise_it(database: DatabaseConfig) -> None:
         raise RuntimeError(message)
 
     return raise_it
 
 
-def test_the_reads_hold_no_engine_between_requests(
-    tmp_path: Path, client: TestClient
-) -> None:
-    """One engine per request, disposed with it: a store deleted, moved
-    or restored under a running server is met as it is now rather than
-    through a pool opened before it moved."""
-    recorded(tmp_path, sessions=1)
-    assert _get(client, "/conversations")["items"]
+def test_the_reads_hold_no_engine_between_requests(client: TestClient) -> None:
+    """One engine per request, disposed with it: a store restored from a
+    backup under a running server is met as it is now rather than
+    through a pool opened before it moved.
 
-    conversations_path(tmp_path).unlink()
+    Asserted by counting the engines the reads open, which is what the
+    property really is. Its SQLite-era form deleted the file between two
+    requests and read the second one's 404; there is no file to delete,
+    and a truncation would not distinguish a pooled engine from a fresh
+    one, since both would see the committed truncation.
+    """
+    opened: list[object] = []
+    real = conversations_api.read_engine
 
-    response = client.get("/conversations")
-    assert response.status_code == 404
-    assert "server.conversations.enabled" in refused(response.json(), 404)
+    def counting(database: DatabaseConfig):
+        engine = real(database)
+        opened.append(engine)
+        return engine
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(conversations_api, "read_engine", counting)
+        recorded(sessions=1)
+        assert _get(client, "/conversations")["items"]
+        assert _get(client, "/conversations")["items"]
+
+    assert len(opened) == 2, "the reads shared an engine between requests"

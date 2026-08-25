@@ -116,6 +116,14 @@ class _CompositionSeed:
     secrets: SecretStore | None
     api: FastAPI
     on_started: Callable[[], None] | None
+    # Whether this configuration's domain half was read from a store, or
+    # handed to `create_app` by whoever built it. It decides one thing:
+    # whether the bindings view reads the database live or serves the
+    # snapshot authoritatively. Stated here, where the composition is,
+    # rather than probed later: the probe used to be whether a database
+    # file existed, and a database is now always there by the time
+    # anything could look (#283).
+    from_store: bool = False
     failure: str | None = None
 
 
@@ -313,7 +321,11 @@ async def _build_composition(
     # database, `main()` through `load_boot_config` and the ASGI one
     # through `create_app`, so a server always gets the live view; the
     # other shape is the test lane's and an embedded caller's.
-    bindings = DeviceBindings.open(generations)
+    bindings = (
+        DeviceBindings.open(generations)
+        if seed.from_store
+        else DeviceBindings.snapshot_only(generations)
+    )
     stack.callback(bindings.dispose)
     # One registry per app: what decides whether there is room for the
     # next conversation, what the drain reaches the live ones through,
@@ -775,6 +787,7 @@ def create_app(
     config: Config | None = None,
     secrets: SecretStore | None = None,
     on_started: Callable[[], None] | None = None,
+    from_store: bool = False,
 ) -> FastAPI:
     """Describe the ASGI app: its routes, its gate, and what its lifespan
     will build. Without a config the whole boot configuration is read here
@@ -791,6 +804,19 @@ def create_app(
     before the first request, and is how the CLI says out loud where to
     point a device. None for an app built by a test lane or an external
     ASGI runner, which has no operator reading its startup output.
+
+    `from_store` says whether the configuration handed in was read from
+    the database, which is true of both production entry points and
+    false of an embedded caller composing one in Python. It decides
+    whether device bindings resolve live from the database or from the
+    snapshot, authoritatively: a server that was handed its world is a
+    server whose world no store describes, and reading a store that
+    describes some other deployment would answer the right question
+    about the wrong server. It is stated by the caller rather than
+    probed here, because it is a fact about how this application was
+    composed. Reading it here when the config is None is not an
+    exception to that: `create_app()` with nothing composes from the
+    store itself, two lines below.
 
     Nothing here opens a database, starts a thread or loads a model: an
     app that is described and never served holds nothing (#142). What it
@@ -824,6 +850,8 @@ def create_app(
     if config is None:
         booted = load_boot_config()
         config, secrets = booted.config, booted.secrets
+        # Composed from the store, by this very line.
+        from_store = True
     # Read here and thrown away: this is the refusal, not the issuer.
     # Enabled authentication with no secret in the environment is a
     # deployment that would come up serving every device that connects,
@@ -882,7 +910,11 @@ def create_app(
     # the token is not, and is now held only by the gate it was passed
     # to.
     app.state.seed = _CompositionSeed(
-        config=config, secrets=secrets, api=api, on_started=on_started
+        config=config,
+        secrets=secrets,
+        api=api,
+        on_started=on_started,
+        from_store=from_store,
     )
 
     return app

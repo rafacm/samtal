@@ -37,6 +37,7 @@ from vinga_server.config.api import (
     store_dependency,
 )
 from vinga_server.config.loader import DatabaseBusyError, StorageError, UnknownEntityError
+from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.store import ConfigStore
 
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
@@ -49,8 +50,8 @@ SENTINEL = "sk-test-2b7d1f0a-never-a-real-credential"
 
 
 @pytest.fixture
-def api(tmp_path: Path) -> FastAPI:
-    return build_api(TOKEN, tmp_path / "db")
+def api() -> FastAPI:
+    return build_api(TOKEN, DatabaseConfig())
 
 
 @pytest.fixture
@@ -291,14 +292,14 @@ def test_a_body_that_is_not_the_expected_shape_is_not_quoted_back(api: FastAPI) 
 # The store dependency
 
 
-def test_the_store_dependency_serves_the_engine_it_was_given(tmp_path: Path) -> None:
+def test_the_store_dependency_serves_the_engine_it_was_given() -> None:
     """One engine per process, opened by a lifespan and handed to every
     request (#142). What a request gets is a view over it, so there is
     nothing to dispose when the request ends, and the next request reads
     what the last one wrote through the engine that is still open."""
-    directory = tmp_path / "db"
-    runtime = build_api_runtime(directory)
-    with open_store(directory) as handle:
+    database = DatabaseConfig()
+    runtime = build_api_runtime(database)
+    with open_store(database) as handle:
         runtime.store = handle
 
         generator = store_dependency(runtime)
@@ -319,11 +320,11 @@ def test_the_store_dependency_serves_the_engine_it_was_given(tmp_path: Path) -> 
     assert handle.engine.pool.checkedin() == 0
 
 
-def test_a_request_with_no_engine_is_a_programming_error(tmp_path: Path) -> None:
+def test_a_request_with_no_engine_is_a_programming_error() -> None:
     """An application whose lifespan never ran has no engine, and saying
     so is the whole answer: opening one here would be an engine nothing
     disposes, on an application nobody may serve requests from."""
-    runtime = build_api_runtime(tmp_path / "db")
+    runtime = build_api_runtime(DatabaseConfig())
 
     with pytest.raises(RuntimeError, match="no database engine"):
         next(store_dependency(runtime))
@@ -357,7 +358,7 @@ def served(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[TestClie
     read through the mount is the thing that proves it.
     """
     monkeypatch.setenv(API_SECRET_ENV, TOKEN)
-    config = Config(server={"database": {"dir": str(tmp_path / "db")}})
+    config = Config()
     with entered_client(config, follow_redirects=False) as client:
         yield client
 

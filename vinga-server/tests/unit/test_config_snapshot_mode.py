@@ -69,7 +69,6 @@ def seed(served: TestClient) -> None:
 @pytest.fixture
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
-    monkeypatch.setenv("VINGA_SERVER__DATABASE__DIR", str(tmp_path / "db"))
     monkeypatch.setenv(API_SECRET_ENV, TOKEN)
     with entered_client(
         handed(tmp_path), headers={"Authorization": f"Bearer {TOKEN}"}
@@ -153,7 +152,6 @@ def test_a_server_reading_a_store_answers_all_three_as_usual(
     directory the first one's API created reads its configuration from
     it, and both surfaces answer."""
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
-    monkeypatch.setenv("VINGA_SERVER__DATABASE__DIR", str(tmp_path / "db"))
     monkeypatch.setenv(API_SECRET_ENV, TOKEN)
     with entered_client(
         handed(tmp_path), headers={"Authorization": f"Bearer {TOKEN}"}

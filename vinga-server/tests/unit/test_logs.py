@@ -29,7 +29,7 @@ from openai import AsyncOpenAI
 from sqlalchemy import create_engine, text
 
 from vinga_server import logs
-from vinga_server.config.models import ServerConfig
+from vinga_server.config.models import DatabaseConfig, ServerConfig
 
 # Not a real credential, and shaped so a substring check for it cannot
 # match by accident. It stands in for what a far end can put in a
@@ -301,6 +301,24 @@ def test_without_the_floor_the_engine_echoes_its_parameters(
 # --- when the floor arrives, on both ways a deployment starts (#124) --
 
 
+def _connection() -> dict[str, str]:
+    """The lane's database, as the `VINGA_DB_*` variables a child reads.
+
+    Every `VINGA_` variable is stripped from a child's environment, so
+    the connection has to be put back explicitly; the settings are this
+    process's own defaults, which the lane's conftest pointed at the
+    database it provisioned.
+    """
+    settings = DatabaseConfig()
+    return {
+        "VINGA_DB_HOST": settings.host,
+        "VINGA_DB_PORT": str(settings.port),
+        "VINGA_DB_NAME": settings.name,
+        "VINGA_DB_USER": settings.user,
+        "VINGA_DB_PASSWORD": os.environ.get("VINGA_DB_PASSWORD", "vinga"),
+    }
+
+
 def _child(*source: str, cwd: Path, **environment: str) -> subprocess.CompletedProcess[str]:
     """A fresh interpreter running exactly this source.
 
@@ -369,7 +387,6 @@ def test_an_external_asgi_runner_gets_the_floor_too(tmp_path: Path) -> None:
     what uvicorn does to that logger, and to the engine's for good
     measure, and then touches the attribute uvicorn touches.
     """
-    database = tmp_path / "db"
     finished = _child(
         """
         import logging
@@ -386,7 +403,7 @@ def test_an_external_asgi_runner_gets_the_floor_too(tmp_path: Path) -> None:
         """,
         _REPORT % (FLOORED,),
         cwd=tmp_path,
-        VINGA_SERVER__DATABASE__DIR=str(database),
+        **_connection(),
         VINGA_API_SECRET=TOKEN,
         VINGA_AUTH_SECRET=TOKEN,
     )
@@ -417,7 +434,6 @@ def test_the_boot_that_reads_the_configuration_is_inside_the_floor(tmp_path: Pat
     `create_app` refuses in one sentence: the database work happens, the
     server never starts.
     """
-    database = tmp_path / "db"
     finished = _child(
         """
         import logging, sys
@@ -433,7 +449,7 @@ def test_the_boot_that_reads_the_configuration_is_inside_the_floor(tmp_path: Pat
         main()
         """,
         cwd=tmp_path,
-        VINGA_SERVER__DATABASE__DIR=str(database),
+        **_connection(),
     )
 
     # The boot got as far as the refusal it was pointed at, which is

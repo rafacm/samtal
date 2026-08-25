@@ -50,7 +50,7 @@ from vinga_server.config.api import (
     build_api,
 )
 from vinga_server.config.loader import ConfigError
-from vinga_server.config.models import json_pointer
+from vinga_server.config.models import DatabaseConfig, json_pointer
 from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key, load_keys
 from vinga_server.config.store import ConfigStore
 from vinga_server.db import open_database
@@ -82,10 +82,10 @@ def keys(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def store(tmp_path: Path, keys: None) -> Iterator[ConfigStore]:
+def store(keys: None) -> Iterator[ConfigStore]:
     """The repository on its own, for the assertions that are about the
     exception rather than about the response built from it."""
-    engine = open_database(tmp_path / "db")
+    engine = open_database(DatabaseConfig())
     try:
         yield ConfigStore(engine, load_keys())
     finally:
@@ -93,8 +93,8 @@ def store(tmp_path: Path, keys: None) -> Iterator[ConfigStore]:
 
 
 @pytest.fixture
-def api(tmp_path: Path, keys: None) -> FastAPI:
-    return build_api(TOKEN, tmp_path / "db")
+def api(keys: None) -> FastAPI:
+    return build_api(TOKEN, DatabaseConfig())
 
 
 @pytest.fixture
@@ -482,9 +482,10 @@ def test_a_conversations_refusal_answers_the_same_shape(client: TestClient) -> N
     assert response.status_code == 404
     assert response.headers["content-type"] == PROBLEM_MEDIA_TYPE
     body = response.json()
-    # The conversation store's own subject, a deployment setting rather
-    # than a field of the request, which is why `errors` is empty.
-    assert "server.conversations.enabled" in refused(body, 404)
+    # The conversation store's own subject, which is a session id that is
+    # not there. The 404 for a deployment with no store at all retired
+    # with the file it was about (#283).
+    assert "no session of that id" in refused(body, 404).lower()
     assert paths(body) == []
     assert SENTINEL not in response.text
 
@@ -755,7 +756,7 @@ def test_the_cli_prints_the_same_sentence_for_a_problem_document(
     with pytest.raises(ConfigError) as caught:
         store.set_provider("llm", "claude", fragment)
 
-    run = runner(tmp_path, monkeypatch)
+    run = runner(monkeypatch)
 
     assert run("provider", "set", "llm", "claude", "-f", "-", stdin="model: m\n") == 1
 
@@ -779,7 +780,7 @@ def test_the_cli_prints_a_typed_options_refusal_without_the_value(
     with pytest.raises(ConfigError) as caught:
         store.set_provider("asr", "ears", fragment)
 
-    run = runner(tmp_path, monkeypatch)
+    run = runner(monkeypatch)
 
     assert (
         run(
@@ -823,7 +824,7 @@ def test_the_cli_prints_a_url_credential_refusal_without_the_key(
     with pytest.raises(ConfigError) as caught:
         store.set_provider("llm", "local", fragment)
 
-    run = runner(tmp_path, monkeypatch)
+    run = runner(monkeypatch)
 
     assert (
         run(

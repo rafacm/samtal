@@ -75,7 +75,6 @@ def _environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
     monkeypatch.delenv(API_SECRET_ENV, raising=False)
     monkeypatch.setenv(AUTH_SECRET_ENV, SECRET)
-    monkeypatch.setenv("VINGA_SERVER__DATABASE__DIR", str(tmp_path / "db"))
 
 
 def _config_file(tmp_path: Path, body: str) -> str:
@@ -1081,14 +1080,20 @@ def test_importing_the_doctor_pulls_in_no_database_machinery() -> None:
     assert json.loads(finished.stdout) == []
 
 
-def test_a_probe_of_a_supplied_url_creates_no_database(
+def test_a_probe_of_a_supplied_url_opens_no_database(
     endpoint, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The property the import discipline exists to keep, asserted
     behaviorally beside it: the import test would still pass if
-    something opened a database at call time."""
-    directory = tmp_path / "never-created"
-    monkeypatch.setenv("VINGA_SERVER__DATABASE__DIR", str(directory))
+    something opened a database at call time.
+
+    Pointed at an instance that is not there, which is the honest shape
+    of the same claim now that there is no file whose absence could be
+    checked: a probe that reached for the database would refuse rather
+    than print."""
+    # A port nothing listens on: a probe that opened a database would
+    # refuse here rather than print.
+    monkeypatch.setenv("VINGA_DB_PORT", "1")
     monkeypatch.chdir(tmp_path)
     endpoint(
         DESCRIBE.format(websocket="wss://voice.example/xiaozhi/v1/", url="https://voice.example")
@@ -1097,8 +1102,6 @@ def test_a_probe_of_a_supplied_url_creates_no_database(
     assert doctor.main(["https://voice.example/x/ABCDEFGH/"]) == 0
 
     assert capsys.readouterr().out != ""
-    assert not directory.exists()
-    assert list(tmp_path.rglob("*.db")) == []
 
 
 def test_an_unrecognized_argument_is_refused_without_repeating_it(

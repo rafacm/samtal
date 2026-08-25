@@ -155,7 +155,7 @@ def unwelcome() -> dict[str, object]:
 def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """One command run the way the entry point runs it, against a
     configuration API of this test's own."""
-    return runner(tmp_path, monkeypatch)
+    return runner(monkeypatch)
 
 
 @pytest.fixture

@@ -13,41 +13,34 @@ it, and the section a refusal is about, which is the half an operator
 acts on. The sentence around that is the repository's to choose and is
 deliberately not pinned here.
 
-The busy case is forced rather than hoped for: a real lock is held by a
-second connection while the busy timeout is short, once inside the
-open-and-migrate step (which the API is on the path of for every
-request) and once inside a repository write.
+The busy case is forced rather than hoped for: a second connection
+holds the domain chain's advisory lock while the lock timeout is short,
+once inside the open-and-migrate step (which the API is on the path of
+for every request) and once inside a repository write.
 """
-
-import sqlite3
-from pathlib import Path
 
 import pytest
 from cryptography.fernet import Fernet, MultiFernet
 from sqlalchemy import update
 
-from tests.support.stores import planted
-from vinga_server import db as db_module
+from tests.support.stores import holding_the_write_lock, planted, the_lock_held
 from vinga_server.config.loader import (
     ConfigError,
     DatabaseBusyError,
     StorageError,
     UnknownEntityError,
 )
+from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.secrets import SecretLocation, generate_key, load_keys
 from vinga_server.config.store import ConfigStore
-from vinga_server.db import DATABASE_FILENAME, open_database, schema
+from vinga_server.db import MIGRATION_BUSY, UNREACHABLE, open_database, schema
 
 CLAUDE = SecretLocation.provider("llm", "claude", "api_key")
 
-# Short enough that a blocked writer gives up inside a test run, and
-# long enough that an unblocked one never sees it.
-SHORT_BUSY_MS = 200
-
 
 @pytest.fixture
-def store(tmp_path: Path):
-    engine = open_database(tmp_path / "db")
+def store():
+    engine = open_database(DatabaseConfig())
     try:
         yield ConfigStore(engine, MultiFernet([Fernet(generate_key())]))
     finally:
@@ -164,14 +157,14 @@ def test_a_stored_row_that_will_not_validate_is_a_storage_error(
 
 
 def test_an_unreadable_row_still_fails_the_boot_as_a_config_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The storage type is a ConfigError, so the boot path prints what
     it always printed rather than growing a second failure shape."""
     from vinga_server.config.boot import load_boot_config
 
-    directory = tmp_path / "db"
-    engine = open_database(directory)
+    settings = DatabaseConfig()
+    engine = open_database(settings)
     try:
         ConfigStore(engine).set_agent("sam", {"prompt": "hello"})
         with engine.begin() as connection:
@@ -179,7 +172,7 @@ def test_an_unreadable_row_still_fails_the_boot_as_a_config_error(
     finally:
         engine.dispose()
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
-    monkeypatch.setenv("VINGA_SERVER__DATABASE__DIR", str(directory))
+    monkeypatch.setenv("VINGA_DB_NAME", settings.name)
 
     with pytest.raises(ConfigError) as caught:
         load_boot_config()
@@ -196,36 +189,21 @@ def test_a_stored_row_naming_no_stage_is_a_storage_error(store: ConfigStore) -> 
         store.load()
 
 
-def test_an_unopenable_directory_is_a_storage_error(tmp_path: Path) -> None:
-    blocker = tmp_path / "not-a-directory"
-    blocker.write_text("", encoding="utf-8")
-
+def test_an_unreachable_instance_is_a_storage_error() -> None:
     with pytest.raises(StorageError):
-        open_database(blocker / "db")
-
-
-def _hold_the_write_lock(directory: Path) -> sqlite3.Connection:
-    """A second process's write transaction, as far as the engine under
-    test can tell: one connection to the same file, in a transaction
-    that has taken the write lock and does not let go."""
-    holder = sqlite3.connect(directory / DATABASE_FILENAME, isolation_level=None)
-    holder.execute("BEGIN IMMEDIATE")
-    return holder
+        open_database(DatabaseConfig(port=1))
 
 
 def test_a_write_that_cannot_take_the_lock_is_a_busy_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(db_module, "BUSY_TIMEOUT_MS", SHORT_BUSY_MS)
-    directory = tmp_path / "db"
-    engine = open_database(directory)
-    holder = _hold_the_write_lock(directory)
-    try:
-        with pytest.raises(DatabaseBusyError) as caught:
-            ConfigStore(engine).set_agent("sam", {"prompt": "hello"})
-    finally:
-        holder.close()
-        engine.dispose()
+    with holding_the_write_lock(monkeypatch):
+        engine = open_database(DatabaseConfig())
+        try:
+            with the_lock_held(), pytest.raises(DatabaseBusyError) as caught:
+                ConfigStore(engine).set_agent("sam", {"prompt": "hello"})
+        finally:
+            engine.dispose()
 
     # The retryable sentence, unchanged: it is what the CLI prints and
     # what the API's 409 carries.
@@ -233,39 +211,37 @@ def test_a_write_that_cannot_take_the_lock_is_a_busy_error(
 
 
 def test_no_database_refusal_carries_the_library_exception(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Both phases of a request's database access, and both links of the
     chain. A SQLAlchemy error holds the statement it failed on together
-    with the parameters bound to it, so a refusal that kept it attached
-    would carry them wherever it went: `from exc` says so outright, and
-    `from None` only stops the default traceback printer from saying
-    it."""
-    monkeypatch.setattr(db_module, "BUSY_TIMEOUT_MS", SHORT_BUSY_MS)
-    directory = tmp_path / "db"
-    engine = open_database(directory)
-    holder = _hold_the_write_lock(directory)
-    try:
-        with pytest.raises(ConfigError) as write:
-            ConfigStore(engine).set_agent("sam", {"prompt": "hello"})
-        with pytest.raises(ConfigError) as opening:
-            open_database(directory)
-    finally:
-        holder.close()
-        engine.dispose()
+    with the parameters bound to it, and a psycopg connection error
+    quotes the DSN it tried, password and all, so a refusal that kept
+    either attached would carry them wherever it went: `from exc` says
+    so outright, and `from None` only stops the default traceback
+    printer from saying it."""
+    with holding_the_write_lock(monkeypatch):
+        engine = open_database(DatabaseConfig())
+        try:
+            with the_lock_held():
+                with pytest.raises(ConfigError) as write:
+                    ConfigStore(engine).set_agent("sam", {"prompt": "hello"})
+                with pytest.raises(ConfigError) as opening:
+                    open_database(DatabaseConfig())
+        finally:
+            engine.dispose()
 
-    blocker = tmp_path / "not-a-directory"
-    blocker.write_text("", encoding="utf-8")
-    with pytest.raises(ConfigError) as unwritable:
-        open_database(blocker / "db")
+    with pytest.raises(ConfigError) as unreachable:
+        open_database(DatabaseConfig(port=1))
 
-    for caught in (write, opening, unwritable):
+    for caught in (write, opening, unreachable):
         assert caught.value.__cause__ is None, caught.value
         assert caught.value.__context__ is None, caught.value
     # And the statement the driver was running is not in the message
-    # either, only the driver's own line about what went wrong.
-    assert "BEGIN IMMEDIATE" not in str(opening.value)
+    # either, nor anything of the connection it was running on.
+    assert "pg_advisory_xact_lock" not in str(opening.value)
     assert "[SQL:" not in str(opening.value)
+    assert "127.0.0.1" not in str(unreachable.value)
 
 
 def test_an_unusable_key_carries_no_library_exception(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -281,20 +257,16 @@ def test_an_unusable_key_carries_no_library_exception(monkeypatch: pytest.Monkey
 
 
 def test_an_open_that_cannot_take_the_lock_is_a_busy_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The case the API adds: opening the database is on every request
-    path, and its migration check takes the same write lock, so a lock
-    timeout here has to be the retryable refusal too rather than the
-    generic one."""
-    monkeypatch.setattr(db_module, "BUSY_TIMEOUT_MS", SHORT_BUSY_MS)
-    directory = tmp_path / "db"
-    open_database(directory).dispose()
-    holder = _hold_the_write_lock(directory)
-    try:
-        with pytest.raises(DatabaseBusyError) as caught:
-            open_database(directory)
-    finally:
-        holder.close()
+    path, and its migration check takes the same advisory lock, so a
+    lock timeout here has to be the retryable refusal too rather than
+    the generic one."""
+    with holding_the_write_lock(monkeypatch):
+        open_database(DatabaseConfig()).dispose()
+        with the_lock_held(), pytest.raises(DatabaseBusyError) as caught:
+            open_database(DatabaseConfig())
 
-    assert "server.database.dir" in str(caught.value)
+    assert str(caught.value) == MIGRATION_BUSY
+    assert str(caught.value) != UNREACHABLE

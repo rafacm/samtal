@@ -28,6 +28,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
+from vinga_server import db as db_module
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.db import (
     DOMAIN_CHAIN,
@@ -43,6 +44,18 @@ from vinga_server.db import (
 SHORT_TIMEOUT_MS = 300
 
 
+def dsn() -> str:
+    """The lane's connection as psycopg spells it.
+
+    Built from the product's own URL rather than from the environment a
+    second time, so a second connection in a test is the same
+    connection the product makes; the dialect is stripped because
+    `postgresql+psycopg` is SQLAlchemy's spelling and libpq refuses it.
+    """
+    url = connection_url(DatabaseConfig())
+    return url.set(drivername="postgresql").render_as_string(hide_password=False)
+
+
 @pytest.fixture
 def holder():
     """A second connection sitting on the domain chain's advisory lock,
@@ -52,7 +65,7 @@ def holder():
     what the test needs is a lock held open across another connection's
     attempt, and an engine's transaction would end when its block does.
     """
-    connection = psycopg.connect(connection_url(DatabaseConfig()).render_as_string(False))
+    connection = psycopg.connect(dsn())
     try:
         connection.execute(
             "select pg_advisory_xact_lock(%s)", (DOMAIN_CHAIN.lock_key,)
@@ -67,7 +80,7 @@ def test_the_lock_timeout_aborts_a_wait_for_the_advisory_lock(holder) -> None:
     """The premise: a waiter gives up inside its timeout, with the error
     the classifier is written around, rather than blocking until the
     holder lets go."""
-    waiter = psycopg.connect(connection_url(DatabaseConfig()).render_as_string(False))
+    waiter = psycopg.connect(dsn())
     try:
         waiter.execute(f"set lock_timeout = {SHORT_TIMEOUT_MS}")
         started = time.monotonic()
@@ -83,15 +96,23 @@ def test_the_lock_timeout_aborts_a_wait_for_the_advisory_lock(holder) -> None:
         waiter.close()
 
 
-def test_a_refused_advisory_lock_is_classified_retryable(holder) -> None:
+def test_a_refused_advisory_lock_is_classified_retryable(
+    holder, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The same failure through the product's own engine, which is where
     it arrives wrapped: SQLAlchemy hands back a `DBAPIError` and the
     driver's error is on `orig`, which is the walk the classifier does
-    and the reason it never reads a message."""
+    and the reason it never reads a message.
+
+    The constant is shortened rather than the connection issuing a
+    `SET`, because the timeout rides on the connection's startup options
+    and a `SET` would itself open the transaction whose begin listener
+    is the thing under test.
+    """
+    monkeypatch.setattr(db_module, "LOCK_TIMEOUT_MS", SHORT_TIMEOUT_MS)
     engine = write_engine(DatabaseConfig(), DOMAIN_CHAIN)
     try:
         with engine.connect() as connection:
-            connection.exec_driver_sql(f"set lock_timeout = {SHORT_TIMEOUT_MS}")
             with pytest.raises(DBAPIError) as caught:
                 # The begin listener is what takes the lock, so any
                 # statement inside a transaction reaches it.

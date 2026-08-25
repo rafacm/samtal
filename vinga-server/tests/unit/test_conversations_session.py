@@ -41,13 +41,10 @@ from vinga_server.app import create_app
 from vinga_server.audio.opus import OpusEncoder
 from vinga_server.capture import CaptureStore
 from vinga_server.config import Config
+from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations import store as store_module
-from vinga_server.conversations.store import (
-    ConversationStore,
-    SessionSink,
-    conversations_path,
-    read_conversations,
-)
+from vinga_server.conversations.store import ConversationStore, SessionSink
+from vinga_server.db import read_engine
 from vinga_server.device import session as session_module
 from vinga_server.device.session import DeviceSession
 from vinga_server.events import Emission
@@ -68,10 +65,15 @@ POISON = "sk-poison-4b1e-never-a-real-credential"
 UTTERANCE = b"\x00\x00" * 320
 
 
-def read(directory: Path, statement: str) -> list[dict[str, Any]]:
+def read(statement: str) -> list[dict[str, Any]]:
     """Whatever is committed right now, read the way anything else reads
-    a live store: a second connection, no migration, no lock."""
-    engine = read_conversations(directory)
+    a live store: a second connection, no migration, no advisory lock.
+
+    The statement is written against the store's schema, which is where
+    its tables are: `select * from sessions` would find nothing, and
+    that is the point of the schema rather than an inconvenience.
+    """
+    engine = read_engine(DatabaseConfig())
     try:
         with engine.connect() as connection:
             return [dict(row) for row in connection.execute(text(statement)).mappings()]
@@ -142,7 +144,7 @@ def test_a_conversation_lands_a_session_row_shaped_like_the_manifest(
             session_id = shake_hands(websocket)["session_id"]
             say_something(websocket)
 
-    (row,) = read(tmp_path, "select * from sessions")
+    (row,) = read("select * from conversations.sessions")
     (manifest_file,) = (tmp_path / "captures").glob("*.json")
     manifest = json.loads(manifest_file.read_text())
 
@@ -150,14 +152,14 @@ def test_a_conversation_lands_a_session_row_shaped_like_the_manifest(
     assert row["device"] == manifest["device"]["mac"] == DEVICE_MAC.lower()
     assert row["client"] == manifest["device"]["client"] == DEVICE_UUID
     assert row["agent"] == manifest["agent"] == "assistant"
-    assert json.loads(row["agents"]) == manifest["agents"] == ["assistant"]
+    assert row["agents"] == manifest["agents"] == ["assistant"]
     # The column is TEXT, so the negotiated version reads back as the
     # text of the number the manifest carries.
     assert row["protocol"] == str(manifest["protocol"]) == "1"
     assert row["started_at"] == manifest["started_at"]
     assert row["server_version"] == manifest["server"]["version"]
     assert row["revision"] == manifest["server"]["revision"]
-    assert json.loads(row["providers"]) == manifest["providers"]
+    assert row["providers"] == manifest["providers"]
     # Which way the switches were set for this session, so a null column
     # elsewhere is distinguishable from a column never stored.
     assert (row["metrics"], row["text"]) == (1, 1)
@@ -177,7 +179,7 @@ def test_the_events_rows_are_the_decision_track_verbatim(
             shake_hands(websocket)
             say_something(websocket)
 
-    rows = read(tmp_path, "select * from events order by id")
+    rows = read("select * from conversations.events order by id")
     declared = declared_fields()
 
     # One row per event this tap position was offered, in the order it
@@ -188,7 +190,7 @@ def test_the_events_rows_are_the_decision_track_verbatim(
     assert rows[-1]["name"] == "session_closed"
 
     for row, emission in zip(rows, spy, strict=True):
-        fields = json.loads(row["fields"])
+        fields = row["fields"]
         expected = {
             key: value
             for key, value in emission.payload.items()
@@ -215,8 +217,8 @@ def test_the_turns_and_their_tool_calls_land_with_their_numbers(
             first_reply, _ = say_something(websocket)
             second_reply, _ = say_something(websocket)
 
-    turns = read(tmp_path, "select * from turns order by id")
-    calls = read(tmp_path, "select * from tool_invocations order by id")
+    turns = read("select * from conversations.turns order by id")
+    calls = read("select * from conversations.tool_invocations order by id")
 
     assert len(turns) == 2
     first, second = turns
@@ -244,7 +246,7 @@ def test_the_turns_and_their_tool_calls_land_with_their_numbers(
         assert call["source"] == "builtin"
         assert call["entry"] is None
         assert call["name"] == "remember"
-        assert json.loads(call["arguments"]) == {"text": "the user likes tea"}
+        assert call["arguments"] == {"text": "the user likes tea"}
         assert call["malformed"] == 0
         assert call["is_error"] == 0
         assert call["duration_ms"] is not None
@@ -261,15 +263,15 @@ def test_the_turn_rows_and_the_event_rows_agree(tmp_path: Path) -> None:
             say_something(websocket)
             say_something(websocket)
 
-    turns = read(tmp_path, "select * from turns")
-    events = read(tmp_path, "select name, fields from events")
+    turns = read("select * from conversations.turns")
+    events = read("select name, fields from conversations.events")
     named = [row["name"] for row in events]
 
     assert len(turns) == named.count("heard") == 2
     assert sum(turn["rounds"] for turn in turns) == named.count("llm_round")
     assert sum(turn["tool_calls"] for turn in turns) == named.count("tool_call")
     agents = {
-        json.loads(row["fields"]).get("agent")
+        row["fields"].get("agent")
         for row in events
         if row["name"] == "heard"
     }
@@ -286,7 +288,7 @@ def test_the_session_row_is_there_from_the_open(tmp_path: Path) -> None:
         with connect(client) as websocket:
             shake_hands(websocket)
             (row,) = until(
-                lambda: read(tmp_path, "select * from sessions"),
+                lambda: read("select * from conversations.sessions"),
                 "the session row never appeared while the session was open",
             )
             assert row["closed_at"] is None
@@ -309,7 +311,7 @@ def test_a_mid_session_read_stops_at_the_last_completed_turn(
             shake_hands(websocket)
             say_something(websocket)
             until(
-                lambda: read(tmp_path, "select * from turns"),
+                lambda: read("select * from conversations.turns"),
                 "the first turn never committed",
             )
             websocket.send_text(
@@ -322,8 +324,8 @@ def test_a_mid_session_read_stops_at_the_last_completed_turn(
                 "the second utterance was never heard",
             )
 
-            assert len(read(tmp_path, "select * from turns")) == 1
-            heard = read(tmp_path, "select * from events where name = 'heard'")
+            assert len(read("select * from conversations.turns")) == 1
+            heard = read("select * from conversations.events where name = 'heard'")
             assert len(heard) == 1, "the open turn's utterance was already visible"
 
 
@@ -354,9 +356,9 @@ def test_the_switch_combinations_decide_what_a_row_keeps(
             shake_hands(websocket)
             say_something(websocket)
 
-    (session,) = read(tmp_path, "select * from sessions")
-    (turn,) = read(tmp_path, "select * from turns")
-    events = read(tmp_path, "select * from events")
+    (session,) = read("select * from conversations.sessions")
+    (turn,) = read("select * from conversations.turns")
+    events = read("select * from conversations.events")
 
     # The spine lands in every enabled configuration: retention, purging
     # and every read key on it.
@@ -376,7 +378,7 @@ def test_the_switch_combinations_decide_what_a_row_keeps(
 
     # The switch on the file rather than in the query planner: what was
     # said reaches no byte of the database when text storage is off.
-    assert (SENTINEL.encode() in _bytes_of(tmp_path)) is text_storage
+    assert _stored_anywhere(SENTINEL) is text_storage
 
 
 def test_a_credential_in_a_provider_url_reaches_no_record(
@@ -398,7 +400,6 @@ def test_a_credential_in_a_provider_url_reaches_no_record(
     monkeypatch.setenv("VINGA_TEST_PROVIDER_KEY", "not-a-real-credential")
     config = Config(
         server={
-            "database": {"dir": str(tmp_path)},
             "conversations": {"enabled": True},
             "capture": {"enabled": True, "dir": str(tmp_path / "captures")},
         },
@@ -427,17 +428,17 @@ def test_a_credential_in_a_provider_url_reaches_no_record(
             with connect(client) as websocket:
                 shake_hands(websocket)
 
-    (row,) = read(tmp_path, "select * from sessions")
+    (row,) = read("select * from conversations.sessions")
     (manifest_file,) = (tmp_path / "captures").glob("*.json")
     manifest = json.loads(manifest_file.read_text())
 
     # What the record is for survives: the entry, its type and the exact
     # model string, and the address without what was in front of it.
-    assert json.loads(row["providers"])["llm"]["base_url"] == "https://host/v1"
-    assert json.loads(row["providers"])["llm"]["model"] == "a-model"
+    assert row["providers"]["llm"]["base_url"] == "https://host/v1"
+    assert row["providers"]["llm"]["model"] == "a-model"
     assert manifest["providers"]["llm"]["base_url"] == "https://host/v1"
     # And the credential reaches nothing that outlives the session.
-    assert SENTINEL.encode() not in _bytes_of(tmp_path)
+    assert not _stored_anywhere(SENTINEL)
     assert SENTINEL not in manifest_file.read_text()
     assert SENTINEL not in caplog.text
     printed = capsys.readouterr()
@@ -487,14 +488,14 @@ def test_a_rejected_tool_argument_is_kept_as_content_and_named_on_no_telemetry(
                 shake_hands(websocket)
                 say_something(websocket)
 
-    (call,) = read(tmp_path, "select * from tool_invocations")
-    events = read(tmp_path, "select * from events")
+    (call,) = read("select * from conversations.tool_invocations")
+    events = read("select * from conversations.events")
 
     # The call happened, was this server's own builtin, and failed.
     assert (call["source"], call["name"], call["is_error"]) == ("builtin", "remember", 1)
     # The content channel's contract: what the model passed, verbatim,
     # rejected value included.
-    assert json.loads(call["arguments"]) == {"text": [SENTINEL]}
+    assert call["arguments"] == {"text": [SENTINEL]}
     # The refusal the model was handed says what to send instead, and
     # quotes no value: it travels back to the model and into this same
     # record, and neither is a reason to echo bytes nobody needs.
@@ -519,16 +520,22 @@ def test_a_rejected_tool_argument_is_kept_as_content_and_named_on_no_telemetry(
     assert SENTINEL not in caplog.text
 
 
-def _bytes_of(directory: Path) -> bytes:
-    """The database and its sidecars, which is where a switch saying text
-    is not stored has to hold."""
-    path = conversations_path(directory)
-    found = b""
-    for suffix in ("", "-wal", "-shm"):
-        candidate = path.with_name(path.name + suffix)
-        if candidate.exists():
-            found += candidate.read_bytes()
-    return found
+def _stored_anywhere(sentinel: str) -> bool:
+    """Whether the planted text is anywhere in the store, asked of every
+    column of every row of every table it owns.
+
+    The SQLite-era form of this read the database file and both of its
+    sidecars, which is the honest surface a file offers and not one a
+    server-side store has. This is weaker in one stated way: it cannot
+    see a page the server has not yet reclaimed, which is autovacuum's
+    business and not a client's. It is the strongest thing a client can
+    ask, and it is what the reference and the README now promise.
+    """
+    for table in ("sessions", "turns", "tool_invocations", "events"):
+        for row in read(f"select * from conversations.{table}"):
+            if sentinel in json.dumps(row, default=str):
+                return True
+    return False
 
 
 # The close path, from the first attachment on
@@ -564,7 +571,7 @@ async def test_a_device_that_vanishes_at_the_hello_opens_no_record(
     """The hello send is the last step outside the guard, and nothing is
     open when it runs. A device that goes away there recorded nothing,
     rather than leaving a capture nobody closes and a row nobody ends."""
-    store = ConversationStore(tmp_path)
+    store = ConversationStore(DatabaseConfig())
     store.start()
     session, websocket = _guarded(tmp_path, store)
 
@@ -578,7 +585,7 @@ async def test_a_device_that_vanishes_at_the_hello_opens_no_record(
     finally:
         store.stop()
 
-    assert read(tmp_path, "select * from sessions") == []
+    assert read("select * from conversations.sessions") == []
     assert _capture_manifest(tmp_path) is None
     assert attached_taps(session) == [], "a consumer was left attached"
 
@@ -600,7 +607,7 @@ async def test_a_failure_after_the_open_still_finishes_the_record(
     failure at any of them still reaches `session_closed`, the store's
     close, the sink's detach and the capture's close. Before, the guard
     began at the serve loop and these steps sat in front of it."""
-    store = ConversationStore(tmp_path)
+    store = ConversationStore(DatabaseConfig())
     store.start()
     session, _ = _guarded(tmp_path, store)
 
@@ -619,7 +626,7 @@ async def test_a_failure_after_the_open_still_finishes_the_record(
 
     (closed,) = [r for r in caplog.records if getattr(r, "event", None) == "session_closed"]
     assert closed.reason == "error"
-    (row,) = read(tmp_path, "select * from sessions")
+    (row,) = read("select * from conversations.sessions")
     assert row["closed_at"] is not None
     assert row["close_reason"] == "error"
     # White-box for the two collaborator reads: a session gives back
@@ -659,7 +666,7 @@ async def test_a_cancelled_cleanup_step_still_finishes_the_record(
     being cancelled, and the record still has to be finished. It is held
     until the event, the store's close and the capture's close have run,
     and re-raised then, so the caller's task still ends cancelled."""
-    store = ConversationStore(tmp_path)
+    store = ConversationStore(DatabaseConfig())
     store.start()
     session, websocket = _guarded(tmp_path, store)
     task = asyncio.create_task(session.run())
@@ -681,7 +688,7 @@ async def test_a_cancelled_cleanup_step_still_finishes_the_record(
     assert task.cancelled(), "the cancellation did not reach the caller"
     (closed,) = [r for r in caplog.records if getattr(r, "event", None) == "session_closed"]
     assert closed.reason == "client"
-    (row,) = read(tmp_path, "select * from sessions")
+    (row,) = read("select * from conversations.sessions")
     assert row["closed_at"] is not None
     # White-box, per the note at the same pair above.
     assert session._record is None
@@ -713,7 +720,7 @@ async def test_no_producer_on_the_session_loop_can_wait(tmp_path: Path) -> None:
             raise AssertionError("the writer is not running in this test")
 
     queue = Refusing()
-    store = ConversationStore(tmp_path, queue=queue)
+    store = ConversationStore(DatabaseConfig(), queue=queue)
     try:
         session, websocket, task = await open_session(recording_config(tmp_path), store)
         await drive_reply(session, UTTERANCE)
@@ -744,7 +751,7 @@ async def test_a_parked_writer_never_delays_a_reply(tmp_path: Path) -> None:
         parked.set()
         released.wait(timeout=TIMEOUT_S)
 
-    store = ConversationStore(tmp_path, gate=gate)
+    store = ConversationStore(DatabaseConfig(), gate=gate)
     store.start()
     gaps: list[float] = []
 
@@ -784,7 +791,7 @@ async def test_events_beyond_the_bound_go_and_the_conversation_does_not(
     once, and counted onto the session row, while the turn and the close
     land because control records are never dropped."""
     monkeypatch.setattr(store_module, "MAX_EVENTS_IN_FLIGHT", 0)
-    store = ConversationStore(tmp_path)
+    store = ConversationStore(DatabaseConfig())
     store.start()
     with caplog.at_level("INFO"):
         try:
@@ -797,11 +804,11 @@ async def test_events_beyond_the_bound_go_and_the_conversation_does_not(
         finally:
             store.stop()
 
-    (row,) = read(tmp_path, "select * from sessions")
+    (row,) = read("select * from conversations.sessions")
     assert row["dropped"] > 0
     assert row["close_reason"] == "client"
-    assert len(read(tmp_path, "select * from turns")) == 1
-    assert read(tmp_path, "select * from events") == []
+    assert len(read("select * from conversations.turns")) == 1
+    assert read("select * from conversations.events") == []
     dropped = [
         r for r in caplog.records if getattr(r, "event", None) == "conversations_dropped"
     ]
@@ -826,7 +833,7 @@ async def test_a_failed_write_costs_the_batch_and_not_the_conversation(
             return None
 
     gate = Gate()
-    store = ConversationStore(tmp_path, gate=gate)
+    store = ConversationStore(DatabaseConfig(), gate=gate)
     store.start()
     with caplog.at_level("INFO"):
         try:
@@ -858,6 +865,6 @@ async def test_a_failed_write_costs_the_batch_and_not_the_conversation(
     assert POISON not in caplog.text
     # The session row is what survived, open-shaped, which is the
     # documented incomplete state and the same shape a crash leaves.
-    (row,) = read(tmp_path, "select * from sessions")
+    (row,) = read("select * from conversations.sessions")
     assert row["session"] == session.session_id
     assert row["closed_at"] is None

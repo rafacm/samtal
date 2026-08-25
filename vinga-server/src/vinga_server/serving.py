@@ -351,7 +351,12 @@ def run(config_path: str | None) -> int:
         # because an app built for a test lane or an external ASGI server
         # has no operator reading its startup output.
         app = create_app(
-            config, booted.secrets, on_started=lambda: onboarding.log_banner(config.server)
+            config,
+            booted.secrets,
+            on_started=lambda: onboarding.log_banner(config.server),
+            # Read from the store, three lines above, which is what makes
+            # this server's device bindings the database's live answer.
+            from_store=True,
         )
     except (ConfigError, ProviderError) as exc:
         print(exc, file=sys.stderr)

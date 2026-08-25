@@ -25,7 +25,6 @@ def test_app_without_a_config_loads_one(
     half from the database it names. Read in the describe phase, since a
     configuration that will not load is a refusal whatever launched the
     app, and carried to the build on the seed."""
-    monkeypatch.setenv("VINGA_SERVER__DATABASE__DIR", str(tmp_path / "db"))
     with entered_app() as (app, _):
         assert isinstance(app.state.composition.generations.current().config, Config)
 

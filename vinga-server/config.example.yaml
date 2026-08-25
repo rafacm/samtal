@@ -10,8 +10,8 @@
 # runs (server:) and where remembered facts are kept (memory:). The
 # domain half, everything about what the server says and to whom
 # (providers, mcp_servers, prompt_fragments, agent_defaults, agents,
-# devices, default_agent), lives in the database under
-# server.database.dir and is written with the config commands. A whole
+# devices, default_agent), lives in the Postgres database
+# server.database names and is written with the config commands. A whole
 # deployment is one document and one command:
 #
 #   vinga-server config apply -f examples/presets/local-stack.yaml
@@ -167,20 +167,38 @@ server:
     # The environment variable holding the token, never the token.
     secret_env: VINGA_API_SECRET
 
-  # Where the domain half of the configuration is stored: one SQLite
-  # file named vinga.db inside this directory, written by the server
-  # through the configuration API and read once at each server start.
-  # The directory is the key, the way memory.dir and capture.dir are,
-  # and it must be on the data volume.
+  # Which Postgres database this server keeps its state in: the domain
+  # half of the configuration in a `domain` schema, and the conversation
+  # record below in a `conversations` schema beside it. Written by the
+  # server through the configuration API and read once at each start.
   #
-  # The default below is the generic one; a container image points this
-  # at its own writable volume, and a development machine needs it
-  # pointed somewhere writable too:
+  # The defaults below are the development instance `docker compose up
+  # -d --wait` starts from the repository root, so a checkout needs
+  # nothing here at all.
   #
-  #   VINGA_SERVER__DATABASE__DIR=./var uv run vinga-server
+  # These four keys have short environment names of their own, and those
+  # are the documented spellings, because the compose file feeds the
+  # Postgres image from the same four:
   #
-  # It is read by the server and by nothing else: the config commands
-  # are clients of its API, and where the rows are kept is its business.
+  #   VINGA_DB_HOST  VINGA_DB_PORT  VINGA_DB_NAME  VINGA_DB_USER
+  #
+  # The generic VINGA_SERVER__DATABASE__* spelling is refused with a
+  # sentence naming the short one, so one fact has one name.
+  #
+  # Two more variables have no key here at all, and that is deliberate:
+  #
+  #   VINGA_DB_PASSWORD  the password, which a configuration file is the
+  #                      wrong place for. Defaults to `vinga`, matching
+  #                      the compose service, which is a development
+  #                      convenience on a loopback-bound instance and
+  #                      nothing else.
+  #   VINGA_DB_URL       the whole connection at once, which wins over
+  #                      all five when it is set. Only postgresql:// and
+  #                      postgresql+psycopg:// are accepted.
+  #
+  # The database is read by the server and by nothing else: the config
+  # commands are clients of its API, and where the rows are kept is its
+  # business.
   #
   # A write through the config commands applies at the next start: the
   # configuration is a boot-time snapshot, so restart the server after
@@ -189,7 +207,10 @@ server:
   # and `vinga-server config reload` has it re-read the MCP servers and
   # the agents' grant lists without a restart.
   # database:
-  #   dir: /var/lib/vinga
+  #   host: 127.0.0.1
+  #   port: 5432
+  #   name: vinga
+  #   user: vinga
 
   # What one server holds at once, and for how long. A device refused for
   # capacity reconnects on its next wake word; one closed by either time
@@ -254,27 +275,28 @@ server:
     # and capture must not be what fills it.
     min_free_mb: 1000
 
-  # RECORDS WHAT WAS SAID to a database when enabled. Absent here, and
-  # off by default: with no section, or with `enabled: false`, nothing is
-  # written and no conversations.db is created.
+  # RECORDS WHAT WAS SAID to the database when enabled. Absent here, and
+  # off by default: with no section, or with `enabled: false`, no writer
+  # is started and no row is ever written.
   #
-  # When it is on, the server writes conversations.db beside vinga.db in
-  # server.database.dir above: sessions, turns, the tool calls a turn
-  # made, and the structured events underneath them, as the queryable
-  # record of what was said. A warning at startup says so, and names the
-  # file. Audio never enters it; the session capture above is the
-  # recording, and this is the record.
+  # The tables exist either way, because the schema is migrated at every
+  # boot; empty tables are not a recording, and migrating them is what
+  # lets a deployment that recorded last month still read what it kept.
+  #
+  # When it is on, the server writes into the `conversations` schema of
+  # the database above: sessions, turns, the tool calls a turn made, and
+  # the structured events underneath them, as the queryable record of
+  # what was said. A warning at startup says so. Audio never enters it;
+  # the session capture above is the recording, and this is the record.
   #
   # Under the flag, two independent storage switches decide what a row
-  # keeps, and every combination is supported. Read it with SQL over a
-  # WAL-safe copy, and see docs/reference/conversations-schema.md for the
-  # columns. Retention below is what deletes; there is no command that
-  # erases one named session yet, so a deployment that has to erase now
-  # stops the server and deletes three files rather than one:
-  # conversations.db, and the conversations.db-wal and
-  # conversations.db-shm sidecars beside it. A committed row's bytes
-  # live in the log until a checkpoint folds them back, so removing the
-  # database alone leaves what was meant to be erased beside it.
+  # keeps, and every combination is supported. Read it live as the
+  # read-only `vinga_ro` role deploy/postgres-init.sql provisions, and
+  # see docs/reference/conversations-schema.md for the columns.
+  # Retention below is what deletes; there is no command that erases one
+  # named session yet, so a deployment that has to erase now does it in
+  # SQL, taking a session's rows from all four tables in one
+  # transaction.
   # conversations:
   #   enabled: false
   #   # Store the structured events and every measured number (durations,

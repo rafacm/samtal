@@ -236,7 +236,7 @@ def expected() -> str:
 
 @pytest.fixture
 def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    return runner(tmp_path, monkeypatch)
+    return runner(monkeypatch)
 
 
 def test_the_respelled_grammar_behaves_as_the_old_one_did(
