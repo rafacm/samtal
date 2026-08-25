@@ -445,20 +445,44 @@ committed `cli.md` renders that epilog, and the test reads the same
 table. A claim that appears in prose and not in the table is impossible
 because there is no prose.
 
-**Supported**, and this is the half a reviewer should hold against the
-code:
+**Every entry carries the milestone it becomes true in, and the table is
+read through that.** This is not bookkeeping: every merge is releasable
+and the image publishes on it, so a table that landed in M1 advertising
+a websocket handshake M2 has not written would be help that lies for the
+length of a milestone, which is the exact failure the honest-capability
+decision exists to prevent. So the table has three sides rather than
+two, and the third is temporary by construction:
+
+- **supported**, which M1 may claim only of what M1 ships;
+- **not supported**, which is permanent and carries a reason;
+- **not available yet**, which carries the verb that will bring it and
+  is empty after M2.
+
+M1 therefore ships every conversation row as "not available yet: the
+`run` verb is not in this version", and **M2 flips those rows to
+supported in the same change that lands `run`**, atomically, so no
+commit exists in which the table and the tree disagree. The
+third side is asserted empty at the end of M2, which is what stops it
+becoming a place to park a claim. `cli.md` and the both-ways tests
+therefore move in both milestones, which decision 8's artifact move list
+already says.
+
+**Supported after M2**, and this is the half a reviewer should hold
+against the code:
 
 - the check-in POST, with the two headers the handler reads and the body
-  shape the firmware sends;
-- the four states of the reply (decision 4);
+  shape the firmware sends **(M1)**;
+- the four states of the reply, decision 4 **(M1)**;
 - **no redirect is followed**, which is the firmware's own behavior and
   the reason every device-facing route serves the slashless spelling
   directly. `xiaozhi-notes.md` records redirect intolerance as "the one
   firmware behavior the simulator could not have shown"; that sentence
   is about the sdk-based test simulator, and this one can show it, so
-  the note gains a clause;
+  the note gains a clause **(M1)**;
 - the activation poll at `Activation-Version: 1`, in the firmware's
-  cadence, bounded by the server's own envelope;
+  cadence, bounded per decision 6 **(M1)**;
+- **everything below this line is M2's, and M1's table says so of each
+  of them.**
 - the websocket handshake with `Authorization`, `Device-Id`, `Client-Id`
   and `Protocol-Version` (sent because the firmware sends it, and
   recorded as read by nothing);
@@ -528,6 +552,13 @@ than a paragraph:
    An "honest" statement that lists nothing unsupported is the exact
    failure the decision exists to prevent, and nothing else in the suite
    would notice it.
+5. **Nothing is claimed supported that this milestone did not ship.**
+   Every row marked supported names a verb the registered tree has, and
+   every row marked not-available-yet names a verb it does not. In M1
+   that puts every conversation row on the third side; in M2 the third
+   side is asserted empty, which is what retires it rather than leaving
+   it as a parking space. This is the assertion finding 2 exists for and
+   it is the one that would have caught the original plan.
 
 ### 6. Two milestones, and the device half goes first
 
@@ -934,6 +965,22 @@ between alternatives the choice is recorded with its reason.
    supported and all conversation behavior as not yet available; M2
    updates the same table atomically when `run` lands. `cli.md` and the
    both-ways tests move in both milestones.
+
+   *Resolution* (this commit): adopted exactly as prescribed. Decision 5
+   gives the table a third side, "not available yet", carrying the verb
+   that will bring it, and states the rule it exists for: every merge is
+   releasable and the image publishes on it, so a table advertising what
+   the next milestone will write is help that lies for the length of a
+   milestone. Every supported row now carries the milestone it becomes
+   true in; M1 ships every conversation row on the third side, and M2
+   flips them in the same change that lands `run`, atomically, so no
+   commit exists in which the table and the tree disagree. A fifth
+   both-ways assertion joins the four: nothing is claimed supported
+   whose verb the registered tree does not have, and the third side is
+   asserted empty at the end of M2, which retires it rather than leaving
+   it as a place to park a claim. Both milestones' test paragraphs and
+   both milestone entries carry the flip, and decision 8's move list
+   already had `cli.md` moving in both.
 
 3. **P1: the simulator has no reusable model for the messages it must
    receive.** `protocol/messages.py` models device-to-server messages
