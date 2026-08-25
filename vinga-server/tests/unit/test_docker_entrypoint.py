@@ -125,8 +125,16 @@ def test_an_explicit_variable_wins_over_the_mount(entrypoint) -> None:
 
 
 def test_the_command_line_reaches_the_server_unchanged(entrypoint) -> None:
-    """`docker run ... config show provider llm claude` has to read as
+    """`docker run ... config provider show llm claude` has to read as
     it always has, which means everything after the image name is the
-    server's own command line and none of it is the wrapper's."""
-    argv = ("config", "show", "provider", "llm", "claude")
+    server's own command line and none of it is the wrapper's.
+
+    Five words rather than two, and in the grammar's own order: the
+    words are arbitrary as far as this wrapper is concerned, which is
+    exactly why they should be words the tree really has. The old order
+    outlived the rename here because it is quoted rather than run, and
+    the spelling guard resolved its `show` prefix to the flat row and
+    stopped.
+    """
+    argv = ("config", "provider", "show", "llm", "claude")
     assert entrypoint(*argv)["argv"] == " ".join(argv)
