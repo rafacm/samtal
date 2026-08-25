@@ -25,6 +25,20 @@ invisible, and capturing its stdout and stderr is not the same
 assertion. So this lane asserts on exit codes, stdout and stderr, and
 makes no no-leak claim it cannot support.
 
+**`uv pip install <wheel>` here, and `uv sync --frozen` there.** The
+tier closure lane builds its environments with `uv sync --frozen`, and
+argues in its own head that `uv pip install` re-resolves from the index
+so an environment built that way cannot be held exactly to a graph it
+did not come from. That is right, and it is right for that lane's
+question, which is what the DECLARATION resolves to. This lane's
+question is a different one: what the built ARTIFACT carries, which
+means installing that file and nothing else, and `uv sync` would install
+the project from the source tree rather than the wheel. So the two lanes
+install differently on purpose, and each asserts only what its own
+installation can support. Nothing here says anything about the closure;
+the closure is the other lane's, and a distribution set compared to
+`uv.lock` is not compared here at all.
+
 **Provenance is proven, not presumed.** The commands run in a temporary
 directory outside the checkout with `PYTHONPATH` and its relatives
 scrubbed, the resolved package file is asserted to sit inside the clean
@@ -150,10 +164,12 @@ def installed(wheel: Path, tmp_path_factory: pytest.TempPathFactory) -> Path:
     """The wheel installed BARE into a clean environment, and the path
     of that environment's interpreter.
 
-    No extras, which is the laptop door: what `uvx --from git+...`
-    resolves to is this closure and nothing else. The tier closure lane
-    installs from the project directory and proves the DECLARATION; this
-    one installs the artifact and proves what the artifact carries.
+    No extras, which is the laptop door. The wheel file and nothing
+    else, for the reason the head of this file gives: the tier closure
+    lane syncs the project against the lock and proves what the
+    DECLARATION resolves to; this one installs the built file and proves
+    what the ARTIFACT carries, and a sync would install from the source
+    tree rather than from the wheel.
     """
     where = tmp_path_factory.mktemp("wheel") / "venv"
     subprocess.run(
