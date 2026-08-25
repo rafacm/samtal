@@ -303,6 +303,31 @@ def test_every_shape_an_act_names_is_a_component_of_the_document(where: tuple[st
             assert named.removeprefix("mapping of ") in schemas, (row.words, named)
 
 
+def test_the_simulator_reaches_this_api_through_an_act_it_already_had() -> None:
+    """`vinga simulator --claim` adds no operation, and that is a claim
+    rather than an observation.
+
+    The claim it performs is `ADD_DEVICE`, the same act behind
+    `device pending claim`, so there is no second encoding of a claim, no
+    new path, no new body and no new row in the covered set above. A
+    future `--claim` that grew a request of its own would arrive here as
+    an operation nobody decided about, from whichever side it was missing
+    from.
+
+    That is why the simulator's rows carry a function rather than an
+    `Act`: what they do is talk to a device-facing endpoint, and the one
+    thing they do to THIS API is performed through a row that is already
+    here.
+    """
+    simulated = [row for row in cli.COMMANDS if row.words[0] == "simulator"]
+    assert simulated
+    assert all(not isinstance(row.does, cli.Act) for row in simulated)
+
+    [claim] = [row for row in cli.COMMANDS if row.words == ("device", "pending", "claim")]
+    assert claim.does is cli.ADD_DEVICE
+    assert ("POST", "/devices/pending/{code}") in COVERED
+
+
 def test_the_document_read_here_is_the_committed_one() -> None:
     """The check that this file is reading anything at all. Every
     assertion above is about a structure loaded from disk, and a path

@@ -522,22 +522,41 @@ def test_a_claim_is_four_requests_and_the_last_one_mints_the_token(
     assert "is admitted" in capsys.readouterr().out
 
 
-def test_a_claim_performs_the_act_the_grammar_already_has(run, far_side) -> None:
-    """`--claim` sends no new request: it performs ADD_DEVICE, the act
-    behind `device pending claim`, so there is no second encoding of the
-    claim and no new row in the contract check's covered set."""
+def test_a_claim_performs_the_act_the_grammar_already_has(
+    run, far_side, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--claim` sends no new request: it performs `ADD_DEVICE`, the same
+    act object behind `device pending claim`, so there is no second
+    encoding of a claim and no new row in the contract check's covered
+    set.
+
+    Asserted by identity rather than by shape, which is the difference
+    between "it sends the same thing" and "it is the same thing". The
+    dispatcher is the seam it is read at, because an act reaches the API
+    through it and reaches it no other way.
+    """
     code = bound(run)
     far_side(
         answering(body=activating(code=code)),
         answering(status=200, text=""),
         answering(body=admitted()),
     )
+    performed: list[object] = []
+    dispatch = cli._act  # noqa: SLF001
+
+    def recording(args: cli.Invocation, act: cli.Act) -> None:
+        performed.append(act)
+        dispatch(args, act)
+
+    monkeypatch.setattr(cli, "_act", recording)
     reached_before = len(run.reached)
 
     assert run("simulator", "check-in", URL, "--claim", "sam") == 0
 
+    assert performed == [cli.ADD_DEVICE]
     # Exactly one configuration API request, which is the claim.
     assert len(run.reached) - reached_before == 1
+    monkeypatch.setattr(cli, "_act", dispatch)
     assert run("device", "show", board.DEFAULT_MAC) == 0
 
 
