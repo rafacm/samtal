@@ -799,3 +799,73 @@ after the P1/P2 amendments. Findings condensed but faithful:
     is declared beside `open_at` in `db/__init__.py` as parameter
     grouping, and each store declares its own chain constant with
     its own advisory key beside its metadata and migrations.
+
+## Delta review round
+
+A focused re-review of the amended plan, 2026-08-26. Backend:
+codex CLI 0.149.1, model `gpt-5.6-terra`, read-only sandbox,
+runtime ~4m. It verified all eleven resolutions as reflected and
+faithful, and found six new problems the amendments introduced.
+Verdict as received: not implementable as written (until these
+are folded). Findings condensed but faithful:
+
+1. **P1: compose cannot supply the init script's `\getenv` inputs
+   as specified.** Variable substitution in the compose file does
+   not export `VINGA_DB_USER` or `VINGA_DB_RO_PASSWORD` into the
+   Postgres container's environment, and the read-only password
+   had no development default despite the zero-configuration
+   loop.
+   *Resolution*: the compose service passes both variables into
+   its environment explicitly (`VINGA_DB_USER:
+   ${VINGA_DB_USER:-vinga}`, `VINGA_DB_RO_PASSWORD:
+   ${VINGA_DB_RO_PASSWORD:-vinga_ro}`), and the `vinga_ro` dev
+   default is documented as a loopback-only convenience beside
+   the server password's.
+
+2. **P1: an infra-executed script leaves the server role unable
+   to migrate.** The executor owns what it creates, and database
+   `CREATE` does not grant the server role `CREATE` on an
+   existing schema, so Alembic could not create its tables.
+   *Resolution*: the init script creates both schemas with
+   `AUTHORIZATION` to the server role, so the server role owns
+   them whoever runs the file; the executor's own required
+   privilege (create roles and schemas in that database:
+   superuser or database owner) is stated in the file's header
+   and the deployment docs; the default-privileges statement
+   stays aligned with the actual table creator, the server role.
+
+3. **P1: per-test truncation deletes the Alembic stamps.**
+   Truncating "both schemas' tables" includes the two
+   schema-qualified `alembic_version` tables, so the next opener
+   would rerun the baseline against populated schemas.
+   *Resolution*: the truncation statement enumerates application
+   tables derived from the two `schema.py` metadata objects,
+   which do not contain the version tables, so the stamps survive
+   by construction rather than by an exclusion list.
+
+4. **P1: image-job scenario databases are named but never
+   provisioned.** Postgres initializes only its configured
+   database, and the server migrates schemas, not databases.
+   *Resolution*: the image job gains an explicit health-gated
+   provisioning step on the Docker network (`createdb` or
+   `psql -c 'CREATE DATABASE ...'` owned by the server role) for
+   each scenario before its seed or smoke container runs.
+
+5. **P2: `CREATE DATABASE` needs `CREATEDB`, which the runtime
+   contract does not include.** The test fixtures and the autogen
+   entry point create databases; database ownership alone does
+   not permit that.
+   *Resolution*: the plan distinguishes the runtime connection
+   contract (no `CREATEDB` required) from the development and
+   test maintenance connection (the compose superuser, or any
+   role with `CREATEDB`), documents the latter beside the test
+   lane and autogen, and keeps it out of the deployment env
+   contract.
+
+6. **P2: source-wheel deployment wording conflicts with the
+   image-only operator model.** The package policy says operators
+   do not install the server package on hosts.
+   *Resolution*: the `libpq`/source-install guidance is scoped to
+   contributors and custom image builders where the wheel install
+   is documented; the image-only operator model is unchanged and
+   unmentioned in the deployment contract.
