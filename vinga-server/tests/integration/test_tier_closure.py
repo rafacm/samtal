@@ -28,7 +28,10 @@ install proves nothing about a command whose heavy import sits inside
 its own arm, which is exactly what `openapi` and `ota-url` are. So the
 grammar's own inventory is split in two here, the two gated commands
 against everything else, and both sides are invoked as subprocesses of
-the installed binary. M3 widens that to the full registered inventory
+the installed binary. The `vinga-server` entry point's own gated
+sibling, the conversations group, is driven here too: it is outside the
+grammar's tree, so nothing about `cli.COMMANDS` would ever reach it.
+M3 widens that to the full registered inventory
 against a live server; what is here is the tier, and a command that
 moved between the two sets fails from whichever side it left.
 
@@ -282,6 +285,38 @@ def test_the_gated_commands_refuse_from_the_client_install(client_env: Path) -> 
         assert "Traceback" not in finished.stderr, words
 
 
+def test_the_conversations_group_refuses_from_the_client_install(client_env: Path) -> None:
+    """The third gated site, and the only one that is not a row of the
+    grammar.
+
+    It renders the conversation store's tables off the SQLAlchemy
+    metadata, so a client install cannot answer it; without the gate it
+    ended in a `ModuleNotFoundError` traceback on the one entry point
+    whose every other answer is a sentence.
+    """
+    finished = _ran(client_env, "vinga-server", "conversations", "schema")
+
+    assert finished.returncode == 1, (finished.stdout, finished.stderr)
+    assert finished.stderr.strip() == cli.NEEDS_THE_SERVER_HALF
+    assert finished.stdout == ""
+    assert "Traceback" not in finished.stderr
+
+
+def test_the_client_half_groups_still_answer_from_the_client_install(
+    client_env: Path,
+) -> None:
+    """And its two siblings that are the client half, which must NOT be
+    gated: `events reference` renders the event registry and `doctor`
+    asks an address a question, and an installation that has this entry
+    point has both."""
+    events = _ran(client_env, "vinga-server", "events", "reference")
+    assert events.returncode == 0, events.stderr
+    assert events.stdout.strip()
+
+    doctor = _ran(client_env, "vinga-server", "doctor", "--help")
+    assert doctor.returncode == 0, doctor.stderr
+
+
 def test_the_gated_pair_is_what_the_table_says_it_is() -> None:
     """The inventory held closed against the registration table, so a
     command that left the gated set fails from the side it left."""
@@ -298,6 +333,15 @@ def test_the_serve_install_carries_both_tiers(
 ) -> None:
     client, serve = tiers
     assert client | serve <= _installed(serve_env)
+
+
+def test_the_conversations_group_answers_from_the_serve_install(serve_env: Path) -> None:
+    """The other side of the same gate: with the half installed, the
+    group renders what it always did."""
+    finished = _ran(serve_env, "vinga-server", "conversations", "schema")
+
+    assert finished.returncode == 0, finished.stderr
+    assert finished.stdout.startswith("# ")
 
 
 def test_the_serve_install_can_be_asked_to_serve(serve_env: Path) -> None:

@@ -36,6 +36,37 @@ from vinga_server.config.models import (
 
 CONFIG_ENV_VAR = "VINGA_CONFIG"
 
+# What a command answers on an installation that carries the
+# configuration client alone.
+#
+# The default install of this package is the client, and the server half
+# is an extra, so three entry points can be typed by somebody who has
+# only the first: `openapi` and `ota-url` in the configuration grammar,
+# which read the API's routes and the onboarding package, and
+# `vinga-server conversations`, which renders the store's tables off the
+# SQLAlchemy metadata. All three answer this, because all three say one
+# thing: the command needs the half that is not here. Three sentences
+# for one fact would be the duplication the design guide names.
+#
+# Here rather than in `config/cli.py`, which is where it started, for the
+# reason `PROGRAM` sits in `models.py`: two modules read it and only one
+# is below both. `main.py` dispatches the conversations group and
+# `config/cli.py` gates its two commands, and both already import this
+# module for `ConfigError` and the config variable above, so the
+# definition costs its readers nothing. `cli` re-exports it, so there is
+# one string and not two.
+#
+# A fixed constant carrying no invocation value, like every sentence
+# these entry points print. It is reached with an ImportError in hand,
+# whose text is a module path, and the command that reached it may have
+# been given a file path; neither is repeated. The two doors that do
+# work are named instead, because the answer is always one of them.
+NEEDS_THE_SERVER_HALF = (
+    "this command needs the server half installed, and this installation carries the "
+    "configuration client alone. Run it inside the container image, or from a "
+    "checkout, where the whole server is present"
+)
+
 # The prefix a configuration override carries. Only the domain names
 # below are scanned for: everything else under this prefix is either a
 # key the file half still owns or a variable that carries a value rather
