@@ -736,3 +736,368 @@ Not verified here, and not claimed:
   closure, and that closure is what the client half of the tier lane
   installs and drives.
 - Anything on hardware. None of it is M2's.
+
+## M3: the wheel-grade lane and the install story
+
+PR TBD.
+
+### What landed
+
+- The wheel-grade subprocess lane
+  (`tests/integration/test_cli_wheel.py`): the wheel built, installed
+  bare into a clean environment, and the `vinga` binary driven as a
+  program against a live in-process server, with provenance proven and
+  the full registered inventory run in both directions.
+- The in-process security lane retained beside it, every case unchanged
+  and still green, still complete against `cli.COMMANDS`.
+- The document-as-data contract check
+  (`tests/unit/test_api_contract.py`), and the one production change it
+  needed: both of an act's contract shapes are now facts on the act.
+- The shared matcher taught to ask what a row could TAKE, which is the
+  discovered work below and the reason a retired verb-first spelling
+  could pass the census guard for two milestones.
+- `serving`, `Live` and `check_in` moved to
+  `tests/support/deployment.py`, so the two lanes read one live server
+  rather than two copies of one.
+- Decision 12's skew policy on `docs/reference/cli.md`, the note on
+  what the wheel lane proves beside the laptop door, and one changelog
+  entry.
+
+### Rebased onto the merged M2
+
+This milestone was written against M2's branch tip and rebased onto
+`main` at `46a34b4e`, after M2 (PR #296) merged with two review passes
+behind it. Thirteen commits dropped as already upstream; the seven of
+this milestone replayed, two of them with conflicts, both in
+`tests/unit/command-spellings.txt`. It is a generated artifact, so it
+was regenerated with its own tool at each step rather than merged.
+
+M2's fix round arrived with four commits, and each was checked against
+what this milestone touches:
+
+- **`transport.py` reports fixed `<field>` and index steps only**, and
+  `check_transportable` takes the fixed section rather than an
+  addressed location. It is called from `_fragment_body` and
+  `_document_body`, which this milestone changed the ROWS around and
+  not the bodies, so nothing of it moved. The static AST walk and the
+  runtime spies over every caller pass on the rebased tree.
+- **The doctor's no-URL derivation is gated** and `doctor <url>` stays
+  thin. `doctor` is a sibling of the `config` group rather than a row
+  of `cli.COMMANDS`, so neither the wheel lane's inventory nor the
+  spelling census's matcher reaches it, and the tier lane is where both
+  of its invocations are driven.
+- **The tier closure became a recursive `uv.lock` walk compared exactly
+  both ways**, and its fixtures moved from `uv pip install` to
+  `uv sync --frozen --no-dev --no-editable`. This lane deliberately did
+  NOT follow, and the reason is now written in its own head: that lane's
+  question is what the DECLARATION resolves to, which is why it needs an
+  environment it can hold to a graph; this lane's question is what the
+  built ARTIFACT carries, which means installing that file and nothing
+  else, and a sync would install the project from the source tree rather
+  than from the wheel. Neither lane makes the other's claim: nothing
+  here compares a distribution set to anything.
+
+Nothing of M2 was weakened. The gated trio, `NEEDS_THE_SERVER_HALF`,
+`serving.py`, the three #287 structure tests, the tier lanes and the
+meta-path-finder simulation all survive untouched, and the tier lane and
+the in-process security lane are both green on the rebased tree.
+
+The contract check and the census were re-run against the merged tree
+rather than assumed. Neither flagged anything from the fix round: the
+document carries the same forty operations, and no `respell` spelling
+names a command the tree does not have. The manifest moved by line
+numbers alone in the files the fix round edited, plus the one line this
+milestone's own record adds.
+
+### The wheel lane, its shape and its cost
+
+Twelve cases, nineteen seconds on this machine, including the build and
+the install. The shape, in the order it runs:
+
+- **Provenance first**, before any command. `vinga_server` resolves
+  inside the clean environment, does not resolve to `src/`, and the
+  installed distribution's `direct_url.json` names the wheel this lane
+  built. The third is the one the first two cannot make: an editable
+  install of the same version passes both of them.
+- **One operator's session**, from an empty database: a whole
+  deployment applied from a document, thirteen reads, the two device
+  writes, the reload and the three reads of the running process, the
+  onboarding ceremony with a real check-in, every destructive verb, and
+  the three documents that reach no server.
+- **The gated pair run**, not imported, and asserted to print the fixed
+  sentence and exit 1.
+- **Completeness both ways**, last: every ungated row ran and answered,
+  no gated row answered, and nothing was driven that the table does not
+  hold. Held against the recording rather than a list, so the only way
+  into it is a command that ran.
+
+Every command goes through the installed binary, from a directory
+outside the checkout, with `PYTHONPATH`, `PYTHONHOME`, `PYTHONSTARTUP`
+and `VINGA_CONFIG` scrubbed. The fragments the session writes are the
+lane's own, in that directory, so no command can reach the source tree
+by a relative path. That the wheel carries the example fragments is
+proven the other way round, by the recipes region of the reference
+rendering non-empty from the installed artifact, which is the one
+assertion in the file that would go red on a packaging mistake rather
+than on a code one.
+
+What it does not claim, and what the in-process lane is retained for:
+anything about a client-side log record, an unformatted argument, an
+extra attribute or an exception chain. All four are invisible from
+outside a child process, so this lane asserts on exit codes, stdout and
+stderr and nothing else.
+
+Held to going red: removing one read from the session's list makes the
+completeness case name it (`agent show`), which is the check that the
+recording is a recording.
+
+### The contract check, in numbers
+
+Forty operations in the committed document. Thirty-one covered by acts
+of the grammar, nine excluded with a reason apiece: the five collection
+reads (paging a kind is the admin UI's), `GET /default-agent` (a
+setting with two verbs and no reader, since what is stored is a line of
+the document `show` prints), and the three conversation routes.
+
+What turns it red, each proven by mutating one thing and watching the
+assertion fire:
+
+- a route added to the document with neither a command nor an
+  exclusion, or a command pointed at a path the document does not have
+  (the union);
+- an operation in both sets (the overlap);
+- an exclusion naming an operation the document no longer has;
+- an act declaring a response shape the document does not answer with;
+- an act that stopped naming the body it sends, or that names one where
+  the document declares none.
+
+The paths are not written down anywhere in the test. An act's path is a
+function of an invocation, so it is given one whose identities are
+their own parameter names (`{stage}`, `{name}`, `{mac}`, `{code}`,
+`{slot}`) and the percent-encoding is undone afterwards. That is what
+let the comparison run through the production code that builds the
+address without `Act` gaining a `route` field it has no runtime use
+for.
+
+### The renderer-validation move, and how big it actually was
+
+Sixty-nine lines added and thirty removed in `config/cli.py`, and
+twenty-two lines across three cases in one test file. Decision 11's
+escape hatch ("if it turns out larger than it looks it moves to M1 with
+the rest of the table work") did not trigger.
+
+It went slightly further than the four acts the plan names, and the
+reason is the plan's own rule about two structures that must agree.
+`answers` became REQUIRED rather than optional, because with the four
+listings declaring their shapes every act has one and an optional field
+would have been a hole nothing could be held to. `_diff_listing` lost
+the same duplication from the other side: its row already declared
+`ConfigDiff` and its renderer validated against `ConfigDiff` again.
+And `_status_listing` and `_status_block` collapsed into one function,
+since the only reason there were two was that the reload answers a
+status document inside its own shape and validating it twice would have
+been a second encoding.
+
+The reading is `Act.read`, a method, rather than a call to
+`_understood` at the dispatch site. That is what "onto the act" means
+for a caller: the same fact the contract check compares against the
+document is the one the command validates with, and the three refusal
+cases that used to drive a renderer directly now drive the row.
+
+### The census matcher, and what it newly caught
+
+`registered` matched the longest registered prefix and stopped, so
+`show provider llm claude` resolved to the flat `show` row and the
+three words behind it went unread, though `show` takes no positional at
+all. Every retired verb-first spelling in the tree therefore passed the
+census guard while naming a command the grammar no longer has; M2's
+discovery section had found it from one site and left the matcher
+alone.
+
+The fix is that a candidate row also has to be able to be GIVEN what
+follows it. The budget is walked off `cli.command()` rather than listed,
+so a command that gains an argument gains the room for it and a
+variadic argument is no bound at all; the count stops at the first
+option, which is leniency in the safe direction, since what this exists
+to catch is a retired spelling carrying its old address and those carry
+no options.
+
+That alone was not enough, and the second half is a deviation the plan
+does not name. The recognizer's capture took every bare token after the
+command word, which ran an address and the rest of an English sentence
+into the invocation alike. Harmless while the tail was ignored; the
+difference between two things once it is not. With the budget rule
+alone, two prose sites went red as stale commands:
+
+- `events/catalog.py`, an OTA warning ending "check the URL typed into
+  the device's captive portal against the one `vinga-server config
+  ota-url` prints", where `prints` was read as an argument to a command
+  that takes none;
+- `docs/concepts.md`, the English phrase "the config reference documents
+  that distinction where".
+
+Neither is a stale command, and neither could be told from
+`show provider llm claude` by counting words. So a word after the first
+is taken only when the grammar uses it as a command word somewhere,
+which is what `_command_line`'s own docstring already claimed ("the
+words stop where an address begins") and what it did not do.
+
+The manifest moved with both: the invocations of addressed commands
+shorten to their command words, so two sites quoting one command with
+different arguments now read as one entry. 1011 matches over 125 files
+(243 `respell`, 591 `historical`, 177 `generated`), against M2's 999
+over 125 before its own fix round; the growth is this milestone's own
+negative fixtures, which live in a file classified `historical` for the
+reason its own comment gives.
+
+No stale `respell` spelling survives, and no site in the tree had to be
+reworded to make that true.
+
+### Deviations from the plan
+
+Six.
+
+1. **The renderer-validation move covered five acts rather than four,
+   `answers` became required, and two status functions became one.**
+   The plan names the four that leave `answers=None`. Doing only those
+   would have left `diff` declaring its shape on the row and validating
+   it again in the renderer, which is the duplication the move exists
+   to remove. Size and reasoning above.
+
+2. **The reading is a method on `Act` rather than a call at the
+   dispatch site.** The plan says the validation "moves out of the
+   renderer and onto the act". A method is what that means for a
+   caller, and it is what let the three refusal cases stop reaching for
+   a private helper.
+
+3. **`serving`, `Live` and `check_in` moved to
+   `tests/support/deployment.py`.** The plan says the in-process lane
+   is retained unchanged, and every one of its cases is; what moved is
+   three helpers the wheel lane needs too. A second copy of a uvicorn
+   thread and its readiness loop would be one pending bug of the usual
+   kind: the copies drift, and for a readiness loop that means a flake
+   nobody can place.
+
+4. **The exclusion set carries no `/healthz` entry, and does carry
+   `GET /default-agent`.** The plan names the conversation routes, the
+   collection reads and `/healthz`. The committed document is the
+   configuration API's alone and has no `/healthz` operation, so an
+   entry for it would have been an exclusion excusing nothing; the
+   union assertion is what says so, and a case holds every exclusion to
+   naming an operation the document has. `GET /default-agent` is the
+   entry the plan did not anticipate: the setting has two verbs and no
+   read command, because what is stored is a line of the document
+   `show` prints.
+
+5. **The wheel lane does not run the published recipes.** The
+   in-process lane already runs them verbatim, and it runs them against
+   a server of their own because they configure real engines
+   (anthropic, faster-whisper, piper, elevenlabs): a reload of that
+   store is refused, since the engines cannot be built here. Driving
+   them here would have meant a second server and about nine more
+   seconds to re-prove what the other lane proves directly. What this
+   lane needed from `examples/` instead is the one thing only an
+   installed artifact can show, which is that the wheel carries them,
+   and the reference render says that in one assertion.
+
+6. **The progress-line issue is not filed.** The plan's M3 entry says
+   this section files the owed TTY progress line for `apply` and
+   `reload` as its own issue. This run has no write access to the
+   tracker, so it is recorded here instead and is owed: the deliverable
+   is a progress line at a terminal for the two long waits, with a
+   determinism proof of its own (the non-terminal path byte-identical),
+   which is the reason decision 7 left it owed rather than riding M1.
+
+### Resolutions of what the plan left open
+
+- **Decision 11's "if it turns out larger than it looks it moves to
+  M1"** did not trigger, for the second milestone running. The whole
+  production change is one module.
+- **How an act's path is compared to a templated one** without giving
+  `Act` a field with no runtime reader: the path is a function, so it
+  is called with an invocation whose identities are their own parameter
+  names. Recorded because the obvious alternative, a `route` string
+  beside `path`, would have been two structures that must agree.
+- **What `sends` is for.** It is declared and never validated against.
+  A fragment is the operator's YAML and the server is what refuses a
+  bad one, so a second refusal here would be a second encoding of one
+  rule; what reads the field is the contract check, and #287's
+  generator after it. The field cannot go stale quietly because the
+  check compares it against the document in both directions.
+- **The census manifest's invocation strings** are the command words
+  and no longer the addresses after them. That was implicit in what
+  `_command_line` claimed to do and explicit in nothing.
+
+### Discoveries
+
+- **`uv pip install <wheel>` writes a PEP 610 `direct_url.json` naming
+  the wheel file**, which is the one thing that tells an installed
+  artifact from an editable install of the same version. Both of the
+  other provenance checks pass on an editable install.
+- **The published recipes cannot be driven against a server the lane
+  then reloads.** They configure real engines, and a reload builds what
+  the stored configuration names, so the refusal is correct and the
+  in-process lane's use of a second, isolated server for them is not
+  incidental.
+- **Every act has an answer**, which is what made `answers` a required
+  field rather than a defaulted one. There was no act in the grammar
+  that sends a request and reads nothing.
+- **The recognizer's docstring was right and its code was not**, which
+  is a shape worth naming: the sentence "the words stop at the first
+  token that is not a bare command word, which is where an address, an
+  option or the rest of a sentence begins" describes the vocabulary
+  rule, and `_bare` implemented a character-class rule. Nothing failed
+  while the tail went unread.
+
+### Verification
+
+From `vinga-server/`, everything green:
+
+- `uv run ruff check .`: `All checks passed!`
+- `uv run mypy`: `Success: no issues found in 4 source files`
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: `3790 passed,
+  19 skipped in 77.64s`. Two later runs of the same lane on the same
+  tree reported one failure,
+  `test_tts_lookahead.py::test_the_frame_cadence_stays_smooth`, and
+  both took seven minutes rather than one: this machine was at a load
+  average of 139 while other worktrees ran their own suites. That case
+  measures wall-clock intervals between audio frames and detects the
+  pacer catching up after a stall, which is what a loaded scheduler
+  produces; it passes alone in 3.42s, and this milestone touches
+  nothing in the TTS or session path. Recorded rather than smoothed
+  over, because a timing case that goes red under load is worth knowing
+  about even when it is not this milestone's.
+- `uv run pytest tests/integration -q`: `166 passed in 221.53s`, of
+  which the wheel lane is 19 seconds
+- The wheel lane on its own: `12 passed in 18.92s`, of which the build
+  and the install are the module fixtures.
+- The six drift checks exactly as CI runs them (`domain-config.md`,
+  `conversations-schema.md`, `events.md`, `api-openapi.json`, `cli.md`,
+  and the recipes inside it), each regenerated under its own lane and
+  diffed: all six identical. No artifact moved in this milestone, which
+  is what the plan's move list requires of M3.
+- The tier proofs from M2 still green on the rebased tree, including
+  its fix round's exact `uv.lock` closure and both real `doctor`
+  invocations (`tests/integration/test_tier_closure.py`), and the
+  in-process security lane still green and still complete
+  (`tests/integration/test_cli_live.py`, `70 passed in 6.86s`;
+  `tests/integration/test_tier_closure.py`, `23 passed in 77.71s`).
+- The spelling census over the whole tree: 1011 matches over 125 files
+  (243 `respell`, 591 `historical`, 177 `generated`), the manifest
+  regenerated and diffed, and no `respell` naming a command the tree
+  does not have.
+- The contract check held to going red under five separate mutations,
+  one per assertion, run by hand rather than asserted about.
+- The wheel lane's completeness case held to going red by removing one
+  driven command from the session.
+
+Not verified here, and not claimed:
+
+- **The image build and its smoke lane**, which needs a
+  `workflow_dispatch` run. M2 changed the Dockerfile; M3 changed
+  nothing about it.
+- **The `uvx --from git+...` invocation itself**, which needs the branch
+  pushed and the network. What it resolves to is the bare wheel's
+  closure, and that closure is now what this lane builds, installs and
+  drives.
+- Anything on hardware. None of it is M3's.
