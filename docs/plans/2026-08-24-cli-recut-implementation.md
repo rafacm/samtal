@@ -30,7 +30,8 @@ the turn, then the artifacts, then the prose.
 - The registration table turned around: `GROUPS` keyed by noun path
   with the five entity nouns derived, `Command.kind` as an explicit
   fact, `Command.destroys`, and registration building the full prefix
-  tree from `row.words[:-1]`.
+  tree from `row.words[:-1]`, with every row held to being reachable by
+  its own words through that tree.
 - The `vinga` console script, `.env` loading in `cli.main`, the
   canonical `PROGRAM` and the closed invocation map.
 - `diff`, seated flat.
@@ -176,7 +177,7 @@ Six, each with what was done and why.
 From `vinga-server/`, everything green:
 
 - `uv run ruff check .`
-- `uv run pytest tests/unit -q -n auto --dist loadfile`: 3464 passed,
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: 3553 passed,
   21 skipped
 - `uv run pytest tests/integration -q`: 131 passed
 - `uv run mypy`: no issues in 4 source files
