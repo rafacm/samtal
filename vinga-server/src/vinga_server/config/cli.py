@@ -99,6 +99,7 @@ from vinga_server.config.models import (
     API_MOUNT_PATH,
     MASK,
     PROVIDER_STAGES,
+    DomainConfig,
     FileConfig,
     ServerConfig,
 )
@@ -110,9 +111,12 @@ from vinga_server.config.responses import (
     ConfigDiff,
     ConfigDocument,
     ConfigReloadResult,
+    DefaultAgentName,
+    DeviceBinding,
     Envelope,
     McpServerStatus,
     PendingDevice,
+    SecretValue,
 )
 from vinga_server.config.transport import APPLY_LOCATION, check_transportable
 from vinga_server.logs import quieted
@@ -1510,7 +1514,7 @@ def _bodies(config: Mapping[str, object]) -> dict[tuple[str, str], Mapping[str, 
     return bodies
 
 
-def _pending_listing(answer: object) -> str:
+def _pending_listing(entries: Mapping[str, Mapping[str, str]]) -> str:
     """The devices waiting to be claimed, one line each.
 
     Columns rather than YAML, because the question this answers is
@@ -1518,7 +1522,6 @@ def _pending_listing(answer: object) -> str:
     read across a line: the code to type, the MAC it will bind, and the
     board and firmware that tell two boards apart.
     """
-    entries = _understood(dict[str, PendingDevice], answer, UNREADABLE_READ)
     if not entries:
         return f"{NOTHING_PENDING}\n"
     rows = [PENDING_COLUMNS] + [
@@ -1535,7 +1538,7 @@ def _pending_listing(answer: object) -> str:
     )
 
 
-def _status_listing(answer: object) -> str:
+def _status_block(entries: Mapping[str, Mapping[str, object]]) -> str:
     """What every configured MCP server is doing, one block each.
 
     A block rather than a row of columns, because two of the three
@@ -1543,15 +1546,11 @@ def _status_listing(answer: object) -> str:
     the agents that may reach it. A column holding a list is a column
     that wraps, and the pending listing's shape only works because every
     one of its fields is short.
+
+    One function and not two: the reload answers one of these inside its
+    own shape, and the reading is the act's either way, so there is
+    nothing left for a second entry point to do.
     """
-    return _status_block(_understood(dict[str, McpServerStatus], answer, UNREADABLE_READ))
-
-
-def _status_block(entries: Mapping[str, Mapping[str, object]]) -> str:
-    """The same listing, from a status document that has already been
-    read. Split from the check because the reload answers one of these
-    inside its own shape, and validating what a shape already validated
-    would be the second encoding this module just stopped keeping."""
     if not entries:
         return f"{NOTHING_CONFIGURED}\n"
     lines: list[str] = []
@@ -1591,7 +1590,7 @@ def _sequence(value: object) -> Sequence[object]:
     return value if isinstance(value, Sequence) and not isinstance(value, str) else ()
 
 
-def _prompt_listing(answer: object) -> str:
+def _prompt_listing(body: Mapping[str, Any]) -> str:
     """The assembled prompt, block by block, and its total size.
 
     Every block is printed whole. This command exists to show what the
@@ -1604,7 +1603,6 @@ def _prompt_listing(answer: object) -> str:
     what is stored and sent, so a replaced character below never
     falsifies the accounting.
     """
-    body = _understood(AssembledPrompt, answer, UNREADABLE_READ)
     lines: list[str] = []
     for block in body["blocks"]:
         named = block.get("name")
@@ -1711,7 +1709,7 @@ RELOAD_SECTIONS: dict[str, type[BaseModel]] = {
 }
 
 
-def _reload_listing(answer: object) -> str:
+def _reload_listing(applied: Mapping[str, Any]) -> str:
     """What the reload applied, kind by kind, and then what is running.
 
     The outcomes first, because they are the answer to the question that
@@ -1728,12 +1726,11 @@ def _reload_listing(answer: object) -> str:
     shaped like neither a list of names nor a flag is a failing test
     rather than output nobody notices is gone.
 
-    Read as one shape, the status half included, which is what the
-    result declares: the outcome lists are printed name by name and the
-    status half is a document a listing renders, so a stray shape
-    anywhere in here would otherwise become output or a traceback.
+    Read as one shape, the status half included, which is what the act
+    declares: the outcome lists are printed name by name and the status
+    half is a document a listing renders, so a stray shape anywhere in
+    here would otherwise become output or a traceback.
     """
-    applied = _understood(ConfigReloadResult, answer, UNREADABLE_RELOAD)
     lines: list[str] = []
     for section, shape in RELOAD_SECTIONS.items():
         body = applied[section]
@@ -1803,14 +1800,13 @@ DIFF_INTRO = (
 )
 
 
-def _diff_listing(answer: object) -> str:
+def _diff_listing(body: Mapping[str, Any]) -> str:
     """The comparison, kind by kind.
 
     Names and labels and nothing else, which is what the shape carries:
     no bodies, no values, no masks and no secret marks cross this
     surface, so there is nothing here to filter.
     """
-    body = _understood(ConfigDiff, answer, UNREADABLE_READ)
     lines = [DIFF_INTRO]
     for section, shape in DIFF_SECTIONS.items():
         lines += _diff_block(section, shape, body[section], "")
@@ -2594,16 +2590,36 @@ class Act:
     # database's; None is no bound, which is one act's answer.
     read_timeout_s: float | None = READ_TIMEOUT_S
 
+    # The shape the API declares for the body this act sends, or None
+    # where it sends none. Declared and never validated against: a
+    # fragment is the operator's YAML and the server is what refuses a
+    # bad one, so a second refusal here would be a second encoding of
+    # the same rule. What reads it is the contract check, which holds
+    # every act's request against the committed document, and #287's
+    # generator after it. A method and a path alone leave exactly the
+    # four bodies with adapters in front of them free to drift.
+    sends: object | None = None
+
     # The shape the API says it answers this act with, and the sentence
-    # a body that is not one meets. None where the renderer reads its
-    # own answer, which is every listing: those are entry points the
-    # acceptance suite hands a body to directly, so the reading is
-    # theirs.
-    answers: object | None = None
+    # a body that is not one meets. Required, because every act has an
+    # answer: a shape known only inside a renderer is a fact with no
+    # home, and one nothing outside the closure can read is a contract
+    # no test can hold to the document.
+    answers: object
     refusal: str = UNREADABLE_READ
 
     # What is printed, given the answer.
     render: Callable[[Any], None]
+
+    def read(self, answer: object) -> Any:
+        """One answer, read as the shape this act says it is sent.
+
+        On the act rather than in the renderer that used to do it, which
+        is what makes the shape inspectable from the row: the same fact
+        the contract check compares against the document is the one the
+        command validates with, so the two cannot come apart.
+        """
+        return _understood(self.answers, answer, self.refusal)
 
 
 def _act(args: Invocation, act: Act) -> None:
@@ -2619,7 +2635,7 @@ def _act(args: Invocation, act: Act) -> None:
         act.body(args) if act.body is not None else _NOTHING,
         read_timeout_s=act.read_timeout_s,
     )
-    act.render(answer if act.answers is None else _understood(act.answers, answer, act.refusal))
+    act.render(act.read(answer))
 
 
 def _identity(descriptor: entities.EntityDescriptor, args: Invocation) -> tuple[str, ...]:
@@ -2674,6 +2690,7 @@ SET_ENTITY: dict[str, Act] = {
         method="PUT",
         path=_entity_path(kind),
         body=_fragment_body(kind),
+        sends=kind.model,
         answers=Acknowledgement,
         refusal=UNREADABLE_WRITE,
         render=_acknowledged,
@@ -2755,6 +2772,7 @@ BIND_DEVICE = Act(
     method="PUT",
     path=_device_path,
     body=_binding,
+    sends=DeviceBinding,
     answers=Acknowledgement,
     refusal=UNREADABLE_WRITE,
     render=_acknowledged,
@@ -2766,6 +2784,7 @@ ADD_DEVICE = Act(
     method="POST",
     path=_claim_path,
     body=_binding,
+    sends=DeviceBinding,
     answers=Acknowledgement,
     refusal=UNREADABLE_WRITE,
     render=_acknowledged,
@@ -2775,6 +2794,7 @@ SET_DEFAULT_AGENT = Act(
     method="PUT",
     path=_default_agent_path,
     body=_default_agent_name,
+    sends=DefaultAgentName,
     answers=Acknowledgement,
     refusal=UNREADABLE_WRITE,
     render=_acknowledged,
@@ -2804,6 +2824,7 @@ SET_SECRET = Act(
     method="PUT",
     path=_secret_path,
     body=_secret_body,
+    sends=SecretValue,
     answers=Acknowledgement,
     refusal=UNREADABLE_WRITE,
     render=_acknowledged,
@@ -2880,17 +2901,32 @@ EXPORT_ENTITY: dict[str, Act] = {
     for kind in entities.ENTITIES
 }
 
-PENDING = Act(method="GET", path=_waiting_path, render=_printed(_pending_listing))
+PENDING = Act(
+    method="GET",
+    path=_waiting_path,
+    answers=dict[str, PendingDevice],
+    render=_printed(_pending_listing),
+)
 
 # A read of the running server rather than of the database: what a
 # database says about an entry is what `show mcp-server` prints, and a
 # stopped server has no state to report.
-STATUS = Act(method="GET", path=_running_path, render=_printed(_status_listing))
+STATUS = Act(
+    method="GET",
+    path=_running_path,
+    answers=dict[str, McpServerStatus],
+    render=_printed(_status_block),
+)
 
 # The other read of the running server: the persona is stored and the
 # guidance is stored, but what they add up to is a property of the
 # process that loaded them.
-PROMPT = Act(method="GET", path=_assembled_path, render=_printed(_prompt_listing))
+PROMPT = Act(
+    method="GET",
+    path=_assembled_path,
+    answers=AssembledPrompt,
+    render=_printed(_prompt_listing),
+)
 
 # The one act that changes what a server is doing without writing
 # anything, and it prints both halves of the answer: what the reload
@@ -2900,6 +2936,8 @@ RELOAD = Act(
     method="POST",
     path=_reload_path,
     read_timeout_s=RELOAD_READ_TIMEOUT_S,
+    answers=ConfigReloadResult,
+    refusal=UNREADABLE_RELOAD,
     render=_printed(_reload_listing),
 )
 
@@ -2940,6 +2978,7 @@ APPLY = Act(
     method="POST",
     path=_apply_path,
     body=_document_body,
+    sends=DomainConfig,
     read_timeout_s=APPLY_READ_TIMEOUT_S,
     answers=AppliedDocument,
     refusal=UNREADABLE_WRITE,

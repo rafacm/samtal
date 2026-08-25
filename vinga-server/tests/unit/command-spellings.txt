@@ -856,7 +856,7 @@ vinga-server/src/vinga_server/config/api.py:407  respell  vinga-server config de
 vinga-server/src/vinga_server/config/api.py:426  respell  vinga-server config list
 vinga-server/src/vinga_server/config/api.py:539  respell  vinga-server config reload
 vinga-server/src/vinga_server/config/api.py:540  respell  vinga-server config list
-vinga-server/src/vinga_server/config/cli.py:1840  respell  config list
+vinga-server/src/vinga_server/config/cli.py:1836  respell  config list
 vinga-server/src/vinga_server/config/docgen.py:191  respell  config schema
 vinga-server/src/vinga_server/config/docgen.py:576  respell  config schema
 vinga-server/src/vinga_server/config/models.py:1648  respell  vinga status
@@ -983,7 +983,7 @@ vinga-server/tests/unit/test_config_api_runtime.py:661  respell  config reload
 vinga-server/tests/unit/test_config_apply.py:4  respell  config apply
 vinga-server/tests/unit/test_config_cli_onboarding.py:1  respell  config ota-url
 vinga-server/tests/unit/test_config_cli_onboarding.py:114  respell  vinga-server config ota-url
-vinga-server/tests/unit/test_config_cli_rendering.py:409  respell  config reload
+vinga-server/tests/unit/test_config_cli_rendering.py:411  respell  config reload
 vinga-server/tests/unit/test_config_cli_respelling.py:28  historical  set-secret
 vinga-server/tests/unit/test_config_cli_respelling.py:72  historical  config set agent-defaults
 vinga-server/tests/unit/test_config_cli_respelling.py:72  historical  config agent-defaults set
