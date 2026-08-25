@@ -79,39 +79,28 @@ fragments separately.
 
 ## Installing it
 
-Three doors, in the order a deployment meets them. They are three
-different things rather than three spellings of one, and only the middle
-one installs anything on the machine it is typed on.
+Three doors. They are three different things rather than three
+spellings of one, and the first is the one this documentation leads
+with: a client on the machine an operator administers from, talking to
+the API the deployment already serves.
 
-**A deployment runs the image and installs nothing.** The published
-container image is the server, and it ships this CLI, so a container
-that is already serving has the token and the loopback address in its
-environment and there is nothing to arrange:
-
-```bash
-docker exec -i vinga vinga-server config list
-```
-
-A shell function makes that the shortest of the three:
+**A workstation installs the CLI**, to administer a deployment whether
+or not it hosts it. The default install of this package is the client
+half and nothing else: the grammar, the models and the HTTP transport,
+and none of the web framework, the database, the encryption, the model
+SDKs or the audio stack. There is still no published name, and there
+does not need to be, because a git reference is one:
 
 ```bash
-vinga() { docker exec -i vinga vinga-server "$@"; }
+uv tool install "git+https://github.com/rafacm/vinga#subdirectory=vinga-server"
 
-vinga config list
+vinga list
 ```
 
-The `-i` is load-bearing rather than habit: a secret set reads the
-credential from stdin, and `apply -f -` reads a whole document from it.
-One thing does not carry over: a path is resolved inside the container,
-which has the CLI but not `examples/`, so a document that lives on your
-machine is piped in with `-f -` rather than named.
-
-**A workstation installs the CLI**, to administer a deployment it does
-not host. The default install of this package is the client half and
-nothing else: the grammar, the models and the HTTP transport, and none
-of the web framework, the database, the encryption, the model SDKs or
-the audio stack. There is still no published name, and there does not
-need to be, because a git reference is one:
+That leaves `vinga` on the PATH, which is what the
+[quick start](../../README.md#getting-started) types from its second
+step onward. For one command and nothing installed, `uvx` runs the same
+client from the same reference:
 
 ```bash
 uvx --from "git+https://github.com/rafacm/vinga#subdirectory=vinga-server" \
@@ -168,6 +157,38 @@ uv run vinga-server config list
 
 That sync gives the checkout the whole server rather than the client
 half, so the same environment also serves, and every command answers.
+
+**The image already carries it**, which is the advanced door and the
+one that installs nothing anywhere. The published container image is the
+server, and it ships this CLI under the server's own entry point, so a
+shell inside a container that is already serving finds the token and the
+loopback address in its environment and there is nothing to arrange:
+
+```bash
+docker exec -i vinga vinga-server config list
+```
+
+A shell function makes that the shortest way to type it:
+
+```bash
+vinga() { docker exec -i vinga vinga-server "$@"; }
+
+vinga config list
+```
+
+Nothing about this door goes around the API. It is the same client
+making the same requests, running where the token already is, which is
+what makes it the answer for a deployment that deliberately does not
+route `/api/` outward, the way the smoke lane seeds its own container,
+and the place the two server-half commands run. What it is not is the
+ordinary way to configure a deployment: that is the workstation client,
+and this is the door for when the token should not travel to reach one.
+
+The `-i` is load-bearing rather than habit: a secret set reads the
+credential from stdin, and `apply -f -` reads a whole document from it.
+One thing does not carry over: a path is resolved inside the container,
+which has the CLI but not `examples/`, so a document that lives on your
+machine is piped in with `-f -` rather than named.
 
 ## Versions, and the two halves disagreeing
 
