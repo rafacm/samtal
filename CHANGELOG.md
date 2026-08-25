@@ -41,6 +41,16 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **A claim the configuration superseded names the condition, not the
+  device** (#248). Claiming a code that a binding or a default agent
+  overtook while it sat on a screen is still refused, still changes
+  nothing, and still points at the listing; what its two sentences no
+  longer carry is the MAC the code resolved to. A caller addresses that
+  write by six digits, so the address in the refusal was one the write
+  resolved rather than one anybody sent, and the sentence travels into
+  an API response body, into whatever keeps the logs, and onto the
+  stderr of whichever command was holding the code. Every other refusal
+  in the configuration store already named its condition this way.
 - **The default install of `vinga-server` is the configuration client**
   (#223). It carries httpx, pydantic, pydantic-settings, python-dotenv,
   PyYAML and typer, and none of FastAPI, uvicorn, SQLAlchemy, Alembic,
