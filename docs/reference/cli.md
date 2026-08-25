@@ -94,17 +94,21 @@ does not need to be, because a git reference is one:
 ```bash
 uv tool install "git+https://github.com/rafacm/vinga#subdirectory=vinga-server"
 
-vinga list
+vinga --version
 ```
 
 That leaves `vinga` on the PATH, which is what the
 [quick start](../../README.md#getting-started) types from its second
-step onward. For one command and nothing installed, `uvx` runs the same
-client from the same reference:
+step onward. `--version` is what proves the install, because it needs
+nothing arranged: every command that reads or writes configuration is a
+request, and [Reaching a server](#reaching-a-server) below is the
+address and the token each of those needs before it can answer. For one
+command and nothing installed, `uvx` runs the same client from the same
+reference:
 
 ```bash
 uvx --from "git+https://github.com/rafacm/vinga#subdirectory=vinga-server" \
-  vinga list
+  vinga --version
 ```
 
 Two things about that door are worth knowing before you use it. It
