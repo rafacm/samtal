@@ -860,15 +860,37 @@ the capability table with no case behind it is the failure mode the
 whole honest-capability decision exists to prevent, so this is the
 pattern for every future row: the milestone that claims it tests it.
 
-**The tier lane gains a third environment.** It holds an installed
-environment to the exact recursive closure of `uv.lock` from each tier's
-roots, in both directions. A `sim` extra that no fixture installs would
-be an extra nothing proves, so a third environment is built from
-`vinga-server[sim]` and asserted to be the client closure plus
-`websockets` and nothing else, with `simulator run` answering from it.
-That is where the gated command is proven to work when its half is
-present, exactly as the serve environment proves `openapi` and
-`ota-url`.
+**The tier lane gains a third environment, and the tier VOCABULARY gains
+a third entry.** The first is the obvious half and the second is the one
+that matters. `tests/support/tiers.py` is the single home both lanes
+read a tier from, and `declared()` returns exactly two sets today
+(`tiers.py:57`), while the wheel pins only the bare block and the
+`serve` block (`test_cli_wheel.py:366`). A `sim` extra declared in
+`pyproject.toml` and missing from the wheel's metadata would therefore
+pass every lane, which is precisely the gap the wheel's own metadata
+check was added to close for `serve`.
+
+So the whole inventory learns the word:
+
+- `declared()` returns three sets rather than two, and `SIM_MODULES`
+  joins `SERVE_MODULES` with `websockets`' import name pinned by hand,
+  for the reason that map is written out rather than derived.
+- The wheel's `Requires-Dist` is asserted both ways for the `sim`
+  marker, as it already is for the bare block and for `serve`, and the
+  no-undeclared-extra case picks the new extra up for free because it
+  reads the declaration.
+- The bare install is asserted to carry no `websockets`, as a
+  distribution and as an importable module, which is the negative half
+  the `serve` tier already gets.
+- A third environment built from `vinga-server[sim]` is asserted to be
+  exactly the locked client closure plus `websockets` and nothing more,
+  with `simulator run` answering from it. That is where the gated
+  command is proven to work when its half is present, exactly as the
+  serve environment proves `openapi` and `ota-url`.
+- The contributor and workflow comments that name `[serve]` alone are
+  updated, and the `dev` group names `vinga-server[serve,sim]` so the
+  checkout door stays one command, which is settled decision 3 of the
+  re-cut and is a proof rather than an edit.
 
 ### 8. Everything else that has to learn about this
 
@@ -1003,8 +1025,11 @@ it.
 - `vinga_server/config/cli.py`: two rows, one `GROUPS` entry, one new
   `Invocation` field (`endpoint`) with `mac` and `agents` reused, the
   generalized gate (M2), and the simulator's own argument declarers.
-- `vinga-server/pyproject.toml` and `uv.lock`: the `sim` extra (M2),
-  the dev group naming it, and the package-data include.
+- `vinga-server/pyproject.toml` and `uv.lock`: the `sim` extra (M2), the
+  dev group naming `vinga-server[serve,sim]`, and the package-data
+  include.
+- `tests/support/tiers.py`: a third declared tier and a third import-name
+  map (M2), because it is the one home both lanes read a tier from.
 - `tests/support/deployment.py`: `check_in` reads the production board
   (M1).
 - `docs/reference/cli.md`, `docs/xiaozhi-notes.md`, `README.md`,
@@ -1131,7 +1156,15 @@ it.
   3a, asserted against that table rather than against the code that
   implements it.
 - The wheel lane's `GATED` set grown by one and its two-way completeness
-  still exact; the tier lane's third environment.
+  still exact.
+- **The tier vocabulary grown by one**: `declared()` returning three
+  sets, `SIM_MODULES` pinned, the wheel's `sim` marker asserted equal to
+  the declaration both ways, `websockets` asserted absent from the bare
+  install as a distribution and as a module, and the `[sim]` environment
+  asserted to be exactly the locked client closure plus `websockets`. A
+  bite case doctors the expected set in each direction, the way the tier
+  lane's own does, so the comparison is proven to reject what it claims
+  to.
 
 ## Risks
 
@@ -1475,6 +1508,23 @@ between alternatives the choice is recorded with its reason.
    assert the `[sim]` environment is exactly the locked client-plus-
    websockets closure, and update the contributor and workflow comments
    that describe only `[serve]`.
+
+    *Resolution* (this commit): adopted as prescribed. Decision 7's
+    paragraph is re-headed to say the tier VOCABULARY gains an entry and
+    not only that a fixture is added, which is the half that mattered:
+    `tests/support/tiers.py` is the one home both lanes read a tier
+    from, so `declared()` returns three sets and `SIM_MODULES` joins
+    `SERVE_MODULES` with `websockets`' import name pinned by hand. The
+    wheel's `Requires-Dist` is asserted both ways for the `sim` marker
+    the way it already is for the bare block and for `serve`; the bare
+    install is asserted to carry no `websockets` as a distribution and
+    as a module; the third environment is asserted to be exactly the
+    locked client closure plus `websockets`; and the contributor and
+    workflow comments naming `[serve]` alone are updated, with the dev
+    group naming `vinga-server[serve,sim]` so the checkout door stays
+    one command. M2's test list and the module layout carry the same,
+    including the bite case that doctors the expected set in each
+    direction.
 
 10. **P2: the simulated board's persistent client identity is left
     undecided.** The plan derives a stable MAC carefully and then says
