@@ -66,6 +66,7 @@ import pytest
 from packaging.markers import Marker
 
 from tests.support.config_cli import registered
+from tests.support.tiers import SERVE_MODULES, declared
 from vinga_server.config import cli
 
 PROJECT = Path(__file__).resolve().parents[2]
@@ -79,19 +80,6 @@ PROJECT = Path(__file__).resolve().parents[2]
 # Written out rather than derived: a distribution's import name is not
 # in its requirement string, and guessing it by replacing hyphens is how
 # a typo becomes a check that always passes.
-SERVE_MODULES = {
-    "alembic": "alembic",
-    "anthropic": "anthropic",
-    "av": "av",
-    "cryptography": "cryptography",
-    "fastapi": "fastapi",
-    "mcp": "mcp",
-    "openai": "openai",
-    "pysilero-vad": "pysilero_vad",
-    "sqlalchemy": "sqlalchemy",
-    "uvicorn": "uvicorn",
-}
-
 # The two commands the grammar keeps and the client half cannot answer.
 # Named here as the expected inventory rather than discovered, because
 # the assertion below is two-way: a third gated command fails this lane
@@ -99,32 +87,17 @@ SERVE_MODULES = {
 GATED = frozenset({("openapi",), ("ota-url",)})
 
 
-def _requirement_names(entries: Sequence[str]) -> set[str]:
-    """The distribution names out of a list of requirement strings,
-    normalized the way an installed environment reports them."""
-    names = set()
-    for entry in entries:
-        name = entry.split(";")[0].split("[")[0]
-        for marker in ("==", ">=", "<=", "~=", "!=", ">", "<"):
-            name = name.split(marker)[0]
-        names.add(name.strip().lower().replace("_", "-"))
-    return names
-
-
 @pytest.fixture(scope="module")
 def tiers() -> tuple[set[str], set[str]]:
     """The two tiers' DIRECT dependencies, read off `pyproject.toml`.
 
     The independent oracle, kept beside the lock closure below rather
-    than derived from it. Six names and ten, written by hand in the
-    declaration under test, so a closure computed from a lock this
+    than derived from it, so a closure computed from a lock this
     repository also wrote is checked against something that came from
-    somewhere else. Either alone would be a graph agreeing with itself.
+    somewhere else. Shared with the wheel lane, which holds the built
+    artifact's own metadata to the same declaration.
     """
-    declared = tomllib.loads((PROJECT / "pyproject.toml").read_text(encoding="utf-8"))
-    client = _requirement_names(declared["project"]["dependencies"])
-    serve = _requirement_names(declared["project"]["optional-dependencies"]["serve"])
-    return client, serve
+    return declared()
 
 
 # The closure, computed from the lock

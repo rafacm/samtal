@@ -25,6 +25,25 @@ invisible, and capturing its stdout and stderr is not the same
 assertion. So this lane asserts on exit codes, stdout and stderr, and
 makes no no-leak claim it cannot support.
 
+**The wheel's own closure is checked here, and only here.** The tier
+lane holds an environment to what `uv.lock` says the DECLARATION
+resolves to. Nothing in it reads the built artifact, so a wheel whose
+`Requires-Dist` said something else would install a heavier closure
+while both lanes stayed green: the metadata a resolver actually consults
+is the wheel's, not the lock's. So this lane reads `Requires-Dist`
+straight out of the built file and holds it to the declared tiers in
+both directions, and then asserts the serve half is absent from the
+environment that file was installed into, as distributions and as
+importable modules.
+
+Metadata plus absence, rather than a resolver report compared against
+the installed set. A report would be a second re-resolution, which is
+the thing this lane deliberately does not do (it installs one file), and
+comparing one would re-derive the tier lane's claim under a different
+name. What the two assertions here close between them is the gap the
+review named: the artifact cannot ask for anything the declaration does
+not, and what it asked for is what arrived.
+
 **`uv pip install <wheel>` here, and `uv sync --frozen` there.** The
 tier closure lane builds its environments with `uv sync --frozen`, and
 argues in its own head that `uv pip install` re-resolves from the index
@@ -74,6 +93,7 @@ import os
 import shutil
 import subprocess
 import sys
+import zipfile
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -82,6 +102,7 @@ import yaml
 
 from tests.support.config_cli import registered
 from tests.support.deployment import Live, check_in, serving
+from tests.support.tiers import SERVE_MODULES, declared, requirement_names
 from vinga_server.config import cli
 from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
 
@@ -275,6 +296,32 @@ def run(installed: Path, elsewhere: Path, live: Live):
     return _run
 
 
+def _requires_dist(wheel: Path) -> dict[str, set[str]]:
+    """What the built wheel asks for, keyed by the extra that asks.
+
+    Read out of the artifact's own `METADATA` rather than out of the
+    installed environment: this is the block a resolver consults, and it
+    is the one thing about the wheel that no lane which never opens the
+    file can see. `""` is what an install with no extras pulls.
+    """
+    with zipfile.ZipFile(wheel) as built:
+        [name] = [
+            entry for entry in built.namelist() if entry.endswith(".dist-info/METADATA")
+        ]
+        metadata = built.read(name).decode("utf-8")
+    asked: dict[str, set[str]] = {}
+    for line in metadata.splitlines():
+        if not line.startswith("Requires-Dist:"):
+            continue
+        requirement = line.removeprefix("Requires-Dist:").strip()
+        head, _, marker = requirement.partition(";")
+        extra = ""
+        if "extra ==" in marker:
+            extra = marker.split("extra ==")[1].strip().strip("\"'")
+        asked.setdefault(extra, set()).update(requirement_names([head]))
+    return asked
+
+
 def answered(finished: subprocess.CompletedProcess[str], *argv: str) -> str:
     """One command asserted to have answered, and what it printed."""
     assert finished.returncode == 0, (argv, finished.stdout, finished.stderr)
@@ -314,6 +361,80 @@ def test_the_binary_under_test_is_the_wheel_s(
     assert str(installed.parent.parent) in where["file"], where["file"]
     assert str(PROJECT / "src") not in where["file"], where["file"]
     assert wheel.name in (where["origin"] or ""), where["origin"]
+
+
+def test_the_wheel_asks_for_exactly_the_client_tier(wheel: Path) -> None:
+    """What an install with no extras pulls, read off the artifact.
+
+    Both ways against the declaration: a distribution the wheel asks for
+    unconditionally and `pyproject.toml` does not declare is a heavier
+    default install than anything else here would notice, and one the
+    declaration has and the wheel does not is a client that cannot run.
+    """
+    client, _ = declared()
+
+    assert _requires_dist(wheel)[""] == client
+
+
+def test_the_wheel_gates_exactly_the_serve_tier_behind_the_extra(wheel: Path) -> None:
+    """And the other half of the same block. A serve distribution that
+    escaped its marker would be an unconditional requirement, which the
+    case above catches; one that went missing from the extra would be an
+    image build that installs a server without a server."""
+    _, serve = declared()
+
+    assert _requires_dist(wheel)["serve"] == serve
+
+
+def test_the_wheel_declares_no_extra_the_project_does_not(wheel: Path) -> None:
+    """The gates themselves, held closed. An extra nobody declared is a
+    door into this package that no lane and no document knows about."""
+    project = json.loads(
+        subprocess.run(
+            [sys.executable, "-c", "import json,tomllib,sys;"
+             "print(json.dumps(tomllib.load(open(sys.argv[1],'rb'))['project']))",
+             str(PROJECT / "pyproject.toml")],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    )
+
+    gates = set(_requires_dist(wheel)) - {""}
+    assert gates <= set(project["optional-dependencies"])
+
+
+def test_the_serve_half_is_absent_from_the_environment_the_wheel_made(
+    installed: Path, elsewhere: Path, live: Live
+) -> None:
+    """What the metadata asked for is what arrived, checked from the
+    other end.
+
+    The declared serve tier is absent as distributions, and every module
+    it would have installed is absent to the interpreter. The second is
+    not the first said twice: a distribution can be missing from the
+    metadata while its module is importable through something that
+    vendored it, which is exactly what a name check alone would miss.
+    """
+    _, serve = declared()
+    assert set(SERVE_MODULES) == serve, "the import-name map has drifted from the tier"
+
+    reported = _ran(
+        installed,
+        elsewhere,
+        live,
+        "python",
+        "-c",
+        "import json,sys;from importlib.metadata import distributions;"
+        "sys.stdout.write(json.dumps(sorted("
+        "d.metadata['Name'].lower().replace('_','-') for d in distributions())))",
+    )
+    assert reported.returncode == 0, reported.stderr
+    assert serve & set(json.loads(reported.stdout)) == set()
+
+    for module in sorted(SERVE_MODULES.values()):
+        finished = _ran(installed, elsewhere, live, "python", "-c", f"import {module}")
+        assert finished.returncode != 0, f"{module} is importable from the wheel install"
 
 
 def test_the_binary_exists_and_answers(installed: Path, elsewhere: Path, live: Live) -> None:
