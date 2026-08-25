@@ -1024,12 +1024,15 @@ change of this shape has gone quiet before.
 
 - **`tests/unit/test_cli_import_weight.py`** pins the exact set of
   `vinga_server` modules `config.cli` imports at module scope. It grows
-  by `vinga_server.simulator` and its submodules,
-  `vinga_server.protocol` and its three modules, and (M1)
-  `vinga_server.device_endpoint`. Every one of them is client-tier pure,
-  and the widening is a review event with a name, which is what that
-  test is for. The `websockets` import lives inside `run`'s own arm and
-  is not in the set.
+  by the simulator modules the grammar names concretely
+  (`simulator.board` and `simulator.capabilities`, and the empty
+  `simulator` package they sit in), `vinga_server.protocol` and its
+  three modules, and `vinga_server.device_endpoint`. Every one of them
+  is client-tier pure, and the widening is a review event with a name,
+  which is what that test is for. `simulator.conversation` is NOT in the
+  set and a case says so, which is the same fact the gate depends on:
+  the `websockets` import lives inside that module, reached only from
+  `run`'s own arm.
 - **The gate.** `cli._from_the_server_half` records an `ImportError`
   inside its handler and raises a fixed sentence outside it, so nothing
   relays a module path. It is generalized to take its sentence and gains
@@ -1094,8 +1097,16 @@ it.
 
 ## Module layout after the change
 
-- `vinga_server/simulator/__init__.py`: **new (M1).** The package doc
-  and what the grammar reaches. Imports nothing that is not client tier.
+- `vinga_server/simulator/__init__.py`: **new (M1), and empty of
+  re-exports.** It carries the package's docstring and nothing else. The
+  grammar imports the concrete modules by name
+  (`from vinga_server.simulator import board`), because a package
+  `__init__` that forwards names is the pass-through the design guide
+  deletes: it would add a name, hide nothing, and make a reader open two
+  files where one would have done. It also has a second cost here, which
+  is why the rule is worth stating rather than following silently: an
+  `__init__` that re-exported `conversation` would drag `websockets`
+  into every import of the package, which is the gate defeating itself.
 - `vinga_server/simulator/board.py`: **new (M1).** The simulated board:
   its identity (the derived MAC and the client id derived from it,
   decision 2a), the system-info body
@@ -1115,9 +1126,16 @@ it.
   half: the handshake headers, the hello exchange, the listen and frame
   sequence, reading until the reply ends or a bound expires, and the
   closed transcript it produces. The `websockets` import is here, which
-  is why nothing above imports this module eagerly. Deletion test: its
-  only other home is `cli.py`, which would then import a websocket
-  client at module scope and end the thin install.
+  is why nothing above imports this module eagerly. Deletion test: it
+  holds the protocol state machine of decision 5a, eight states with
+  their transitions, their bounds and their out-of-order rule, and
+  inlining that into `cli.py` would put a conversation protocol inside
+  the module that owns the command grammar, where a reader looking for
+  what `run` does would have to read past it to find anything else. The
+  first draft justified it by import placement instead, which does not
+  survive the test: an inlined function can import lazily just as
+  easily, so that was an argument about where a line goes rather than
+  about what a module knows.
 - `vinga_server/simulator/utterance.py`: **new (M2).** What the packaged
   utterance is: the package-data lookup, the frame walk, and the rate
   and duration the packets were encoded at, so the sender paces them.
@@ -1750,3 +1768,20 @@ between alternatives the choice is recorded with its reason.
     `__init__.py` as a re-export layer, have the grammar import concrete
     modules directly, and keep `conversation.py` on the independent
     state-machine responsibility it removes from `cli.py`.
+
+    *Resolution* (this commit): adopted as prescribed. The
+    `simulator/__init__.py` entry says it carries the package docstring
+    and nothing else, and the grammar imports the concrete modules by
+    name; the design guide's own words for what a forwarding module
+    costs are given, plus the second cost that applies only here, an
+    `__init__` re-exporting `conversation` would drag `websockets` into
+    every import of the package, which is the gate defeating itself.
+    `conversation.py` keeps its place on the responsibility it holds,
+    the eight-state protocol machine of decision 5a with its
+    transitions, its bounds and its out-of-order rule, and the
+    import-placement argument is retracted in the entry itself as an
+    argument about where a line goes rather than about what a module
+    knows. Decision 8's import-weight bullet is rewritten to match: the
+    inventory grows by the modules the grammar names concretely, and a
+    case asserts `simulator.conversation` is not among them, which is
+    the same fact the gate depends on.
