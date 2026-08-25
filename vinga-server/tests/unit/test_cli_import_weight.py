@@ -40,20 +40,37 @@ SOURCE = Path(__file__).resolve().parents[2] / "src" / "vinga_server"
 # Every `vinga_server` module importing `config.cli` loads, and the
 # reason each is on the list.
 #
-# Sixteen, and each of them is the client half of something: the models
-# and the registry the grammar is derived from, the loader that reads
-# the file half, the renderers the four document commands print, the
-# response shapes the answers are read through, the transport policy a
-# fragment is checked against before it travels, and the logging
+# Twenty-three, and each of them is the client half of something: the
+# models and the registry the grammar is derived from, the loader that
+# reads the file half, the renderers the four document commands print,
+# the response shapes the answers are read through, the transport policy
+# a fragment is checked against before it travels, and the logging
 # boundary that quiets the request loggers. `runtime.prompt` and
 # `tools.names` arrive under `models`, which declares an agent's
 # fragments and an MCP grant's tool names in their own types.
 #
-# What is NOT here is the point of the list: no `store`, so no
+# Seven arrived with `vinga simulator` (#248), deliberately and as a
+# review event with a name, which is what this list is for.
+# `device_endpoint` is the device-facing address policy and the request
+# boundary the doctor and the simulator share; `simulator.board` and
+# `simulator.capabilities` are the grammar's two concrete imports, in the
+# empty package they sit in; and `protocol` and its three modules arrive
+# under them, because the simulator holds no copy of the wire and reads
+# the same module the server does. Every one of them is client-tier
+# pure: the whole of `protocol` imports `json`, `struct`, `dataclasses`,
+# `collections.abc` and pydantic and nothing else.
+#
+# `simulator.conversation` is deliberately NOT here, and
+# `test_the_simulator_s_conversation_half_is_not_imported_eagerly` below
+# says so: it is the only module in the tree that imports `websockets`,
+# and M2's extra gate depends on that import happening inside `run`'s own
+# arm rather than at the top of the grammar.
+#
+# What is NOT here is the other point of the list: no `store`, so no
 # SQLAlchemy; no `secrets`, so no cryptography; no `api` and no
 # `onboarding`, so no FastAPI; no `db`, so no Alembic. Each of those
-# left in this milestone, and each would come back one convenient import
-# at a time.
+# left in the #223 milestone, and each would come back one convenient
+# import at a time.
 CLI_REACH = frozenset(
     {
         "vinga_server",
@@ -67,13 +84,25 @@ CLI_REACH = frozenset(
         "vinga_server.config.provider_options",
         "vinga_server.config.responses",
         "vinga_server.config.transport",
+        "vinga_server.device_endpoint",
         "vinga_server.logs",
+        "vinga_server.protocol",
+        "vinga_server.protocol.framing",
+        "vinga_server.protocol.mcp",
+        "vinga_server.protocol.messages",
         "vinga_server.runtime",
         "vinga_server.runtime.prompt",
+        "vinga_server.simulator",
+        "vinga_server.simulator.board",
+        "vinga_server.simulator.capabilities",
         "vinga_server.tools",
         "vinga_server.tools.names",
     }
 )
+
+# The module the gate depends on not being reached, named here so the
+# claim is a constant rather than a string inside one assertion.
+GATED_MODULE = "vinga_server.simulator.conversation"
 
 # The one module allowed to import the CLI, and the one #287 removes.
 # `main.py` dispatches `vinga-server config ...` to it, inside the
@@ -138,6 +167,21 @@ def test_the_cli_reaches_exactly_this_much_of_the_server() -> None:
     stale allowlist is worth less than none.
     """
     assert _loaded("import vinga_server.config.cli") == CLI_REACH
+
+
+def test_the_simulator_s_conversation_half_is_not_imported_eagerly() -> None:
+    """The other side of the inventory, stated as its own claim because
+    it is the one a gate depends on.
+
+    M2 puts the `websockets` import inside `simulator/conversation.py`
+    and gates `simulator run` on it. That gate is worth nothing if
+    importing the grammar loads the module: the bare install would fail
+    at import rather than answering the fixed sentence, and every command
+    of the tree would fail with it. The inventory above already says so
+    by omission; this says it by name, so a re-export added to
+    `simulator/__init__.py` fails a test that names what it broke.
+    """
+    assert GATED_MODULE not in _loaded("import vinga_server.config.cli")
 
 
 def test_nothing_but_the_entry_point_imports_the_cli() -> None:
