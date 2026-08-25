@@ -7,39 +7,82 @@
 .github/workflows/vinga-server.yml:234  respell  vinga-server config openapi
 .github/workflows/vinga-server.yml:236  respell  vinga-server config openapi
 .github/workflows/vinga-server.yml:254  respell  vinga-server config cli-reference
+.github/workflows/vinga-server.yml:257  respell  vinga-server config cli-reference
+.github/workflows/vinga-server.yml:281  respell  vinga-server config cli-reference
 AGENTS.md:161  respell  vinga-server config schema
 CHANGELOG.md:13  historical  vinga-server config provider set
 CHANGELOG.md:13  historical  config set provider llm local
+CHANGELOG.md:15  historical  bind-device
+CHANGELOG.md:15  historical  add-device
+CHANGELOG.md:17  historical  set-default-agent
 CHANGELOG.md:38  historical  vinga provider set
 CHANGELOG.md:39  historical  vinga-server config provider set llm local
 CHANGELOG.md:81  historical  vinga agent show kids
 CHANGELOG.md:127  historical  vinga-server config schema
 CHANGELOG.md:161  historical  vinga-server config schema
 CHANGELOG.md:168  historical  vinga-server config set provider
+CHANGELOG.md:220  historical  set-secret
+CHANGELOG.md:220  historical  clear-secret
+CHANGELOG.md:237  historical  config export
+CHANGELOG.md:237  historical  config apply
+CHANGELOG.md:240  historical  set-secret
+CHANGELOG.md:336  historical  config apply
+CHANGELOG.md:343  historical  set-secret
+CHANGELOG.md:367  historical  config schema
+CHANGELOG.md:380  historical  config apply
+CHANGELOG.md:391  historical  config apply
 CHANGELOG.md:415  historical  vinga-server config cli-reference
 CHANGELOG.md:425  historical  vinga-server config set
 CHANGELOG.md:488  historical  vinga-server config apply
+CHANGELOG.md:492  historical  config set
 CHANGELOG.md:516  historical  vinga-server config export
 CHANGELOG.md:517  historical  vinga-server config export
+CHANGELOG.md:518  historical  config set
+CHANGELOG.md:519  historical  config show
 CHANGELOG.md:524  historical  vinga-server config set-secret
 CHANGELOG.md:531  historical  vinga-server config set
+CHANGELOG.md:532  historical  config set provider llm claude
+CHANGELOG.md:542  historical  config set-secret
 CHANGELOG.md:572  historical  vinga-server config set-secret
+CHANGELOG.md:690  historical  config schema
+CHANGELOG.md:922  historical  config set agent
+CHANGELOG.md:923  historical  set-default-agent
 CHANGELOG.md:1054  historical  vinga-server config reload
 CHANGELOG.md:1173  historical  vinga-server config reload
+CHANGELOG.md:1480  historical  config show
+CHANGELOG.md:1545  historical  set-secret
 CHANGELOG.md:2449  historical  config status
 CHANGELOG.md:2553  historical  config ota-url
 CHANGELOG.md:2669  historical  config prompt
 CHANGELOG.md:2693  historical  config prompt
 CHANGELOG.md:2736  historical  config reload
+CHANGELOG.md:2737  historical  set-secret
+CHANGELOG.md:2737  historical  clear-secret
 CHANGELOG.md:2757  historical  config status
 CHANGELOG.md:2797  historical  config status
 CHANGELOG.md:2829  historical  config reload
 CHANGELOG.md:2939  historical  config ota-url
 CHANGELOG.md:2972  historical  config add-device CODE
 CHANGELOG.md:2974  historical  config pending
+CHANGELOG.md:2976  historical  add-device
+CHANGELOG.md:2977  historical  bind-device
+CHANGELOG.md:3095  historical  config list
+CHANGELOG.md:3170  historical  clear-secret
+CHANGELOG.md:3170  historical  set-secret
+CHANGELOG.md:3239  historical  config show
 CHANGELOG.md:3360  historical  config openapi
+CHANGELOG.md:3363  historical  config schema
+CHANGELOG.md:3364  historical  config reference
 CHANGELOG.md:3374  historical  config schema
 CHANGELOG.md:3375  historical  config reference
+CHANGELOG.md:3377  historical  config set
+CHANGELOG.md:3385  historical  config set
+CHANGELOG.md:3405  historical  bind-device
+CHANGELOG.md:3405  historical  set-default-agent
+CHANGELOG.md:3406  historical  clear-default-agent
+CHANGELOG.md:3406  historical  set-secret
+CHANGELOG.md:3406  historical  clear-secret
+CHANGELOG.md:3411  historical  set-secret
 README.md:96  respell  vinga config apply
 README.md:99  respell  vinga config device bind
 README.md:100  respell  vinga config default-agent set assistant
@@ -48,14 +91,26 @@ README.md:110  respell  vinga config reload
 README.md:118  respell  vinga config ota-url
 README.md:127  respell  vinga config device pending list
 README.md:128  respell  vinga config device pending claim
+docs/adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md:157  historical  set-secret
 docs/architecture/cli-guide.md:46  respell  vinga provider set llm local
 docs/architecture/cli-guide.md:47  historical  vinga-server config provider set llm local
 docs/architecture/cli-guide.md:72  respell  vinga provider set llm local
 docs/architecture/cli-guide.md:73  respell  vinga agent show kids
+docs/architecture/cli-guide.md:107  historical  set-secret
+docs/architecture/cli-guide.md:107  historical  clear-secret
+docs/architecture/cli-guide.md:116  historical  set-secret
+docs/architecture/cli-guide.md:117  historical  bind-device
 docs/architecture/cli-guide.md:125  respell  vinga provider set llm local
 docs/architecture/cli-guide.md:125  respell  vinga provider delete
+docs/architecture/cli-guide.md:132  historical  bind-device
+docs/architecture/cli-guide.md:132  historical  add-device
+docs/architecture/cli-guide.md:133  historical  set-default-agent
+docs/architecture/cli-guide.md:133  historical  clear-default-agent
+docs/architecture/cli-guide.md:134  historical  set-secret
+docs/architecture/cli-guide.md:134  historical  clear-secret
 docs/architecture/cli-guide.md:148  respell  vinga provider set llm local
 docs/architecture/cli-guide.md:149  respell  vinga device bind
+docs/architecture/cli-guide.md:162  historical  bind-device
 docs/architecture/cli-guide.md:163  respell  vinga device bind
 docs/architecture/cli-guide.md:197  respell  vinga mcp-server set home
 docs/architecture/cli-guide.md:202  historical  vinga set
@@ -68,22 +123,60 @@ docs/architecture/cli-guide.md:231  respell  vinga export
 docs/architecture/cli-guide.md:231  respell  vinga provider export llm local
 docs/architecture/cli-guide.md:233  respell  vinga reload
 docs/architecture/cli-guide.md:237  historical  vinga config apply
+docs/architecture/cli-guide.md:342  historical  set-secret
 docs/architecture/cli-guide.md:348  respell  vinga export
+docs/architecture/cli-guide.md:488  historical  set-secret
+docs/architecture/cli-guide.md:493  historical  set-secret
 docs/architecture/cli-guide.md:507  respell  vinga provider set llm claude
 docs/architecture/cli-guide.md:525  respell  vinga export
 docs/architecture/cli-guide.md:526  respell  vinga apply
 docs/architecture/cli-guide.md:779  historical  vinga-server config schema provider
+docs/architecture/cli-guide.md:796  historical  set-secret
+docs/architecture/cli-guide.md:818  historical  set-secret
+docs/architecture/cli-guide.md:822  historical  clear-default-agent
+docs/architecture/cli-guide.md:831  historical  bind-device
+docs/architecture/cli-guide.md:831  historical  add-device
 docs/architecture/design-guide.md:177  respell  vinga-server config agent preview
 docs/concepts.md:243  respell  config reference documents that distinction where
 docs/devices/waveshare-esp32-s3-touch-amoled-2.16.md:132  respell  vinga-server config device pending claim
 docs/features/2026-08-06-session-capture.md:70  historical  config schema already
 docs/features/2026-08-12-agent-not-persona.md:61  historical  config openapi
+docs/features/2026-08-19-display-fails-open.md:17  historical  config show prompt-fragment household
+docs/features/2026-08-19-display-fails-open.md:147  historical  config reference
+docs/features/2026-08-19-display-fails-open.md:148  historical  config openapi
+docs/features/2026-08-19-random-number-tool.md:84  historical  config reference
+docs/features/2026-08-19-random-number-tool.md:85  historical  config openapi
 docs/features/2026-08-19-refusal-and-debug-hygiene.md:91  historical  config set
 docs/features/2026-08-19-refusal-and-debug-hygiene.md:91  historical  config set
+docs/features/2026-08-19-refusal-and-debug-hygiene.md:242  historical  set-secret
 docs/plans/2026-08-02-m6-tools-and-mcp.md:336  historical  config reference says
 docs/plans/2026-08-03-realtime-multi-turn-and-barge-in.md:118  historical  config schema change updates the example in the
+docs/plans/2026-08-11-db-domain-config-implementation.md:162  historical  set-secret
+docs/plans/2026-08-11-db-domain-config-implementation.md:355  historical  config show
+docs/plans/2026-08-11-db-domain-config-implementation.md:466  historical  config list
+docs/plans/2026-08-11-db-domain-config-implementation.md:466  historical  config show
+docs/plans/2026-08-11-db-domain-config-implementation.md:519  historical  config schema
+docs/plans/2026-08-11-db-domain-config-implementation.md:519  historical  config reference
+docs/plans/2026-08-11-db-domain-config-implementation.md:542  historical  config set
+docs/plans/2026-08-11-db-domain-config-implementation.md:557  historical  config schema
+docs/plans/2026-08-11-db-domain-config-implementation.md:557  historical  config reference
+docs/plans/2026-08-11-db-domain-config-implementation.md:663  historical  config set
+docs/plans/2026-08-11-db-domain-config-implementation.md:699  historical  config schema
+docs/plans/2026-08-11-db-domain-config-implementation.md:699  historical  config reference
 docs/plans/2026-08-11-db-domain-config-implementation.md:723  historical  config reference
+docs/plans/2026-08-11-db-domain-config-implementation.md:831  historical  config set
+docs/plans/2026-08-11-db-domain-config-implementation.md:850  historical  config schema
+docs/plans/2026-08-11-db-domain-config-implementation.md:895  historical  config set
+docs/plans/2026-08-11-db-domain-config-implementation.md:899  historical  config set
 docs/plans/2026-08-11-db-domain-config-implementation.md:965  historical  config reference
+docs/plans/2026-08-11-db-domain-config.md:288  historical  config set-secret
+docs/plans/2026-08-11-db-domain-config.md:335  historical  set-secret
+docs/plans/2026-08-11-db-domain-config.md:343  historical  clear-secret
+docs/plans/2026-08-11-db-domain-config.md:344  historical  set-secret
+docs/plans/2026-08-11-db-domain-config.md:349  historical  set-secret
+docs/plans/2026-08-11-db-domain-config.md:355  historical  config show
+docs/plans/2026-08-11-db-domain-config.md:355  historical  config list
+docs/plans/2026-08-11-db-domain-config.md:361  historical  set-secret
 docs/plans/2026-08-11-db-domain-config.md:408  historical  config set provider
 docs/plans/2026-08-11-db-domain-config.md:441  historical  config set provider
 docs/plans/2026-08-11-db-domain-config.md:442  historical  config set mcp-server
@@ -110,41 +203,172 @@ docs/plans/2026-08-11-db-domain-config.md:462  historical  config show agent-def
 docs/plans/2026-08-11-db-domain-config.md:463  historical  config show device
 docs/plans/2026-08-11-db-domain-config.md:464  historical  config schema
 docs/plans/2026-08-11-db-domain-config.md:465  historical  config reference
+docs/plans/2026-08-11-db-domain-config.md:472  historical  set-secret
+docs/plans/2026-08-11-db-domain-config.md:472  historical  clear-secret
+docs/plans/2026-08-11-db-domain-config.md:473  historical  clear-default-agent
+docs/plans/2026-08-11-db-domain-config.md:479  historical  clear-secret
+docs/plans/2026-08-11-db-domain-config.md:479  historical  set-secret
+docs/plans/2026-08-11-db-domain-config.md:483  historical  config set provider
+docs/plans/2026-08-11-db-domain-config.md:489  historical  set-secret
+docs/plans/2026-08-11-db-domain-config.md:498  historical  set-secret
+docs/plans/2026-08-11-db-domain-config.md:498  historical  clear-secret
+docs/plans/2026-08-11-db-domain-config.md:506  historical  set-secret
+docs/plans/2026-08-11-db-domain-config.md:512  historical  config set
+docs/plans/2026-08-11-db-domain-config.md:529  historical  config schema
+docs/plans/2026-08-11-db-domain-config.md:532  historical  config reference
+docs/plans/2026-08-11-db-domain-config.md:543  historical  config set
+docs/plans/2026-08-11-db-domain-config.md:581  historical  set-secret
+docs/plans/2026-08-11-db-domain-config.md:592  historical  config reference
+docs/plans/2026-08-11-db-domain-config.md:710  historical  config set
+docs/plans/2026-08-11-db-domain-config.md:714  historical  config show
+docs/plans/2026-08-11-db-domain-config.md:793  historical  set-secret
+docs/plans/2026-08-11-db-domain-config.md:798  historical  clear-secret
+docs/plans/2026-08-11-db-domain-config.md:800  historical  set-secret
+docs/plans/2026-08-11-db-domain-config.md:822  historical  clear-secret
+docs/plans/2026-08-11-db-domain-config.md:825  historical  clear-default-agent
+docs/plans/2026-08-11-db-domain-config.md:826  historical  clear-secret
+docs/plans/2026-08-11-db-domain-config.md:834  historical  set-secret
+docs/plans/2026-08-11-db-domain-config.md:837  historical  set-secret
+docs/plans/2026-08-11-db-domain-config.md:838  historical  clear-secret
+docs/plans/2026-08-11-db-domain-config.md:885  historical  config set
+docs/plans/2026-08-11-db-domain-config.md:923  historical  set-secret
+docs/plans/2026-08-11-db-domain-config.md:939  historical  set-secret
+docs/plans/2026-08-11-db-domain-config.md:950  historical  set-secret
+docs/plans/2026-08-11-db-domain-config.md:990  historical  config reference
 docs/plans/2026-08-11-rest-api-implementation.md:67  historical  config openapi
 docs/plans/2026-08-11-rest-api-implementation.md:180  historical  config openapi
+docs/plans/2026-08-11-rest-api-implementation.md:400  historical  config show
+docs/plans/2026-08-11-rest-api-implementation.md:545  historical  clear-secret
+docs/plans/2026-08-11-rest-api-implementation.md:545  historical  set-secret
+docs/plans/2026-08-11-rest-api-implementation.md:601  historical  config schema
+docs/plans/2026-08-11-rest-api-implementation.md:614  historical  config list
+docs/plans/2026-08-11-rest-api-implementation.md:615  historical  clear-secret
+docs/plans/2026-08-11-rest-api-implementation.md:615  historical  set-secret
+docs/plans/2026-08-11-rest-api-implementation.md:620  historical  config list
+docs/plans/2026-08-11-rest-api-implementation.md:714  historical  clear-secret
+docs/plans/2026-08-11-rest-api-implementation.md:715  historical  set-secret
+docs/plans/2026-08-11-rest-api-implementation.md:822  historical  set-secret
 docs/plans/2026-08-11-rest-api-implementation.md:859  historical  config list
+docs/plans/2026-08-11-rest-api-implementation.md:889  historical  set-secret
+docs/plans/2026-08-11-rest-api-implementation.md:890  historical  clear-secret
+docs/plans/2026-08-11-rest-api-implementation.md:907  historical  config openapi
+docs/plans/2026-08-11-rest-api-implementation.md:938  historical  config set-secret
+docs/plans/2026-08-11-rest-api-implementation.md:941  historical  config set-secret
+docs/plans/2026-08-11-rest-api-implementation.md:944  historical  clear-secret
+docs/plans/2026-08-11-rest-api-implementation.md:945  historical  set-secret
+docs/plans/2026-08-11-rest-api-implementation.md:956  historical  set-secret
+docs/plans/2026-08-11-rest-api.md:38  historical  clear-secret
+docs/plans/2026-08-11-rest-api.md:39  historical  set-secret
+docs/plans/2026-08-11-rest-api.md:51  historical  set-secret
+docs/plans/2026-08-11-rest-api.md:129  historical  config show
+docs/plans/2026-08-11-rest-api.md:132  historical  config show
+docs/plans/2026-08-11-rest-api.md:348  historical  config show
 docs/plans/2026-08-11-rest-api.md:387  historical  config openapi
+docs/plans/2026-08-11-rest-api.md:491  historical  set-secret
+docs/plans/2026-08-11-rest-api.md:517  historical  config set
+docs/plans/2026-08-11-rest-api.md:631  historical  set-secret
+docs/plans/2026-08-11-rest-api.md:635  historical  config schema
+docs/plans/2026-08-11-rest-api.md:683  historical  config openapi
+docs/plans/2026-08-11-rest-api.md:807  historical  set-secret
+docs/plans/2026-08-11-rest-api.md:1038  historical  set-secret
+docs/plans/2026-08-11-rest-api.md:1072  historical  config openapi
 docs/plans/2026-08-12-device-onboarding-implementation.md:473  historical  config openapi
+docs/plans/2026-08-12-device-onboarding-implementation.md:789  historical  bind-device
+docs/plans/2026-08-12-device-onboarding-implementation.md:790  historical  add-device
+docs/plans/2026-08-12-device-onboarding-implementation.md:850  historical  config openapi
+docs/plans/2026-08-12-device-onboarding-implementation.md:883  historical  bind-device
+docs/plans/2026-08-12-device-onboarding-implementation.md:988  historical  config list
+docs/plans/2026-08-12-device-onboarding-implementation.md:1077  historical  config ota-url
+docs/plans/2026-08-12-device-onboarding-implementation.md:1118  historical  bind-device
+docs/plans/2026-08-12-device-onboarding-implementation.md:1209  historical  config reference
+docs/plans/2026-08-12-device-onboarding-implementation.md:1209  historical  config openapi
+docs/plans/2026-08-12-device-onboarding-implementation.md:1234  historical  config ota-url
+docs/plans/2026-08-12-device-onboarding-implementation.md:1245  historical  config reference
+docs/plans/2026-08-12-device-onboarding-implementation.md:1246  historical  config openapi
+docs/plans/2026-08-12-device-onboarding-implementation.md:1408  historical  config add-device
+docs/plans/2026-08-12-device-onboarding-implementation.md:1428  historical  config add-device
+docs/plans/2026-08-12-device-onboarding.md:112  historical  config show device
+docs/plans/2026-08-12-device-onboarding.md:140  historical  add-device
+docs/plans/2026-08-12-device-onboarding.md:301  historical  add-device
 docs/plans/2026-08-12-device-onboarding.md:393  historical  config pending GET
 docs/plans/2026-08-12-device-onboarding.md:394  historical  config add-device CODE
 docs/plans/2026-08-12-device-onboarding.md:395  historical  config ota-url contacts nothing
+docs/plans/2026-08-12-device-onboarding.md:399  historical  add-device
+docs/plans/2026-08-12-device-onboarding.md:399  historical  bind-device
+docs/plans/2026-08-12-device-onboarding.md:824  historical  config pending
+docs/plans/2026-08-12-device-onboarding.md:824  historical  config add-device
+docs/plans/2026-08-12-device-onboarding.md:838  historical  config add-device
+docs/plans/2026-08-13-mcp-operability-implementation.md:60  historical  config openapi
 docs/plans/2026-08-13-mcp-operability-implementation.md:70  historical  config status
 docs/plans/2026-08-13-mcp-operability-implementation.md:82  historical  config openapi
+docs/plans/2026-08-13-mcp-operability-implementation.md:156  historical  config status
+docs/plans/2026-08-13-mcp-operability-implementation.md:262  historical  config status
+docs/plans/2026-08-13-mcp-operability-implementation.md:301  historical  config status
+docs/plans/2026-08-13-mcp-operability-implementation.md:312  historical  config status
 docs/plans/2026-08-13-mcp-operability-implementation.md:454  historical  config reload
+docs/plans/2026-08-13-mcp-operability-implementation.md:778  historical  config status
+docs/plans/2026-08-13-mcp-operability-implementation.md:827  historical  config status
+docs/plans/2026-08-13-mcp-operability-implementation.md:853  historical  config status
 docs/plans/2026-08-13-mcp-operability.md:45  historical  config reload
 docs/plans/2026-08-13-mcp-operability.md:178  historical  config status
+docs/plans/2026-08-13-mcp-operability.md:251  historical  config status
 docs/plans/2026-08-13-mcp-operability.md:329  historical  config schema
+docs/plans/2026-08-13-mcp-operability.md:497  historical  config show mcp-server status
+docs/plans/2026-08-13-mcp-operability.md:524  historical  config status
+docs/plans/2026-08-13-mcp-operability.md:707  historical  config status
+docs/plans/2026-08-13-mcp-operability.md:716  historical  config reload
 docs/plans/2026-08-14-agent-know-how-implementation.md:92  historical  config prompt
 docs/plans/2026-08-14-agent-know-how-implementation.md:269  historical  config reference
 docs/plans/2026-08-14-agent-know-how-implementation.md:270  historical  config openapi
 docs/plans/2026-08-14-agent-know-how-implementation.md:395  historical  config reference
 docs/plans/2026-08-14-agent-know-how-implementation.md:398  historical  config openapi
+docs/plans/2026-08-14-agent-know-how-implementation.md:454  historical  config set
+docs/plans/2026-08-14-agent-know-how-implementation.md:487  historical  config prompt
+docs/plans/2026-08-14-agent-know-how-implementation.md:591  historical  config prompt
 docs/plans/2026-08-14-agent-know-how-implementation.md:656  historical  config reference
 docs/plans/2026-08-14-agent-know-how-implementation.md:761  historical  config reference
 docs/plans/2026-08-14-agent-know-how-implementation.md:764  historical  config openapi
+docs/plans/2026-08-14-agent-know-how-implementation.md:858  historical  config prompt
+docs/plans/2026-08-14-agent-know-how-implementation.md:896  historical  config status
 docs/plans/2026-08-14-agent-know-how-implementation.md:1072  historical  config reference
 docs/plans/2026-08-14-agent-know-how-implementation.md:1075  historical  config openapi
 docs/plans/2026-08-14-agent-know-how-implementation.md:1088  historical  config reference
+docs/plans/2026-08-14-agent-know-how-implementation.md:1106  historical  config prompt
+docs/plans/2026-08-14-agent-know-how-implementation.md:1111  historical  config prompt
+docs/plans/2026-08-14-agent-know-how-implementation.md:1128  historical  config prompt
 docs/plans/2026-08-14-agent-know-how-implementation.md:1230  historical  config reference
 docs/plans/2026-08-14-agent-know-how-implementation.md:1233  historical  config openapi
+docs/plans/2026-08-14-agent-know-how.md:379  historical  config set prompt-fragment
+docs/plans/2026-08-14-agent-know-how.md:494  historical  config prompt
 docs/plans/2026-08-14-agent-know-how.md:550  historical  config prompt
+docs/plans/2026-08-14-agent-know-how.md:872  historical  config prompt
+docs/plans/2026-08-14-agent-know-how.md:878  historical  config prompt
+docs/plans/2026-08-14-agent-know-how.md:1157  historical  config prompt
+docs/plans/2026-08-14-local-notice-drift-implementation.md:55  historical  set-secret
+docs/plans/2026-08-14-local-notice-drift-implementation.md:55  historical  clear-secret
+docs/plans/2026-08-14-local-notice-drift-implementation.md:212  historical  config set
+docs/plans/2026-08-14-local-notice-drift-implementation.md:213  historical  config set mcp-server
+docs/plans/2026-08-14-local-notice-drift.md:9  historical  set-secret
+docs/plans/2026-08-14-local-notice-drift.md:9  historical  clear-secret
+docs/plans/2026-08-14-local-notice-drift.md:28  historical  set-secret
+docs/plans/2026-08-14-local-notice-drift.md:28  historical  clear-secret
+docs/plans/2026-08-14-local-notice-drift.md:76  historical  config schema
+docs/plans/2026-08-14-local-notice-drift.md:76  historical  config reference
+docs/plans/2026-08-14-local-notice-drift.md:139  historical  set-secret
+docs/plans/2026-08-14-local-notice-drift.md:141  historical  clear-secret
+docs/plans/2026-08-14-local-notice-drift.md:179  historical  config reload
+docs/plans/2026-08-14-local-notice-drift.md:264  historical  config reload
 docs/plans/2026-08-15-conversation-store-implementation.md:1539  historical  config openapi
 docs/plans/2026-08-15-conversation-store-implementation.md:1732  historical  config openapi
 docs/plans/2026-08-15-conversation-store-implementation.md:2005  historical  config openapi
 docs/plans/2026-08-15-conversation-store-implementation.md:2157  historical  config openapi
 docs/plans/2026-08-15-conversation-store-implementation.md:2297  historical  config openapi
 docs/plans/2026-08-15-event-surface-implementation.md:1123  historical  config status
+docs/plans/2026-08-16-schema-declared-events.md:581  historical  config reference
+docs/plans/2026-08-16-schema-declared-events.md:1186  historical  config reference
 docs/plans/2026-08-17-config-descriptors-implementation.md:1  historical  config schema behind per-entity
+docs/plans/2026-08-17-config-descriptors-implementation.md:54  historical  config schema
+docs/plans/2026-08-17-config-descriptors-implementation.md:54  historical  config reference
 docs/plans/2026-08-17-config-descriptors-implementation.md:158  historical  config reference
 docs/plans/2026-08-17-config-descriptors-implementation.md:161  historical  config openapi
 docs/plans/2026-08-17-config-descriptors-implementation.md:508  historical  config reference
@@ -153,18 +377,63 @@ docs/plans/2026-08-17-config-descriptors-implementation.md:597  historical  conf
 docs/plans/2026-08-17-config-descriptors-implementation.md:600  historical  config openapi
 docs/plans/2026-08-17-config-descriptors-implementation.md:972  historical  config reference
 docs/plans/2026-08-17-config-descriptors-implementation.md:975  historical  config openapi
+docs/plans/2026-08-17-config-descriptors-implementation.md:1110  historical  add-device
+docs/plans/2026-08-17-config-descriptors-implementation.md:1250  historical  config set prompt-fragment household
+docs/plans/2026-08-17-config-descriptors-implementation.md:1291  historical  config show prompt-fragment household
 docs/plans/2026-08-17-config-descriptors-implementation.md:1334  historical  config reference
 docs/plans/2026-08-17-config-descriptors-implementation.md:1337  historical  config openapi
 docs/plans/2026-08-17-config-descriptors.md:1  historical  config schema behind per-entity descriptors
+docs/plans/2026-08-17-config-descriptors.md:99  historical  config schema
+docs/plans/2026-08-17-config-descriptors.md:99  historical  config reference
+docs/plans/2026-08-17-config-descriptors.md:264  historical  config set
 docs/plans/2026-08-17-mcp-split-implementation.md:531  historical  config openapi
 docs/plans/2026-08-17-mcp-split-implementation.md:745  historical  config openapi
 docs/plans/2026-08-17-mcp-split-implementation.md:959  historical  config openapi
+docs/plans/2026-08-18-onboarding-ota-split.md:449  historical  config openapi
+docs/plans/2026-08-18-onboarding-ota-split.md:524  historical  config openapi
+docs/plans/2026-08-19-governance-simplification-implementation.md:210  historical  config reference
+docs/plans/2026-08-19-governance-simplification-implementation.md:211  historical  config openapi
+docs/plans/2026-08-19-governance-simplification-implementation.md:534  historical  config reference
+docs/plans/2026-08-19-governance-simplification-implementation.md:535  historical  config openapi
+docs/plans/2026-08-19-governance-simplification-implementation.md:835  historical  config reference
+docs/plans/2026-08-19-governance-simplification-implementation.md:836  historical  config openapi
+docs/plans/2026-08-19-governance-simplification-implementation.md:1086  historical  config reference
+docs/plans/2026-08-19-governance-simplification-implementation.md:1087  historical  config openapi
+docs/plans/2026-08-19-governance-simplification-implementation.md:1639  historical  config reference
+docs/plans/2026-08-19-governance-simplification-implementation.md:1640  historical  config openapi
+docs/plans/2026-08-19-governance-simplification-implementation.md:2438  historical  config reference
+docs/plans/2026-08-19-governance-simplification-implementation.md:2439  historical  config openapi
+docs/plans/2026-08-19-structured-refusals-implementation.md:163  historical  config reference
+docs/plans/2026-08-19-structured-refusals-implementation.md:164  historical  config openapi
+docs/plans/2026-08-19-structured-refusals-implementation.md:421  historical  config reference
+docs/plans/2026-08-19-structured-refusals-implementation.md:422  historical  config openapi
+docs/plans/2026-08-20-config-diff-read-implementation.md:167  historical  config reference
+docs/plans/2026-08-20-config-diff-read-implementation.md:168  historical  config openapi
+docs/plans/2026-08-20-config-diff-read-implementation.md:440  historical  config reference
+docs/plans/2026-08-20-config-diff-read-implementation.md:441  historical  config openapi
 docs/plans/2026-08-20-config-diff-read-implementation.md:473  historical  vinga-server config reload
+docs/plans/2026-08-20-config-diff-read-implementation.md:541  historical  config reference
+docs/plans/2026-08-20-config-diff-read-implementation.md:542  historical  config openapi
 docs/plans/2026-08-20-config-reload-implementation.md:171  historical  vinga-server config reload
 docs/plans/2026-08-20-config-reload-implementation.md:1224  historical  vinga-server config reload
+docs/plans/2026-08-22-compat-branch-cleanup-implementation.md:125  historical  config reference
+docs/plans/2026-08-22-compat-branch-cleanup-implementation.md:126  historical  config openapi
+docs/plans/2026-08-22-compat-branch-cleanup-implementation.md:252  historical  config reference
+docs/plans/2026-08-22-compat-branch-cleanup-implementation.md:253  historical  config openapi
+docs/plans/2026-08-22-compat-branch-cleanup-implementation.md:412  historical  config reference
+docs/plans/2026-08-22-compat-branch-cleanup-implementation.md:412  historical  config openapi
+docs/plans/2026-08-22-compat-branch-cleanup-implementation.md:494  historical  config reference
+docs/plans/2026-08-22-compat-branch-cleanup-implementation.md:495  historical  config openapi
+docs/plans/2026-08-22-compat-branch-cleanup.md:325  historical  config set
+docs/plans/2026-08-22-pin-catalog-once-implementation.md:304  historical  config diff
+docs/plans/2026-08-23-config-consolidation-implementation.md:34  historical  config schema
+docs/plans/2026-08-23-config-consolidation-implementation.md:192  historical  config schema
+docs/plans/2026-08-23-config-consolidation-implementation.md:195  historical  config schema
 docs/plans/2026-08-23-config-consolidation-implementation.md:315  historical  vinga-server config openapi
 docs/plans/2026-08-23-config-consolidation-implementation.md:317  historical  vinga-server config reference
 docs/plans/2026-08-23-config-consolidation-implementation.md:319  historical  vinga-server config schema
+docs/plans/2026-08-23-config-consolidation-implementation.md:357  historical  config schema
+docs/plans/2026-08-23-config-consolidation-implementation.md:363  historical  config schema
 docs/plans/2026-08-23-config-consolidation-implementation.md:436  historical  vinga-server config openapi
 docs/plans/2026-08-23-config-consolidation-implementation.md:438  historical  vinga-server config reference
 docs/plans/2026-08-23-config-consolidation-implementation.md:440  historical  vinga-server config schema
@@ -172,7 +441,12 @@ docs/plans/2026-08-23-config-consolidation-implementation.md:695  historical  vi
 docs/plans/2026-08-23-config-consolidation-implementation.md:700  historical  vinga-server config reference
 docs/plans/2026-08-23-config-consolidation-implementation.md:821  historical  vinga-server config openapi
 docs/plans/2026-08-23-config-consolidation-implementation.md:824  historical  vinga-server config reference
+docs/plans/2026-08-23-config-consolidation.md:58  historical  config schema
+docs/plans/2026-08-23-config-consolidation.md:74  historical  config schema
 docs/plans/2026-08-23-config-consolidation.md:181  historical  vinga-server config openapi
+docs/plans/2026-08-23-config-consolidation.md:183  historical  config reference
+docs/plans/2026-08-23-config-consolidation.md:183  historical  config schema
+docs/plans/2026-08-23-config-consolidation.md:289  historical  config schema
 docs/plans/2026-08-23-json-body-store-implementation.md:242  historical  vinga-server config reference
 docs/plans/2026-08-23-json-body-store-implementation.md:243  historical  vinga-server config openapi
 docs/plans/2026-08-23-json-body-store-implementation.md:268  historical  vinga-server config reference
@@ -181,40 +455,123 @@ docs/plans/2026-08-23-json-body-store-implementation.md:290  historical  vinga-s
 docs/plans/2026-08-23-json-body-store-implementation.md:292  historical  vinga-server config set-secret
 docs/plans/2026-08-23-json-body-store-implementation.md:447  historical  vinga-server config reference
 docs/plans/2026-08-23-json-body-store-implementation.md:447  historical  vinga-server config openapi
+docs/plans/2026-08-23-json-body-store.md:168  historical  set-secret
+docs/plans/2026-08-23-network-doctor-move-implementation.md:169  historical  config reference
+docs/plans/2026-08-23-network-doctor-move-implementation.md:196  historical  config reference
+docs/plans/2026-08-23-network-doctor-move-implementation.md:199  historical  config openapi
 docs/plans/2026-08-23-network-doctor-move-implementation.md:203  historical  vinga-server config schema
 docs/plans/2026-08-23-network-doctor-move.md:32  historical  vinga-server config ota-url
+docs/plans/2026-08-23-network-doctor-move.md:307  historical  config schema
 docs/plans/2026-08-23-network-doctor-move.md:309  historical  vinga-server config schema
+docs/plans/2026-08-23-network-doctor-move.md:413  historical  config schema
+docs/plans/2026-08-23-network-doctor-move.md:417  historical  config schema
 docs/plans/2026-08-23-session-split-implementation.md:102  historical  vinga-server config reference
 docs/plans/2026-08-23-session-split-implementation.md:103  historical  vinga-server config openapi
+docs/plans/2026-08-23-typer-cli-implementation.md:30  historical  config reload
+docs/plans/2026-08-23-typer-cli-implementation.md:31  historical  config add-device
+docs/plans/2026-08-23-typer-cli-implementation.md:31  historical  config bind-device
+docs/plans/2026-08-23-typer-cli-implementation.md:31  historical  config ota-url
+docs/plans/2026-08-23-typer-cli-implementation.md:260  historical  config reference
+docs/plans/2026-08-23-typer-cli-implementation.md:261  historical  config openapi
+docs/plans/2026-08-23-typer-cli-implementation.md:433  historical  config apply
+docs/plans/2026-08-23-typer-cli-implementation.md:433  historical  config export
+docs/plans/2026-08-23-typer-cli-implementation.md:515  historical  set-secret
+docs/plans/2026-08-23-typer-cli-implementation.md:788  historical  set-secret
+docs/plans/2026-08-23-typer-cli-implementation.md:824  historical  set-secret
+docs/plans/2026-08-23-typer-cli-implementation.md:904  historical  set-secret
+docs/plans/2026-08-23-typer-cli-implementation.md:905  historical  clear-secret
+docs/plans/2026-08-23-typer-cli-implementation.md:906  historical  bind-device
+docs/plans/2026-08-23-typer-cli-implementation.md:907  historical  add-device
+docs/plans/2026-08-23-typer-cli-implementation.md:909  historical  set-default-agent
+docs/plans/2026-08-23-typer-cli-implementation.md:910  historical  clear-default-agent
+docs/plans/2026-08-23-typer-cli-implementation.md:951  historical  add-device
+docs/plans/2026-08-23-typer-cli-implementation.md:956  historical  add-device
+docs/plans/2026-08-23-typer-cli-implementation.md:982  historical  set-default-agent
+docs/plans/2026-08-23-typer-cli-implementation.md:984  historical  clear-default-agent
+docs/plans/2026-08-23-typer-cli-implementation.md:993  historical  clear-secret
+docs/plans/2026-08-23-typer-cli-implementation.md:995  historical  set-secret
+docs/plans/2026-08-23-typer-cli-implementation.md:1215  historical  config cli-reference
+docs/plans/2026-08-23-typer-cli-implementation.md:1285  historical  set-secret
+docs/plans/2026-08-23-typer-cli-implementation.md:1295  historical  config apply
+docs/plans/2026-08-23-typer-cli-implementation.md:1339  historical  config cli-reference
+docs/plans/2026-08-23-typer-cli-implementation.md:1438  historical  add-device
+docs/plans/2026-08-23-typer-cli-implementation.md:1441  historical  config reload
+docs/plans/2026-08-23-typer-cli-implementation.md:1442  historical  config bind-device
+docs/plans/2026-08-23-typer-cli-implementation.md:1442  historical  config ota-url
+docs/plans/2026-08-23-typer-cli.md:12  historical  config apply
+docs/plans/2026-08-23-typer-cli.md:13  historical  config export
+docs/plans/2026-08-23-typer-cli.md:29  historical  config apply
+docs/plans/2026-08-23-typer-cli.md:33  historical  config export
+docs/plans/2026-08-23-typer-cli.md:36  historical  set-secret
+docs/plans/2026-08-23-typer-cli.md:56  historical  config schema
+docs/plans/2026-08-23-typer-cli.md:143  historical  config reload
+docs/plans/2026-08-23-typer-cli.md:143  historical  config add-device
+docs/plans/2026-08-23-typer-cli.md:144  historical  config bind-device
+docs/plans/2026-08-23-typer-cli.md:144  historical  config ota-url
+docs/plans/2026-08-23-typer-cli.md:145  historical  config set
+docs/plans/2026-08-23-typer-cli.md:145  historical  config set-secret
+docs/plans/2026-08-23-typer-cli.md:146  historical  config show device
 docs/plans/2026-08-23-typer-cli.md:244  historical  vinga-server config apply
+docs/plans/2026-08-23-typer-cli.md:289  historical  config export
+docs/plans/2026-08-23-typer-cli.md:291  historical  config export
+docs/plans/2026-08-23-typer-cli.md:303  historical  set-secret
+docs/plans/2026-08-23-typer-cli.md:308  historical  set-secret
+docs/plans/2026-08-23-typer-cli.md:311  historical  set-secret
+docs/plans/2026-08-23-typer-cli.md:320  historical  config cli-reference
 docs/plans/2026-08-23-typer-cli.md:373  historical  vinga config apply
+docs/plans/2026-08-23-typer-cli.md:586  historical  set-secret
+docs/plans/2026-08-23-typer-cli.md:590  historical  set-secret
 docs/plans/2026-08-24-cli-recut.md:19  historical  vinga-server config set provider llm
 docs/plans/2026-08-24-cli-recut.md:20  historical  vinga provider set llm local
+docs/plans/2026-08-24-cli-recut.md:73  historical  config bind-device
+docs/plans/2026-08-24-cli-recut.md:73  historical  config add-device
 docs/plans/2026-08-24-cli-recut.md:75  historical  vinga provider set
 docs/plans/2026-08-24-cli-recut.md:76  historical  vinga-server config provider set
+docs/plans/2026-08-24-cli-recut.md:214  historical  clear-default-agent
+docs/plans/2026-08-24-cli-recut.md:426  historical  set-secret
 docs/plans/2026-08-24-cli-recut.md:440  historical  vinga-server config cli-reference
+docs/plans/2026-08-24-cli-recut.md:521  historical  set-secret
+docs/plans/2026-08-24-cli-recut.md:546  historical  set-secret
+docs/plans/2026-08-24-cli-recut.md:547  historical  set-secret
+docs/plans/2026-08-24-cli-recut.md:548  historical  set-secret
+docs/plans/2026-08-24-cli-recut.md:555  historical  set-secret
+docs/plans/2026-08-24-cli-recut.md:1072  historical  set-secret
+docs/plans/2026-08-24-cli-recut.md:1327  historical  set-secret
+docs/plans/2026-08-24-cli-recut.md:1340  historical  set-secret
+docs/plans/2026-08-24-cli-recut.md:1344  historical  set-secret
+docs/plans/2026-08-24-cli-recut.md:1405  historical  config add-device
 docs/plans/2026-08-24-typed-provider-options-implementation.md:96  historical  vinga-server config schema provider asr
+docs/plans/2026-08-24-typed-provider-options-implementation.md:275  historical  config schema
+docs/plans/2026-08-24-typed-provider-options-implementation.md:464  historical  config schema provider tts elevenlabs
+docs/plans/2026-08-24-typed-provider-options.md:79  historical  config set
+docs/plans/2026-08-24-typed-provider-options.md:92  historical  config set provider
+docs/plans/2026-08-24-typed-provider-options.md:218  historical  config schema provider
+docs/plans/2026-08-24-typed-provider-options.md:304  historical  config schema
+docs/plans/2026-08-24-typed-provider-options.md:328  historical  config set provider
+docs/plans/2026-08-24-typed-provider-options.md:416  historical  config schema provider
+docs/plans/2026-08-24-typed-provider-options.md:421  historical  config schema provider
 docs/reference/api-openapi.json:5  generated  vinga schema provider
+docs/reference/api-openapi.json:4617  generated  config provider secret set
 docs/reference/api-openapi.json:4738  generated  vinga-server config agent preview
 docs/reference/api-openapi.json:4770  generated  vinga-server config agent preview
 docs/reference/api-openapi.json:4813  generated  vinga-server config status
 docs/reference/api-openapi.json:4837  generated  vinga-server config status
-docs/reference/cli.md:24  generated  vinga provider set llm local
-docs/reference/cli.md:25  generated  vinga-server config provider set llm local
-docs/reference/cli.md:46  generated  vinga config list
-docs/reference/cli.md:74  generated  config list
-docs/reference/cli.md:82  generated  vinga config list
-docs/reference/cli.md:95  generated  vinga-server config list
-docs/reference/cli.md:104  generated  vinga-server config list
-docs/reference/cli.md:107  generated  vinga-server config list
-docs/reference/cli.md:146  generated  vinga-server config list
-docs/reference/cli.md:155  generated  vinga-server config apply
-docs/reference/cli.md:211  generated  vinga-server config export
-docs/reference/cli.md:212  generated  vinga-server config agent export assistant
-docs/reference/cli.md:221  generated  vinga-server config apply
-docs/reference/cli.md:244  generated  vinga-server config apply
-docs/reference/cli.md:247  generated  vinga-server config provider secret set
-docs/reference/cli.md:250  generated  vinga-server config export
+docs/reference/cli.md:24  respell  vinga provider set llm local
+docs/reference/cli.md:25  respell  vinga-server config provider set llm local
+docs/reference/cli.md:46  respell  vinga config list
+docs/reference/cli.md:74  respell  config list
+docs/reference/cli.md:82  respell  vinga config list
+docs/reference/cli.md:95  respell  vinga-server config list
+docs/reference/cli.md:104  respell  vinga-server config list
+docs/reference/cli.md:107  respell  vinga-server config list
+docs/reference/cli.md:146  respell  vinga-server config list
+docs/reference/cli.md:155  respell  vinga-server config apply
+docs/reference/cli.md:211  respell  vinga-server config export
+docs/reference/cli.md:212  respell  vinga-server config agent export assistant
+docs/reference/cli.md:221  respell  vinga-server config apply
+docs/reference/cli.md:244  respell  vinga-server config apply
+docs/reference/cli.md:247  respell  vinga-server config provider secret set
+docs/reference/cli.md:250  respell  vinga-server config export
 docs/reference/cli.md:269  generated  vinga cli-reference
 docs/reference/cli.md:290  generated  vinga apply
 docs/reference/cli.md:291  generated  vinga apply
@@ -349,9 +706,11 @@ docs/reference/cli.md:1785  generated  vinga openapi
 docs/reference/cli.md:1793  generated  vinga cli-reference
 docs/reference/cli.md:1796  generated  vinga cli-reference
 docs/reference/domain-config.md:3  generated  vinga reference
+docs/reference/domain-config.md:22  generated  config export
 docs/reference/domain-config.md:75  generated  vinga reload
 docs/reference/domain-config.md:121  generated  vinga schema
 docs/reference/domain-config.md:139  generated  vinga provider set
+docs/reference/domain-config.md:145  generated  config provider secret set
 docs/reference/domain-config.md:152  generated  vinga schema provider
 docs/reference/domain-config.md:251  generated  vinga mcp-server set
 docs/reference/domain-config.md:265  generated  vinga-server config agent preview
@@ -375,11 +734,14 @@ docs/reference/events.md:1320  generated  vinga-server config ota-url
 docs/reference/events.md:1344  generated  vinga-server config ota-url prints
 docs/reference/events.md:1363  generated  vinga-server config ota-url
 docs/related-projects.md:122  respell  vinga provider
+docs/xiaozhi-notes.md:239  respell  config device pending claim
 spikes/2026-08-20-openapi-ts-client/README.md:24  historical  vinga-server config openapi
+spikes/2026-08-20-openapi-ts-client/hey-api/generated/types.gen.ts:797  generated  config set-secret
 spikes/2026-08-20-openapi-ts-client/hey-api/generated/types.gen.ts:883  generated  vinga-server config prompt
 spikes/2026-08-20-openapi-ts-client/hey-api/generated/types.gen.ts:911  generated  vinga-server config prompt
 spikes/2026-08-20-openapi-ts-client/hey-api/generated/types.gen.ts:963  generated  vinga-server config status
 spikes/2026-08-20-openapi-ts-client/hey-api/generated/types.gen.ts:978  generated  vinga-server config status
+spikes/2026-08-20-openapi-ts-client/openapi-typescript/generated/api.d.ts:1344  generated  config set-secret
 spikes/2026-08-20-openapi-ts-client/openapi-typescript/generated/api.d.ts:1426  generated  vinga-server config prompt
 spikes/2026-08-20-openapi-ts-client/openapi-typescript/generated/api.d.ts:1452  generated  vinga-server config prompt
 spikes/2026-08-20-openapi-ts-client/openapi-typescript/generated/api.d.ts:1499  generated  vinga-server config status
@@ -392,6 +754,7 @@ vinga-server/README.md:531  respell  vinga-server config mcp-server set home
 vinga-server/README.md:539  respell  vinga-server config mcp-server set weather
 vinga-server/README.md:572  respell  vinga-server config agent set kids
 vinga-server/README.md:583  respell  vinga-server config status
+vinga-server/README.md:598  respell  config status
 vinga-server/README.md:619  respell  vinga-server config mcp-server set home
 vinga-server/README.md:766  respell  vinga-server config agent preview house
 vinga-server/README.md:813  respell  vinga-server config prompt-fragment set household
@@ -405,14 +768,23 @@ vinga-server/README.md:923  respell  vinga-server config reload
 vinga-server/README.md:1195  respell  vinga-server config apply
 vinga-server/README.md:1196  respell  vinga-server config device bind
 vinga-server/README.md:1197  respell  vinga-server config list
+vinga-server/README.md:1212  respell  config device pending list
+vinga-server/README.md:1212  respell  config device pending claim
 vinga-server/README.md:1230  respell  vinga-server config reference
 vinga-server/README.md:1231  respell  vinga-server config schema
+vinga-server/README.md:1238  respell  config list
+vinga-server/README.md:1238  respell  config show
+vinga-server/README.md:1239  respell  config export
+vinga-server/README.md:1240  respell  config apply
 vinga-server/README.md:1262  respell  vinga-server config reload
 vinga-server/README.md:1327  respell  vinga-server config openapi
 vinga-server/README.md:1387  respell  vinga-server config agent preview
 vinga-server/README.md:1397  respell  config status
 vinga-server/README.md:1400  respell  vinga-server config reload
+vinga-server/README.md:1432  respell  config show
+vinga-server/README.md:1524  respell  config export
 vinga-server/README.md:1544  respell  vinga-server config provider secret set llm claude
+vinga-server/README.md:1555  respell  config show
 vinga-server/README.md:1688  respell  vinga-server config provider set llm local
 vinga-server/README.md:1756  respell  vinga-server config agent-defaults set
 vinga-server/README.md:1953  respell  vinga-server config status
@@ -429,6 +801,7 @@ vinga-server/README.md:2651  respell  vinga-server config reload
 vinga-server/config.deploy.example.sh:42  respell  vinga-server config reload
 vinga-server/config.deploy.example.sh:47  respell  vinga-server config apply
 vinga-server/config.deploy.example.yaml:57  respell  vinga-server config ota-url
+vinga-server/config.deploy.example.yaml:166  respell  config apply
 vinga-server/config.example.yaml:17  respell  vinga-server config apply
 vinga-server/config.example.yaml:18  respell  vinga-server config default-agent set assistant
 vinga-server/config.example.yaml:19  respell  vinga-server config list
@@ -437,13 +810,19 @@ vinga-server/config.example.yaml:24  respell  vinga-server config agent set sam
 vinga-server/config.example.yaml:25  respell  vinga-server config device bind
 vinga-server/config.example.yaml:33  respell  vinga-server config export
 vinga-server/config.example.yaml:135  respell  vinga-server config ota-url
+vinga-server/config.example.yaml:139  respell  config device pending list
+vinga-server/config.example.yaml:140  respell  config device pending claim
 vinga-server/config.example.yaml:189  respell  vinga-server config reload
 vinga-server/examples/README.md:8  respell  vinga-server config apply
 vinga-server/examples/README.md:22  respell  vinga-server config apply
 vinga-server/examples/README.md:23  respell  vinga-server config provider set llm claude
 vinga-server/examples/README.md:43  respell  vinga-server config schema
+vinga-server/examples/README.md:51  respell  config provider set
 vinga-server/examples/README.md:52  respell  vinga-server config schema provider
 vinga-server/examples/README.md:76  respell  vinga-server config provider secret set llm claude
+vinga-server/examples/README.md:81  respell  config show
+vinga-server/examples/README.md:108  respell  config device bind
+vinga-server/examples/README.md:108  respell  config default-agent set
 vinga-server/examples/agent-defaults.yaml:4  respell  vinga agent-defaults set
 vinga-server/examples/agent.yaml:5  respell  vinga agent set assistant
 vinga-server/examples/agent.yaml:54  respell  vinga agent preview
@@ -472,24 +851,40 @@ vinga-server/examples/tts-elevenlabs.yaml:5  respell  vinga provider set tts ele
 vinga-server/examples/tts-openai.yaml:8  respell  vinga provider set tts
 vinga-server/examples/tts-piper.yaml:3  respell  vinga provider set tts piper
 vinga-server/examples/vad-silero.yaml:5  respell  vinga provider set vad silero
+vinga-server/pyproject.toml:82  respell  config cli-reference
 vinga-server/src/vinga_server/config/api.py:407  respell  vinga-server config device pending list
 vinga-server/src/vinga_server/config/api.py:426  respell  vinga-server config list
 vinga-server/src/vinga_server/config/api.py:539  respell  vinga-server config reload
 vinga-server/src/vinga_server/config/api.py:540  respell  vinga-server config list
+vinga-server/src/vinga_server/config/cli.py:1767  respell  config list
+vinga-server/src/vinga_server/config/docgen.py:191  respell  config schema
+vinga-server/src/vinga_server/config/docgen.py:229  respell  config export
 vinga-server/src/vinga_server/config/docgen.py:353  respell  config show
+vinga-server/src/vinga_server/config/docgen.py:576  respell  config schema
+vinga-server/src/vinga_server/config/models.py:1121  respell  config provider secret set
 vinga-server/src/vinga_server/config/models.py:1355  respell  vinga-server config agent preview
 vinga-server/src/vinga_server/config/models.py:1512  respell  vinga-server config agent preview
 vinga-server/src/vinga_server/config/models.py:1613  respell  vinga-server config status
 vinga-server/src/vinga_server/config/models.py:1644  respell  vinga-server config status
+vinga-server/src/vinga_server/config/models.py:2200  respell  config schema
+vinga-server/src/vinga_server/config/responses.py:9  respell  config schema
+vinga-server/src/vinga_server/config/responses.py:9  respell  config reference
 vinga-server/src/vinga_server/config/secrets.py:9  respell  vinga-server config provider secret set
+vinga-server/src/vinga_server/config/secrets.py:54  respell  config show
+vinga-server/src/vinga_server/config/secrets.py:54  respell  config list
 vinga-server/src/vinga_server/config/store.py:581  respell  vinga-server config device show
+vinga-server/src/vinga_server/config/views.py:29  respell  config show
+vinga-server/src/vinga_server/config/views.py:115  respell  config show
 vinga-server/src/vinga_server/device/session.py:721  respell  config schema
 vinga-server/src/vinga_server/doctor.py:199  respell  vinga-server config ota-url
 vinga-server/src/vinga_server/doctor.py:207  respell  config ota-url
+vinga-server/src/vinga_server/events/catalog.py:958  respell  vinga-server config reload
 vinga-server/src/vinga_server/events/catalog.py:1664  respell  vinga-server config device pending claim
+vinga-server/src/vinga_server/events/catalog.py:1710  respell  vinga-server config reload
 vinga-server/src/vinga_server/events/catalog.py:1799  respell  vinga-server config device bind
 vinga-server/src/vinga_server/events/catalog.py:1935  respell  vinga-server config ota-url
-vinga-server/src/vinga_server/events/catalog.py:1964  respell  vinga-server config ota-url
+vinga-server/src/vinga_server/events/catalog.py:1964  respell  vinga-server config ota-url prints
+vinga-server/src/vinga_server/events/catalog.py:1980  respell  vinga-server config ota-url
 vinga-server/src/vinga_server/onboarding/__init__.py:30  respell  vinga-server config ota-url
 vinga-server/src/vinga_server/onboarding/keys.py:37  respell  vinga-server config ota-url
 vinga-server/src/vinga_server/onboarding/keys.py:105  respell  vinga-server config ota-url
@@ -499,6 +894,7 @@ vinga-server/src/vinga_server/onboarding/origin.py:253  respell  vinga-server co
 vinga-server/src/vinga_server/tools/mcp/manager.py:515  respell  vinga-server config status
 vinga-server/src/vinga_server/tools/mcp/manager.py:709  respell  vinga-server config status
 vinga-server/src/vinga_server/tools/publish.py:24  respell  vinga-server config status
+vinga-server/tests/integration/test_cli_live.py:543  respell  config apply
 vinga-server/tests/integration/test_cli_live.py:1278  respell  vinga-server config device pending list
 vinga-server/tests/smoke/seed-local-engines.sh:19  respell  vinga-server config provider set llm mock
 vinga-server/tests/smoke/seed-local-engines.sh:23  respell  vinga-server config provider set asr whisper
@@ -551,8 +947,39 @@ vinga-server/tests/unit/data/cli-respelling.txt:310  historical  vinga-server co
 vinga-server/tests/unit/data/cli-respelling.txt:316  historical  vinga-server config apply
 vinga-server/tests/unit/data/cli-respelling.txt:318  historical  vinga-server config apply
 vinga-server/tests/unit/test_api_openapi.py:37  respell  vinga-server config openapi
-vinga-server/tests/unit/test_command_spellings.py:331  respell  vinga-server config provider secret commands
+vinga-server/tests/unit/test_command_spellings.py:140  historical  bind-device
+vinga-server/tests/unit/test_command_spellings.py:152  historical  bind-device
+vinga-server/tests/unit/test_command_spellings.py:153  historical  set-secret
+vinga-server/tests/unit/test_command_spellings.py:196  historical  bind-device
+vinga-server/tests/unit/test_command_spellings.py:197  historical  set-secret
+vinga-server/tests/unit/test_command_spellings.py:217  historical  vinga set
+vinga-server/tests/unit/test_command_spellings.py:411  historical  vinga-server config provider secret commands
+vinga-server/tests/unit/test_command_spellings.py:443  historical  vinga provider frobnicate
+vinga-server/tests/unit/test_command_spellings.py:521  historical  vinga-server config set
+vinga-server/tests/unit/test_command_spellings.py:523  historical  vinga-server config set
+vinga-server/tests/unit/test_command_spellings.py:529  historical  config apply
+vinga-server/tests/unit/test_command_spellings.py:531  historical  config apply
+vinga-server/tests/unit/test_command_spellings.py:538  historical  bind-device
+vinga-server/tests/unit/test_command_spellings.py:568  historical  vinga-server config apply
+vinga-server/tests/unit/test_command_spellings.py:570  historical  vinga-server config apply
+vinga-server/tests/unit/test_command_spellings.py:572  historical  vinga-server config apply
+vinga-server/tests/unit/test_command_spellings.py:586  historical  vinga provider
+vinga-server/tests/unit/test_command_spellings.py:587  historical  vinga provider secret
+vinga-server/tests/unit/test_command_spellings.py:588  historical  vinga provider frobnicate
+vinga-server/tests/unit/test_command_spellings.py:589  historical  vinga provider secret frobnicate
+vinga-server/tests/unit/test_command_spellings.py:591  historical  vinga provider set llm local
+vinga-server/tests/unit/test_command_spellings.py:592  historical  vinga-server config device pending list
+vinga-server/tests/unit/test_command_spellings.py:593  historical  vinga device pending frobnicate
+vinga-server/tests/unit/test_command_spellings.py:602  historical  vinga provider frobnicate
+vinga-server/tests/unit/test_config_api_pending.py:348  respell  config list
+vinga-server/tests/unit/test_config_api_runtime.py:661  respell  config reload
+vinga-server/tests/unit/test_config_apply.py:4  respell  config apply
+vinga-server/tests/unit/test_config_cli_onboarding.py:1  respell  config ota-url
+vinga-server/tests/unit/test_config_cli_onboarding.py:114  respell  vinga-server config ota-url
+vinga-server/tests/unit/test_config_cli_rendering.py:409  respell  config reload
+vinga-server/tests/unit/test_config_cli_respelling.py:28  historical  set-secret
 vinga-server/tests/unit/test_config_cli_respelling.py:72  historical  config set agent-defaults
+vinga-server/tests/unit/test_config_cli_respelling.py:72  historical  config agent-defaults set
 vinga-server/tests/unit/test_config_cli_respelling.py:73  historical  config set agent
 vinga-server/tests/unit/test_config_cli_respelling.py:73  historical  config agent set
 vinga-server/tests/unit/test_config_cli_respelling.py:74  historical  config set provider
@@ -565,7 +992,16 @@ vinga-server/tests/unit/test_config_docgen.py:318  respell  vinga-server config 
 vinga-server/tests/unit/test_config_docgen.py:674  respell  vinga-server config cli-reference
 vinga-server/tests/unit/test_config_docgen.py:708  respell  vinga-server config cli-reference
 vinga-server/tests/unit/test_config_examples.py:51  respell  vinga provider set llm claude
+vinga-server/tests/unit/test_config_round_trip.py:433  respell  config export
+vinga-server/tests/unit/test_config_round_trip.py:434  respell  config apply
+vinga-server/tests/unit/test_device_bindings.py:199  respell  vinga-server config reload
+vinga-server/tests/unit/test_device_bindings.py:230  respell  vinga-server config reload
 vinga-server/tests/unit/test_docker_entrypoint.py:128  respell  config show provider llm claude
+vinga-server/tests/unit/test_event_docs.py:339  respell  vinga-server config reload
+vinga-server/tests/unit/test_mcp_status_reflection.py:16  respell  config status
 vinga-server/tests/unit/test_mcp_status_reflection.py:112  respell  vinga-server config status
 vinga-server/tests/unit/test_mcp_status_reflection.py:169  respell  vinga-server config agent preview assistant
+vinga-server/tests/unit/test_onboarding_banner.py:75  respell  vinga-server config ota-url
+vinga-server/tests/unit/test_server_event_pins.py:293  respell  vinga-server config ota-url
+vinga-server/tests/unit/test_tools_mcp.py:648  respell  config status
 vinga-server/tests/unit/test_tools_mcp.py:1101  respell  vinga-server config status
