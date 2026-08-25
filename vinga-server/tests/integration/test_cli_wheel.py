@@ -105,6 +105,8 @@ from tests.support.deployment import Live, check_in, serving
 from tests.support.tiers import SERVE_MODULES, declared, requirement_names
 from vinga_server.config import cli
 from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
+from vinga_server.ota import OTA_PATH
+from vinga_server.simulator import board
 
 PROJECT = Path(__file__).resolve().parents[2]
 
@@ -117,6 +119,10 @@ BOUND_MAC = "aa:bb:cc:dd:ee:ff"
 # The second board, which arrives the other way: by checking in and
 # showing a code.
 WAITING_MAC = "11:22:33:44:55:66"
+
+# And the one the simulated board presents, which is its own documented
+# default rather than a third address invented here.
+SIMULATED_MAC = board.DEFAULT_MAC
 
 # The deployment this lane configures, every provider a mock so the
 # running server can actually build what it is asked to reload.
@@ -520,7 +526,9 @@ def test_a_board_is_onboarded_by_the_code_on_its_screen(run, live: Live) -> None
     assert answered(run("default-agent", "set", "sam"), "default-agent set").startswith("wrote ")
     assert answered(run("default-agent", "clear"), "default-agent clear").startswith("wrote ")
 
-    code = str(check_in(live, WAITING_MAC)["activation"]["code"])
+    waiting = check_in(live, WAITING_MAC)
+    assert isinstance(waiting, board.Activating)
+    code = waiting.code
     assert code.isdigit()
 
     waiting = answered(run("device", "pending", "list"), "device pending list")
@@ -529,6 +537,41 @@ def test_a_board_is_onboarded_by_the_code_on_its_screen(run, live: Live) -> None
 
     claimed = run("device", "pending", "claim", code, "sam")
     assert answered(claimed, "device pending claim").startswith("wrote ")
+
+
+def test_a_simulated_board_checks_in_from_the_installed_wheel(run, live: Live) -> None:
+    """The one command of the grammar that reaches something other than
+    the configuration API, driven from the artifact.
+
+    Ungated, and that is the claim rather than an omission: the check-in
+    is httpx and pydantic and nothing else, so a bare `uvx --from git+...`
+    install gets the whole of it. A lane that only ran this from a
+    checkout would not have shown that.
+
+    The board is a MAC nothing else in this file uses, so it is unbound
+    and onboarding is on, which is the state that produces a code. What
+    is asserted about the code is that the deployment agrees there is
+    one: the same board is then in the pending listing the configuration
+    API answers, which is the two halves of this lane meeting.
+    """
+    url = f"{live.origin}{OTA_PATH}"
+    checked = answered(run("simulator", "check-in", url, "--mac", SIMULATED_MAC), "simulator")
+
+    assert "not claimed yet" in checked
+    [code] = [
+        line.removeprefix("activation code: ").strip()
+        for line in checked.splitlines()
+        if line.startswith("activation code: ")
+    ]
+    assert code.isdigit()
+    # Nothing about the address it was pointed at, which can be the
+    # deployment's own secret.
+    assert live.origin not in checked
+
+    listed = answered(run("device", "pending", "list"), "device pending list")
+    assert code in listed
+    assert SIMULATED_MAC in listed
+    assert board.BOARD_TYPE in listed
 
 
 # The writes that cannot be undone, driven against entries written to be

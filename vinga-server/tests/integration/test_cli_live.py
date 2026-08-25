@@ -88,6 +88,9 @@ from vinga_server.config.secrets import (
 )
 from vinga_server.config.store import APPLY_LIMIT, TOO_MANY_ENTRIES, ConfigStore
 from vinga_server.db import DATABASE_FILENAME, open_database
+from vinga_server.device_endpoint import SUPPLIED_ENDPOINT
+from vinga_server.ota import OTA_PATH
+from vinga_server.simulator import board
 
 # The variable a secret set's `--from-env` is pointed at. Not a real
 # credential, and shaped so a substring check for it cannot match by
@@ -382,6 +385,10 @@ KNOWN_MAC = "aa:bb:cc:dd:ee:ff"
 
 WAITING_MAC = "11:22:33:44:55:66"
 
+# And the board nobody owns, which presents its own documented default
+# rather than a third address invented here.
+SIMULATED_MAC = board.DEFAULT_MAC
+
 
 # The deployment this lane configures
 #
@@ -652,12 +659,13 @@ def test_a_board_is_onboarded_by_the_code_on_its_screen(
     """
     assert run("default-agent", "set", "sam") == 0
     assert capsys.readouterr().out.startswith("wrote ")
-    assert "activation" not in check_in(deployed, WAITING_MAC)
+    assert isinstance(check_in(deployed, WAITING_MAC), board.Unwelcome)
 
     assert run("default-agent", "clear") == 0
     assert capsys.readouterr().out.startswith("wrote ")
-    activation = check_in(deployed, WAITING_MAC)["activation"]
-    code = str(activation["code"])
+    waiting = check_in(deployed, WAITING_MAC)
+    assert isinstance(waiting, board.Activating)
+    code = waiting.code
     assert code.isdigit()
 
     assert run("device", "pending", "list") == 0
@@ -830,6 +838,120 @@ def test_the_running_server_is_read_after_a_reload(
     assert "sam" in summary
     assert "household" in summary
     assert SECRET not in summary
+
+
+# The board nobody owns, over the wire
+#
+# The one command of the grammar that reaches something other than the
+# configuration API. It is driven here for the same reason everything
+# else is: what it talks to is a real uvicorn, so the address policy, the
+# request boundary and the reading of a real reply all run for real.
+#
+# It sits after the reload because that is where the agent this
+# deployment names becomes one this server is serving, which is what
+# turns a claimed board into an admitted one rather than a bound board
+# waiting on a restart.
+
+# Planted in the QUERY of the address the command is given, which is the
+# other place a credential is written into a URL and the one the address
+# policy accepts rather than refusing. Distinct from the two sentinels
+# above, so a failure says which path leaked.
+URL_SECRET = "utok-5c8e13-never-a-real-credential"
+
+
+def test_a_simulated_board_checks_in_and_is_claimed_over_the_wire(
+    deployed: Live, capsys: pytest.CaptureFixture[str], watched: Watched
+) -> None:
+    """The whole device-side half against a running server, and the
+    credential nobody typed.
+
+    Three claims, and the third is the one a review would not think to
+    ask for. The unclaimed board reports the code the deployment agrees
+    it is showing, which is the two halves of this lane meeting. The
+    claim runs the four-step ceremony, and the fourth step is what mints
+    the token: the poll answers a status and only a check-in reply mints
+    anything, so the state this ends in is the SECOND reply's.
+
+    And that reply carries a real device token and a real websocket URL,
+    neither of which anybody typed and neither of which may reach a
+    surface. They are read here off the same board the command uses, so
+    what is asserted absent is the actual value the server issued rather
+    than a value this test invented.
+    """
+    url = f"{deployed.origin}{OTA_PATH}?token={URL_SECRET}"
+
+    assert run("simulator", "check-in", url, "--mac", SIMULATED_MAC) == 0
+    unclaimed = capsys.readouterr()
+    assert "not claimed yet" in unclaimed.out
+    [code] = [
+        line.removeprefix("activation code: ").strip()
+        for line in unclaimed.out.splitlines()
+        if line.startswith("activation code: ")
+    ]
+    assert code.isdigit()
+    # The deployment agrees there is a board waiting with that code, and
+    # it is the simulated one.
+    assert run("device", "pending", "list") == 0
+    listed = capsys.readouterr().out
+    assert code in listed
+    assert SIMULATED_MAC in listed
+    assert BOARD in listed
+
+    # The four-step ceremony, ending in the state the second check-in
+    # carried. The poll answers 200 at once here, because the claim binds
+    # the board to an agent this server is already serving.
+    assert run("simulator", "check-in", url, "--claim", "sam") == 0
+    admitted = capsys.readouterr()
+    assert "is admitted" in admitted.out
+    assert "protocol version" in admitted.out
+
+    # What the reply actually handed this board, read through the same
+    # board the command drives.
+    issued = check_in(deployed, SIMULATED_MAC)
+    assert isinstance(issued, board.Admitted)
+    assert issued.token
+    capsys.readouterr()
+
+    assert run("simulator", "check-in", url) == 0
+    reported = capsys.readouterr()
+    surfaces = {
+        "stdout": unclaimed.out + admitted.out + reported.out,
+        "stderr": unclaimed.err + admitted.err + reported.err,
+        "logs": watched.everything(),
+        # The fourth surface needs a refusal to exist at all, and these
+        # three commands all succeeded. So it is the same address given
+        # to a command this grammar will not take, which is refused after
+        # the URL has been read and before anything is sent.
+        "chain": chain_of(("simulator", "check-in", url, "--mac", "not-a-mac")),
+    }
+    # The three credentials of this issue, on all four surfaces: the URL
+    # an operator typed, the device token the reply minted, and the API
+    # secret the claim carried.
+    assert leaked(URL_SECRET, **surfaces) == []
+    assert leaked(issued.token, **surfaces) == []
+    assert leaked(SECRET, **surfaces) == []
+    # And the address that token would have been sent to, which is
+    # far-side text deciding where a credential goes.
+    assert leaked(issued.websocket, **surfaces) == []
+    # The stand-in is what every line named instead.
+    assert SUPPLIED_ENDPOINT in reported.out
+
+
+def test_the_device_half_needs_no_api_token_at_all(
+    deployed: Live, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two credentials kept distinct, asserted the only way that means
+    anything: with the operator-side one absent from the environment.
+
+    A command that read it would refuse naming the variable, so this
+    passing is the claim rather than an absence of evidence.
+    """
+    monkeypatch.delenv("VINGA_API_SECRET", raising=False)
+    url = f"{deployed.origin}{OTA_PATH}"
+
+    assert run("simulator", "check-in", url, "--mac", "02:00:00:00:00:09") == 0
+
+    assert "VINGA_API_SECRET" not in capsys.readouterr().err
 
 
 def test_the_documents_that_reach_nothing_render_in_the_same_environment(
@@ -1192,6 +1314,17 @@ REFUSALS: tuple[Refusal, ...] = (
         "domain configuration, which are " + ", ".join(DOMAIN_KEYS) + ". Something else "
         "was written, and it is not quoted back",
         True,
+    ),
+    # The one family whose refusals are about an address rather than
+    # about a configuration, so its row hands the command a URL with a
+    # credential-shaped segment in it and asserts the sentence quotes
+    # none of it.
+    Refusal(
+        ("simulator",),
+        ("simulator", "check-in", f"ftp://voice.example/x/{PLANTED}/"),
+        "the URL given to the simulator is not an http:// or https:// URL with a host. "
+        "It is not quoted back, since an OTA URL can be the deployment's own secret.",
+        False,
     ),
     Refusal(("status",), ("status", "extra"), USAGE, False),
     Refusal(("reload",), ("reload", "extra"), USAGE, False),

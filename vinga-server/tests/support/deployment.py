@@ -16,16 +16,21 @@ so it is the shape both lanes talk to.
 `check_in` is here for the same reason, and it is the one thing in
 either lane that is not a command: a code is minted by a board asking
 for one, and `device pending list` and `device pending claim` are about
-what an operator does with the number on its screen. A plain HTTP POST
-is the whole of what a board does to get there.
+what an operator does with the number on its screen.
+
+It used to be a hand-written POST, which was a second copy of the
+exchange `vinga simulator` now ships. Since #248 it drives the
+production board instead, so what a lane calls a device and what an
+operator can run are one structure. The other check-in helper,
+`tests/support/checkin.py`, stays where it is: its job is driving the
+route with hand-built and deliberately malformed bodies, which a
+production client would never send, and that is a different question.
 """
 
 import contextlib
-import json
 import threading
 import time
-import urllib.request
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -35,7 +40,9 @@ import uvicorn
 from vinga_server.app import create_app
 from vinga_server.config.boot import load_boot_config
 from vinga_server.config.models import API_MOUNT_PATH
+from vinga_server.device_endpoint import SUPPLIED_ENDPOINT, Endpoint
 from vinga_server.ota import OTA_PATH
+from vinga_server.simulator import board
 
 # The one variable a fileless boot needs: where the database goes. The
 # server half of the configuration is otherwise all defaults, which is
@@ -45,9 +52,11 @@ DATABASE_DIR_ENV = "VINGA_SERVER__DATABASE__DIR"
 
 CONFIG_ENV = "VINGA_CONFIG"
 
-BOARD = "waveshare-esp32-s3-touch-lcd-1.54"
-
-DEVICE_UUID = "6f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"
+# What a lane's board says it is, which is what the pending listing
+# shows. Read off the shipped simulator rather than written here: a
+# second spelling of it would be a listing assertion that passes while
+# the command prints something else.
+BOARD = board.BOARD_TYPE
 
 
 @dataclass(frozen=True)
@@ -117,38 +126,18 @@ def serving(directory: Path) -> Iterator[Live]:
         thread.join(timeout=30)
 
 
-def check_in(live: Live, mac: str) -> Mapping[str, object]:
-    """One board's OTA check-in, headers and all, the way
-    `test_ota_endpoint.py` makes one.
+def check_in(live: Live, mac: str) -> board.CheckIn:
+    """One board's OTA check-in, made by the board this repository ships.
 
     The only thing in either CLI lane that is not a command, and it is
-    here because two of the commands need a device: a code is minted by
-    a board asking for one, and `device pending list` and `device
-    pending claim` are about what an operator does with the number on
-    its screen. A plain HTTP POST is the whole of what a board does to
-    get there, so a lane can make one without hardware and without the
-    websocket simulator.
+    here because two of the commands need a device: a code is minted by a
+    board asking for one, and `device pending list` and `device pending
+    claim` are about what an operator does with the number on its screen.
+
+    It answers the closed four-state reading rather than a body, which is
+    the reading `vinga simulator check-in` prints: a lane asking "was
+    this board offered a code" asks the same question an operator does,
+    in the same words.
     """
-    request = urllib.request.Request(
-        f"{live.origin}{OTA_PATH}",
-        data=json.dumps(
-            {
-                "version": 2,
-                "mac_address": mac,
-                "uuid": DEVICE_UUID,
-                "application": {"name": "xiaozhi", "version": "2.4.0"},
-                "board": {"type": BOARD},
-            }
-        ).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Device-Id": mac,
-            "Client-Id": DEVICE_UUID,
-            "User-Agent": f"{BOARD}/2.4.0",
-            "Accept-Language": "en-US",
-        },
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=10) as response:
-        answer: Mapping[str, object] = json.loads(response.read())
-    return answer
+    endpoint = Endpoint.parsed(f"{live.origin}{OTA_PATH}", "the lane's OTA URL", SUPPLIED_ENDPOINT)
+    return board.check_in(endpoint, board.Identity.of(mac))
