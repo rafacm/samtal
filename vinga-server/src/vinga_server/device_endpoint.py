@@ -32,7 +32,11 @@ What this owns:
   all: the OTA endpoint is the token issuer, so it cannot require one.
   What does apply is the rest: a URL that cannot be read is refused, and
   a userinfo is refused rather than carried.
-- **The stand-in name** every verdict uses instead of the address.
+- **The stand-in name** every verdict uses instead of the address, and
+  the redaction that keeps far-side text from putting the address back:
+  `Endpoint.repeated` is the one door the few fields these commands DO
+  show go through, because an endpoint that reflects the request target
+  into an answer would otherwise publish the segment no sentence prints.
 - **The request lifecycle**: one request, no redirect followed, the
   request loggers held quiet around it, the client built inside the
   boundary, the close reported rather than raised, and every failure a
@@ -49,9 +53,10 @@ API's bearer token rides every request, and this one has to allow it.
 """
 
 import logging
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from urllib.parse import SplitResult, urlsplit, urlunsplit
+from urllib.parse import SplitResult, parse_qsl, urlsplit, urlunsplit
 
 import httpx
 
@@ -75,6 +80,31 @@ SUPPLIED_ENDPOINT = "the supplied OTA endpoint"
 # reason one step further out: it is far-side text that decides where a
 # device token would be sent, so it is validated and never shown.
 REPORTED_WEBSOCKET = "the websocket endpoint the reply named"
+
+# What stands in for a part of the supplied address wherever far-side
+# text hands one back.
+#
+# A refusal is a fixed sentence and prints nothing, so a supplied URL
+# reaches a surface by exactly one route: the few far-side fields these
+# commands exist to SHOW. An endpoint that reflects the request's own
+# path or query into one of them would publish, through this command's
+# stdout, the segment no sentence here will print. Reflection is what a
+# proxy, a captive portal and an error page all do by default, so this
+# is the ordinary case rather than an adversarial one.
+WITHHELD = "[withheld: part of the supplied address]"
+
+# How long a part of an address has to be before repeating it counts as
+# repeating the address.
+#
+# A secret is long because it is a secret: the documented `ota_path`
+# segment is a random word, and a credential in a query is longer still.
+# The parts under this bound are the ones a path is made of rather than
+# the one it hides (`/x/`, `/v1/`, `/ota/`), and matching those as
+# substrings would take a letter out of the middle of an ordinary word
+# and leave a stand-in where a code should be. The floor is here so that
+# what redaction costs is nothing, and what it buys is everything with
+# enough entropy to be worth buying.
+SECRET_PART_LENGTH = 4
 
 # What a waiting board appends to its OTA URL to poll.
 #
@@ -227,6 +257,53 @@ class Endpoint:
         path = f"{self.parts.path.rstrip('/')}/{ACTIVATION_SEGMENT}"
         composed = self.parts._replace(path=path)
         return Endpoint(given=urlunsplit(composed), parts=composed, shown=self.shown)
+
+    def secrets(self) -> tuple[str, ...]:
+        """Every part of this address that far-side text may not hand
+        back, longest first.
+
+        The path and the query, whole and in their parts, because both
+        spellings are reflected in the wild: a gateway echoes the request
+        target it did not recognize, and an application echoes one
+        parameter it read. Longest first so that a reflection of the
+        whole path is taken out as the whole path rather than segment by
+        segment, which would leave the slashes between the stand-ins.
+
+        The host is deliberately absent. It is not a secret in the way
+        the path is: the reply's own activation message carries the
+        deployment's origin, on purpose, because that is the line the
+        firmware draws on a screen for a person to type into a browser.
+        Redacting it would take the answer out of the answer.
+        """
+        parts = [
+            self.parts.path,
+            self.parts.query,
+            *self.parts.path.split("/"),
+            *(value for _, value in parse_qsl(self.parts.query, keep_blank_values=True)),
+        ]
+        held = {part for part in parts if len(part) >= SECRET_PART_LENGTH}
+        return tuple(sorted(held, key=len, reverse=True))
+
+    def repeated(self, value: str) -> str:
+        """Far-side text on its way to a surface: this address taken out
+        of it, then bounded and made printable.
+
+        One door, so that the two rules cannot be applied by halves. What
+        `printing.printable` governs is what a terminal would obey and
+        how much of it there may be; what this adds is the one value a
+        reflection can carry that neither of those would catch, since the
+        supplied address is perfectly printable and perfectly short.
+
+        Case-insensitively, because a host that lower-cases the target it
+        echoes is reflecting the address just as much as one that does
+        not, and this side gains nothing by only catching the careful
+        spelling.
+        """
+        secrets = self.secrets()
+        if not secrets:
+            return printable(value)
+        pattern = re.compile("|".join(re.escape(secret) for secret in secrets), re.IGNORECASE)
+        return printable(pattern.sub(WITHHELD, value))
 
 
 def requested(
@@ -461,7 +538,9 @@ __all__ = [
     "READ_TIMEOUT_S",
     "REPORTED_WEBSOCKET",
     "REQUEST_LOGGERS",
+    "SECRET_PART_LENGTH",
     "SUPPLIED_ENDPOINT",
+    "WITHHELD",
     "Endpoint",
     "build_client",
     "close_failed",
