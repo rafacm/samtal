@@ -18,6 +18,7 @@ from vinga_server.protocol.messages import (
     UnknownMessage,
     parse_message,
     server_hello,
+    stt_message,
     tts_message,
 )
 
@@ -168,3 +169,86 @@ def test_tts_messages_only_carry_text_when_there_is_some() -> None:
     assert start == {"session_id": "s", "type": "tts", "state": "start"}
     sentence = json.loads(tts_message("s", "sentence_start", text="Hej"))
     assert sentence["text"] == "Hej"
+
+
+# The three builders, transcribed byte for byte
+#
+# The pin that comes before the reshape. `protocol/messages.py` models
+# the device-to-server half and builds the server-to-device half by hand,
+# and #248 derives those builders from models of their own so the models
+# and the wire cannot come to disagree. What every device in the field
+# reads is the bytes, so what a derivation may not change is the bytes:
+# not the key order, not the separators, not the escaping of a character
+# outside ASCII.
+#
+# So this is a transcription rather than a description. Each string below
+# was read off the builders as they stood before the models arrived, and
+# the case asserts equality with the whole string rather than membership
+# of a parsed object, because a parse is exactly the comparison that
+# would not have noticed.
+
+HELLO_BYTES = (
+    '{"type": "hello", "transport": "websocket", "session_id": "abc123", '
+    '"audio_params": {"format": "opus", "sample_rate": 16000, "channels": 1, '
+    '"frame_duration": 60}}'
+)
+
+# The same builder with nothing left at a default, so the pin is about
+# the layout rather than about the defaults happening to line up.
+HELLO_BYTES_UNUSUAL = (
+    '{"type": "hello", "transport": "websocket", "session_id": "s", '
+    '"audio_params": {"format": "pcm", "sample_rate": 24000, "channels": 2, '
+    '"frame_duration": 20}}'
+)
+
+STT_BYTES = '{"session_id": "s", "type": "stt", "text": "hi"}'
+
+# A transcript is whatever was said, and what was said is not always
+# ASCII. `json.dumps` escapes it and a byte-preserving derivation has to
+# escape it the same way, which is the half of this pin a parsed
+# comparison could not hold.
+STT_BYTES_ESCAPED = '{"session_id": "s", "type": "stt", "text": "det \\u00e4r bra"}'
+
+TTS_START_BYTES = '{"session_id": "s", "type": "tts", "state": "start"}'
+
+TTS_STOP_BYTES = '{"session_id": "s", "type": "tts", "state": "stop"}'
+
+TTS_SENTENCE_BYTES = (
+    '{"session_id": "s", "type": "tts", "state": "sentence_start", "text": "Hej"}'
+)
+
+# The empty string is a sentence's text as much as any other string is,
+# and it is the one a builder that dropped falsy values would lose.
+TTS_EMPTY_SENTENCE_BYTES = (
+    '{"session_id": "s", "type": "tts", "state": "sentence_start", "text": ""}'
+)
+
+
+def test_the_server_hello_is_built_byte_for_byte_as_it_always_was() -> None:
+    assert server_hello("abc123", AudioParams()) == HELLO_BYTES
+
+    unusual = AudioParams(format="pcm", sample_rate=24000, channels=2, frame_duration=20)
+    assert server_hello("s", unusual) == HELLO_BYTES_UNUSUAL
+
+
+def test_the_transcript_is_built_byte_for_byte_as_it_always_was() -> None:
+    assert stt_message("s", "hi") == STT_BYTES
+    assert stt_message("s", "det är bra") == STT_BYTES_ESCAPED
+
+
+def test_every_tts_state_is_built_byte_for_byte_as_it_always_was() -> None:
+    assert tts_message("s", "start") == TTS_START_BYTES
+    assert tts_message("s", "stop") == TTS_STOP_BYTES
+    assert tts_message("s", "sentence_start", text="Hej") == TTS_SENTENCE_BYTES
+    assert tts_message("s", "sentence_start", text="") == TTS_EMPTY_SENTENCE_BYTES
+
+
+def test_a_text_nobody_gave_is_absent_rather_than_null() -> None:
+    """The one shape rule the transcriptions above imply and no single
+    string states: a `start` and a `stop` carry no `text` key at all,
+    rather than a key whose value is null. The firmware reads the field
+    where it expects one, and a null is not a string.
+    """
+    assert "text" not in json.loads(tts_message("s", "start"))
+    assert "text" not in json.loads(tts_message("s", "stop"))
+    assert json.loads(tts_message("s", "sentence_start", text=""))["text"] == ""
