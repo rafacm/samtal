@@ -1184,7 +1184,7 @@ suite runs against a real server, so its measured values are checked
 rather than merely written down.
 
 **The domain half lives in a database**, one SQLite file under
-`server.database.dir`, written with `vinga-server config`: named
+`server.database.dir`, written with the `vinga` CLI: named
 `providers` per stage (`llm`, `asr`, `tts`, `vad`), named `mcp_servers`,
 named `prompt_fragments` holding the blocks of prompt text agents share,
 `agent_defaults` holding what every agent uses unless it says otherwise,
@@ -1194,9 +1194,14 @@ unknown devices.
 
 The CLI writes it through the configuration API on the running server,
 so these commands need one to be up, and an empty database is a valid
-state for it to be up on. From inside the container the token and the
-loopback address are already in the environment; from outside, name the
-API with `--api-url` (or `VINGA_API_URL`) and carry the token yourself.
+state for it to be up on. `vinga` is that CLI installed as a tool of its
+own, which is the ordinary way in: install it on whichever machine
+administers this deployment, name the API in `VINGA_API_URL` and carry
+the token in `VINGA_API_SECRET`. The image ships the same client under
+the server's own entry point, so a shell inside a running container
+reaches it with the token and the loopback address already in its
+environment, which is the alternative for a deployment that does not
+route its API outward.
 [`../docs/reference/cli.md`](../docs/reference/cli.md) is the CLI's own
 page: installing it, reaching a server, rebuilding one, and every
 command's help.
@@ -1206,9 +1211,9 @@ command. [`examples/presets/`](examples/presets/) holds two of them, a
 deployment that reaches no vendor and the same thing on vendor APIs:
 
 ```bash
-vinga-server config apply -f examples/presets/cloud-stack.yaml
-vinga-server config device bind aa:bb:cc:dd:ee:ff assistant
-vinga-server config list
+vinga apply -f examples/presets/cloud-stack.yaml
+vinga device bind aa:bb:cc:dd:ee:ff assistant
+vinga list
 ```
 
 Applying orders the writes for you. A write whose references do not
@@ -2254,9 +2259,12 @@ docker build --build-arg VINGA_REVISION=$(git rev-parse --short HEAD) -t vinga-s
 The default image carries both local engines, so one seeded database
 serves a conversation. The server starts first, on whatever the database
 holds (nothing, the first time, which is a valid state to serve), and
-the domain half is written into it with the CLI inside the running
-container, where the API token and the loopback address are already in
-the environment.
+the domain half is written into it over the API it is already serving,
+with the `vinga` client on whichever machine administers this
+deployment. The image ships that same client under the server's own
+entry point, so a shell inside the running container is the alternative
+where the API is not routed outward: the token and the loopback address
+are already in its environment.
 
 **A configuration file is optional.** Every key of the server half has a
 default and every one of them is overridable with a `VINGA_`-prefixed
@@ -2273,10 +2281,8 @@ docker run -d --name vinga \
   -v vinga-data:/data \
   ghcr.io/rafacm/vinga-server:latest
 
-docker exec -i vinga vinga-server \
-  config provider set llm claude -f - < examples/llm-anthropic.yaml
-
-docker restart vinga
+vinga provider set llm claude -f examples/llm-anthropic.yaml
+vinga reload
 ```
 
 - `/config/config.yaml` is the server half, and mounting it is optional.
