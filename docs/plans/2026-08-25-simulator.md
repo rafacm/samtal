@@ -609,26 +609,29 @@ change of this shape has gone quiet before.
   documentation for what it changed, because the image publishes on its
   merge.
 
-### 9. One tension with a recorded decision, stated rather than resolved
+### 9. The API secret rides the environment, and that is now ruled
 
-The maintainer's decision reads: the operator-side convenience "rides
-the config API with the API secret passed as a flag or taken from the
-environment, the exact pattern the rest of the CLI uses."
+The recorded decision of 2026-08-24 reads: the operator-side convenience
+"rides the config API with the API secret passed as a flag or taken from
+the environment, the exact pattern the rest of the CLI uses."
 
-**The two halves of that sentence do not describe the same thing, and
-this plan implements the second.** The pattern the rest of the CLI uses
-is: the API address is a flag (`--api-url`), then an environment
-variable, then a derived default; the API secret is never a flag, it is
-read from the variable `server.api.secret_env` names. There is no
-`--api-secret` in this grammar and adding one is refused by the practice
-"a credential is never an argument", by clig 54, and by the reviewer
-checklist's question 7. Arguments land in shell history and in the
-process list, where a value cannot be taken back.
+**The two halves of that sentence do not describe the same thing.** The
+pattern the rest of the CLI uses is: the API address is a flag
+(`--api-url`), then an environment variable, then a derived default; the
+API secret is never a flag, it is read from the variable
+`server.api.secret_env` names. There is no `--api-secret` in this
+grammar and adding one is refused by the practice "a credential is never
+an argument", by clig 54, and by the reviewer checklist's question 7.
+Arguments land in shell history and in the process list, where a value
+cannot be taken back.
 
-So `--api-url` is a flag here, the secret is not, and the sentence's
-"flag" reading is not taken. It is recorded rather than quietly dropped:
-if the intent was literally a `--api-secret` flag, this is the decision
-to reopen, and reopening it means reopening the practice.
+The plan raised that as a tension and **the maintainer ruled on it on
+2026-08-25: the environment half is confirmed, and there is no
+`--api-secret` flag.** So `--api-url` is a flag here and the secret is
+not, by decision rather than by this plan's reading, and the question is
+closed rather than reopenable. It stays written down because a future
+command will meet the same sentence and should find the ruling beside
+it.
 
 ## Module layout after the change
 
@@ -815,3 +818,159 @@ to reopen, and reopening it means reopening the practice.
   `protocol/framing.py` with the stream reader that keeps the header
   layout in one place, and `config/cli.py`'s gate with its second
   caller rather than a copy of it.
+
+## Plan review round
+
+External review of commit `5d11d316`, 2026-08-25. Backend: codex CLI,
+model `gpt-5.6-sol`, read-only sandbox. Verdict as received: ready after
+the P1/P2 amendments. Twelve findings, four P1, seven P2, one P3. All
+twelve are adopted as prescribed; each amendment is its own commit with
+a resolution note under the finding, and where the maintainer chose
+between alternatives the choice is recorded with its reason.
+
+1. **P1: the device token is missing from the credential and no-leak
+   design.** Only the initial OTA POST is credentialless. Its response
+   issues a device bearer token (`ota/reply.py:273`) which the websocket
+   verifies against the MAC and the client id (`ws.py:103`). The plan
+   calls the device side credentialless throughout and names only the
+   API token in its sentinel inventory. It also proposes printing peer
+   close reasons, which are arbitrary far-side bytes. Treat the returned
+   device token as the second credential; define websocket URL
+   validation, userinfo refusal and a transport policy that at least
+   refuses an HTTPS-to-WS downgrade the way the doctor does; never print
+   the token or a raw close reason; contain websocket library exceptions
+   outside their handlers; and plant distinct four-surface sentinels for
+   the API token, the device token, the OTA URL, the returned websocket
+   URL and its userinfo, a malformed server hello, and the peer close
+   reason.
+
+2. **P1: M1 would publish capability help claiming M2 features already
+   work.** The supported table includes the websocket handshake, the
+   hello, listening, Opus, TTS and close handling, but M1 ships that
+   table with `check-in` alone and every merge is claimed releasable.
+   M1's table must classify only the shipped check-in surface as
+   supported and all conversation behavior as not yet available; M2
+   updates the same table atomically when `run` lands. `cli.md` and the
+   both-ways tests move in both milestones.
+
+3. **P1: the simulator has no reusable model for the messages it must
+   receive.** `protocol/messages.py` models device-to-server messages
+   only; the server-to-device half is raw JSON builder functions
+   (`messages.py:160`). Making `_MESSAGE_TYPES` public therefore leaves
+   `conversation.py` hand-rolling parsing and state strings for hello,
+   `stt`, `tts` and `mcp`. The type-level capability pin is also too
+   coarse: `listen` holds supported `start` and `stop` beside
+   unsupported `detect`, `auto` and `realtime`. And the plan says the
+   hello goes through `framing.wrap`, which is wrong: JSON controls are
+   websocket text frames and only audio is wrapped
+   (`session.py:406, 1130`). Add public immutable server-message models
+   and a safe parser, derive the builders and the inventories from them,
+   define the conversation's ordering state machine explicitly,
+   classify capabilities at state and mode granularity, and state the
+   text-versus-binary rule.
+
+4. **P1: the claimed activation path never obtains a usable token.** An
+   activating check-in has an empty token, and tokens are minted only by
+   a check-in response. The plan claims, polls `/activate` to 200, and
+   then opens the websocket, never naming the second check-in in
+   between; `xiaozhi-notes.md:223` records that activation loops back
+   through the whole OTA check. The proposed end-to-end case can miss
+   this entirely by starting from an already servable agent. After a 200
+   poll, repeat the check-in with the same MAC and client id, require
+   `Admitted`, and use that fresh URL and token; add an end-to-end
+   `run --claim` case that starts in `Activating`.
+
+5. **P2: `Endpoint(reached, shown)` is too shallow for the actual work.**
+   It is justified as a base for "a single POST", but activation POSTs
+   repeatedly to an appended path, and a supplied URL may carry a query
+   string, so a two-string type offers no safe rule for inserting
+   `/activate` before that query. The doctor's request boundary also
+   quiets the request loggers, catches construction, request and close
+   failures and strips exception context (`doctor.py:404`), and the plan
+   would leave the simulator to duplicate all of it. Deepen the shared
+   module to own parsed endpoint composition and the whole request
+   lifecycle, give it an activation-target operation, and test a secret
+   path plus a query against both requests with exact request targets
+   and every retained surface.
+
+6. **P2: a far-side `timeout_ms` is not a real bound.** The plan derives
+   the activation wait from the response's own `activation.timeout_ms`,
+   which is untrusted remote input and can be huge, negative, boolean or
+   malformed; the server constant is only the firmware's default echoed
+   back, and the firmware reads it nowhere (`unbound.py:31`). Validate
+   the field strictly and cap it with a documented local maximum: remote
+   input may shorten the wait and may never extend it past the CLI's own
+   ceiling. Test zero, negative, boolean, wrong-type and excessive
+   values, and the exact ten-poll cadence.
+
+7. **P2: the four-state reader is underspecified at malformed and
+   contradictory inputs.** The table defines only the normal
+   `activation`/token combinations and a 4xx. It says nothing about
+   redirects, 5xx, invalid JSON, missing or wrong-shaped websocket
+   fields, unsupported protocol versions, or an `activation` present
+   beside a non-empty token, and the tests drive real server responses
+   only, so nothing would catch truthiness used where the `is not None`
+   seam is required. Keep the four outcome states, define a strict
+   schema and a precedence for reaching them, state `activation is not
+   None` explicitly, route malformed, contradictory, redirect and
+   transport outcomes through fixed refusals outside the valid-response
+   set, pin an exit code per outcome, and add table-driven hostile
+   responses including `activation={}`.
+
+8. **P2: the acceptance tests cannot prove two advertised properties.**
+   The M2 case claims to prove the `Protocol-Version` handshake header,
+   which the server deliberately reads nothing from (`ws.py:89`), and
+   the capability table advertises redirect intolerance with no redirect
+   case anywhere in M1. Keep the real-server conversation test for
+   compatibility and add a controlled peer that captures every handshake
+   header and can return adversarial hello, TTS, binary and close
+   frames; add an endpoint answering 307 with a counted target and
+   assert one request, no redirect followed, no `Location` printed, and
+   only the fixed refusal.
+
+9. **P2: the new extra does not join the wheel's real metadata
+   inventories.** The plan names a third closure environment and grows
+   the command `GATED` set but omits `tests/support/tiers.py`, whose
+   `declared()` returns exactly the client and serve sets
+   (`tiers.py:57`), and the wheel's own metadata pins, which cover the
+   bare and serve requirement blocks alone (`test_cli_wheel.py:366`). A
+   declared `sim` extra missing from the wheel metadata would therefore
+   pass. Name the `tiers.py` changes, put `sim` in the tier inventory
+   with its import name pinned, assert the wheel's `sim` marker equals
+   the declaration both ways, assert the bare install excludes it,
+   assert the `[sim]` environment is exactly the locked client-plus-
+   websockets closure, and update the contributor and workflow comments
+   that describe only `[serve]`.
+
+10. **P2: the simulated board's persistent client identity is left
+    undecided.** The plan derives a stable MAC carefully and then says
+    only that `board.py` owns "the client id", with no rule and no
+    stability test, while the server signs and verifies the token
+    against both. Define a deterministic client id derived from the
+    normalized MAC under a fixed namespace, and test its stability
+    across invocations, its distinctness between two simulated MACs, and
+    its reuse across activation, re-check-in and the websocket
+    handshake.
+
+11. **P2: the committed audio asset still has an unresolved licensing
+    and wire-format fork.** The risk section leaves the source as either
+    a maintainer recording or a permissively licensed voice, to be
+    chosen during implementation, and never fixes the sentence, the
+    sample rate, the channel count, the frame duration, the packet
+    count or the provenance record. Choose the source before
+    implementation; record the exact sentence, the ownership and
+    licence, the 16 kHz mono and 60 ms contract, the creation
+    procedure, the packet count, the duration and a committed checksum;
+    and require the end-to-end server decoder test and the provenance
+    entry in the same M2 change.
+
+12. **P3: two module deletion-test arguments do not survive the
+    repository's own test.** `simulator/__init__.py` is described as
+    "what the grammar reaches", which is forwarding and has no
+    justification; the design guide rejects forwarding modules
+    explicitly. `conversation.py` is justified by saying an inlined
+    version would force a module-scope websocket import, which is false,
+    since an inlined function can import lazily too. Do not use
+    `__init__.py` as a re-export layer, have the grammar import concrete
+    modules directly, and keep `conversation.py` on the independent
+    state-machine responsibility it removes from `cli.py`.
