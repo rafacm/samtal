@@ -345,8 +345,12 @@ class Unwelcome:
     """It checked in and it may not speak.
 
     A state rather than a boolean's false half, because it is the one the
-    reply says nothing about: onboarding is off, or nothing resolves this
-    MAC and no default agent covers it.
+    reply says nothing about at all: it is `200 OK` with an empty token
+    and no activation section, which is what onboarding being off looks
+    like, and equally what a MAC bound to an agent this server has not
+    loaded looks like, and equally what a refused offer looks like. The
+    grammar's sentence names all three, because the reply names none of
+    them.
     """
 
 

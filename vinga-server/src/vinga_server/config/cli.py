@@ -51,7 +51,7 @@ import shlex
 import sys
 import textwrap
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from importlib import metadata
 from pathlib import Path
@@ -83,6 +83,7 @@ from typer._click.exceptions import (
 )
 from typer.core import TyperCommand, TyperGroup
 
+from vinga_server import device_endpoint
 from vinga_server.config import docgen, entities
 from vinga_server.config.loader import (
     CONFIG_ENV_VAR,
@@ -120,6 +121,15 @@ from vinga_server.config.responses import (
 )
 from vinga_server.config.transport import APPLY_LOCATION, check_transportable
 from vinga_server.logs import quieted
+
+# The simulator's two modules, imported by name rather than through the
+# package's `__init__`, which carries a docstring and no re-exports.
+# Both are client-tier pure: `board` reaches `device_endpoint`, the
+# models and `protocol`, and `capabilities` reaches `protocol.messages`.
+# The conversation half M2 adds is deliberately NOT reachable from here,
+# because it is the only module that imports `websockets` and the
+# extra's gate depends on that import happening inside `run`'s own arm.
+from vinga_server.simulator import board, capabilities
 
 # Where the API is, when nothing says otherwise: the loopback address of
 # this machine, on the port the server half of the configuration names,
@@ -510,6 +520,15 @@ class Invocation:
     # `stage` above: the two together name one type's options, since the
     # registry holds one type name in more than one stage.
     type_name: str = ""
+
+    # The address a simulated board checks in to. Its own field rather
+    # than `name` or `file`, because it is neither an identity nor a
+    # payload: it names the deployment, it is held to the device-facing
+    # transport policy rather than to the API's, and it is the one
+    # positional in this grammar that addresses no row of anything. The
+    # MAC and the agents that go with it are `mac` and `agents`, reused
+    # from the device verbs that already take them.
+    endpoint: str = ""
 
 
 # The commands that reach no API
@@ -2986,6 +3005,178 @@ APPLY = Act(
 )
 
 
+# The simulated board
+#
+# The one command here that stands where a device stands rather than
+# where an operator does. Everything it knows about the exchange is
+# `simulator.board`, and everything it knows about talking to a
+# device-facing address is `device_endpoint`; what is here is the
+# grammar's half, which is what is printed and which of the states is a
+# failure.
+#
+# Two credentials stay apart, and the seam is `--claim`. Without the
+# flag no API token is read and no API request is made: the device side
+# never touches the operator-side credential, which is what "kept
+# distinct" has to mean to be worth saying. With it, the claim is
+# `ADD_DEVICE`, the same act `device pending claim` performs, so there is
+# no second encoding of the claim and no new row in the contract check's
+# covered set.
+
+# Where the URL comes from, said on the help page, because there is
+# deliberately no derivation behind it. The resolution order the guide
+# asks for would end at `onboarding.origin`, which is the import that
+# gates `ota-url` on the server half, and inheriting that gate would make
+# this command refuse on the very install it exists for.
+ENDPOINT_HELP = (
+    f"the OTA URL to check in to: the address `{PROGRAM} ota-url` prints inside the "
+    f"image, or the one already written into a board's NVS"
+)
+
+MAC_HELP = (
+    f"the address this simulated board presents (default: {board.DEFAULT_MAC}, whose "
+    f"leading octet is the locally-administered bit; a second board is "
+    f"02:00:00:00:00:02)"
+)
+
+CLAIM_HELP = (
+    "bind this board to an agent through the configuration API and check in again to be "
+    "issued a token; repeat the option for several agents (default: print the code and "
+    "the command to run)"
+)
+
+# What is printed on stderr beside an activation code, which is the same
+# advice `ota-url` gives beside its URL: what to do next is a notice, and
+# stdout holds what the board was handed.
+CLAIM_GUIDANCE = (
+    f"This board is showing an activation code, the way a screen would. Bind it with "
+    f"`{PROGRAM} device pending claim <code> <agent>`, or run this command again with "
+    f"--claim <agent> to do both."
+)
+
+# What a claim needs and did not get. `--claim` is addressed by the six
+# digits a board is showing, so a board that was not offered a code has
+# nothing for the claim to address.
+NOTHING_TO_CLAIM = (
+    "--claim binds the board showing an activation code, and this check-in was not "
+    "offered one. A board that is already bound needs no claim, and a board this "
+    "deployment will not admit is not one a claim can help: run without --claim to see "
+    "which of the two it is."
+)
+
+# And what a ceremony that ran its course without being admitted says.
+# The claim went through, so this is the server not yet serving what the
+# binding names.
+NOT_ADMITTED_YET = (
+    f"this board was claimed, and the activation poll was still answering keep-waiting "
+    f"when the bound expired. A binding to an agent this server is not serving yet flips "
+    f"at the reload that installs it: run `{PROGRAM} reload`, and then this command "
+    f"again."
+)
+
+NOT_ADMITTED_AFTER_CLAIM = (
+    f"this board was claimed and the activation poll said it was activated, and the "
+    f"check-in after it did not hand this board a token. Nothing here can go on from "
+    f"that: read what the deployment says about the MAC with "
+    f"`{PROGRAM} device show <mac>`."
+)
+
+
+def _simulator_check_in(args: Invocation) -> None:
+    """Check in to an OTA URL as a board would, and say what it was told.
+
+    Three of the four states are a command that worked, because a
+    simulated board reporting the state it is in is the answer, and only
+    a reply this client will not read as one is a failure.
+    """
+    endpoint = device_endpoint.Endpoint.parsed(
+        args.endpoint, board.GIVEN_URL, device_endpoint.SUPPLIED_ENDPOINT
+    )
+    identity = board.Identity.of(args.mac)
+    state = board.check_in(endpoint, identity)
+    if args.agents:
+        state = _claimed(args, endpoint, identity, state)
+    _reported(state)
+
+
+def _claimed(
+    args: Invocation,
+    endpoint: "device_endpoint.Endpoint",
+    identity: board.Identity,
+    state: board.CheckIn,
+) -> board.CheckIn:
+    """The four-step ceremony a real board and an operator perform
+    between them.
+
+    Check in and read a code; claim it through the act the grammar
+    already has; poll where a waiting board polls; and check in AGAIN.
+    The fourth step is the one that makes the other three worth anything:
+    an activating check-in's token is empty and the poll route answers a
+    status, so the only thing that mints a token is a check-in reply. A
+    socket opened with the token from step one would be refused at the
+    handshake with no_token, which is the confusion
+    `docs/xiaozhi-notes.md` warns about from the other side.
+
+    The same MAC and the same client id cross all four requests, because
+    the token is signed for the two of them together.
+    """
+    if not isinstance(state, board.Activating):
+        if isinstance(state, board.Refused):
+            return state
+        raise ConfigError(NOTHING_TO_CLAIM)
+    _act(replace(args, code=state.code), ADD_DEVICE)
+    waited = board.polled(endpoint, identity, state.timeout_ms)
+    if isinstance(waited, board.Refused):
+        return waited
+    if isinstance(waited, board.StillWaiting):
+        raise ConfigError(NOT_ADMITTED_YET)
+    admitted = board.check_in(endpoint, identity)
+    if isinstance(admitted, board.Activating | board.Unwelcome):
+        raise ConfigError(NOT_ADMITTED_AFTER_CLAIM)
+    return admitted
+
+
+def _reported(state: board.CheckIn) -> None:
+    """What the board was handed, on stdout, and what to do about it on
+    stderr.
+
+    Everything read out of the reply is bounded and made printable
+    first: the code, the message and the challenge are the artifact this
+    command exists to show and they are still whatever that address
+    returned. The device token and the websocket URL are neither, and
+    are named by their stand-ins.
+    """
+    if isinstance(state, board.Refused):
+        raise ConfigError(state.problem)
+    if isinstance(state, board.Activating):
+        print(
+            f"{device_endpoint.SUPPLIED_ENDPOINT} answered, and this board is not "
+            f"claimed yet.\n"
+            f"activation code: {printable(state.code)}\n"
+            f"what a screen would show: {printable(state.message)}\n"
+            f"challenge: {printable(state.challenge)}"
+        )
+        sys.stdout.flush()
+        print(CLAIM_GUIDANCE, file=sys.stderr)
+        return
+    if isinstance(state, board.Admitted):
+        print(
+            f"{device_endpoint.SUPPLIED_ENDPOINT} answered, and this board is admitted.\n"
+            f"device token: issued, and its value is never printed\n"
+            f"websocket: {device_endpoint.REPORTED_WEBSOCKET}, which is not printed "
+            f"either: it is what a token would be sent to\n"
+            f"protocol version: {state.protocol_version}"
+        )
+        return
+    print(
+        f"{device_endpoint.SUPPLIED_ENDPOINT} answered, and this board may not speak.\n"
+        f"It was issued no token and offered no activation code, which is what three "
+        f"configurations look like from here: onboarding is turned off on that "
+        f"deployment and nothing resolves this MAC; or this MAC is bound to an agent "
+        f"that deployment is not serving yet, which `{PROGRAM} reload` installs; or the "
+        f"table of boards waiting to be claimed would not take another one."
+    )
+
+
 # The grammar
 #
 # One row per command: where it sits in the command tree, what it does,
@@ -3717,6 +3908,51 @@ def _bound_by_code(row: Command) -> Callable[..., None]:
     return run
 
 
+def _simulated_board(row: Command) -> Callable[..., None]:
+    """The simulator's verbs: one URL, and two options about the board
+    it pretends to be.
+
+    One positional and everything heterogeneous a flag, which is the
+    homogeneity rule. The URL is required rather than derived, and the
+    help says where to get one: deriving it would mean reading
+    `onboarding.origin`, which is the import that gates `ota-url` on the
+    server half, and a headline command that refused on a client install
+    would be the one thing this must not be.
+
+    `--config` and `--api-url` apply because `--claim` reaches the
+    configuration API. `--force` and `--no-input` are offered because
+    they are offered everywhere, and are inert here: neither verb
+    prompts and neither destroys.
+    """
+
+    def run(
+        context: typer.Context,
+        endpoint: Annotated[str, typer.Argument(metavar="URL", help=ENDPOINT_HELP)],
+        mac: Annotated[
+            str,
+            # The default is in the help sentence with the reason it was
+            # chosen, so Click's own copy of it would be the same string
+            # twice on one page.
+            typer.Option("--mac", metavar="MAC", help=MAC_HELP, show_default=False),
+        ] = board.DEFAULT_MAC,
+        claim: Annotated[
+            list[str] | None, typer.Option("--claim", metavar="AGENT", help=CLAIM_HELP)
+        ] = None,
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        force: ForceOption = None,
+        no_input: NoInputOption = None,
+    ) -> None:
+        row.perform(
+            _invocation(
+                row, context, config, api_url, force, no_input,
+                endpoint=endpoint, mac=mac, agents=_given(claim),
+            )
+        )
+
+    return run
+
+
 def _from_the_file_half(row: Command) -> Callable[..., None]:
     """The onboarding command, which takes `--config` and nothing else.
 
@@ -3829,6 +4065,12 @@ GROUPS: dict[tuple[str, ...], str] = {
     ("device",): "read and write devices.<mac>, which agents a board reaches",
     ("device", "pending"): "the boards waiting to be claimed, and claiming one",
     ("default-agent",): "the agent an unbound device reaches",
+    # A noun with verbs rather than two flat words, because it has a
+    # subject: the simulated board, which persists across invocations as
+    # its MAC and which more than one verb asks about. `simulate` and
+    # `check-in` side by side at the top level would be exactly the list
+    # of things-and-actions that noun first exists to remove.
+    ("simulator",): "a simulated board, checking in the way one with a screen would",
 }
 
 
@@ -4080,6 +4322,20 @@ COMMANDS: tuple[Command, ...] = (
     # reach no server and need no encryption key. Keep it that way: the
     # documentation lane runs `reference` and `openapi` from a plain
     # sync, with no database, no key and no token anywhere.
+    # The board nobody has to own. It reaches the OTA endpoint the way a
+    # device does, and reaches the configuration API only when --claim
+    # says so, which is why it takes both global options and why the
+    # device half works with neither of them set.
+    Command(
+        words=("simulator", "check-in"),
+        does=_simulator_check_in,
+        declare=_simulated_board,
+        help=(
+            "check in to an OTA URL as a board would, and say what a board at that "
+            "address would be handed"
+        ),
+        epilog=capabilities.epilog(docgen.HELP_WIDTH),
+    ),
     Command(
         words=("schema",),
         does=_schema,

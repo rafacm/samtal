@@ -518,6 +518,8 @@ Commands:
   ota-url          the URL to type into a device's captive portal; derived from
                    this configuration and the device-auth secret, and it
                    contacts nothing
+  simulator        a simulated board, checking in the way one with a screen
+                   would
   schema           the JSON Schema of one entity, or of the whole domain half
   reference        the markdown reference, generated from the models
   openapi          the configuration API's OpenAPI document, generated from its
@@ -1835,6 +1837,147 @@ Options:
   --config PATH  path to the YAML config file naming server.port and
                  server.api.secret_env (default: $VINGA_CONFIG)
   -h, --help     Show this message and exit.
+```
+
+### `vinga simulator`
+
+```
+Usage: vinga simulator [OPTIONS] COMMAND [ARGS]...
+
+  a simulated board, checking in the way one with a screen would
+
+Options:
+  -h, --help  Show this message and exit.
+
+Commands:
+  check-in  check in to an OTA URL as a board would, and say what a board at
+            that address would be handed
+```
+
+### `vinga simulator check-in`
+
+```
+Usage: vinga simulator check-in [OPTIONS] {URL}
+
+  check in to an OTA URL as a board would, and say what a board at that address
+  would be handed
+
+Arguments:
+  URL  the OTA URL to check in to: the address `vinga ota-url` prints inside the
+       image, or the one already written into a board's NVS  [required]
+
+Options:
+  --mac MAC      the address this simulated board presents (default:
+                 02:00:00:00:00:01, whose leading octet is the locally-
+                 administered bit; a second board is 02:00:00:00:00:02)
+  --claim AGENT  bind this board to an agent through the configuration API and
+                 check in again to be issued a token; repeat the option for
+                 several agents (default: print the code and the command to run)
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
+  -h, --help     Show this message and exit.
+
+What this simulator is and is not. Both directions, on this page, so that
+nobody debugs a deployment believing this is a board. Every line below is read
+out of one table, which is the same table the tests hold the command to.
+
+Supported:
+  - the check-in POST, with the two headers the handler reads and the body
+    shape the firmware sends
+  - the four states of the reply: activating, admitted, unwelcome, and a
+    refusal for anything else
+  - no redirect is followed, which is the firmware's own behavior and the
+    reason every device-facing route serves the slashless spelling directly
+  - the activation poll at Activation-Version 1, in the firmware's cadence of
+    ten polls three seconds apart, bounded
+  - claiming this board through the configuration API with --claim, and
+    checking in again afterwards to be issued a token
+
+Not supported, and not planned:
+  - a real microphone and speakers (they need PortAudio and a runtime encoder,
+    a push-to-talk loop has no non-interactive path at all, and no CI runner
+    has an audio device, so it would ship as a headline feature no lane could
+    drive)
+  - saying anything but the one packaged sentence (the audio is encoded once
+    at build time so that what this sends is byte-identical on a laptop and on
+    a runner; there is no codec in any tier to encode something else with)
+  - echo cancellation and barge-in (the board's own AEC quality is the number
+    the whole barge-in gate stack is built around and it is invisible from the
+    server, and a simulator with no playback has nothing to cancel)
+  - decoding or playing the reply audio (no codec ships in any tier, so what
+    is reported about reply audio is arithmetic over frames rather than sound)
+  - firmware update (the reply's firmware block is read and reported and never
+    fetched: there are no partitions here)
+  - MQTT and UDP (vinga implements the websocket transport and promises no
+    other, which is a bound of the compatibility promise itself)
+  - Activation-Version 2 and its HMAC (the key is burned into a device's
+    eFuses and only the vendor's cloud has a copy, which is equally true of
+    every consumer board)
+  - the display, the captive portal and NVS (this simulator is pointed at a
+    URL rather than provisioned into one, so there is nothing to draw on and
+    nothing to persist)
+  - sending listen (state=start, mode=auto) (the device owns the listening
+    mode, and auto re-arms itself after each tts stop, which is a second
+    turn-taking design rather than a flag)
+  - sending listen (state=start, mode=realtime) (realtime is the only mode
+    barge-in exists in, and barge-in is built around the board's own echo
+    cancellation, which a simulator with no playback has nothing to do)
+  - sending listen (state=start) (this simulator always names the mode it is
+    listening in, so a listen carrying no mode is one it does not send)
+  - sending listen (state=stop, mode=auto) (the device owns the listening
+    mode, and auto re-arms itself after each tts stop, which is a second
+    turn-taking design rather than a flag)
+  - sending listen (state=stop, mode=realtime) (realtime is the only mode
+    barge-in exists in, and barge-in is built around the board's own echo
+    cancellation, which a simulator with no playback has nothing to do)
+  - sending listen (state=stop) (this simulator always names the mode it is
+    listening in, so a listen carrying no mode is one it does not send)
+  - sending listen (state=detect, mode=auto) (the wake word is decided on the
+    chip: ESP-SR runs there, the server takes no part in it, and a simulator
+    has no microphone to have heard one with)
+  - sending listen (state=detect, mode=manual) (the wake word is decided on
+    the chip: ESP-SR runs there, the server takes no part in it, and a
+    simulator has no microphone to have heard one with)
+  - sending listen (state=detect, mode=realtime) (the wake word is decided on
+    the chip: ESP-SR runs there, the server takes no part in it, and a
+    simulator has no microphone to have heard one with)
+  - sending listen (state=detect) (the wake word is decided on the chip:
+    ESP-SR runs there, the server takes no part in it, and a simulator has no
+    microphone to have heard one with)
+  - sending abort (abort is what a PWR press sends mid-reply, and there is no
+    interactive path here to press anything from)
+  - sending mcp (the hello omits features.mcp, so this board publishes no
+    tools of its own: a simulated board has no volume, no screen and no
+    battery to act on)
+  - reading mcp (the server sends no mcp envelopes to a board whose hello
+    omitted features.mcp, so there is nothing here to read)
+
+Not available yet:
+  - the websocket handshake with its Authorization, Device-Id, Client-Id and
+    Protocol-Version headers (comes with simulator run)
+  - the hello exchange, announcing whichever framing version the check-in
+    reply named, as a websocket text frame (comes with simulator run)
+  - one packaged utterance of Opus, sent under the negotiated framing (comes
+    with simulator run)
+  - binary reply frames, counted, size-checked and unwrapped, with the reply's
+    duration computed from the frame count (comes with simulator run)
+  - the close, reported by its code compared against the closed set this side
+    knows and named in this side's own words (comes with simulator run)
+  - sending hello (comes with simulator run)
+  - sending listen (state=start, mode=manual) (comes with simulator run)
+  - sending listen (state=stop, mode=manual) (comes with simulator run)
+  - reading hello (comes with simulator run)
+  - reading stt (comes with simulator run)
+  - reading tts (state=start) (comes with simulator run)
+  - reading tts (state=stop) (comes with simulator run)
+  - reading tts (state=sentence_start) (comes with simulator run)
 ```
 
 ### `vinga schema`
