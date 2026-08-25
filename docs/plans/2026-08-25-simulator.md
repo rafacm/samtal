@@ -404,10 +404,33 @@ ten, three seconds apart, with `Activation-Version: 1` and a body of
 `{}`, which is what a consumer board with no eFuse serial number sends
 and what upstream's manager-api reads nothing of. The server answers 202
 until the MAC resolves to a servable agent and 200 once it does
-(`ota/poll.py:41-101`). `run` reproduces that cadence, bounded by the
-server's own `activation.timeout_ms` (30 000 ms,
-`onboarding/unbound.py:38`) rather than by a number invented here, and
-reports which of the two answers it got.
+(`ota/poll.py:41-101`). `run` reproduces that cadence, bounded per
+decision 6, and reports which of the two answers it got.
+
+**A 200 from the poll is not a token, and the ceremony has a fourth
+step the first draft skipped.** An activating check-in's token is empty,
+and **the only thing that mints a token is a check-in reply**: the poll
+route answers a status and nothing else. So `run --claim` is four steps,
+not three, and the fourth is the one that makes the other three worth
+anything:
+
+1. check in, and read `Activating`;
+2. claim, through the existing act;
+3. poll `/activate` until 200 or the bound;
+4. **check in again, with the same MAC and the same client id**, and
+   require `Admitted`. The websocket URL and the token used to open the
+   socket are that second reply's, never the first's, which carried
+   neither.
+
+That is what the firmware does, and the notes say so:
+`Application::CheckNewVersion` polls in bursts and then "re-runs the
+whole OTA check and re-displays whatever code the fresh response
+carries" (`docs/xiaozhi-notes.md:223`). A simulator that opened a socket
+with the empty token from step 1 would be refused at the handshake with
+`no_token`, which is the exact confusion the notes warn about from the
+other side. The same client id across all four steps is load-bearing,
+because the token is signed for the MAC and the client id together
+(decision 10a).
 
 ### 4. The check-in's answer is a closed set of four states
 
@@ -885,6 +908,17 @@ it.
   handshake, the hello at the negotiated framing version, the utterance,
   an `stt`, `tts` start, `sentence_start` and stop, reply frames that
   unwrap, and a clean close.
+- **`run --claim` from `Activating`, end to end, and it starts there
+  deliberately.** The harness's board is unbound and no default agent
+  covers it, so the run traverses all four steps of decision 3: the
+  first check-in reporting a code and an empty token, the claim, the
+  poll answering 202 and then 200, the SECOND check-in returning
+  `Admitted` with a token the first reply did not carry, and only then
+  the handshake and the reply. Held to going red by removing the
+  re-check-in, which turns the handshake into a `no_token` refusal. A
+  case that started from an already servable agent would pass with the
+  bug in place, which is why the starting state is part of the
+  assertion.
 - The three existing builders proven byte-identical after being derived
   from the new models, by a case that transcribes their current output
   first, which is the pin-before-reshape discipline applied to the one
@@ -1116,6 +1150,21 @@ between alternatives the choice is recorded with its reason.
    poll, repeat the check-in with the same MAC and client id, require
    `Admitted`, and use that fresh URL and token; add an end-to-end
    `run --claim` case that starts in `Activating`.
+
+   *Resolution* (this commit): adopted as prescribed. Decision 3's
+   activation paragraph gains the step it was missing and states the
+   fact that makes it necessary: the poll route answers a status, and
+   the only thing that mints a token is a check-in reply, so
+   `run --claim` is four steps and the fourth is a second check-in with
+   the same MAC and the same client id, required to return `Admitted`,
+   whose URL and token are the ones the socket is opened with. The
+   firmware's own loop is cited from `xiaozhi-notes.md:223`, and the
+   failure a missing fourth step produces is named: a handshake refused
+   with `no_token`, which is the confusion the notes warn about from the
+   other side. M2's test list gains the end-to-end `run --claim` case,
+   starting from `Activating` deliberately, held to going red by
+   removing the re-check-in, with the note that a case starting from an
+   already servable agent would pass with the bug in place.
 
 5. **P2: `Endpoint(reached, shown)` is too shallow for the actual work.**
    It is justified as a base for "a single POST", but activation POSTs
