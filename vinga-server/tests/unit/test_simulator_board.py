@@ -36,7 +36,7 @@ from vinga_server.config.models import NOT_A_MAC
 from vinga_server.config.store import ALREADY_BOUND, ConfigStore
 from vinga_server.db import open_database
 from vinga_server.device_endpoint import SUPPLIED_ENDPOINT
-from vinga_server.simulator import board
+from vinga_server.simulator import board, utterance
 
 # The path segment in front of an OTA endpoint is the whole protection a
 # deployment with onboarding turned off has, and the query string is the
@@ -1027,3 +1027,29 @@ def test_the_conversation_verb_reads_no_api_token_without_a_claim(
     said = capsys.readouterr().err
     assert API_SECRET_ENV not in said
     assert said.strip().startswith("cannot open a conversation with ")
+
+
+def test_an_installation_with_nothing_to_say_sends_nothing_at_all(
+    run, far_side, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The packaged utterance is a fact about the INSTALLATION, so it is
+    settled where the extra's gate is settled: before anything is typed
+    is read, and long before anything is sent.
+
+    It used to be read after the check-in and after `--claim`, which
+    meant a build that could not speak still rebound the device and sat
+    through the activation ceremony to find that out. A command that
+    cannot do the thing it was asked for may not change the
+    configuration on its way to saying so.
+
+    Bite: with the read back below `_claimed`, the endpoint records four
+    requests instead of none and the board is bound to `sam` before the
+    refusal is printed.
+    """
+    monkeypatch.setattr(utterance, "ASSET", "utterance.that-was-never-built")
+    endpoint = far_side(answering(body=activating()))
+
+    assert run("simulator", "run", URL, "--claim", "sam") == 1
+
+    assert capsys.readouterr().err.strip() == utterance.NO_UTTERANCE
+    assert endpoint.requests == [], "a command with nothing to say reached the network anyway"

@@ -3204,13 +3204,20 @@ def _simulator_run(args: Invocation) -> None:
     --claim. The token and the websocket address this opens with are the
     LAST check-in reply's, which is the only thing that mints either.
 
-    The gate comes FIRST, before any request goes out. An installation
-    without the extra can never hold a conversation whatever the address
-    answers, so making it check in, claim a board and sit through an
-    activation poll to be told it needs a websocket client would be the
-    wrong answer arrived at slowly.
+    Everything this command needs of its own INSTALLATION is settled
+    before anything about the arguments, and both are settled before
+    anything reaches the network. The extra is the first of those and the
+    packaged utterance is the second: a board with nothing to say cannot
+    hold a conversation whatever the address answers, and finding that
+    out after a check-in, a claim and an activation poll would mean a
+    command that could not speak had already rebound a device and spent
+    a ceremony to say so.
+
+    So the order is: what is installed, then what was typed, then what
+    the network says.
     """
     held = _from_an_installed_half(_the_conversation_half, NEEDS_THE_SIM_EXTRA)
+    said = utterance.packaged()
     endpoint = device_endpoint.Endpoint.parsed(
         args.endpoint, board.GIVEN_URL, device_endpoint.SUPPLIED_ENDPOINT
     )
@@ -3222,7 +3229,6 @@ def _simulator_run(args: Invocation) -> None:
         raise ConfigError(state.problem)
     if not isinstance(state, board.Admitted):
         raise ConfigError(CANNOT_CONVERSE)
-    said = utterance.packaged()
     print(
         f"{device_endpoint.SUPPLIED_ENDPOINT} admitted this board, and the conversation is "
         f"open on {device_endpoint.REPORTED_WEBSOCKET}, which is not printed.\n"
