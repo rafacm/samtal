@@ -61,6 +61,40 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **User-facing documentation leads with the standalone CLI** (#304).
+  The root README's Getting Started drove every configuration step
+  through a shell function that exec'd into the container
+  (`vinga() { docker exec -i vinga vinga-server "$@"; }`), so a reader
+  came away believing vinga is administered by getting a shell inside
+  it, while the API-speaking client #223 shipped appeared only in the
+  simulator's one `uvx` line. It is now seven steps, each one action:
+  start the container, install the client with
+  `uv tool install "git+https://github.com/rafacm/vinga#subdirectory=vinga-server"`
+  and point `VINGA_API_URL` and `VINGA_API_SECRET` at the deployment,
+  apply the committed preset fetched from the repository, flash, get the
+  OTA URL, provision, talk. The prose the section was carrying a level
+  down (the `__` delimiter shape, the YAML mount, the image tag policy,
+  the `apply` transaction semantics) is now a link to the section of
+  `vinga-server/README.md` that already owns each fact. One step stays a
+  `docker exec`, and says why: `ota-url` derives its URL from the file
+  half and the device-auth secret, which live with the server.
+- **The docker shim is the advanced door, not the first one** (#304).
+  `docs/reference/cli.md` presented it first of three; the order is now
+  the workstation client, a checkout, and the image, and the client door
+  names `uv tool install` alongside the one-off `uvx`. The shim keeps
+  its place and gains the fact that makes it advanced rather than
+  deprecated: it is the same client making the same requests, running
+  where the token already is, so nothing about it goes around the API.
+  `vinga-server/README.md` moves the same stance into Configuration and
+  Running in a container, whose blocks now read as the recipes generated
+  from the example fragments do.
+- **`docs/README.md` navigates by intent** (#304): start here,
+  reference, device guides, architecture, research notes, and the
+  record, with the user-facing versus working-notes distinction stated
+  up front. Five reference pages that were missing from the index are on
+  it (the CLI, the domain configuration, the API contract, the events,
+  the conversation store schema), as are the CLI guide, the
+  observability surfaces and the pipeline ownership inventory.
 - **The image workflow's Docker actions moved to their Node 24 majors**:
   `build-push-action` v6 to v7, `login-action` v3 to v4,
   `metadata-action` v5 to v6, `setup-buildx-action` and
