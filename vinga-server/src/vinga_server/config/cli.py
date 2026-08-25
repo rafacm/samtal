@@ -29,7 +29,9 @@ is ordinary SQLite tooling and not this grammar's business.
 One command stands outside all of this, because onboarding a board
 happens before there is anything to configure. `ota-url` derives the
 string a person types into a captive portal from the file half and the
-environment, and contacts nothing whatsoever. What answers on that URL
+environment, and contacts nothing whatsoever. It is one of the two
+commands here that need the server half installed, `openapi` being the
+other; both answer one fixed sentence when it is not. What answers on that URL
 is a question for `vinga-server doctor`, which since #244 is a command
 of its own: diagnosing an endpoint is not a configuration concern, and
 what the two share is where the URL comes from, which is
@@ -109,16 +111,6 @@ from vinga_server.config.responses import (
 )
 from vinga_server.config.transport import APPLY_LOCATION, check_transportable
 from vinga_server.logs import quieted
-
-# Imported like anything else since issue #143 split the onboarding
-# package. The derivation reads the configuration models, the key
-# module beside it and the standard library, and it is the one thing
-# this module wants from that package: a second implementation of it is
-# the one mistake that could send an operator to a URL this server does
-# not serve. It was deferred until #143, because the module that held
-# it also held a router over the OTA handlers and so pulled in a whole
-# conversation's worth of machinery.
-from vinga_server.onboarding.origin import onboarding_url
 
 # Where the API is, when nothing says otherwise: the loopback address of
 # this machine, on the port the server half of the configuration names,
@@ -285,6 +277,26 @@ OTA_URL_GUIDANCE = (
 # goes into is `origin.ONBOARDING_OFF`, which is the derivation's own,
 # and the fix is the asking command's.
 ONBOARDING_OFF_FOR_URL = "Turn onboarding on for a URL short enough to type."
+
+
+# What `openapi` and `ota-url` answer on an installation that carries
+# the configuration client alone.
+#
+# One sentence for the pair, because what it says is one fact: this
+# command needs the server half. Two sentences for one fact would be the
+# duplication the design guide names, and neither command can say
+# anything more useful than the other.
+#
+# A fixed constant carrying no invocation value, like every sentence
+# this grammar prints. It is reached with an ImportError in hand, whose
+# text is a module path, and the command that reached it may have been
+# given a file path; neither is repeated. The two doors are named
+# instead, because the answer is always one of them.
+NEEDS_THE_SERVER_HALF = (
+    "this command needs the server half installed, and this installation carries the "
+    "configuration client alone. Run it inside the container image, or from a "
+    "checkout, where the whole server is present"
+)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -520,6 +532,52 @@ class Invocation:
 # without opening a database, reaching a server or needing a key.
 
 
+def _from_the_server_half[T](answered: Callable[[], T]) -> T:
+    """One command's answer, or the fixed sentence when the server half
+    is not installed.
+
+    The gate for the two commands that read a server-side module. They
+    are the only two: everything else in this grammar is either a
+    request, which needs no such module, or a render off the models,
+    which are the client half.
+
+    Recorded inside the handler and raised outside it, the way every
+    boundary in this module raises. An ImportError's text is the module
+    path it could not find, and an exception raised while one is being
+    handled carries it as `__context__` for anything walking the chain;
+    raising after the handler leaves neither a cause nor a context.
+
+    Only ImportError is caught, and only around the call: a
+    `ConfigError` out of the derivation itself is this grammar's own
+    refusal and travels as one.
+    """
+    answers: list[T] = []
+    try:
+        answers.append(answered())
+    except ImportError:
+        pass
+    if not answers:
+        raise ConfigError(NEEDS_THE_SERVER_HALF)
+    return answers[0]
+
+
+def _derived_ota_url(config: ServerConfig) -> tuple[str, object]:
+    """The onboarding derivation, imported where it is used.
+
+    Not at the top of this module, and it is the one import here that is
+    deferred for weight rather than for a cycle. `onboarding/origin.py`
+    imports `.keys`, which imports FastAPI, and naming either submodule
+    runs the package's own `__init__`, which imports the aggregate; so
+    the derivation is the server half however little of it this command
+    wants. Extracting a FastAPI-free half of that package is a second
+    responsibility and #287's, and until then this command is gated
+    rather than thinned (the plan's decision 9 records why).
+    """
+    from vinga_server.onboarding.origin import onboarding_url
+
+    return onboarding_url(config, ONBOARDING_OFF_FOR_URL)
+
+
 def _ota_url(args: Invocation) -> None:
     """The URL to type into a board's captive portal.
 
@@ -531,11 +589,18 @@ def _ota_url(args: Invocation) -> None:
     the functions the server itself calls, so what it prints is what
     that server answers on rather than a second opinion about it.
 
+    It does need those functions to be installed, which is what makes it
+    one of the two gated commands: it is a server-host command by
+    nature, since the file half it reads is the one a laptop does not
+    have. The laptop-side question it is confused with, whether that URL
+    answers, is `vinga-server doctor`'s since #244.
+
     The URL goes to stdout alone, so it can be captured; what to do with
     it, and where its origin came from, go to stderr the way every
     other notice does.
     """
-    url, origin = onboarding_url(_server_config(args), ONBOARDING_OFF_FOR_URL)
+    config = _server_config(args)
+    url, origin = _from_the_server_half(lambda: _derived_ota_url(config))
     print(url)
     sys.stdout.flush()
     print(OTA_URL_GUIDANCE, file=sys.stderr)
@@ -561,8 +626,13 @@ def _openapi(args: Invocation) -> None:
     """The configuration API's OpenAPI document, the other artifact CI
     diffs its committed copy against. Rendered from the routes, so it
     opens no database and needs no token: the application is built, its
-    document is taken, and nothing of it is served."""
-    print(docgen.openapi(), end="")
+    document is taken, and nothing of it is served.
+
+    The routes are the server half, so this is the second of the two
+    gated commands. What it renders is committed at
+    `docs/reference/api-openapi.json`, which is where a client-only
+    installation reads the contract instead."""
+    print(_from_the_server_half(docgen.openapi), end="")
 
 
 def _cli_reference(args: Invocation) -> None:

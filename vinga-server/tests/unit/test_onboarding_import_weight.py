@@ -17,10 +17,12 @@ loads an audio codec) is not what anybody is testing at the time.
 
 In a subprocess, because the assertion is about what an import pulls in
 and this suite's own `sys.modules` has the whole server in it already.
-Three cases: the package itself, the CLI that reads it, and the
-configuration API's `document()` render, which is the one the two
-imports would not catch, since building the application evaluates route
-handlers and response models a bare import never touches.
+Three cases: the package itself, the CLI that reached it (and now
+reaches it only inside one command's arm, which the case below states
+as the stronger claim it became), and the configuration API's
+`document()` render, which is the one the two imports would not catch,
+since building the application evaluates route handlers and response
+models a bare import never touches.
 
 Deliberately NOT asserted here: SQLAlchemy, which IS loaded.
 `onboarding.unbound` imports `device.bindings` for the resolution type it
@@ -90,13 +92,26 @@ def test_importing_onboarding_loads_no_conversation() -> None:
     assert not loaded & frozenset(FORBIDDEN)
 
 
-def test_the_configuration_cli_loads_no_conversation_either() -> None:
-    """The reader the deferrals existed for, held to the same bound: it
-    imports the package's submodules at module scope now, so an edge
-    added inside the package would land here too."""
+def test_the_configuration_cli_loads_none_of_this_package() -> None:
+    """The reader the deferrals existed for, which has stopped being a
+    reader at module scope.
+
+    The split let this module import `onboarding.origin` like anything
+    else, and the dependency tiering took that back: `origin.py` imports
+    `.keys`, which imports FastAPI, and naming either submodule runs the
+    package's own `__init__`. So the whole package is the server half
+    however little of it `ota-url` wants, the derivation is imported
+    inside that one command's arm, and the command is gated.
+
+    A stronger claim than the one it replaces, and asserted as one: the
+    CLI loads none of this package rather than the light end of it.
+    `tests/unit/test_cli_import_weight.py` holds the whole inventory;
+    this case is here because this file is where the cost of importing
+    the package is measured.
+    """
     loaded = _loaded("import vinga_server.config.cli")
 
-    assert "vinga_server.onboarding.origin" in loaded
+    assert not [name for name in loaded if name.startswith("vinga_server.onboarding")]
     assert not loaded & frozenset(FORBIDDEN)
 
 
