@@ -295,18 +295,30 @@ explicitly.
    the implementation doc, and the after may not double the
    before.
 
-9. **CI provides the instance as a service container, and the
-   wheel step keeps its assertions in Postgres vocabulary.** Both
-   jobs gain a `postgres:17-alpine` service with a `pg_isready`
-   health check and `VINGA_DB_*` env wiring. The wheel-migration
-   step creates a fresh database in the service, migrates both
-   chains from the built wheel, and keeps the same assertions
-   translated: heads read from the two schema-qualified version
-   tables, table inventories and body columns read from
+9. **CI provides the instance to all three jobs, and the wheel
+   step keeps its assertions in Postgres vocabulary.** The unit
+   and integration jobs gain a `postgres:17-alpine` service with a
+   `pg_isready` health check and `VINGA_DB_*` env wiring. The
+   wheel-migration step creates a fresh database in the service,
+   migrates both chains from the built wheel, and keeps the same
+   assertions translated: heads read from the two schema-qualified
+   version tables, table inventories and body columns read from
    `information_schema` (replacing `sqlite_master`,
    workflow `:404-409`), and the cursor property asserted as
    identity/default-sequence columns in `information_schema`
    (replacing the `AUTOINCREMENT` DDL grep, workflow `:422-429`).
+   The image job is in scope too, because its seed and smoke
+   containers are real servers that today share SQLite through
+   `/data` (workflow `:668-791`): it gains a Postgres container on
+   a named Docker network the server containers join (a
+   runner-localhost service is not reachable as localhost from
+   inside `docker run`), each scenario (the boots-on-external
+   check, the refusal check, the seeded smoke server) gets its own
+   database name through `VINGA_DB_*` so scenarios stay isolated,
+   and `tests/smoke` plus the seed step move with it. The image
+   job does not run on pull requests, so the milestone's
+   verification includes one manual `workflow_dispatch` image run
+   against the branch before merge, recorded in the PR body.
 
 10. **The image gains the driver and loses the directory; the
     entrypoint stays dumb.** `psycopg[binary]` joins the `serve`
@@ -604,6 +616,12 @@ after the P1/P2 amendments. Findings condensed but faithful:
    provide a Docker-network-reachable instance, pass per-scenario
    `VINGA_DB_*`, and require a pre-merge manual-dispatch image run
    because the image job does not run on pull requests.
+   *Resolution*: decision 9 amended exactly so: the image job's
+   Postgres rides a named Docker network the server containers
+   join, per-scenario database names isolate the three scenarios,
+   `tests/smoke` and the seed step are named in scope, and the
+   pre-merge `workflow_dispatch` image run is a milestone
+   verification item.
 
 5. **P1: the provisioning script breaks for a configured server
    user and after database reset.** `ALTER DEFAULT PRIVILEGES FOR
