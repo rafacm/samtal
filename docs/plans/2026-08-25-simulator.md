@@ -431,7 +431,7 @@ ten, three seconds apart, with `Activation-Version: 1` and a body of
 and what upstream's manager-api reads nothing of. The server answers 202
 until the MAC resolves to a servable agent and 200 once it does
 (`ota/poll.py:41-101`). `run` reproduces that cadence, bounded per
-decision 6, and reports which of the two answers it got.
+decision 3a, and reports which of the two answers it got.
 
 **A 200 from the poll is not a token, and the ceremony has a fourth
 step the first draft skipped.** An activating check-in's token is empty,
@@ -457,6 +457,47 @@ with the empty token from step 1 would be refused at the handshake with
 other side. The same client id across all four steps is load-bearing,
 because the token is signed for the MAC and the client id together
 (decision 10a).
+
+### 3a. Every wait is bounded here, and a far-side number may only shorten one
+
+The guide's rule is that every wait has a bound and a wait that does not
+says why where the constant is. This command waits more than anything
+else in the grammar, so the bounds are written out rather than left to
+the implementer, and one of them is a trap the first draft walked into.
+
+**A far-side `timeout_ms` is not a bound.** The draft derived the
+activation wait from `activation.timeout_ms` in the reply, calling it
+"the server's own envelope rather than a number invented here". That
+reasoning is wrong twice. The value is untrusted remote input, and
+nothing about a JSON number stops it being negative, boolean, a string,
+or large enough to hang the command for a week. And the server constant
+it usually carries is not an envelope at all: `ACTIVATION_TIMEOUT_MS`
+is the FIRMWARE's own default sent back to it, and
+`onboarding/unbound.py:25-38` says in as many words that the firmware
+parses it into a member no other line reads. Deriving a client bound
+from it is deriving a bound from a value nobody uses.
+
+So the rule, stated once and applied to every remote number this command
+reads: **remote input may shorten a wait and may never extend one.** The
+field is validated strictly as a positive integer, anything else is
+ignored rather than refused (a malformed hint is not a reason to fail a
+ceremony that works without it), and the result is capped by a local
+maximum this repository chose, with its reason beside the constant.
+
+The bounds, each with the reason that picked it:
+
+| Wait | Bound | Why |
+| --- | --- | --- |
+| connect, every request | 5 s | the doctor's, and for its reason: an address nothing listens on must say so in seconds |
+| read, check-in and poll | 30 s | the doctor's, and for its reason: the network a device sits on is the thing being diagnosed, and a slow answer is still an answer |
+| the whole activation ceremony | local ceiling, the reply's `timeout_ms` only where it is valid and smaller | above |
+| the poll cadence | ten polls, 3 s apart | the firmware's, and it is a cadence rather than a bound: `xiaozhi-notes.md` records the burst, and reproducing it is part of being faithful |
+| websocket open and the hello reply | the server's own hello bound | the far side gives up there, so waiting longer learns nothing |
+| the reply, `tts start` to `tts stop` | a local ceiling with the reason beside it | a model and a TTS have no bound this side can derive, and an unbounded wait is what `server.limits.idle_timeout_s` exists on the server to end |
+
+Nothing in this command waits without one of these, and the one wait in
+the grammar that deliberately has no bound, `apply`, has nothing in
+common with any of them.
 
 ### 4. The check-in's answer is a closed set of four states
 
@@ -529,7 +570,7 @@ against the code:
   is about the sdk-based test simulator, and this one can show it, so
   the note gains a clause **(M1)**;
 - the activation poll at `Activation-Version: 1`, in the firmware's
-  cadence, bounded per decision 6 **(M1)**;
+  cadence, bounded per decision 3a **(M1)**;
 - **everything below this line is M2's, and M1's table says so of each
   of them.**
 - the websocket handshake with `Authorization`, `Device-Id`, `Client-Id`
@@ -676,7 +717,7 @@ Two rules make it a machine rather than a list. A message that arrives
 in a state that does not expect it is reported by its type and state in
 this side's own words and does not advance anything, which is what the
 firmware does with JSON it does not understand. And every transition
-that waits has a bound (decision 6), so no state can be waited in
+that waits has a bound (decision 3a), so no state can be waited in
 forever.
 
 ### 6. Two milestones, and the device half goes first
@@ -924,6 +965,13 @@ it.
   each `--claim` value, and the body the endpoint answered with. The
   device-token case is the one a review would otherwise not think to
   ask for, because nobody typed it.
+- **The activation ceiling, table-driven over hostile `timeout_ms`
+  values**: absent, zero, negative, `true`, a string, a float, and a
+  number large enough to hang the command. Each is asserted to leave the
+  ceremony bounded by the local ceiling, and a valid smaller value is
+  asserted to shorten it, which is the only direction remote input moves
+  a wait. The ten-poll, three-second cadence is asserted exactly, on a
+  clock the test controls.
 - The endpoint extraction proven behavior-preserving: every existing
   `test_doctor.py` case green against the moved function and the moved
   boundary, unchanged.
@@ -990,9 +1038,9 @@ it.
   name with no `__context__` behind it.
 - The framing round trip at all three versions, through the server's own
   `wrap` and `unwrap`.
-- Every wait bounded, each with its constant and its reason, and the
-  activation poll's bound derived from the server's own
-  `activation.timeout_ms` rather than restated.
+- Every wait bounded, each with its constant and its reason per decision
+  3a, asserted against that table rather than against the code that
+  implements it.
 - The wheel lane's `GATED` set grown by one and its two-way completeness
   still exact; the tier lane's third environment.
 
@@ -1246,6 +1294,25 @@ between alternatives the choice is recorded with its reason.
    input may shorten the wait and may never extend it past the CLI's own
    ceiling. Test zero, negative, boolean, wrong-type and excessive
    values, and the exact ten-poll cadence.
+
+   *Resolution* (this commit): new decision 3a. The rule is stated once
+   and applies to every remote number this command reads: remote input
+   may shorten a wait and may never extend one. `timeout_ms` is
+   validated strictly as a positive integer, anything else is ignored
+   rather than refused (a malformed hint is no reason to fail a ceremony
+   that works without it), and the result is capped by a local maximum
+   with its reason beside the constant. The draft's justification is
+   retracted with the evidence the finding gives: `ACTIVATION_TIMEOUT_MS`
+   is the firmware's own default echoed back, and
+   `onboarding/unbound.py:25-38` says the firmware parses it into a
+   member no other line reads, so deriving a client bound from it was
+   deriving one from a value nobody uses. The decision writes out all
+   six waits with the reason that picked each. M1's tests gain a
+   table-driven case over absent, zero, negative, boolean, string, float
+   and excessive values, plus the exact ten-poll cadence on a clock the
+   test controls; the earlier "derived from the server's envelope" test
+   line is replaced. Two forward references elsewhere in the plan now
+   point at 3a.
 
 7. **P2: the four-state reader is underspecified at malformed and
    contradictory inputs.** The table defines only the normal
