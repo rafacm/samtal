@@ -18,28 +18,28 @@ CHANGELOG.md:161  historical  vinga-server config schema
 CHANGELOG.md:168  historical  vinga-server config set provider
 CHANGELOG.md:415  historical  vinga-server config cli-reference
 CHANGELOG.md:425  historical  vinga-server config set
-CHANGELOG.md:464  historical  vinga-server config apply
-CHANGELOG.md:492  historical  vinga-server config export
-CHANGELOG.md:493  historical  vinga-server config export
-CHANGELOG.md:500  historical  vinga-server config set-secret
-CHANGELOG.md:507  historical  vinga-server config set
-CHANGELOG.md:548  historical  vinga-server config set-secret
-CHANGELOG.md:1030  historical  vinga-server config reload
-CHANGELOG.md:1149  historical  vinga-server config reload
-CHANGELOG.md:2425  historical  config status
-CHANGELOG.md:2529  historical  config ota-url
-CHANGELOG.md:2645  historical  config prompt
+CHANGELOG.md:488  historical  vinga-server config apply
+CHANGELOG.md:516  historical  vinga-server config export
+CHANGELOG.md:517  historical  vinga-server config export
+CHANGELOG.md:524  historical  vinga-server config set-secret
+CHANGELOG.md:531  historical  vinga-server config set
+CHANGELOG.md:572  historical  vinga-server config set-secret
+CHANGELOG.md:1054  historical  vinga-server config reload
+CHANGELOG.md:1173  historical  vinga-server config reload
+CHANGELOG.md:2449  historical  config status
+CHANGELOG.md:2553  historical  config ota-url
 CHANGELOG.md:2669  historical  config prompt
-CHANGELOG.md:2712  historical  config reload
-CHANGELOG.md:2733  historical  config status
-CHANGELOG.md:2773  historical  config status
-CHANGELOG.md:2805  historical  config reload
-CHANGELOG.md:2915  historical  config ota-url
-CHANGELOG.md:2948  historical  config add-device CODE
-CHANGELOG.md:2950  historical  config pending
-CHANGELOG.md:3336  historical  config openapi
-CHANGELOG.md:3350  historical  config schema
-CHANGELOG.md:3351  historical  config reference
+CHANGELOG.md:2693  historical  config prompt
+CHANGELOG.md:2736  historical  config reload
+CHANGELOG.md:2757  historical  config status
+CHANGELOG.md:2797  historical  config status
+CHANGELOG.md:2829  historical  config reload
+CHANGELOG.md:2939  historical  config ota-url
+CHANGELOG.md:2972  historical  config add-device CODE
+CHANGELOG.md:2974  historical  config pending
+CHANGELOG.md:3360  historical  config openapi
+CHANGELOG.md:3374  historical  config schema
+CHANGELOG.md:3375  historical  config reference
 README.md:96  respell  vinga config apply
 README.md:99  respell  vinga config device bind
 README.md:100  respell  vinga config default-agent set assistant
