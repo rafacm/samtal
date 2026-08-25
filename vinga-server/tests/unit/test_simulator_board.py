@@ -305,6 +305,73 @@ def test_a_board_with_no_token_and_no_code_names_the_trap(
     assert "not serving yet" in captured.out
 
 
+# The firmware block, which the capability table claims is read
+#
+# The claim is tested in the milestone that makes it, which is the
+# pattern the redirect row set. The capability pin cannot reach this on
+# its own: it holds a row to naming a verb the tree has, and every row
+# would still name `check-in` with the block thrown away.
+
+
+@pytest.mark.parametrize(
+    ("block", "expected"),
+    [
+        ({"version": board.FIRMWARE_VERSION, "url": ""}, cli.FIRMWARE_UP_TO_DATE),
+        ({"version": "9.9.9", "url": "https://voice.example/fw.bin"}, cli.FIRMWARE_OFFERED),
+        ({"version": board.FIRMWARE_VERSION, "url": "https://voice.example/fw.bin"},
+         cli.FIRMWARE_OFFERED),
+        ({"version": "9.9.9", "url": ""}, cli.FIRMWARE_UNEXPECTED_VERSION),
+        ({}, cli.FIRMWARE_UNEXPECTED_VERSION),
+    ],
+    ids=[
+        "the version echoed back with nothing to fetch",
+        "an image offered",
+        "an image offered at the version this board runs",
+        "a different version with nothing to fetch",
+        "an empty block",
+    ],
+)
+def test_the_reply_s_firmware_block_is_read_and_what_it_means_reported(
+    run, far_side, capsys: pytest.CaptureFixture[str], block: dict, expected: str
+) -> None:
+    """What a real board does with that block is decide, so the decision
+    is what is reported: an image was named or it was not, and the
+    version named back is this board's own or it is not.
+
+    Held to going red by discarding the block: with no firmware field on
+    the reply every one of these rows reports the same sentence, and
+    three of the five are then wrong.
+    """
+    far_side(answering(body={**unwelcome(), "firmware": block}))
+
+    assert run("simulator", "check-in", URL) == 0
+
+    assert expected in capsys.readouterr().out
+
+
+def test_the_firmware_block_is_reported_without_a_word_of_it(
+    run, far_side, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
+) -> None:
+    """Read is not repeated. The version is a string a stranger's server
+    chose and the URL is an address it would like this board to fetch,
+    so what crosses is the two comparisons and neither value."""
+    far_side(
+        answering(
+            body={
+                **admitted(),
+                "firmware": {"version": PASTED, "url": f"https://voice.example/{PASTED}.bin"},
+            }
+        )
+    )
+    with caplog.at_level(logging.DEBUG):
+        caplog.clear()
+        assert run("simulator", "check-in", URL) == 0
+    captured = capsys.readouterr()
+
+    assert cli.FIRMWARE_OFFERED in captured.out
+    assert PASTED not in captured.out + captured.err + logged(caplog)
+
+
 # The replies a correct server never sends
 #
 # Every one of these is `Refused` and exit 1, and each names the sentence

@@ -717,14 +717,14 @@ docs/reference/cli.md:1845  generated  vinga simulator
 docs/reference/cli.md:1857  generated  vinga simulator check-in
 docs/reference/cli.md:1860  generated  vinga simulator check-in
 docs/reference/cli.md:1866  generated  vinga ota-url
-docs/reference/cli.md:1983  generated  vinga schema
-docs/reference/cli.md:1986  generated  vinga schema
-docs/reference/cli.md:2000  generated  vinga reference
-docs/reference/cli.md:2003  generated  vinga reference
-docs/reference/cli.md:2011  generated  vinga openapi
-docs/reference/cli.md:2014  generated  vinga openapi
-docs/reference/cli.md:2022  generated  vinga cli-reference
-docs/reference/cli.md:2025  generated  vinga cli-reference
+docs/reference/cli.md:1988  generated  vinga schema
+docs/reference/cli.md:1991  generated  vinga schema
+docs/reference/cli.md:2005  generated  vinga reference
+docs/reference/cli.md:2008  generated  vinga reference
+docs/reference/cli.md:2016  generated  vinga openapi
+docs/reference/cli.md:2019  generated  vinga openapi
+docs/reference/cli.md:2027  generated  vinga cli-reference
+docs/reference/cli.md:2030  generated  vinga cli-reference
 docs/reference/domain-config.md:3  generated  vinga reference
 docs/reference/domain-config.md:22  generated  vinga export
 docs/reference/domain-config.md:75  generated  vinga reload
@@ -884,7 +884,8 @@ vinga-server/src/vinga_server/config/models.py:2235  respell  config schema
 vinga-server/src/vinga_server/config/responses.py:9  respell  config schema
 vinga-server/src/vinga_server/config/responses.py:9  respell  config reference
 vinga-server/src/vinga_server/config/secrets.py:9  respell  vinga-server config provider secret set
-vinga-server/src/vinga_server/config/store.py:558  respell  vinga-server config device show
+vinga-server/src/vinga_server/config/store.py:217  respell  vinga simulator check-in
+vinga-server/src/vinga_server/config/store.py:229  respell  vinga-server config device show
 vinga-server/src/vinga_server/config/views.py:29  respell  config show
 vinga-server/src/vinga_server/config/views.py:115  respell  config show
 vinga-server/src/vinga_server/device/session.py:721  respell  config schema

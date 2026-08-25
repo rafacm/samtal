@@ -38,7 +38,7 @@ from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
 import httpx
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from vinga_server import __version__
 from vinga_server.config.loader import ConfigError
@@ -310,6 +310,22 @@ class _Activation(BaseModel):
     timeout_ms: Any = None
 
 
+class _Firmware(BaseModel):
+    """What the reply says about an image for this board.
+
+    Modelled rather than ignored, because a real board reads this block
+    on every check-in: it is where a deployment says "you are up to
+    date" (by naming the version the board just reported, with no URL)
+    or "here is an image" (by naming one). A simulator that discarded it
+    would be claiming in its own help to read something it threw away.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    version: str = ""
+    url: str = ""
+
+
 class _Reply(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -317,9 +333,44 @@ class _Reply(BaseModel):
     # failure rather than an empty token.
     websocket: _Websocket
     activation: _Activation | None = None
+    # Not required: a reply carrying no firmware block at all is one
+    # that offered nothing, which is a state this reads rather than a
+    # shape it refuses.
+    firmware: _Firmware = Field(default_factory=_Firmware)
 
 
 # The four states, and nothing else a check-in can end as
+
+
+@dataclass(frozen=True)
+class Firmware:
+    """What the reply's firmware block means to THIS board, in the two
+    facts a board acts on.
+
+    Two booleans and no strings, deliberately. What a real board does
+    with the block is decide, not display: it fetches when an image is
+    named and its version is newer, and otherwise reads the version it
+    just reported coming back as "you are up to date". Both of those are
+    comparisons, so the reading survives the crossing and the far side's
+    own text does not, which is what lets a verdict say something true
+    about the block without repeating a word of it.
+
+    Neither the version nor the URL is carried. This simulator has no
+    partitions and fetches nothing, so an address it will never open is
+    an address it has no reason to hold.
+    """
+
+    # An image was named: a URL to fetch, which a board with partitions
+    # would.
+    offered: bool
+
+    # The version named is the one this board announced, which is how a
+    # deployment with no image says so.
+    announced: bool
+
+    @classmethod
+    def of(cls, block: "_Firmware") -> "Firmware":
+        return cls(offered=bool(block.url), announced=block.version == FIRMWARE_VERSION)
 
 
 @dataclass(frozen=True)
@@ -331,6 +382,7 @@ class Activating:
     message: str
     challenge: str
     timeout_ms: Any
+    firmware: Firmware
 
 
 @dataclass(frozen=True)
@@ -347,6 +399,7 @@ class Admitted:
     token: str
     websocket: str
     protocol_version: int
+    firmware: Firmware
 
 
 @dataclass(frozen=True)
@@ -361,6 +414,8 @@ class Unwelcome:
     grammar's sentence names all three, because the reply names none of
     them.
     """
+
+    firmware: Firmware
 
 
 @dataclass(frozen=True)
@@ -429,15 +484,19 @@ def read(answered: httpx.Response, endpoint: Endpoint) -> CheckIn:
         return Refused(UNKNOWN_PROTOCOL_VERSION)
     if reply.activation is not None and reply.websocket.token:
         return Refused(CONTRADICTORY_REPLY)
+    # Read once, for whichever state this ends in: every reply carries
+    # the block, whatever it says about admitting the board.
+    firmware = Firmware.of(reply.firmware)
     if reply.activation is not None:
         return Activating(
             code=reply.activation.code,
             message=reply.activation.message,
             challenge=reply.activation.challenge,
             timeout_ms=reply.activation.timeout_ms,
+            firmware=firmware,
         )
     if not reply.websocket.token:
-        return Unwelcome()
+        return Unwelcome(firmware=firmware)
     # The scheme is read off the response rather than off the string an
     # operator typed, because that is what the request went out over and
     # no redirect was followed, so it is the address that answered.
@@ -448,6 +507,7 @@ def read(answered: httpx.Response, endpoint: Endpoint) -> CheckIn:
         token=reply.websocket.token,
         websocket=target,
         protocol_version=reply.websocket.version,
+        firmware=firmware,
     )
 
 
@@ -586,6 +646,7 @@ __all__ = [
     "Activating",
     "Admitted",
     "CheckIn",
+    "Firmware",
     "Identity",
     "Poll",
     "Refused",

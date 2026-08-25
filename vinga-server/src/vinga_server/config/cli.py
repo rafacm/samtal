@@ -3073,6 +3073,28 @@ NOT_ADMITTED_YET = (
     f"again."
 )
 
+# What the reply's firmware block said, as this side read it. Three
+# sentences over two booleans, and no far-side value in any of them: a
+# real board's use of that block is a decision rather than a display, so
+# the decision is what crosses and the version and the URL stay where
+# every other far-side string in this command stays.
+FIRMWARE_OFFERED = (
+    "firmware: an image was offered, and nothing here fetches one: a simulated board "
+    "has no partitions to write it to. Neither the version nor the address it named is "
+    "repeated."
+)
+
+FIRMWARE_UP_TO_DATE = (
+    "firmware: no image was offered, and the version named back is the one this board "
+    "announced, which is how a deployment with nothing to offer says so."
+)
+
+FIRMWARE_UNEXPECTED_VERSION = (
+    "firmware: no image was offered, and the version named back is not the one this "
+    "board announced. A board reads that as up to date too, since there is nothing to "
+    "fetch; the version is not repeated, being whatever that endpoint returned."
+)
+
 NOT_ADMITTED_AFTER_CLAIM = (
     f"this board was claimed and the activation poll said it was activated, and the "
     f"check-in after it did not hand this board a token. Nothing here can go on from "
@@ -3151,7 +3173,8 @@ def _reported(state: board.CheckIn, endpoint: "device_endpoint.Endpoint") -> Non
     each do by default.
 
     The device token and the websocket URL are not that artifact and are
-    named by their stand-ins.
+    named by their stand-ins. The firmware block is neither: what is
+    said about it is this side's own reading of it, per `_firmware`.
     """
     if isinstance(state, board.Refused):
         raise ConfigError(state.problem)
@@ -3161,7 +3184,8 @@ def _reported(state: board.CheckIn, endpoint: "device_endpoint.Endpoint") -> Non
             f"claimed yet.\n"
             f"activation code: {endpoint.repeated(state.code)}\n"
             f"what a screen would show: {endpoint.repeated(state.message)}\n"
-            f"challenge: {endpoint.repeated(state.challenge)}"
+            f"challenge: {endpoint.repeated(state.challenge)}\n"
+            f"{_firmware(state.firmware)}"
         )
         sys.stdout.flush()
         print(CLAIM_GUIDANCE, file=sys.stderr)
@@ -3172,7 +3196,8 @@ def _reported(state: board.CheckIn, endpoint: "device_endpoint.Endpoint") -> Non
             f"device token: issued, and its value is never printed\n"
             f"websocket: {device_endpoint.REPORTED_WEBSOCKET}, which is not printed "
             f"either: it is what a token would be sent to\n"
-            f"protocol version: {state.protocol_version}"
+            f"protocol version: {state.protocol_version}\n"
+            f"{_firmware(state.firmware)}"
         )
         return
     print(
@@ -3181,8 +3206,26 @@ def _reported(state: board.CheckIn, endpoint: "device_endpoint.Endpoint") -> Non
         f"configurations look like from here: onboarding is turned off on that "
         f"deployment and nothing resolves this MAC; or this MAC is bound to an agent "
         f"that deployment is not serving yet, which `{PROGRAM} reload` installs; or the "
-        f"table of boards waiting to be claimed would not take another one."
+        f"table of boards waiting to be claimed would not take another one.\n"
+        f"{_firmware(state.firmware)}"
     )
+
+
+def _firmware(read: board.Firmware) -> str:
+    """What the reply said about an image, as this side read it.
+
+    Three sentences over two booleans, and no far-side value in any of
+    them. What a real board does with that block is decide rather than
+    display, so the decision is what survives the crossing: an image was
+    named or it was not, and the version named back is this board's own
+    or it is not. A deployment with nothing to offer echoes the version
+    it was told, which is how the firmware reads "up to date", and a
+    version that comes back changed with no image behind it is the one
+    combination worth saying out loud.
+    """
+    if read.offered:
+        return FIRMWARE_OFFERED
+    return FIRMWARE_UP_TO_DATE if read.announced else FIRMWARE_UNEXPECTED_VERSION
 
 
 # The grammar
