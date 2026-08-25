@@ -109,6 +109,20 @@ def _command_words() -> frozenset[str]:
     return _RETIRED_WORDS | {row.words[0] for row in cli.COMMANDS}
 
 
+def _vocabulary() -> frozenset[str]:
+    """Every word the grammar uses as a command word, at any depth, plus
+    the ones it retired.
+
+    What an invocation may CONTINUE with, as against `_command_words`
+    above, which is what one may open with. The two differ because a
+    sub-noun and a verb are not opening words: `secret`, `set` and
+    `pending` are only ever reached under something.
+    """
+    live = {word for row in cli.COMMANDS for word in row.words}
+    live |= {word for path in cli.GROUPS for word in path}
+    return _RETIRED_WORDS | frozenset(live)
+
+
 # One invocation, as a program word and the rest of its line. The
 # alternation is longest first, so `vinga-server config` is read as
 # itself rather than as the short spelling with a word after it, and
@@ -291,7 +305,9 @@ def _classified(path: str, program: str, invocation: str, inside: bool) -> str:
     return "respell"
 
 
-def _command_line(program: str, rest: str, words: frozenset[str]) -> str | None:
+def _command_line(
+    program: str, rest: str, words: frozenset[str], vocabulary: frozenset[str]
+) -> str | None:
     """One match as the invocation it quotes: the program word and the
     command words after it, and nothing else.
 
@@ -300,13 +316,24 @@ def _command_line(program: str, rest: str, words: frozenset[str]) -> str | None:
     begins. What is left is comparable between two sites that quote the
     same command with different arguments, which is what makes the
     manifest readable and the guard's job the tree's.
+
+    A bare word is not enough to be a command word, which is the half
+    this had wrong: `llm` and `claude` are bare, and so are `prints` and
+    `documents`, so a capture that took every bare token ran an address
+    and the rest of an English sentence into the invocation alike. It
+    was harmless while the guard read a leading prefix and ignored the
+    tail; once the tail is what tells a retired spelling from a live
+    one, the difference between `ota-url prints` and `show provider` has
+    to be made here. So a word after the first is taken only when the
+    grammar uses it as a command word somewhere, which is the same
+    vocabulary the retired family is drawn from.
     """
     typed = rest.split()
     if not typed or typed[0] not in words:
         return None
     taken: list[str] = []
     for word in typed:
-        if not _bare(word):
+        if not _bare(word) or (taken and word not in vocabulary):
             break
         taken.append(word)
     return " ".join([program, *taken])
@@ -338,11 +365,12 @@ def _matches(path: str, text: str, words: frozenset[str]) -> list[Spelling]:
     found: list[Spelling] = []
     region = _generated_region(text) if path == _HALF_GENERATED else None
     gone = retired(words)
+    vocabulary = _vocabulary()
     for number, line in enumerate(text.splitlines(), start=1):
         inside = region is not None and region[0] < number < region[1]
         claimed: list[tuple[int, int]] = []
         for match in _INVOCATION.finditer(line):
-            quoted = _command_line(match.group(1), match.group(2).strip(), words)
+            quoted = _command_line(match.group(1), match.group(2).strip(), words, vocabulary)
             if quoted is None:
                 continue
             claimed.append(match.span())
@@ -357,7 +385,7 @@ def _matches(path: str, text: str, words: frozenset[str]) -> list[Spelling]:
         for match in _SHORTHAND.finditer(line):
             if any(start <= match.start() < end for start, end in claimed):
                 continue
-            quoted = _command_line("config", match.group(2).strip(), words)
+            quoted = _command_line("config", match.group(2).strip(), words, vocabulary)
             if quoted is None:
                 continue
             found.append(
@@ -668,4 +696,53 @@ def test_a_group_is_named_exactly_and_a_command_by_its_words(
     it is matched exactly: the leading-prefix rule accepted
     `vinga provider frobnicate`, which is the half of this guard that
     was accepting invalid spellings rather than missing valid ones."""
+    assert names_something(invocation) is names
+
+
+@pytest.mark.parametrize(
+    ("invocation", "names"),
+    [
+        ("vinga show provider llm claude", False),
+        ("vinga export agent assistant", False),
+        ("vinga-server config show device aa:bb", False),
+        ("vinga list agents", False),
+        ("vinga status mcp-server", False),
+        ("vinga provider show llm claude", True),
+        ("vinga agent export assistant", True),
+        ("vinga device show aa:bb", True),
+        ("vinga provider secret set llm claude api_key", True),
+        ("vinga agent set kids prompt=hello be=kind", True),
+        ("vinga show", True),
+        ("vinga export", True),
+    ],
+    ids=[
+        "the retired verb-first show",
+        "the retired verb-first export",
+        "the retired show device",
+        "a flat read given a subject",
+        "a flat read given a noun",
+        "the respelled show",
+        "the respelled export",
+        "the respelled device read",
+        "three words and three identities",
+        "a write with inline pairs",
+        "the flat read, alone",
+        "the flat export, alone",
+    ],
+)
+def test_a_word_a_flat_verb_cannot_take_makes_the_spelling_stale(
+    invocation: str, names: bool
+) -> None:
+    """The other half of the same hole, and the one that survived two
+    milestones.
+
+    Matching the longest registered prefix and stopping there reads
+    `show provider llm claude` as the flat `show` row with three words
+    nobody asked about, so every retired verb-first spelling in the tree
+    passed this guard while naming a command the grammar no longer has.
+    What the matcher asks now is whether the row could be GIVEN what
+    follows it, counted against the positional arguments the built tree
+    declares, so a flat read carrying an address is stale and a noun's
+    read carrying the same address is not.
+    """
     assert names_something(invocation) is names

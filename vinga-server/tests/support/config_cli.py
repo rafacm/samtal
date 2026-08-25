@@ -24,6 +24,7 @@ import io
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 import pytest
@@ -168,6 +169,17 @@ def runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 # depth. `provider secret set` is three words and `provider` is one, and
 # a matcher that took two would attribute the first to the second and
 # mark the wrong row driven.
+#
+# And the prefix alone is not enough, which is the half M3 added. A
+# prefix match stopped at the last registered word and never asked what
+# came after it, so `show provider llm claude` resolved to the flat
+# `show` row and the three words behind it went unread, though `show`
+# takes no positional at all and the tree refuses that line. That is how
+# a spelling the rename retired went on passing the census guard for two
+# milestones. So a candidate row also has to be able to TAKE what
+# follows it, and how much that is is read off the built tree rather
+# than listed here: a command's positional arguments are its budget, and
+# a variadic one is no budget at all.
 
 _BY_WORDS: dict[tuple[str, ...], cli.Command] = {row.words: row for row in cli.COMMANDS}
 
@@ -176,14 +188,70 @@ _FIRST_WORDS = {row.words[0] for row in cli.COMMANDS}
 _DEEPEST = max(len(row.words) for row in cli.COMMANDS)
 
 
+def _budgets() -> dict[tuple[str, ...], int | None]:
+    """How many words each leaf of the built tree takes after its own,
+    or None where it takes any number.
+
+    Walked off `cli.command()` rather than off `COMMANDS`, because what
+    a command accepts is declared in the signature its `declare` builds
+    and only the tree has read it. Duck-typed rather than checked
+    against `click`, because Typer builds its own vendored classes and
+    an `isinstance` against the installed package answers False for
+    every one of them, which would silently make every group a leaf.
+    """
+    budgets: dict[tuple[str, ...], int | None] = {}
+
+    def walk(group: Any, prefix: tuple[str, ...]) -> None:
+        for word, below in group.commands.items():
+            words = (*prefix, word)
+            if hasattr(below, "commands"):
+                walk(below, words)
+                continue
+            counts = [
+                parameter.nargs
+                for parameter in below.params
+                if getattr(parameter, "param_type_name", "") == "argument"
+            ]
+            budgets[words] = None if any(count < 0 for count in counts) else sum(counts)
+
+    walk(cli.command(), ())
+    return budgets
+
+
+_TAKES = _budgets()
+
+
+def _fits(words: tuple[str, ...], rest: Sequence[str]) -> bool:
+    """Whether a row could be given what follows its own words.
+
+    Counted up to the first option, because everything after one is that
+    option's business and this is a matcher rather than a parser: a
+    value can look like anything, and guessing which options take one
+    would be a second copy of the declaration. Leniency there is the
+    right direction, since what this exists to catch is a retired
+    spelling carrying its old address, and those carry no options at
+    all.
+    """
+    budget = _TAKES.get(words)
+    if budget is None:
+        return True
+    given = 0
+    for word in rest:
+        if word.startswith("-"):
+            break
+        given += 1
+    return given <= budget
+
+
 def registered(argv: Sequence[str]) -> tuple[str, ...] | None:
     """Which row of `cli.COMMANDS` this command line names, or None.
 
     The words are found rather than assumed to be first, because the
     global options are accepted before the command word as well as after
-    it. From there the longest registered prefix wins, which is how
-    `provider secret set` is told from `provider` and `show device` from
-    `show`.
+    it. From there the longest registered prefix that could take what
+    follows it wins, which is how `provider secret set` is told from
+    `provider`, `device show` from `show`, and both from a line naming a
+    row the tree does not have.
 
     Read off the table, never a list of it: a command added to the
     grammar is addressed here the day it is added.
@@ -193,7 +261,7 @@ def registered(argv: Sequence[str]) -> tuple[str, ...] | None:
             continue
         for length in range(min(_DEEPEST, len(argv) - index), 0, -1):
             candidate = tuple(argv[index : index + length])
-            if candidate in _BY_WORDS:
+            if candidate in _BY_WORDS and _fits(candidate, argv[index + length :]):
                 return candidate
     return None
 
