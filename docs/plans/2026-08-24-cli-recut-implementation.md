@@ -44,8 +44,8 @@ the turn, then the artifacts, then the prose.
 
 ### The census, in numbers
 
-567 matches over 94 files, after the rename: 186 `respell`, 193
-`historical`, 188 `generated`. Before the rename the same tool found 525
+567 matches over 94 files, after the rename and after the rebase: 186
+`respell`, 193 `historical`, 188 `generated`. Before the rename the same tool found 525
 matches over 92 files (200 `respell`, 148 `historical`, 177
 `generated`). The manifest grew rather than shrank, which is the
 expected shape: the new grammar's noun words are recognized invocation
@@ -76,6 +76,39 @@ print:
 
 Nothing else on either stream and nothing in the store read back at the
 end moved.
+
+### Rebased onto the #293 fix round
+
+The branch was written against `fix/cli-refusal-leaks` at its first
+shape and rebased onto `main` after #293 merged, which is when the
+fix round's five commits arrived: the request-quieting boundary
+(`REQUEST_LOGGERS`, `logs.quieted`), client construction moved inside
+`_sent`'s value-free boundary with its `httpx.InvalidURL` arm and its
+close-failure sentence, `Address` in three parts with
+`Address.endpoint(path)` composing the path before the query,
+`printable(shown_url(...))`, all six `_FILE_PROBLEMS` rows pinned as a
+table, and the both-logger quieting pins.
+
+The three #293 commits this branch was stacked on were dropped as
+already upstream, and the verbatim plan copy was dropped as empty, which
+is what it was carried for. One conflict, in
+`tests/unit/test_config_cli.py`: the fix round replaced three
+hand-written file-refusal tests with the parametrized table that
+supersedes them, and this branch had respelled the three. Resolved by
+keeping the fix round's structure whole and respelling the command words
+inside it, which left the file's test inventory identical to `main`'s.
+Nothing of the fix round was weakened: the boundary, the three-part
+address, the quieting and every pin are intact, and the only thing that
+moved in them is the command words the rename legitimately moved.
+
+The census and the differential were both re-run against the new base.
+The manifest's classification did not change at all (the same 186, 193
+and 188 over the same 94 files); only line numbers moved, in the files
+the fix round edited. The differential still passes with the same six
+substitutions and no others, and its transcript is byte-unchanged: the
+fix round's new sentences are the transport ones, and the differential
+drives no transport failure, so nothing in it moved for a reason other
+than the rename.
 
 ### Deviations from the plan
 
@@ -177,7 +210,7 @@ Six, each with what was done and why.
 From `vinga-server/`, everything green:
 
 - `uv run ruff check .`
-- `uv run pytest tests/unit -q -n auto --dist loadfile`: 3553 passed,
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: 3570 passed,
   21 skipped
 - `uv run pytest tests/integration -q`: 131 passed
 - `uv run mypy`: no issues in 4 source files
