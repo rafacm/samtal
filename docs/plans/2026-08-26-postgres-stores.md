@@ -486,7 +486,8 @@ explicitly.
 - `docs/adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md`:
   the addendum.
 - `vinga-server/README.md`, root `README.md`, `docs/README.md`,
-  deployment docs: milestone 2.
+  deployment docs: in the milestone, per the review round's
+  finding 7.
 - `CHANGELOG.md` under `## 2026-08-26`.
 
 ## Tests
@@ -507,9 +508,13 @@ delete-then-insert case asserting no id reuse. The drift family:
 had, replacing the `sqlite_master` DDL assertion). The lane
 itself: unit and integration green against the compose instance
 locally and the service container in CI, times recorded, budget
-held. The recovery case: the integration export, drop-recreate,
-boot, apply, re-secret, byte-identical-export path using the
-template-clone fixture. The wheel step green with its translated
+held. The recovery case, which is also the cutover proof: a
+committed export fixture produced by the pre-cutover CLI is
+applied into a truly empty Postgres database (the `template0`
+fixture, no init script), secrets re-entered, and a fresh export
+byte-compared against the fixture modulo its annotated `set-secret`
+comments; a second case drops and recreates the database and
+repeats the path, which is the documented reset. The wheel step green with its translated
 assertions. Mutation, per house practice: stopping the compose
 service must turn boot into the fixed refusal sentence, not a
 traceback; killing a second writer's lock wait early must leave
@@ -545,34 +550,36 @@ nothing half-applied.
 
 ## Milestones
 
-- [ ] **M1: cut both stores over to Postgres.** One atomic
-  milestone for the same reason #243 was one: two storage backends
-  cannot coexist releasably, and a half-cut state (one store
-  moved, or code moved with the lane still SQLite) is exactly what
-  the workflow must never publish. The diff is dominated by the
-  db/ rewrite, the fixture reshape, and deletions (the WAL and
-  checkpoint machinery, the stranded-file arms, the old
+- [ ] **M1: cut both stores over to Postgres, operator story
+  included.** One atomic milestone for the same reason #243 was
+  one, and one more the review round added: two storage backends
+  cannot coexist releasably, a half-cut state (one store moved, or
+  code moved with the lane still SQLite) is exactly what the
+  workflow must never publish, and an image whose own README still
+  promises an empty local database is a broken release even when
+  its code is whole, so the operator documentation ships in the
+  same merge as the image it describes. The diff is dominated by
+  the db/ rewrite, the fixture reshape, and deletions (the WAL
+  and checkpoint machinery, the stranded-file arms, the old
   revisions); compose, the initdb file, the config schema, both
-  baselines, CI, the generated references, the example files, the
-  ADR addendum and the changelog land here because the drift lanes
-  and the releasability rule leave them nowhere else. Design
-  footprint: deepens `db/` (callers stop knowing which engine,
-  driver, or failure vocabulary exists; classification gets one
-  home instead of two copies) and `tests/conftest.py` (a test
-  stops knowing databases are provisioned at all); adds one seam,
-  `StoreChain`, stated as a type, so the two stores stop reaching
-  into the opener's parameter list with loose filenames and
-  directories.
-- [ ] **M2: rewrite the operator story.** The hand-written docs:
-  both READMEs' storage, backup (`pg_dump` replacing
-  `VACUUM INTO`/`.backup`), reset and recovery sections; the
-  deployment docs' external-database contract and the `vinga_ro`
-  access recipe (loopback `psql` in dev; port-forward or one-shot
-  exec against a deployment, always as `vinga_ro`); the
-  `docs/README.md` index line. Documentation-only, trivially
-  releasable, cut from M1 so the cutover diff stays reviewable;
-  M1's PR body names the one-PR lag. Design footprint: none, by
-  design.
+  baselines, CI including the image job, the generated
+  references, the example files, the ADR addendum, the changelog,
+  and the hand-written operator docs land here: both READMEs'
+  storage, quickstart-prerequisite, backup (`pg_dump` replacing
+  `VACUUM INTO`/`.backup`), reset and recovery sections with the
+  export-before-upgrade ordering and the old SQLite file and
+  sidecars' disposition stated plainly (nothing migrates them;
+  archive or delete them deliberately); the deployment docs'
+  external-database contract and the `vinga_ro` access recipe
+  (loopback `psql` in dev; port-forward or one-shot exec against
+  a deployment, always as `vinga_ro`); the `docs/README.md` index
+  line. Design footprint: deepens `db/` (callers stop knowing
+  which engine, driver, or failure vocabulary exists;
+  classification gets one home instead of two copies) and
+  `tests/conftest.py` (a test stops knowing databases are
+  provisioned at all); adds one seam, `StoreChain`, stated as a
+  type, so the two stores stop reaching into the opener's
+  parameter list with loose filenames and directories.
 
 ## Plan review round
 
@@ -700,6 +707,12 @@ after the P1/P2 amendments. Findings condensed but faithful:
    replaying a committed pre-cutover export into a truly empty
    Postgres database; state plainly that conversation history is
    not migrated and what happens to the SQLite file and sidecars.
+   *Resolution*: the milestone split is dissolved: one milestone
+   carries the code, the image and every operator-facing document,
+   the recovery case becomes the cutover proof (a committed
+   pre-cutover export applied into a truly empty database, then
+   the reset repetition), and the old file and sidecars'
+   disposition is stated in the recovery docs.
 
 8. **P2: `psycopg[binary]` in `serve` defeats the promised
    source-install option.** Any `serve` install would pull
