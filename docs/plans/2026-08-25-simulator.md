@@ -196,6 +196,103 @@ itself would be the second home for it. The packets go back out under
 whatever version the session negotiated, through the same
 `framing.wrap` the server uses.
 
+### 1a. The packaged utterance, chosen here rather than during implementation
+
+An audio file committed to a public MIT repository is a licensing
+decision, and the first draft left it as a fork ("the maintainer's own
+recording, or a clip from a permissively licensed voice") to be resolved
+by whoever implemented M2. That is the wrong place for it: one branch of
+that fork puts a person's voice into a public repository, which the
+project's own stance on what may be published rules out, and the other
+was unverified. **It is chosen here, with the licence read rather than
+assumed.**
+
+**The source.** Synthesized with Piper from the voice
+`en_US-ljspeech-high` in the `rhasspy/piper-voices` repository at tag
+`v1.0.0`. Its `MODEL_CARD` names the LJ Speech Dataset as its data and
+gives the licence as the exact string **`public domain`**, with no SPDX
+identifier, no URL and no conditions. The dataset's own page says "This
+dataset is in the public domain in the US (and most likely other
+countries as well). There are no restrictions on its use" and, on
+attribution, "As this work is in the public domain, you may use it
+without attribution." The `piper-voices` repository card declares
+`license: mit` over the weights themselves. Every link in that chain is
+zero-obligation.
+
+**The two alternatives, rejected with their licence strings.**
+`en_US-lessac-medium`'s `MODEL_CARD` gives its licence as a URL to the
+Blizzard 2013 Lessac agreement, which is a per-licensee, manually
+verified, research-only click-through that excludes commercial use by
+name and requires all copies to be destroyed on termination.
+`en_US-libritts_r-medium` gives `CC BY 4.0`, which is usable but puts an
+attribution obligation on everyone downstream of this repository, and
+its card records that it was fine-tuned from the lessac checkpoint, so
+it inherits the question above through its base.
+
+**Why Piper's own licence does not reach the audio.** The GNU GPL FAQ's
+`#WhatCaseIsOutputGPL` states that a program's licence does not cover
+its output, with an exception for output that reproduces GPL-licensed
+art or audio; what a Piper waveform reproduces is the voice model and
+the input text, and the model is MIT weights over public-domain data,
+so nothing GPL-licensed is copied into it. The question is narrower than
+it looks in any case: the classic Piper engine is MIT, and only the
+`piper1-gpl` rewrite behind today's `pip install piper-tts` is GPL-3.0,
+because it embeds espeak-ng. This repository already carries `piper` as
+an optional extra and the licensing rules already forbid it becoming a
+core dependency; nothing here changes that, because the synthesis
+happens once, offline, on a contributor's machine, and no Piper code
+ships.
+
+**No `THIRD_PARTY_LICENSES.md` entry is owed**, because no attribution
+is required by any link in the chain, and that file is for notices that
+must be preserved rather than for a record of everything ever used. The
+provenance is recorded where it is useful instead: in the manifest
+beside the asset and in M2's implementation section, as
+`Synthesized with Piper using en_US-ljspeech-high (rhasspy/piper-voices,
+MIT weights), trained on the LJ Speech Dataset (public domain).`
+
+**The contract, fixed here so the asset cannot be regenerated into a
+different thing.**
+
+| | |
+| --- | --- |
+| the sentence | `Hello, can you hear me?` |
+| sample rate | 16 000 Hz, which is the device side of `AudioParams` |
+| channels | 1 |
+| packet duration | 60 ms, which is `AudioParams.frame_duration` |
+| codec | Opus, bare packets, no container |
+| storage | a run of version-2 frames, walked by `framing.frames` (decision 1) |
+| expected size | roughly 1.5 to 2.5 seconds, so 25 to 42 packets |
+
+The sentence is deliberately neutral, short and self-describing: it
+carries no personal detail, no place and no name, it is a plausible
+thing to say to a board, and it is long enough for a real ASR to have
+something to work with.
+
+**The procedure is a checked-in tool, not a paragraph.**
+`tests/tools/utterance.py` (beside `driver_times.py` and
+`event_baseline.py`, which is where this repository keeps tools a person
+runs by hand) downloads the pinned voice, synthesizes the sentence,
+resamples to 16 kHz mono, encodes at 60 ms through `av`, and writes both
+the asset and a manifest beside it. It runs on a contributor's machine
+and never at install time, at import time or in a lane; `av` and `piper`
+are dev-environment tools here, not tiers of anything.
+
+**The manifest is committed with the asset** and records the packet
+count, the total duration, the byte length and a SHA-256 of the file,
+plus the provenance line above. A case asserts the asset matches its
+manifest, so the asset cannot drift and cannot be replaced quietly.
+The exact numbers are recorded there rather than guessed here; what is
+fixed here is the contract they must satisfy, and the expected range,
+so an asset that came out at four hundred packets is visible in review.
+
+**And the packets are proven to be Opus, not merely well-framed bytes.**
+M2 adds a case that feeds the packaged packets through the server's own
+real decoder, which is `av` in the dev environment, and asserts they
+decode to 16 kHz mono PCM of the manifest's duration. Without it the
+whole audio path could ship carrying forty well-formed frames of
+garbage, and every other case in the plan would still pass.
+
 ### 2. The grammar: one noun, two verbs, one positional
 
 ```
@@ -1027,9 +1124,13 @@ it.
   Deletion test: without it `conversation.py` holds an asset format
   beside a wire protocol, which are two responsibilities with two
   reasons to change.
-- `vinga_server/simulator/data/`: **new (M2).** The packaged utterance,
-  one file, carried into the wheel by a `force-include` entry beside the
-  one that carries `examples/`.
+- `vinga_server/simulator/data/`: **new (M2).** The packaged utterance
+  and its manifest, carried into the wheel by a `force-include` entry
+  beside the one that carries `examples/`.
+- `vinga-server/tests/tools/utterance.py`: **new (M2).** How the asset
+  was made, checked in so it can be made again: the pinned voice, the
+  synthesis, the resample, the encode and the manifest. Run by hand,
+  never by a lane.
 - `vinga_server/device_endpoint.py`: **new (M1).** A device-facing
   address a person typed, and what it takes to make a request to one:
   the parsed `Endpoint` with its `activation()` composition, the policy,
@@ -1168,9 +1269,14 @@ it.
   and is the value most likely to be relayed by accident. The simulation
   is a meta-path finder, per `tests/unit/test_missing_server_half.py`,
   because a module resolved by name never reaches `builtins.__import__`.
-- The fixture: `framing.frames` walks it, every packet is non-empty, the
-  count and the announced frame duration multiply to the stated
-  duration, and the bytes are identical on every machine.
+- The fixture against its committed manifest (decision 1a):
+  `framing.frames` walks it, every packet is non-empty, the packet
+  count, the byte length and the SHA-256 match the manifest, and the
+  count times 60 ms is the recorded duration.
+- **The packets decoded by the server's own decoder**, to 16 kHz mono
+  PCM of the manifest's duration. This is the case that separates real
+  Opus from well-framed garbage, and without it the whole audio path
+  could ship carrying neither.
 - **The controlled peer** of decision 7, and the two things only it can
   say: the four handshake headers read off its recording, including the
   `Protocol-Version` no server reads; and every adversarial answer the
@@ -1202,12 +1308,12 @@ it.
 
 ## Risks
 
-- **The packaged utterance's provenance.** It is audio committed to an
-  MIT repository, and a synthesized clip inherits its voice model's
-  licence. Mitigation: the utterance is the maintainer's own recording,
-  or a clip from a permissively licensed voice recorded in
-  `THIRD_PARTY_LICENSES.md`, and the choice is made before the file is
-  committed rather than after.
+- **The packaged utterance's provenance.** Decided in decision 1a rather
+  than left as a risk: a zero-obligation chain, read rather than
+  assumed. What remains is that a `MODEL_CARD` can be edited upstream,
+  so the residual mitigation is that the implementer re-reads the card
+  at the pinned tag before committing the asset and stops to ask if the
+  licence string is not the one 1a records.
 - **A green lane does not prove a real deployment converses.** Every ASR
   in every lane is a mock that transcribes whatever it is handed, and
   the tree's synthesized audio is a 300 Hz sine. So the suite can prove
@@ -1599,6 +1705,40 @@ between alternatives the choice is recorded with its reason.
     procedure, the packet count, the duration and a committed checksum;
     and require the end-to-end server decoder test and the provenance
     entry in the same M2 change.
+
+    *Resolution* (this commit): new decision 1a, and the maintainer
+    chose the branch rather than leaving it open. It is synthesized, not
+    recorded: a maintainer recording would put a person's voice into a
+    public repository, which the project's stance on what may be
+    published rules out, and it would block the milestone on one person.
+    The source is Piper's `en_US-ljspeech-high` from `rhasspy/piper-
+    voices` at `v1.0.0`, whose `MODEL_CARD` gives the licence as the
+    exact string `public domain` over the LJ Speech Dataset, which says
+    "There are no restrictions on its use" and "you may use it without
+    attribution", under weights the repository card declares `license:
+    mit`. The two alternatives are rejected in the decision with their
+    own licence strings: lessac's is a research-only Blizzard 2013
+    click-through excluding commercial use, and libritts_r's is CC BY
+    4.0 with an attribution obligation and a lessac base. Piper's own
+    licence is shown not to reach the output, per the GNU GPL FAQ's
+    `#WhatCaseIsOutputGPL`, and the synthesis happens once, offline, on
+    a contributor's machine with no Piper code shipped. **No
+    `THIRD_PARTY_LICENSES.md` entry is owed**, because no attribution is
+    required anywhere in the chain, and the decision says so with the
+    evidence rather than adding a courtesy entry to a file meant for
+    notices that must be preserved; the provenance line lives in the
+    manifest and in M2's implementation section. The contract is fixed
+    as a table: the sentence `Hello, can you hear me?`, 16 kHz mono,
+    60 ms packets, bare Opus stored as version-2 frames, and an expected
+    25 to 42 packets. The procedure is a checked-in tool,
+    `tests/tools/utterance.py`, run by hand and never by a lane. The
+    exact packet count, duration, byte length and SHA-256 go in a
+    manifest committed beside the asset, asserted by a case, because
+    those are measurements and a plan that invented them would be
+    inventing them. And M2 gains the end-to-end decoder case the finding
+    asks for, feeding the packets through the server's own decoder,
+    without which the audio path could ship carrying forty well-formed
+    frames of garbage with every other case still green.
 
 12. **P3: two module deletion-test arguments do not survive the
     repository's own test.** `simulator/__init__.py` is described as
