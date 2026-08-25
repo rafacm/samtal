@@ -1,17 +1,20 @@
 """The tables holding what was said, and what it cost to say it.
 
-Its own `MetaData` and its own file (`conversations.db`), beside the
+Its own `MetaData` and its own schema (`conversations`), beside the
 domain configuration rather than inside it: the configuration is what an
 operator writes and the server reads at boot, this is what the server
 writes and an operator reads afterwards, and the two have different
 retention, different privacy switches and different reasons to be
-deleted.
+deleted. The split is also what the read-only analyst role is scoped to:
+`vinga_ro` reads everything here and nothing next door, so a query over
+what was said cannot reach a stored secret's ciphertext.
 
 Typed columns carry identity, the references between rows and the
 numbers a query filters on; JSON carries the structures the manifest and
 the pydantic layers already own. Referential integrity is the writer's,
-not SQLite's, for the reason `db/schema.py` gives: validation belongs in
-one layer, and a per-connection pragma would be a second, weaker place.
+not the database's, for the reason `db/schema.py` gives: validation
+belongs in one layer, and a constraint here would be a second place that
+knows less about what a reference means.
 The writer is not the only deleter either (retention takes whole
 sessions, including one that is still talking), so what keeps its
 inserts honest against a deletion is a check inside each of its
@@ -28,20 +31,26 @@ Two conventions run through the whole schema:
   milliseconds**, the offsets aligned with the capture's `t_ms` because
   both derive from the session loop's clock reading at session open. A
   row and a capture triplet for the same session share one timeline.
-- **The three cursor tables are `AUTOINCREMENT`**. A plain `INTEGER
-  PRIMARY KEY` reuses the deleted maximum rowid, and retention deletes
-  from exactly the end a cursor points past, so a reused id would hand a
-  paginating client someone else's row under a cursor it had already
-  consumed. `tool_invocations` is not a cursor table: it is read through
-  its parent turn, never paginated on its own.
+- **Row ids are `bigint` identity columns.** A sequence never hands
+  out a value it has already handed out, which is the property the three
+  cursor tables need: retention deletes from exactly the end a cursor
+  points past, and a reused id would hand a paginating client someone
+  else's row under a cursor it had already consumed. `bigint` is what
+  makes the API's `MAX_ROW_ID` true by declaration rather than by
+  folklore about what a row id happens to be. `tool_invocations` is not
+  a cursor table (it is read through its parent turn, never paginated on
+  its own) and is declared the same way regardless, because a row still
+  needs an id and one rule is cheaper to read than two.
 """
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     CheckConstraint,
     Column,
     Float,
+    Identity,
     Index,
     Integer,
     MetaData,
@@ -51,8 +60,8 @@ from sqlalchemy import (
 )
 
 # The same convention the domain schema uses, and for the same reason:
-# SQLite cannot drop an unnamed constraint, and Alembic's batch mode
-# needs a name to rebuild a table around one.
+# a constraint the database named for itself is one a migration has to
+# look up before it can drop it.
 NAMING_CONVENTION = {
     "ix": "ix_%(table_name)s_%(column_0_name)s",
     "uq": "uq_%(table_name)s_%(column_0_name)s",
@@ -61,7 +70,11 @@ NAMING_CONVENTION = {
     "pk": "pk_%(table_name)s",
 }
 
-metadata = MetaData(naming_convention=NAMING_CONVENTION)
+# The schema this store lives in, carried on the metadata rather than
+# arranged with a `search_path`, for the reason `db/schema.py` gives.
+SCHEMA = "conversations"
+
+metadata = MetaData(schema=SCHEMA, naming_convention=NAMING_CONVENTION)
 
 # `none_as_null` so that a column the text switch emptied is SQL NULL
 # rather than the four bytes `null`. One rule for every JSON column
@@ -87,9 +100,9 @@ sessions = Table(
     metadata,
     Column(
         "id",
-        Integer,
+        BigInteger,
+        Identity(),
         primary_key=True,
-        autoincrement=True,
         comment="Monotonic row id, never reused. The session list's cursor.",
     ),
     Column(
@@ -227,8 +240,6 @@ sessions = Table(
     ),
     Index("ix_sessions_device", "device"),
     Index("ix_sessions_started_at", "started_at"),
-    # A cursor table: see the module docstring.
-    sqlite_autoincrement=True,
 )
 
 turns = Table(
@@ -236,9 +247,9 @@ turns = Table(
     metadata,
     Column(
         "id",
-        Integer,
+        BigInteger,
+        Identity(),
         primary_key=True,
-        autoincrement=True,
         comment="Monotonic row id, never reused. The turn timeline's cursor.",
     ),
     Column(
@@ -380,17 +391,15 @@ turns = Table(
         ),
     ),
     Index("ix_turns_session", "session", "id"),
-    # A cursor table: see the module docstring.
-    sqlite_autoincrement=True,
 )
 
 tool_invocations = Table(
     "tool_invocations",
     metadata,
-    Column("id", Integer, primary_key=True, comment="Row id."),
+    Column("id", BigInteger, Identity(), primary_key=True, comment="Row id."),
     Column(
         "turn",
-        Integer,
+        BigInteger,
         nullable=False,
         comment=(
             "The `turns.id` this call belongs to, resolved by the writer "
@@ -486,9 +495,9 @@ events = Table(
     metadata,
     Column(
         "id",
-        Integer,
+        BigInteger,
+        Identity(),
         primary_key=True,
-        autoincrement=True,
         comment="Monotonic row id, never reused. The reconcile cursor.",
     ),
     Column(
@@ -533,8 +542,6 @@ events = Table(
         ),
     ),
     Index("ix_events_session", "session", "id"),
-    # A cursor table: see the module docstring.
-    sqlite_autoincrement=True,
 )
 
 # Declaration order, which is also the order the reference documents
