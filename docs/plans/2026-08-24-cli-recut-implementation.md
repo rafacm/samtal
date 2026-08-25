@@ -639,7 +639,30 @@ three are adopted, one commit each.
    to say that `doctor` gates one branch inside itself rather than at
    the dispatch.
 
-3. **P2: the tier "closure" checked a subset.** The six direct client
+3. **P2 (re-review, terra): the no-leak guard tested the vocabulary and
+   not the callers.** The section words were held to being fixed, and
+   what production actually passes was never observed, so a call site
+   that went back to `providers.<stage>.<name>` would have stayed
+   green.
+
+   *Resolution:* both halves. A static walk over `src/` finds every
+   call to `check_transportable`, unparses its first argument and holds
+   it to a closed set of three written expressions, following the one
+   forwarding hop this tree has (the store's `_readable` takes the
+   section and hands it on, so a guard stopping at the direct call
+   would be reading a parameter name and calling it fixed). The set of
+   modules that call it at all is asserted too, so a third call site is
+   a review event and a walk that finds nothing fails. Beside it, a spy
+   on both modules' bound name records what each production path
+   actually receives, driven with credential-shaped identities: the
+   CLI's entity write gets `providers`, its apply gets `document`, and
+   the repository's own write gets `providers` while keeping the
+   addressed location for every other refusal it makes. Reintroducing
+   the addressed form at the CLI call site turns seven cases red;
+   reintroducing it at the store's forwarding hop turns three red,
+   including the static walk both times.
+
+4. **P2: the tier "closure" checked a subset.** The six direct client
    names had to be present and the ten direct serve names absent, which
    says nothing about a transitive distribution, and that is the shape
    a heavy dependency comes back in.
@@ -670,8 +693,8 @@ From `vinga-server/`, on the rebased tree, everything green:
 
 - `uv run ruff check .`: `All checks passed!`
 - `uv run mypy`: `Success: no issues found in 4 source files`
-- `uv run pytest tests/unit -q -n auto --dist loadfile`: `3676 passed,
-  19 skipped in 44.04s`
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: `3680 passed,
+  19 skipped in 43.33s`
 - `uv run pytest tests/integration -q`: `154 passed in 203.17s`
 - The six drift checks exactly as CI runs them (`domain-config.md`,
   `conversations-schema.md`, `events.md`, `api-openapi.json`, `cli.md`,
