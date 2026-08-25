@@ -41,6 +41,14 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **The image workflow's Docker actions moved to their Node 24 majors**:
+  `build-push-action` v6 to v7, `login-action` v3 to v4,
+  `metadata-action` v5 to v6, `setup-buildx-action` and
+  `setup-qemu-action` v3 to v4. GitHub is retiring the Node 20 runner
+  runtime and every run warned that these five were being forced onto
+  Node 24; the new majors target it natively. No inputs or outputs the
+  workflow uses changed.
+
 - **A claim the configuration superseded names the condition, not the
   device** (#248). Claiming a code that a binding or a default agent
   overtook while it sat on a screen is still refused, still changes
