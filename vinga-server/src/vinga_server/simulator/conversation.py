@@ -155,7 +155,45 @@ CLOSE_TIMEOUT_S = 5.0
 # the reason `device_endpoint.REQUEST_LOGGERS` gives: what they have to
 # say is the address, and a log record is a retained surface in a way a
 # terminal is not.
+#
+# A floor is the WEAKER of the two mechanisms here and it is kept for
+# what the stronger one cannot reach: anything the library logs under its
+# own module names outside a connection this module opened.
 SOCKET_LOGGERS = ("websockets", "websockets.client")
+
+# And the stronger one, which is the connection's own logger.
+#
+# A floor at WARNING is not enough for this library, and that is a fact
+# about it rather than a judgement: `websockets/sync/connection.py` calls
+# `self.logger.error(..., exc_info=True)` from four reachable paths, the
+# keepalive ping and three internal-error arms among them. An ERROR
+# record clears a WARNING floor, and `exc_info=True` puts a whole
+# traceback on a retained surface, which is the one thing every sentence
+# in this module is written to keep off one.
+#
+# So the connection is GIVEN a logger instead: private to this module,
+# disabled, and not propagating. Disabled is what makes it total rather
+# than another floor to be cleared, since a disabled logger emits at no
+# level at all; not propagating is what makes it stay total if anything
+# ever re-enables it. Nothing else logs under this name, which is why
+# holding it that way for the process is not somebody else's silence
+# being taken away.
+SOCKET_LOGGER_NAME = "vinga_server.simulator.conversation.socket"
+
+QUIET_LEVEL = logging.WARNING
+
+
+def socket_logger() -> logging.Logger:
+    """The logger a connection this module opens is handed.
+
+    Named rather than anonymous because `logging` has no anonymous
+    loggers, and public because the case that proves it silent has to be
+    able to ask for it.
+    """
+    logger = logging.getLogger(SOCKET_LOGGER_NAME)
+    logger.disabled = True
+    logger.propagate = False
+    return logger
 
 # What each close code this side knows means, in this side's own words.
 #
@@ -316,6 +354,7 @@ def _opened(target: str, token: str, identity: Identity):
             },
             open_timeout=OPEN_TIMEOUT_S,
             close_timeout=CLOSE_TIMEOUT_S,
+            logger=socket_logger(),
         )
     except (WebSocketException, OSError, TimeoutError, ValueError) as exc:
         # Recorded here and raised below, so nothing walking a chain
@@ -522,8 +561,6 @@ def _packet_duration(announced: AudioParams, ours: int) -> int:
 # mean.
 _LONGEST_PACKET_MS = 120
 
-QUIET_LEVEL = logging.WARNING
-
 
 def _send(socket, text: str) -> None:
     """One control message, as a websocket TEXT frame.
@@ -695,7 +732,9 @@ __all__ = [
     "OPEN_TIMEOUT_S",
     "REPLY_CEILING_S",
     "REPLY_COMPLETE",
+    "QUIET_LEVEL",
     "SOCKET_LOGGERS",
+    "SOCKET_LOGGER_NAME",
     "SPEAKING",
     "STATES",
     "TRANSITIONS",
@@ -704,4 +743,5 @@ __all__ = [
     "cannot_open",
     "cannot_speak",
     "converse",
+    "socket_logger",
 ]

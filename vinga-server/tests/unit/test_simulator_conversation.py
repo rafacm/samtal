@@ -25,6 +25,7 @@ same seam, which is the only thing a real sleep would have added.
 """
 
 import json
+import logging
 import time
 from collections.abc import Iterator
 
@@ -33,6 +34,7 @@ import pytest
 from tests.support.config_cli import chain, logged
 from tests.support.peer import SESSION, Recorded, conversing, greet, peer, read_until_listen_stop
 from vinga_server.config.loader import ConfigError
+from vinga_server.logs import quieted
 from vinga_server.protocol import framing
 from vinga_server.protocol.messages import (
     AudioParams,
@@ -555,6 +557,57 @@ def test_a_malformed_server_hello_is_refused_without_quoting_a_field(
     for surface in surfaces:
         assert HELLO_PLANTED not in surface
     assert refused.value.__cause__ is None and refused.value.__context__ is None
+
+
+def test_the_connections_own_logger_emits_at_no_level_at_all(
+    unpaced,
+    identity,
+    said,
+    opened: list,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The surface a floor could not hold.
+
+    `websockets/sync/connection.py` calls `self.logger.error(...,
+    exc_info=True)` from four reachable paths, the keepalive ping among
+    them. An ERROR record clears a WARNING floor and `exc_info=True` puts
+    a whole traceback on a retained surface, which is the one thing every
+    sentence in this module exists to keep off one.
+
+    So the connection is handed a disabled, non-propagating logger of
+    this module's own, and what is asserted is the connection's actual
+    logger rather than a name: the exact call the library makes, with a
+    credential-shaped exception behind it, reaching nothing.
+
+    Bite: the same record emitted on the library's own logger inside the
+    floor this module used to rely on DOES land, traceback and all, which
+    is what says the floor was never the fix.
+    """
+    with peer(conversing(sentences=REPLY)) as (url, _):
+        held(url, identity, said)
+
+    [socket] = opened
+    planted = RuntimeError(HELLO_PLANTED)
+
+    with caplog.at_level(0):
+        socket.logger.error("keepalive ping failed", exc_info=planted)
+
+    # The library wraps what it is given in a `LoggerAdapter`, which
+    # delegates `isEnabledFor` to the logger underneath it, so that is
+    # the object the claim is about.
+    underneath = getattr(socket.logger, "logger", socket.logger)
+    assert underneath is conversation.socket_logger()
+    assert underneath.disabled and not underneath.propagate
+    assert HELLO_PLANTED not in logged(caplog)
+    assert caplog.records == []
+
+    # And the floor alone, asked the same question, which is the bite.
+    with caplog.at_level(0), quieted(conversation.SOCKET_LOGGERS, conversation.QUIET_LEVEL):
+        logging.getLogger("websockets.client").error("keepalive ping failed", exc_info=planted)
+
+    assert HELLO_PLANTED in logged(caplog), (
+        "the floor stopped admitting the record this fix exists for, so the bite is stale"
+    )
 
 
 def test_a_peer_close_reason_is_read_and_never_relayed(
