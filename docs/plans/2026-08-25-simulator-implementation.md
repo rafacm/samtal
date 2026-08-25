@@ -521,13 +521,96 @@ Nothing in `board.py`, `device_endpoint.py`, `logs.py` or
 `conversation.py` calls `logs.quieted` through the same signature the
 RLock serialization kept.
 
+### PR review round
+
+External review of PR #302, 2026-08-25. Backend: codex CLI, model
+`gpt-5.6-sol`, read-only sandbox, over `main...d239b5ec`. Verdict as
+received: mergeable after the listed fixes. Seven findings, three P1 and
+four P2. All seven were verified against the tree before being fixed and
+all seven are adopted; each is its own commit, and each fix that is
+about a leak or a bound carries the bite that proves it in its commit
+body.
+
+1. **P1: audio-send failures escaped as library tracebacks.** Confirmed:
+   the utterance went out through a bare `socket.send`, the only send in
+   the module outside the containment. Fixed by `_send_audio`, a second
+   name for the same guard, so text and binary stay different calls. The
+   bite is the shape of the leak: reverted, the case does not raise
+   `ConfigError` at all but a `ConnectionClosedError` whose own message
+   reads "received 1011 (internal error) sk-closereason-...", so the
+   peer's close reason reaches the chain verbatim. Getting the failure
+   onto an audio frame at all took two deliberate halves, both recorded
+   in the case: the peer waits for the first binary frame before closing,
+   because a peer that closed after greeting fails the `listen start`
+   instead, and the pacing hook waits for that close to complete.
+2. **P1: unexpected traffic could extend the hello wait forever.**
+   Confirmed: the bound was on each READ, so a peer sending one frame
+   just before each window came due restarted it every time. One
+   deadline now, computed on entering the state, which is what the
+   reply's own wait had done since it was written. The bite is timed
+   rather than asserted about a value: reverted, the case takes 6.98
+   seconds instead of 1.1 and ends with the wrong sentence. The peer's
+   chatter is bounded rather than endless on purpose, because a bug that
+   hangs is a bug a runner cannot report.
+3. **P1: the logging guard still admitted library tracebacks.**
+   Confirmed against the locked library:
+   `websockets/sync/connection.py` calls `self.logger.error(...,
+   exc_info=True)` from four reachable paths, and an ERROR record clears
+   a WARNING floor. The connection is now GIVEN a disabled,
+   non-propagating logger private to this module; the floor stays for
+   what a logger cannot reach, which is anything the library says under
+   its own module names outside a connection this module opened. The
+   bite runs in both directions: the exact call the library makes reaches
+   nothing through the connection's logger, and the same record on
+   `websockets.client` INSIDE the old floor lands with its traceback, so
+   a floor that stopped admitting it would fail as a stale bite rather
+   than pass quietly.
+4. **P2: a server hello without `audio_params` was accepted.**
+   Confirmed, and the finding's own caution was answered before the
+   field was required: `server_hello` takes the parameters as an
+   argument rather than defaulting them and the server's only call site
+   passes its own `OUTPUT_AUDIO`, so no vinga-server can send a hello
+   this now refuses. The fields INSIDE the block keep their defaults,
+   which is a different question and is asserted beside the fix. The
+   least-valid payload moved with it and a controlled-peer case covers
+   the omission.
+5. **P2: audio before `tts start` was counted as reply audio.**
+   Confirmed: `(awaiting reply, audio)` was in the table. Removed, so a
+   frame from before the reply began is a surprise and reaches no count.
+   Bite: with it back, the case reads 2 packets and 20 bytes where it
+   should read 1 and 10, and records no surprise at all.
+6. **P2: the packaged utterance was validated after network and claim
+   side effects.** Confirmed: a build that could not speak still rebound
+   the device and sat through the activation ceremony before finding
+   out. The read moved up beside the extra's gate, which gives the
+   command an order worth naming: what is installed, then what was
+   typed, then what the network says. Bite: with the read back below the
+   claim, the case records four requests instead of none and refuses
+   about an activation code rather than about the missing asset.
+7. **P2: the advertised `closed` state was unreachable.** Confirmed: the
+   socket was closed and the state left at `reply complete`, and the
+   case pinned the contradiction. The close is now a transition through
+   the same table, from `reply complete` and from nowhere else, so a
+   close on the way out of a refusal advances nothing. A close that will
+   not complete gets an outcome of its own, `CLOSE_FAILED`: the reply
+   survives whole, the machine does not advance, and how the connection
+   ended is reported as not this side's to say rather than guessed from
+   a code nobody set. Bite: with the close swallowing its failure and
+   advancing anyway, the case reports `closed` and "the session ended
+   normally" about a connection whose close never finished.
+
+Nothing was declined. `cli.md` is byte-identical after the round, since
+no help text moved; the census moved and was regenerated.
+
 ### Verification
 
 From `vinga-server/` on the milestone head, after the rebase onto M1's
 fix round: `uv run ruff check .` clean; `uv run pytest tests/unit -q -n
-auto --dist loadfile` **3990 passed, 19 skipped** (3966 before the
-rebase; the 24 are the fix round's own cases arriving under this
-branch); `uv run pytest tests/integration -q` **190 passed**; the
+auto --dist loadfile` **3998 passed, 19 skipped** (3966 before the
+rebase, 3990 after it and before the review round; the 24 are the M1 fix
+round's own cases arriving under this branch, and the 8 are this round's
+seven fixes plus the census row the record's own quoted command adds);
+`uv run pytest tests/integration -q` **190 passed**; the
 openapi, events and domain-config drift checks byte-clean, with `cli.md`
 the only generated document that moved and the census regenerated. The
 image and the smoke lane are CI's to prove, and no run has yet been made
