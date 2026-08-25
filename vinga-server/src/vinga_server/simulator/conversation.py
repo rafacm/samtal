@@ -407,9 +407,22 @@ def _server_hello(socket, heard: "_Heard") -> ServerHello:
     Bounded by the server's own hello window: the far side gives up
     waiting for a device hello there, so a client waiting longer for the
     answer learns nothing.
+
+    ONE deadline for the whole state, computed on entry, with only what
+    is left of it passed to each read. A bound per read is not a bound on
+    the transition at all: a peer sending one frame of anything just
+    before each window came due would restart the window every time and
+    hold this command open for as long as it cared to, which is exactly
+    what the machine's rule that every waiting transition is bounded
+    exists to make unwritable. The reply's own wait has been one deadline
+    for the same reason since it was written; this one had not caught up.
     """
+    deadline = monotonic() + HELLO_TIMEOUT
     while True:
-        received = _received(socket, HELLO_TIMEOUT, NO_HELLO)
+        left = deadline - monotonic()
+        if left <= 0:
+            raise ConfigError(NO_HELLO)
+        received = _received(socket, left, NO_HELLO)
         if isinstance(received, bytes):
             heard.surprise(AUDIO)
             continue

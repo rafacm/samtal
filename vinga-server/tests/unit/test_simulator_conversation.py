@@ -429,6 +429,47 @@ def test_a_peer_that_never_answers_the_hello_gives_up_at_the_bound(
     assert str(refused.value) == conversation.NO_HELLO
 
 
+def test_a_peer_that_talks_without_saying_hello_still_gives_up(
+    unpaced, identity, said, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The bound on the TRANSITION rather than on each read.
+
+    A bound per read is not a bound at all: a peer that sends one frame
+    of anything just before each window comes due restarts the window
+    every time. Here the peer sends a `stt` in a tight loop and never a
+    hello, which is a valid message arriving where nothing expects one,
+    so every frame is a surprise and none of them advances anything.
+
+    Bite: with the deadline computed inside the loop instead of on entry
+    to the state, this case waits out every one of the peer's frames and
+    only then times out, so it takes the whole chatter rather than the
+    whole bound. The peer chatters for a fixed span far longer than the
+    wait, and the assertion sits between the two: a quarter of a second
+    when the bound holds, six when it does not. The chatter is bounded
+    rather than endless on purpose, because a bug that hangs is a bug a
+    runner cannot report.
+    """
+    monkeypatch.setattr(conversation, "HELLO_TIMEOUT", 0.2)
+    chatter_until = time.monotonic() + 6.0
+
+    def script(connection, recorded: Recorded) -> None:
+        recorded.texts.append(connection.recv())
+        while time.monotonic() < chatter_until:
+            try:
+                connection.send(stt_message(SESSION, "not a hello"))
+            except Exception:
+                return
+            time.sleep(0.01)
+
+    started = time.monotonic()
+    with peer(script) as (url, _), pytest.raises(ConfigError) as refused:
+        held(url, identity, said)
+    took = time.monotonic() - started
+
+    assert str(refused.value) == conversation.NO_HELLO
+    assert took < 3.0, "the hello wait restarted on the traffic that was meant to end it"
+
+
 def test_a_reply_that_never_ends_gives_up_at_the_ceiling(
     unpaced, identity, said, monkeypatch: pytest.MonkeyPatch
 ) -> None:
