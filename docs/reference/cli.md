@@ -1899,6 +1899,9 @@ Supported:
     ten polls three seconds apart, bounded
   - claiming this board through the configuration API with --claim, and
     checking in again afterwards to be issued a token
+  - the reply's firmware block, read and reported as a board reads it: whether
+    an image was offered, and whether the version named back is the one this
+    board announced
 
 Not supported, and not planned:
   - a real microphone and speakers (they need PortAudio and a runtime encoder,
@@ -1913,8 +1916,10 @@ Not supported, and not planned:
     server, and a simulator with no playback has nothing to cancel)
   - decoding or playing the reply audio (no codec ships in any tier, so what
     is reported about reply audio is arithmetic over frames rather than sound)
-  - firmware update (the reply's firmware block is read and reported and never
-    fetched: there are no partitions here)
+  - fetching and installing a firmware image (the block that offers one is
+    read and reported, per the supported row above, and nothing is ever
+    downloaded: there are no partitions here to write an image to and no
+    bootloader to hand it to)
   - MQTT and UDP (vinga implements the websocket transport and promises no
     other, which is a bound of the compatibility promise itself)
   - Activation-Version 2 and its HMAC (the key is burned into a device's

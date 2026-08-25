@@ -278,6 +278,16 @@ _PROSE_ROWS: tuple[Capability, ...] = (
         side=SUPPORTED,
         verb=CHECK_IN,
     ),
+    # Deliberately not phrased as "reading ...": a row whose text starts
+    # with `reading ` or `sending ` is a message row to the both-ways
+    # pin, which reads the two halves of the wire off their prefixes.
+    Capability(
+        what="the reply's firmware block, read and reported as a board reads it: "
+        "whether an image was offered, and whether the version named back is the one "
+        "this board announced",
+        side=SUPPORTED,
+        verb=CHECK_IN,
+    ),
     Capability(
         what="the websocket handshake with its Authorization, Device-Id, Client-Id and "
         "Protocol-Version headers",
@@ -335,10 +345,11 @@ _PROSE_ROWS: tuple[Capability, ...] = (
         "arithmetic over frames rather than sound",
     ),
     Capability(
-        what="firmware update",
+        what="fetching and installing a firmware image",
         side=UNSUPPORTED,
-        reason="the reply's firmware block is read and reported and never fetched: there "
-        "are no partitions here",
+        reason="the block that offers one is read and reported, per the supported row "
+        "above, and nothing is ever downloaded: there are no partitions here to "
+        "write an image to and no bootloader to hand it to",
     ),
     Capability(
         what="MQTT and UDP",
