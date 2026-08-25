@@ -102,12 +102,36 @@ tests, then the documents.
 
 ### Deviations
 
-None found in the record. The nine commit bodies record choices the
-plan already made and cite the plan's own findings for the two places
-a reader might suspect one: `_MESSAGE_TYPES` becoming public without
-the server-side models (finding 3's resolution assigns the models to
-M2) and the capability table shipping with every conversation row on
-the third side (finding 2's resolution, the releasable-merge rule).
+None from the plan's decisions. The nine commit bodies record choices
+the plan already made and cite the plan's own findings for the two
+places a reader might suspect one: `_MESSAGE_TYPES` becoming public
+without the server-side models (finding 3's resolution assigns the
+models to M2) and the capability table shipping with every
+conversation row on the third side (finding 2's resolution, the
+releasable-merge rule).
+
+Four interpretation decisions the implementing agent made where the
+plan was silent, recovered from the coordinator's resume note and
+verified against the tree:
+
+- **The doctor re-imports the moved names rather than having its
+  callers rewired**, so the seam its own suite patches stays where
+  that suite reaches it (`doctor.py:60-74`); the move is proven by
+  the suite running unchanged, which was the plan's pin.
+- **`Admitted` reports the websocket URL's presence and protocol
+  version, never its value**, extending the "can be the deployment's
+  secret" rule from the OTA URL to the address the reply derives
+  from it.
+- **`Unwelcome`'s sentence names the three configurations that
+  produce it** (onboarding off, nothing resolving the MAC, no default
+  agent covering it), because a 200 with an empty token is the trap
+  state and a sentence that just said "not admitted" would send a
+  reader to the network.
+- **`ACTIVATION_SEGMENT` is spelled client-side with an equality test
+  against `ota.router.ACTIVATE_SEGMENT`**
+  (`test_device_endpoint.py:40`) rather than imported, because the
+  router module imports FastAPI, which the client half does not
+  carry; the test is what keeps two spellings one fact.
 
 ### Verification
 
