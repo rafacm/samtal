@@ -87,6 +87,27 @@ def serving(directory: Path) -> Iterator[Live]:
     passed no `--config`: the file half comes from the settings
     machinery, which reads `VINGA_SERVER__*` and nothing else, and the
     domain half comes from the database that half names.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.delenv(CONFIG_ENV, raising=False)
+        patch.setenv(DATABASE_DIR_ENV, str(directory))
+        booted = load_boot_config()
+    with served(create_app(booted.config, booted.secrets), directory) as running:
+        yield running
+
+
+@contextlib.contextmanager
+def served(app: object, directory: Path) -> Iterator[Live]:
+    """One built application on a real uvicorn, on an ephemeral loopback
+    port.
+
+    Split from `serving` because two lanes need a thread-served app and
+    only one of them wants a fileless boot: the conversation lane builds
+    its app from a `Config` with mock providers in it, because a server
+    with no providers can hold no conversation. A second copy of a
+    uvicorn thread and its readiness loop is the pending bug in the usual
+    way.
 
     The port lives on the socket rather than in the configuration, the
     way `tests/integration/conftest.py` does it: the models refuse 0,
@@ -94,23 +115,13 @@ def serving(directory: Path) -> Iterator[Live]:
     port means.
 
     Run in a thread rather than on a loop of the caller's own, because
-    what talks to it is either `cli.main`, which is synchronous and
-    stays that way, or a subprocess; uvicorn skips its signal handlers
-    off the main thread, which is the one thing that would otherwise
-    need care here.
+    what talks to it is either `cli.main`, which is synchronous and stays
+    that way, or a subprocess; uvicorn skips its signal handlers off the
+    main thread, which is the one thing that would otherwise need care
+    here.
     """
-    directory.mkdir(parents=True, exist_ok=True)
-    with pytest.MonkeyPatch.context() as patch:
-        patch.delenv(CONFIG_ENV, raising=False)
-        patch.setenv(DATABASE_DIR_ENV, str(directory))
-        booted = load_boot_config()
     server = uvicorn.Server(
-        uvicorn.Config(
-            create_app(booted.config, booted.secrets),
-            host="127.0.0.1",
-            port=0,
-            log_level="warning",
-        )
+        uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning")
     )
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
