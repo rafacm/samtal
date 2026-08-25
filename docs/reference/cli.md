@@ -163,7 +163,16 @@ a second thing that has to stay true. What a mismatched pair does
 instead is fail legibly: a command whose route the server does not have
 is refused by the server, and an answer whose shape this client does not
 recognize earns one sentence saying so rather than a rendering of
-something nobody sent. Neither writes anything.
+something nobody sent.
+
+**A refusal is not a rollback**, and the difference matters most on a
+write. The client checks the answer's shape after the request has been
+sent and answered, so a newer server that accepted the write and
+acknowledged it in a shape this client does not know earns the same one
+sentence a garbled answer would, with the write already committed. Read
+the state back with `show` or `diff` before repeating a write that
+refused this way; the sentence says the answer could not be read, and it
+says nothing at all about what the server did with the request.
 
 So the fix for a disagreement is upgrading the older half, and the first
 step is finding out which it is. Each half says so on its own:

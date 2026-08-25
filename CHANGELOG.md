@@ -99,12 +99,16 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   different builds: before 1.0, run the CLI from the same release line
   as the server, and upgrade the older half when they disagree. There is
   deliberately no negotiation machinery. The committed
-  `docs/reference/api-openapi.json` is the contract, a mismatched pair
-  fails legibly rather than silently (the server refuses a route it does
-  not have; the client answers one sentence for a shape it does not
-  recognize, and neither writes anything), and which half is older is
-  read from `vinga --version` and from the unauthenticated `/healthz`,
-  which serves `version` and `revision`.
+  `docs/reference/api-openapi.json` is the contract, and a mismatched
+  pair fails legibly rather than silently: the server refuses a route it
+  does not have, and the client answers one sentence for a shape it does
+  not recognize. That sentence is not a rollback, which the page says
+  where it matters: the shape is checked after the request was answered,
+  so a write a newer server accepted is committed whatever this client
+  could make of the acknowledgement, and the way to know is to read the
+  state back with `show` or `diff`. Which half is older is read from
+  `vinga --version` and from the unauthenticated `/healthz`, which
+  serves `version` and `revision`.
 
 ### Fixed
 
