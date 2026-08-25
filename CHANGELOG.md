@@ -93,6 +93,18 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 - **`--version`, and `-h` beside `--help`** (#223). `--version` prints
   the installed distribution and its version and exits 0; `-h` answers
   on every page of the tree.
+- **A written version-skew policy** (#223). Two of the three install
+  doors put the CLI on a different machine from the server it talks to,
+  so `docs/reference/cli.md` now says what to do when the two halves are
+  different builds: before 1.0, run the CLI from the same release line
+  as the server, and upgrade the older half when they disagree. There is
+  deliberately no negotiation machinery. The committed
+  `docs/reference/api-openapi.json` is the contract, a mismatched pair
+  fails legibly rather than silently (the server refuses a route it does
+  not have; the client answers one sentence for a shape it does not
+  recognize, and neither writes anything), and which half is older is
+  read from `vinga --version` and from the unauthenticated `/healthz`,
+  which serves `version` and `revision`.
 
 ### Fixed
 
