@@ -38,11 +38,11 @@ read as JSON values rather than as a dumped model, and the device
 lookup path selects `devices.c.agents` by name on a connection that
 never migrates.
 
-Referential integrity lives in the repository rather than in SQLite
+Referential integrity lives in the repository rather than in database
 foreign keys: validation is single-sourced in the model/repository
-layer, the layer the REST API uses too, and SQLite's foreign key
-enforcement is a per-connection pragma that would duplicate half of
-those checks in a second, weaker place.
+layer, the layer the REST API uses too, and a constraint here would
+duplicate half of those checks in a second place that knows less about
+what a reference means.
 
 Encrypted secrets never sit in a body. Each secret-bearing entity has
 its own `secrets` JSON column mapping a credential slot to an
@@ -61,8 +61,9 @@ from sqlalchemy import (
 )
 
 # Named constraints and indexes, so a later migration can address them.
-# SQLite cannot drop an unnamed constraint, and Alembic's batch mode
-# needs a name to rebuild a table around one.
+# A constraint Postgres named for itself is one a migration has to look
+# up before it can drop it, and a name that a convention produces is one
+# both sides can write down.
 NAMING_CONVENTION = {
     "ix": "ix_%(table_name)s_%(column_0_name)s",
     "uq": "uq_%(table_name)s_%(column_0_name)s",
@@ -71,7 +72,15 @@ NAMING_CONVENTION = {
     "pk": "pk_%(table_name)s",
 }
 
-metadata = MetaData(naming_convention=NAMING_CONVENTION)
+# The schema these tables live in, carried on the metadata rather than
+# arranged with a `search_path`: which schema a table is in is a fact,
+# and a fact has one home. It is also the seat of this chain's Alembic
+# version table, which is what keeps the two chains apart inside one
+# database, and the boundary the read-only analyst role is scoped
+# outside of, because the `secrets` columns below are here.
+SCHEMA = "domain"
+
+metadata = MetaData(schema=SCHEMA, naming_convention=NAMING_CONVENTION)
 
 # The one row agent_defaults may hold. The value is arbitrary and never
 # shown; the check constraint on it is what makes the singleton a
