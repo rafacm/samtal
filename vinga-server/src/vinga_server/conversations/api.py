@@ -4,7 +4,7 @@ The route functions live here and are registered by `config/api.py`'s
 `_application()`, which is the application `document()` renders and the
 one the server mounts, so a route cannot be served without being in the
 committed contract. What travels the other way is only runtime fact: the
-database directory, attached by `build_api` as the per-request reader
+database connection, attached by `build_api` as the per-request reader
 below. Registration takes `_problems` as an argument rather than
 importing it, because the configuration API imports this module and the
 import may not go both ways.
@@ -26,18 +26,21 @@ Three transport rules the routes hold to:
   what the argument has to be. What arrived is the caller's, and a
   refusal that echoed it would be the one place this API prints
   something it was handed.
-- **A missing file is a 404 naming the switch**, and an existing one is
-  served whether or not recording is on: switching recording off stops
-  the writer, not the reader, exactly as capture files outlive the
-  capture switch.
+- **A store with no rows answers its ordinary empty shapes.** There is
+  no 404 for "this deployment never recorded" any more, and that is a
+  deliberate contract change (#283): the distinction it drew was
+  between a file that existed and one that did not, and there is no
+  file. Boot migrates the schema whether or not recording is on, so
+  what a deployment that never recorded has is empty tables, and an
+  empty list is the honest answer to a question about them. The 404
+  that remains is the one about a session id.
 
-Every read opens the file for the length of one request through the
-read engine `store.read_conversations` describes: no migration, no
-lock, and nothing created when the file is not there.
+Every read opens a connection for the length of one request through
+`db.read_engine`: no migration, no advisory lock, and a repeatable-read
+snapshot that cannot write.
 """
 
 from collections.abc import Callable, Iterator
-from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, Query, Request
@@ -45,8 +48,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import ColumnElement, Connection, Table, func, select
 
 from vinga_server.config.loader import ConfigError, UnknownEntityError
-from vinga_server.config.models import normalize_mac
-from vinga_server.conversations import store
+from vinga_server.config.models import DatabaseConfig, normalize_mac
 from vinga_server.conversations.schema import (
     CLOSE_REASONS,
     TOOL_SOURCES,
@@ -55,6 +57,7 @@ from vinga_server.conversations.schema import (
     tool_invocations,
     turns,
 )
+from vinga_server.db import read_engine
 
 if TYPE_CHECKING:
     # The name only, for the annotation in `_reader`: the configuration
@@ -78,9 +81,11 @@ CloseReason = Literal[*CLOSE_REASONS]
 LIMIT_DEFAULT = 50
 LIMIT_MAX = 200
 
-# SQLite's integer range. A cursor beyond it is refused here rather than
-# bound into a statement, where it would be a driver error and a 500
-# instead of the caller's own mistake.
+# The range of the `bigint` identity columns the cursors are. True by
+# declaration since the schema says `bigint` (#283), rather than by
+# folklore about what a row id happens to be. A cursor beyond it is
+# refused here rather than bound into a statement, where it would be a
+# driver error and a 500 instead of the caller's own mistake.
 MAX_ROW_ID = 2**63 - 1
 
 # What a refused argument is told. Each says what the argument has to
@@ -102,17 +107,14 @@ _DEVICE_REFUSED = (
     "pairs, for example aa:bb:cc:dd:ee:ff. What was sent is not quoted back"
 )
 
-# The two 404s. Neither names what the request asked for: a session id
-# arrives in the path, and what is worth saying about it is where to
+# The one 404, which does not name what the request asked for: a session
+# id arrives in the path, and what is worth saying about it is where to
 # look instead.
-_NO_STORE = (
-    "this deployment has no conversation store: there is no conversations.db in the "
-    "directory server.database.dir names. Recording is switched on with "
-    "server.conversations.enabled, which creates the file at the next start. A store "
-    "that recorded before is still served after recording is switched off, but one "
-    "that never existed has nothing to serve."
-)
-
+#
+# There used to be a second, for a deployment with no `conversations.db`
+# at all. It retired with the file (#283): the schema is migrated at
+# every boot, so "no store" is not a state that exists, and a deployment
+# that never recorded answers the empty shapes rather than a refusal.
 _UNKNOWN_SESSION = (
     "no session of that id is in the conversation store. The id is the session's uuid "
     "hex, which its events carry and its capture triplet is named after; a session "
@@ -126,10 +128,7 @@ _UNKNOWN_SESSION = (
 # parse are a limit, a cursor and a device; and 500 is about the
 # conversation store rather than the stored configuration.
 PROBLEMS_INSTEAD: dict[int, str] = {
-    404: (
-        "There is no conversation store to read, or no session of that id in it. The "
-        "body says which."
-    ),
+    404: "No session of that id is in the conversation store.",
     422: (
         "One of the query arguments could not be read: the limit, the cursor or the "
         "device filter. Nothing sent is quoted back."
@@ -575,32 +574,26 @@ CursorQuery = Annotated[
 ]
 
 
-def reader(directory: Path) -> Callable[[], Iterator[Connection]]:
-    """Per-request access to the store: open the file, yield a
-    connection, dispose the engine.
+def reader(database: DatabaseConfig) -> Callable[[], Iterator[Connection]]:
+    """Per-request access to the store: open a connection, yield it,
+    dispose the engine.
 
-    Nothing holds an engine between requests, so a store that was
-    deleted, moved or restored under a running server is met as it is now
-    rather than through a connection pooled before it moved.
+    Nothing holds an engine between requests, so a store restored from a
+    backup underneath a running server is met as it is now rather than
+    through a connection pooled before it moved.
 
     This was the shape the configuration database's dependency had too,
     until #142 gave that one a single lifespan-owned engine. This one is
     deliberately left as it is, which that plan records as considered
     and declined: the property above is this store's own, and a
     configuration row is not restored from a backup underneath a running
-    server the way a month of conversations might be.
-
-    The existence check is here rather than in each handler because it
-    is the same answer for all three, and because a reader that reached
-    the engine would meet a driver error instead of a sentence: the
-    engine names the file as a URI with `mode=rw`, which refuses to
-    create a missing one.
+    server the way a month of conversations might be. Pooling it is an
+    optimization with risks of its own, recorded as a follow-up rather
+    than smuggled into the cutover (#283).
     """
 
     def open_reader() -> Iterator[Connection]:
-        if not store.conversations_path(directory).exists():
-            raise UnknownEntityError(_NO_STORE)
-        engine = store.read_conversations(directory)
+        engine = read_engine(database)
         try:
             with engine.connect() as connection:
                 yield connection
@@ -615,7 +608,7 @@ def _reader(request: Request) -> Iterator[Connection]:
 
     Taken from the application rather than closed over by the routes, so
     that the document can be rendered from an application built without
-    a database directory: `build_api` attaches the dependency and
+    a database to reach: `build_api` attaches the dependency and
     `document()` never resolves it.
     """
     runtime: ApiRuntime = request.app.state.api_runtime

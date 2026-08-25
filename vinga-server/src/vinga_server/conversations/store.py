@@ -1,4 +1,4 @@
-"""The writer behind `conversations.db`: a queue, a thread, and markers.
+"""The writer behind the conversation record: a queue, a thread, markers.
 
 The sink is off the audio path, which is the whole of its contract. A
 producer only ever `put_nowait`s, so the session loop never waits on the
@@ -22,10 +22,10 @@ arbitrary:
   store unable to record its own incompleteness.
 - **The writer commits at markers, into per-session batches.** One queue
   carries every session, so a marker commits exactly its own session's
-  accumulated batch inside one short `BEGIN IMMEDIATE` transaction, and
-  no write lock is held across the interval between two turns where a
-  backup could be waiting on it. A page opened mid conversation reads
-  everything up to the last completed turn.
+  accumulated batch inside one short transaction, and the chain's
+  advisory lock is not held across the interval between two turns. A
+  page opened mid conversation reads everything up to the last completed
+  turn.
 - **Absence of the session row is a tombstone.** Retention deletes whole
   sessions on `started_at` and asks nothing about whether the
   conversation ended, so a session long enough to fall outside the
@@ -73,10 +73,12 @@ from typing import Any
 
 from sqlalchemy import ColumnElement, Engine, delete, select
 
+from vinga_server.config.models import DatabaseConfig
+from vinga_server.conversations import schema
 from vinga_server.conversations.records import ToolInvocation, TurnLeg, TurnRecord
 from vinga_server.conversations.schema import events as events_table
 from vinga_server.conversations.schema import sessions, tool_invocations, turns
-from vinga_server.db import BUSY_TIMEOUT_MS, existing_engine, open_at
+from vinga_server.db import LOCK_TIMEOUT_MS, StoreChain, advisory_key, open_at
 from vinga_server.events import Emission, ServerEvents
 from vinga_server.events.catalog import (
     ConversationsDropped,
@@ -85,7 +87,7 @@ from vinga_server.events.catalog import (
     PruneFailed,
     WriteFailed,
 )
-from vinga_server.events.values import ClassName, ConfiguredPath, Count, SessionId
+from vinga_server.events.values import ClassName, Count, SessionId
 
 events = ServerEvents(__name__)
 
@@ -97,9 +99,20 @@ events = ServerEvents(__name__)
 # in a vocabulary that is a compatibility surface.
 logger = logging.getLogger(__name__)
 
-DATABASE_FILENAME = "conversations.db"
-
-_MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
+# This store's own chain: the schema its tables and its Alembic version
+# table live in, its migrations, and the advisory key its writers
+# serialize on. Declared here rather than beside `db.open_at`, because
+# which schema a store lives in is a fact of that store; the schema name
+# itself is read off the metadata that declares it.
+CONVERSATIONS_CHAIN = StoreChain(
+    schema=schema.SCHEMA,
+    migrations=Path(__file__).resolve().parent / "migrations",
+    # The second key in this application's half of the advisory lock
+    # space. Distinct from the domain chain's on purpose: the two stores
+    # are written by different callers at different moments, and sharing
+    # a key would make a conversation wait on a configuration write.
+    lock_key=advisory_key(2),
+)
 
 # How many `Event` records may be waiting on the writer before the
 # producer starts refusing them. A turn produces tens of them, so this
@@ -112,11 +125,13 @@ MAX_EVENTS_IN_FLIGHT = 1024
 # default; 0 keeps everything and is a deliberate choice.
 RETENTION_DAYS_DEFAULT = 90
 
-# How long `stop()` waits for the writer thread. Above the database's
-# busy timeout, so a commit parked on another writer's lock has time to
-# take it and finish, and a commit that is wedged for any other reason
-# cannot hold shutdown past this.
-STOP_TIMEOUT_S = BUSY_TIMEOUT_MS / 1000 + 5.0
+# How long `stop()` waits for the writer thread. A policy margin above
+# the lock wait rather than a derived ceiling: a commit parked on the
+# chain's advisory lock gives up after `LOCK_TIMEOUT_MS`, so five
+# seconds beyond that is room for the retry and the rest of the batch,
+# and nothing bounds a whole transaction's execution. A commit wedged
+# for any other reason cannot hold shutdown past this.
+STOP_TIMEOUT_S = LOCK_TIMEOUT_MS / 1000 + 5.0
 
 # What is taken off an event's fields before the row lands. One table,
 # consulted in one place, because a content key that is scrubbed at some
@@ -156,68 +171,17 @@ EVENT_CONTENT: dict[str, tuple[str, ...]] = {
 # it fills it is emptied, and the warnings begin again.
 _UNKNOWN_WARNED_MAX = 64
 
-# How long a checkpoint waits for a reader to let go before it defers.
-# Far below the busy timeout on purpose: by the time it runs, the
-# deletion is committed and durable, and truncating the log is tidying
-# up after it. A quarter of a second covers a reader that is about to
-# finish; waiting the full ten seconds would queue the writer behind a
-# reader it has no reason to wait for, which is exactly what deferring
-# to the next quiet moment exists to avoid.
-CHECKPOINT_WAIT_MS = 250
+def open_conversations(settings: DatabaseConfig) -> Engine:
+    """Open and migrate the conversation record's schema.
 
-
-def conversations_path(directory: str | Path) -> Path:
-    """Where the file is, without creating anything: the question a
-    caller asks before deciding whether there is a store to read."""
-    return Path(directory) / DATABASE_FILENAME
-
-
-def open_conversations(directory: str | Path) -> Engine:
-    """Open (creating if needed) and migrate `conversations.db`.
-
-    `secure_delete` because a right to delete honored in the query
-    planner and broken in the file bytes is not honored: freed pages are
-    overwritten with zeros rather than left in the freelist, which is
-    cheap for a store this append-mostly.
-
-    No `superseded`, deliberately and not by omission. That argument is
-    what a database stamped at a revision its own chain deleted is told,
-    and this chain has deleted none: it is the single baseline it has
-    always been, untouched by the domain squash beside it. Handing in
-    the domain's answer would tell whoever met an unreadable
-    conversations database to reset a volume and re-seed a
-    configuration, which is advice about the other file, and acting on
-    it would destroy exactly the recorded conversations `secure_delete`
-    above exists to erase completely when retention takes them."""
-    return open_at(directory, DATABASE_FILENAME, _MIGRATIONS_DIR, secure_delete=True)
-
-
-def migrate_existing(directory: str | Path) -> bool:
-    """Bring a store that is already there up to the current schema, and
-    create nothing. Answers whether there was one.
-
-    What a boot with recording switched off does. A deployment that
-    recorded last month and records nothing today still has to serve its
-    history against the schema this server reads with, and migrating what
-    exists is maintenance rather than recording: a missing file stays
-    missing, which is what keeps an absent or disabled section a server
-    that leaves no database behind."""
-    if not conversations_path(directory).exists():
-        return False
-    open_conversations(directory).dispose()
-    return True
-
-
-def read_conversations(directory: str | Path) -> Engine:
-    """An engine for reading a store somebody else migrated.
-
-    The read behavior `db.read_engine` describes, pointed at this file:
-    URI `mode=rw` because a WAL reader may extend the `-shm` index and
-    `mode=ro` would refuse exactly the live database this serves, while
-    `mode=rw` still refuses to create a missing one; deferred
-    transactions, so a read never queues behind the writer; the busy
-    timeout; no migration and no pragma that writes."""
-    return existing_engine(conversations_path(directory))
+    Always, and not only when recording is on. Migrating this schema
+    creates empty tables, which is not a recording: what the privacy
+    promise says is that recording off starts no writer and writes no
+    rows, and a deployment that recorded last month still has to serve
+    its history against the schema this build reads with. There is no
+    file to leave behind for an absence to be visible in.
+    """
+    return open_at(settings, CONVERSATIONS_CHAIN)
 
 
 # What the producers put on the queue
@@ -305,7 +269,7 @@ class ConversationStore:
 
     def __init__(
         self,
-        directory: str | Path,
+        settings: DatabaseConfig,
         metrics: bool = True,
         text: bool = True,
         retention_days: int = RETENTION_DAYS_DEFAULT,
@@ -314,12 +278,11 @@ class ConversationStore:
         gate: Callable[[], None] | None = None,
         stop_timeout_s: float = STOP_TIMEOUT_S,
     ) -> None:
-        self.directory = Path(directory)
+        self.settings = settings
         self.metrics = metrics
         self.text = text
         self.retention_days = retention_days
-        self.path = conversations_path(directory)
-        self._engine = open_conversations(directory)
+        self._engine = open_conversations(settings)
         self._queue: queuing.SimpleQueue[Any] = (
             queuing.SimpleQueue() if queue is None else queue
         )
@@ -344,10 +307,6 @@ class ConversationStore:
         # folded into the session row's count at close. Writer-side, so
         # unlike the producer's counter it needs no lock.
         self._lost: dict[str, int] = {}
-        # Whether a deletion's truncating checkpoint was blocked and is
-        # still owed. Retried at the next marker and at stop, which is
-        # what "the next quiet moment" means concretely.
-        self._truncation_due = False
 
     # --- lifecycle ----------------------------------------------------
 
@@ -365,11 +324,11 @@ class ConversationStore:
         # recording when it is not.
         thread.start()
         self._thread = thread
-        events.emit(lambda: ConversationsEnabled(path=ConfiguredPath(self.path)))
+        events.emit(ConversationsEnabled)
 
     def stop(self) -> None:
         """Accept nothing more, drain what is queued, and let go of the
-        file. Idempotent: a second call has nothing to do."""
+        connections. Idempotent: a second call has nothing to do."""
         if self._stopped:
             return
         self._stopped = True
@@ -554,9 +513,6 @@ class ConversationStore:
         for session_id in list(self._batches):
             self._commit(session_id)
             self._batches.pop(session_id, None)
-        # The last quiet moment there will be. A truncation still owed
-        # when the server stops has no later marker to wait for.
-        self._settle()
 
     def _commit(
         self, session_id: str, opening: Open | None = None, closing: Close | None = None
@@ -564,12 +520,11 @@ class ConversationStore:
         """One marker: one short transaction holding exactly this
         session's batch.
 
-        The write lock is taken before anything is read (the engine
-        begins immediate), so the existence check below and the inserts
-        that follow it cannot straddle a deletion. A failure rolls the
-        whole batch back, which is the unit SQLite gives, and the report
-        that leaves carries the exception's class name and nothing
-        else."""
+        The chain's advisory lock is taken before anything is read (the
+        engine's begin listener takes it), so the existence check below
+        and the inserts that follow it cannot straddle a deletion. A
+        failure rolls the whole batch back, and the report that leaves
+        carries the exception's class name and nothing else."""
         batch = self._batches.get(session_id)
         if batch is None:
             return
@@ -611,15 +566,6 @@ class ConversationStore:
         # to prevent.
         if session_id in self._batches:
             self._batches[session_id] = _Batch()
-        self._settle()
-
-    def _settle(self) -> None:
-        """The next quiet moment, taken when one arrives. A deletion
-        whose checkpoint a reader blocked leaves the deleted frames in
-        the write-ahead log, so the truncation is owed until it lands,
-        and every marker the writer commits is another chance at it."""
-        if self._truncation_due and _checkpoint(self._engine):
-            self._truncation_due = False
 
     def _alive(self, connection: Any, session_id: str) -> bool:
         found = connection.execute(
@@ -780,6 +726,17 @@ class ConversationStore:
         at each session close, which is often enough for a store that
         only grows when a conversation happens.
 
+        What deletion means here is stated exactly, because the backend
+        decides it and the backend has moved. A deleted row is invisible
+        to every transaction that begins after this one commits,
+        including the analyst role's; a repeatable-read transaction
+        already in flight when it commits keeps seeing the row until it
+        ends, which is what MVCC is. Reclaiming the space the row
+        occupied is the database server's own storage maintenance
+        (autovacuum), not a per-delete overwrite: there is no freed page
+        for this process to write zeros over, and the file the SQLite
+        era erased in place is not this deployment's to reach.
+
         Failure is a dropped prune, not a dropped conversation: a store
         that could not delete still records, and the next close tries
         again."""
@@ -793,8 +750,6 @@ class ConversationStore:
                 # offset, which they are: the cutoff is built here and
                 # the column is written from the same clock.
                 counts = _delete_sessions(connection, [sessions.c.started_at < cutoff])
-            if counts["sessions"]:
-                self._truncation_due = not _checkpoint(self._engine)
         except Exception as exc:  # noqa: BLE001 - retention never breaks a session
             # Bound to an ordinary local before the thunk closes over
             # it: `except ... as` unbinds its own name when the block
@@ -873,53 +828,12 @@ def _delete_sessions(
     return counts
 
 
-def _checkpoint(engine: Engine, wait_ms: int = CHECKPOINT_WAIT_MS) -> bool:
-    """Fold the write-ahead log back into the database and truncate it,
-    so the deleted frames stop existing rather than merely stop being
-    read. Answers whether it truncated.
-
-    On a raw DBAPI connection, deliberately, and not through the engine:
-    SQLite refuses to checkpoint inside a transaction, and every
-    connection this engine hands out through SQLAlchemy takes `BEGIN
-    IMMEDIATE` before its first statement. Through the engine the
-    statement raises "database table is locked" every single time, which
-    a suppressed exception turns into a checkpoint that silently never
-    happened. The pragma runs in autocommit here because the connect
-    listener hands transaction control to SQLAlchemy, and SQLAlchemy is
-    not in the way of a raw connection.
-
-    A checkpoint a reader blocks reports busy in its first column rather
-    than raising, so the answer is read rather than assumed. Its caller
-    retries at the next quiet moment; the copies that already left the
-    file (backups, snapshots) stay the operator's to manage.
-    """
-    raw = engine.raw_connection()
-    try:
-        cursor = raw.cursor()
-        try:
-            cursor.execute(f"PRAGMA busy_timeout={wait_ms}")
-            row = cursor.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
-            # Back to the connection's own budget before it returns to
-            # the pool: the short wait belongs to this statement, not to
-            # every transaction that borrows the connection next.
-            cursor.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
-        finally:
-            cursor.close()
-    except Exception:  # noqa: BLE001 - tidying up never breaks a deletion
-        return False
-    finally:
-        raw.close()
-    # (busy, log frames, frames checkpointed). Busy is 0 only when every
-    # frame moved and the log was truncated.
-    return row is not None and row[0] == 0
-
-
 def _utc_now() -> dt.datetime:
     return dt.datetime.now(dt.UTC)
 
 
 __all__ = [
-    "DATABASE_FILENAME",
+    "CONVERSATIONS_CHAIN",
     "MAX_EVENTS_IN_FLIGHT",
     "RETENTION_DAYS_DEFAULT",
     "STOP_TIMEOUT_S",
@@ -929,8 +843,5 @@ __all__ = [
     "Open",
     "SessionSink",
     "Turn",
-    "conversations_path",
-    "migrate_existing",
     "open_conversations",
-    "read_conversations",
 ]
