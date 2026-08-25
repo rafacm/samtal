@@ -486,9 +486,11 @@ against the code:
 - the websocket handshake with `Authorization`, `Device-Id`, `Client-Id`
   and `Protocol-Version` (sent because the firmware sends it, and
   recorded as read by nothing);
-- the hello exchange, at whichever framing version the OTA reply named,
-  through `framing.wrap`;
-- `listen` `start` and `stop` in `manual` mode;
+- the hello exchange, announcing whichever framing version the OTA reply
+  named. **The hello is a websocket TEXT frame**, as every JSON control
+  message is; `framing.wrap` applies to binary audio and to nothing else
+  (`device/session.py:406` against `:1130`);
+- `listen` in `manual` mode, `start` and `stop` states only;
 - reading `stt`, `tts` in all three states, and binary reply frames:
   counted, size-checked and unwrapped, with the reply's duration
   computed from the frame count and the announced `frame_duration`;
@@ -538,15 +540,17 @@ list rather than a shrug:
 **The both-ways pin**, which is what makes the statement a test rather
 than a paragraph:
 
-1. Every message type in `protocol.messages`' modelled set appears in
-   the table exactly once, on exactly one side. That set is
-   `_MESSAGE_TYPES` today and becomes public in M1: a private name
-   reached from another module is a fact with no home, which is the
-   reasoning the re-cut's M2 applied to `untransportable`. A new
-   device-to-server message the server learns to model therefore fails
-   this test until the simulator classifies it.
-2. Every message builder the protocol package exposes is likewise
-   classified, so the read side is closed the same way the send side is.
+1. **Every message type is classified at state and mode granularity,
+   not at type granularity.** A row per `(type, state, mode)` the
+   protocol declares, because `listen` alone holds supported `start` and
+   `stop` beside unsupported `detect`, and `manual` beside unsupported
+   `auto` and `realtime`. A type-level pin would have called `listen`
+   supported and published a claim that is two thirds false. The
+   enumeration comes from the models' own `Literal` members (decision
+   5a), so a fourth listening state added to the protocol appears in the
+   simulator's help as unclassified rather than as silently supported.
+2. Every message the server can SEND is classified the same way, off the
+   same models, so the read side is closed exactly as the send side is.
 3. Every entry renders into the help epilog, on the side it declares.
 4. The unsupported half is non-empty and every entry carries a reason.
    An "honest" statement that lists nothing unsupported is the exact
@@ -559,6 +563,72 @@ than a paragraph:
    side is asserted empty, which is what retires it rather than leaving
    it as a parking space. This is the assertion finding 2 exists for and
    it is the one that would have caught the original plan.
+
+### 5a. The server's half of the protocol gets models, and the
+conversation gets a state machine
+
+`protocol/messages.py` models the device-to-server half and builds the
+server-to-server half as raw `json.dumps` calls (`messages.py:160-189`).
+That asymmetry is fine while the only reader is the server, which never
+parses what it just wrote. It stops being fine the moment something in
+this repository has to READ those messages, and the simulator is the
+first such reader.
+
+Making `_MESSAGE_TYPES` public, which is all the first draft proposed,
+does not help with that half at all: it would leave `conversation.py`
+hand-rolling `data.get("type") == "tts"` and `data.get("state") ==
+"sentence_start"`, which is a second encoding of the wire in the one
+module whose whole justification was that it holds none.
+
+So **`protocol/messages.py` gains the other half**, in M2, beside the
+half it has:
+
+- **Frozen models for what the server sends**: the server hello with its
+  `session_id` and its validated `audio_params`, `stt`, `tts` with its
+  state as a closed `Literal`, and the `mcp` envelope. Immutable, and
+  `extra="ignore"` like their siblings, so a newer server stays readable.
+- **A parser beside `parse_message`**, with the same boundary discipline:
+  a refusal naming the message type, where it broke and which rule it
+  broke, and nothing that arrived. `_refusal` is written to be read from
+  both directions already, and the reason it gives is this issue's
+  reason too: pydantic renders a `ValidationError` with `input_value=`
+  in it, so a server that put a credential where a `session_id` belongs
+  would otherwise put it into a sentence.
+- **The builders derived from the models rather than written beside
+  them.** `server_hello`, `stt_message` and `tts_message` become
+  `model.model_dump_json()` over the new models, which is what stops the
+  models and the wire from disagreeing. This is the one production
+  change to the server's own path in this issue, and it is
+  behavior-preserving by construction: a case transcribes the three
+  existing builders' output and compares it byte for byte, the way the
+  prompt assembler's move was proven.
+- **The public message inventory** the capability pin reads: the types,
+  and each type's states and modes, off the `Literal` members rather
+  than restated.
+
+`_MESSAGE_TYPES` still becomes public in M1, because M1's capability pin
+needs the send-side inventory and M1 adds no models. A private name
+reached from another module is a fact with no home, which is the
+reasoning the re-cut's M2 deviation 3 applied to `untransportable`.
+
+**And the conversation's ordering is stated, not implied.** A simulator
+that reads messages in whatever order they arrive is a simulator that
+cannot say what went wrong. `conversation.py` owns one explicit state
+machine, and the states are the ones the protocol actually has:
+
+`opened` → `hello sent` → `hello received` (or the fixed refusal for a
+malformed one, or the bound expiring) → `listening` (`listen start`
+sent, frames sent, `listen stop` sent) → `awaiting reply` → `speaking`
+(`tts start` seen; `stt` may arrive before or after it, and
+`sentence_start` any number of times) → `reply complete` (`tts stop`)
+→ `closed`.
+
+Two rules make it a machine rather than a list. A message that arrives
+in a state that does not expect it is reported by its type and state in
+this side's own words and does not advance anything, which is what the
+firmware does with JSON it does not understand. And every transition
+that waits has a bound (decision 6), so no state can be waited in
+forever.
 
 ### 6. Two milestones, and the device half goes first
 
@@ -757,7 +827,12 @@ it.
   (M2), the stream reader that is the only thing that knows a header's
   size.
 - `vinga_server/protocol/messages.py`: the modelled message-type map
-  becomes public (M1).
+  becomes public (M1); frozen models for the server-to-device half, a
+  parser beside `parse_message`, the three builders derived from those
+  models, and the public state-and-mode inventory the capability pin
+  reads (M2, decision 5a). Deepened rather than split: it is the module
+  that owns what a control message is, and owning only one direction of
+  that was the asymmetry a second reader exposed.
 - `vinga_server/config/cli.py`: two rows, one `GROUPS` entry, one new
   `Invocation` field (`endpoint`) with `mac` and `agents` reused, the
   generalized gate (M2), and the simulator's own argument declarers.
@@ -810,6 +885,18 @@ it.
   handshake, the hello at the negotiated framing version, the utterance,
   an `stt`, `tts` start, `sentence_start` and stop, reply frames that
   unwrap, and a clean close.
+- The three existing builders proven byte-identical after being derived
+  from the new models, by a case that transcribes their current output
+  first, which is the pin-before-reshape discipline applied to the one
+  server-path change this issue makes.
+- The state machine (decision 5a) driven off its happy path: a message
+  arriving in a state that does not expect it is reported and advances
+  nothing; a `tts stop` with no `tts start` before it, an `stt` after
+  the reply completed, and a binary frame before the hello are each a
+  case.
+- The control channel proven to be text: the hello, `listen` and every
+  message this side sends go out as websocket text frames, and
+  `framing.wrap` is asserted to be reached only for audio.
 - The gate: `run` from an environment without `websockets` prints the
   fixed sentence and exits 1, with a sentinel planted in the simulated
   `ImportError`'s message, since an import error's text is a module path
@@ -997,6 +1084,27 @@ between alternatives the choice is recorded with its reason.
    define the conversation's ordering state machine explicitly,
    classify capabilities at state and mode granularity, and state the
    text-versus-binary rule.
+
+   *Resolution* (this commit): new decision 5a. `protocol/messages.py`
+   is deepened rather than split: it gains frozen models for the
+   server-to-device half, a parser beside `parse_message` with the same
+   boundary discipline and the same reason (`_refusal` exists because
+   pydantic renders `input_value=` into a `ValidationError`), the three
+   builders derived from those models so the models and the wire cannot
+   disagree, and the public state-and-mode inventory the capability pin
+   reads. That builder change is the one production change to the
+   server's own path in this issue and it is pinned byte for byte before
+   it moves. `_MESSAGE_TYPES` still becomes public in M1, because M1's
+   pin needs the send-side inventory and M1 adds no models. Capability
+   pin 1 is re-cut to classify at `(type, state, mode)` granularity off
+   the models' own `Literal` members, since a type-level pin would have
+   called `listen` supported and published a claim two thirds false.
+   Decision 5a also writes the conversation's ordering out as an
+   explicit state machine with its two rules, an unexpected message is
+   reported and advances nothing, and every waiting transition is
+   bounded. The capability list's framing claim is corrected: the hello
+   is a websocket text frame, as every JSON control message is, and
+   `framing.wrap` reaches audio and nothing else.
 
 4. **P1: the claimed activation path never obtains a usable token.** An
    activating check-in has an empty token, and tokens are minted only by
