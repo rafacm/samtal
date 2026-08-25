@@ -2288,6 +2288,18 @@ CONFIRMATION = (
 
 DECLINED = "nothing was deleted, because the confirmation was not answered with y"
 
+# And what a terminal that cannot be read says. The question is asked
+# and the answer never arrives: a stream that has gone, or bytes the
+# terminal's encoding will not decode, which is an ordinary thing for a
+# pasted answer to be. Neither is quoted, and the decoding failure is
+# the reason: what it retains is the bytes it could not read, which came
+# off a terminal an operator is typing a delete into.
+CONFIRMATION_UNREADABLE = (
+    "the confirmation could not be read from this terminal, so nothing was deleted. "
+    "What could not be read is not repeated here. Run it again, or run it with "
+    "--force, which answers the question without asking it"
+)
+
 NO_INPUT_REFUSED = (
     "a destructive command asks for a confirmation at a terminal, and --no-input "
     "disables every prompt. Run it again with --force, which answers the question "
@@ -2313,8 +2325,30 @@ def _permitted_to_destroy(args: Invocation) -> None:
     if args.no_input:
         raise ConfigError(NO_INPUT_REFUSED)
     print(CONFIRMATION, end="", file=sys.stderr, flush=True)
-    if sys.stdin.readline().strip().lower() != "y":
+    if _answered().strip().lower() != "y":
         raise ConfigError(DECLINED)
+
+
+def _answered() -> str:
+    """What was typed at the confirmation, or the sentence for a
+    terminal that would not give it.
+
+    The one read in this grammar that happens after something has
+    already been printed, and the only one whose failure would otherwise
+    leave through `main` as a traceback. Both families are caught for
+    the reason `-f`'s reader catches both: a stream that has gone is an
+    `OSError`, and bytes the encoding will not decode leave as a
+    `UnicodeError`, which is a `ValueError` and not an `OSError` at all.
+
+    Built inside the handler and raised after it, so the exception that
+    holds those bytes is not on the chain of what leaves.
+    """
+    problem: str | None = None
+    try:
+        return sys.stdin.readline()
+    except (OSError, UnicodeError, ValueError):
+        problem = CONFIRMATION_UNREADABLE
+    raise ConfigError(problem)
 
 
 def _read_secret(args: Invocation) -> str:
