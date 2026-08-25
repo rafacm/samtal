@@ -610,6 +610,32 @@ def test_the_connections_own_logger_emits_at_no_level_at_all(
     )
 
 
+def test_a_hello_that_named_no_audio_parameters_ends_the_conversation(
+    unpaced, identity, said
+) -> None:
+    """The refusal the model change makes reachable from here.
+
+    Everything this side does after the hello is paced and announced by
+    what the hello named: the reply's own packet duration is read off
+    it, and a block manufactured out of nothing would have been this
+    client's guesses reported as the far side's answer. So a hello
+    without one is not a hello, and there is no session to speak in.
+
+    Bite: with `audio_params` back to a `default_factory`, this peer's
+    hello parses, the conversation proceeds, and the case does not raise
+    at all.
+    """
+    def script(connection, recorded: Recorded) -> None:
+        recorded.texts.append(connection.recv())
+        connection.send(json.dumps({"type": "hello", "session_id": SESSION}))
+        recorded.finished.wait(timeout=5)
+
+    with peer(script) as (url, _), pytest.raises(ConfigError) as refused:
+        held(url, identity, said)
+
+    assert str(refused.value) == conversation.BAD_HELLO
+
+
 def test_a_peer_close_reason_is_read_and_never_relayed(
     unpaced,
     identity,

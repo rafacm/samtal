@@ -291,6 +291,28 @@ def test_every_message_the_server_sends_parses_into_its_own_model() -> None:
     assert isinstance(sentence, TtsMessage) and sentence.text == "Hej"
 
 
+def test_a_hello_that_named_no_audio_parameters_is_refused() -> None:
+    """The field that used to be manufactured out of nothing.
+
+    A `default_factory` meant a hello naming no audio parameters at all
+    parsed as one naming this client's own guesses, so a reader would
+    pace and announce a conversation by numbers the far side never sent.
+    The fields INSIDE the block keep their defaults, which is a different
+    question and is asserted beside it: a server that omits `channels` is
+    telling a device the ordinary thing, and a server that omits the
+    block is telling it nothing.
+    """
+    with pytest.raises(ProtocolError):
+        parse_server_message(json.dumps({"type": "hello", "session_id": "s"}))
+
+    named = parse_server_message(
+        json.dumps({"type": "hello", "session_id": "s", "audio_params": {"sample_rate": 24000}})
+    )
+    assert isinstance(named, ServerHello)
+    assert named.audio_params.sample_rate == 24000
+    assert named.audio_params.channels == 1
+
+
 def test_a_parsed_server_message_cannot_be_edited() -> None:
     """Frozen, because a parsed message is a record of what arrived and
     nothing downstream has any business rewriting it."""
@@ -399,9 +421,14 @@ def test_the_two_inventories_name_the_models_that_parse_them() -> None:
 
 
 def _least(message_type: str) -> dict[str, object]:
-    """The smallest well-formed message of one server-sent type."""
+    """The smallest well-formed message of one server-sent type.
+
+    A hello carries `audio_params`, because a hello without one is not a
+    small hello, it is a hello that told a client nothing about the
+    stream it is about to pace and announce.
+    """
     return {
-        "hello": {"type": "hello", "session_id": "s"},
+        "hello": {"type": "hello", "session_id": "s", "audio_params": {}},
         "stt": {"type": "stt", "text": ""},
         "tts": {"type": "tts", "state": "stop"},
         "mcp": {"type": "mcp"},
