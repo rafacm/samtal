@@ -22,19 +22,24 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   a deployment runs the image and installs nothing, as it always has. A
   checkout is unaffected too: `uv sync` still yields a runnable server
   with no new flags, because the dev dependency group names the extra.
-- **`openapi`, `ota-url` and `vinga-server conversations` need the
-  server half installed** (#223). All three read the server's own code:
-  `openapi` builds the configuration application to describe it,
-  `ota-url` derives its URL through the onboarding package, and the
-  conversations group renders the store's tables off the SQLAlchemy
-  metadata. On a client-only install each stays where it was and answers
-  one fixed sentence naming the missing half rather than an ImportError
+- **Four commands need the server half installed** (#223): `openapi`
+  and `ota-url` in the configuration grammar,
+  `vinga-server conversations`, and `vinga-server doctor` **with no
+  URL**. Each reads the server's own code: `openapi` builds the
+  configuration application to describe it, `ota-url` and the doctor's
+  derivation read the onboarding package, and the conversations group
+  renders the store's tables off the SQLAlchemy metadata. On a
+  client-only install each stays where it was and answers one fixed
+  sentence naming the missing half rather than an ImportError
   traceback. Inside the image and from a checkout they behave exactly as
-  before. The committed `docs/reference/api-openapi.json` is where a
-  client-only install reads the contract, and the laptop-side question
-  `ota-url` is confused with, whether a URL answers, is
-  `vinga-server doctor`'s. `config`, `events` and `doctor` are the
-  client half and are not gated.
+  before. **`vinga-server doctor <url>` is not gated**: diagnosing an
+  address a workstation was given opens a socket and reads an answer,
+  which is exactly what a laptop administering a remote deployment
+  does, and it keeps working on the client half alone. Only deriving
+  the URL needs the other half. The committed
+  `docs/reference/api-openapi.json` is where a client-only install
+  reads the contract, and `config` and `events` are the client half
+  throughout.
 - **The configuration grammar is noun first** (#223). `vinga-server
   config set provider llm local` is `vinga-server config provider set
   llm local`, and every command word in the grammar moved with it:

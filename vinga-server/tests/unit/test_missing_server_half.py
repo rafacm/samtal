@@ -1,18 +1,25 @@
 """What an installation carrying the client half alone is told.
 
 The default installation of this package is the configuration client,
-and the server half is an extra. So four things a person can type are
+and the server half is an extra. So five things a person can type are
 answerable only by an installation that has that half, and each of them
 is answered with a fixed sentence rather than with an ImportError:
 `vinga-server` with nothing after it, which means serve; the two
 commands of the configuration grammar that read the server's own
 modules, `openapi` (which builds the API application to describe it) and
-`ota-url` (which derives a URL through the onboarding package); and
+`ota-url` (which derives a URL through the onboarding package);
 `vinga-server conversations`, which renders the store's tables off the
-SQLAlchemy metadata.
+SQLAlchemy metadata; and `vinga-server doctor` WITH NO URL, which
+derives the URL to diagnose through the same onboarding package.
 
-Two sentences and not four: serving is one fact, and needing the other
-half is the other, which the remaining three share.
+That last one is gated at the derivation rather than at the command,
+which is the whole of what makes it right: a laptop diagnosing a remote
+deployment passes the URL, opens a socket and reads an answer, and
+wants nothing of this package's server half. Only the derivation needs
+it. A case below drives both halves of that split.
+
+Two sentences and not five: serving is one fact, and needing the other
+half is the other, which the remaining four share.
 
 The sentinels are the point of this file. Every one of these refusals is
 reached with an ImportError in hand, and an ImportError's text is a
@@ -31,6 +38,7 @@ with. A test that needed a second environment could not run here at all,
 and the clean-venv lane is where the real absence is proven.
 """
 
+import argparse
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -38,6 +46,7 @@ from pathlib import Path
 import pytest
 
 from tests.support.config_cli import chain, logged
+from vinga_server import doctor
 from vinga_server import main as entrypoint
 from vinga_server.config import cli
 from vinga_server.config.loader import NEEDS_THE_SERVER_HALF, ConfigError
@@ -300,13 +309,19 @@ def test_the_conversations_refusal_leaks_nothing_it_was_given(
             assert sentinel not in surface, sentinel
 
 
-def test_the_three_client_half_groups_are_not_gated(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_client_half_groups_are_not_gated_at_the_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The other half of the same decision, held explicitly.
 
-    `config`, `events` and `doctor` are the client half, so an
-    installation that reached this file has them. Routing them through
-    the gate would turn a real bug in one of them into a sentence
+    `config`, `events` and `doctor` are dispatched without the gate,
+    because all three are modules the client half carries. Routing them
+    through it would turn a real bug in one of them into a sentence
     saying something untrue about the installation.
+
+    `doctor` gates one branch INSIDE itself instead, which is the case
+    below: the module imports thin, and the derivation that does not is
+    the only thing behind the sentence.
     """
     assert entrypoint.CONVERSATIONS_GROUP == "vinga_server.conversations.cli"
     assert entrypoint.SERVING == "vinga_server.serving"
@@ -314,6 +329,81 @@ def test_the_three_client_half_groups_are_not_gated(monkeypatch: pytest.MonkeyPa
     gated = {entrypoint.CONVERSATIONS_GROUP, entrypoint.SERVING}
     for module in ("vinga_server.config.cli", "vinga_server.events_cli", "vinga_server.doctor"):
         assert module not in gated, module
+
+
+# The doctor, whose two halves fall on opposite sides of the line
+
+
+def test_the_doctor_with_no_url_answers_the_gated_sentence(
+    offline: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """With no URL it has to derive one, and the derivation reads the
+    onboarding package."""
+    _refuses("vinga_server.onboarding")(monkeypatch)
+
+    assert doctor.main(["--config", str(offline)]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.err.strip() == NEEDS_THE_SERVER_HALF
+    assert captured.out == ""
+
+
+def test_the_doctor_with_a_url_needs_no_server_half(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """And the half that must keep working: a laptop diagnosing a
+    remote deployment passes the URL, and nothing about that reaches
+    the onboarding package at all.
+
+    It is driven at an address nothing answers on, so what comes back
+    is the transport refusal rather than a diagnosis, which is the
+    point: it got as far as opening a socket, which the gated branch
+    never does.
+    """
+    _refuses("vinga_server.onboarding")(monkeypatch)
+
+    assert doctor.main(["http://127.0.0.1:9/x/ABCDEFGH/"]) == 1
+
+    said = capsys.readouterr().err
+    assert NEEDS_THE_SERVER_HALF not in said
+    assert "cannot reach" in said
+
+
+def test_the_doctor_refusal_leaks_nothing_it_was_given(
+    offline: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """All four surfaces. What this invocation carries is the path of
+    the file half, which is the file a deployment keeps its secrets
+    beside, and the ImportError's own module path."""
+    _refuses("vinga_server.onboarding")(monkeypatch)
+
+    with caplog.at_level(0):
+        assert doctor.main(["--config", str(offline)]) == 1
+
+    captured = capsys.readouterr()
+    for sentinel in (IMPORT_SENTINEL, CONFIG_PATH_SENTINEL):
+        for surface in (captured.out, captured.err, logged(caplog)):
+            assert sentinel not in surface, sentinel
+
+
+def test_the_doctor_refusal_carries_no_exception_chain(
+    offline: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The fourth surface, read where a walker would find it. Driven at
+    the derivation, because `doctor.main` prints the sentence and
+    returns."""
+    with monkeypatch.context() as patched:
+        _refuses("vinga_server.onboarding")(patched)
+        with pytest.raises(ConfigError) as refused:
+            doctor._derived_url(argparse.Namespace(config=str(offline)))
+
+    assert str(refused.value) == NEEDS_THE_SERVER_HALF
+    assert refused.value.__cause__ is None
+    assert refused.value.__context__ is None
+    assert IMPORT_SENTINEL not in chain(refused.value)
 
 
 def test_one_sentence_answers_every_command_that_needs_the_other_half() -> None:

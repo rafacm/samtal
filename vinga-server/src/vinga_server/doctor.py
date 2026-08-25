@@ -43,7 +43,12 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from vinga_server.config.loader import CONFIG_ENV_VAR, ConfigError, load_file_config
+from vinga_server.config.loader import (
+    CONFIG_ENV_VAR,
+    NEEDS_THE_SERVER_HALF,
+    ConfigError,
+    load_file_config,
+)
 from vinga_server.config.models import ServerConfig
 from vinga_server.config.printing import parsed_url, printable, shown_url
 from vinga_server.logs import quieted
@@ -240,18 +245,7 @@ def _doctor(args: argparse.Namespace) -> None:
         url = _device_url(args.url, "the URL given to doctor")
         shown = SUPPLIED_ENDPOINT
     else:
-        # Imported here rather than at the top of this module, and the
-        # reason is the import graph rather than a cycle:
-        # `onboarding/__init__` eagerly imports `unbound`, which imports
-        # `device.bindings`, which imports `config.store` and
-        # `vinga_server.db`. At module level that would pull the whole
-        # database machinery into every invocation of this command, URL
-        # argument or not, and this branch is the only one that wants
-        # anything from that package at all.
-        from vinga_server.onboarding.origin import onboarding_url
-
-        derived, _ = onboarding_url(_server_config(args), ONBOARDING_OFF_FOR_DOCTOR)
-        url = _device_url(derived, "the onboarding URL this configuration derives")
+        url = _device_url(_derived_url(args), "the onboarding URL this configuration derives")
         shown = url
     response = _probed(url, shown)
     reported = _describe(response.text)
@@ -273,6 +267,47 @@ def _doctor(args: argparse.Namespace) -> None:
         f"{shown} is vinga-server {printable(reported['version'])}, and sends devices "
         f"to {websocket} (protocol version {printable(reported['protocol'])})."
     )
+
+
+def _derived_url(args: argparse.Namespace) -> str:
+    """The onboarding URL this configuration derives, or the fixed
+    sentence when the server half is not installed.
+
+    Imported here rather than at the top of this module, and for two
+    reasons that stack. The first is weight: `onboarding/__init__`
+    eagerly imports `unbound`, which imports `device.bindings`, which
+    imports `config.store` and `vinga_server.db`, so a module-level
+    import would pull the whole database machinery into every
+    invocation of this command, URL argument or not. The second is that
+    the same chain reaches FastAPI, which the default install of this
+    package does not carry, so on a client-only install this import
+    does not merely cost something, it fails.
+
+    Which is why it is gated, and why the gate is HERE rather than
+    around the command. A laptop diagnosing a remote deployment passes
+    the URL, and that half must keep working with the client half
+    alone: it opens a socket and reads an answer and wants nothing of
+    this package's server. Only the derivation needs the other half,
+    because only the derivation reads the onboarding key.
+
+    Recorded inside the handler and raised outside it, the way every
+    sanitized boundary here raises: an ImportError's text is the module
+    path it could not find, and an exception raised while one is being
+    handled carries it as `__context__` for anything walking the chain.
+    A `ConfigError` out of the derivation itself is this command's own
+    refusal and travels as one, since only ImportError is caught.
+    """
+    config = _server_config(args)
+    derived: list[str] = []
+    try:
+        from vinga_server.onboarding.origin import onboarding_url
+
+        derived.append(onboarding_url(config, ONBOARDING_OFF_FOR_DOCTOR)[0])
+    except ImportError:
+        pass
+    if not derived:
+        raise ConfigError(NEEDS_THE_SERVER_HALF)
+    return derived[0]
 
 
 def _server_config(args: argparse.Namespace) -> ServerConfig:

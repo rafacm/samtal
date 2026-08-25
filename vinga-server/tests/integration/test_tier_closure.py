@@ -6,7 +6,9 @@ exercised here:
 
 - the **client** door, which is `uvx --from git+...` on a laptop: the
   project installed with no extras at all, which must carry the
-  configuration grammar and must carry none of the server;
+  configuration grammar and must carry none of the server. It must also
+  carry the half of `doctor` a laptop uses, which is diagnosing a URL
+  it was given; deriving one is the server's half and refuses;
 - the **server** door, which is the image build: the same project with
   `[serve]`, which must boot;
 - the **contributor** door, which is `cd vinga-server && uv sync`: the
@@ -305,16 +307,62 @@ def test_the_conversations_group_refuses_from_the_client_install(client_env: Pat
 def test_the_client_half_groups_still_answer_from_the_client_install(
     client_env: Path,
 ) -> None:
-    """And its two siblings that are the client half, which must NOT be
-    gated: `events reference` renders the event registry and `doctor`
-    asks an address a question, and an installation that has this entry
-    point has both."""
+    """And its sibling that is the client half, which must NOT be
+    gated: `events reference` renders the event registry, and an
+    installation that has this entry point has it."""
     events = _ran(client_env, "vinga-server", "events", "reference")
     assert events.returncode == 0, events.stderr
     assert events.stdout.strip()
 
-    doctor = _ran(client_env, "vinga-server", "doctor", "--help")
-    assert doctor.returncode == 0, doctor.stderr
+
+def test_the_doctor_diagnoses_a_given_url_from_the_client_install(
+    client_env: Path,
+) -> None:
+    """The half a laptop needs, driven for real rather than through
+    `--help`.
+
+    A workstation diagnosing a remote deployment passes the URL: it
+    opens a socket, reads what answers, and wants nothing of this
+    package's server half. Pointed at a port nothing listens on, so the
+    answer is the transport refusal, which is the proof it got that far
+    at all.
+    """
+    finished = _ran(client_env, "vinga-server", "doctor", "http://127.0.0.1:9/x/ABCDEFGH/")
+
+    assert finished.returncode == 1, (finished.stdout, finished.stderr)
+    assert "cannot reach" in finished.stderr, finished.stderr
+    assert cli.NEEDS_THE_SERVER_HALF not in finished.stderr
+    assert "Traceback" not in finished.stderr
+
+
+def test_the_doctor_with_no_url_refuses_from_the_client_install(client_env: Path) -> None:
+    """And the half it does not have, driven for real.
+
+    With no URL the command derives one, and the derivation reads the
+    onboarding package, whose `__init__` reaches FastAPI. This is the
+    invocation the review round found: it used to end in a library
+    traceback carrying the ImportError's module path, because the
+    client-tier proof only ran `doctor --help` and never entered the
+    branch.
+    """
+    finished = _ran(client_env, "vinga-server", "doctor")
+
+    assert finished.returncode == 1, (finished.stdout, finished.stderr)
+    assert finished.stderr.strip() == cli.NEEDS_THE_SERVER_HALF
+    assert finished.stdout == ""
+    assert "Traceback" not in finished.stderr
+    assert "fastapi" not in finished.stderr.lower()
+
+
+def test_the_doctor_with_no_url_derives_one_from_the_serve_install(serve_env: Path) -> None:
+    """The other side of that gate: with the half installed the
+    derivation runs, so the command gets as far as trying to reach what
+    it derived rather than refusing to derive it."""
+    finished = _ran(serve_env, "vinga-server", "doctor")
+
+    assert finished.returncode == 1, (finished.stdout, finished.stderr)
+    assert cli.NEEDS_THE_SERVER_HALF not in finished.stderr
+    assert finished.stderr.strip(), "the derivation said nothing at all"
 
 
 def test_the_gated_pair_is_what_the_table_says_it_is() -> None:
