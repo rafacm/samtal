@@ -32,6 +32,7 @@ structured-logging dependency would cost more than it saves.
 import datetime as dt
 import json
 import logging
+import threading
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from typing import Any
@@ -136,6 +137,33 @@ def quiet_vendor_libraries(level: int | None = None) -> None:
         logger.setLevel(max(against, floor))
 
 
+# The one lock every quieting is taken under.
+#
+# A logger's level is process state, and this raises one and puts it
+# back. Two threads doing that over the same names, unserialized, undo
+# each other in the direction that matters: the first to enter saved the
+# loud level, the second saved the quiet one, and the first to LEAVE
+# restores the loud level underneath a request the second is still
+# making, so the library narrates that request's URL into a record after
+# all. The pair then finishes with the level the second saved, which is
+# the wrong one in the other direction.
+#
+# Held across the whole block rather than around each mutation, because
+# what has to be atomic is the span from raising the level to putting it
+# back, not the setLevel calls at its ends. Reentrant, so a caller
+# already inside one boundary may open another; the callers here do not
+# nest today, and a lock that deadlocked if they ever did would be a
+# trap left for somebody else to find.
+#
+# What this costs is that two threads quieting the same loggers take
+# their turns rather than overlapping. Both callers are command-line
+# tools making one request, which is the shape this was always for; a
+# server that wanted concurrent quieting would want a different
+# mechanism entirely, since the level it is changing is global to the
+# process whatever guards it.
+_QUIETING = threading.RLock()
+
+
 @contextmanager
 def quieted(names: Iterable[str], level: int) -> Iterator[None]:
     """Hold these loggers at `level` or above for the length of a block,
@@ -154,18 +182,22 @@ def quieted(names: Iterable[str], level: int) -> Iterator[None]:
 
     What is restored is each logger's own level rather than its
     effective one, so a logger that was inheriting goes back to
-    inheriting. Logger levels are process state, and so is this: it is
-    for a command line tool doing one thing at a time, and two threads
-    calling it over the same names would restore each other's.
+    inheriting.
+
+    One block at a time, under `_QUIETING` above, which says why: the
+    state being held is the process's, so two threads holding it at once
+    restore each other's levels, and the one that loses is the one whose
+    request is still in flight.
     """
-    held = [(logging.getLogger(name), logging.getLogger(name).level) for name in names]
-    for logger, _ in held:
-        logger.setLevel(max(logger.getEffectiveLevel(), level))
-    try:
-        yield
-    finally:
-        for logger, was in held:
-            logger.setLevel(was)
+    with _QUIETING:
+        held = [(logging.getLogger(name), logging.getLogger(name).level) for name in names]
+        for logger, _ in held:
+            logger.setLevel(max(logger.getEffectiveLevel(), level))
+        try:
+            yield
+        finally:
+            for logger, was in held:
+                logger.setLevel(was)
 
 
 class JsonFormatter(logging.Formatter):

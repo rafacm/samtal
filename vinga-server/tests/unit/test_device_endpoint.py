@@ -11,8 +11,11 @@ secret path segment and a query string, and reading a websocket URL as
 somewhere a device token may actually be sent.
 """
 
+import logging
+import threading
 from urllib.parse import urlsplit
 
+import httpx
 import pytest
 
 from vinga_server import device_endpoint
@@ -334,3 +337,94 @@ def test_the_downgrade_rule_is_about_those_two_schemes_and_no_others() -> None:
     assert not device_endpoint.downgraded("https", "wss")
     assert not device_endpoint.downgraded("http", "ws")
     assert not device_endpoint.downgraded("http", "wss")
+
+
+# The request boundary's logging, when two of them overlap
+#
+# The quieting is process state, and a request is the span it has to
+# cover. Two of them at once is not hypothetical here: the live lane
+# runs this client in the same process as a uvicorn that makes requests
+# of its own, and `simulator run` will hold a socket open while a poll
+# goes out beside it.
+
+
+class _Held:
+    """A far side that answers only when a case says so, and records
+    which URL it was asked for."""
+
+    def __init__(self, entered: threading.Event, released: threading.Event) -> None:
+        self.entered = entered
+        self.released = released
+
+    def client(self, url: str) -> httpx.Client:
+        return httpx.Client(base_url=url, transport=httpx.MockTransport(self._handle))
+
+    def _handle(self, request: httpx.Request) -> httpx.Response:
+        self.entered.set()
+        assert self.released.wait(timeout=10)
+        return httpx.Response(200, json={})
+
+
+def _requesting(url: str, far_side: _Held, failed: list[BaseException]) -> threading.Thread:
+    def request() -> None:
+        try:
+            device_endpoint.requested("GET", _endpoint(url), build=far_side.client)
+        except BaseException as exc:  # pragma: no cover - a failure is the assertion
+            failed.append(exc)
+
+    return threading.Thread(target=request, daemon=True)
+
+
+def test_two_overlapping_requests_neither_unquiet_the_other(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The interleaving the levels are process state for.
+
+    Unserialized, the pair undoes itself in the direction that matters:
+    the first in saves the loud level, the second saves the quiet one,
+    and the first OUT restores the loud level underneath a request the
+    second is still making, so the library writes that request's URL
+    into a record after all. The pair then finishes on the level the
+    second saved, which is the wrong one the other way.
+
+    Both halves are asserted, because either alone would pass with the
+    other broken: no record carries either sentinel, and both loggers
+    end at exactly the level they started at.
+    """
+    first = f"https://voice.example/x/{SEGMENT}-one/"
+    second = f"https://voice.example/x/{SEGMENT}-two/"
+    loggers = [logging.getLogger(name) for name in device_endpoint.REQUEST_LOGGERS]
+    was = [logger.level for logger in loggers]
+    failed: list[BaseException] = []
+    inside, release = threading.Event(), threading.Event()
+    waiting, let_go = threading.Event(), threading.Event()
+    try:
+        for logger in loggers:
+            logger.setLevel(logging.INFO)
+        with caplog.at_level(logging.DEBUG):
+            caplog.clear()
+            ahead = _requesting(first, _Held(inside, release), failed)
+            behind = _requesting(second, _Held(waiting, let_go), failed)
+            ahead.start()
+            assert inside.wait(timeout=10)
+            behind.start()
+            # The second cannot be inside the boundary while the first
+            # is: this is the wait that would let it in without the
+            # lock, and it is what makes the case an interleaving rather
+            # than two requests in a row.
+            assert not waiting.wait(timeout=0.25)
+            release.set()
+            ahead.join(timeout=10)
+            let_go.set()
+            behind.join(timeout=10)
+        written = "\n".join(
+            f"{record.getMessage()}\n{record.args!r}" for record in caplog.records
+        )
+
+        assert failed == []
+        assert f"{SEGMENT}-one" not in written
+        assert f"{SEGMENT}-two" not in written
+        assert [logger.level for logger in loggers] == [logging.INFO] * len(loggers)
+    finally:
+        for logger, level in zip(loggers, was, strict=True):
+            logger.setLevel(level)
