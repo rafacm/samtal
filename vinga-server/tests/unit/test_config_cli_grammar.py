@@ -836,3 +836,79 @@ def test_a_tree_with_nothing_installed_says_so_rather_than_guessing(
     monkeypatch.setattr(metadata, "version", missing)
 
     assert cli.installed_version() == cli.VERSION_UNKNOWN
+
+
+# The tree, held to the table
+#
+# The grammar was two words deep until #223 and the assumption was
+# written into more places than the registration loop: the loop itself,
+# the kind resolution, the two lanes' inventory helpers, the refusal
+# families and the two document renderers. Each of those has its own
+# case; this is the one that makes a SEVENTH site fail loudly, because
+# what it asserts is the property all six were about.
+
+
+@pytest.mark.parametrize(
+    "row", cli.COMMANDS, ids=[" ".join(row.words) for row in cli.COMMANDS]
+)
+def test_every_row_is_reachable_by_its_own_words(row) -> None:
+    """Walked down the built tree word by word, so a row registered
+    under the wrong parent, or with a word in the middle discarded, is a
+    row this cannot reach.
+
+    The failure it exists for is silent: a completeness test that cannot
+    see a command reports full coverage of a tree with a hole in it.
+    """
+    found = cli.command()
+    for word in row.words[:-1]:
+        assert word in getattr(found, "commands", {}), " ".join(row.words)
+        found = found.commands[word]
+    assert row.words[-1] in getattr(found, "commands", {}), " ".join(row.words)
+
+
+def test_every_group_of_the_tree_carries_a_command() -> None:
+    """A noun path with no command under it is a heading nothing
+    answers to, which is what a discarded intermediate word leaves
+    behind."""
+    for path in cli.GROUPS:
+        assert any(row.words[: len(path)] == path for row in cli.COMMANDS), " ".join(path)
+        assert getattr(_leaf(path), "commands", {}), " ".join(path)
+
+
+@pytest.mark.parametrize(
+    "row", cli.COMMANDS, ids=[" ".join(row.words) for row in cli.COMMANDS]
+)
+def test_a_rows_kind_is_a_kind_the_registry_has(row) -> None:
+    """`kind` stopped being the last word when the tree grew a third
+    level, so what is left to check is that the explicit fact names
+    something: a kind the registry has, the device, or nothing at all
+    for a row that addresses no kind."""
+    known = {kind.name for kind in cli.entities.ENTITIES} | {"device", ""}
+
+    assert row.kind in known, " ".join(row.words)
+
+
+def test_the_deep_rows_resolve_to_their_own_kind() -> None:
+    """The three-word cases decision 5a names, each of which a
+    positional rule reads wrongly: a provider secret's kind is the noun
+    it sits under and not `set`, and a pending claim's kind is the
+    device its two-word noun path opens with."""
+    by_words = {row.words: row for row in cli.COMMANDS}
+
+    assert by_words[("provider", "secret", "set")].kind == "provider"
+    assert by_words[("provider", "secret", "clear")].kind == "provider"
+    assert by_words[("mcp-server", "secret", "set")].kind == "mcp-server"
+    assert by_words[("device", "pending", "claim")].kind == "device"
+    assert by_words[("device", "pending", "list")].kind == "device"
+
+
+def test_the_reference_carries_a_heading_for_every_level() -> None:
+    """The renderer's own case: a discarded intermediate group would be
+    a missing heading in the committed reference, which CI would catch
+    as drift without saying why."""
+    rendered = cli.cli_reference()
+
+    assert f"### `{cli.PROGRAM} provider secret`" in rendered
+    assert f"### `{cli.PROGRAM} provider secret set`" in rendered
+    assert f"### `{cli.PROGRAM} device pending`" in rendered
+    assert f"### `{cli.PROGRAM} device pending claim`" in rendered
