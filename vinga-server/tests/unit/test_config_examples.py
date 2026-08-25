@@ -99,7 +99,6 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     rather than through a shortcut none of them takes."""
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
     monkeypatch.delenv(cli.API_URL_ENV, raising=False)
-    monkeypatch.setenv("VINGA_SERVER__DATABASE__DIR", str(tmp_path / "db"))
     monkeypatch.setenv(MASTER_KEY_ENV, generate_key())
     monkeypatch.setenv(API_SECRET_ENV, TOKEN)
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))

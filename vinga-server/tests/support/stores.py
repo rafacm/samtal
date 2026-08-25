@@ -1,11 +1,13 @@
 """What a suite writes into a store, and how it reads one back.
 
-Three things on disk keep what a conversation produced: the capture
-directory, the conversations database, and an agent's memory file. What
-belongs here is the scaffolding around all three: the manifest each
-kind of session is opened with, a store built where a test can reach it,
-the audio a channel is filled with, a read through a second engine, and
-the way a memory file is made unreadable on purpose.
+Two places keep what a conversation produced: the capture directory and
+the conversation record's schema, with an agent's memory file beside
+them. What belongs here is the scaffolding around all three: the
+manifest each kind of session is opened with, a store built where a
+test can reach it, the audio a channel is filled with, a read through a
+second engine, the second writer four suites need in order to prove the
+retryable refusal, and the way a memory file is made unreadable on
+purpose.
 
 Nothing here asserts and nothing here drives a session. A helper returns
 a store, a payload or a list of rows, and the suite says what it expects.
@@ -17,18 +19,74 @@ writes beside its WAVs, the other is the session row a conversation
 opens with. Both importing suites keep their own spelling by alias.
 """
 
+import contextlib
 import struct
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import psycopg
+import pytest
 from pydantic import BaseModel
 from sqlalchemy import text
 
+from vinga_server import db as db_module
 from vinga_server.capture import CAPTURE_RATE, CaptureStore
 from vinga_server.config import entities
 from vinga_server.config import store as config_store
+from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations.store import open_conversations
+from vinga_server.db import DOMAIN_CHAIN, StoreChain, connection_url
 from vinga_server.tools.memory import MemoryStore
+
+# --- a second writer, holding the lock ---------------------------------
+
+# Short enough that a blocked writer gives up inside a test run, and
+# long enough that an unblocked one never sees it.
+SHORT_LOCK_MS = 200
+
+
+@contextlib.contextmanager
+def holding_the_write_lock(
+    monkeypatch: pytest.MonkeyPatch, chain: StoreChain = DOMAIN_CHAIN
+) -> Iterator[None]:
+    """A second process's write transaction, as far as the engine under
+    test can tell: one connection holding the chain's advisory lock in a
+    transaction that does not let go.
+
+    The SQLite-era shape of this was a second `sqlite3` connection in
+    `BEGIN IMMEDIATE`, repeated in four suites. What it proved then is
+    what it proves now, and the mechanism is the only thing that moved:
+    a writer takes the chain's `pg_advisory_xact_lock` before it reads,
+    so a second one waits out `lock_timeout` and refuses retryably.
+
+    The constant is shortened first, and that ordering is the scenario
+    rather than a convenience: the timeout rides on a connection's
+    startup options, so an engine opened under the packaged ten seconds
+    keeps them for the life of its pool. Open the engine, or the
+    application that owns one, only after entering this.
+    """
+    monkeypatch.setattr(db_module, "LOCK_TIMEOUT_MS", SHORT_LOCK_MS)
+    yield
+
+
+@contextlib.contextmanager
+def the_lock_held(chain: StoreChain = DOMAIN_CHAIN) -> Iterator[None]:
+    """The other half: the lock actually taken, once whatever is under
+    test has its engine.
+
+    Separate from the constant above because the two happen at different
+    moments in every one of these scenarios, and a helper that did both
+    would have to be entered where neither belongs.
+    """
+    url = connection_url(DatabaseConfig()).set(drivername="postgresql")
+    holder = psycopg.connect(url.render_as_string(hide_password=False))
+    try:
+        holder.execute("select pg_advisory_xact_lock(%s)", (chain.lock_key,))
+        yield
+    finally:
+        holder.rollback()
+        holder.close()
 
 # --- the capture directory --------------------------------------------
 
@@ -66,13 +124,15 @@ CONVERSATIONS_MANIFEST: dict[str, Any] = {
 }
 
 
-def rows(directory: Path, table: str, **where: Any) -> list[dict[str, Any]]:
+def rows(table: str, **where: Any) -> list[dict[str, Any]]:
     """Read through a second engine, which is what a reader beside a
     running writer is."""
-    engine = open_conversations(directory)
+    engine = open_conversations(DatabaseConfig())
     try:
         clause = " and ".join(f"{name} = :{name}" for name in where)
-        query = f"select * from {table}" + (f" where {clause}" if where else "")
+        query = f"select * from conversations.{table}" + (
+            f" where {clause}" if where else ""
+        )
         with engine.connect() as connection:
             return [dict(row) for row in connection.execute(text(query), where).mappings()]
     finally:

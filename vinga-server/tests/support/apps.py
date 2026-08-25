@@ -36,6 +36,7 @@ from vinga_server.config.secrets import SecretStore
 def entered_app(
     config: Config | None = None,
     secrets: SecretStore | None = None,
+    from_store: bool = False,
     **client_options: Any,
 ) -> Iterator[tuple[FastAPI, TestClient]]:
     """`with entered_app(config) as (app, client): ...`
@@ -43,8 +44,15 @@ def entered_app(
     The app is built, its lifespan entered, and everything it built
     released on the way out. `client_options` are `TestClient`'s own
     (headers, follow_redirects, base_url).
+
+    `from_store` says the configuration handed in stands for one read
+    from the database, which a test that seeded the same database first
+    is doing. It decides whether device bindings resolve live and
+    whether the two surfaces spanning a store and a running world have
+    anything to span. False is the honest default here: most of this
+    lane composes a `Config` in Python and no store describes it.
     """
-    app = create_app(config, secrets)
+    app = create_app(config, secrets, from_store=from_store)
     with TestClient(app, **client_options) as client:
         yield app, client
 
@@ -53,11 +61,12 @@ def entered_app(
 def entered_client(
     config: Config | None = None,
     secrets: SecretStore | None = None,
+    from_store: bool = False,
     **client_options: Any,
 ) -> Iterator[TestClient]:
     """`with entered_client(config) as client: ...`, for a test that only
     makes requests."""
-    with entered_app(config, secrets, **client_options) as (_, client):
+    with entered_app(config, secrets, from_store, **client_options) as (_, client):
         yield client
 
 

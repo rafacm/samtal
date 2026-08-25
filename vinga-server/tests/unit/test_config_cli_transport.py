@@ -22,8 +22,8 @@ registry's own envelope so that nobody is left not knowing what is
 running.
 """
 
+import contextlib
 import logging
-import sqlite3
 from pathlib import Path
 
 import httpx
@@ -34,26 +34,25 @@ import vinga_server.tools.mcp as mcp_module
 from tests.support.config_cli import API_SECRET_ENV, OTHER_SECRET, SECRET, TOKEN, runner
 from tests.support.config_cli import chain as _chain
 from tests.support.config_cli import logged as _logged
-from vinga_server import db as db_module
+from tests.support.stores import holding_the_write_lock, the_lock_held
 from vinga_server.config import cli
 from vinga_server.config.api import MOUNT_PATH, build_api
 from vinga_server.config.cli import outcomes
 from vinga_server.config.loader import ConfigError
+from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.responses import McpReloadResult
-from vinga_server.db import DATABASE_FILENAME
+from vinga_server.db import LOCK_TIMEOUT_MS
 
 
 @pytest.fixture
 def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """One command run the way the entry point runs it, against a server
     of this test's own."""
-    return runner(tmp_path, monkeypatch)
+    return runner(monkeypatch)
 
 
 # Short enough that a blocked writer gives up inside a test run, and
 # long enough that an unblocked one never sees it.
-SHORT_BUSY_MS = 200
-
 
 def test_a_config_file_that_is_not_there_is_an_error_not_a_default(
     run, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -288,7 +287,6 @@ def test_a_server_that_cannot_be_reached_says_so_and_names_the_recovery_path(
     """The real client, against a port nothing is listening on: the one
     case the injected test client cannot show."""
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
-    monkeypatch.setenv("VINGA_SERVER__DATABASE__DIR", str(tmp_path / "db"))
     monkeypatch.setenv(API_SECRET_ENV, TOKEN)
 
     assert cli.main(["--api-url", "http://127.0.0.1:1", "list"]) == 1
@@ -414,7 +412,6 @@ def test_a_transport_failure_after_an_accepted_url_names_it_sanitized(
     address without the credential.
     """
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
-    monkeypatch.setenv("VINGA_SERVER__DATABASE__DIR", str(tmp_path / "db"))
     monkeypatch.setenv(API_SECRET_ENV, TOKEN)
 
     with caplog.at_level(logging.DEBUG):
@@ -442,7 +439,6 @@ def test_an_unreadable_answer_from_an_accepted_url_names_it_sanitized(
     application here would send.
     """
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
-    monkeypatch.setenv("VINGA_SERVER__DATABASE__DIR", str(tmp_path / "db"))
     monkeypatch.setenv(API_SECRET_ENV, TOKEN)
 
     def answer(request: httpx.Request) -> httpx.Response:
@@ -494,7 +490,6 @@ def test_an_address_the_library_will_not_open_is_a_sentence_not_a_traceback(
     used to leave as a traceback carrying the hostname exactly as it was
     typed."""
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
-    monkeypatch.setenv("VINGA_SERVER__DATABASE__DIR", str(tmp_path / "db"))
     monkeypatch.setenv(API_SECRET_ENV, TOKEN)
 
     with caplog.at_level(logging.DEBUG):
@@ -697,25 +692,32 @@ def test_neither_failure_carries_the_credential_in_its_chain(
     assert unreadable.value.__context__ is None
 
 
-def test_the_read_timeout_outlasts_the_database_s_busy_timeout() -> None:
+def test_the_read_timeout_outlasts_the_database_s_lock_timeout() -> None:
     """The constant this depends on, asserted against the constant it has
     to outlast.
 
-    The contention tests below shorten the busy timeout so they finish
+    The contention tests below shorten the lock timeout so they finish
     inside a test run, which means they would keep passing if the read
     timeout were put back to httpx's five second default: the very
     regression the explicit timeout exists to prevent. So the relationship
     is checked directly, at the production values, where nothing has been
-    shortened."""
-    busy_timeout_s = db_module.BUSY_TIMEOUT_MS / 1000
+    shortened.
 
-    assert cli.READ_TIMEOUT_S > busy_timeout_s
-    # Margin, not just order: a read timeout a hair above the busy
+    A margin above the typical wait rather than a derived ceiling.
+    Postgres applies `lock_timeout` per lock acquisition, so a
+    transaction can wait it out on the advisory gate and again on a
+    later lock, and nothing bounds its execution: what this pins is
+    that the ordinary contended write reports the retryable refusal
+    rather than a transport error."""
+    lock_timeout_s = LOCK_TIMEOUT_MS / 1000
+
+    assert cli.READ_TIMEOUT_S > lock_timeout_s
+    # Margin, not just order: a read timeout a hair above the lock
     # timeout would still turn a slow answer into a transport error.
-    assert cli.READ_TIMEOUT_S >= busy_timeout_s * 2
+    assert cli.READ_TIMEOUT_S >= lock_timeout_s * 2
     # And the connect timeout is bounded, which is the other half: a
     # server that is not there must not take the read timeout to say so.
-    assert cli.CONNECT_TIMEOUT_S < busy_timeout_s
+    assert cli.CONNECT_TIMEOUT_S < lock_timeout_s
 
 
 def test_the_client_is_built_with_those_timeouts() -> None:
@@ -845,10 +847,10 @@ def test_apply_waits_for_the_server_however_long_it_takes(
 
 
 def test_a_write_that_cannot_take_the_lock_prints_the_retryable_refusal(
-    run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The reason the client's read timeout has margin above the
-    database's busy timeout: the settled answer to contention is a
+    database's lock timeout: the settled answer to contention is a
     sentence the operator can act on, and a client-side timeout at five
     seconds would replace it with one that says nothing.
 
@@ -861,11 +863,9 @@ def test_a_write_that_cannot_take_the_lock_prints_the_retryable_refusal(
     ordering below, which is the whole of the setup: both applications
     are up before the lock exists, and the lock arrives while the CLI's
     command is in flight."""
-    monkeypatch.setattr(db_module, "BUSY_TIMEOUT_MS", SHORT_BUSY_MS)
     run("agent", "set", "sam", "-f", "-", stdin="prompt: You are Sam.\n")
     capsys.readouterr()
-    directory = tmp_path / "db"
-    holder: sqlite3.Connection | None = None
+    holding = contextlib.ExitStack()
     built = cli.build_client
 
     def build_then_hold_the_lock(base_url: str, token: str) -> TestClient:
@@ -876,27 +876,26 @@ def test_a_write_that_cannot_take_the_lock_prints_the_retryable_refusal(
         met while the application was opening its engine, which is a
         different refusal in different words, and the other side of this
         assertion would have nothing to equal."""
-        nonlocal holder
         client = built(base_url, token)
-        holder = sqlite3.connect(directory / DATABASE_FILENAME, isolation_level=None)
-        holder.execute("BEGIN IMMEDIATE")
+        holding.enter_context(the_lock_held())
         return client
 
-    monkeypatch.setattr(cli, "build_client", build_then_hold_the_lock)
-    with TestClient(
-        build_api(TOKEN, directory), headers={"Authorization": f"Bearer {TOKEN}"}
-    ) as served:
-        assert run("agent", "set", "sam", "-f", "-", stdin="prompt: Still Sam.\n") == 1
-        assert holder is not None
-        try:
-            over_http = served.put("/agents/sam", json={"prompt": "Still Sam."})
-        finally:
-            holder.close()
+    with holding_the_write_lock(monkeypatch):
+        monkeypatch.setattr(cli, "build_client", build_then_hold_the_lock)
+        with TestClient(
+            build_api(TOKEN, DatabaseConfig()),
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        ) as served:
+            assert run("agent", "set", "sam", "-f", "-", stdin="prompt: Still Sam.\n") == 1
+            try:
+                over_http = served.put("/agents/sam", json={"prompt": "Still Sam."})
+            finally:
+                holding.close()
 
-        assert over_http.status_code == 409
-        captured = capsys.readouterr()
-        assert captured.err.rstrip("\n") == over_http.json()["detail"]
-        assert captured.out == ""
-        # And with the lock let go, the same command is answered.
-        monkeypatch.setattr(cli, "build_client", built)
-        assert run("agent", "set", "sam", "-f", "-", stdin="prompt: Still Sam.\n") == 0
+            assert over_http.status_code == 409
+            captured = capsys.readouterr()
+            assert captured.err.rstrip("\n") == over_http.json()["detail"]
+            assert captured.out == ""
+            # And with the lock let go, the same command is answered.
+            monkeypatch.setattr(cli, "build_client", built)
+            assert run("agent", "set", "sam", "-f", "-", stdin="prompt: Still Sam.\n") == 0

@@ -43,7 +43,7 @@ from vinga_server.config.secrets import MASK, MASTER_KEY_ENV
 def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """One command run the way the entry point runs it, against a server
     of this test's own."""
-    return runner(tmp_path, monkeypatch)
+    return runner(monkeypatch)
 
 
 def test_an_invalid_fragment_is_refused_without_echoing_it(

@@ -279,8 +279,8 @@ def recording_config(
     prompt: str | None = None,
     **conversations: object,
 ) -> Config:
-    """A server that records, with its databases where a test can read
-    them.
+    """A server that records, on the database this lane provisioned, with
+    its captures where a test can read them.
 
     The mock LLM asks for the `remember` builtin on the first round of a
     turn whose transcript carries the trigger and speaks the result on
@@ -289,10 +289,7 @@ def recording_config(
     """
     section: dict[str, object] = {"enabled": True}
     section.update(conversations)
-    server: dict[str, object] = {
-        "database": {"dir": str(tmp_path)},
-        "conversations": section,
-    }
+    server: dict[str, object] = {"conversations": section}
     if capture:
         server["capture"] = {"enabled": True, "dir": str(tmp_path / "captures")}
     return Config(

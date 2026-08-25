@@ -40,7 +40,7 @@ from vinga_server.config.loader import (
     RunningConfigMovedError,
     StorageError,
 )
-from vinga_server.config.models import MemoryConfig
+from vinga_server.config.models import DatabaseConfig, MemoryConfig
 from vinga_server.config.responses import (
     AgentsDiff,
     Applies,
@@ -88,10 +88,10 @@ def entry_data(**overrides: object) -> dict[str, object]:
 
 
 def config_with(
-    servers: dict[str, object], granted: list[str], database: Path | None = None
+    servers: dict[str, object], granted: list[str], database: DatabaseConfig | None = None
 ) -> Config:
     return Config(
-        server={} if database is None else {"database": {"dir": str(database)}},
+        server={} if database is None else {"database": database.model_dump()},
         providers={
             stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "tts", "vad")
         },
@@ -102,11 +102,11 @@ def config_with(
     )
 
 
-def seed(directory: Path, config: Config) -> None:
+def seed(database: DatabaseConfig, config: Config) -> None:
     """The configuration this test's server booted on, written into the
     database it would read again, so a reload that changes nothing has
     nothing to change."""
-    engine = open_database(directory)
+    engine = open_database(database)
     try:
         store = ConfigStore(engine)
         for stage in ("llm", "asr", "tts", "vad"):
@@ -123,8 +123,10 @@ def seed(directory: Path, config: Config) -> None:
 
 
 @pytest.fixture
-def directory(tmp_path: Path) -> Path:
-    return tmp_path / "db"
+def database() -> DatabaseConfig:
+    """The database this lane provisioned, which is what a server and a
+    client of its API both name."""
+    return DatabaseConfig()
 
 
 @pytest.fixture
@@ -134,7 +136,7 @@ def keys(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @contextmanager
 def serving(
-    directory: Path,
+    database: DatabaseConfig,
     servers: McpServers | None,
     reload: object = None,
     agent_prompt: object = None,
@@ -143,7 +145,7 @@ def serving(
 ) -> Iterator[TestClient]:
     api = build_api(
         TOKEN,
-        directory,
+        database,
         mcp_servers=servers,
         reload=reload,
         agent_prompt=agent_prompt,
@@ -155,19 +157,19 @@ def serving(
 
 
 @pytest.fixture
-def client(directory: Path) -> Iterator[TestClient]:
+def client(database: DatabaseConfig) -> Iterator[TestClient]:
     """An application built without a server around it, which is what
     the document is rendered from and what every test that does not care
     about the runtime gets."""
-    with serving(directory, None) as client:
+    with serving(database, None) as client:
         yield client
 
 
-def test_the_status_read_needs_the_bearer_token(directory: Path) -> None:
+def test_the_status_read_needs_the_bearer_token(database: DatabaseConfig) -> None:
     # The gate runs in front of routing, so this route inherits it
     # rather than declaring anything of its own. A client of its own,
     # since the shared one carries the header.
-    with TestClient(build_api(TOKEN, directory)) as anonymous:
+    with TestClient(build_api(TOKEN, database)) as anonymous:
         assert anonymous.get(STATUS_PATH).status_code == 401
         wrong = anonymous.get(STATUS_PATH, headers={"Authorization": "Bearer wrong"})
         assert wrong.status_code == 401
@@ -182,12 +184,12 @@ def test_an_application_without_a_server_reports_no_runtime(client: TestClient) 
     assert response.json() == {}
 
 
-async def test_the_read_answers_with_what_the_registry_holds(directory: Path) -> None:
+async def test_the_read_answers_with_what_the_registry_holds(database: DatabaseConfig) -> None:
     config = config_with({"tools": entry_data(), "shelved": entry_data()}, ["tools"])
     servers = McpServers.build(config)
     await servers.start_all()
     try:
-        with serving(directory, servers) as client:
+        with serving(database, servers) as client:
             answered = client.get(STATUS_PATH).json()
     finally:
         await servers.stop_all()
@@ -204,12 +206,12 @@ async def test_the_read_answers_with_what_the_registry_holds(directory: Path) ->
     assert answered["shelved"]["grants"] == {}
 
 
-async def test_a_dead_server_is_reported_down_with_its_reason(directory: Path) -> None:
+async def test_a_dead_server_is_reported_down_with_its_reason(database: DatabaseConfig) -> None:
     dead = entry_data(command="/nonexistent/mcp-server", args=[])
     servers = McpServers.build(config_with({"tools": dead}, ["tools"]))
     await servers.start_all()
     try:
-        with serving(directory, servers) as client:
+        with serving(database, servers) as client:
             answered = client.get(STATUS_PATH).json()
     finally:
         await servers.stop_all()
@@ -220,7 +222,7 @@ async def test_a_dead_server_is_reported_down_with_its_reason(directory: Path) -
 
 
 def test_a_running_server_hands_its_own_managers_to_the_api(
-    monkeypatch: pytest.MonkeyPatch, directory: Path
+    monkeypatch: pytest.MonkeyPatch, database: DatabaseConfig
 ) -> None:
     """The wiring, through the mount a deployment gets.
 
@@ -232,9 +234,9 @@ def test_a_running_server_hands_its_own_managers_to_the_api(
     """
     monkeypatch.setenv(API_SECRET_ENV, TOKEN)
     unreachable = entry_data(command="/nonexistent/mcp-server", args=[])
-    config = config_with({"tools": unreachable, "shelved": unreachable}, ["tools"], directory)
+    config = config_with({"tools": unreachable, "shelved": unreachable}, ["tools"], database)
 
-    with entered_client(config) as served:
+    with entered_client(config, from_store=True) as served:
         answered = served.get(
             f"{MOUNT_PATH}{STATUS_PATH}", headers={"Authorization": f"Bearer {TOKEN}"}
         )
@@ -318,8 +320,8 @@ def refusing(exc: Exception):
     return reload
 
 
-def test_the_reload_needs_the_bearer_token(directory: Path) -> None:
-    with TestClient(build_api(TOKEN, directory)) as anonymous:
+def test_the_reload_needs_the_bearer_token(database: DatabaseConfig) -> None:
+    with TestClient(build_api(TOKEN, database)) as anonymous:
         assert anonymous.post(RELOAD_PATH).status_code == 401
         wrong = anonymous.post(RELOAD_PATH, headers={"Authorization": "Bearer wrong"})
         assert wrong.status_code == 401
@@ -336,7 +338,7 @@ def test_an_application_without_a_server_refuses_to_reload(client: TestClient) -
     assert "no running server" in response.json()["detail"]
 
 
-def test_half_a_runtime_refuses_to_reload_from_either_side(directory: Path) -> None:
+def test_half_a_runtime_refuses_to_reload_from_either_side(database: DatabaseConfig) -> None:
     """The route refuses on "this application has a running server
     around it", and half a runtime is not one.
 
@@ -358,7 +360,7 @@ def test_half_a_runtime_refuses_to_reload_from_either_side(directory: Path) -> N
         prompts=PromptsReload(changed=[]),
     )
 
-    with serving(directory, None, answering(orphan)) as client:
+    with serving(database, None, answering(orphan)) as client:
         refused = client.post(RELOAD_PATH)
     assert refused.status_code == 503
     assert "no running server" in refused.json()["detail"]
@@ -366,13 +368,13 @@ def test_half_a_runtime_refuses_to_reload_from_either_side(directory: Path) -> N
     # And the other way round, which is what the guard said before the
     # composing moved out of this handler.
     servers = McpServers.build(config_with({"tools": entry_data()}, ["tools"]))
-    with serving(directory, servers) as client:
+    with serving(database, servers) as client:
         refused = client.post(RELOAD_PATH)
     assert refused.status_code == 503
     assert "no running server" in refused.json()["detail"]
 
 
-def test_a_reload_answers_with_what_it_did_and_what_is_running(directory: Path) -> None:
+def test_a_reload_answers_with_what_it_did_and_what_is_running(database: DatabaseConfig) -> None:
     servers = McpServers.build(
         config_with({"tools": entry_data(), "shelved": entry_data()}, ["tools"])
     )
@@ -384,7 +386,7 @@ def test_a_reload_answers_with_what_it_did_and_what_is_running(directory: Path) 
         unchanged=("shelved",),
     )
 
-    with serving(directory, servers, answering(applied)) as client:
+    with serving(database, servers, answering(applied)) as client:
         response = client.post(RELOAD_PATH)
 
     assert response.status_code == 200
@@ -402,11 +404,11 @@ def test_a_reload_answers_with_what_it_did_and_what_is_running(directory: Path) 
     assert answer["mcp"]["unchanged"] == ["shelved"]
     # And the whole status document, exactly as the read beside it
     # answers: one round trip applies and verifies.
-    with serving(directory, servers) as client:
+    with serving(database, servers) as client:
         assert answer["mcp"]["servers"] == client.get(STATUS_PATH).json()
 
 
-def test_the_mcp_section_is_what_the_retired_route_answered(directory: Path) -> None:
+def test_the_mcp_section_is_what_the_retired_route_answered(database: DatabaseConfig) -> None:
     """The one pin that says the MCP move was a move.
 
     The generalized reload has exactly three intentional transport
@@ -431,7 +433,7 @@ def test_the_mcp_section_is_what_the_retired_route_answered(directory: Path) -> 
         servers, started=("tools",), stopped=("gone",), unchanged=("shelved",)
     )
 
-    with serving(directory, servers, answering(applied)) as client:
+    with serving(database, servers, answering(applied)) as client:
         response = client.post(RELOAD_PATH)
 
     assert response.json()["mcp"] == former.model_dump()
@@ -452,11 +454,11 @@ def test_the_mcp_section_is_what_the_retired_route_answered(directory: Path) -> 
     ],
 )
 def test_a_refusal_maps_to_its_status_and_carries_its_own_sentence(
-    directory: Path, refusal: Exception, status: int
+    database: DatabaseConfig, refusal: Exception, status: int
 ) -> None:
     servers = McpServers.build(config_with({"tools": entry_data()}, ["tools"]))
 
-    with serving(directory, servers, refusing(refusal)) as client:
+    with serving(database, servers, refusing(refusal)) as client:
         response = client.post(RELOAD_PATH)
 
     assert response.status_code == status
@@ -464,7 +466,7 @@ def test_a_refusal_maps_to_its_status_and_carries_its_own_sentence(
 
 
 def test_a_read_that_fails_unexpectedly_answers_without_quoting_it(
-    directory: Path, caplog: pytest.LogCaptureFixture
+    database: DatabaseConfig, caplog: pytest.LogCaptureFixture
 ) -> None:
     """The refusals above are this application's own sentences, composed
     to be shown. The one below is not: the `read` callable opens a
@@ -483,7 +485,7 @@ def test_a_read_that_fails_unexpectedly_answers_without_quoting_it(
     reload = config_reloader(world(running, providers=built_world(running)), servers, read)
 
     with caplog.at_level("INFO"):
-        with serving(directory, servers, reload) as client:
+        with serving(database, servers, reload) as client:
             response = client.post(RELOAD_PATH)
 
     assert response.status_code == 500
@@ -503,7 +505,7 @@ def test_a_read_that_fails_unexpectedly_answers_without_quoting_it(
 
 
 def test_a_running_server_hands_its_own_reload_to_the_api(
-    monkeypatch: pytest.MonkeyPatch, directory: Path
+    monkeypatch: pytest.MonkeyPatch, database: DatabaseConfig
 ) -> None:
     """The wiring, through the mount a deployment gets: the route is
     served, and it is not the 503 an application without a server
@@ -512,10 +514,10 @@ def test_a_running_server_hands_its_own_reload_to_the_api(
     managers."""
     monkeypatch.setenv(API_SECRET_ENV, TOKEN)
     unreachable = entry_data(command="/nonexistent/mcp-server", args=[])
-    config = config_with({"tools": unreachable}, ["tools"], directory)
-    seed(directory, config)
+    config = config_with({"tools": unreachable}, ["tools"], database)
+    seed(database, config)
 
-    with entered_client(config) as served:
+    with entered_client(config, from_store=True) as served:
         answered = served.post(
             f"{MOUNT_PATH}{RELOAD_PATH}", headers={"Authorization": f"Bearer {TOKEN}"}
         )
@@ -579,7 +581,7 @@ def test_the_reload_describes_a_422_of_its_own() -> None:
     )
 
 
-def test_a_server_with_no_store_behind_it_refuses_to_reload(directory: Path) -> None:
+def test_a_server_with_no_store_behind_it_refuses_to_reload(database: DatabaseConfig) -> None:
     """The mode a test lane and an embedded caller run in: the
     configuration was handed to this server rather than read from a
     store, so the database beside it describes some other server. An
@@ -589,7 +591,7 @@ def test_a_server_with_no_store_behind_it_refuses_to_reload(directory: Path) -> 
     applied = outcome(servers)
 
     with serving(
-        directory, servers, answering(applied), snapshot_only=True
+        database, servers, answering(applied), snapshot_only=True
     ) as client:
         response = client.post(RELOAD_PATH)
 
@@ -624,8 +626,8 @@ def previewing(assembled: object):
     return assemble
 
 
-def test_the_prompt_read_needs_the_bearer_token(directory: Path) -> None:
-    with TestClient(build_api(TOKEN, directory)) as anonymous:
+def test_the_prompt_read_needs_the_bearer_token(database: DatabaseConfig) -> None:
+    with TestClient(build_api(TOKEN, database)) as anonymous:
         assert anonymous.get(PROMPT_PATH).status_code == 401
         wrong = anonymous.get(PROMPT_PATH, headers={"Authorization": "Bearer wrong"})
         assert wrong.status_code == 401
@@ -648,12 +650,12 @@ def test_an_application_without_a_server_has_no_prompt_to_assemble(
 
 
 def test_an_agent_this_server_is_not_serving_is_a_404_naming_the_reload(
-    directory: Path,
+    database: DatabaseConfig,
 ) -> None:
     """The 404 follows the world being served, so what it sends an
     operator to is the reload that installs an agent rather than the
     restart that used to."""
-    with serving(directory, None, agent_prompt=previewing(prompt.know_how("P"))) as client:
+    with serving(database, None, agent_prompt=previewing(prompt.know_how("P"))) as client:
         response = client.get("/runtime/agents/stranger/prompt")
 
     assert response.status_code == 404
@@ -664,12 +666,12 @@ def test_an_agent_this_server_is_not_serving_is_a_404_naming_the_reload(
     assert "stranger" not in detail
 
 
-def test_the_blocks_and_the_total_are_the_assemblers_own(directory: Path) -> None:
+def test_the_blocks_and_the_total_are_the_assemblers_own(database: DatabaseConfig) -> None:
     assembled = prompt.with_memory(
         prompt.know_how("POET", guidance=[Guidance("home", "Ask first.")]), "- a fact"
     )
 
-    with serving(directory, None, agent_prompt=previewing(assembled)) as client:
+    with serving(database, None, agent_prompt=previewing(assembled)) as client:
         answered = client.get(PROMPT_PATH)
 
     assert answered.status_code == 200
@@ -722,7 +724,7 @@ def test_the_prompt_read_describes_the_refusals_it_can_actually_answer() -> None
 
 
 def test_a_fragment_is_counted_on_the_surface_under_its_own_provenance(
-    directory: Path,
+    database: DatabaseConfig,
 ) -> None:
     """Every injected block is reported by the surface that counts it,
     which is what makes the fragment section's cost visible rather than
@@ -737,7 +739,7 @@ def test_a_fragment_is_counted_on_the_surface_under_its_own_provenance(
         "- a fact",
     )
 
-    with serving(directory, None, agent_prompt=previewing(assembled)) as client:
+    with serving(database, None, agent_prompt=previewing(assembled)) as client:
         body = client.get(PROMPT_PATH).json()
 
     assert [block["provenance"] for block in body["blocks"]] == [
@@ -757,7 +759,7 @@ def test_a_fragment_is_counted_on_the_surface_under_its_own_provenance(
 
 
 def test_the_server_shipped_blocks_are_counted_and_named_on_the_surface(
-    directory: Path,
+    database: DatabaseConfig,
 ) -> None:
     """The bytes an entry opted into reach exactly two places, and this
     is the second: the surface exists to say what the model was given,
@@ -775,7 +777,7 @@ def test_the_server_shipped_blocks_are_counted_and_named_on_the_surface(
         ],
     )
 
-    with serving(directory, None, agent_prompt=previewing(assembled)) as client:
+    with serving(database, None, agent_prompt=previewing(assembled)) as client:
         body = client.get(PROMPT_PATH).json()
 
     assert [block["provenance"] for block in body["blocks"]] == [
@@ -798,16 +800,16 @@ def test_the_server_shipped_blocks_are_counted_and_named_on_the_surface(
 
 
 def test_a_running_server_hands_its_own_assembly_to_the_api(
-    monkeypatch: pytest.MonkeyPatch, directory: Path, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, database: DatabaseConfig, tmp_path: Path
 ) -> None:
     """The wiring, through the mount a deployment gets: the loaded
     agent, the running slice and the memory store, none of which the API
     application knows anything about."""
     monkeypatch.setenv(API_SECRET_ENV, TOKEN)
-    config = config_with({"tools": entry_data(instructions="Ask first.")}, ["tools"], directory)
+    config = config_with({"tools": entry_data(instructions="Ask first.")}, ["tools"], database)
     config = config.model_copy(update={"memory": MemoryConfig(dir=tmp_path / "memory")})
 
-    with entered_client(config) as served:
+    with entered_client(config, from_store=True) as served:
         answered = served.get(
             f"{MOUNT_PATH}{PROMPT_PATH}", headers={"Authorization": f"Bearer {TOKEN}"}
         )
@@ -890,8 +892,8 @@ def refusing_diff(exc: Exception):
     return diff
 
 
-def test_the_diff_read_needs_the_bearer_token(directory: Path) -> None:
-    with TestClient(build_api(TOKEN, directory)) as anonymous:
+def test_the_diff_read_needs_the_bearer_token(database: DatabaseConfig) -> None:
+    with TestClient(build_api(TOKEN, database)) as anonymous:
         assert anonymous.get(DIFF_PATH).status_code == 401
         wrong = anonymous.get(DIFF_PATH, headers={"Authorization": "Bearer wrong"})
         assert wrong.status_code == 401
@@ -917,7 +919,7 @@ def test_an_application_without_a_server_has_nothing_to_compare(
     assert refused(response.json(), 503) != PROBLEM_DESCRIPTIONS[503]
 
 
-def test_the_diff_answers_every_kind_with_its_own_regime(directory: Path) -> None:
+def test_the_diff_answers_every_kind_with_its_own_regime(database: DatabaseConfig) -> None:
     """The whole shape on the wire, since this is the contract a client
     generates against: seven kinds, each labelled, the two live ones
     carrying their label and nothing else, and the three halves an agent
@@ -931,7 +933,7 @@ def test_the_diff_answers_every_kind_with_its_own_regime(directory: Path) -> Non
         fillers=("assistant",),
     )
 
-    with serving(directory, None, config_diff=comparing(composed)) as client:
+    with serving(database, None, config_diff=comparing(composed)) as client:
         response = client.get(DIFF_PATH)
 
     assert response.status_code == 200
@@ -979,12 +981,12 @@ def test_the_diff_answers_every_kind_with_its_own_regime(directory: Path) -> Non
     ],
 )
 def test_a_diff_refusal_maps_to_its_status_and_carries_its_own_sentence(
-    directory: Path, refusal: Exception, status: int
+    database: DatabaseConfig, refusal: Exception, status: int
 ) -> None:
     """The same typed refusals the reload answers, plus the one this read
     has of its own: a world that moved while it was being compared is
     retryable exactly as a contended write is."""
-    with serving(directory, None, config_diff=refusing_diff(refusal)) as client:
+    with serving(database, None, config_diff=refusing_diff(refusal)) as client:
         response = client.get(DIFF_PATH)
 
     assert response.status_code == status

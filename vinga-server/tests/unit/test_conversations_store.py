@@ -36,6 +36,7 @@ from tests.support.sessions import Gate
 from tests.support.stores import CONVERSATIONS_MANIFEST as MANIFEST
 from tests.support.stores import rows
 from vinga_server import logs
+from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations import store as store_module
 from vinga_server.conversations.records import ToolInvocation, TurnLeg, TurnRecord
 from vinga_server.conversations.store import (
@@ -44,9 +45,8 @@ from vinga_server.conversations.store import (
     STOP_TIMEOUT_S,
     ConversationStore,
     _Batch,
-    read_conversations,
 )
-from vinga_server.db import BUSY_TIMEOUT_MS
+from vinga_server.db import LOCK_TIMEOUT_MS, read_engine
 from vinga_server.events import attach_server_tap, detach_server_tap
 
 # A value that must never appear anywhere but the database file, shaped
@@ -66,13 +66,13 @@ class Wedged:
 
 
 @pytest.fixture
-def stores(tmp_path: Path):
+def stores():
     """Build stores that are always stopped, so no test leaves a writer
     thread or an open engine behind."""
     built: list[ConversationStore] = []
 
-    def _build(directory: Path | None = None, **options: Any) -> ConversationStore:
-        store = ConversationStore(directory or tmp_path, **options)
+    def _build(**options: Any) -> ConversationStore:
+        store = ConversationStore(DatabaseConfig(), **options)
         built.append(store)
         return store
 
@@ -132,7 +132,7 @@ def a_turn(**overrides: Any) -> TurnRecord:
 # The marker policy
 
 
-def test_the_session_row_is_visible_from_the_open(tmp_path: Path, stores) -> None:
+def test_the_session_row_is_visible_from_the_open(stores) -> None:
     """The open is its own marker, which is what lets a page opened mid
     conversation find the session it is about."""
     gate = Gate()
@@ -147,20 +147,20 @@ def test_the_session_row_is_visible_from_the_open(tmp_path: Path, stores) -> Non
     store.record_turn("alpha", a_turn())
     gate.wait()
 
-    (session,) = rows(tmp_path, "sessions")
+    (session,) = rows("sessions")
     assert session["session"] == "alpha"
     assert session["device"] == "aa:bb:cc:dd:ee:ff"
     assert session["agent"] == "sam"
     assert session["started_at"] == MANIFEST["started_at"]
     assert session["closed_at"] is None
     assert (session["metrics"], session["text"]) == (1, 1)
-    assert rows(tmp_path, "turns") == []
+    assert rows("turns") == []
 
     gate.open_forever()
 
 
 def test_rows_are_invisible_before_their_marker_and_visible_after(
-    tmp_path: Path, stores
+    stores,
 ) -> None:
     """A turn's rows land with the turn, not as they arrive: the writer
     accumulates in memory and holds no transaction between markers."""
@@ -175,23 +175,23 @@ def test_rows_are_invisible_before_their_marker_and_visible_after(
     store.record_turn("alpha", a_turn())
     gate.wait()
 
-    assert rows(tmp_path, "turns") == []
-    assert rows(tmp_path, "events") == []
+    assert rows("turns") == []
+    assert rows("events") == []
 
     gate.open_forever()
     store.stop()
 
-    (turn,) = rows(tmp_path, "turns")
+    (turn,) = rows("turns")
     assert turn["heard"] == "turn the light on"
     assert turn["tool_calls"] == 1
-    (invocation,) = rows(tmp_path, "tool_invocations")
+    (invocation,) = rows("tool_invocations")
     assert invocation["turn"] == turn["id"]
     assert invocation["entry"] == "home"
-    (event,) = rows(tmp_path, "events")
+    (event,) = rows("events")
     assert (event["name"], event["t_ms"]) == ("heard", 1400)
 
 
-def test_one_sessions_marker_exposes_nothing_of_another(tmp_path: Path, stores) -> None:
+def test_one_sessions_marker_exposes_nothing_of_another(stores) -> None:
     """One queue, many batches. A global next-marker policy would commit
     session B's half-assembled turn when session A completed one, which
     is what this interleaving would catch."""
@@ -218,20 +218,20 @@ def test_one_sessions_marker_exposes_nothing_of_another(tmp_path: Path, stores) 
     store.record_turn("alpha", a_turn(at=104.0))
     gate.wait()
 
-    assert [row["session"] for row in rows(tmp_path, "turns")] == ["alpha"]
-    assert [row["session"] for row in rows(tmp_path, "events")] == ["alpha"]
+    assert [row["session"] for row in rows("turns")] == ["alpha"]
+    assert [row["session"] for row in rows("events")] == ["alpha"]
 
     gate.open_forever()
     store.stop()
 
-    assert {row["session"] for row in rows(tmp_path, "events")} == {"alpha", "beta"}
+    assert {row["session"] for row in rows("events")} == {"alpha", "beta"}
 
 
 # The bound, and what it may not drop
 
 
 def test_events_beyond_the_bound_are_dropped_counted_and_said_once(
-    tmp_path: Path, stores, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    stores, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The droppable class, dropped at the producer so the session loop
     never waits. The count lands on the session row at close, which is
@@ -260,9 +260,9 @@ def test_events_beyond_the_bound_are_dropped_counted_and_said_once(
     store.close_session("alpha", duration_s=12.0, reason="client")
     store.stop()
 
-    (session,) = rows(tmp_path, "sessions")
+    (session,) = rows("sessions")
     assert session["dropped"] == 6
-    assert len(rows(tmp_path, "events")) == 4
+    assert len(rows("events")) == 4
 
 
 def test_the_bound_counts_events_the_writer_is_holding_in_a_batch(
@@ -325,13 +325,13 @@ def test_the_bound_counts_events_the_writer_is_holding_in_a_batch(
     store.close_session("alpha", duration_s=1.0, reason="client")
     store.stop()
 
-    assert len(rows(tmp_path, "events")) == 5
-    (session,) = rows(tmp_path, "sessions")
+    assert len(rows("events")) == 5
+    (session,) = rows("sessions")
     assert session["dropped"] == 6
 
 
 def test_control_records_are_never_dropped(
-    tmp_path: Path, stores, monkeypatch: pytest.MonkeyPatch
+    stores, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A dropped close would make the store unable to record its own
     incompleteness, so the bound is on the droppable class alone."""
@@ -344,15 +344,15 @@ def test_control_records_are_never_dropped(
     store.close_session("alpha", duration_s=9.0, reason="idle")
     store.stop()
 
-    (session,) = rows(tmp_path, "sessions")
+    (session,) = rows("sessions")
     assert session["close_reason"] == "idle"
     assert session["duration_s"] == 9.0
     assert session["dropped"] == 1
-    assert len(rows(tmp_path, "turns")) == 1
-    assert rows(tmp_path, "events") == []
+    assert len(rows("turns")) == 1
+    assert rows("events") == []
 
 
-def test_the_writers_defaults_are_the_documented_ones(tmp_path: Path, stores) -> None:
+def test_the_writers_defaults_are_the_documented_ones(stores) -> None:
     """The numbers a test that injects a seam cannot prove, pinned as
     values and, where a value is not the whole claim, as behavior.
 
@@ -363,58 +363,57 @@ def test_the_writers_defaults_are_the_documented_ones(tmp_path: Path, stores) ->
     from sqlalchemy import text as sql
 
     assert MAX_EVENTS_IN_FLIGHT == 1024
-    # Not merely "above the busy timeout": the margin is what a wedged
-    # commit is given to finish after the lock it is parked on clears,
-    # and a budget that drifted down to the timeout itself would still
-    # satisfy a greater-than.
-    assert STOP_TIMEOUT_S == BUSY_TIMEOUT_MS / 1000 + 5.0
-    assert BUSY_TIMEOUT_MS == 10_000
+    # A policy margin above the lock wait rather than a derived ceiling:
+    # a commit parked on the advisory lock gives up after
+    # LOCK_TIMEOUT_MS, and five seconds beyond that is room for the rest
+    # of the batch. Not merely "above the lock timeout", because a
+    # budget that drifted down to the timeout itself would still satisfy
+    # a greater-than.
+    assert STOP_TIMEOUT_S == LOCK_TIMEOUT_MS / 1000 + 5.0
+    assert LOCK_TIMEOUT_MS == 10_000
 
     store = stores()
     assert store.retention_days == RETENTION_DAYS_DEFAULT == 90
     # Both storage switches default on under an enabled store, which is
     # what makes enabling it alone give the documented defaults.
     assert (store.metrics, store.text) == (True, True)
-    # The pragma the connection really carries, rather than the constant
-    # it was meant to be built from.
-    # White-box: a pragma is a property of the connection the writer
-    # holds, and nothing reports it. What it protects is a second writer
-    # waiting rather than failing, and a deletion leaving no readable
-    # bytes behind, neither of which any read can show.
+    # The timeout the connection really carries, rather than the
+    # constant it was meant to be built from.
+    # White-box: it rides on the connection the writer holds, and
+    # nothing reports it. What it protects is a second writer failing
+    # retryably rather than waiting without end, which no read can show.
     with store._engine.connect() as connection:
-        assert connection.execute(sql("PRAGMA busy_timeout")).scalar() == 10_000
-        assert connection.execute(sql("PRAGMA secure_delete")).scalar() == 1
-        assert connection.execute(sql("PRAGMA journal_mode")).scalar() == "wal"
+        assert connection.execute(sql("show lock_timeout")).scalar() == "10s"
 
 
-def test_a_default_store_really_prunes_at_ninety_days(tmp_path: Path) -> None:
+def test_a_default_store_really_prunes_at_ninety_days() -> None:
     """The retention default asserted as the behavior it names, not as
     the number it is written with: a store built with nothing but a
-    directory has to delete a session older than the window and keep one
-    inside it. Only the clock is injected, because the alternative is a
-    test that waits ninety days."""
+    connection has to delete a session older than the window and keep
+    one inside it. Only the clock is injected, because the alternative
+    is a test that waits ninety days."""
     now = dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC)
 
     def manifest_at(started: dt.datetime) -> dict[str, Any]:
         return {**MANIFEST, "started_at": started.isoformat()}
 
-    seeding = ConversationStore(tmp_path, now=lambda: now, retention_days=0)
+    seeding = ConversationStore(DatabaseConfig(), now=lambda: now, retention_days=0)
     seeding.start()
     for name, age in (("ancient", 91), ("recent", 89)):
         seeding.open_session(name, 100.0, manifest_at(now - dt.timedelta(days=age)))
         seeding.close_session(name, duration_s=1.0, reason="client")
     seeding.stop()
-    assert {row["session"] for row in rows(tmp_path, "sessions")} == {"ancient", "recent"}
+    assert {row["session"] for row in rows("sessions")} == {"ancient", "recent"}
 
-    # Built the way the server will build it: a directory and a clock.
-    store = ConversationStore(tmp_path, now=lambda: now)
+    # Built the way the server will build it: a connection and a clock.
+    store = ConversationStore(DatabaseConfig(), now=lambda: now)
     store.start()
     store.stop()
 
-    assert [row["session"] for row in rows(tmp_path, "sessions")] == ["recent"]
+    assert [row["session"] for row in rows("sessions")] == ["recent"]
 
 
-def test_no_producer_path_can_wait_on_the_writer(tmp_path: Path, stores) -> None:
+def test_no_producer_path_can_wait_on_the_writer(stores) -> None:
     """Structural rather than timed: a queue whose blocking `put` raises
     proves no producer reaches one, whatever the writer is doing."""
 
@@ -445,7 +444,7 @@ def test_no_producer_path_can_wait_on_the_writer(tmp_path: Path, stores) -> None
 
 
 def test_records_for_a_session_it_never_opened_are_refused_once(
-    tmp_path: Path, stores, caplog: pytest.LogCaptureFixture
+    stores, caplog: pytest.LogCaptureFixture
 ) -> None:
     """By construction this cannot happen, since the open is enqueued
     before the runtime can produce anything on the same loop. It is
@@ -466,13 +465,13 @@ def test_records_for_a_session_it_never_opened_are_refused_once(
     ]
     assert len(refusals) == 1
     assert "ghost" in refusals[0].getMessage()
-    assert rows(tmp_path, "turns") == []
-    assert rows(tmp_path, "sessions") == []
+    assert rows("turns") == []
+    assert rows("sessions") == []
 
 
 @pytest.mark.parametrize("after_a_turn", [False, True])
 def test_a_session_deleted_under_a_live_one_is_never_resurrected(
-    tmp_path: Path, stores, after_a_turn: bool
+    stores, after_a_turn: bool
 ) -> None:
     """Retention is a deleter that can take a session that is still
     talking, because it selects on `started_at` and asks nothing about
@@ -537,10 +536,10 @@ def test_a_session_deleted_under_a_live_one_is_never_resurrected(
     store.close_session("alpha", duration_s=8.0, reason="client")
     store.stop()
 
-    assert [row["session"] for row in rows(tmp_path, "sessions")] == ["beta"]
-    assert rows(tmp_path, "turns") == []
-    assert rows(tmp_path, "tool_invocations") == []
-    assert rows(tmp_path, "events") == []
+    assert [row["session"] for row in rows("sessions")] == ["beta"]
+    assert rows("turns") == []
+    assert rows("tool_invocations") == []
+    assert rows("events") == []
 
 
 # The two storage switches, at the row level
@@ -549,7 +548,7 @@ def test_a_session_deleted_under_a_live_one_is_never_resurrected(
 @pytest.mark.parametrize("metrics", [True, False])
 @pytest.mark.parametrize("text_storage", [True, False])
 def test_each_switch_combination_nulls_its_own_half(
-    tmp_path: Path, stores, metrics: bool, text_storage: bool
+    stores, metrics: bool, text_storage: bool
 ) -> None:
     """Every combination is a supported configuration: metrics without
     text is the stricter setting, text without metrics is the
@@ -567,10 +566,10 @@ def test_each_switch_combination_nulls_its_own_half(
     store.close_session("alpha", duration_s=30.0, reason="limit")
     store.stop()
 
-    (session,) = rows(tmp_path, "sessions")
-    (turn,) = rows(tmp_path, "turns")
-    (invocation,) = rows(tmp_path, "tool_invocations")
-    legs = json.loads(turn["legs"])
+    (session,) = rows("sessions")
+    (turn,) = rows("turns")
+    (invocation,) = rows("tool_invocations")
+    legs = turn["legs"]
 
     # The spine, in every configuration: retention and every read key on it.
     assert session["started_at"] and session["closed_at"]
@@ -588,7 +587,7 @@ def test_each_switch_combination_nulls_its_own_half(
         assert turn["heard"] == "turn the light on"
         assert turn["reply"] == "Done."
         assert invocation["name"] == "turn_on_light"
-        assert json.loads(invocation["arguments"]) == {"room": "kitchen"}
+        assert invocation["arguments"] == {"room": "kitchen"}
         assert invocation["result"] == "ok"
         assert [leg["text"] for leg in legs] == ["Done.", "Hello."]
     else:
@@ -606,7 +605,7 @@ def test_each_switch_combination_nulls_its_own_half(
         assert turn["tts_first_audio_ms"] == 260
         assert invocation["duration_ms"] == 42
         assert [leg["input_tokens"] for leg in legs] == [512, 8]
-        assert len(rows(tmp_path, "events")) == 1
+        assert len(rows("events")) == 1
     else:
         assert session["duration_s"] is None
         assert (turn["asr_ms"], turn["llm_ms"]) == (None, None)
@@ -614,12 +613,12 @@ def test_each_switch_combination_nulls_its_own_half(
         assert turn["tts_first_audio_ms"] is None
         assert invocation["duration_ms"] is None
         assert [leg["input_tokens"] for leg in legs] == [None, None]
-        assert rows(tmp_path, "events") == []
+        assert rows("events") == []
 
 
 @pytest.mark.parametrize("text_storage", [True, False])
 def test_an_events_row_never_carries_content_whatever_the_switches_say(
-    tmp_path: Path, stores, text_storage: bool
+    stores, text_storage: bool
 ) -> None:
     """The events table is metadata-only by construction, from the first
     row, and that is not a policy the text switch decides: content has
@@ -653,19 +652,52 @@ def test_an_events_row_never_carries_content_whatever_the_switches_say(
     store.close_session("alpha", duration_s=3.0, reason="client")
     store.stop()
 
-    stored = rows(tmp_path, "events")
+    stored = rows("events")
     assert len(stored) == 5
     for row in stored:
-        fields = json.loads(row["fields"])
-        assert "text" not in fields
-        assert "tool" not in fields
-    assert json.loads(stored[0]["fields"]) == {"kept": 1}
+        # The JSON columns come back as values rather than as the text
+        # they were dumped to: psycopg reads a `json` column into Python
+        # objects, where the SQLite driver handed back the string.
+        assert "text" not in row["fields"]
+        assert "tool" not in row["fields"]
+    assert stored[0]["fields"] == {"kept": 1}
     # What the event is still worth reading for: which entry was called,
     # how it was routed, and how long it took. Names this deployment
     # configured, never one a peer chose.
-    call = json.loads(stored[3]["fields"])
-    assert call == {"source": "mcp", "entry": "home", "duration_ms": 42}
-    assert SENTINEL.encode() not in (tmp_path / "conversations.db").read_bytes()
+    assert stored[3]["fields"] == {"source": "mcp", "entry": "home", "duration_ms": 42}
+    # And nowhere else in the store either.
+    #
+    # The SQLite-era form of this read the database file's bytes, which
+    # is the honest surface a file offers and not one a server-side
+    # store has. What replaces it is every column of every row of every
+    # table: weaker, because it cannot see a page the server has not
+    # reclaimed, and it is the strongest thing a client can ask.
+    assert _absent_from_every_column(SENTINEL)
+
+
+def _absent_from_every_column(sentinel: str) -> bool:
+    """Whether the planted text is nowhere in the store, asked of every
+    column of every row of every table it owns.
+
+    The honest surface a server-side store offers, and deliberately a
+    weaker claim than the one it replaces: reading the database file's
+    bytes could see a freed page the engine had not overwritten, and
+    nothing a client can ask reaches that. What autovacuum has not yet
+    reclaimed is the database server's own storage maintenance, which
+    the retention docstring and the generated reference both say.
+    """
+    engine = read_engine(DatabaseConfig())
+    try:
+        with engine.connect() as connection:
+            for table in ("sessions", "turns", "tool_invocations", "events"):
+                for row in connection.execute(
+                    text(f"select * from conversations.{table}")
+                ).mappings():
+                    if sentinel in json.dumps(dict(row), default=str):
+                        return False
+    finally:
+        engine.dispose()
+    return True
 
 
 # Failure, and what it may say
@@ -686,7 +718,7 @@ class Raising:
 
 
 def test_a_failed_marker_drops_its_batch_and_names_only_the_class(
-    tmp_path: Path, stores, caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
+    stores, caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Rollback is SQLite's own unit, so the batch is atomically gone;
     what leaves the store is the exception's class name and nothing
@@ -716,6 +748,10 @@ def test_a_failed_marker_drops_its_batch_and_names_only_the_class(
         # holding what was being written. Nothing public can make a
         # committed engine fail on the next statement, and what is being
         # proved is that the report of it carries no content.
+        # The real engine is let go of first: replacing it would
+        # otherwise leave its pool open for the rest of the run, which a
+        # server-side driver notices and a file-backed one did not.
+        store._engine.dispose()
         store._engine = Raising(f"near {SENTINEL}: syntax error")
         with caplog.at_level(logging.INFO):
             gate.open_forever()
@@ -743,11 +779,11 @@ def test_a_failed_marker_drops_its_batch_and_names_only_the_class(
     assert seen, "the server tap was offered nothing"
     assert all(SENTINEL not in json.dumps(item.payload, default=str) for item in seen)
     # And the batch really is gone rather than half applied.
-    assert rows(tmp_path, "turns") == []
-    assert rows(tmp_path, "tool_invocations") == []
+    assert rows("turns") == []
+    assert rows("tool_invocations") == []
 
 
-def test_a_failed_close_leaves_the_session_open_shaped(tmp_path: Path, stores) -> None:
+def test_a_failed_close_leaves_the_session_open_shaped(stores) -> None:
     """The documented incomplete state: readable, listed with its null
     close, and pruned on `started_at` like any other row, which is the
     same shape a crash mid-session leaves behind."""
@@ -764,22 +800,23 @@ def test_a_failed_close_leaves_the_session_open_shaped(tmp_path: Path, stores) -
     gate.wait()
     # White-box, same shape: a close that cannot be written is what
     # leaves a session row open, and only a broken engine produces one.
+    store._engine.dispose()
     store._engine = Raising("no")
     gate.open_forever()
     store.stop()
 
-    (session,) = rows(tmp_path, "sessions")
+    (session,) = rows("sessions")
     assert session["closed_at"] is None
     assert session["close_reason"] is None
     assert session["duration_s"] is None
     # The turn that did commit is still there: the close is what failed.
-    assert len(rows(tmp_path, "turns")) == 1
+    assert len(rows("turns")) == 1
 
 
 # Lifecycle
 
 
-def test_stop_is_idempotent_and_bounded_by_a_wedged_writer(tmp_path: Path, stores) -> None:
+def test_stop_is_idempotent_and_bounded_by_a_wedged_writer(stores) -> None:
     """A commit that cannot finish must not hold shutdown past the
     drain budget, and a teardown path may call stop twice without
     either call being a different act from the other."""
@@ -807,32 +844,41 @@ def test_stop_is_idempotent_and_bounded_by_a_wedged_writer(tmp_path: Path, store
     assert writer is not None
     writer.join(timeout=TIMEOUT_S)
     assert not writer.is_alive(), "the released writer did not exit"
+    # And the pool the released writer opened after `stop()` had already
+    # disposed the first one. That is what a daemon thread in a process
+    # that is ending really does, and it is exactly as harmless there;
+    # here the process carries on, and a connection to a server outlives
+    # a file handle in a way this lane would find later and blame on
+    # whichever test ran next.
+    store._engine.dispose()
 
 
-def test_a_store_that_never_started_leaks_no_thread(tmp_path: Path, stores) -> None:
+def test_a_store_that_never_started_leaks_no_thread(stores) -> None:
     """An app built for a test and never entered as a lifespan builds
     the store cold, so stopping it is a dispose and nothing else. The
-    file exists because the constructor migrates it, which is work that
-    belongs at boot rather than at the first turn."""
+    schema exists because the constructor migrates it, which is work
+    that belongs at boot rather than at the first turn."""
     store = stores()
     store.stop()
 
     assert not [
         thread for thread in threading.enumerate() if thread.name == "conversation-store"
     ]
-    assert (tmp_path / "conversations.db").is_file()
+    assert rows("sessions") == []
 
 
 # Reading beside the writer
 
 
-def test_a_reader_sees_committed_rows_while_the_wal_is_uncheckpointed(
-    tmp_path: Path, stores
-) -> None:
-    """The read engine opens the live file, so the case that matters is
-    a commit still living in the write-ahead log. `mode=ro` would refuse
-    it (a WAL reader may extend the `-shm` index); `mode=rw` serves it
-    and still refuses to create a file that is not there."""
+def test_a_reader_sees_committed_rows_while_the_writer_is_still_going(stores) -> None:
+    """The read engine reads the live store, so the case that matters is
+    a commit made by a writer that has not let go of its connection.
+
+    Its SQLite-era shape said the same thing about an uncheckpointed
+    write-ahead log and a `mode=rw` URI, both of which retired with the
+    file. What is left is the promise: a reader takes no advisory lock,
+    is never blocked by the writer, and sees what the writer committed.
+    """
     gate = Gate()
     store = stores(gate=gate)
     store.start()
@@ -843,19 +889,18 @@ def test_a_reader_sees_committed_rows_while_the_wal_is_uncheckpointed(
     gate.wait()
     gate.let_through()
     # Parked in front of a third marker, so the turn above is committed
-    # and the writer still holds its connection: closing the last one
-    # would checkpoint the log and take the case away.
+    # and the writer is still holding its connection.
     store.record_turn("alpha", a_turn(at=109.0))
     gate.wait()
-    wal = tmp_path / "conversations.db-wal"
-    assert wal.is_file() and wal.stat().st_size > 0
 
-    engine = read_conversations(tmp_path)
+    engine = read_engine(DatabaseConfig())
     try:
         with engine.connect() as connection:
             found = [
                 dict(row)
-                for row in connection.execute(text("select * from turns")).mappings()
+                for row in connection.execute(
+                    text("select * from conversations.turns")
+                ).mappings()
             ]
     finally:
         engine.dispose()
@@ -865,18 +910,20 @@ def test_a_reader_sees_committed_rows_while_the_wal_is_uncheckpointed(
     gate.open_forever()
 
 
-def test_the_read_engine_refuses_to_create_a_missing_store(tmp_path: Path) -> None:
-    """A lookup against a misconfigured path must not leave a database
-    behind, which is what naming the file as a URI with `mode=rw`
-    buys."""
-    from sqlalchemy.exc import OperationalError
+def test_the_read_engine_creates_nothing(stores) -> None:
+    """A lookup must not bring anything into existence, which used to be
+    a `mode=rw` URI refusing to create a missing file and is now the
+    server's own rule: the connection is opened with
+    `default_transaction_read_only`, so a write through it is refused
+    whatever asked for it."""
+    from sqlalchemy.exc import DBAPIError
 
-    engine = read_conversations(tmp_path / "nothing-here")
+    engine = read_engine(DatabaseConfig())
     try:
-        with pytest.raises(OperationalError):
+        with pytest.raises(DBAPIError):
             with engine.connect() as connection:
-                connection.execute(text("select 1"))
+                connection.execute(
+                    text("create table conversations.not_allowed (id int)")
+                )
     finally:
         engine.dispose()
-
-    assert not (tmp_path / "nothing-here").exists()

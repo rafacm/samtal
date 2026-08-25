@@ -58,7 +58,7 @@ SENTINELS = (
 def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Callable[..., int]]:
     """One command, against a server of this test's own, with every
     request it would have sent recorded."""
-    driver = runner(tmp_path, monkeypatch)
+    driver = runner(monkeypatch)
     sent: list[httpx.Request] = []
     built = cli.build_client
 

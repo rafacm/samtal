@@ -13,12 +13,18 @@
 #
 # The published image already reads a config mounted at
 # /config/config.yaml (mounting one is optional; without it the server
-# half comes from the defaults and VINGA_SERVER__* alone),
-# keeps its database on the /data volume
-# (VINGA_SERVER__DATABASE__DIR=/data/db), sends every model cache there
-# too (HOME=/data), and defaults its logs to the json format, so none of
-# that appears here. Secrets never live in this file: the keys below
-# name environment variables, and the deployment provides them.
+# half comes from the defaults and VINGA_SERVER__* alone), sends every
+# model cache to the /data volume (HOME=/data), and defaults its logs to
+# the json format, so none of that appears here.
+#
+# Which database it serves is not in this file either, and deliberately:
+# it is the VINGA_DB_HOST, VINGA_DB_PORT, VINGA_DB_NAME, VINGA_DB_USER
+# and VINGA_DB_PASSWORD variables the deployment sets, beside the other
+# credentials. A server that cannot reach the database it was pointed at
+# refuses to start with a sentence naming those variables.
+#
+# Secrets never live in this file: the keys below name environment
+# variables, and the deployment provides them.
 #
 # This profile assumes the DEFAULT image variant, the unsuffixed tags:
 # it configures faster_whisper for ASR and piper for TTS, and the slim
@@ -129,9 +135,9 @@ server:
   # Unset, the server's own current offset applies.
   # timezone_offset_minutes: 120
 
-  # Recording what was said into conversations.db, which lands on the
-  # /data volume beside the configuration database. Absent, as here,
-  # means nothing is recorded and no file is created. Turn it on
+  # Recording what was said into the `conversations` schema of the same
+  # database the configuration lives in. Absent, as here, means no
+  # writer is started and no row is ever written. Turn it on
   # deliberately: it keeps conversation text, and the two switches under
   # the flag are the only privacy controls this release has, so they are
   # deployment-wide. Retention is 90 days unless this says otherwise, and

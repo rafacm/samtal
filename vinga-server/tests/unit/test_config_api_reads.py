@@ -13,9 +13,7 @@ read out by the request an operator would make to find it.
 """
 
 import logging
-import sqlite3
 from collections.abc import Iterator
-from pathlib import Path
 from urllib.parse import quote
 
 import pytest
@@ -24,10 +22,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import update
 
 from tests.support.problems import PROBLEM_KEYS, refused
-from tests.support.stores import body, planted
-from vinga_server import db as db_module
+from tests.support.stores import body, holding_the_write_lock, planted, the_lock_held
 from vinga_server.config.api import build_api
-from vinga_server.config.models import PROVIDER_STAGES, ProviderConfig
+from vinga_server.config.models import PROVIDER_STAGES, DatabaseConfig, ProviderConfig
 from vinga_server.config.secrets import (
     MASK,
     MASTER_KEY_ENV,
@@ -36,7 +33,7 @@ from vinga_server.config.secrets import (
     load_keys,
 )
 from vinga_server.config.store import ConfigStore
-from vinga_server.db import DATABASE_FILENAME, open_database, schema
+from vinga_server.db import open_database, schema
 
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
 
@@ -54,18 +51,16 @@ PASTED = "sk_test_4f8b2c9e_never_a_real_credential"
 # up on the way through HTTP.
 FRAGMENT = "  The bins go out on Tuesday.\n\n    The radio is called Bosse.\n"
 
-# Short enough that a blocked reader gives up inside a test run, and
-# long enough that an unblocked one never sees it.
-SHORT_BUSY_MS = 200
-
 # Names that only survive a URL path percent-encoded. Legal repository
 # identities, all three.
 AWKWARD = ["a name with spaces", "100%-sure", "agente-café"]
 
 
 @pytest.fixture
-def directory(tmp_path: Path) -> Path:
-    return tmp_path / "db"
+def database() -> DatabaseConfig:
+    """The database this lane provisioned, which is where the store
+    below writes and the application below reads."""
+    return DatabaseConfig()
 
 
 @pytest.fixture
@@ -82,11 +77,11 @@ def keys(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def store(directory: Path, keys: None) -> Iterator[ConfigStore]:
+def store(database: DatabaseConfig, keys: None) -> Iterator[ConfigStore]:
     """The repository the test writes through, on the database the API
-    reads. A second engine on the same file, so what is written here is
-    what a request finds."""
-    engine = open_database(directory)
+    reads. A second engine on the same database, so what is written here
+    is what a request finds."""
+    engine = open_database(database)
     try:
         yield ConfigStore(engine, load_keys())
     finally:
@@ -94,8 +89,8 @@ def store(directory: Path, keys: None) -> Iterator[ConfigStore]:
 
 
 @pytest.fixture
-def api(directory: Path, keys: None) -> FastAPI:
-    return build_api(TOKEN, directory)
+def api(database: DatabaseConfig, keys: None) -> FastAPI:
+    return build_api(TOKEN, database)
 
 
 @pytest.fixture
@@ -518,7 +513,7 @@ def test_a_stored_number_that_is_not_finite_is_500(
 
 
 def test_a_read_that_cannot_take_the_lock_is_409(
-    api: FastAPI, store: ConfigStore, directory: Path, monkeypatch: pytest.MonkeyPatch
+    api: FastAPI, store: ConfigStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A read takes the write lock before it reads, so a lock somebody
     else is holding is met inside the request. That is the retryable
@@ -526,21 +521,19 @@ def test_a_read_that_cannot_take_the_lock_is_409(
     and asserted by status code so that no wording becomes load-bearing.
 
     The client is built here rather than taken from the fixture because
-    the short busy timeout has to be in place before the engine opens:
+    the short lock timeout has to be in place before the engine opens:
     the API's engine is its lifespan's since #142, its connections are
-    pooled, and a connection made under the packaged ten seconds keeps
-    them. So the order is the scenario: shorten the timeout, open the
-    application, then hold the lock.
+    pooled, the timeout rides on a connection's startup options, and a
+    connection made under the packaged ten seconds keeps them. So the
+    order is the scenario: shorten the timeout, open the application,
+    then hold the lock.
     """
     _populate(store)
-    monkeypatch.setattr(db_module, "BUSY_TIMEOUT_MS", SHORT_BUSY_MS)
-    with TestClient(api, headers={"Authorization": f"Bearer {TOKEN}"}) as client:
-        holder = sqlite3.connect(directory / DATABASE_FILENAME, isolation_level=None)
-        holder.execute("BEGIN IMMEDIATE")
-        try:
+    with holding_the_write_lock(monkeypatch), TestClient(
+        api, headers={"Authorization": f"Bearer {TOKEN}"}
+    ) as client:
+        with the_lock_held():
             response = client.get("/config")
-        finally:
-            holder.close()
 
         assert response.status_code == 409
         assert set(response.json()) == PROBLEM_KEYS

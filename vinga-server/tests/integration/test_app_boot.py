@@ -17,7 +17,6 @@ from fastapi.testclient import TestClient
 
 
 def test_served_app_responds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("VINGA_SERVER__DATABASE__DIR", str(tmp_path / "db"))
     # Imported here, not at module level: the attribute access is what
     # builds the app, and it has to happen after the override is set.
     from vinga_server.app import app

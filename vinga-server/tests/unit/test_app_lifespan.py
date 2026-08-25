@@ -22,12 +22,12 @@ sentence, and re-raised as `StartupFailed` with nothing chained to it,
 which is what keeps an operator's stderr to one line.
 """
 
-from pathlib import Path
 from typing import Any
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine
+from sqlalchemy import Engine, text
 from sqlalchemy.pool import Pool
 
 import vinga_server.app as app_module
@@ -41,9 +41,8 @@ from vinga_server.composition import Composition
 from vinga_server.config import Config
 from vinga_server.config.api import ApiRuntime
 from vinga_server.config.loader import DatabaseBusyError
-from vinga_server.config.models import API_MOUNT_PATH
-from vinga_server.conversations.store import DATABASE_FILENAME
-from vinga_server.db import open_database
+from vinga_server.config.models import API_MOUNT_PATH, DatabaseConfig
+from vinga_server.db import DOMAIN_CHAIN, read_engine
 from vinga_server.device.bindings import DeviceBindings
 from vinga_server.providers import ProviderError
 from vinga_server.providers import world as provider_world
@@ -59,41 +58,27 @@ TOKEN = "test-api-token-" + "0123456789abcdef" * 2
 BEARER = {"Authorization": f"Bearer {TOKEN}"}
 
 
-def recording_config(tmp_path: Path) -> Config:
+def recording_config(name: str | None = None) -> Config:
     """A server whose every acquisition lands where this test can see it:
-    the databases in a directory of its own, and recording on so the
-    conversation store is one of them."""
+    recording on, so the conversation store is one of them, and the
+    database this lane provisioned unless the caller names another."""
+    database = {} if name is None else {"name": name}
     return config_with_agent(
-        server={
-            "database": {"dir": str(tmp_path)},
-            "conversations": {"enabled": True},
-        }
+        server={"database": database, "conversations": {"enabled": True}}
     )
 
 
-def migrated(tmp_path: Path) -> None:
-    """The configuration database, where a boot leaves it.
-
-    Load bearing for every disposal assertion here, and for the
-    check-in test at the end: `DeviceBindings.open` creates no database
-    and opens no engine when there is no file, and answers from the boot
-    snapshot instead, so a test that asserts a pool was let go without
-    this has asserted `dispose()` on an object holding nothing. Both
-    production entry points migrate this database before the app is
-    built, through `load_boot_config`, which is what this stands in for.
-    """
-    open_database(tmp_path).dispose()
+def served(config: Config) -> FastAPI:
+    """An app that stands for one a deployment runs: the configuration
+    reads as if it came from the store, so the bindings view opens the
+    engine whose disposal this file is about. A test whose subject is an
+    app nobody served builds one with `create_app` directly."""
+    return create_app(config, from_store=True)
 
 
 def engine_of(view: DeviceBindings) -> Engine:
     """The connection pool a bindings view is holding, and the check that
-    it is holding one at all.
-
-    `DeviceBindings.open` opens no engine when there is no database file,
-    so without `migrated()` above a disposal assertion would be
-    `dispose()` on an object holding nothing. This is what says so rather
-    than letting such a test pass.
-    """
+    it is holding one at all."""
     # White-box for this file's engine and thread reads. What a
     # lifespan promises is that what it took is given back: an engine
     # disposed, a pool released, a writer thread joined. A released
@@ -174,18 +159,32 @@ def refusing_providers(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_a_described_app_acquires_nothing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    blank_database: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The whole of acceptance criterion 6: build the app, never enter
-    its lifespan, and nothing was opened, migrated, threaded or loaded."""
+    its lifespan, and nothing was opened, migrated, threaded or loaded.
+
+    Over a blank database, because "nothing was migrated" is the half
+    that needs one: the lane's own database is migrated before the first
+    test runs, so an empty schema list there would prove nothing.
+    """
     opened, _ = opened_bindings(monkeypatch)
     built = built_providers(monkeypatch)
 
-    app = create_app(recording_config(tmp_path))
+    app = create_app(recording_config(blank_database))
 
     assert opened == [], "the bindings pool was opened by an app nobody served"
     assert built == [], "a provider was constructed by an app nobody served"
-    assert not (tmp_path / DATABASE_FILENAME).exists(), "the store was opened and migrated"
+    engine = read_engine(DatabaseConfig(name=blank_database))
+    try:
+        with engine.connect() as connection:
+            found = connection.execute(
+                text("select to_regnamespace(:name) is not null"),
+                {"name": DOMAIN_CHAIN.schema},
+            ).scalar()
+    finally:
+        engine.dispose()
+    assert not found, "the schema was created by an app nobody served"
     # And the composition itself does not exist yet, which is the honest
     # signal for a reader that arrives too early: an attribute error
     # naming what has not been built, rather than a half-built object.
@@ -193,11 +192,10 @@ def test_a_described_app_acquires_nothing(
 
 
 def test_entering_and_leaving_releases_everything(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The other end of the same claim: what the lifespan took, it gives
     back, in the reverse of the order it took it."""
-    migrated(tmp_path)
     opened, pools = opened_bindings(monkeypatch)
     disposed = disposed_bindings(monkeypatch)
     stopped: list[str] = []
@@ -209,7 +207,7 @@ def test_entering_and_leaving_releases_everything(
 
     monkeypatch.setattr(McpServers, "stop_all", spy_stop_all)
 
-    app = create_app(recording_config(tmp_path))
+    app = served(recording_config())
     with TestClient(app):
         composition = app.state.composition
         store = composition.conversations
@@ -237,7 +235,7 @@ def test_entering_and_leaving_releases_everything(
 
 
 def test_the_engines_are_let_go_of_when_the_process_ends(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The last end a provider can meet, and the one an apply never
     reaches: the process stops.
@@ -261,8 +259,7 @@ def test_the_engines_are_let_go_of_when_the_process_ends(
     monkeypatch.setattr(
         "vinga_server.providers.mock.build_tts", lambda label, config: Closing()
     )
-    migrated(tmp_path)
-    app = create_app(recording_config(tmp_path))
+    app = create_app(recording_config())
 
     with TestClient(app):
         assert closed == [], "the world being served let go of its voice"
@@ -271,7 +268,7 @@ def test_the_engines_are_let_go_of_when_the_process_ends(
 
 
 def test_a_boot_that_fails_after_the_engines_are_built_lets_go_of_them(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The stretch between a build and the world it was built for.
 
@@ -302,9 +299,8 @@ def test_a_boot_that_fails_after_the_engines_are_built_lets_go_of_them(
     # The next thing a boot does after the engines, and the first one
     # that can fail on a deployment rather than in a test.
     monkeypatch.setattr(app_module, "build_agent_fillers", refuse)
-    migrated(tmp_path)
 
-    app = create_app(recording_config(tmp_path))
+    app = served(recording_config())
     with pytest.raises(StartupFailed):
         with TestClient(app):
             pass
@@ -313,7 +309,7 @@ def test_a_boot_that_fails_after_the_engines_are_built_lets_go_of_them(
 
 
 def test_a_build_that_fails_part_way_releases_what_it_took(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The partial-startup case (the plan review's finding 6). The
     bindings pool is opened part way through the build, so a step after
@@ -326,16 +322,15 @@ def test_a_build_that_fails_part_way_releases_what_it_took(
     The view is opened after the world it reads from is built, so a
     provider failure never reaches it and would prove nothing here.
     """
-    migrated(tmp_path)
     opened, pools = opened_bindings(monkeypatch)
     disposed = disposed_bindings(monkeypatch)
 
-    def refuse(directory: Path) -> Any:
+    def refuse(database: Any) -> Any:
         raise DatabaseBusyError("another process holds the write lock")
 
     monkeypatch.setattr(app_module, "open_store", refuse)
 
-    app = create_app(recording_config(tmp_path))
+    app = served(recording_config())
     with pytest.raises(StartupFailed):
         with TestClient(app):
             pass
@@ -350,7 +345,7 @@ def test_a_build_that_fails_part_way_releases_what_it_took(
 
 
 def test_a_boot_failure_is_carried_out_as_one_sentence(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The bridge (the plan review's finding 4). Uvicorn renders a
     lifespan exception as a traceback, so what it is handed carries the
@@ -358,7 +353,7 @@ def test_a_boot_failure_is_carried_out_as_one_sentence(
     `__cause__` can hold what a client library was configured with."""
     refusing_providers(monkeypatch)
 
-    app = create_app(recording_config(tmp_path))
+    app = create_app(recording_config())
     with pytest.raises(StartupFailed) as raised:
         with TestClient(app):
             pass
@@ -372,7 +367,7 @@ def test_a_boot_failure_is_carried_out_as_one_sentence(
 
 
 def test_a_failure_outside_the_taxonomy_is_raised_as_itself(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A bug is not a boot failure. Only the refusals a deployment can
     cause are turned into a sentence; anything else keeps its type and
@@ -383,7 +378,7 @@ def test_a_failure_outside_the_taxonomy_is_raised_as_itself(
 
     monkeypatch.setattr(app_module, "build_world", explode)
 
-    app = create_app(recording_config(tmp_path))
+    app = create_app(recording_config())
     with pytest.raises(ZeroDivisionError):
         with TestClient(app):
             pass
@@ -392,33 +387,33 @@ def test_a_failure_outside_the_taxonomy_is_raised_as_itself(
 
 
 def test_a_server_that_came_up_says_so_and_one_that_did_not_stays_quiet(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`on_started` is the CLI's banner (the plan review's finding 11):
     it announces a server that is up, so a build that refused prints
     nothing."""
     said: list[str] = []
 
-    with TestClient(create_app(recording_config(tmp_path), on_started=lambda: said.append("up"))):
+    with TestClient(create_app(recording_config(), on_started=lambda: said.append("up"))):
         assert said == ["up"], "the banner was not said by a server that started"
 
     refusing_providers(monkeypatch)
     with pytest.raises(StartupFailed):
         with TestClient(
-            create_app(recording_config(tmp_path), on_started=lambda: said.append("up again"))
+            create_app(recording_config(), on_started=lambda: said.append("up again"))
         ):
             pass
 
     assert said == ["up"]
 
 
-def test_the_api_gets_its_live_pieces_before_the_first_request(tmp_path: Path) -> None:
+def test_the_api_gets_its_live_pieces_before_the_first_request() -> None:
     """Starlette runs no lifespan for a mounted application, so the
     parent's is what installs the objects its requests resolve. Before
     the yield, and therefore before any request: the pending table the
     OTA endpoint writes is the one the claim route reads, and the agents
     it reports are the ones this server loaded."""
-    app = create_app(recording_config(tmp_path))
+    app = served(recording_config())
     with TestClient(app):
         composition = app.state.composition
         mounted = composition.api
@@ -446,7 +441,7 @@ def _wrote(client: TestClient, path: str, body: object) -> None:
 
 
 def test_a_binding_written_through_the_api_is_live_at_the_next_check_in(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An operator binds a board through the API, and the board's next
     check-in resolves it: no restart, and nothing to do but ask again.
@@ -454,17 +449,14 @@ def test_a_binding_written_through_the_api_is_live_at_the_next_check_in(
     Driven end to end because that is the only way it is worth pinning.
     The API writes to the configuration database and says the write is
     live; the OTA endpoint resolves through the bindings view, which is a
-    second engine on the same file, opened at startup. Nothing in either
+    second engine on the same database, opened at startup. Nothing in either
     half asserts the other, so an unclaimed board checks in and is sent
     round the ceremony, the binding is written, and the same board checks
     in again.
 
-    `migrated` first, because that is the shape a server has: both
-    production entry points compose their configuration out of this
-    database, so the file is always there before the app is built. A
-    build over a directory with no database is the test lane's shape and
-    an embedded caller's, where the snapshot is the whole truth and the
-    view says so authoritatively.
+    The database the lane provisioned, which is the shape a server has:
+    both production entry points compose their configuration out of it,
+    so its schemas are always there before the app is built.
 
     The configuration deliberately names no default agent. With one, an
     unbound device resolves to it and the second check-in answers the
@@ -472,9 +464,8 @@ def test_a_binding_written_through_the_api_is_live_at_the_next_check_in(
     with a bindings view that never read the database.
     """
     monkeypatch.setenv(API_SECRET_ENV, TOKEN)
-    migrated(tmp_path)
 
-    with entered_app(unbound_config(database={"dir": str(tmp_path)})) as (app, client):
+    with entered_app(unbound_config(), from_store=True) as (app, client):
         # There is a database behind the view, so what follows is about
         # resolution and not about the fallback.
         composition: Composition = app.state.composition
@@ -510,7 +501,7 @@ def test_a_binding_written_through_the_api_is_live_at_the_next_check_in(
 
 
 def test_the_mounted_api_holds_the_engine_only_while_the_server_serves(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The engine goes onto the mounted application's runtime when the
     lifespan opens it and comes off when the lifespan ends.
@@ -525,7 +516,7 @@ def test_the_mounted_api_holds_the_engine_only_while_the_server_serves(
     other unexpected failure.
     """
     monkeypatch.setenv(API_SECRET_ENV, TOKEN)
-    app = create_app(recording_config(tmp_path))
+    app = create_app(recording_config())
     mounted = app.state.seed.api
     # Read off the mounted application rather than the composition,
     # because before the lifespan there is no composition to read, which

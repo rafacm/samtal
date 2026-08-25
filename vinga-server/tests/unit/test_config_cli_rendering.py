@@ -58,7 +58,7 @@ from vinga_server.tools.mcp import McpServers
 def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """One command run the way the entry point runs it, against a server
     of this test's own."""
-    return runner(tmp_path, monkeypatch)
+    return runner(monkeypatch)
 
 
 def test_pending_lists_nothing_when_nothing_is_waiting(

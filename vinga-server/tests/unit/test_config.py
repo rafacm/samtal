@@ -24,7 +24,10 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "VINGA_CONFIG",
         "VINGA_SERVER__HOST",
         "VINGA_SERVER__PORT",
-        "VINGA_SERVER__DATABASE__DIR",
+        "VINGA_DB_HOST",
+        "VINGA_DB_PORT",
+        "VINGA_DB_NAME",
+        "VINGA_DB_USER",
         "VINGA_DEFAULT_AGENT",
     ):
         monkeypatch.delenv(var, raising=False)
@@ -254,22 +257,83 @@ def test_config_path_from_environment(
     assert load_file_config().server.port == 9000
 
 
-def test_the_database_directory_defaults_and_is_overridable(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, packaged_database_dir: Path
+def test_the_database_connection_defaults_and_is_overridable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, packaged_database
 ) -> None:
-    """The CLI reads this key through the same settings machinery the
-    server does, so a deployment names its database directory once.
+    """The CLI reads these keys through the same settings machinery the
+    server does, so a deployment names its database once.
 
-    `packaged_database_dir` is what the rest of the lane runs without:
-    every other test is moved onto a temporary directory, and this is the
-    one that asks what a deployment is shipped pointing at."""
-    assert load_file_config().server.database.dir == Path("/var/lib/vinga")
+    `packaged_database` is what the rest of the lane runs without: every
+    other test is moved onto the database this run provisioned, and this
+    is the one that asks what a deployment is shipped pointing at, which
+    is the compose service's own defaults.
+    """
+    shipped = load_file_config().server.database
+    assert (shipped.host, shipped.port, shipped.name, shipped.user) == (
+        "127.0.0.1",
+        5432,
+        "vinga",
+        "vinga",
+    )
 
-    path = write_config(tmp_path, "server:\n  database:\n    dir: /data/db\n")
-    assert load_file_config(path).server.database.dir == Path("/data/db")
+    path = write_config(
+        tmp_path,
+        "server:\n  database:\n    host: db.internal\n    port: 6543\n"
+        "    name: vinga_prod\n    user: vinga_app\n",
+    )
+    written = load_file_config(path).server.database
+    assert (written.host, written.port, written.name, written.user) == (
+        "db.internal",
+        6543,
+        "vinga_prod",
+        "vinga_app",
+    )
 
-    monkeypatch.setenv("VINGA_SERVER__DATABASE__DIR", str(tmp_path / "var"))
-    assert load_file_config(path).server.database.dir == tmp_path / "var"
+    # The short names beat the file, which is what a deployment sets
+    # beside its password.
+    monkeypatch.setenv("VINGA_DB_HOST", "127.0.0.2")
+    monkeypatch.setenv("VINGA_DB_PORT", "5433")
+    monkeypatch.setenv("VINGA_DB_NAME", "vinga_other")
+    monkeypatch.setenv("VINGA_DB_USER", "vinga_other_user")
+    overridden = load_file_config(path).server.database
+    assert (overridden.host, overridden.port, overridden.name, overridden.user) == (
+        "127.0.0.2",
+        5433,
+        "vinga_other",
+        "vinga_other_user",
+    )
+
+
+def test_the_generic_spelling_of_a_database_key_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`VINGA_SERVER__DATABASE__HOST` would work by accident of the
+    nesting scheme, and letting it would give every connection fact two
+    names. It is refused naming the short one instead, because the short
+    names are the ones the compose file feeds the database image from,
+    so they are the ones a `.env` holds."""
+    monkeypatch.setenv("VINGA_SERVER__DATABASE__HOST", "db.internal")
+
+    with pytest.raises(ConfigError) as caught:
+        load_file_config()
+
+    problem = str(caught.value)
+    assert "VINGA_SERVER__DATABASE__HOST" in problem
+    assert "VINGA_DB_HOST" in problem
+
+
+def test_a_database_port_that_is_not_a_port_is_refused_without_the_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """These variables are set beside a password, so a refusal that
+    echoed its input is one typo away from echoing the wrong one."""
+    monkeypatch.setenv("VINGA_DB_PORT", "sk-test-9182aa-never-a-real-credential")
+
+    with pytest.raises(ConfigError) as caught:
+        load_file_config()
+
+    assert "sk-test-9182aa" not in str(caught.value)
+    assert "VINGA_DB_PORT" in str(caught.value)
 
 
 def test_env_overrides_beat_the_file(

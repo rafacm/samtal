@@ -1,21 +1,37 @@
-"""Opening the domain configuration database: creation, migration, reopen.
+"""Opening the domain configuration schema: migration, reopen, refusal.
 
 The database is opened by the server at boot and by every CLI
 invocation, so the interesting cases are the ones that happen without
-anybody watching: an empty data volume, a file that is already current,
-and two processes doing either at the same moment.
+anybody watching: a blank database, a schema that is already current,
+two processes doing either at the same moment, and an instance that is
+not there at all.
+
+What retired with SQLite is named here rather than left as an absence,
+because the deletions are half of this change. The uncreatable and
+unwritable directory cases go with the directory; the stranded-database
+family (a file stamped at a revision the squash deleted) goes with the
+file, because the only databases carrying those stamps are SQLite files
+this build cannot open at all, so no Postgres database can reach the
+arm. What replaces both is one refusal for an instance this server
+cannot use, tested below.
 """
 
-import os
 import threading
-from pathlib import Path
 
 import pytest
 from sqlalchemy import inspect, text
 
 import vinga_server
 from vinga_server.config import ConfigError
-from vinga_server.db import DATABASE_FILENAME, open_database
+from vinga_server.config.loader import DatabaseBusyError, StorageError
+from vinga_server.config.models import DatabaseConfig
+from vinga_server.db import (
+    DOMAIN_CHAIN,
+    LOCK_TIMEOUT_MS,
+    UNREACHABLE,
+    connection_url,
+    open_database,
+)
 
 EXPECTED_TABLES = {
     "providers",
@@ -39,31 +55,38 @@ EXPECTED_COLUMNS = {
     "agents": {"name", "body"},
 }
 
-# The head of the packaged domain chain, which is one revision and no
-# longer a chain at all. A database stamped at anything else is one this
-# build cannot upgrade, and the refusal below is what it gets told.
-HEAD = "2001_json_body_baseline"
+# The head of the packaged domain chain, which is one revision.
+HEAD = "3001_postgres_domain"
+
+SCHEMA = DOMAIN_CHAIN.schema
 
 
 def _tables(engine) -> set[str]:
-    return set(inspect(engine).get_table_names())
+    return set(inspect(engine).get_table_names(schema=SCHEMA))
 
 
 def _columns(engine, table: str) -> set[str]:
-    return {column["name"] for column in inspect(engine).get_columns(table)}
+    return {column["name"] for column in inspect(engine).get_columns(table, schema=SCHEMA)}
 
 
 def _version(engine) -> list[str]:
     with engine.connect() as connection:
-        return [row[0] for row in connection.execute(text("select * from alembic_version"))]
+        return [
+            row[0]
+            for row in connection.execute(text(f"select * from {SCHEMA}.alembic_version"))
+        ]
 
 
-def test_fresh_directory_gains_a_migrated_database(tmp_path: Path) -> None:
-    directory = tmp_path / "db"
+def test_a_blank_database_gains_a_migrated_schema(blank_database: str) -> None:
+    """From truly empty: no schemas, no stamps, nothing an init script
+    put there, which is what a deployment that provisioned nothing has.
 
-    engine = open_database(directory)
+    The one case a migrated template cannot exercise, which is why this
+    test asks for a database made from `template0` rather than for the
+    worker's own.
+    """
+    engine = open_database(DatabaseConfig(name=blank_database))
     try:
-        assert (directory / DATABASE_FILENAME).is_file()
         assert EXPECTED_TABLES <= _tables(engine)
         assert _version(engine) == [HEAD]
         for table, columns in EXPECTED_COLUMNS.items():
@@ -72,26 +95,27 @@ def test_fresh_directory_gains_a_migrated_database(tmp_path: Path) -> None:
         engine.dispose()
 
 
-def test_the_connection_is_configured_for_concurrent_use(tmp_path: Path) -> None:
-    """WAL and a busy timeout are what let a CLI write land while the
-    server holds the same file open."""
-    engine = open_database(tmp_path / "db")
+def test_the_connection_carries_the_lock_timeout() -> None:
+    """What lets a CLI write land while the server holds the same
+    database open, and what bounds the wait when it cannot."""
+    engine = open_database(DatabaseConfig())
     try:
         with engine.connect() as connection:
-            assert connection.execute(text("PRAGMA journal_mode")).scalar() == "wal"
-            assert connection.execute(text("PRAGMA busy_timeout")).scalar() > 0
+            assert connection.execute(text("show lock_timeout")).scalar() == (
+                f"{LOCK_TIMEOUT_MS // 1000}s"
+            )
     finally:
         engine.dispose()
 
 
-def test_an_already_migrated_database_reopens(tmp_path: Path) -> None:
-    directory = tmp_path / "db"
+def test_an_already_migrated_schema_reopens(blank_database: str) -> None:
+    settings = DatabaseConfig(name=blank_database)
 
-    first = open_database(directory)
+    first = open_database(settings)
     version = _version(first)
     first.dispose()
 
-    second = open_database(directory)
+    second = open_database(settings)
     try:
         assert EXPECTED_TABLES <= _tables(second)
         assert _version(second) == version
@@ -100,21 +124,20 @@ def test_an_already_migrated_database_reopens(tmp_path: Path) -> None:
 
 
 def test_concurrent_openers_serialize_on_the_migration_lock(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    blank_database: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The first opener is held inside the migration after its
-    transaction has taken the write lock; the second is started and
-    must not reach the migration until the first commits. That pins
-    the serialization property directly, rather than hoping the
-    scheduler produces the race: BEGIN IMMEDIATE precedes Alembic's
-    version-table read, so the loser reads the schema the winner
-    committed and finds it current instead of creating the same
-    tables twice. Without the lock, the second opener enters the
-    migration while the first still holds it, and the ordering
-    assertion below fails."""
+    transaction has taken the advisory lock; the second is started and
+    must not reach the migration until the first commits. That pins the
+    serialization property directly, rather than hoping the scheduler
+    produces the race: the lock is taken before Alembic's version-table
+    read, so the loser reads the schema the winner committed and finds
+    it current instead of creating the same tables twice. Without the
+    lock, the second opener enters the migration while the first still
+    holds it, and the ordering assertion below fails."""
     from vinga_server import db as db_module
 
-    directory = tmp_path / "db"
+    settings = DatabaseConfig(name=blank_database)
     real_upgrade = db_module.command.upgrade
     first_inside = threading.Event()
     release_first = threading.Event()
@@ -136,7 +159,7 @@ def test_concurrent_openers_serialize_on_the_migration_lock(
 
     def opener() -> None:
         try:
-            engines.append(open_database(directory))
+            engines.append(open_database(settings))
         except BaseException as exc:  # noqa: BLE001 - reported, not swallowed
             failures.append(exc)
 
@@ -146,9 +169,9 @@ def test_concurrent_openers_serialize_on_the_migration_lock(
 
     second = threading.Thread(target=opener)
     second.start()
-    # The second opener must park on the write lock, outside the
+    # The second opener must park on the advisory lock, outside the
     # migration, for as long as the first holds it. The window is long
-    # enough to catch an unserialized entry and far inside the busy
+    # enough to catch an unserialized entry and far inside the lock
     # timeout, so a correctly parked opener neither enters nor fails.
     second.join(timeout=1.0)
     assert second.is_alive(), "the second opener finished while the first held the lock"
@@ -172,188 +195,68 @@ def test_concurrent_openers_serialize_on_the_migration_lock(
             engine.dispose()
 
 
-def test_an_uncreatable_directory_names_the_configuration_key(tmp_path: Path) -> None:
-    blocker = tmp_path / "not-a-directory"
-    blocker.write_text("", encoding="utf-8")
-
-    with pytest.raises(ConfigError) as caught:
-        open_database(blocker / "db")
-
-    assert "server.database.dir" in str(caught.value)
-
-
-@pytest.mark.skipif(os.getuid() == 0, reason="root writes to unwritable directories")
-def test_an_unwritable_directory_names_the_configuration_key(tmp_path: Path) -> None:
-    directory = tmp_path / "read-only"
-    directory.mkdir()
-    directory.chmod(0o500)
-    try:
-        with pytest.raises(ConfigError) as caught:
-            open_database(directory)
-    finally:
-        directory.chmod(0o700)
-
-    assert "server.database.dir" in str(caught.value)
-
-
-# The property `test_provider_rows_hold_every_declared_model_field` used
-# to state, that every declared field of `ProviderConfig` has somewhere
-# in the row to live, is inherited by
-# `test_config_bodies.py::test_a_body_round_trips_through_the_mapper_pair`.
-# It is not a check any more but a consequence: the row holds the model's
-# own dump, so a field cannot be missing from it without the dump being
-# missing it too, and the round trip is what says so for every kind
-# rather than for the one that had the most columns.
-
-
-# The databases this build cannot open
+# The instance this server cannot use
 #
-# The domain chain was squashed to one baseline under a revision id
-# nothing was ever stamped with (#243), so a database from the old chain
-# is not silently at head: Alembic cannot find its revision. What an
-# operator meets is the sentence below rather than a traceback, and it is
-# the whole of the operator-facing surface of "these are unsupported".
+# One refusal, with a fixed sentence, replacing the directory family
+# (uncreatable, unwritable) and the stranded-file family (a database
+# stamped at a revision the squash deleted). The first two were about a
+# path; the third was advice to delete a file, and there is no file.
 
 
-def _stamped(directory: Path, revision: str) -> None:
-    """A migrated database, then rewritten to say it is at `revision`,
-    which is what a deployment carrying another build's chain has."""
-    engine = open_database(directory)
-    try:
-        with engine.begin() as connection:
-            connection.execute(
-                text("update alembic_version set version_num = :revision"),
-                {"revision": revision},
-            )
-    finally:
-        engine.dispose()
-
-
-@pytest.mark.parametrize("revision", ["0001", "0002", "0003", "0004"])
-def test_a_database_from_the_squashed_chain_says_to_reset(
-    tmp_path: Path, revision: str
-) -> None:
-    """Every revision the squash deleted, one by one, because the set is
-    closed and naming it is what makes the arm narrow."""
-    directory = tmp_path / "db"
-    _stamped(directory, revision)
-
+def test_an_unreachable_instance_refuses_with_the_fixed_sentence() -> None:
+    """The boot refusal decision 7 of the issue asks for: a sentence,
+    not a traceback, and one that names the variables to look at."""
     with pytest.raises(ConfigError) as caught:
-        open_database(directory)
+        open_database(DatabaseConfig(port=1))
 
-    problem = str(caught.value)
-    assert "a revision this build does not carry" in problem
-    assert "Delete that file, together with the -wal and -shm files" in problem
-    assert "keep any conversations.db" in problem
-    # The stored revision is a value in a file nothing here validates, so
-    # it is not quoted back, and neither is Alembic's own sentence.
-    assert revision not in problem
-    assert "Can\'t locate" not in problem
+    assert str(caught.value) == UNREACHABLE
+    assert isinstance(caught.value, StorageError)
+    assert not isinstance(caught.value, DatabaseBusyError)
 
 
-def test_the_domain_database_answers_only_for_its_own_deleted_revisions(
-    tmp_path: Path,
-) -> None:
-    """The other direction of the same seam: `0001` is a live revision of
-    the conversations chain and a deleted one of this chain, and what
-    decides is which chain was opened rather than the id alone."""
-    directory = tmp_path / "db"
-    _stamped(directory, "0001")
-
+def test_a_database_that_is_not_there_refuses_the_same_way() -> None:
+    """The other shape of unreachable, and deliberately the same
+    sentence: a name that does not exist on a reachable instance is a
+    connection this server cannot make, and the operator's next step is
+    the same list of variables. Distinguishing the two would mean
+    reporting what the driver said, and the driver quotes the DSN."""
     with pytest.raises(ConfigError) as caught:
-        open_database(directory)
+        open_database(DatabaseConfig(name="vinga_no_such_database_at_all"))
 
-    assert "Delete that file" in str(caught.value)
+    assert str(caught.value) == UNREACHABLE
 
 
-def test_a_database_from_a_newer_build_is_not_told_to_delete_itself(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    "planted",
+    [
+        "sk-test-2b7e11-never-a-real-credential",
+        "hunter2",
+    ],
+)
+def test_no_refusal_repeats_the_password(
+    monkeypatch: pytest.MonkeyPatch, planted: str
 ) -> None:
-    """The rollback: a deployment upgraded, then rolled back to this
-    image, so the volume is stamped at a revision from a chain this build
-    does not have yet.
+    """The sentinel, in its simplest form: a credential-shaped password
+    in the environment, an open that cannot succeed, and nothing of it
+    anywhere on the way out.
 
-    Alembic fails it exactly as it fails a database from the squashed
-    chain, and the two want opposite things. This one is current: the
-    remedy is to roll forward to the build that wrote it, and telling its
-    operator to delete the file would destroy a live configuration. So
-    it takes the ordinary migration-failure sentence instead, which is
-    what it took before the squash arm existed.
+    The whole chain, not only the message: psycopg quotes the DSN it
+    tried in its own error, and `from exc` would leave that reachable
+    from the refusal that travels.
     """
-    directory = tmp_path / "db"
-    _stamped(directory, "2002_a_migration_this_build_does_not_have")
+    monkeypatch.setenv("VINGA_DB_PASSWORD", planted)
 
     with pytest.raises(ConfigError) as caught:
-        open_database(directory)
+        open_database(DatabaseConfig(port=1))
 
-    problem = str(caught.value)
-    assert "Delete that file" not in problem
-    assert "before the storage reshape" not in problem
-    assert "cannot migrate the database" in problem
-    assert "server.database.dir" in problem
-
-
-def test_the_conversations_database_is_never_told_the_domain_sentence(
-    tmp_path: Path,
-) -> None:
-    """The two databases share every line of the opening machinery and
-    must not share this one sentence.
-
-    The conversations chain deleted nothing, so no database of its can be
-    stranded by a squash, and the domain's advice is about the other
-    file: it would send whoever met an unreadable conversations database
-    to reset a volume and re-seed a configuration, destroying recorded
-    conversations the store is otherwise careful to erase physically only
-    when asked.
-    """
-    from vinga_server.conversations.store import open_conversations
-
-    directory = tmp_path / "db"
-    engine = open_conversations(directory)
-    try:
-        with engine.begin() as connection:
-            # `0001` is a revision the conversations chain really has, so
-            # this is the domain's superseded set met on the other
-            # database: the id that would trip the arm if the answer were
-            # shared instead of supplied.
-            connection.execute(
-                text("update alembic_version set version_num = '0001_not_this_chain'")
-            )
-    finally:
-        engine.dispose()
-
-    with pytest.raises(ConfigError) as caught:
-        open_conversations(directory)
-
-    problem = str(caught.value)
-    assert "Delete that file" not in problem
-    assert "re-seed the configuration" not in problem
-    assert "cannot migrate the database" in problem
+    problem = caught.value
+    assert planted not in str(problem)
+    assert planted not in repr(problem.args)
+    assert problem.__cause__ is None
+    assert problem.__context__ is None
 
 
-def test_an_alembic_failure_that_is_not_a_stranded_database_is_not_told_to_reset(
-    tmp_path: Path,
-) -> None:
-    """The other CommandError this used to answer with the reset
-    sentence: a script directory Alembic cannot read at all. Nothing
-    about the database is wrong, so nothing about the database is the
-    remedy."""
-    from vinga_server.db import migration_failure, open_at
-
-    with pytest.raises(ConfigError) as caught:
-        open_at(tmp_path / "db", "vinga.db", tmp_path / "no-such-migrations")
-
-    assert "Delete that file" not in str(caught.value)
-
-    # And the shape directly, since a resolution failure with no cause at
-    # all is a thing a future Alembic could produce.
-    from alembic.util.exc import CommandError
-
-    plain = migration_failure(CommandError("multiple heads"), tmp_path / "vinga.db")
-    assert "Delete that file" not in str(plain)
-
-
-def test_the_baseline_builds_exactly_what_the_tables_declare(tmp_path: Path) -> None:
+def test_the_baseline_builds_exactly_what_the_tables_declare() -> None:
     """The chain and `db/schema.py` agree, asked of the whole shape
     rather than of a list somebody remembered to update.
 
@@ -371,18 +274,30 @@ def test_the_baseline_builds_exactly_what_the_tables_declare(tmp_path: Path) -> 
     would have anything to write. An empty answer is the whole
     assertion: if it is not empty, the difference it reports is the
     migration that is missing.
+
+    Schema-qualified, and that part is not decoration: without the name
+    filter the comparison would see the conversation store's tables in
+    the same database and propose dropping them.
     """
     from alembic.autogenerate import compare_metadata
     from alembic.migration import MigrationContext
 
     from vinga_server.db import schema
 
-    engine = open_database(tmp_path / "db")
+    engine = open_database(DatabaseConfig())
     try:
         with engine.connect() as connection:
-            difference = compare_metadata(
-                MigrationContext.configure(connection), schema.metadata
+            context = MigrationContext.configure(
+                connection,
+                opts={
+                    "include_schemas": True,
+                    "version_table_schema": SCHEMA,
+                    "include_name": lambda name, type_, parents: (
+                        type_ != "schema" or name == SCHEMA
+                    ),
+                },
             )
+            difference = compare_metadata(context, schema.metadata)
     finally:
         engine.dispose()
 
@@ -393,8 +308,110 @@ def test_the_migrations_ship_inside_the_package() -> None:
     """Discovery from an installed wheel is proved in CI, which installs
     one and migrates from it. This is the cheap half: the scripts are
     inside the package directory hatchling builds, not beside it."""
+    from pathlib import Path
+
     package = Path(vinga_server.__file__).resolve().parent
     migrations = package / "db" / "migrations"
 
     assert (migrations / "env.py").is_file()
     assert list((migrations / "versions").glob("*.py"))
+
+
+# The URL override, and what it will not accept
+#
+# `VINGA_DB_URL` replaces all five discrete facts when it is set, which
+# is what a deployment with a connection string in a secret manager
+# needs. It is constrained rather than trusted: accepting any SQLAlchemy
+# URL would admit `sqlite://` and psycopg2's `postgresql://` dialect,
+# and "there is no second storage backend" would be documentation
+# rather than a property of the code.
+
+
+def test_the_url_override_wins_over_the_discrete_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "VINGA_DB_URL", "postgresql+psycopg://someone:pw@elsewhere:6543/other"
+    )
+
+    url = connection_url(DatabaseConfig())
+
+    assert url.host == "elsewhere"
+    assert url.port == 6543
+    assert url.database == "other"
+
+
+def test_a_bare_postgresql_url_is_normalized_to_psycopg(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`postgresql://` alone selects psycopg2, which is not installed and
+    is not the driver this project chose. It is what Postgres itself
+    documents, so it is accepted and normalized rather than refused."""
+    monkeypatch.setenv("VINGA_DB_URL", "postgresql://someone:pw@elsewhere:6543/other")
+
+    assert connection_url(DatabaseConfig()).drivername == "postgresql+psycopg"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "sqlite:///vinga.db",
+        "mysql+pymysql://someone:pw@elsewhere/vinga",
+        "postgresql+psycopg2://someone:pw@elsewhere/vinga",
+        "not a url at all",
+        "",
+    ],
+)
+def test_a_url_that_is_not_this_backend_is_refused(
+    monkeypatch: pytest.MonkeyPatch, url: str
+) -> None:
+    """Every other scheme, and an unparseable string, one by one.
+
+    The empty string is the one that is not a refusal: an unset-shaped
+    value falls through to the discrete settings, which is what an
+    operator who cleared the variable meant.
+    """
+    monkeypatch.setenv("VINGA_DB_URL", url)
+
+    if url == "":
+        assert connection_url(DatabaseConfig()).host == "127.0.0.1"
+        return
+
+    with pytest.raises(ConfigError) as caught:
+        connection_url(DatabaseConfig())
+
+    assert "postgresql" in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "sqlite:///sk-test-4a9c02-never-a-real-credential.db",
+        "mysql://someone:sk-test-4a9c02-never-a-real-credential@host/vinga",
+        "postgresql+psycopg2://u:p@h/db?sslpassword=sk-test-4a9c02-never-a-real-credential",
+        "://sk-test-4a9c02-never-a-real-credential",
+    ],
+)
+def test_a_refused_url_is_never_quoted_back(
+    monkeypatch: pytest.MonkeyPatch, url: str
+) -> None:
+    """The three places a URL can carry a credential: its authority, its
+    query parameters, and a value somebody pasted into the wrong
+    variable entirely.
+
+    A password-hidden rendering would cover only the first, which is why
+    the refusal is fixed rather than rendered at all. The parse failure
+    is included because SQLAlchemy's own message quotes the string it
+    could not parse.
+    """
+    monkeypatch.setenv("VINGA_DB_URL", url)
+    planted = "sk-test-4a9c02-never-a-real-credential"
+
+    with pytest.raises(ConfigError) as caught:
+        connection_url(DatabaseConfig())
+
+    problem = caught.value
+    assert planted not in str(problem)
+    assert planted not in repr(problem.args)
+    assert problem.__cause__ is None
+    assert problem.__context__ is None

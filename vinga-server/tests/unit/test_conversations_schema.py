@@ -1,16 +1,20 @@
-"""Opening `conversations.db`: creation, migration, reopen, and the ids.
+"""Opening the conversation store: migration, reopen, and the ids.
 
 The domain database's suite next door covers the shared machinery, so
-what is left here is what is specific to the second database: that it
-really is a second file with a chain of its own, that its migrations
-ship inside the package a wheel is built from, and that the three cursor
-tables issue ids a paginating client can trust.
+what is left here is what is specific to the second store: that it
+really is a second schema with a chain of its own inside one database,
+that its migrations ship inside the package a wheel is built from, and
+that the three cursor tables issue ids a paginating client can trust.
 
-That last one is the reason for the delete-maximum case. A plain
-`INTEGER PRIMARY KEY` reuses the highest deleted rowid, and retention
-deletes from exactly the end a cursor points past, so without
-`AUTOINCREMENT` a client that had already read row N would be handed a
-different row N on its next page.
+That last one is the reason for the delete-maximum case. Retention
+deletes from exactly the end a cursor points past, so a backend that
+reissued the highest deleted id would hand a client that had already
+read row N a different row N on its next page. Under SQLite that
+property was bought with `AUTOINCREMENT` and asserted on the stored
+DDL; a Postgres sequence has it by construction, so what is asserted is
+the declaration (an identity column, read from `information_schema`)
+and the behavior (a delete-then-insert lands past every id ever
+issued).
 """
 
 from pathlib import Path
@@ -18,18 +22,16 @@ from pathlib import Path
 from sqlalchemy import inspect, text
 
 import vinga_server
+from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations import schema
-from vinga_server.conversations.store import (
-    DATABASE_FILENAME,
-    conversations_path,
-    open_conversations,
-)
-from vinga_server.db import DATABASE_FILENAME as DOMAIN_FILENAME
+from vinga_server.conversations.store import CONVERSATIONS_CHAIN, open_conversations
+from vinga_server.db import DOMAIN_CHAIN, open_database
 
 EXPECTED_TABLES = {"sessions", "turns", "tool_invocations", "events"}
 
-# The three tables whose ids are cursors, which is why they carry
-# AUTOINCREMENT and why tool_invocations does not.
+# The three tables whose ids are cursors. `tool_invocations` is declared
+# the same way and is not one: it is read through its parent turn and
+# never paginated, so nothing reads its ids as a position.
 CURSOR_TABLES = ("sessions", "turns", "events")
 
 EXPECTED_INDEXES = {
@@ -41,14 +43,21 @@ EXPECTED_INDEXES = {
     "ix_events_session",
 }
 
-
-def _tables(engine) -> set[str]:
-    return set(inspect(engine).get_table_names())
+HEAD = "1001_postgres_conversations"
 
 
-def _version(engine) -> list[str]:
+def _tables(engine, schema_name: str) -> set[str]:
+    return set(inspect(engine).get_table_names(schema=schema_name))
+
+
+def _version(engine, schema_name: str) -> list[str]:
     with engine.connect() as connection:
-        return [row[0] for row in connection.execute(text("select * from alembic_version"))]
+        return [
+            row[0]
+            for row in connection.execute(
+                text(f"select * from {schema_name}.alembic_version")
+            )
+        ]
 
 
 def _session_row(session_id: str, started_at: str = "2026-08-15T10:00:00+00:00") -> dict:
@@ -72,106 +81,105 @@ def _session_row(session_id: str, started_at: str = "2026-08-15T10:00:00+00:00")
     }
 
 
-def test_a_fresh_directory_gains_a_migrated_conversation_database(tmp_path: Path) -> None:
-    directory = tmp_path / "db"
-
-    engine = open_conversations(directory)
+def test_a_blank_database_gains_a_migrated_conversation_schema(
+    blank_database: str,
+) -> None:
+    """From truly empty: no schemas, no stamps, nothing an init script
+    put there. This is the case a migrated template cannot exercise and
+    the one a fresh deployment actually has."""
+    engine = open_conversations(DatabaseConfig(name=blank_database))
     try:
-        assert (directory / DATABASE_FILENAME).is_file()
-        assert EXPECTED_TABLES <= _tables(engine)
-        assert len(_version(engine)) == 1
+        assert EXPECTED_TABLES <= _tables(engine, schema.SCHEMA)
+        assert _version(engine, schema.SCHEMA) == [HEAD]
     finally:
         engine.dispose()
 
 
-def test_it_is_a_second_file_beside_the_domain_database(tmp_path: Path) -> None:
-    """Two databases, two chains. Sharing the helpers must not end with
-    the domain configuration's tables in this file or its version row in
+def test_it_is_a_second_schema_beside_the_domain_one(blank_database: str) -> None:
+    """Two chains, one database. Sharing the opener must not end with the
+    domain configuration's tables in this schema or its version row in
     the same table."""
-    from vinga_server.db import open_database
-
-    directory = tmp_path / "db"
-    domain = open_database(directory)
-    store = open_conversations(directory)
+    settings = DatabaseConfig(name=blank_database)
+    domain = open_database(settings)
+    store = open_conversations(settings)
     try:
-        assert (directory / DOMAIN_FILENAME).is_file()
-        assert (directory / DATABASE_FILENAME).is_file()
-        assert DOMAIN_FILENAME != DATABASE_FILENAME
-        assert "providers" not in _tables(store)
-        assert "sessions" not in _tables(domain)
+        assert DOMAIN_CHAIN.schema != CONVERSATIONS_CHAIN.schema
+        assert "providers" not in _tables(store, CONVERSATIONS_CHAIN.schema)
+        assert "sessions" not in _tables(domain, DOMAIN_CHAIN.schema)
+        # And the version tables really are two, each inside its own
+        # schema, which is the whole of what keeps the chains apart.
+        assert _version(domain, DOMAIN_CHAIN.schema) != _version(
+            store, CONVERSATIONS_CHAIN.schema
+        )
     finally:
         store.dispose()
         domain.dispose()
 
 
-def test_an_already_migrated_conversation_database_reopens(tmp_path: Path) -> None:
-    directory = tmp_path / "db"
-
-    first = open_conversations(directory)
-    version = _version(first)
+def test_an_already_migrated_conversation_schema_reopens() -> None:
+    first = open_conversations(DatabaseConfig())
+    version = _version(first, schema.SCHEMA)
     first.dispose()
 
-    second = open_conversations(directory)
+    second = open_conversations(DatabaseConfig())
     try:
-        assert EXPECTED_TABLES <= _tables(second)
-        assert _version(second) == version
+        assert EXPECTED_TABLES <= _tables(second, schema.SCHEMA)
+        assert _version(second, schema.SCHEMA) == version
     finally:
         second.dispose()
 
 
-def test_the_connection_is_configured_for_concurrent_use_and_erasure(tmp_path: Path) -> None:
-    """WAL and a busy timeout for the same reason the domain database
-    has them, and secure_delete because a deletion that leaves the words
-    in a freelist page is not a deletion."""
-    engine = open_conversations(tmp_path / "db")
+def test_the_cursor_tables_are_declared_identity_columns() -> None:
+    """Read off `information_schema` rather than off the metadata,
+    because what matters is what the database was told, and it is the
+    same assertion the installed-wheel step in CI makes.
+
+    `BY DEFAULT` rather than `ALWAYS`: a restore and the suites that
+    plant rows both name an id, and `ALWAYS` would refuse them.
+    """
+    engine = open_conversations(DatabaseConfig())
     try:
         with engine.connect() as connection:
-            assert connection.execute(text("PRAGMA journal_mode")).scalar() == "wal"
-            assert connection.execute(text("PRAGMA busy_timeout")).scalar() > 0
-            assert connection.execute(text("PRAGMA secure_delete")).scalar() == 1
-    finally:
-        engine.dispose()
-
-
-def test_the_cursor_tables_are_declared_autoincrement(tmp_path: Path) -> None:
-    """Read off the stored DDL rather than off the metadata, because
-    what matters is what SQLite was told, and it is the same assertion
-    the installed-wheel step in CI makes."""
-    engine = open_conversations(tmp_path / "db")
-    try:
-        with engine.connect() as connection:
-            ddl = {
+            declared = {
                 row[0]: row[1]
                 for row in connection.execute(
-                    text("select name, sql from sqlite_master where type = 'table'")
+                    text(
+                        "select table_name, is_identity from information_schema.columns "
+                        "where table_schema = :schema and column_name = 'id'"
+                    ),
+                    {"schema": schema.SCHEMA},
                 )
             }
     finally:
         engine.dispose()
 
     for name in CURSOR_TABLES:
-        assert "AUTOINCREMENT" in ddl[name], f"{name} would reuse deleted row ids"
-    assert "AUTOINCREMENT" not in ddl["tool_invocations"]
+        assert declared[name] == "YES", f"{name} would not have a sequence behind it"
 
 
-def test_a_deleted_maximum_id_is_never_issued_again(tmp_path: Path) -> None:
+def test_a_deleted_maximum_id_is_never_issued_again() -> None:
     """Retention deletes the newest rows of an old session, which is
-    exactly the maximum. Reopened, the next insert must land past every
-    id ever issued rather than back on the one a client just read."""
-    directory = tmp_path / "db"
-    engine = open_conversations(directory)
+    exactly the maximum. The next insert must land past every id ever
+    issued rather than back on the one a client just read."""
+    engine = open_conversations(DatabaseConfig())
     try:
         with engine.begin() as connection:
             connection.execute(schema.sessions.insert().values(_session_row("first")))
             connection.execute(schema.sessions.insert().values(_session_row("second")))
         with engine.connect() as connection:
-            issued = [row[0] for row in connection.execute(text("select id from sessions"))]
+            issued = [
+                row[0]
+                for row in connection.execute(text("select id from conversations.sessions"))
+            ]
         with engine.begin() as connection:
-            connection.execute(text("delete from sessions where id = :id"), {"id": max(issued)})
+            connection.execute(
+                text("delete from conversations.sessions where id = :id"),
+                {"id": max(issued)},
+            )
     finally:
         engine.dispose()
 
-    reopened = open_conversations(directory)
+    reopened = open_conversations(DatabaseConfig())
     try:
         with reopened.begin() as connection:
             landed = connection.execute(
@@ -183,16 +191,16 @@ def test_a_deleted_maximum_id_is_never_issued_again(tmp_path: Path) -> None:
     assert landed > max(issued)
 
 
-def test_every_index_the_queries_need_exists(tmp_path: Path) -> None:
-    """Named in the migration rather than left to the metadata, so that
+def test_every_index_the_queries_need_exists() -> None:
+    """Named in the migration rather than left to the database, so that
     a later migration can address them."""
-    engine = open_conversations(tmp_path / "db")
+    engine = open_conversations(DatabaseConfig())
     try:
         inspector = inspect(engine)
         found = {
             index["name"]
             for table in EXPECTED_TABLES
-            for index in inspector.get_indexes(table)
+            for index in inspector.get_indexes(table, schema=schema.SCHEMA)
         }
     finally:
         engine.dispose()
@@ -200,25 +208,25 @@ def test_every_index_the_queries_need_exists(tmp_path: Path) -> None:
     assert EXPECTED_INDEXES <= found
 
 
-def test_the_source_column_refuses_a_token_outside_the_closed_set(tmp_path: Path) -> None:
+def test_the_source_column_refuses_a_token_outside_the_closed_set() -> None:
     """The value of the column is that a query may enumerate it, so the
     closed set is a property of the schema and not only of the
     classifier that fills it."""
     from sqlalchemy.exc import IntegrityError
 
-    engine = open_conversations(tmp_path / "db")
+    engine = open_conversations(DatabaseConfig())
     try:
         with engine.begin() as connection:
             connection.execute(schema.sessions.insert().values(_session_row("s")))
-            connection.execute(
+            turn = connection.execute(
                 schema.turns.insert().values(session="s", t_ms=0, tool_calls=1)
-            )
+            ).inserted_primary_key[0]
         rejected = False
         try:
             with engine.begin() as connection:
                 connection.execute(
                     schema.tool_invocations.insert().values(
-                        turn=1,
+                        turn=turn,
                         session="s",
                         position=0,
                         source="whatever",
@@ -245,11 +253,38 @@ def test_the_conversation_migrations_ship_inside_the_package() -> None:
     assert list((migrations / "versions").glob("*.py"))
 
 
-def test_the_path_is_answered_without_creating_anything(tmp_path: Path) -> None:
-    """The question a read path asks before deciding whether there is a
-    store at all. Asking must not bring one into existence."""
-    path = conversations_path(tmp_path)
+def test_the_baseline_builds_exactly_what_the_tables_declare() -> None:
+    """The chain and `conversations/schema.py` agree, asked of the whole
+    shape rather than of a list somebody remembered to update.
 
-    assert path.name == DATABASE_FILENAME
-    assert not path.exists()
-    assert not tmp_path.joinpath(DATABASE_FILENAME).exists()
+    The check this store never had. Its SQLite-era suite asserted the
+    stored DDL of three tables, which said nothing about a column added
+    to the metadata without a migration; the domain chain has had this
+    since #243 and this is the same comparison, which is also the one
+    `alembic revision --autogenerate` makes.
+
+    Schema-qualified, which is what `include_schemas` with a name filter
+    is for: without it the comparison would see the domain schema's
+    tables in the same database and propose dropping them.
+    """
+    from alembic.autogenerate import compare_metadata
+    from alembic.migration import MigrationContext
+
+    engine = open_conversations(DatabaseConfig())
+    try:
+        with engine.connect() as connection:
+            context = MigrationContext.configure(
+                connection,
+                opts={
+                    "include_schemas": True,
+                    "version_table_schema": CONVERSATIONS_CHAIN.schema,
+                    "include_name": lambda name, type_, parents: (
+                        type_ != "schema" or name == CONVERSATIONS_CHAIN.schema
+                    ),
+                },
+            )
+            difference = compare_metadata(context, schema.metadata)
+    finally:
+        engine.dispose()
+
+    assert difference == []

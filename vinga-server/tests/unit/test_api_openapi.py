@@ -41,12 +41,14 @@ REGENERATE = (
 @pytest.fixture
 def run(monkeypatch: pytest.MonkeyPatch):
     """The command renders routes and nothing else, so the fixture takes
-    away everything else: no config file, no writable database
-    directory, no encryption key, and no API token either."""
+    away everything else: no config file, no reachable database, no
+    encryption key, and no API token either."""
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
     monkeypatch.delenv(MASTER_KEY_ENV, raising=False)
     monkeypatch.delenv("VINGA_API_SECRET", raising=False)
-    monkeypatch.setenv("VINGA_SERVER__DATABASE__DIR", "/nowhere/at/all")
+    # A port nothing listens on, so a command that opened the database
+    # would refuse here rather than print.
+    monkeypatch.setenv("VINGA_DB_PORT", "1")
 
     def _run(*argv: str) -> int:
         return cli.main(list(argv))

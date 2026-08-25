@@ -602,12 +602,12 @@ _NO_RUNTIME_DIFF = (
 # two directions.
 _NO_STORED_WORLD = (
     "this server serves a configuration it was given rather than one it read from a "
-    "store, so no stored configuration describes what it is running. The database in "
-    "its directory holds whatever has been written to it since, which is not this "
-    "server's world: comparing the two would report everything as pending, and applying "
-    "it would replace what is running with a description of some other server. Nothing "
-    "was changed, and making the request again will not help; a server started from a "
-    "store answers both of these."
+    "store, so no stored configuration describes what it is running. The database it is "
+    "pointed at holds whatever has been written to it since, which is not this server's "
+    "world: comparing the two would report everything as pending, and applying it would "
+    "replace what is running with a description of some other server. Nothing was "
+    "changed, and making the request again will not help; a server started from a store "
+    "answers both of these."
 )
 
 

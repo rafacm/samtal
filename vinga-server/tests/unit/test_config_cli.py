@@ -55,7 +55,7 @@ from vinga_server.db import open_database, schema
 def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """One command run the way the entry point runs it, against a server
     of this test's own."""
-    return runner(tmp_path, monkeypatch)
+    return runner(monkeypatch)
 
 
 def test_an_empty_database_becomes_a_working_configuration(
@@ -999,17 +999,19 @@ def test_a_row_of_the_wrong_shape_is_reported_rather_than_raised(
         assert "Traceback" not in captured.err
 
 
-def test_a_database_that_cannot_be_opened_names_the_key(
-    run, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+def test_a_database_that_cannot_be_opened_names_the_variables(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    blocker = tmp_path / "not-a-directory"
-    blocker.write_text("", encoding="utf-8")
-    monkeypatch.setenv("VINGA_SERVER__DATABASE__DIR", str(blocker / "db"))
+    """A port nothing listens on, which is the ordinary shape of a
+    misconfigured deployment. What comes back is a sentence naming the
+    variables to look at, and no part of the connection: the driver's
+    own error quotes the DSN it tried."""
+    monkeypatch.setenv("VINGA_DB_PORT", "1")
 
     assert run("list") == 1
 
     captured = capsys.readouterr()
-    assert "server.database.dir" in captured.err
+    assert "VINGA_DB_HOST" in captured.err
     assert "Traceback" not in captured.err
 
 

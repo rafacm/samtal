@@ -23,7 +23,6 @@ import contextlib
 import io
 import sys
 from collections.abc import Sequence
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -59,14 +58,14 @@ FRAGMENT_INPUT = "text: |2\n" + "".join(
 )
 
 
-def runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def runner(monkeypatch: pytest.MonkeyPatch):
     """Run one command the way the entry point runs it, against a server
     of this test's own.
 
     The application is built per request rather than once, from the
-    database directory the CLI itself would have resolved, because that
+    database settings the CLI itself would have resolved, because that
     is what a deployment's server does too: the CLI and the server read
-    `server.database.dir` through the same machinery and cannot disagree
+    `server.database` through the same machinery and cannot disagree
     about it.
 
     Each application is served for exactly the length of one command:
@@ -78,7 +77,6 @@ def runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
     monkeypatch.delenv(cli.API_URL_ENV, raising=False)
-    monkeypatch.setenv("VINGA_SERVER__DATABASE__DIR", str(tmp_path / "db"))
     monkeypatch.setenv(MASTER_KEY_ENV, generate_key())
     monkeypatch.setenv(API_SECRET_ENV, TOKEN)
 
@@ -106,7 +104,7 @@ def runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     def factory(base_url: str, token: str) -> TestClient:
         reached.append(base_url)
-        directory = load_file_config(None).server.database.dir
+        database = load_file_config(None).server.database
         # The server's token is fixed here and is not the one the CLI
         # resolved. Building the gate out of whatever the client happened
         # to send would make every token the right one, and the
@@ -114,7 +112,7 @@ def runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         # variable, a stale value and a typo would all authenticate.
         api = build_api(
             TOKEN,
-            directory,
+            database,
             pending=pending,
             mcp_servers=runtime["mcp_servers"],
             reload=runtime["reload"],

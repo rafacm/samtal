@@ -32,23 +32,22 @@ import threading
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
-from pathlib import Path
 
 import pytest
 import uvicorn
 
 from vinga_server.app import create_app
 from vinga_server.config.boot import load_boot_config
-from vinga_server.config.models import API_MOUNT_PATH
+from vinga_server.config.models import API_MOUNT_PATH, DatabaseConfig
 from vinga_server.device_endpoint import SUPPLIED_ENDPOINT, Endpoint
 from vinga_server.ota import OTA_PATH
 from vinga_server.simulator import board
 
-# The one variable a fileless boot needs: where the database goes. The
+# The one variable a fileless boot needs: which database it serves. The
 # server half of the configuration is otherwise all defaults, which is
 # what "a handful of environment variables" means for a deployment that
 # has not yet configured anything.
-DATABASE_DIR_ENV = "VINGA_SERVER__DATABASE__DIR"
+DATABASE_NAME_ENV = "VINGA_DB_NAME"
 
 CONFIG_ENV = "VINGA_CONFIG"
 
@@ -66,9 +65,9 @@ class Live:
     # What a device reaches: the origin the OTA endpoint is served on.
     origin: str
 
-    # Where the database it serves is, so a test can read the file back
-    # rather than take the API's word for it.
-    directory: Path
+    # Which database it serves, so a test can read the rows back rather
+    # than take the API's word for it.
+    database: DatabaseConfig
 
     @property
     def api_url(self) -> str:
@@ -78,27 +77,28 @@ class Live:
 
 
 @contextlib.contextmanager
-def serving(directory: Path) -> Iterator[Live]:
+def serving(database: DatabaseConfig | None = None) -> Iterator[Live]:
     """A real uvicorn on an ephemeral loopback port, booted with no
     configuration file at all.
 
     `load_boot_config()` with no path and no `VINGA_CONFIG` in the
     environment is exactly what `main()` runs on a deployment that
     passed no `--config`: the file half comes from the settings
-    machinery, which reads `VINGA_SERVER__*` and nothing else, and the
-    domain half comes from the database that half names.
+    machinery, which reads the `VINGA_DB_*` names and the
+    `VINGA_SERVER__*` ones and nothing else, and the domain half comes
+    from the database that half names.
     """
-    directory.mkdir(parents=True, exist_ok=True)
+    database = DatabaseConfig() if database is None else database
     with pytest.MonkeyPatch.context() as patch:
         patch.delenv(CONFIG_ENV, raising=False)
-        patch.setenv(DATABASE_DIR_ENV, str(directory))
+        patch.setenv(DATABASE_NAME_ENV, database.name)
         booted = load_boot_config()
-    with served(create_app(booted.config, booted.secrets), directory) as running:
+    with served(create_app(booted.config, booted.secrets), database) as running:
         yield running
 
 
 @contextlib.contextmanager
-def served(app: object, directory: Path) -> Iterator[Live]:
+def served(app: object, database: DatabaseConfig | None = None) -> Iterator[Live]:
     """One built application on a real uvicorn, on an ephemeral loopback
     port.
 
@@ -131,7 +131,10 @@ def served(app: object, directory: Path) -> Iterator[Live]:
             assert thread.is_alive() and time.monotonic() < deadline, "the server never started"
             time.sleep(0.02)
         port = server.servers[0].sockets[0].getsockname()[1]
-        yield Live(origin=f"http://127.0.0.1:{port}", directory=directory)
+        yield Live(
+            origin=f"http://127.0.0.1:{port}",
+            database=DatabaseConfig() if database is None else database,
+        )
     finally:
         server.should_exit = True
         thread.join(timeout=30)

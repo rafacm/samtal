@@ -1,10 +1,10 @@
 #!/bin/sh
 # The domain half the smoke lane's server runs on, written through the
-# CLI into the database at server.database.dir.
+# CLI into the database the VINGA_DB_* variables name.
 #
 # Run from the image itself before the container starts, so the seeding
 # exercises the shipped artifact rather than a checkout, and against the
-# same data volume the server is given. Mock providers throughout: the
+# same database the server is given. Mock providers throughout: the
 # conversation needs no model downloads, no keys, and no network.
 #
 # It starts a server of its own to write through, so the container it

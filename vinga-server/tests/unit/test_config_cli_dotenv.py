@@ -40,7 +40,7 @@ PLANTED_PATH = "sk-env-2b6e5c41-never-a-real-credential"
 
 @pytest.fixture
 def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    return runner(tmp_path, monkeypatch)
+    return runner(monkeypatch)
 
 
 def a_dotenv(directory: Path, text: str) -> Path:

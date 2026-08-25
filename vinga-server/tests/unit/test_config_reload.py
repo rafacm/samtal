@@ -1296,7 +1296,6 @@ def directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     environment, which is what makes `load_boot_config` read this test's
     database rather than a real one's."""
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
-    monkeypatch.setenv("VINGA_SERVER__DATABASE__DIR", str(tmp_path / "db"))
     monkeypatch.setenv(API_SECRET_ENV, TOKEN)
     return tmp_path / "db"
 

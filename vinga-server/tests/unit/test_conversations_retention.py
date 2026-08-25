@@ -1,11 +1,21 @@
-"""Retention: what leaves the file, and whether it really leaves it.
+"""Retention: what leaves the store, and what "leaves" means.
 
-Deletion here is the right-to-delete made operational, so the tests are
-about the file rather than about a query. A deletion honored in the
-query planner and broken in the file bytes is not honored, which is why
-the deferred-truncation case plants a credential-shaped utterance, lets
-retention take its session, and hunts the bytes through the database and
-both of its sidecars.
+Deletion here is the right-to-delete made operational, and what that
+promises is now the database server's rule rather than a file trick
+(#283). Precisely: a deleted row is invisible to every transaction that
+begins after the deletion commits, including the analyst role's; a
+repeatable-read transaction already in flight when it commits keeps
+seeing the row until it ends, which is what MVCC is; and reclaiming the
+pages the row occupied is autovacuum's, not a per-delete overwrite.
+
+The held-snapshot case below pins both halves of that in one test,
+which is the honest replacement for the SQLite-era pair it retires. Two
+tests went with the mechanism: one that hunted a planted credential
+through `conversations.db` and both of its sidecars after a deferred
+truncating checkpoint, and one that pinned the checkpoint running
+outside a transaction. Neither has an analogue: there is no file to
+read, no write-ahead log to truncate, and no freed page this process
+could write zeros over.
 
 Nothing sleeps. The store takes a wall clock, so a session recorded
 "ninety-one days ago" is a clock the test chose, and the cutoff
@@ -16,19 +26,19 @@ approached.
 import datetime as dt
 import logging
 import time
-from pathlib import Path
 from typing import Any
 
 import pytest
 from sqlalchemy import text
 
+from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations.records import ToolInvocation, TurnRecord
 from vinga_server.conversations.store import (
     RETENTION_DAYS_DEFAULT,
     ConversationStore,
     open_conversations,
-    read_conversations,
 )
+from vinga_server.db import read_engine
 
 NOW = dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC)
 
@@ -58,11 +68,11 @@ def a_turn(heard: str = "hello there") -> TurnRecord:
 
 
 @pytest.fixture
-def stores(tmp_path: Path):
+def stores():
     built: list[ConversationStore] = []
 
     def _build(**options: Any) -> ConversationStore:
-        store = ConversationStore(tmp_path, now=lambda: NOW, **options)
+        store = ConversationStore(DatabaseConfig(), now=lambda: NOW, **options)
         built.append(store)
         return store
 
@@ -97,29 +107,29 @@ def _until(ready, complaint: str) -> None:
     raise AssertionError(complaint)
 
 
-def _holds(path: Path, sentinel: str) -> bool:
-    return sentinel.encode() in path.read_bytes()
-
-
-def counts(directory: Path) -> dict[str, int]:
-    engine = open_conversations(directory)
+def counts() -> dict[str, int]:
+    engine = open_conversations(DatabaseConfig())
     try:
         with engine.connect() as connection:
             return {
-                table: connection.execute(text(f"select count(*) from {table}")).scalar_one()
+                table: connection.execute(
+                    text(f"select count(*) from conversations.{table}")
+                ).scalar_one()
                 for table in ("sessions", "turns", "tool_invocations", "events")
             }
     finally:
         engine.dispose()
 
 
-def stored_sessions(directory: Path) -> list[str]:
-    engine = open_conversations(directory)
+def stored_sessions() -> list[str]:
+    engine = open_conversations(DatabaseConfig())
     try:
         with engine.connect() as connection:
             return [
                 row[0]
-                for row in connection.execute(text("select session from sessions order by id"))
+                for row in connection.execute(
+                    text("select session from conversations.sessions order by id")
+                )
             ]
     finally:
         engine.dispose()
@@ -129,7 +139,7 @@ def stored_sessions(directory: Path) -> list[str]:
 
 
 def test_retention_deletes_at_the_cutoff_and_not_a_day_inside_it(
-    tmp_path: Path, stores
+    stores,
 ) -> None:
     """The boundary is the whole of the policy: `retention_days` days
     before the store's own clock, applied to `started_at`, which is the
@@ -143,8 +153,8 @@ def test_retention_deletes_at_the_cutoff_and_not_a_day_inside_it(
 
     # Pruning runs at each close, so the second session's close is what
     # took the first one's older neighbour.
-    assert stored_sessions(tmp_path) == ["just-inside"]
-    assert counts(tmp_path) == {
+    assert stored_sessions() == ["just-inside"]
+    assert counts() == {
         "sessions": 1,
         "turns": 1,
         "tool_invocations": 1,
@@ -152,7 +162,7 @@ def test_retention_deletes_at_the_cutoff_and_not_a_day_inside_it(
     }
 
 
-def test_retention_zero_keeps_everything(tmp_path: Path, stores) -> None:
+def test_retention_zero_keeps_everything(stores) -> None:
     """0 is the documented opt-out, and it has to be chosen: the default
     is a window, because a store with no policy retains forever."""
     store = stores(retention_days=0)
@@ -161,12 +171,12 @@ def test_retention_zero_keeps_everything(tmp_path: Path, stores) -> None:
     record(store, "recent", NOW - dt.timedelta(hours=1))
     store.stop()
 
-    assert stored_sessions(tmp_path) == ["ancient", "recent"]
+    assert stored_sessions() == ["ancient", "recent"]
     assert RETENTION_DAYS_DEFAULT == 90
 
 
 def test_retention_runs_at_start_against_what_a_previous_run_left(
-    tmp_path: Path, stores
+    stores,
 ) -> None:
     """A deployment that recorded and was then restarted must not have
     to hold a conversation before its old sessions go."""
@@ -174,17 +184,17 @@ def test_retention_runs_at_start_against_what_a_previous_run_left(
     first.start()
     record(first, "ancient", NOW - dt.timedelta(days=400))
     first.stop()
-    assert stored_sessions(tmp_path) == ["ancient"]
+    assert stored_sessions() == ["ancient"]
 
     second = stores(retention_days=90)
     second.start()
     second.stop()
 
-    assert stored_sessions(tmp_path) == []
+    assert stored_sessions() == []
 
 
 def test_pruning_says_how_many_sessions_it_took(
-    tmp_path: Path, stores, caplog: pytest.LogCaptureFixture
+    stores, caplog: pytest.LogCaptureFixture
 ) -> None:
     """A count and nothing else: which sessions were pruned is a
     question for the store, not for the log."""
@@ -209,86 +219,67 @@ def test_pruning_says_how_many_sessions_it_took(
     assert "old-one" not in pruned.getMessage()
 
 
-def test_a_reader_defers_the_stores_truncation_and_the_next_marker_takes_it(
-    tmp_path: Path, stores
-) -> None:
-    """A checkpoint cannot move frames a reader is still reading. It
-    reports busy rather than raising, the deletion stands, and the
-    truncation stays owed until a checkpoint gets its moment.
+def test_a_snapshot_open_across_a_prune_keeps_seeing_what_the_prune_took() -> None:
+    """The whole of what deletion promises, both halves, in one test.
 
-    Asserted on the database file rather than on the log, because that
-    is where the evidence is: `secure_delete` writes the zeroed page
-    into the write-ahead log, so until the checkpoint copies it over the
-    old page the sentinel is still in `conversations.db` itself.
+    A repeatable-read transaction opened before retention runs keeps
+    seeing the row it deleted, because that is what its snapshot is; a
+    transaction opened after the delete commits does not. Promising
+    otherwise would be promising something MVCC does not do, and the
+    generated reference and the README say it in these words.
+
+    Held across the pruning store's start, which is when it prunes.
     """
-    seeding = stores(retention_days=0)
+    seeding = ConversationStore(DatabaseConfig(), now=lambda: NOW, retention_days=0)
     seeding.start()
     seeding.open_session("old", 100.0, manifest(NOW - dt.timedelta(days=400)))
     seeding.record_turn("old", a_turn(heard=f"my password is {SENTINEL}"))
     seeding.close_session("old", duration_s=3.0, reason="client")
     seeding.stop()
 
-    database = tmp_path / "conversations.db"
-    log = tmp_path / "conversations.db-wal"
-    assert _holds(database, SENTINEL)
-
-    # Held across the pruning store's start, which is when it prunes.
-    reader = read_conversations(tmp_path)
+    reader = read_engine(DatabaseConfig())
     held = reader.connect()
-    held.execute(text("select count(*) from sessions")).scalar()
-    pruning = stores(retention_days=90)
-    pruning.start()
-    # White-box: the writer's own record of when it last truncated is
-    # what says the prune ran at all. What a prune leaves behind is
-    # asserted below through the database; this is the synchronisation
-    # in front of it, and a store publishes no "have you pruned yet".
-    _until(
-        lambda: pruning._truncation_due,
-        "the prune never ran, or was checkpointed past a held reader",
-    )
+    try:
+        # The snapshot is taken by the first statement, so it has to
+        # happen before the prune rather than after it.
+        assert held.execute(
+            text("select count(*) from conversations.sessions")
+        ).scalar() == 1
 
-    assert stored_sessions(tmp_path) == []
-    assert _holds(database, SENTINEL), "the frames went while a reader held them"
+        pruning = ConversationStore(DatabaseConfig(), now=lambda: NOW, retention_days=90)
+        pruning.start()
+        try:
+            _until(lambda: stored_sessions() == [], "the prune never ran")
 
-    held.close()
-    reader.dispose()
+            # The transaction that began before the delete committed
+            # still sees the row, sentinel and all: this is the
+            # weakening the docs state rather than paper over.
+            assert held.execute(
+                text("select count(*) from conversations.sessions")
+            ).scalar() == 1
+            assert held.execute(
+                text("select heard from conversations.turns")
+            ).scalar() == f"my password is {SENTINEL}"
+        finally:
+            pruning.stop()
+    finally:
+        held.close()
+        reader.dispose()
 
-    # The next quiet moment: a marker on the still-running store.
-    pruning.open_session("after", 200.0, manifest(NOW))
-    pruning.record_turn("after", a_turn(heard="nothing secret"))
-    _until(
-        lambda: not pruning._truncation_due,
-        "the owed truncation was never taken at a later marker",
-    )
-
-    # Every file the store keeps, not only the database: the frames that
-    # held the bytes lived in the log, and the shared-memory index beside
-    # it is written from the same pages. The log is not asserted empty,
-    # because the marker that took the owed truncation wrote its own
-    # frames into it.
-    for path in (database, log, tmp_path / "conversations.db-shm"):
-        assert path.exists(), f"{path.name} went missing"
-        assert not _holds(path, SENTINEL), f"{path.name} still holds it"
-
-
-def test_the_checkpoint_runs_outside_a_transaction(tmp_path: Path, stores) -> None:
-    """SQLite refuses to checkpoint inside a transaction, and every
-    connection this engine hands out through SQLAlchemy opens BEGIN
-    IMMEDIATE before its first statement. Run through the engine the
-    pragma raises every time, which a suppressed exception turns into a
-    checkpoint that silently never happened; this is the pin that it
-    runs and answers."""
-    from vinga_server.conversations.store import _checkpoint
-
-    store = stores(retention_days=0)
-    store.start()
-    record(store, "one", NOW)
-    log = tmp_path / "conversations.db-wal"
-    _until(lambda: stored_sessions(tmp_path) == ["one"], "the session was never committed")
-    assert log.stat().st_size > 0
-
-    # White-box: a checkpoint is run against the writer's own
-    # connection, and the claim is about that connection's log rather
-    # than about any reader's view of the data.
-    assert _checkpoint(store._engine) is True
-    assert log.stat().st_size == 0
+    # And every transaction that begins afterwards, including the
+    # analyst role's, finds nothing: not the session, not its turn, and
+    # not the words in it.
+    fresh = read_engine(DatabaseConfig())
+    try:
+        with fresh.connect() as connection:
+            assert connection.execute(
+                text("select count(*) from conversations.sessions")
+            ).scalar() == 0
+            assert connection.execute(
+                text(
+                    "select count(*) from conversations.turns where heard like :like"
+                ),
+                {"like": f"%{SENTINEL}%"},
+            ).scalar() == 0
+    finally:
+        fresh.dispose()

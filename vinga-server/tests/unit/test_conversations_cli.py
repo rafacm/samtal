@@ -20,18 +20,19 @@ from vinga_server.conversations import cli
 # argument.
 SENTINEL = "hunter2-not-a-real-credential-9f31c7"
 
-# A directory that cannot be created, so a command that opened the
-# database would fail here rather than print.
-NOWHERE = "/nowhere/at/all"
+# A port nothing listens on, so a command that opened the database
+# would refuse here rather than print.
+NOWHERE_PORT = "1"
 
 
 @pytest.fixture
 def run(monkeypatch: pytest.MonkeyPatch):
-    """The group composes `server.database.dir` the way the server does,
-    and nothing here reads it, so pointing it somewhere unopenable is
-    both the whole of the setup and half of what is asserted."""
+    """The group composes `server.database` the way the server does, and
+    nothing here reads it, so pointing it at an instance that is not
+    there is both the whole of the setup and half of what is
+    asserted."""
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
-    monkeypatch.setenv("VINGA_SERVER__DATABASE__DIR", NOWHERE)
+    monkeypatch.setenv("VINGA_DB_PORT", NOWHERE_PORT)
 
     def _run(*argv: str) -> int:
         return cli.main(list(argv))
@@ -132,7 +133,7 @@ def test_the_command_word_dispatches_to_this_group(
         entrypoint.sys, "argv", ["vinga-server", "conversations", "schema"]
     )
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
-    monkeypatch.setenv("VINGA_SERVER__DATABASE__DIR", NOWHERE)
+    monkeypatch.setenv("VINGA_DB_PORT", NOWHERE_PORT)
 
     with pytest.raises(SystemExit) as left:
         entrypoint.main()
