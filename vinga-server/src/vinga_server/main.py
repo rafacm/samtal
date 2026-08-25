@@ -22,11 +22,17 @@ path.
 
 import argparse
 import sys
+from importlib import import_module
 from types import ModuleType
 from typing import NoReturn
 
 from vinga_server import logs
-from vinga_server.config.loader import CONFIG_ENV_VAR, ConfigError, load_environment_file
+from vinga_server.config.loader import (
+    CONFIG_ENV_VAR,
+    NEEDS_THE_SERVER_HALF,
+    ConfigError,
+    load_environment_file,
+)
 
 # The first words that mean "do this, do not serve".
 CONFIG_COMMAND = "config"
@@ -47,8 +53,18 @@ COMMANDS = (CONFIG_COMMAND, CONVERSATIONS_COMMAND, EVENTS_COMMAND, DOCTOR_COMMAN
 # otherwise have printed it on stderr on its way to an exit code.
 UNKNOWN_COMMAND = "that is not a command; expected one of: " + ", ".join(COMMANDS)
 
+# The two modules this entry point can be asked for and may not have,
+# named as strings because they are imported by name rather than
+# written down as an import: a `from vinga_server import serving` at
+# module scope is exactly what the split exists to prevent.
+SERVING = "vinga_server.serving"
+CONVERSATIONS_GROUP = "vinga_server.conversations.cli"
+
 # What an installation carrying the client half alone is told when it is
-# asked to serve.
+# asked to serve. The conversations group answers
+# `NEEDS_THE_SERVER_HALF` instead, which is the sentence the two gated
+# commands of the configuration grammar answer with: serving is one
+# fact and a command that needs the other half is another.
 #
 # A fixed constant, like every other sentence out of this entry point: it
 # names no argument, no path and nothing of the ImportError that reached
@@ -151,8 +167,13 @@ def main() -> None:
         # The second group, dispatched the same way and for the same
         # reasons. It says what the conversation store's tables are,
         # which must be answerable when the server will not start, so
-        # it opens no database and reaches nothing here.
-        from vinga_server.conversations import cli as conversations_cli
+        # it opens no database.
+        #
+        # It does read the store's SQLAlchemy metadata to say it, which
+        # is the server half, so it goes through the gate: an
+        # installation carrying the client alone is told which half is
+        # missing rather than shown where the import failed.
+        conversations_cli = _server_half(CONVERSATIONS_GROUP, NEEDS_THE_SERVER_HALF)
 
         raise SystemExit(conversations_cli.main(sys.argv[2:]))
 
@@ -195,36 +216,47 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    raise SystemExit(_serving().run(args.config))
+    raise SystemExit(_server_half(SERVING, CANNOT_SERVE).run(args.config))
 
 
-def _serving() -> ModuleType:
-    """The serving module, or the fixed sentence and an exit of 1.
+def _server_half(module: str, sentence: str) -> ModuleType:
+    """One dispatch target that needs the server half, or the fixed
+    sentence and an exit of 1.
 
-    The whole of what a client-only installation meets when it is asked
-    to serve. Recorded inside the handler and answered outside it, the
-    way every sanitized boundary in this repository answers: an
-    exception raised while an ImportError is being handled carries that
-    ImportError as its `__context__`, and an ImportError's text is the
-    module path it could not find. Nothing here reads it, and nothing
-    walking a chain out of this function finds it either.
+    Two branches reach it. Serving is the obvious one: `serving` imports
+    FastAPI and uvicorn and subclasses `uvicorn.Server` at import time.
+    The conversations group is the quiet one: it renders the store's
+    tables off the SQLAlchemy metadata, so importing it pulls in
+    SQLAlchemy, and without this it ended in a `ModuleNotFoundError`
+    traceback on the one entry point whose every other answer is a
+    sentence.
 
-    Only ImportError is caught. A serving module that imports and then
-    fails at import time for a reason of its own is a bug in this
-    server, and its traceback is the whole of what anybody has to work
-    with.
+    The other three groups are NOT reached through here, deliberately.
+    `config`, `events` and `doctor` are the client half, so an
+    installation that has this file has them; if one of them will not
+    import, that is a bug in this server and its traceback is the whole
+    of what anybody has to work with.
+
+    Recorded inside the handler and answered outside it, the way every
+    sanitized boundary in this repository answers: an exception raised
+    while an ImportError is being handled carries that ImportError as
+    its `__context__`, and an ImportError's text is the module path it
+    could not find. Nothing here reads it, and nothing walking a chain
+    out of this function finds it either.
+
+    Only ImportError is caught, for the same reason: a module that
+    imports and then fails for a reason of its own is a bug, not a
+    missing half.
     """
-    module: ModuleType | None = None
+    found: ModuleType | None = None
     try:
-        from vinga_server import serving
-
-        module = serving
+        found = import_module(module)
     except ImportError:
         pass
-    if module is None:
-        print(CANNOT_SERVE, file=sys.stderr)
+    if found is None:
+        print(sentence, file=sys.stderr)
         raise SystemExit(1)
-    return module
+    return found
 
 
 if __name__ == "__main__":

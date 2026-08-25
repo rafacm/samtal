@@ -86,6 +86,11 @@ from typer.core import TyperCommand, TyperGroup
 from vinga_server.config import docgen, entities
 from vinga_server.config.loader import (
     CONFIG_ENV_VAR,
+    # Defined one module down and re-exported here, because `main.py`
+    # answers the same sentence for the conversations group and only
+    # `loader` is below both readers. `cli.NEEDS_THE_SERVER_HALF` stays
+    # the name every test and both wheel lanes reach for.
+    NEEDS_THE_SERVER_HALF,
     ConfigError,
     load_environment_file,
     load_file_config,
@@ -277,26 +282,6 @@ OTA_URL_GUIDANCE = (
 # goes into is `origin.ONBOARDING_OFF`, which is the derivation's own,
 # and the fix is the asking command's.
 ONBOARDING_OFF_FOR_URL = "Turn onboarding on for a URL short enough to type."
-
-
-# What `openapi` and `ota-url` answer on an installation that carries
-# the configuration client alone.
-#
-# One sentence for the pair, because what it says is one fact: this
-# command needs the server half. Two sentences for one fact would be the
-# duplication the design guide names, and neither command can say
-# anything more useful than the other.
-#
-# A fixed constant carrying no invocation value, like every sentence
-# this grammar prints. It is reached with an ImportError in hand, whose
-# text is a module path, and the command that reached it may have been
-# given a file path; neither is repeated. The two doors are named
-# instead, because the answer is always one of them.
-NEEDS_THE_SERVER_HALF = (
-    "this command needs the server half installed, and this installation carries the "
-    "configuration client alone. Run it inside the container image, or from a "
-    "checkout, where the whole server is present"
-)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -4153,4 +4138,4 @@ def command() -> TyperGroup:
     return grammar
 
 
-__all__ = ["COMMANDS", "build_client", "command", "main"]
+__all__ = ["COMMANDS", "NEEDS_THE_SERVER_HALF", "build_client", "command", "main"]

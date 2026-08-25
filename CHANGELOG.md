@@ -22,16 +22,19 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   a deployment runs the image and installs nothing, as it always has. A
   checkout is unaffected too: `uv sync` still yields a runnable server
   with no new flags, because the dev dependency group names the extra.
-- **`openapi` and `ota-url` need the server half installed** (#223).
-  Both read the server's own code, `openapi` by building the
-  configuration application to describe it and `ota-url` by deriving its
-  URL through the onboarding package, so on a client-only install they
-  stay in the grammar and answer one fixed sentence naming the missing
-  half rather than an ImportError. Inside the image and from a checkout
-  they behave exactly as before. The committed
-  `docs/reference/api-openapi.json` is where a client-only install reads
-  the contract, and the laptop-side question `ota-url` is confused with,
-  whether a URL answers, is `vinga-server doctor`'s.
+- **`openapi`, `ota-url` and `vinga-server conversations` need the
+  server half installed** (#223). All three read the server's own code:
+  `openapi` builds the configuration application to describe it,
+  `ota-url` derives its URL through the onboarding package, and the
+  conversations group renders the store's tables off the SQLAlchemy
+  metadata. On a client-only install each stays where it was and answers
+  one fixed sentence naming the missing half rather than an ImportError
+  traceback. Inside the image and from a checkout they behave exactly as
+  before. The committed `docs/reference/api-openapi.json` is where a
+  client-only install reads the contract, and the laptop-side question
+  `ota-url` is confused with, whether a URL answers, is
+  `vinga-server doctor`'s. `config`, `events` and `doctor` are the
+  client half and are not gated.
 - **The configuration grammar is noun first** (#223). `vinga-server
   config set provider llm local` is `vinga-server config provider set
   llm local`, and every command word in the grammar moved with it:

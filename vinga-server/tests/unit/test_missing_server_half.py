@@ -1,16 +1,18 @@
 """What an installation carrying the client half alone is told.
 
 The default installation of this package is the configuration client,
-and the server half is an extra. So three things a person can type are
+and the server half is an extra. So four things a person can type are
 answerable only by an installation that has that half, and each of them
 is answered with a fixed sentence rather than with an ImportError:
-`vinga-server` with nothing after it, which means serve, and the two
+`vinga-server` with nothing after it, which means serve; the two
 commands of the configuration grammar that read the server's own
 modules, `openapi` (which builds the API application to describe it) and
-`ota-url` (which derives a URL through the onboarding package).
+`ota-url` (which derives a URL through the onboarding package); and
+`vinga-server conversations`, which renders the store's tables off the
+SQLAlchemy metadata.
 
-Two sentences and not three: serving is one fact and a gated command is
-another, and `openapi` and `ota-url` are the same fact as each other.
+Two sentences and not four: serving is one fact, and needing the other
+half is the other, which the remaining three share.
 
 The sentinels are the point of this file. Every one of these refusals is
 reached with an ImportError in hand, and an ImportError's text is a
@@ -29,7 +31,7 @@ with. A test that needed a second environment could not run here at all,
 and the clean-venv lane is where the real absence is proven.
 """
 
-import builtins
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -38,7 +40,7 @@ import pytest
 from tests.support.config_cli import chain, logged
 from vinga_server import main as entrypoint
 from vinga_server.config import cli
-from vinga_server.config.loader import ConfigError
+from vinga_server.config.loader import NEEDS_THE_SERVER_HALF, ConfigError
 
 # One per field that could carry a pasted credential, so a leak says
 # which field it came out of. None of them is a real credential and each
@@ -48,31 +50,46 @@ CONFIG_PATH_SENTINEL = "sk-configpath-4d5e6f-never-a-real-credential"
 ARGV0_SENTINEL = "sk-argv0-7a8b9c-never-a-real-credential"
 
 
-def _refuses(module: str) -> Callable[[pytest.MonkeyPatch], None]:
-    """Make one module unimportable, with a sentinel in the failure.
+class _Missing:
+    """A meta-path finder that refuses one module, with a sentinel in the
+    failure it refuses with.
 
-    The import hook rather than a `None` in `sys.modules`, because the
-    message is half of what this file is about: the machinery's own
-    failure text names the module it could not find, and planting a
-    value there is what proves the sentence carries nothing of it.
+    The import machinery rather than `builtins.__import__`, because the
+    entry point resolves its two gated modules by name through
+    `importlib.import_module`, which does not go through the builtin at
+    all. A finder covers both spellings, and it covers the submodules
+    under the name as well, since a package's own `__init__` is what
+    drags the heavy import in for two of the three sites.
+
+    The sentinel goes in the message and nowhere else, which is the
+    machinery's own shape: what an ImportError carries is the module
+    path it could not find.
     """
 
+    def __init__(self, module: str) -> None:
+        self._module = module
+
+    def find_spec(self, name: str, path: object = None, target: object = None) -> None:
+        if name == self._module or name.startswith(f"{self._module}."):
+            raise ImportError(IMPORT_SENTINEL)
+        return None
+
+
+def _refuses(module: str) -> Callable[[pytest.MonkeyPatch], None]:
+    """Make one module unimportable, as though its half were not
+    installed."""
+
     def install(monkeypatch: pytest.MonkeyPatch) -> None:
-        real = builtins.__import__
-
-        def refusing(
-            name: str,
-            globals: object = None,
-            locals: object = None,
-            fromlist: tuple[str, ...] = (),
-            level: int = 0,
-        ) -> object:
-            reached = f"{name}.{fromlist[0]}" if fromlist else name
-            if reached == module or name == module:
-                raise ImportError(IMPORT_SENTINEL)
-            return real(name, globals, locals, fromlist, level)  # type: ignore[arg-type]
-
-        monkeypatch.setattr(builtins, "__import__", refusing)
+        # Already-imported copies first: this suite runs in a process
+        # that has the whole server in it, and a cached module is one
+        # `import_module` answers without asking any finder.
+        for name in [
+            name
+            for name in sys.modules
+            if name == module or name.startswith(f"{module}.")
+        ]:
+            monkeypatch.delitem(sys.modules, name, raising=False)
+        monkeypatch.setattr(sys, "meta_path", [_Missing(module), *sys.meta_path])
 
     return install
 
@@ -234,3 +251,73 @@ def test_the_gated_pair_is_exactly_two(offline: Path) -> None:
     gated.
     """
     assert {argv[-1] for _, argv in _gated(offline)} == {"openapi", "ota-url"}
+
+
+# The conversations group, which is the third site and is not in the
+# configuration grammar at all
+
+
+def test_the_conversations_group_answers_the_gated_sentence(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The site the plan's inventory did not reach.
+
+    That inventory is the `vinga` grammar's own tree, and this group is
+    a sibling of it under the server's entry point. The standard it is
+    held to is the entry point's, not the tree's: no path out of
+    `main.py` answers with a traceback.
+    """
+    monkeypatch.setattr(entrypoint.sys, "argv", [ARGV0_SENTINEL, "conversations", "schema"])
+    _refuses(entrypoint.CONVERSATIONS_GROUP)(monkeypatch)
+
+    with pytest.raises(SystemExit) as left:
+        entrypoint.main()
+
+    assert left.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.err.strip() == NEEDS_THE_SERVER_HALF
+    assert captured.out == ""
+
+
+def test_the_conversations_refusal_leaks_nothing_it_was_given(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The group takes one word and no value of its own, so what could
+    leak is the ImportError's module path and the name it was invoked
+    by, and both are planted."""
+    monkeypatch.setattr(entrypoint.sys, "argv", [ARGV0_SENTINEL, "conversations", "schema"])
+    _refuses(entrypoint.CONVERSATIONS_GROUP)(monkeypatch)
+
+    with caplog.at_level(0), pytest.raises(SystemExit) as left:
+        entrypoint.main()
+
+    captured = capsys.readouterr()
+    surfaces = (captured.out, captured.err, logged(caplog), chain(left.value))
+    for sentinel in (IMPORT_SENTINEL, ARGV0_SENTINEL):
+        for surface in surfaces:
+            assert sentinel not in surface, sentinel
+
+
+def test_the_three_client_half_groups_are_not_gated(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The other half of the same decision, held explicitly.
+
+    `config`, `events` and `doctor` are the client half, so an
+    installation that reached this file has them. Routing them through
+    the gate would turn a real bug in one of them into a sentence
+    saying something untrue about the installation.
+    """
+    assert entrypoint.CONVERSATIONS_GROUP == "vinga_server.conversations.cli"
+    assert entrypoint.SERVING == "vinga_server.serving"
+
+    gated = {entrypoint.CONVERSATIONS_GROUP, entrypoint.SERVING}
+    for module in ("vinga_server.config.cli", "vinga_server.events_cli", "vinga_server.doctor"):
+        assert module not in gated, module
+
+
+def test_one_sentence_answers_every_command_that_needs_the_other_half() -> None:
+    """Three sites, one string, read from the module below all of them.
+    Two strings for one fact is the duplication the design guide names,
+    and it is the shape this started in."""
+    assert cli.NEEDS_THE_SERVER_HALF is NEEDS_THE_SERVER_HALF
