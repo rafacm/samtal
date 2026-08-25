@@ -349,7 +349,12 @@ explicitly.
    inside `docker run`), each scenario (the boots-on-external
    check, the refusal check, the seeded smoke server) gets its own
    database name through `VINGA_DB_*` so scenarios stay isolated,
-   and `tests/smoke` plus the seed step move with it. The image
+   and `tests/smoke` plus the seed step move with it. The
+   scenario databases are provisioned explicitly: Postgres
+   initializes only its configured database and the server
+   migrates schemas, never databases, so a health-gated step on
+   the same network creates each scenario's database (owned by
+   the server role) before its seed or smoke container runs. The image
    job does not run on pull requests, so the milestone's
    verification includes one manual `workflow_dispatch` image run
    against the branch before merge, recorded in the PR body.
