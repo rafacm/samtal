@@ -120,6 +120,21 @@ most needs the two variables the next section is about. The two
 server-half commands named above are not on this door: run those in the
 container or from a checkout.
 
+What that door resolves to is exercised on every run of the test suite,
+and it is worth saying what the exercise covers, because it is stronger
+than a smoke test and weaker than a promise about the network. The wheel
+is built, installed into a clean environment with no extras, and the
+`vinga` binary it puts there is run as a program, from a directory
+outside the checkout, against a running server. Every command of the
+grammar is run that way rather than imported: the ones that reach the
+API are asserted to answer, and the two server-half commands are
+asserted to print their one sentence. So a wheel missing a file it
+needs, an entry point that stopped being written, a heavy import that
+crept back into a command's own arm, and a command that quietly left or
+joined the server-half pair are each a failing test. What it does not
+cover is the `git+` resolution itself, which needs the network and the
+published branch.
+
 **A checkout runs it from the source**, which is what a development
 machine does. Run it from `vinga-server/`, where the example fragments
 are:
@@ -131,6 +146,46 @@ uv run vinga-server config list
 
 That sync gives the checkout the whole server rather than the client
 half, so the same environment also serves, and every command answers.
+
+## Versions, and the two halves disagreeing
+
+Two of the three doors above install the CLI separately from the server
+it talks to, so the two halves can come to be different builds. Before
+1.0 the policy is one sentence: **run the CLI from the same release line
+as the server.**
+
+There is no negotiation machinery, and that is a decision rather than a
+gap. The committed [`api-openapi.json`](api-openapi.json) is the
+contract between the halves and its `API_VERSION` is the handle; a
+version exchange, a compatibility matrix or a downgrade path would be
+machinery built for an incident nobody has had yet, and each of them is
+a second thing that has to stay true. What a mismatched pair does
+instead is fail legibly: a command whose route the server does not have
+is refused by the server, and an answer whose shape this client does not
+recognize earns one sentence saying so rather than a rendering of
+something nobody sent. Neither writes anything.
+
+So the fix for a disagreement is upgrading the older half, and the first
+step is finding out which it is. Each half says so on its own:
+
+```bash
+vinga --version
+
+curl -s https://voice.example/healthz
+# {"status":"ok","version":"...","revision":"..."}
+```
+
+`/healthz` is unauthenticated and needs no token, which is what makes it
+the half of the check you can run first. `version` is what the server
+is; `revision` is which build of it, so a deployment that follows a
+moving tag can be matched to the image that produced it. `vinga
+--version` reports the version of the installed distribution and answers
+whatever else is wrong, including a configuration file it cannot read,
+because comparing two halves is exactly the moment when the rest of a
+machine is not in a state to be relied on.
+
+Machinery beyond that waits for a real skew incident or for 1.0. This
+paragraph is the floor, recorded deliberately.
 
 ## Reaching a server
 
