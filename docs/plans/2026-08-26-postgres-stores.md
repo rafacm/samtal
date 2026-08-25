@@ -373,7 +373,14 @@ explicitly.
     (`VINGA_DB_USER`) via `psql`'s `\getenv` (available since psql
     15; the compose pin is 17) so the same file runs unmodified
     under compose and in the infra repository and never hardcodes
-    a role decision 2 makes configurable. It is repeatable by
+    a role decision 2 makes configurable. `\getenv` reads the
+    executing process's environment, and compose substitution
+    alone puts nothing there, so the compose service passes both
+    variables into the container environment explicitly
+    (`VINGA_DB_USER: ${VINGA_DB_USER:-vinga}`,
+    `VINGA_DB_RO_PASSWORD: ${VINGA_DB_RO_PASSWORD:-vinga_ro}`);
+    the `vinga_ro` development default is documented beside the
+    server password's as the same loopback-only convenience. It is repeatable by
     construction, because a `dropdb`/`createdb` reset destroys
     schemas and database-local default privileges while the
     instance-level `vinga_ro` survives: the role is
