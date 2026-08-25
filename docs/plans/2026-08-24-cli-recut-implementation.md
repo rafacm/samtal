@@ -739,7 +739,7 @@ Not verified here, and not claimed:
 
 ## M3: the wheel-grade lane and the install story
 
-PR TBD.
+PR #298.
 
 ### What landed
 
