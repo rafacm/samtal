@@ -1,0 +1,652 @@
+"""`vinga simulator check-in`, against a far side a case controls.
+
+The live lane drives this command against a real server, which is the
+compatibility claim only a real server can make. It cannot make any of
+the claims below, and that is the point of this file rather than an
+overlap with it: a correct vinga-server never answers a check-in with a
+307, with an `activation` beside a token, with a token that is a number,
+or with a websocket URL carrying a password, and every one of those is a
+shape this client has to have a decided answer to.
+
+So the far side here is `httpx.MockTransport` behind the command's own
+client seam, which records every request it was given and answers
+whatever the case says. What that buys is the two halves a real server
+cannot supply: the hostile reply table, and the exact request targets of
+a ceremony driven through an address carrying a secret path segment and
+a query string.
+"""
+
+import json
+import logging
+from collections.abc import Callable, Iterator
+from pathlib import Path
+
+import httpx
+import pytest
+
+from tests.support.config_cli import API_SECRET_ENV, chain, logged, runner
+from vinga_server.config import cli
+from vinga_server.config.loader import ConfigError
+from vinga_server.config.models import NOT_A_MAC
+from vinga_server.device_endpoint import SUPPLIED_ENDPOINT
+from vinga_server.simulator import board
+
+# The path segment in front of an OTA endpoint is the whole protection a
+# deployment with onboarding turned off has, and the query string is the
+# other place a credential is written into a URL. Both are planted, so
+# that every assertion about what is not printed is about something.
+SEGMENT = "AB2C4D5E-never-a-real-path-key"
+
+QUERY_SECRET = "qtok-2f9a41-never-a-real-credential"
+
+# What the far side hands back that nobody typed: the device token, and
+# the websocket URL that decides where it would be sent.
+DEVICE_TOKEN = "dev-tok-7b31e9-never-a-real-credential"
+
+PASTED = "hunter2-never-a-real-password-9c3f"
+
+URL = f"https://voice.example/x/{SEGMENT}/?token={QUERY_SECRET}"
+
+ACTIVATION_URL = f"https://voice.example/x/{SEGMENT}/activate?token={QUERY_SECRET}"
+
+CODE = "659505"
+
+
+class Canned:
+    """A far side that answers what a case tells it to and records what
+    it was asked.
+
+    Answers are functions of the request rather than responses, because a
+    response is read once and several of these cases send more than one
+    request. The last answer repeats, so a ceremony that polls ten times
+    is one entry rather than ten.
+    """
+
+    def __init__(self, *answers: Callable[[httpx.Request], httpx.Response]) -> None:
+        self.answers = list(answers)
+        self.requests: list[httpx.Request] = []
+
+    def _handle(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        return self.answers[min(len(self.requests) - 1, len(self.answers) - 1)](request)
+
+    def client(self, url: str) -> httpx.Client:
+        return httpx.Client(base_url=url, transport=httpx.MockTransport(self._handle))
+
+    def targets(self) -> list[str]:
+        return [str(request.url) for request in self.requests]
+
+    def headers(self, name: str) -> list[str]:
+        return [request.headers.get(name, "") for request in self.requests]
+
+    def bodies(self) -> list[object]:
+        return [json.loads(request.content or b"null") for request in self.requests]
+
+
+def answering(
+    status: int = 200, body: object = None, text: str | None = None, **headers: str
+) -> Callable[[httpx.Request], httpx.Response]:
+    """One canned answer, built fresh for every request that meets it."""
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        if text is not None:
+            return httpx.Response(status, text=text, headers=headers)
+        return httpx.Response(status, json=body, headers=headers)
+
+    return answer
+
+
+def activating(code: str = CODE, **overrides: object) -> dict[str, object]:
+    """What a deployment answers a board it has never seen."""
+    activation: dict[str, object] = {
+        "message": f"voice.example\n{code}",
+        "code": code,
+        "challenge": "02:00:00:00:00:01",
+        "timeout_ms": 30000,
+    }
+    activation.update(overrides)
+    return {
+        "activation": activation,
+        "server_time": {"timestamp": 0, "timezone_offset": 0},
+        "firmware": {"version": "0.1.0", "url": ""},
+        "websocket": {"url": "wss://voice.example/xiaozhi/v1/", "token": "", "version": 1},
+    }
+
+
+def admitted(url: str = "wss://voice.example/xiaozhi/v1/", **websocket: object) -> dict:
+    """What a deployment answers a board it will serve."""
+    block: dict[str, object] = {"url": url, "token": DEVICE_TOKEN, "version": 1}
+    block.update(websocket)
+    return {
+        "server_time": {"timestamp": 0, "timezone_offset": 0},
+        "firmware": {"version": "0.1.0", "url": ""},
+        "websocket": block,
+    }
+
+
+def unwelcome() -> dict[str, object]:
+    """200 OK, no token and no activation: the state that costs an
+    evening."""
+    return {
+        "server_time": {"timestamp": 0, "timezone_offset": 0},
+        "firmware": {"version": "0.1.0", "url": ""},
+        "websocket": {"url": "wss://voice.example/xiaozhi/v1/", "token": "", "version": 1},
+    }
+
+
+@pytest.fixture
+def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """One command run the way the entry point runs it, against a
+    configuration API of this test's own."""
+    return runner(tmp_path, monkeypatch)
+
+
+@pytest.fixture
+def far_side(monkeypatch: pytest.MonkeyPatch) -> Callable[..., Canned]:
+    """The device-facing endpoint, replaced at the command's own seam.
+
+    `board.build_client` and not `device_endpoint.build_client`: the name
+    imported into the module under test is the seam, which is what keeps
+    a suite driving one command from replacing the doctor's client too.
+    """
+
+    def canned(*answers: Callable[[httpx.Request], httpx.Response]) -> Canned:
+        endpoint = Canned(*answers)
+        monkeypatch.setattr(board, "build_client", endpoint.client)
+        return endpoint
+
+    return canned
+
+
+@pytest.fixture
+def stopped_clock(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[float]]:
+    """A clock the case controls, so a cadence is asserted rather than
+    waited out.
+
+    Every sleep advances the clock by what it was asked to sleep, which
+    is the whole of what a real one does to a bound made of `monotonic`.
+    Both names are read out of `board`, which is where they were imported
+    to, so this replaces the seam and not the standard library.
+    """
+    slept: list[float] = []
+    now = [0.0]
+
+    def sleeping(seconds: float) -> None:
+        slept.append(seconds)
+        now[0] += seconds
+
+    monkeypatch.setattr(board, "sleep", sleeping)
+    monkeypatch.setattr(board, "monotonic", lambda: now[0])
+    yield slept
+
+
+# The board's identity, both halves
+
+
+def test_the_default_address_is_fixed_and_says_it_was_never_assigned() -> None:
+    """A binding sticks across runs because the address is the same
+    every run, and nothing is written anywhere to make that true. The
+    leading octet's second-least-significant bit is the
+    locally-administered one, which is what an address that never came
+    off a chip should carry."""
+    assert board.DEFAULT_MAC == "02:00:00:00:00:01"
+    assert int(board.DEFAULT_MAC.split(":")[0], 16) & 0b10 == 0b10
+    assert board.Identity.of(board.DEFAULT_MAC) == board.Identity.of(board.DEFAULT_MAC)
+
+
+def test_two_spellings_of_one_address_are_one_board() -> None:
+    """The token is signed for the MAC and the client id together, so a
+    client id that varied with how the MAC was typed would produce a
+    bad_token refusal with nothing on either side saying why."""
+    assert board.Identity.of("AA:BB:CC:DD:EE:FF") == board.Identity.of("aa-bb-cc-dd-ee-ff")
+
+
+def test_two_addresses_are_two_boards() -> None:
+    first = board.Identity.of("02:00:00:00:00:01")
+    second = board.Identity.of("02:00:00:00:00:02")
+
+    assert first.client_id != second.client_id
+
+
+def test_the_client_id_is_reproducible_from_the_rule_in_the_source() -> None:
+    """A reader can compute it, which is what "derived by a stated rule"
+    has to mean to be worth saying."""
+    from uuid import uuid5
+
+    assert board.Identity.of("02:00:00:00:00:01").client_id == str(
+        uuid5(board.CLIENT_ID_NAMESPACE, "02:00:00:00:00:01")
+    )
+
+
+def test_an_address_that_is_not_a_mac_is_refused_in_the_grammar_s_own_words(run) -> None:
+    """The same sentence `device bind` answers with, which carries the
+    rule and never the value."""
+    with pytest.raises(ConfigError) as caught:
+        board.Identity.of("not-a-mac")
+
+    assert str(caught.value) == NOT_A_MAC
+
+
+# The four states, and one exit code each
+
+
+def test_an_unclaimed_board_reports_its_code_and_exits_zero(
+    run, far_side, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A simulated board reporting the state it is in is a command that
+    worked."""
+    far_side(answering(body=activating()))
+
+    assert run("simulator", "check-in", URL) == 0
+
+    captured = capsys.readouterr()
+    assert CODE in captured.out
+    assert "not claimed yet" in captured.out
+    # What to do next is a notice, and stdout holds what the board was
+    # handed.
+    assert "device pending claim" in captured.err
+
+
+def test_an_admitted_board_says_a_token_was_issued_and_never_says_which(
+    run, far_side, capsys: pytest.CaptureFixture[str]
+) -> None:
+    far_side(answering(body=admitted()))
+
+    assert run("simulator", "check-in", URL) == 0
+
+    captured = capsys.readouterr()
+    assert "is admitted" in captured.out
+    assert "protocol version: 1" in captured.out
+    assert DEVICE_TOKEN not in captured.out + captured.err
+    # Nor the address it would have been sent to, which is far-side text
+    # deciding where a credential goes.
+    assert "voice.example/xiaozhi" not in captured.out + captured.err
+
+
+def test_a_board_with_no_token_and_no_code_names_the_trap(
+    run, far_side, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The state the reply says nothing about: 200 OK, an empty token and
+    no activation section. A boolean "did I get a token" would have
+    folded it into the unclaimed one."""
+    far_side(answering(body=unwelcome()))
+
+    assert run("simulator", "check-in", URL) == 0
+
+    captured = capsys.readouterr()
+    assert "may not speak" in captured.out
+    assert "onboarding is turned off" in captured.out
+    assert "not serving yet" in captured.out
+
+
+# The replies a correct server never sends
+#
+# Every one of these is `Refused` and exit 1, and each names the sentence
+# it must leave with, because a refusal that answered with the wrong
+# fixed sentence would be as wrong as one that answered with a value.
+
+HOSTILE: tuple[tuple[str, Callable[[httpx.Request], httpx.Response], str], ...] = (
+    (
+        # The case a truthiness check passes and `is not None` fails. An
+        # empty object is falsy and is not an absent key, and the schema
+        # admits it deliberately so that the seam is what decides.
+        "an empty activation object",
+        answering(body={**unwelcome(), "activation": {}}),
+        "not claimed yet",
+    ),
+    (
+        "an activation beside a token",
+        answering(body={**admitted(), "activation": activating()["activation"]}),
+        board.CONTRADICTORY_REPLY,
+    ),
+    (
+        "a token that is a number",
+        answering(body=admitted(token=7)),
+        board.MALFORMED_REPLY,
+    ),
+    (
+        "no websocket object at all",
+        answering(body={"server_time": {"timestamp": 0, "timezone_offset": 0}}),
+        board.MALFORMED_REPLY,
+    ),
+    (
+        "a websocket that is a string",
+        answering(body={"websocket": "wss://voice.example/xiaozhi/v1/"}),
+        board.MALFORMED_REPLY,
+    ),
+    (
+        "a protocol version this side does not speak",
+        answering(body=admitted(version=9)),
+        board.UNKNOWN_PROTOCOL_VERSION,
+    ),
+    (
+        "a websocket URL with a credential in it",
+        answering(body=admitted(url=f"wss://board:{PASTED}@voice.example/xiaozhi/v1/")),
+        board.UNUSABLE_WEBSOCKET,
+    ),
+    (
+        "invalid JSON",
+        answering(text="{not json at all"),
+        board.NOT_A_REPLY,
+    ),
+    (
+        "an empty body",
+        answering(text=""),
+        board.NOT_A_REPLY,
+    ),
+    (
+        "a 500",
+        answering(status=500, text="upstream is unwell"),
+        board.bad_status(500),
+    ),
+    (
+        "a 307",
+        answering(status=307, text="", location="https://elsewhere.invalid/x/"),
+        SUPPLIED_ENDPOINT,
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    ("answer", "expected"),
+    [(answer, expected) for _, answer, expected in HOSTILE],
+    ids=[name for name, _, _ in HOSTILE],
+)
+def test_a_reply_a_real_server_never_sends_reaches_a_decided_answer(
+    run, far_side, capsys: pytest.CaptureFixture[str], answer, expected: str
+) -> None:
+    """Every one of these names the outcome it must reach and the exit
+    code it must leave with.
+
+    The `activation={}` row is the one held to going red if the seam is
+    written as truthiness: under `if activation:` an empty object is
+    falsy, the reading falls through to the token, the token is empty,
+    and the command reports the unclaimed board as unwelcome instead.
+    """
+    far_side(answer)
+
+    code = run("simulator", "check-in", URL)
+    captured = capsys.readouterr()
+
+    if expected == "not claimed yet":
+        assert code == 0
+        assert expected in captured.out
+        return
+    assert code == 1
+    assert captured.err.strip() == expected.strip() or expected in captured.err
+    assert captured.out == ""
+
+
+def test_every_refusal_of_a_hostile_reply_repeats_nothing_of_it(
+    run, far_side, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
+) -> None:
+    """The four surfaces, against the values a case planted in the ANSWER
+    rather than in the command line: a credential in the websocket URL
+    the reply named, and a body that is nothing but a planted value.
+
+    The device token is the one a review would not think to ask for,
+    because nobody typed it.
+    """
+    for answer in (
+        answering(body=admitted(url=f"wss://board:{PASTED}@voice.example/xiaozhi/v1/")),
+        answering(body=admitted(token=PASTED, version=9)),
+        answering(text=json.dumps({"websocket": PASTED})),
+        answering(status=500, text=PASTED),
+        answering(status=307, text=PASTED, location=f"https://elsewhere.invalid/{PASTED}"),
+    ):
+        far_side(answer)
+        with caplog.at_level(logging.DEBUG):
+            caplog.clear()
+            assert run("simulator", "check-in", URL) == 1
+        captured = capsys.readouterr()
+        with pytest.raises(ConfigError) as caught:
+            cli._parsed(["simulator", "check-in", URL], cli.DISPATCHED)  # noqa: SLF001
+        surfaces = {
+            "stdout": captured.out,
+            "stderr": captured.err,
+            "logs": logged(caplog),
+            "chain": chain(caught.value),
+        }
+        assert [name for name, text in surfaces.items() if PASTED in text] == []
+        assert [name for name, text in surfaces.items() if DEVICE_TOKEN in text] == []
+
+
+# The redirect the capability table claims
+
+
+def test_a_redirect_is_refused_and_its_target_is_never_fetched(
+    run, far_side, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The claim the capability table makes, tested in the milestone that
+    makes it. The firmware does not follow a redirect on this request, so
+    every device-facing route serves the slashless spelling directly and
+    a redirect from that address is something else answering."""
+    endpoint = far_side(
+        answering(status=307, text="", location="https://elsewhere.invalid/x/counted/")
+    )
+
+    assert run("simulator", "check-in", URL) == 1
+
+    assert len(endpoint.requests) == 1
+    assert "elsewhere.invalid" not in " ".join(endpoint.targets())
+    captured = capsys.readouterr()
+    assert "does not follow" in captured.err
+    assert "elsewhere.invalid" not in captured.out + captured.err
+    assert captured.out == ""
+
+
+# What a request actually carries
+
+
+def test_the_check_in_sends_what_the_handler_reads(run, far_side) -> None:
+    """Two headers and a system-info body, which is the whole of what a
+    board tells a server about itself."""
+    endpoint = far_side(answering(body=unwelcome()))
+
+    assert run("simulator", "check-in", URL) == 0
+
+    [request] = endpoint.requests
+    assert request.method == "POST"
+    assert request.headers["Device-Id"] == board.DEFAULT_MAC
+    assert request.headers["Client-Id"] == board.Identity.of(board.DEFAULT_MAC).client_id
+    [body] = endpoint.bodies()
+    assert body["application"]["version"] == board.FIRMWARE_VERSION
+    assert body["board"]["type"] == board.BOARD_TYPE
+
+
+def test_a_given_address_is_the_one_the_check_in_is_sent_to(run, far_side) -> None:
+    """The path as given with the query preserved, which is the case a
+    two-string type could not have been given."""
+    endpoint = far_side(answering(body=unwelcome()))
+
+    assert run("simulator", "check-in", URL) == 0
+
+    assert endpoint.targets() == [URL]
+
+
+def test_a_given_mac_replaces_the_default(run, far_side) -> None:
+    endpoint = far_side(answering(body=unwelcome()))
+
+    assert run("simulator", "check-in", URL, "--mac", "02:00:00:00:00:02") == 0
+
+    assert endpoint.headers("Device-Id") == ["02:00:00:00:00:02"]
+
+
+# The ceremony, and the fourth step that makes the other three worth
+# anything
+
+
+def bound(run) -> str:
+    """A deployment with an agent to be claimed by, and a board waiting
+    in the pending table with the code the far side is about to show."""
+    run("provider", "set", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
+    run("agent", "set", "sam", "-f", "-", stdin="llm: claude\n")
+    identity = board.Identity.of(board.DEFAULT_MAC)
+    return run.pending.observe(
+        identity.mac, identity.client_id, board.BOARD_TYPE, board.FIRMWARE_VERSION
+    ).device.code
+
+
+def test_a_claim_is_four_requests_and_the_last_one_mints_the_token(
+    run, far_side, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An activating check-in's token is empty and the poll route answers
+    a status, so the only thing that mints a token is a check-in reply.
+    A socket opened with the token from step one would be refused at the
+    handshake with no_token.
+
+    Held to going red by removing the re-check-in: without it the
+    command would have to report the state the FIRST reply carried, which
+    is the unclaimed one with no token in it.
+    """
+    code = bound(run)
+    endpoint = far_side(
+        answering(body=activating(code=code)),
+        answering(status=200, text=""),
+        answering(body=admitted()),
+    )
+    capsys.readouterr()
+
+    assert run("simulator", "check-in", URL, "--claim", "sam") == 0
+
+    assert endpoint.targets() == [URL, ACTIVATION_URL, URL]
+    # One identity across every request of the ceremony, asserted off the
+    # recorded requests rather than off the function that makes it.
+    identity = board.Identity.of(board.DEFAULT_MAC)
+    assert set(endpoint.headers("Device-Id")) == {identity.mac}
+    assert set(endpoint.headers("Client-Id")) == {identity.client_id, ""}
+    # The poll is the firmware's version-1 shape: the version header and
+    # an empty object, which upstream's own server reads nothing of.
+    assert endpoint.headers("Activation-Version") == ["", "1", ""]
+    assert endpoint.bodies()[1] == {}
+    assert "is admitted" in capsys.readouterr().out
+
+
+def test_a_claim_performs_the_act_the_grammar_already_has(run, far_side) -> None:
+    """`--claim` sends no new request: it performs ADD_DEVICE, the act
+    behind `device pending claim`, so there is no second encoding of the
+    claim and no new row in the contract check's covered set."""
+    code = bound(run)
+    far_side(
+        answering(body=activating(code=code)),
+        answering(status=200, text=""),
+        answering(body=admitted()),
+    )
+    reached_before = len(run.reached)
+
+    assert run("simulator", "check-in", URL, "--claim", "sam") == 0
+
+    # Exactly one configuration API request, which is the claim.
+    assert len(run.reached) - reached_before == 1
+    assert run("device", "show", board.DEFAULT_MAC) == 0
+
+
+def test_without_the_flag_no_api_token_is_read_and_no_api_request_is_made(
+    run, far_side, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The device side never touches the operator-side credential, which
+    is what "kept distinct" has to mean to be worth saying. Asserted with
+    the variable unset, so a command that read it would fail rather than
+    quietly succeed."""
+    monkeypatch.delenv(API_SECRET_ENV, raising=False)
+    far_side(answering(body=unwelcome()))
+    reached_before = len(run.reached)
+
+    assert run("simulator", "check-in", URL) == 0
+
+    assert len(run.reached) == reached_before
+
+
+def test_a_claim_needs_a_code_and_says_so_when_there_is_none(
+    run, far_side, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--claim` is addressed by the six digits a board is showing, so a
+    board that was not offered a code has nothing for the claim to
+    address."""
+    endpoint = far_side(answering(body=admitted()))
+
+    assert run("simulator", "check-in", URL, "--claim", "sam") == 1
+
+    assert len(endpoint.requests) == 1
+    assert capsys.readouterr().err.strip() == cli.NOTHING_TO_CLAIM
+
+
+# Every wait, bounded
+
+
+@pytest.mark.parametrize(
+    ("hint", "expected"),
+    [
+        (None, board.ACTIVATION_CEILING_S),
+        (0, board.ACTIVATION_CEILING_S),
+        (-1000, board.ACTIVATION_CEILING_S),
+        (True, board.ACTIVATION_CEILING_S),
+        ("6000", board.ACTIVATION_CEILING_S),
+        (6000.0, board.ACTIVATION_CEILING_S),
+        (10**12, board.ACTIVATION_CEILING_S),
+        (30000, board.ACTIVATION_CEILING_S),
+        (6000, 6.0),
+    ],
+    ids=[
+        "absent",
+        "zero",
+        "negative",
+        "boolean",
+        "a string",
+        "a float",
+        "large enough to hang the command",
+        "the value a real server sends",
+        "a valid smaller value",
+    ],
+)
+def test_a_far_side_number_may_shorten_a_wait_and_never_extend_one(
+    hint: object, expected: float
+) -> None:
+    """The rule, stated once and applied to every remote number this
+    command reads. A malformed hint is ignored rather than refused,
+    because it is not a reason to fail a ceremony that works without it.
+
+    `True` is excluded before `int` is asked, since a bool is an int in
+    Python and a JSON `true` is not a number of milliseconds.
+    """
+    assert board.activation_ceiling(hint) == expected
+
+
+def test_the_poll_keeps_the_firmware_s_cadence_exactly(
+    run, far_side, stopped_clock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Bursts of ten, three seconds apart, which is what
+    `docs/xiaozhi-notes.md` records `Application::CheckNewVersion`
+    doing. Ten polls and nine waits between them, on a clock this case
+    controls rather than half a minute of real time."""
+    code = bound(run)
+    endpoint = far_side(
+        answering(body=activating(code=code)),
+        answering(status=202, text=""),
+    )
+    capsys.readouterr()
+
+    assert run("simulator", "check-in", URL, "--claim", "sam") == 1
+
+    polls = [target for target in endpoint.targets() if target == ACTIVATION_URL]
+    assert len(polls) == board.POLL_ATTEMPTS
+    assert stopped_clock == [board.POLL_INTERVAL_S] * (board.POLL_ATTEMPTS - 1)
+    # The claim's own notice comes first, because the claim happened.
+    assert capsys.readouterr().err.splitlines()[-1] == cli.NOT_ADMITTED_YET
+
+
+def test_a_smaller_far_side_bound_shortens_the_burst(
+    run, far_side, stopped_clock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The only direction remote input moves a wait."""
+    code = bound(run)
+    far_side(
+        answering(body=activating(code=code, timeout_ms=6000)),
+        answering(status=202, text=""),
+    )
+    capsys.readouterr()
+
+    assert run("simulator", "check-in", URL, "--claim", "sam") == 1
+
+    assert sum(stopped_clock) <= 6.0
+    assert len(stopped_clock) < board.POLL_ATTEMPTS - 1
