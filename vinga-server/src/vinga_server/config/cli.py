@@ -312,7 +312,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     nobody validated, holding the variables an API token and the
     provider credentials come from, and outside the boundary it would
     leave as a traceback with those bytes on the exception.
+
+    And one invocation is answered in front of that read, because it
+    has to be answerable when nothing else is: see `_version_asked`.
     """
+    if _version_asked(sys.argv[1:] if argv is None else argv):
+        _print_version()
+        raise SystemExit(0)
     try:
         load_environment_file()
         _parsed(
@@ -3113,11 +3119,79 @@ def _version(shown: bool) -> None:
     parsed and does not need a command word after it. It leaves the way
     `--help` leaves, through the exit the boundary carries out of its
     handler, because asking is not failing.
+
+    Reached only when the environment was readable, since `main`
+    answers the same question in front of that read; both print through
+    `_print_version` rather than one of them formatting the line again.
     """
     if not shown:
         return
-    print(f"{DISTRIBUTION} {installed_version()}")
+    _print_version()
     raise typer.Exit(0)
+
+
+def _print_version() -> None:
+    print(f"{DISTRIBUTION} {installed_version()}")
+
+
+# What is answered before the environment is read
+#
+# `--version` has to succeed whatever else is wrong, and that is the
+# whole of its contract: it is the question an operator asks when they
+# are already comparing two halves of a deployment that disagree, which
+# is exactly when the rest of a machine is not in a state to be relied
+# on. A `.env` that will not decode is one such state, and reading it
+# first made the one command that must always answer exit 1 with a
+# sentence about a file it was never asked about.
+#
+# So the root position is recognized without a parser, and recognizing
+# it is possible because the root's options are a closed set: everything
+# before the first command word is either `--version`, one of the root
+# flags, or one of the root options and its value. The sets are read off
+# the built tree rather than listed, so an option added to the root
+# joins them by being declared, and anything this does not recognize
+# ends the scan and goes to the parser, which is the answer that was
+# always there.
+#
+# `--config path --version` therefore answers, and `--config --version`
+# does not, because there the word is the option's value and not the
+# root's. That distinction is the reason this reads the parameters
+# rather than searching the list for a string.
+
+
+def _root_options() -> tuple[frozenset[str], frozenset[str]]:
+    """The root's flags and its value-taking options, by every spelling
+    each of them answers to."""
+    flags: set[str] = set()
+    valued: set[str] = set()
+    for parameter in command().params:
+        into = flags if getattr(parameter, "is_flag", False) else valued
+        into.update(parameter.opts)
+    return frozenset(flags), frozenset(valued)
+
+
+def _version_asked(argv: Sequence[str]) -> bool:
+    """Whether this command line asks the root for its version.
+
+    Read left to right, consuming what the root accepts, and stopping at
+    the first word it does not: a command word means whatever follows is
+    that command's business, and this grammar declares `--version`
+    nowhere but the root.
+    """
+    flags, valued = _root_options()
+    skip = False
+    for word in argv:
+        if skip:
+            skip = False
+            continue
+        if word == "--version":
+            return True
+        if word in valued:
+            skip = True
+            continue
+        if word not in flags:
+            return False
+    return False
 
 
 def installed_version() -> str:
