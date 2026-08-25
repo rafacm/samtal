@@ -113,8 +113,18 @@ explicitly.
    zero-configuration loop works; the deployment docs say plainly
    that the default is a development convenience on a
    loopback-bound instance. `VINGA_DB_URL`, when set, wins whole
-   over all five, and is rendered anywhere only through
-   `URL.render_as_string(hide_password=True)`.
+   over all five, and is constrained to the issue's decisions
+   structurally: only the `postgresql` and `postgresql+psycopg`
+   schemes are accepted, the former normalized to the psycopg 3
+   dialect (a bare `postgresql://` would otherwise select
+   psycopg2), and every other scheme is refused at load with a
+   fixed value-free sentence, which is what makes "no fallback
+   backend" enforced rather than documented. The URL and the
+   discrete values are never rendered on any error surface:
+   refusal and failure sentences are fixed, and even a
+   password-hidden rendering is out, because query parameters
+   (`sslpassword`) can carry credentials the hiding does not
+   touch.
 
 3. **The single-writer discipline translates to a
    transaction-scoped advisory lock, and the 409 contract
@@ -373,17 +383,19 @@ explicitly.
 ## The standing review lenses, pre-answered
 
 - **No-leak.** The new secret surface is the database password
-  (and a `VINGA_DB_URL` that may embed one). It reaches exactly
-  one consumer, the URL the engine is built from; every rendering
-  of that URL goes through `render_as_string(hide_password=True)`;
-  the boot-refusal and migration-failure sentences are built from
-  the discrete host/port/name fields, never from driver text
-  (psycopg connection errors quote the DSN), and raise with the
-  cause chain severed per house rule. The sentinel: plant a
-  credential-shaped password in settings, drive an unreachable
-  boot and a migration failure, assert absence from the sentence,
-  `args`, `__cause__`/`__context__`, and both log formats.
-  Statement echo stays off with its comment.
+  (and a `VINGA_DB_URL` that may embed credentials in its
+  authority or its query parameters). It reaches exactly one
+  consumer, the URL the engine is built from, and is never
+  rendered anywhere: the boot-refusal, migration-failure and
+  invalid-URL sentences are fixed and value-free (psycopg
+  connection errors quote the DSN, so driver text never travels),
+  and raise with the cause chain severed per house rule. The
+  sentinel family: plant credential-shaped values in the discrete
+  password field, a URL authority, and a URL query parameter;
+  drive an unreachable boot, a migration failure, and an
+  unparseable URL; assert absence from every sentence, `args`,
+  `__cause__`/`__context__`, and both log formats. Statement echo
+  stays off with its comment.
 - **Pin before reshaping.** The pins that must hold through the
   move, run green before and after: the retryable-409 family
   (`test_config_refusals`, the API 409 mappings, the reload/diff
@@ -669,6 +681,12 @@ after the P1/P2 amendments. Findings condensed but faithful:
    extend the sentinel to URL authority and query credentials,
    invalid-URL parsing, discrete fields, connection and migration
    failures, chains, and both log formats.
+   *Resolution*: decision 2 and the no-leak lens amended exactly
+   so: the two-scheme allowlist with psycopg 3 normalization, the
+   fixed value-free refusal for every other scheme, no rendering
+   of the URL or discrete values anywhere (the password-hidden
+   rendering dropped for the query-parameter reason), and the
+   widened sentinel family.
 
 7. **P1: M1 publishes a breaking image while the operator
    instructions remain SQLite-only.** The workflow publishes every
