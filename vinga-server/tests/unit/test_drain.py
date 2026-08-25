@@ -19,16 +19,16 @@ import pytest
 import uvicorn
 
 from tests.support.registry import FakeSession, registry_with
-from vinga_server import main
+from vinga_server import serving
 from vinga_server.config import Config
-from vinga_server.main import (
+from vinga_server.registry import SessionRegistry
+from vinga_server.serving import (
     PING_INTERVAL_S,
     PING_TIMEOUT_S,
     UVICORN_GRACEFUL_SHUTDOWN_S,
     DrainingServer,
     serve,
 )
-from vinga_server.registry import SessionRegistry
 
 
 async def test_draining_asks_every_session_to_stop() -> None:
@@ -397,7 +397,7 @@ async def test_a_drain_that_outlives_its_bound_is_abandoned(
                 await self.released.wait()
 
     uvicorn_that_stops_mid_drain(monkeypatch)
-    monkeypatch.setattr(main, "CLOSE_MARGIN_S", 0.05)
+    monkeypatch.setattr(serving, "CLOSE_MARGIN_S", 0.05)
     registry = UncooperativeRegistry()
     server = draining_server(cast(Any, registry), drain_s=0.05)
 
