@@ -886,8 +886,8 @@ vinga-server/src/vinga_server/onboarding/origin.py:253  respell  vinga-server co
 vinga-server/src/vinga_server/tools/mcp/manager.py:515  respell  vinga-server config status
 vinga-server/src/vinga_server/tools/mcp/manager.py:709  respell  vinga-server config status
 vinga-server/src/vinga_server/tools/publish.py:24  respell  vinga-server config status
-vinga-server/tests/integration/test_cli_live.py:543  respell  config apply
-vinga-server/tests/integration/test_cli_live.py:1278  respell  vinga-server config device pending list
+vinga-server/tests/integration/test_cli_live.py:429  respell  config apply
+vinga-server/tests/integration/test_cli_live.py:1164  respell  vinga-server config device pending list
 vinga-server/tests/smoke/seed-local-engines.sh:19  respell  vinga-server config provider set
 vinga-server/tests/smoke/seed-local-engines.sh:23  respell  vinga-server config provider set
 vinga-server/tests/smoke/seed-local-engines.sh:28  respell  vinga-server config provider set

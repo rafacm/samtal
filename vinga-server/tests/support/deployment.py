@@ -1,0 +1,154 @@
+"""A real server on a real port, and a board checking in to it.
+
+What the two CLI lanes both need and neither may own. The in-process
+security lane drives `cli.main` against this; the wheel lane drives the
+installed `vinga` binary as a subprocess against the same thing. A
+second copy of a uvicorn thread and its readiness loop would be one
+pending bug in the usual way: the copies drift, and the lane running the
+older one quietly proves less than it says.
+
+The server is booted the way a deployment with nothing configured yet is
+booted: no configuration file anywhere, the file half from the settings
+machinery reading `VINGA_SERVER__*`, and the domain half from the
+database that half names. That is the shape the quick start documents,
+so it is the shape both lanes talk to.
+
+`check_in` is here for the same reason, and it is the one thing in
+either lane that is not a command: a code is minted by a board asking
+for one, and `device pending list` and `device pending claim` are about
+what an operator does with the number on its screen. A plain HTTP POST
+is the whole of what a board does to get there.
+"""
+
+import contextlib
+import json
+import threading
+import time
+import urllib.request
+from collections.abc import Iterator, Mapping
+from dataclasses import dataclass
+from pathlib import Path
+
+import pytest
+import uvicorn
+
+from vinga_server.app import create_app
+from vinga_server.config.boot import load_boot_config
+from vinga_server.config.models import API_MOUNT_PATH
+from vinga_server.ota import OTA_PATH
+
+# The one variable a fileless boot needs: where the database goes. The
+# server half of the configuration is otherwise all defaults, which is
+# what "a handful of environment variables" means for a deployment that
+# has not yet configured anything.
+DATABASE_DIR_ENV = "VINGA_SERVER__DATABASE__DIR"
+
+CONFIG_ENV = "VINGA_CONFIG"
+
+BOARD = "waveshare-esp32-s3-touch-lcd-1.54"
+
+DEVICE_UUID = "6f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"
+
+
+@dataclass(frozen=True)
+class Live:
+    """One running server, as a lane addresses it."""
+
+    # What a device reaches: the origin the OTA endpoint is served on.
+    origin: str
+
+    # Where the database it serves is, so a test can read the file back
+    # rather than take the API's word for it.
+    directory: Path
+
+    @property
+    def api_url(self) -> str:
+        """Where the configuration API is, which is what the CLI is
+        pointed at."""
+        return f"{self.origin}{API_MOUNT_PATH}"
+
+
+@contextlib.contextmanager
+def serving(directory: Path) -> Iterator[Live]:
+    """A real uvicorn on an ephemeral loopback port, booted with no
+    configuration file at all.
+
+    `load_boot_config()` with no path and no `VINGA_CONFIG` in the
+    environment is exactly what `main()` runs on a deployment that
+    passed no `--config`: the file half comes from the settings
+    machinery, which reads `VINGA_SERVER__*` and nothing else, and the
+    domain half comes from the database that half names.
+
+    The port lives on the socket rather than in the configuration, the
+    way `tests/integration/conftest.py` does it: the models refuse 0,
+    which is right for a deployment and is not what binding an ephemeral
+    port means.
+
+    Run in a thread rather than on a loop of the caller's own, because
+    what talks to it is either `cli.main`, which is synchronous and
+    stays that way, or a subprocess; uvicorn skips its signal handlers
+    off the main thread, which is the one thing that would otherwise
+    need care here.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.delenv(CONFIG_ENV, raising=False)
+        patch.setenv(DATABASE_DIR_ENV, str(directory))
+        booted = load_boot_config()
+    server = uvicorn.Server(
+        uvicorn.Config(
+            create_app(booted.config, booted.secrets),
+            host="127.0.0.1",
+            port=0,
+            log_level="warning",
+        )
+    )
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    try:
+        deadline = time.monotonic() + 30
+        while not server.started:
+            assert thread.is_alive() and time.monotonic() < deadline, "the server never started"
+            time.sleep(0.02)
+        port = server.servers[0].sockets[0].getsockname()[1]
+        yield Live(origin=f"http://127.0.0.1:{port}", directory=directory)
+    finally:
+        server.should_exit = True
+        thread.join(timeout=30)
+
+
+def check_in(live: Live, mac: str) -> Mapping[str, object]:
+    """One board's OTA check-in, headers and all, the way
+    `test_ota_endpoint.py` makes one.
+
+    The only thing in either CLI lane that is not a command, and it is
+    here because two of the commands need a device: a code is minted by
+    a board asking for one, and `device pending list` and `device
+    pending claim` are about what an operator does with the number on
+    its screen. A plain HTTP POST is the whole of what a board does to
+    get there, so a lane can make one without hardware and without the
+    websocket simulator.
+    """
+    request = urllib.request.Request(
+        f"{live.origin}{OTA_PATH}",
+        data=json.dumps(
+            {
+                "version": 2,
+                "mac_address": mac,
+                "uuid": DEVICE_UUID,
+                "application": {"name": "xiaozhi", "version": "2.4.0"},
+                "board": {"type": BOARD},
+            }
+        ).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Device-Id": mac,
+            "Client-Id": DEVICE_UUID,
+            "User-Agent": f"{BOARD}/2.4.0",
+            "Accept-Language": "en-US",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=10) as response:
+        answer: Mapping[str, object] = json.loads(response.read())
+    return answer

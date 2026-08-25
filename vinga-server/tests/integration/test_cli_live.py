@@ -61,19 +61,23 @@ import threading
 import time
 import traceback
 import urllib.request
-from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass, replace
+from collections.abc import Iterator, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import NamedTuple
 
 import pytest
-import uvicorn
 import yaml
 
 from tests.support.config_cli import document, registered
-from vinga_server.app import create_app
+from tests.support.deployment import (
+    BOARD,
+    CONFIG_ENV,
+    Live,
+    check_in,
+    serving,
+)
 from vinga_server.config import ConfigError, cli, docgen, entities
-from vinga_server.config.boot import load_boot_config
 from vinga_server.config.models import API_MOUNT_PATH, DOMAIN_KEYS, NOT_A_MAC
 from vinga_server.config.secrets import (
     MASK,
@@ -84,15 +88,6 @@ from vinga_server.config.secrets import (
 )
 from vinga_server.config.store import APPLY_LIMIT, TOO_MANY_ENTRIES, ConfigStore
 from vinga_server.db import DATABASE_FILENAME, open_database
-from vinga_server.ota import OTA_PATH
-
-# The one variable a fileless boot needs: where the database goes. The
-# server half of the configuration is otherwise all defaults, which is
-# what "a handful of environment variables" means for a deployment that
-# has not yet configured anything.
-DATABASE_DIR_ENV = "VINGA_SERVER__DATABASE__DIR"
-
-CONFIG_ENV = "VINGA_CONFIG"
 
 # The variable a secret set's `--from-env` is pointed at. Not a real
 # credential, and shaped so a substring check for it cannot match by
@@ -109,72 +104,6 @@ SECRET = "sk-live-1c4e9f27-never-a-real-credential"
 # come out on. Distinct from `SECRET`, so a failure says which of the
 # two paths leaked.
 PLANTED = "sk-planted-9b3e7d41-never-a-real-credential"
-
-
-@dataclass(frozen=True)
-class Live:
-    """One running server, as this lane addresses it."""
-
-    # What a device reaches: the origin the OTA endpoint is served on.
-    origin: str
-
-    # Where the database it serves is, so a test can read the file back
-    # rather than take the API's word for it.
-    directory: Path
-
-    @property
-    def api_url(self) -> str:
-        """Where the configuration API is, which is what the CLI is
-        pointed at."""
-        return f"{self.origin}{API_MOUNT_PATH}"
-
-
-@contextlib.contextmanager
-def serving(directory: Path) -> Iterator[Live]:
-    """A real uvicorn on an ephemeral loopback port, booted with no
-    configuration file at all.
-
-    `load_boot_config()` with no path and no `VINGA_CONFIG` in the
-    environment is exactly what `main()` runs on a deployment that
-    passed no `--config`: the file half comes from the settings
-    machinery, which reads `VINGA_SERVER__*` and nothing else, and the
-    domain half comes from the database that half names.
-
-    The port lives on the socket rather than in the configuration, the
-    way `tests/integration/conftest.py` does it: the models refuse 0,
-    which is right for a deployment and is not what binding an ephemeral
-    port means.
-
-    Run in a thread rather than on a loop of the test's own, because
-    what talks to it is `cli.main`, which is synchronous and stays that
-    way; uvicorn skips its signal handlers off the main thread, which is
-    the one thing that would otherwise need care here.
-    """
-    directory.mkdir(parents=True, exist_ok=True)
-    with pytest.MonkeyPatch.context() as patch:
-        patch.delenv(CONFIG_ENV, raising=False)
-        patch.setenv(DATABASE_DIR_ENV, str(directory))
-        booted = load_boot_config()
-    server = uvicorn.Server(
-        uvicorn.Config(
-            create_app(booted.config, booted.secrets),
-            host="127.0.0.1",
-            port=0,
-            log_level="warning",
-        )
-    )
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    try:
-        deadline = time.monotonic() + 30
-        while not server.started:
-            assert thread.is_alive() and time.monotonic() < deadline, "the server never started"
-            time.sleep(0.02)
-        port = server.servers[0].sockets[0].getsockname()[1]
-        yield Live(origin=f"http://127.0.0.1:{port}", directory=directory)
-    finally:
-        server.should_exit = True
-        thread.join(timeout=30)
 
 
 @pytest.fixture(scope="module")
@@ -449,49 +378,6 @@ def chain_of(argv: Sequence[str]) -> str:
     return carried(caught.value)
 
 
-def check_in(live: Live, mac: str) -> Mapping[str, object]:
-    """One board's OTA check-in, headers and all, the way
-    `test_ota_endpoint.py` makes one.
-
-    The only thing in this lane that is not a CLI command, and it is
-    here because two of the commands need a device: a code is minted by
-    a board asking for one, and `device pending list` and `device pending
-    claim` are about
-    what an operator does with the number on its screen. A plain HTTP
-    POST is the whole of what a board does to get there, so the lane can
-    make one without hardware and without the websocket simulator.
-    """
-    request = urllib.request.Request(
-        f"{live.origin}{OTA_PATH}",
-        data=json.dumps(
-            {
-                "version": 2,
-                "mac_address": mac,
-                "uuid": DEVICE_UUID,
-                "application": {"name": "xiaozhi", "version": "2.4.0"},
-                "board": {"type": BOARD},
-            }
-        ).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Device-Id": mac,
-            "Client-Id": DEVICE_UUID,
-            "User-Agent": f"{BOARD}/2.4.0",
-            "Accept-Language": "en-US",
-        },
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=10) as response:
-        answer: Mapping[str, object] = json.loads(response.read())
-    return answer
-
-
-BOARD = "waveshare-esp32-s3-touch-lcd-1.54"
-
-DEVICE_UUID = "6f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"
-
-# The board an operator already knows the address of, and the one that
-# is only ever a number on a screen.
 KNOWN_MAC = "aa:bb:cc:dd:ee:ff"
 
 WAITING_MAC = "11:22:33:44:55:66"
