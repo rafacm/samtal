@@ -822,8 +822,7 @@ than a paragraph:
    it as a parking space. This is the assertion finding 2 exists for and
    it is the one that would have caught the original plan.
 
-### 5a. The server's half of the protocol gets models, and the
-conversation gets a state machine
+### 5a. The server's half gets models, the conversation gets a machine
 
 `protocol/messages.py` models the device-to-server half and builds the
 server-to-server half as raw `json.dumps` calls (`messages.py:160-189`).
@@ -1366,39 +1365,61 @@ it.
 
 ## Milestones
 
-- [ ] **M1: the board and its check-in.** Decisions 2, 3, 4, 5 and 8:
-  the `simulator` noun with `GROUPS` entry; `check-in` with its URL
-  positional, `--mac` and its derived default, and `--claim`; the
-  four-state reading of the reply; `device_endpoint.py` extracted from
-  `doctor` and pinned by doctor's own cases; the capability table with
-  its four both-ways assertions rendered into the help and into
-  `cli.md`; the modelled message-type map made public; `--claim`
-  performing the existing act with the existing address and token seams;
-  the live lane's driven row, family refusal and exhaustive sentinels;
-  the wheel lane's driven row; the import inventory widened;
-  `deployment.check_in` rewired to the production board; the closed
-  artifact move list; `cli.md`'s simulator section,
-  `xiaozhi-notes.md`'s redirect clause and the changelog entry. Design
-  footprint: two new modules under `simulator/` (`board.py`,
-  `capabilities.py`), each with its deletion-test justification above,
-  plus `device_endpoint.py`, which exists because one policy with two
-  readers may not have two homes; deepens `config/cli.py` by two rows
-  and one `Invocation` field, and `protocol/messages.py` by making one
-  fact public. No extra, nothing gated.
-- [ ] **M2: the conversation.** Decisions 1, 5, 6 and 7: the `run` verb;
-  the `sim` extra carrying `websockets` and the dev group naming it; the
-  packaged utterance and its `force-include`; `framing.frames`;
-  `conversation.py` and `utterance.py`; the generalized gate and its
-  fixed sentence; the wheel lane's `GATED` set grown by one with two-way
-  completeness intact; the tier lane's third environment; the end-to-end
-  conversation lane against the mock-provider harness; the microphone
-  tier filed as its own issue; `cli.md`'s installation head, the root
-  README's no-hardware paragraph and the changelog entry. Design
-  footprint: two new modules under `simulator/`, one of which holds the
-  only `websockets` import anywhere in `src/`; deepens
-  `protocol/framing.py` with the stream reader that keeps the header
-  layout in one place, and `config/cli.py`'s gate with its second
-  caller rather than a copy of it.
+- [ ] **M1: the board and its check-in.** Decisions 2, 2a, 3, 3a, 4, 5,
+  7 and 8: the `simulator` noun with its `GROUPS` entry; `check-in` with
+  its URL positional, `--mac` and its derived default, and `--claim`;
+  the board's identity, both halves, with the client id a UUID5 over the
+  normalized MAC; the four-state reader with its strict schema, its
+  five-step precedence, its `activation is not None` seam and one exit
+  code per outcome; the bounds table, with the activation ceiling local
+  and a remote `timeout_ms` able only to shorten it;
+  `device_endpoint.py` extracted from `doctor` with the request
+  lifecycle as well as the address rule, pinned by doctor's own cases
+  and given the parsed `Endpoint` with its `activation()` composition;
+  the capability table with its THIRD side, every conversation row
+  marked not available yet and naming `run`, rendered into the help and
+  into `cli.md`, held by five both-ways assertions; the modelled
+  message-type map made public; `--claim` performing the existing act
+  through the existing address and token seams; the redirect `307` case
+  behind the claim M1 makes; the hostile-reply table; the live lane's
+  driven row, family refusal and exhaustive sentinels over three
+  credentials and every far-side value; the wheel lane's driven row; the
+  import inventory widened; `deployment.check_in` rewired to the
+  production board; the closed artifact move list; `cli.md`'s simulator
+  section, `xiaozhi-notes.md`'s redirect clause and the changelog entry.
+  Design footprint: two new modules under `simulator/` (`board.py`,
+  `capabilities.py`) in a package whose `__init__` carries a docstring
+  and no re-exports, plus `device_endpoint.py`, which exists because one
+  address policy and one request boundary with three callers may not
+  have two homes; deepens `config/cli.py` by two rows and one
+  `Invocation` field, and `protocol/messages.py` by making one fact
+  public. No extra, nothing gated.
+- [ ] **M2: the conversation.** Decisions 1, 1a, 5, 5a, 6 and 7: the
+  `run` verb, including the four-step ceremony whose fourth step is the
+  second check-in; the `sim` extra carrying `websockets`, the dev group
+  naming `vinga-server[serve,sim]`, and the tier VOCABULARY grown by a
+  third entry in `tests/support/tiers.py` with the wheel's own `sim`
+  metadata pinned both ways; the packaged utterance, its committed
+  manifest, its `force-include` and the checked-in tool that makes it;
+  `framing.frames`; `conversation.py` and `utterance.py`; the
+  server-to-device models, their parser, the three builders derived from
+  them and pinned byte for byte first, and the public state-and-mode
+  inventory; **the capability table's conversation rows flipped to
+  supported in the same change that lands `run`, with its third side
+  then asserted empty**; the generalized gate and its fixed sentence;
+  the wheel lane's `GATED` set grown by one with two-way completeness
+  intact; the tier lane's third environment; the controlled peer and the
+  two properties only it can prove; the end-to-end `run --claim` lane
+  starting from `Activating`; the decoder case that proves the packets
+  are Opus; the microphone tier filed as its own issue; `cli.md`'s
+  installation head, the root README's no-hardware paragraph and the
+  changelog entry. Design footprint: two new modules under `simulator/`,
+  one of which owns the eight-state protocol machine and holds the only
+  `websockets` import anywhere in `src/`; deepens `protocol/framing.py`
+  with the stream reader that keeps the header layout in one place,
+  `protocol/messages.py` with the direction it did not model, and
+  `config/cli.py`'s gate with its second caller rather than a copy of
+  it.
 
 ## Plan review round
 
