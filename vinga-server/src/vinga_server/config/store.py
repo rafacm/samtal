@@ -1896,9 +1896,17 @@ def _write_secrets(
         # The kind's own missing sentence with the next step after it,
         # so this and the check that runs before it say one thing about
         # what is not there rather than two.
+        #
+        # The command is built from the kind's own descriptor rather
+        # than written out, which is what stops it prescribing a
+        # spelling the grammar no longer has: a noun and its verb, in
+        # the noun's own word. The program half stays the long one,
+        # because this sentence is composed by a server and a server
+        # runs inside the image, where that is what a shell answers to.
+        holder = _HOLDER_OF[location.kind]
         raise UnknownEntityError(
-            f"{_missing(_HOLDER_OF[location.kind])}; create it first with "
-            f"vinga-server config set"
+            f"{_missing(holder)}; create it first with "
+            f"vinga-server config {holder.name} set"
         )
 
 

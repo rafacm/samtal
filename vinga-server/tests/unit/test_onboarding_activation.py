@@ -34,6 +34,7 @@ from tests.support.events import events as emitted
 from tests.support.events import fields_of, only
 from vinga_server import logs
 from vinga_server.config import Config
+from vinga_server.config.cli import DISPATCHED
 from vinga_server.onboarding import (
     ACTIVATION_TIMEOUT_MS,
     CODE_DIGITS,
@@ -178,9 +179,9 @@ def test_a_device_bound_to_an_agent_this_server_has_not_loaded_gets_no_code(
 
     assert "activation" not in body
     assert body["websocket"]["token"] == ""
-    assert "vinga-server config reload" in caplog.text
+    assert f"{DISPATCHED} reload" in caplog.text
     assert "restart" not in caplog.text
-    assert "add-device" not in caplog.text
+    assert "device pending claim" not in caplog.text
 
 
 def test_a_bound_but_unloaded_device_keeps_being_told_to_wait() -> None:

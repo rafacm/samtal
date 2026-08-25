@@ -71,7 +71,7 @@ def test_the_newest_key_encrypts_and_an_old_key_still_decrypts() -> None:
 
     assert decrypt(CLAUDE, written_before, after) == SECRET
     # Written under the newest key alone, which is what makes re-running
-    # set-secret the interim rewrite path.
+    # a secret set the interim rewrite path.
     assert decrypt(CLAUDE, written_after, MultiFernet([Fernet(new)])) == SECRET
     with pytest.raises(ConfigError):
         decrypt(CLAUDE, written_after, MultiFernet([Fernet(old)]))

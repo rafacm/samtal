@@ -95,7 +95,7 @@ def test_a_plain_connection_to_another_host_is_refused(
 ) -> None:
     """The bearer token rides on every request and grants everything the
     API can do, so loopback-or-TLS is the rule for the whole client
-    rather than a set-secret footnote, and there is deliberately no flag
+    rather than a secret-write footnote, and there is deliberately no flag
     to override it.
 
     The refusal says "loopback address", which is what the check

@@ -94,7 +94,7 @@ DATABASE_DIR_ENV = "VINGA_SERVER__DATABASE__DIR"
 
 CONFIG_ENV = "VINGA_CONFIG"
 
-# The variable `set-secret --from-env` is pointed at. Not a real
+# The variable a secret set's `--from-env` is pointed at. Not a real
 # credential, and shaped so a substring check for it cannot match by
 # accident.
 SECRET_ENV = "VINGA_LANE_SECRET"
@@ -455,7 +455,8 @@ def check_in(live: Live, mac: str) -> Mapping[str, object]:
 
     The only thing in this lane that is not a CLI command, and it is
     here because two of the commands need a device: a code is minted by
-    a board asking for one, and `pending` and `add-device` are about
+    a board asking for one, and `device pending list` and `device pending
+    claim` are about
     what an operator does with the number on its screen. A plain HTTP
     POST is the whole of what a board does to get there, so the lane can
     make one without hardware and without the websocket simulator.
@@ -752,8 +753,8 @@ def test_a_board_is_onboarded_by_the_code_on_its_screen(
     The two check-ins are what make the settings' claim observable. A
     binding and the default agent are read as a device asks for them
     rather than at a restart, so a board checking in after
-    `set-default-agent` is answered as a configured device and mints no
-    code at all, and the same board after `clear-default-agent` is
+    `default-agent set` is answered as a configured device and mints no
+    code at all, and the same board after `default-agent clear` is
     unbound and gets one. Nothing in-process can show that: it is the
     running server re-reading the database between two requests.
 
@@ -1028,7 +1029,7 @@ def test_the_store_exports_as_a_document_it_applies_back_unchanged(
 
 
 def _annotated_secret_command(exported: str) -> tuple[str, ...]:
-    """The `set-secret` an export named, as the words to run.
+    """The secret set an export named, as the words to run.
 
     Read out of the document rather than written here, and run rather
     than compared: what is being held is that the line an operator
@@ -1082,7 +1083,7 @@ def test_a_deployment_is_rebuilt_from_its_export_on_an_empty_database(
     Seed a deployment and store a credential on it, keep the export,
     stop the server, delete the database, rotate to a key the old one is
     not in, boot another server on the same empty directory, apply the
-    export, re-run the set-secret command the export annotated, and start
+    export, re-run the secret set command the export annotated, and start
     the server once more. Then read the credential back, and export.
 
     A new key rather than the old one, because that is the case the
@@ -1098,7 +1099,7 @@ def test_a_deployment_is_rebuilt_from_its_export_on_an_empty_database(
     fails here. And the credential is read back as plaintext before the
     exports are compared, because an export carries a credential's
     location and the command that fills it and never its value: a
-    set-secret that stored the wrong bytes writes an export that matches
+    a secret set that stored the wrong bytes writes an export that matches
     the first one to the letter.
 
     A store and a key of its own, because the deployment is destroyed
@@ -1383,7 +1384,7 @@ def test_one_refusal_of_each_family_arrives_intact(
     Two of these rows hand the command a credential-shaped value in the
     place their own input can hold one: the body of the refused write,
     and the entries of the refused document. A third sends a real one,
-    because `set-secret --from-env` reads the variable before it learns
+    because a secret set's `--from-env` reads the variable before it learns
     there is no such entity to store it on. All three are checked on
     every surface a value can come out on: the two streams, the log
     records this server made while the case ran, whichever thread made

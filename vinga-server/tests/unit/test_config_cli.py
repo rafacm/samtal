@@ -649,7 +649,7 @@ def test_add_device_inherits_the_reference_check(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The repository decides what an agent is, here as everywhere: the
-    claim route calls the same method bind-device calls. What differs is
+    claim route calls the same method `device bind` calls. What differs is
     the sentence, which on this route does not repeat the names it
     refused: a code is typed by hand, and so is whatever is typed beside
     it."""

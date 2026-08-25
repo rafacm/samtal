@@ -2314,7 +2314,7 @@ def _permitted_to_destroy(args: Invocation) -> None:
     take the only door away. `--force` answers the question, so it
     proceeds whatever else was given; `--no-input` takes the asking away
     and refuses, because a confirmation has no second way to be
-    answered, which is exactly why `set-secret` is not refused by the
+    answered, which is exactly why a secret set is not refused by the
     same flag: a secret has three doors and disabling one leaves two.
     A stream that is not a terminal has nobody to ask, so it proceeds.
     """

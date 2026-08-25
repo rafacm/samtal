@@ -511,7 +511,7 @@ def test_a_set_help_says_a_credential_is_never_one_of_its_arguments(
     helped = printed_help(run, capsys, "set", kind)
 
     assert _said(cli.SECRET_NOT_A_PAIR) in _said(helped)
-    assert _said("vinga-server config set-secret") in _said(helped)
+    assert _said(f"{cli.DISPATCHED} <kind> secret set") in _said(helped)
 
 
 # The two positions a global option is given in
