@@ -116,11 +116,17 @@ AUDIO = "audio"
 # `stt` is expected on both sides of a `tts start` because the server
 # does not promise an order between them, and `sentence_start` any number
 # of times because a reply is as many sentences as the model wrote.
+#
+# Audio is expected in ONE state, and the narrowness is the point. A
+# reply's audio is what a `tts start` opens; a frame before it is a frame
+# from outside the reply, and counting one into the reply's own totals
+# would make what this command reports about a reply depend on what
+# arrived before the reply began. It is reported as a surprise instead,
+# and nothing about it reaches a count.
 TRANSITIONS: dict[tuple[str, str], str] = {
     (HELLO_SENT, "hello"): HELLO_RECEIVED,
     (AWAITING_REPLY, "stt"): AWAITING_REPLY,
     (AWAITING_REPLY, "tts start"): SPEAKING,
-    (AWAITING_REPLY, AUDIO): AWAITING_REPLY,
     (SPEAKING, "stt"): SPEAKING,
     (SPEAKING, "tts sentence_start"): SPEAKING,
     (SPEAKING, "tts stop"): REPLY_COMPLETE,

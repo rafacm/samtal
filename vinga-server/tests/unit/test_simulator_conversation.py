@@ -356,6 +356,39 @@ def test_a_frame_that_does_not_match_the_framing_is_reported_not_counted(
     )
 
 
+def test_audio_before_the_reply_starts_is_a_surprise_and_not_a_count(
+    unpaced, identity, said
+) -> None:
+    """A frame arriving before `tts start` is a frame from outside the
+    reply.
+
+    The machine used to expect audio in `awaiting reply` as well as in
+    `speaking`, which meant a frame from before the reply began was added
+    to the reply's own packets, bytes and duration. What this command
+    reports about a reply then depended on what arrived before there was
+    one.
+
+    Bite: with `(AWAITING_REPLY, AUDIO)` back in the table, the totals
+    below are 2, 20 and two packets' worth of milliseconds instead of 1,
+    10 and one, and the surprise is not recorded at all.
+    """
+    def script(connection, recorded: Recorded) -> None:
+        greet(connection, recorded)
+        read_until_listen_stop(connection, recorded)
+        connection.send(framing.wrap(1, b"0123456789"))
+        connection.send(tts_message(SESSION, "start"))
+        connection.send(framing.wrap(1, b"9876543210"))
+        connection.send(tts_message(SESSION, "stop"))
+
+    with peer(script) as (url, _):
+        reply, _ = held(url, identity, said)
+
+    assert reply.packets == 1
+    assert reply.audio_bytes == 10
+    assert reply.audio_ms == said.frame_duration_ms
+    assert reply.surprises == (f"audio arrived while {conversation.AWAITING_REPLY}",)
+
+
 def test_a_message_of_a_type_this_client_does_not_model_is_named_not_quoted(
     unpaced, identity, said
 ) -> None:
