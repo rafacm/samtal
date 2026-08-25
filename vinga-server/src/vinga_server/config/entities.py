@@ -49,6 +49,8 @@ from typing import ClassVar
 from pydantic import BaseModel
 
 from vinga_server.config.models import (
+    PROGRAM,
+    SERVER_PROGRAM,
     AgentConfig,
     AgentDefaults,
     FillerConfig,
@@ -60,12 +62,6 @@ from vinga_server.config.models import (
     is_secret_option,
 )
 from vinga_server.config.provider_options import declared_options
-
-# How a command is spelled in the documents this registry feeds. The
-# canonical name `config/cli.py` publishes, written here because this
-# module is imported by the renderers and imports nothing of theirs; the
-# CLI re-exports it, so there is one string and not two.
-PROGRAM = "vinga"
 
 # Where the example fragments and the configuration file live, relative
 # to the committed reference (docs/reference/domain-config.md). Printed
@@ -622,6 +618,7 @@ def setting(name: str) -> Setting:
 
 
 __all__ = [
+    "SERVER_PROGRAM",
     "API_OPTIONS_NOTE",
     "BINDING_NOTICE",
     "BINDING_UNSERVED_NOTICE",

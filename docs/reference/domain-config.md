@@ -19,7 +19,7 @@ the body of a `PUT`, validated in the same one place whichever way it
 arrived. The API's own contract is [`api-openapi.json`](api-openapi.json),
 generated from its routes under the same regenerate-and-diff check as
 this document. A deployment whose server will not start is recovered by
-booting one on an empty database and applying a kept `config export`,
+booting one on an empty database and applying a kept `vinga export`,
 which the command reference writes out step by step.
 
 ## How the pieces fit
@@ -142,7 +142,7 @@ vinga provider set <stage> <name> -f fragment.yaml
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `type` | `str` | `required` | The provider implementation this entry configures, such as anthropic, openai_compatible, faster_whisper, openai, piper, elevenlabs or silero. Every key beyond the ones listed here is an option for that implementation. |
-| `api_key_env` | `str \| null` | `null` | The name of the environment variable holding this provider's credential, never the credential itself. Left unset for a local engine or a keyless self-hosted endpoint. A credential stored with `config provider secret set` fills the same slot and takes precedence. |
+| `api_key_env` | `str \| null` | `null` | The name of the environment variable holding this provider's credential, never the credential itself. Left unset for a local engine or a keyless self-hosted endpoint. A credential stored with `vinga provider secret set` fills the same slot and takes precedence. |
 | `egress` | `bool \| null` | `null` | Whether this entry sends session data off the host, asserted by the operator for the types whose configuration decides it rather than their name (openai_compatible, and the openai ASR and TTS types, whose base_url may be local or a vendor). Under server.local_only such an entry must declare egress: false; a type that knows its own egress rejects the key. |
 | ... | | | Passed through to the provider implementation. |
 
@@ -262,7 +262,7 @@ vinga mcp-server set <name> -f fragment.yaml
 | `egress` | `bool \| null` | `null` | Whether this server sends session data off the local network. Tool arguments carry conversation-derived data and neither transport can tell on its own, since a stdio command may proxy anywhere and a url may name localhost, so under server.local_only every referenced entry must declare it. |
 | `tool_timeout_s` | `float` | `15.0` | How long one tool call on this server may take, in seconds, before the model is told it timed out. The device hears silence meanwhile, so keep it short. |
 | `instructions` | `str \| null` | `null` | Guidance for the model about using this server's tools, injected into the system prompt of every agent this entry is granted to, under a heading naming the prefix its tools carry. It is written for the whole entry rather than per tool, so guidance about a tool an agent's allow list withholds is noise the operator avoids by writing about the granted surface. The grant is the whole condition: it is injected whether or not the server is connected and whatever its tools turn out to be, and an agent with `mcp: []` never sees it. It is stored and injected as written, its indentation and its own blank lines included; the only bytes trimmed are whitespace at the two ends of the whole assembled prompt, which is also what the inspection surface reports. Editing it does not restart the connection, so a reload reports the entry as `unchanged`, and the new text reaches a conversation at its next activation: a new session or an agent switch, never a reply of a session already running. |
-| `use_server_instructions` | `bool` | `false` | Whether to inject the guidance this server ships about itself, the `instructions` field of its initialize result, into the system prompt of every agent this entry is granted to. Off by default, and deliberately: the entry's own `instructions` is what your operator wrote, while this is a third party's text steering the agent, so consuming it is an explicit opt-in taken per entry and per channel. What a server ships is captured on every connect whatever this says, so turning it on applies at the next reload without restarting the connection, and turning it off stops the injection at the next activation. A block longer than 4000 characters is skipped whole rather than truncated. The block sits after this entry's own guidance, and `vinga-server config agent preview <agent>` reports it under `server_instructions:<entry>`, so an operator can see whose words they are reading. |
+| `use_server_instructions` | `bool` | `false` | Whether to inject the guidance this server ships about itself, the `instructions` field of its initialize result, into the system prompt of every agent this entry is granted to. Off by default, and deliberately: the entry's own `instructions` is what your operator wrote, while this is a third party's text steering the agent, so consuming it is an explicit opt-in taken per entry and per channel. What a server ships is captured on every connect whatever this says, so turning it on applies at the next reload without restarting the connection, and turning it off stops the injection at the next activation. A block longer than 4000 characters is skipped whole rather than truncated. The block sits after this entry's own guidance, and `vinga agent preview <agent>` reports it under `server_instructions:<entry>`, so an operator can see whose words they are reading. |
 | `inject_prompts` | `list[str] \| null` | `null` | The prompts this server publishes that are injected into the system prompt of every agent this entry is granted to, each by the name the server lists it under and in the order listed here. Unset means none, which is the default: a third party's text steering the agent is an opt-in per entry and per channel, and the specification defines prompts as user-controlled templates, so the operator who read the server's documentation names the ones that are standing guidance rather than invocable templates. Every name is validated against the server's own paginated prompt listing before anything is fetched, and a name the listing does not carry, one whose prompt declares required arguments, one that renders anything but text, and a rendered block longer than 4000 characters are each skipped with a warning naming this entry and the position in this list, never the name itself, since a server-chosen name is not this server's to print. Editing this list changes what a connect fetches, so unlike the other two prompt fields it restarts the connection when a reload applies it. A name listed twice is refused. Each name is stored and looked up exactly as written, surrounding whitespace included, because it is an identifier the server chose rather than a word this server may tidy: a stripped copy of it addresses a different prompt or none at all. |
 
 Examples:
@@ -288,7 +288,7 @@ vinga prompt-fragment set <name> -f fragment.yaml
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `text` | `str` | `required` | The text injected into the system prompt of every agent whose prompt_includes names this fragment, as written: its indentation and its own blank lines are part of it, and nothing is added around it, not even a heading, since this is prompt text the operator wrote and a heading would editorialize. The only bytes trimmed are whitespace at the two ends of the whole assembled prompt, which is also what the inspection surface reports. It sits after the agent's own prompt and before any MCP guidance, in the order the including layer lists it. There is no length cap: what each block costs is reported by `vinga-server config agent preview <agent>`, and the operator is the one who knows what their model tolerates. |
+| `text` | `str` | `required` | The text injected into the system prompt of every agent whose prompt_includes names this fragment, as written: its indentation and its own blank lines are part of it, and nothing is added around it, not even a heading, since this is prompt text the operator wrote and a heading would editorialize. The only bytes trimmed are whitespace at the two ends of the whole assembled prompt, which is also what the inspection surface reports. It sits after the agent's own prompt and before any MCP guidance, in the order the including layer lists it. There is no length cap: what each block costs is reported by `vinga agent preview <agent>`, and the operator is the one who knows what their model tolerates. |
 
 Nothing is added around the text, not one heading: it is prompt text the
 operator wrote, and a heading would editorialize. The blocks are injected in
@@ -392,7 +392,7 @@ calls.
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `server` | `str` | `required` | The MCP server this grant is about, by the name it is defined under in mcp_servers. |
-| `tools` | `list[str] \| null` | `null` | Which of that server's tools this layer may reach, by the published name without its entry prefix (turn_on_light for home__turn_on_light), which is the name `vinga-server config status` shows. Leaving it out grants the whole server, exactly as naming the server as a plain string does. A name that matches nothing the server published is not an error at write time, since only a live connection knows the list; it is logged when the server publishes and visible under grants on the status surface. |
+| `tools` | `list[str] \| null` | `null` | Which of that server's tools this layer may reach, by the published name without its entry prefix (turn_on_light for home__turn_on_light), which is the name `vinga status` shows. Leaving it out grants the whole server, exactly as naming the server as a plain string does. A name that matches nothing the server published is not an error at write time, since only a live connection knows the list; it is logged when the server publishes and visible under grants on the status surface. |
 
 There is no deny list, deliberately. A denied set fails open: a server that
 adds a tool would silently grant it to every agent that denied the old ones,
@@ -459,9 +459,9 @@ built up in the natural order without wedging.
 
 ## The whole domain configuration
 
-What one deployment's domain half holds, which is what `vinga-server
-config show` prints and what a running server serves once it has been
-asked to apply it.
+What one deployment's domain half holds, which is what
+`vinga show` prints and what a running server serves once it has
+been asked to apply it.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |

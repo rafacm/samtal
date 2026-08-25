@@ -56,6 +56,7 @@ from vinga_server.config.models import (
     DOMAIN_KEYS,
     PROMPT_FRAGMENT_NAME_RULE,
     PROVIDER_STAGES,
+    SERVER_PROGRAM,
     AgentConfig,
     AgentDefaults,
     DomainConfig,
@@ -1906,7 +1907,7 @@ def _write_secrets(
         holder = _HOLDER_OF[location.kind]
         raise UnknownEntityError(
             f"{_missing(holder)}; create it first with "
-            f"vinga-server config {holder.name} set"
+            f"{SERVER_PROGRAM} {holder.name} set"
         )
 
 
