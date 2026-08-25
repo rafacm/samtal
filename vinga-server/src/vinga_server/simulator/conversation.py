@@ -354,7 +354,7 @@ def _turn(
     heard.state = LISTENING
     _send(socket, built(_listen(session, "start")))
     for packet in said.packets:
-        socket.send(framing.wrap(version, packet))
+        _send_audio(socket, framing.wrap(version, packet))
         # Paced the way a microphone delivers them, because that is what
         # the endpointer on the other side is measuring. A burst would be
         # the same bytes and not the same utterance.
@@ -520,6 +520,23 @@ def _send(socket, text: str) -> None:
     cannot mistake one for the other, and a case asserts it.
     """
     _guarded(lambda: socket.send(text))
+
+
+def _send_audio(socket, frame: bytes) -> None:
+    """One binary frame of the utterance.
+
+    A second name for the same containment, and the second name is the
+    point: text and binary are different calls so a reader cannot mistake
+    one for the other, and both go through the boundary so a peer that
+    goes away mid-utterance is a sentence rather than a library
+    traceback.
+
+    The utterance is the longest thing this command sends, and a
+    disconnect is likeliest during it, which makes an unguarded send here
+    worse than an unguarded send anywhere else in the module rather than
+    better.
+    """
+    _guarded(lambda: socket.send(frame))
 
 
 def _received(socket, timeout: float, expired: str) -> str | bytes:
