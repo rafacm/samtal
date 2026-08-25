@@ -2270,7 +2270,10 @@ are already in its environment.
 default and every one of them is overridable with a `VINGA_`-prefixed
 variable, so a container started with nothing mounted at `/config`
 serves on those. Mount a YAML there and the image reads it, which is
-what a deployment past a handful of keys wants:
+what a deployment past a handful of keys wants; the two lines after it
+write one provider into the domain half and install it, run from a
+checkout's `vinga-server/` directory, where the example fragments their
+`-f` paths name are:
 
 ```bash
 docker run -d --name vinga \
