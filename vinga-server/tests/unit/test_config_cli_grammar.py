@@ -29,7 +29,7 @@ from pathlib import Path
 import pytest
 from typer._click.core import Context
 
-from tests.support.config_cli import SECRET, chain, runner
+from tests.support.config_cli import SECRET, chain, logged, runner
 from tests.support.events import both_formats
 from vinga_server.config import cli, docgen, entities
 
@@ -933,3 +933,93 @@ def test_the_reference_carries_a_heading_for_every_level() -> None:
     assert f"### `{cli.PROGRAM} provider secret set`" in rendered
     assert f"### `{cli.PROGRAM} device pending`" in rendered
     assert f"### `{cli.PROGRAM} device pending claim`" in rendered
+
+
+# What the program was invoked as
+#
+# The name a live help page prints is a closed map from a known entry
+# point to a written-down string, and `argv[0]` is read by nothing at
+# all. That is the strongest form of the rule and also the easiest to
+# lose: one `sys.argv[0]` interpolated into a usage line would be a
+# value nobody validated printed into help, into the committed
+# reference, into an operator's exported file and into whatever collects
+# stderr.
+#
+# `argv[0]` is what a shell puts there, and a shell puts whatever it was
+# given: a symlink's name, an `exec -a`, a path under a directory named
+# after whatever the person was pasting. So it is treated as a value,
+# and this drives all six surfaces the plan names with a
+# credential-shaped one in place.
+
+HOSTILE = "sk-argv-3f9a1c7e-never-a-real-credential"
+
+
+def test_no_surface_interpolates_what_the_program_was_invoked_as(
+    run,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Six surfaces, one sentinel, and it reaches none of them.
+
+    Help and a leaf's help, because that is the only surface the
+    invocation is allowed to vary; the recipes and the reference,
+    because those are generated documents and a document may no more
+    vary with the invocation than with the terminal; an export, because
+    it is the one output an operator keeps in a file; and the log
+    records and the exception chain a refusal is carried by.
+    """
+    monkeypatch.setattr("sys.argv", [f"/opt/{HOSTILE}/bin/vinga", "list"])
+    assert run("agent", "set", "kids", "-f", "-", stdin="prompt: You are kids.\n") == 0
+    capsys.readouterr()
+
+    with pytest.raises(SystemExit):
+        cli.main(["--help"])
+    root_help = capsys.readouterr().out
+    with pytest.raises(SystemExit):
+        cli.main(["agent", "set", "--help"])
+    leaf_help = capsys.readouterr().out
+
+    with caplog.at_level(logging.DEBUG):
+        assert run("export") == 0
+    exported = capsys.readouterr().out
+
+    with pytest.raises(cli.ConfigError) as refused:
+        cli._parsed(["agent", "show", "no-such-agent"], cli.DISPATCHED)
+
+    surfaces = {
+        "help": root_help,
+        "leaf help": leaf_help,
+        "recipes": cli.cli_recipes(),
+        "reference": cli.cli_reference(),
+        "export": exported,
+        "logs": logged(caplog),
+        "chain": chain(refused.value),
+    }
+
+    # The surfaces are about something: an empty one would pass this
+    # while proving nothing.
+    assert all(text for text in surfaces.values()), surfaces
+    assert [where for where, text in surfaces.items() if HOSTILE in text] == []
+
+
+def test_a_help_page_prints_the_entry_point_it_was_reached_by(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The one licensed variation, and it is a fixed string per entry
+    point rather than anything the invocation carried: the console
+    script is the call with no argument list, and the dispatch is the
+    call with one."""
+    monkeypatch.setattr("sys.argv", [f"/opt/{HOSTILE}/bin/vinga", "--help"])
+    with pytest.raises(SystemExit):
+        cli.main()
+    scripted = capsys.readouterr().out
+
+    with pytest.raises(SystemExit):
+        cli.main(["--help"])
+    dispatched = capsys.readouterr().out
+
+    assert scripted.startswith(f"Usage: {cli.CONSOLE_SCRIPT} ")
+    assert dispatched.startswith(f"Usage: {cli.DISPATCHED} ")
+    assert HOSTILE not in scripted + dispatched

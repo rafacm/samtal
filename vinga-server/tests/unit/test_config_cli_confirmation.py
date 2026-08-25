@@ -332,11 +332,12 @@ def test_from_env_is_read_whatever_the_flags_say(
 #
 # One distinct credential-shaped value per field, so a leak names its
 # own source, and every identity segment a destructive command takes has
-# one. `code` is the one segment no destructive command carries, since
-# claiming a board is a rebinding rather than a destruction, and it is
-# named here rather than left out silently.
-
-STAGE = "llm"
+# one. Every segment: a provider is addressed by a stage AND a name, and
+# a case that planted a real stage beside a planted name would have been
+# checking one of the two while calling itself exhaustive. `code` is the
+# one segment no destructive command carries, since claiming a board is
+# a rebinding rather than a destruction, and it is named here rather
+# than left out silently.
 
 PLANTED_NAME = "sk-name-4f8b2c9e-never-a-real-credential"
 
@@ -365,8 +366,8 @@ ADDRESSED: list[tuple[str, tuple[str, ...], tuple[str, ...]]] = [
     ("device delete", ("device", "delete", PLANTED_MAC), (PLANTED_MAC,)),
     (
         "provider secret clear",
-        ("provider", "secret", "clear", STAGE, PLANTED_NAME, PLANTED_SLOT),
-        (PLANTED_NAME, PLANTED_SLOT),
+        ("provider", "secret", "clear", PLANTED_STAGE, PLANTED_NAME, PLANTED_SLOT),
+        (PLANTED_STAGE, PLANTED_NAME, PLANTED_SLOT),
     ),
     (
         "mcp-server secret clear",
