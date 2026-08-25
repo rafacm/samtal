@@ -70,6 +70,14 @@ serve = [
     # configured. A core dependency of serving rather than an extra of
     # it, which is why both image variants carry it.
     "pysilero-vad>=3.4",
+    # The Postgres driver, as the pure-Python distribution. The binary
+    # implementation is a door rather than a default: `psycopg[binary]`
+    # here would make every install of this extra pull a wheel with a
+    # libpq inside it, including the source-backed install a custom
+    # image build may want. The dev group and the Dockerfile name the
+    # binary one explicitly; what a bare `[serve]` install needs beside
+    # this is a libpq on the system.
+    "psycopg>=3.2",
     "sqlalchemy>=2.0.51",
     "uvicorn[standard]>=0.34",
 ]
@@ -125,6 +133,11 @@ dev = [
     # direct because a test imports it, and an undeclared import is a
     # break waiting for the day the transitive edge goes.
     "packaging>=24",
+    # The driver's binary implementation, so a checkout needs no libpq
+    # of its own: `uv sync` and the compose instance are the whole of
+    # the local loop. The `serve` extra deliberately carries the plain
+    # distribution instead.
+    "psycopg[binary]>=3.2",
     # Validates the committed OpenAPI document (Apache-2.0), so that
     # "the API generates a document" means one a client generator will
     # accept rather than one that happens to be JSON. Tests only: the
