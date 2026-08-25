@@ -148,6 +148,22 @@ CONNECT_TIMEOUT_S = 5.0
 READ_TIMEOUT_S = 30.0
 
 
+def bounded_timeout(budget_s: float) -> httpx.Timeout:
+    """The timeouts above, shortened to what is left of a caller's own
+    bound.
+
+    A ceremony made of several requests has a bound over the whole of
+    it, and the bounds above are per request, so a caller with four
+    seconds left would otherwise spend thirty of them inside one read.
+    Only ever shorter: the two constants are the ceiling and this is
+    what a remaining budget takes off them, which is the same direction
+    the rule about a far side's own hint runs in.
+    """
+    return httpx.Timeout(
+        min(READ_TIMEOUT_S, budget_s), connect=min(CONNECT_TIMEOUT_S, budget_s)
+    )
+
+
 def build_client(url: str) -> httpx.Client:
     """The connection to a device-facing endpoint, and the one seam here.
 
@@ -313,6 +329,7 @@ def requested(
     build: Callable[[str], httpx.Client],
     headers: Mapping[str, str] | None = None,
     body: object | None = None,
+    budget_s: float | None = None,
 ) -> httpx.Response:
     """One request to a device-facing address, and never anything else.
 
@@ -341,6 +358,16 @@ def requested(
     suite replaces the client of the command it is driving. Each caller
     passes its own, looked up as that module's global at call time, which
     is what makes patching it work.
+
+    `budget_s` is what is left of a bound the CALLER holds, and it is
+    applied to this request rather than only checked after it. A caller
+    with a ceiling over several requests and a per-request read bound of
+    thirty seconds has no bound at all otherwise: the first request can
+    spend the whole of the ceiling and more inside one read, and the
+    check that comes after it is a check on a wait already taken. Set on
+    the client after the seam built it, because the seam takes an
+    address and a suite's replacement is entitled to build whatever kind
+    of client it likes.
     """
     problem: str | None = None
     client: httpx.Client | None = None
@@ -349,6 +376,8 @@ def requested(
         try:
             try:
                 client = build(endpoint.given)
+                if budget_s is not None:
+                    client.timeout = bounded_timeout(budget_s)
                 sent = dict(headers or {})
                 # Two calls rather than one with a built-up keyword bag:
                 # `json=None` is a body of `null` to httpx and not the
@@ -542,6 +571,7 @@ __all__ = [
     "SUPPLIED_ENDPOINT",
     "WITHHELD",
     "Endpoint",
+    "bounded_timeout",
     "build_client",
     "close_failed",
     "downgraded",
