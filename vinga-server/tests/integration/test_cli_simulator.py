@@ -150,6 +150,10 @@ def test_an_unclaimed_board_is_claimed_and_then_holds_a_conversation(
     assert f"heard: {HEARD}" in said.out
     assert f"said: {REPLY}" in said.out
     assert "reply: " in said.out
+    # The eighth state, reported rather than advertised: a turn against a
+    # real server ends with the socket given back, and the verdict says
+    # so in the machine's own word for it.
+    assert f"the conversation reached: {conversation.CLOSED}" in said.out
     assert conversation.CLOSE_NAMES[1000] in said.out
     assert "out of order:" not in said.err
 
