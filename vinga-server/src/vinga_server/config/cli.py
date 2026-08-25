@@ -1192,6 +1192,17 @@ def _declared(shape: object, answer: object) -> object:
         # stays the string it was and meets the refusal, where
         # `Applies(answer)` would raise a ValueError out of a boundary
         # that catches validation errors.
+        #
+        # Only a string is looked up, and that is the same rule stated
+        # about the answer rather than about the shape. Nothing bounds
+        # what a body puts where a token belongs: a list or an object
+        # there is unhashable, and using it as a key would raise a
+        # TypeError out of this boundary exactly as constructing the
+        # member would have. Every other shape passes through untouched
+        # and meets strict validation, which is what turns it into the
+        # one fixed sentence a body this client cannot read gets.
+        if not isinstance(answer, str):
+            return answer
         return {member.value: member for member in shape}.get(answer, answer)
     if isinstance(shape, type) and issubclass(shape, BaseModel):
         if isinstance(answer, Mapping):
