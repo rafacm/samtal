@@ -301,3 +301,197 @@ regenerated through the workflow's own procedure and the spelling
 census regenerated, with `events.md`, `domain-config.md` and
 `api-openapi.json` byte-identical, which is the closed move list this
 milestone declared.
+
+## M2: the conversation
+
+PR TBD.
+
+### What landed
+
+The websocket half of `vinga simulator`, in the order the commits tell
+it: the framing reader first, then the wire's other direction, then the
+audio, then the conversation and the verb that holds one, then the
+tiers, then the lanes, then the documents.
+
+- `protocol/framing.py` gained `frames(version, data)`, the reader for a
+  run of frames stored as a file. Nothing on the wire needs it, because
+  a websocket delivers one frame per message; the packaged utterance
+  does, because a file of bare Opus packets has no boundaries at all.
+  Version 1 is refused by a sentence of its own rather than by the
+  unsupported-version one, since it is a version a single frame very
+  much has and what it lacks is a length to walk by.
+- `protocol/messages.py` gained the direction it only wrote: frozen
+  models for the server hello, `stt` and `tts`, `parse_server_message`
+  beside `parse_message` with the same boundary discipline, and the
+  three builders derived from those models. The builders were
+  transcribed byte for byte first, in a commit of their own, and are
+  byte-identical after. `built(message)` became public with it, so the
+  simulator's own device hello and `listen` are built by the module that
+  owns what a control message is.
+- `simulator/utterance.py` and `simulator/data/`: the packaged sentence
+  as a run of version 2 frames with a manifest beside it, read on demand
+  and never at import. `understood(manifest, asset)` sits under
+  `packaged()` because they are two questions, which is also what lets
+  the doctored-pair cases be written without reaching into the module.
+- `tests/tools/utterance.py`: how the asset was made, checked in so it
+  can be made again. It runs by hand and never in a lane.
+- `simulator/conversation.py`: the eight-state machine with its
+  transitions as a table, the two rules that make it a machine (an
+  unexpected message is reported and advances nothing; every waiting
+  transition is bounded), and the only `websockets` import anywhere in
+  `src/`. The bounds are the server's own hello window for the open and
+  the hello, read from `device/watchdog.py` rather than restated, and a
+  local ceiling for the reply, which is the one wait with nothing on
+  either side to derive it from.
+- The `sim` extra, `websockets` and nothing else; the dev group naming
+  `vinga-server[serve,sim]`; and the tier VOCABULARY grown to three in
+  `tests/support/tiers.py`, which is the half that mattered: an extra
+  missing from the wheel's own metadata would otherwise have passed
+  every lane.
+- The grammar: a second row on the noun, the same argument declarer as
+  `check-in` (one URL, `--mac`, `--claim`), and the gate deepened by its
+  second caller. `_from_the_server_half` became
+  `_from_an_installed_half(answered, missing)`, because the server half
+  is somewhere you go and an extra is something you install, and a second
+  copy of it would have been a second chance to get the ImportError
+  containment wrong.
+- The capability table's conversation rows flipped to supported in the
+  same change that landed `run`, and the third side is now asserted
+  EMPTY. The machinery stays, so a future row can be declared honestly
+  rather than parked.
+- The lanes. Unit: 23 conversation cases against a controlled peer,
+  including the four handshake headers, the framing round trip at all
+  three versions, the text-versus-binary rule, four out-of-order cases,
+  both bounds, and the websocket half's no-leak inventory; 20 utterance
+  cases including the manifest match and the decode through the server's
+  own decoder; four new `run` cases beside the board's, for the two
+  address rules and the states the two verbs disagree about; four new
+  gate cases. Integration: the live lane drives `simulator run` against
+  a real uvicorn for a real conversation, and
+  `tests/integration/test_cli_simulator.py` starts at `Activating` and
+  runs the whole four-step ceremony, with the bite that doctors the
+  second reply's token back to empty and watches the server refuse the
+  handshake with `no_token`. The wheel lane's `GATED` grew by one, and
+  the tier lane gained the `[sim]` environment.
+
+### Deviations
+
+Four, each with the reason.
+
+1. **No `force-include` for the asset.** The plan asks for a
+   `force-include` entry beside the one that carries `examples/`. The
+   asset lives at `src/vinga_server/simulator/data/`, INSIDE the package
+   `[tool.hatch.build.targets.wheel] packages` already carries, and
+   hatchling refuses the build outright with "A second file is being
+   added to the wheel archive at the same path". `examples/` needs the
+   entry because it is outside `src/`; this does not. What the entry
+   would have declared is asserted instead, which is stronger: the wheel
+   lane reads the built archive for both packaged names and hands the
+   bytes to the same reader the command uses, and the tier lane's
+   `[sim]` environment reads the asset through `packaged()` from an
+   installed tier. A comment in `pyproject.toml` records the absence so
+   the next reader does not re-derive it.
+2. **The builders are `json.dumps` over `model_dump`, not
+   `model_dump_json`.** The plan names the latter. Pydantic's serializer
+   writes compact separators (`,` and `:`) and emits non-ASCII raw,
+   so it would have rewritten every server-to-device message in the
+   field while changing nothing about what any of them mean, and the
+   byte-for-byte pin the same decision demands would have failed. The
+   models are still the single home of the shape, which is the property
+   the derivation was for; the encoder stays the one these messages have
+   always been written by.
+3. **The live lane's `simulator run` row holds a real conversation
+   rather than reporting an unbound board.** Decision 7's table says it
+   is "driven, against the same server, where it reports the unbound
+   state and exits 0", on the premise that the shared server has no
+   providers. That premise is about `tests/support/deployment.serving`'s
+   own fixture; `test_cli_live.py` applies a document of mock providers
+   and reloads it, and the case before this one claims the simulated
+   board, so the board there is admitted and the deployment can answer
+   it. Reporting an unbound board would also not have been exit 0: `run`
+   was asked for a conversation, so the states `check-in` reports and
+   exits 0 on are a refusal for this verb. The stronger case is the one
+   that ran.
+4. **The peer's cases are a unit suite, not an integration one.**
+   Decision 7 puts the controlled peer in `tests/support/`, which is
+   where it is, and does not say which lane drives it. It is driven from
+   `tests/unit/test_simulator_conversation.py`, because it opens a
+   loopback socket and nothing else: no database, no application, no
+   providers. The integration lanes are the two that need a real
+   vinga-server.
+
+### Resolutions of what the plan left open
+
+- **The asset's numbers**, which the plan deliberately did not invent:
+  28 packets, 1680 ms, 10254 bytes, SHA-256
+  `6edd0d5cb85ac5f983eb9275dad577ac01ed7e396fe2b6a43f42b66e44a50d77`.
+  Inside the plan's expected range of 25 to 42 packets.
+- **The licence string was re-read at the pinned tag before the asset
+  was committed**, which is the residual mitigation the risk section
+  asks for. `rhasspy/piper-voices` at `v1.0.0`,
+  `en/en_US/ljspeech/high/MODEL_CARD`, gives the dataset licence as the
+  exact string `public domain` over the LJ Speech Dataset. Unchanged
+  from what decision 1a records, so no question was raised.
+- **How the asset was produced**, so it can be produced again:
+  `uv run python -m tests.tools.utterance` from `vinga-server/`. It
+  downloads `en_US-ljspeech-high.onnx` and its `.json` from the pinned
+  tag, runs Piper through `uvx --from piper-tts piper` (a transient
+  environment, so a GPL-3.0 package enters no tier of anything),
+  resamples 22 050 Hz to 16 000 through `av`, pads 120 ms of silence in
+  front and at least 300 ms behind up to a whole packet boundary, and
+  encodes through the server's own `OpusEncoder`.
+- **The `sim` extra's install line was verified**, not assumed:
+  `uvx --from "vinga-server[sim] @ git+<url>#subdirectory=vinga-server" vinga simulator run ...`
+  was run against a `git+file://` URL of this branch and installed 23
+  packages, the client closure plus `websockets`, and reached the
+  network rather than the gate.
+
+### Discoveries
+
+- **A missing extra has to be simulated in two places.** The gate's own
+  case passed alone and failed under `-n auto`, because another case in
+  the same worker had already imported `simulator.conversation`. Evicting
+  it from `sys.modules` was not enough either: `from
+  vinga_server.simulator import conversation` reads the ATTRIBUTE the
+  first import bound on the parent package when the cache is gone. Both
+  have to go, and the suite says so where it does it.
+- **The gate belongs in front of the request, not behind it.** The first
+  shape ran the check-in first, so a bare install pointed at a real
+  deployment would have checked in, claimed a board, sat through an
+  activation poll and only then said it needed a websocket client. The
+  gate now fires before anything goes out, which is also what lets the
+  wheel lane drive the row at all.
+- **The decoded utterance is a shade shorter than the encoded one.**
+  libopus carries a few milliseconds of encoder lookahead that the
+  decoder skips at the start of a stream, so the decode case's tolerance
+  is one packet rather than a millisecond; a tighter comparison would
+  have been a comparison to the codec's internals.
+- **`websockets` is the one distribution here that arrives both ways.**
+  It is a `sim` root and a transitive dependency of
+  `uvicorn[standard]`, which is why the negative checks ask the
+  interpreter as well as the metadata: a tiering mistake shows up as an
+  importable module before it shows up as a declared one.
+
+### The microphone tier
+
+Not in scope, per the plan's unsupported list, and filed by this
+milestone as **#301**. What that issue has to decide rather than assume
+is written into it: which tier the audio stack lands in and what that
+does to the three-set inventory in `tests/support/tiers.py`, what the
+non-interactive path is for a thing that is inherently interactive, what
+a runner with no audio device can prove, and whether decoding the reply
+comes with it (it is on the permanent unsupported list for the same
+reason, which a tier carrying `av` would remove). Barge-in stays out
+whatever it decides. The reasons that keep the tier off the list are
+recorded in `simulator/capabilities.py` and stay there.
+
+### Verification
+
+From `vinga-server/` on the milestone head: `uv run ruff check .` clean;
+`uv run pytest tests/unit -q -n auto --dist loadfile` 3966 passed, 19
+skipped; `uv run pytest tests/integration -q` 190 passed; the openapi,
+events and cli reference drift checks byte-clean locally, with `cli.md`
+the only generated document that moved. The image and the smoke lane are
+CI's to prove, and no run has yet been made against a real ASR: every
+ASR in every lane is a mock that transcribes whatever it is handed, so
+the suite proves the wire and cannot prove intelligibility.

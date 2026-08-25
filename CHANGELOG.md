@@ -9,6 +9,26 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **`vinga simulator run URL` holds a conversation without a board**
+  (#248). The verb beside `check-in` does everything that one does and
+  then opens the websocket: the handshake with the four headers the
+  firmware sets, the hello exchange at whichever framing version the
+  check-in reply named, one packaged utterance of Opus paced the way a
+  microphone delivers it, and the transcript and the reply's sentences
+  printed as they arrive. The terminal is the display. Half duplex, one
+  turn, and one sentence: the audio is encoded once at build time and
+  shipped inside the package, because no client tier carries a codec and
+  packets encoded once are byte-identical on a laptop and on a runner.
+  The sentence is "Hello, can you hear me?", synthesized with Piper from
+  a voice whose weights are MIT over a public-domain dataset, with the
+  provenance and a checksum recorded in a manifest beside it.
+  The websocket client rides a **`sim` extra** carrying exactly one
+  distribution, so the default install stays the configuration client;
+  asked for a conversation without it, `run` names the extra and stops
+  before it sends anything. `check-in` needs none of it. The capability
+  table on both verbs' help pages moves with the code: everything the
+  conversation half does is now on the supported side, and the "not
+  available yet" side is empty.
 - **`vinga simulator check-in URL` puts a simulated board in the
   grammar** (#248). Trying a deployment used to need hardware; the
   protocol a board speaks is HTTP and a websocket, and this command
