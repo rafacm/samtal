@@ -29,12 +29,13 @@ would have called the whole of it supported and been two thirds false.
 
 import textwrap
 from dataclasses import dataclass, field
-from typing import get_args
+
+from pydantic import BaseModel
 
 from vinga_server.protocol.messages import (
     MESSAGE_TYPES,
     SERVER_MESSAGE_TYPES,
-    server_states,
+    declared_values,
 )
 
 # The three sides, as the words a reader sees.
@@ -89,30 +90,16 @@ class Capability:
     verb: tuple[str, ...] = field(default_factory=tuple)
 
 
-def _members(annotation: object) -> tuple[str, ...]:
-    """The `Literal` members of one model field, flattened out of the
-    union an optional field is.
-
-    Read off the model rather than listed here, which is the whole point:
-    `ListenMessage.state` is where the protocol says what a listening
-    state can be, and a second list of them would be a bug pending.
-    """
-    found: list[str] = []
-    for member in get_args(annotation) or ():
-        if isinstance(member, str):
-            found.append(member)
-            continue
-        found.extend(_members(member))
-    return tuple(found)
-
-
-def _facets(message_type: str, name: str) -> tuple[str, ...]:
+def _facets(model: type[BaseModel], name: str) -> tuple[str, ...]:
     """One field's declared values, plus the absent one where the field
-    is optional, or `()` where the type has no such field at all."""
-    model = MESSAGE_TYPES[message_type]
-    if name not in model.model_fields:
-        return ()
-    declared = _members(model.model_fields[name].annotation)
+    is optional, or `()` where the model has no such field at all.
+
+    `declared_values` is `protocol/messages.py`'s, because that is where
+    the protocol says what a listening state can be; what belongs here is
+    only the question of whether "no value at all" is a case, which is a
+    question about the TABLE rather than about the wire.
+    """
+    declared = declared_values(model, name)
     if not declared:
         return ()
     # `mode` is `Literal[...] | None`, and a `listen stop` with no mode is
@@ -121,14 +108,25 @@ def _facets(message_type: str, name: str) -> tuple[str, ...]:
     return (*declared, NONE_DECLARED) if optional else declared
 
 
-def sent_messages() -> tuple[tuple[str, str, str], ...]:
-    """Every `(type, state, mode)` a device may send, off the models."""
+def _rows_of(inventory: dict[str, type[BaseModel]]) -> tuple[tuple[str, str, str], ...]:
+    """Every `(type, state, mode)` one direction of the wire declares.
+
+    One function for both directions, because both are now the same
+    question asked of the same kind of model. What the server declares no
+    modes at all is a fact of the protocol that falls out of its models
+    rather than a special case written here.
+    """
     found: list[tuple[str, str, str]] = []
-    for message_type in MESSAGE_TYPES:
-        states = _facets(message_type, "state") or (NONE_DECLARED,)
-        modes = _facets(message_type, "mode") or (NONE_DECLARED,)
+    for message_type, model in inventory.items():
+        states = _facets(model, "state") or (NONE_DECLARED,)
+        modes = _facets(model, "mode") or (NONE_DECLARED,)
         found += [(message_type, state, mode) for state in states for mode in modes]
     return tuple(found)
+
+
+def sent_messages() -> tuple[tuple[str, str, str], ...]:
+    """Every `(type, state, mode)` a device may send, off the models."""
+    return _rows_of(MESSAGE_TYPES)
 
 
 def received_messages() -> tuple[tuple[str, str, str], ...]:
@@ -136,14 +134,9 @@ def received_messages() -> tuple[tuple[str, str, str], ...]:
 
     The read side is closed exactly as the send side is, so a message
     type this simulator would meet and not know is a row of this table
-    rather than a surprise in a session. It declares no modes at all,
-    which is a fact of the protocol and not an omission here.
+    rather than a surprise in a session.
     """
-    found: list[tuple[str, str, str]] = []
-    for message_type in SERVER_MESSAGE_TYPES:
-        states = server_states(message_type) or (NONE_DECLARED,)
-        found += [(message_type, state, NONE_DECLARED) for state in states]
-    return tuple(found)
+    return _rows_of(SERVER_MESSAGE_TYPES)
 
 
 # Why each message this simulator will never send is one it will never
