@@ -144,7 +144,12 @@ explicitly.
    `LOCK_TIMEOUT_MS` (10 000, the renamed `BUSY_TIMEOUT_MS`), so a
    writer that cannot take the advisory lock inside ten seconds
    fails with `LockNotAvailable`, and the contract row keeps its
-   shape: same bound, same retryable refusal, same sentences.
+   shape: same bound on the lock wait, same retryable refusal,
+   same sentences. Stated precisely, because Postgres applies
+   `lock_timeout` per acquisition: ten seconds bounds each lock
+   wait (the advisory gate being the one that matters), not the
+   transaction or the response, whose execution time was never
+   bounded under SQLite either.
    `upgrade_to_head` takes the same advisory lock before Alembic
    reads the version table, which is today's migration race
    answered the same way (`db/__init__.py:437-449`). The
@@ -397,10 +402,13 @@ explicitly.
     justification dies, but pooling it is an optimization with its
     own risks, left as a recorded follow-up rather than smuggled
     into a cutover). The CLI read timeout keeps its 30 s value
-    with its rationale re-derived: the server still holds a write
-    for up to the 10 s lock timeout before answering the
-    retryable 409 (`config/cli.py:187-195`), and the onboarding
-    release grace keeps its reasoning against the same bound
+    and `STOP_TIMEOUT_S` its arithmetic, both restated as policy
+    margins rather than derived maxima: a waiter typically spends
+    up to the 10 s lock wait before the retryable 409
+    (`config/cli.py:187-195`), but nothing bounds a whole
+    transaction, so the comments say "margin above the lock wait"
+    and stop claiming a ceiling; the onboarding release grace
+    keeps its reasoning against the same typical wait
     (`onboarding/pending.py:246-258`).
 
 ## The standing review lenses, pre-answered
@@ -772,6 +780,11 @@ after the P1/P2 amendments. Findings condensed but faithful:
     execution. State only that one acquisition is bounded and
     yields the retryable refusal; treat the CLI and shutdown
     numbers as independent policy margins, not derived maxima.
+    *Resolution*: decisions 3 and 11 amended exactly so: the
+    ten-second bound is stated per lock acquisition, and the CLI
+    read timeout and `STOP_TIMEOUT_S` become policy margins above
+    the typical lock wait, with their comments forbidden from
+    claiming a ceiling.
 
 11. **P3: `db/chain.py` fails the deletion test.** A file holding
     one small dataclass and two constants, placed by line count,
