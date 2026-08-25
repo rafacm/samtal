@@ -442,8 +442,26 @@ def _without_the_extra(monkeypatch: pytest.MonkeyPatch) -> None:
     the reason the finder above exists: a module resolved by name never
     reaches the builtin, and `websockets.sync.client` is reached through
     the package.
+
+    The simulator's own conversation module goes with it, and that is not
+    a shortcut. `run` imports THAT module, which imports `websockets` at
+    its top; on a bare install neither exists and the import runs. This
+    suite runs in a process where another case may already have imported
+    it, and a module Python can hand back is one no finder is asked
+    about, so leaving it would simulate a missing extra the command never
+    notices.
+
+    Both places it can be handed back from, which is the part that is
+    easy to miss: `sys.modules`, and the ATTRIBUTE the first import bound
+    on the parent package. `from vinga_server.simulator import
+    conversation` reads the second when the first is gone, so evicting
+    only the cache leaves the import succeeding anyway.
     """
+    import vinga_server.simulator
+
     _refuses("websockets")(monkeypatch)
+    _refuses("vinga_server.simulator.conversation")(monkeypatch)
+    monkeypatch.delattr(vinga_server.simulator, "conversation", raising=False)
 
 
 def test_the_conversation_verb_without_its_extra_answers_its_own_sentence(

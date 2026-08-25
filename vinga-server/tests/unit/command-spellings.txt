@@ -767,7 +767,8 @@ spikes/2026-08-20-openapi-ts-client/openapi-typescript/generated/api.d.ts:1426  
 spikes/2026-08-20-openapi-ts-client/openapi-typescript/generated/api.d.ts:1452  generated  vinga-server config prompt
 spikes/2026-08-20-openapi-ts-client/openapi-typescript/generated/api.d.ts:1499  generated  vinga-server config status
 spikes/2026-08-20-openapi-ts-client/openapi-typescript/generated/api.d.ts:1512  generated  vinga-server config status
-vinga-server/Dockerfile:137  respell  config list
+vinga-server/Dockerfile:25  respell  vinga simulator
+vinga-server/Dockerfile:143  respell  config list
 vinga-server/README.md:175  respell  vinga-server config provider set asr ears
 vinga-server/README.md:368  respell  vinga-server config provider set tts eleven
 vinga-server/README.md:428  respell  vinga-server config provider set tts
@@ -1054,6 +1055,5 @@ vinga-server/tests/unit/test_mcp_status_reflection.py:112  respell  vinga-server
 vinga-server/tests/unit/test_mcp_status_reflection.py:169  respell  vinga-server config agent preview assistant
 vinga-server/tests/unit/test_onboarding_banner.py:75  respell  vinga-server config ota-url
 vinga-server/tests/unit/test_server_event_pins.py:293  respell  vinga-server config ota-url
-vinga-server/tests/unit/test_simulator_board.py:1  respell  vinga simulator check-in
 vinga-server/tests/unit/test_tools_mcp.py:648  respell  config status
 vinga-server/tests/unit/test_tools_mcp.py:1101  respell  vinga-server config status
