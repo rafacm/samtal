@@ -107,7 +107,8 @@ from vinga_server.config.responses import (
     PendingDevice,
 )
 from vinga_server.config.secrets import MASK, provider_identity
-from vinga_server.config.store import APPLY_LOCATION, addressed, check_transportable
+from vinga_server.config.store import addressed
+from vinga_server.config.transport import APPLY_LOCATION, check_transportable
 from vinga_server.logs import quieted
 
 # Imported like anything else since issue #143 split the onboarding
