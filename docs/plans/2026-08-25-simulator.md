@@ -615,8 +615,10 @@ against the code:
 - **everything below this line is M2's, and M1's table says so of each
   of them.**
 - the websocket handshake with `Authorization`, `Device-Id`, `Client-Id`
-  and `Protocol-Version` (sent because the firmware sends it, and
-  recorded as read by nothing);
+  and `Protocol-Version`. The last is sent because the firmware sends
+  it and **this server reads nothing from it** (`ws.py:89-112`), so no
+  real-server case can prove it was sent; what proves it is the
+  controlled peer of decision 7;
 - the hello exchange, announcing whichever framing version the OTA reply
   named. **The hello is a websocket TEXT frame**, as every JSON control
   message is; `framing.wrap` applies to binary audio and to nothing else
@@ -829,6 +831,35 @@ utterance, an `stt`, `tts` in three states, reply frames, and a clean
 close. The live lane's own case remains the unbound one, which is a real
 outcome and is what its completeness recording holds.
 
+**Two protocol properties need a peer the real server cannot be.** The
+real-server lane proves compatibility, which is the thing that matters
+most and the thing only a real server can say. It cannot prove two
+claims this plan makes. The `Protocol-Version` header is read by nothing
+on the server side, so a conversation that succeeds says nothing about
+whether the header was sent; and every adversarial answer the no-leak
+cases need (a malformed hello, a `tts stop` with no start, a truncated
+binary frame, a close carrying credential-shaped bytes, a returned
+websocket URL with a userinfo in it) is a thing a correct server will
+never do.
+
+So M2 adds a **controlled peer** in `tests/support/`: a websocket
+endpoint that records every handshake header it was given and answers
+whatever the case tells it to. It is not a second server and it makes no
+compatibility claim; it is the instrument the adversarial cases need,
+and the real-server lane stays exactly where it is beside it. The
+handshake header case reads the four headers off the peer's recording,
+which is the only place that fact is observable at all.
+
+**The redirect claim gets a case in the milestone that makes it.** M1's
+capability table advertises that no redirect is followed, and the first
+draft tested it nowhere. M1 adds an HTTP endpoint answering `307` with a
+counted target, and asserts: exactly one request arrives, the target is
+never fetched, no `Location` value appears on any of the four surfaces,
+and the command answers its own fixed refusal and exits 1. A claim in
+the capability table with no case behind it is the failure mode the
+whole honest-capability decision exists to prevent, so this is the
+pattern for every future row: the milestone that claims it tests it.
+
 **The tier lane gains a third environment.** It holds an installed
 environment to the exact recursive closure of `uv.lock` from each tier's
 roots, in both directions. A `sim` extra that no fixture installs would
@@ -1033,6 +1064,9 @@ it.
   the query still after it and the segment still before it. Every
   retained surface is checked for both the segment and the query, which
   is the case a two-string type could not have been given.
+- **The redirect case** of decision 7: a `307` from a counted endpoint,
+  one request made, the target never fetched, no `Location` on any of
+  the four surfaces, the fixed refusal, exit 1.
 - The live lane's new family refusal, its driven row, and the wheel
   lane's driven row.
 - The import inventory widened, deliberately, with the new set written
@@ -1078,8 +1112,12 @@ it.
 - The fixture: `framing.frames` walks it, every packet is non-empty, the
   count and the announced frame duration multiply to the stated
   duration, and the bytes are identical on every machine.
-- **The websocket half's own no-leak inventory**, on the same four
-  surfaces: the device token never printed and never logged; a returned
+- **The controlled peer** of decision 7, and the two things only it can
+  say: the four handshake headers read off its recording, including the
+  `Protocol-Version` no server reads; and every adversarial answer the
+  cases below need, which a correct server will never produce.
+- **The websocket half's own no-leak inventory**, driven against that
+  peer, on the same four surfaces: the device token never printed and never logged; a returned
   websocket URL carrying a userinfo refused and not shown; a `ws://` URL
   returned from an `https://` endpoint refused as a downgrade; a
   malformed server hello answered with a fixed sentence naming no
@@ -1407,6 +1445,22 @@ between alternatives the choice is recorded with its reason.
    frames; add an endpoint answering 307 with a counted target and
    assert one request, no redirect followed, no `Location` printed, and
    only the fixed refusal.
+
+   *Resolution* (this commit): adopted as prescribed, both halves.
+   Decision 7 keeps the real-server conversation lane exactly where it
+   is, as the compatibility claim only a real server can make, and adds
+   a controlled peer in `tests/support/` beside it: a websocket endpoint
+   that records every handshake header and answers whatever a case tells
+   it to. It is named as an instrument rather than a second server, and
+   the paragraph says what only it can prove, the `Protocol-Version`
+   header the server reads nothing from, and every adversarial answer a
+   correct server will never produce. The capability table's handshake
+   row is corrected to say so rather than implying the conversation case
+   proves it. The redirect claim gets its case in the milestone that
+   makes the claim: M1 adds a `307` from a counted endpoint with one
+   request made, the target never fetched, no `Location` on any of the
+   four surfaces, the fixed refusal and exit 1, and the rule is stated
+   for every future row, the milestone that claims it tests it.
 
 9. **P2: the new extra does not join the wheel's real metadata
    inventories.** The plan names a third closure environment and grows
