@@ -2351,28 +2351,52 @@ def _answered() -> str:
     raise ConfigError(problem)
 
 
+# What an empty secret says. Named rather than written at its raise
+# site, because two paths answer with it now: a read that gave nothing,
+# and a terminal that was never read because prompting was disabled.
+SECRET_EMPTY = (
+    "the secret is empty; pipe it in, type it at the prompt, or name the "
+    "variable holding it with --from-env"
+)
+
+
 def _read_secret(args: Invocation) -> str:
     """The secret itself, from a named environment variable or from
     stdin. Never from an argument: arguments land in shell history and
     in the process list. An interactive terminal is read without echo;
-    a pipe or a redirect is read plainly, which is what scripts use."""
+    a pipe or a redirect is read plainly, which is what scripts use.
+
+    `--no-input` does not refuse: what that flag disables is prompting,
+    and a value is still reachable two other ways. What it does at a
+    terminal is answer immediately rather than read, and that is not a
+    third answer but the same one arrived at without hanging first. A
+    terminal is where somebody types, so a terminal with the typing
+    disabled has nothing in it: reading one waits for an end-of-file
+    only a person can send, which is the block `-f -` used to have and
+    the thing the whole prompt rule is about. The value such a read
+    would yield is the empty one, and this is that answer without the
+    wait.
+
+    A destructive verb is refused by the same flag rather than answered,
+    because its confirmation has no other way to be given.
+    """
     if args.from_env:
         secret = os.environ.get(args.from_env, "")
         if not secret:
             raise ConfigError(FROM_ENV_NOT_SET)
         return secret
 
-    if sys.stdin is not None and sys.stdin.isatty() and not args.no_input:
+    at_a_terminal = sys.stdin is not None and sys.stdin.isatty()
+    if at_a_terminal and args.no_input:
+        raise ConfigError(SECRET_EMPTY)
+    if at_a_terminal:
         secret = getpass.getpass("Secret (not echoed): ")
     else:
         secret = _stdin()
     # The trailing newline is the shell's, not the secret's.
     secret = secret.rstrip("\r\n")
     if not secret:
-        raise ConfigError(
-            "the secret is empty; pipe it in, type it at the prompt, or name the "
-            "variable holding it with --from-env"
-        )
+        raise ConfigError(SECRET_EMPTY)
     return secret
 
 
