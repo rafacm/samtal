@@ -38,9 +38,9 @@ Three classes, with the rule each is assigned by:
 
 Four invocation families are recognized, because the grammar is quoted
 under four program words: `vinga-server config` (the checkout and
-in-image spelling), `vinga config` (the docker shim the README's own
-quick start defines), `vinga` (the console script this issue adds), and
-the bare `config <verb>` shorthand prose uses inside backticks.
+in-image spelling), `vinga config` (the docker shim the CLI reference
+defines), `vinga` (the console script this issue adds), and the bare
+`config <verb>` shorthand prose uses inside backticks.
 """
 
 import re
