@@ -1,0 +1,557 @@
+"""`vinga simulator run`'s websocket half, against a peer a case
+controls.
+
+The integration lane drives this against a real vinga-server, which is
+the compatibility claim only a real server can make. This file makes the
+claims a real server cannot be asked for, and that is why it exists
+rather than overlapping:
+
+- the four handshake headers, read off the peer's own recording.
+  `Protocol-Version` is read by NOTHING on the server side, so a
+  conversation that succeeded against a real server would say nothing
+  about whether it was sent;
+- every adversarial answer. A malformed hello, a `tts stop` with no
+  start, a truncated binary frame, a close carrying credential-shaped
+  bytes: a correct server produces none of them, and each is a shape this
+  client has to have a decided answer to;
+- the no-leak inventory of the websocket half, five cases, each planting
+  its own sentinel on all four surfaces.
+
+The utterance is real and the pacing is not. `conversation.sleep` is
+replaced, because the packets are twenty-eight sixty-millisecond frames
+and waiting them out per case would be most of a minute across this file
+for no assertion at all; the pacing itself is asserted once, against that
+same seam, which is the only thing a real sleep would have added.
+"""
+
+import json
+from collections.abc import Iterator
+
+import pytest
+
+from tests.support.config_cli import chain, logged
+from tests.support.peer import SESSION, Recorded, conversing, greet, peer, read_until_listen_stop
+from vinga_server.config.loader import ConfigError
+from vinga_server.protocol import framing
+from vinga_server.protocol.messages import (
+    AudioParams,
+    server_hello,
+    stt_message,
+    tts_message,
+)
+from vinga_server.simulator import board, conversation, utterance
+
+# Nothing here is a real credential, and each is shaped so a substring
+# check for it cannot match by accident. One per field that could carry
+# one, so a leak names its own source.
+DEVICE_TOKEN = "dev-tok-9e42c1-never-a-real-credential"
+
+CLOSE_REASON = "sk-closereason-6b1f22-never-a-real-credential"
+
+HELLO_PLANTED = "sk-hello-3a7d54-never-a-real-credential"
+
+REPLY = ["Yes, I can hear you.", "What would you like?"]
+
+
+@pytest.fixture
+def unpaced(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[float]]:
+    """The pacing seam, held by the case.
+
+    `sleep` is imported into `conversation`, so replacing the module's
+    own name replaces the seam and not the standard library. What every
+    case here gets is the same order of sends with none of the waiting.
+    """
+    slept: list[float] = []
+    monkeypatch.setattr(conversation, "sleep", slept.append)
+    yield slept
+
+
+@pytest.fixture
+def said() -> utterance.Utterance:
+    return utterance.packaged()
+
+
+@pytest.fixture
+def identity() -> board.Identity:
+    return board.Identity.of(board.DEFAULT_MAC)
+
+
+def held(url: str, identity: board.Identity, said: utterance.Utterance, **overrides):
+    """One turn, with the arguments every case shares."""
+    printed: list[str] = []
+    arguments = {
+        "target": url,
+        "token": DEVICE_TOKEN,
+        "identity": identity,
+        "version": 1,
+        "said": said,
+        "say": printed.append,
+    }
+    arguments.update(overrides)
+    reply = conversation.converse(**arguments)
+    return reply, printed
+
+
+# The ordinary turn
+
+
+def test_one_turn_reaches_the_end_of_the_reply(unpaced, identity, said) -> None:
+    """The happy path, and what a verdict is written from: the
+    transcript, the sentences, the reply's audio counted rather than
+    decoded, and where the machine finished."""
+    with peer(conversing(sentences=REPLY, packets=5)) as (url, recorded):
+        reply, printed = held(url, identity, said)
+
+    assert reply.transcript == "Hello, can you hear me?"
+    assert reply.sentences == tuple(REPLY)
+    assert reply.packets == 5
+    assert reply.audio_ms == 5 * AudioParams().frame_duration
+    assert reply.state == conversation.REPLY_COMPLETE
+    assert reply.surprises == ()
+    assert reply.closed == conversation.CLOSE_NAMES[1000]
+    # As they arrived, which is the difference between watching a
+    # conversation and reading a report of one.
+    assert printed == [
+        "heard: Hello, can you hear me?",
+        f"said: {REPLY[0]}",
+        f"said: {REPLY[1]}",
+    ]
+    assert recorded.finished.wait(timeout=10)
+
+
+def test_the_handshake_carries_the_four_headers_the_firmware_sets(
+    unpaced, identity, said
+) -> None:
+    """The claim only this peer can make.
+
+    `Protocol-Version` is read by nothing on the server side, so no
+    real-server case can prove it was sent, and a simulator that stopped
+    sending it would be a simulator no longer doing what a board does.
+    """
+    with peer(conversing(sentences=REPLY)) as (url, recorded):
+        held(url, identity, said)
+
+    assert recorded.headers["authorization"] == f"Bearer {DEVICE_TOKEN}"
+    assert recorded.headers["device-id"] == identity.mac
+    assert recorded.headers["client-id"] == identity.client_id
+    assert recorded.headers["protocol-version"] == "1"
+
+
+def test_the_hello_announces_the_negotiated_version_and_the_packaged_audio(
+    unpaced, identity, said
+) -> None:
+    """What this board says it is: the framing version the check-in reply
+    named, and the rate and packet duration the asset was actually
+    encoded at, read off the asset rather than written twice.
+
+    `features` is empty, which is what says this board publishes no MCP
+    tools of its own, and it is why no `mcp` envelope ever arrives.
+    """
+    with peer(conversing(sentences=REPLY)) as (url, recorded):
+        held(url, identity, said, version=3)
+
+    [hello] = recorded.of_type("hello")
+    assert hello["version"] == 3
+    assert hello["transport"] == "websocket"
+    assert hello["audio_params"]["sample_rate"] == said.sample_rate
+    assert hello["audio_params"]["frame_duration"] == said.frame_duration_ms
+    assert hello["features"] == {}
+
+
+def test_the_utterance_is_bracketed_by_a_manual_listen(unpaced, identity, said) -> None:
+    """Start, then the packets, then stop, and both listens name the mode
+    they listen in: a listen carrying no mode is one the capability table
+    says this simulator does not send."""
+    with peer(conversing(sentences=REPLY)) as (url, recorded):
+        held(url, identity, said)
+
+    start, stop = recorded.of_type("listen")
+    assert (start["state"], start["mode"]) == ("start", conversation.LISTENING_MODE)
+    assert (stop["state"], stop["mode"]) == ("stop", conversation.LISTENING_MODE)
+    assert start["session_id"] == stop["session_id"] == SESSION
+
+
+@pytest.mark.parametrize("version", framing.SUPPORTED_VERSIONS)
+def test_the_packets_go_out_under_the_negotiated_framing(
+    version: int, unpaced, identity, said
+) -> None:
+    """The round trip at all three versions, through the server's own
+    `wrap` on this side and `unwrap` on the peer's.
+
+    The asset is stored as version 2 frames and sent under whatever the
+    session negotiated, which is the whole reason the two are separate
+    facts: at version 1 the packets go out bare.
+    """
+    with peer(conversing(sentences=REPLY)) as (url, recorded):
+        held(url, identity, said, version=version)
+
+    sent = [framing.unwrap(version, frame).payload for frame in recorded.frames]
+    assert tuple(sent) == said.packets
+
+
+def test_the_control_channel_is_text_and_only_audio_is_framed(
+    unpaced, identity, said
+) -> None:
+    """The rule finding 3 of the plan review corrected: every JSON
+    control message is a websocket TEXT frame, and `framing.wrap` reaches
+    audio and nothing else.
+
+    Asserted from both ends: every text frame this side sent parses as a
+    control message, and `wrap` was reached exactly as many times as
+    there are packets in the utterance and not once more.
+
+    The peer sends no reply audio, deliberately. `framing` is one module
+    object, so a peer that wrapped its own frames would be counted here
+    and the assertion would be about the sum of two sides.
+    """
+    wrapped: list[int] = []
+    real = framing.wrap
+
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr(
+            conversation.framing,
+            "wrap",
+            lambda version, payload, **rest: wrapped.append(version) or real(
+                version, payload, **rest
+            ),
+        )
+        with peer(conversing(sentences=REPLY, packets=0)) as (url, recorded):
+            held(url, identity, said)
+
+    assert {message["type"] for message in recorded.messages()} == {"hello", "listen"}
+    assert len(wrapped) == len(said.packets), "wrap was reached for something that is not audio"
+    assert len(recorded.frames) == len(said.packets)
+
+
+def test_the_packets_are_paced_the_way_a_microphone_delivers_them(
+    unpaced, identity, said
+) -> None:
+    """One packet duration between packets, because that is what the
+    endpointer on the other side is measuring. A burst would be the same
+    bytes and not the same utterance."""
+    with peer(conversing(sentences=REPLY)) as (url, _):
+        held(url, identity, said)
+
+    assert unpaced == [said.frame_duration_ms / 1000] * len(said.packets)
+
+
+# The ordering, driven off its happy path
+
+
+def test_a_tts_stop_with_no_start_before_it_advances_nothing(
+    unpaced, identity, said
+) -> None:
+    """The machine's first rule. A stop this side never expected does not
+    end the reply, and it does not vanish either: it is reported by its
+    own name and the state it arrived in."""
+
+    def script(connection, recorded: Recorded) -> None:
+        greet(connection, recorded)
+        read_until_listen_stop(connection, recorded)
+        connection.send(tts_message(SESSION, "stop"))
+        connection.send(tts_message(SESSION, "start"))
+        connection.send(tts_message(SESSION, "sentence_start", text=REPLY[0]))
+        connection.send(tts_message(SESSION, "stop"))
+
+    with peer(script) as (url, _):
+        reply, _ = held(url, identity, said)
+
+    assert reply.state == conversation.REPLY_COMPLETE
+    assert reply.sentences == (REPLY[0],)
+    assert reply.surprises == (f"tts stop arrived while {conversation.AWAITING_REPLY}",)
+
+
+def test_a_transcript_after_the_reply_completed_advances_nothing(
+    unpaced, identity, said
+) -> None:
+    """The reply is over when `tts stop` says so, and the read loop stops
+    there, so an `stt` sent after it never reaches this side at all. What
+    this asserts is that the state is what ended the reading, not a
+    guess about what the peer stopped sending."""
+
+    def script(connection, recorded: Recorded) -> None:
+        greet(connection, recorded)
+        read_until_listen_stop(connection, recorded)
+        connection.send(tts_message(SESSION, "start"))
+        connection.send(tts_message(SESSION, "stop"))
+        connection.send(stt_message(SESSION, "said after the reply ended"))
+
+    with peer(script) as (url, _):
+        reply, printed = held(url, identity, said)
+
+    assert reply.state == conversation.REPLY_COMPLETE
+    assert reply.transcript == ""
+    assert printed == []
+
+
+def test_a_binary_frame_before_the_hello_advances_nothing(unpaced, identity, said) -> None:
+    """Audio arriving where a hello is expected. Reported, and the hello
+    that follows it still lands, which is what "advances nothing" has to
+    mean to be worth saying."""
+
+    def script(connection, recorded: Recorded) -> None:
+        received = connection.recv()
+        recorded.texts.append(received)
+        connection.send(framing.wrap(1, b"audio before anything"))
+        connection.send(server_hello(SESSION, AudioParams()))
+        read_until_listen_stop(connection, recorded)
+        connection.send(tts_message(SESSION, "start"))
+        connection.send(tts_message(SESSION, "stop"))
+
+    with peer(script) as (url, _):
+        reply, _ = held(url, identity, said)
+
+    assert reply.state == conversation.REPLY_COMPLETE
+    assert reply.surprises == (f"audio arrived while {conversation.HELLO_SENT}",)
+
+
+def test_a_frame_that_does_not_match_the_framing_is_reported_not_counted(
+    unpaced, identity, said
+) -> None:
+    """A truncated frame under a negotiated version 2: it fails the
+    server's own `unwrap`, so it is a surprise rather than a number added
+    to the reply's size."""
+
+    def script(connection, recorded: Recorded) -> None:
+        greet(connection, recorded)
+        read_until_listen_stop(connection, recorded)
+        connection.send(tts_message(SESSION, "start"))
+        connection.send(framing.wrap(2, b"a whole packet"))
+        connection.send(b"\x00\x02\x00")
+        connection.send(tts_message(SESSION, "stop"))
+
+    with peer(script) as (url, _):
+        reply, _ = held(url, identity, said, version=2)
+
+    assert reply.packets == 1
+    assert reply.audio_bytes == len(b"a whole packet")
+    assert reply.surprises == (
+        "a binary frame that does not match the negotiated framing arrived while "
+        f"{conversation.SPEAKING}",
+    )
+
+
+def test_a_message_of_a_type_this_client_does_not_model_is_named_not_quoted(
+    unpaced, identity, said
+) -> None:
+    """A server that grew an `llm` message. Reported as unmodelled, and
+    the type is NOT repeated: `UnknownMessage.type` is a string the peer
+    wrote."""
+
+    def script(connection, recorded: Recorded) -> None:
+        greet(connection, recorded)
+        read_until_listen_stop(connection, recorded)
+        connection.send(json.dumps({"type": HELLO_PLANTED, "emotion": "happy"}))
+        connection.send(tts_message(SESSION, "start"))
+        connection.send(tts_message(SESSION, "stop"))
+
+    with peer(script) as (url, _):
+        reply, _ = held(url, identity, said)
+
+    assert reply.state == conversation.REPLY_COMPLETE
+    [surprise] = reply.surprises
+    assert "does not model" in surprise
+    assert HELLO_PLANTED not in surprise
+
+
+def test_the_transitions_are_a_table_rather_than_a_chain() -> None:
+    """The machine held to being one, off the declaration rather than off
+    a run: every state a transition names is one of the eight, and every
+    event it names is a message this side classifies or audio."""
+    for (state, _), moved in conversation.TRANSITIONS.items():
+        assert state in conversation.STATES
+        assert moved in conversation.STATES
+    assert conversation.TRANSITIONS[(conversation.SPEAKING, "tts stop")] == (
+        conversation.REPLY_COMPLETE
+    )
+    # Nothing may be read in `listening`: this side is sending there, and
+    # a machine that accepted a reply mid-utterance would have no order
+    # at all.
+    assert not any(state == conversation.LISTENING for state, _ in conversation.TRANSITIONS)
+
+
+# What every wait is bounded by
+
+
+def test_every_wait_carries_the_bound_the_plan_named() -> None:
+    """The bounds table, asserted against the reasons rather than against
+    the code that implements them.
+
+    The open and the hello are the SERVER's own hello window, read from
+    the module that declares it: the far side gives up there, so waiting
+    longer learns nothing. The reply's is local, because a model and a
+    text-to-speech engine have no bound this client can compute.
+    """
+    from vinga_server.device.watchdog import HELLO_TIMEOUT_S
+
+    assert conversation.OPEN_TIMEOUT_S == HELLO_TIMEOUT_S
+    assert conversation.HELLO_TIMEOUT == HELLO_TIMEOUT_S
+    assert 0 < conversation.REPLY_CEILING_S <= 120.0
+    assert 0 < conversation.CLOSE_TIMEOUT_S
+
+
+def test_a_peer_that_never_answers_the_hello_gives_up_at_the_bound(
+    unpaced, identity, said, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A socket that accepts and then says nothing. Bounded, and answered
+    by the fixed sentence rather than by a wait a person watches."""
+    monkeypatch.setattr(conversation, "HELLO_TIMEOUT", 0.2)
+
+    def script(connection, recorded: Recorded) -> None:
+        recorded.finished.wait(timeout=5)
+
+    with peer(script) as (url, _), pytest.raises(ConfigError) as refused:
+        held(url, identity, said)
+
+    assert str(refused.value) == conversation.NO_HELLO
+
+
+def test_a_reply_that_never_ends_gives_up_at_the_ceiling(
+    unpaced, identity, said, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A `tts start` with no stop after it. The bound is on the whole
+    reply rather than per message, because what a person is waiting for
+    is the reply and a server sending a sentence a second forever would
+    satisfy any per-message bound."""
+    monkeypatch.setattr(conversation, "REPLY_CEILING_S", 0.3)
+
+    def script(connection, recorded: Recorded) -> None:
+        greet(connection, recorded)
+        read_until_listen_stop(connection, recorded)
+        connection.send(tts_message(SESSION, "start"))
+        recorded.finished.wait(timeout=5)
+
+    with peer(script) as (url, _), pytest.raises(ConfigError) as refused:
+        held(url, identity, said)
+
+    assert str(refused.value) == conversation.NO_REPLY
+
+
+# The websocket half's no-leak inventory
+#
+# Five cases, one sentinel each, on the four surfaces the rest of this
+# suite uses: stdout, stderr, every log record rendered whole, and the
+# exception chain a walker would find. Two of the five are about the
+# address the reply named and are driven through the command in
+# `test_simulator_board.py`, where the check-in's answer is a case's to
+# write; the three here are about the socket itself.
+
+
+def test_the_device_token_reaches_no_surface_at_all(
+    unpaced,
+    identity,
+    said,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The credential nobody typed. It is on the handshake, so the peer
+    has it and this side has it, and neither is a reason for it to be
+    printed or logged.
+
+    The log surface is the one that matters here: `websockets` narrates
+    its connections, and what it has to say includes the request's
+    headers.
+    """
+    with caplog.at_level(0):
+        with peer(conversing(sentences=REPLY)) as (url, recorded):
+            held(url, identity, said)
+
+    captured = capsys.readouterr()
+    assert recorded.headers["authorization"] == f"Bearer {DEVICE_TOKEN}"
+    for surface in (captured.out, captured.err, logged(caplog)):
+        assert DEVICE_TOKEN not in surface
+
+
+def test_a_malformed_server_hello_is_refused_without_quoting_a_field(
+    unpaced,
+    identity,
+    said,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A hello with no session id, carrying a credential-shaped value
+    where a client would look for one.
+
+    There is no session to speak in, so this is a refusal rather than a
+    surprise to note and go on from, and the sentence names no field and
+    quotes nothing: what arrived is whatever that address returned.
+    """
+    def script(connection, recorded: Recorded) -> None:
+        recorded.texts.append(connection.recv())
+        connection.send(json.dumps({"type": "hello", "session_id": [HELLO_PLANTED]}))
+        recorded.finished.wait(timeout=5)
+
+    with caplog.at_level(0):
+        with peer(script) as (url, _), pytest.raises(ConfigError) as refused:
+            held(url, identity, said)
+
+    assert str(refused.value) == conversation.BAD_HELLO
+    captured = capsys.readouterr()
+    surfaces = (captured.out, captured.err, logged(caplog), chain(refused.value))
+    for surface in surfaces:
+        assert HELLO_PLANTED not in surface
+    assert refused.value.__cause__ is None and refused.value.__context__ is None
+
+
+def test_a_peer_close_reason_is_read_and_never_relayed(
+    unpaced,
+    identity,
+    said,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A close carrying credential-shaped bytes.
+
+    The code is looked up in a closed set and reported in this side's own
+    words; the reason is arbitrary far-side prose and is dropped. A close
+    code outside the set is reported as outside it, without the number.
+    """
+    def script(connection, recorded: Recorded) -> None:
+        greet(connection, recorded)
+        read_until_listen_stop(connection, recorded)
+        connection.send(tts_message(SESSION, "start"))
+        connection.send(tts_message(SESSION, "stop"))
+        connection.close(code=4001, reason=CLOSE_REASON)
+
+    with caplog.at_level(0):
+        with peer(script) as (url, _):
+            reply, _ = held(url, identity, said)
+
+    assert reply.closed == conversation.UNKNOWN_CLOSE
+    assert "4001" not in reply.closed
+    captured = capsys.readouterr()
+    for surface in (captured.out, captured.err, logged(caplog), reply.closed):
+        assert CLOSE_REASON not in surface
+
+
+def test_a_handshake_the_peer_refuses_names_a_class_and_nothing_else(
+    unpaced, identity, said, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The refusal a bad token produces against a real server, driven
+    here against a port nothing is listening on.
+
+    What may be said is the exception's class. The library puts the URI
+    into its exceptions and a refused upgrade carries the peer's own
+    status line, and neither is this side's to repeat: the address is
+    what a device token would be sent to.
+    """
+    with caplog.at_level(0), pytest.raises(ConfigError) as refused:
+        held("ws://127.0.0.1:9/xiaozhi/v1/", identity, said)
+
+    assert str(refused.value).startswith("cannot open a conversation with ")
+    assert "127.0.0.1:9" not in str(refused.value)
+    assert DEVICE_TOKEN not in str(refused.value) + logged(caplog) + chain(refused.value)
+    assert refused.value.__cause__ is None and refused.value.__context__ is None
+
+
+def test_the_refusals_of_this_module_are_built_rather_than_formatted() -> None:
+    """The two that take a value take a CLASS NAME and nothing else, and
+    the rest are constants. A sentence assembled from a peer's own text
+    would pass every case above on the day it was written and leak on the
+    first connection that carried something else."""
+    for sentence in (conversation.NO_HELLO, conversation.BAD_HELLO, conversation.NO_REPLY):
+        assert "{" not in sentence and "%s" not in sentence
+    for built in (conversation.cannot_open("SomeError"), conversation.cannot_speak("SomeError")):
+        assert "SomeError" in built
+    for name in conversation.CLOSE_NAMES.values():
+        assert "{" not in name and "%s" not in name

@@ -1,4 +1,8 @@
-"""`vinga simulator check-in`, against a far side a case controls.
+"""The simulator's DEVICE-SIDE half, against a far side a case controls.
+
+Both verbs, because both make the same check-in and read the same reply;
+`run`'s own section is at the foot of this file, and what is in it is
+what belongs to `run` alone.
 
 The live lane drives this command against a real server, which is the
 compatibility claim only a real server can make. It cannot make any of
@@ -927,3 +931,99 @@ def test_a_poll_that_spends_the_ceiling_ends_the_burst(
     assert len(polls) == 1
     assert stopped_clock.slept == []
     assert capsys.readouterr().err.splitlines()[-1] == cli.NOT_ADMITTED_YET
+
+
+# The other verb, and the two no-leak cases only its ANSWER can produce
+#
+# `simulator run` is `check-in` plus a socket, so everything above is its
+# too. What is here is what belongs to `run` alone: the states that are a
+# report for one verb and a refusal for the other, and the two rules
+# about the address the reply named, which decide where a device token
+# would be sent and are therefore refusals before any socket opens.
+
+
+def test_the_conversation_verb_refuses_a_board_that_may_not_speak(
+    run, far_side, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The one place the two verbs disagree about the same reply.
+
+    `check-in` reports these two states and exits 0, because reporting
+    the state a board is in IS the answer. `run` was asked to hold a
+    conversation and cannot, so the same replies are a refusal here.
+    """
+    for answer in (answering(body=activating()), answering(body=unwelcome())):
+        far_side(answer)
+
+        assert run("simulator", "run", URL) == 1
+
+        assert capsys.readouterr().err.strip() == cli.CANNOT_CONVERSE
+
+
+def test_the_conversation_verb_opens_no_socket_to_an_address_with_a_credential_in_it(
+    run, far_side, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
+) -> None:
+    """A reply naming a websocket URL with a password written into it.
+
+    Refused before anything is opened, and the address never printed. The
+    stakes are the reason: this client is holding a device token, and the
+    URL a reply names is what decides where that token goes. A client
+    that connected anyway would be the thing that published the
+    credential in the URL.
+    """
+    far_side(answering(body=admitted(url=f"wss://board:{PASTED}@voice.example/xiaozhi/v1/")))
+    with caplog.at_level(logging.DEBUG):
+        assert run("simulator", "run", URL) == 1
+
+    captured = capsys.readouterr()
+    assert captured.err.strip() == board.UNUSABLE_WEBSOCKET
+    for surface in (captured.out, captured.err, logged(caplog)):
+        assert PASTED not in surface
+        assert DEVICE_TOKEN not in surface
+
+
+def test_the_conversation_verb_refuses_a_downgrade_from_the_endpoint_it_reached(
+    run, far_side, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
+) -> None:
+    """An `https://` check-in answering with a plain `ws://` address.
+
+    The TLS-proxy misconfiguration the doctor already calls out, and here
+    it is a refusal rather than a diagnosis: a device token crossing a
+    plain socket from behind TLS is the same mistake the configuration
+    client has no flag to make. The address this lane is given is
+    `https://`, which is what makes the rule apply at all.
+    """
+    plain = f"ws://voice.example/xiaozhi/v1/?s={PASTED}"
+    far_side(answering(body=admitted(url=plain)))
+    with caplog.at_level(logging.DEBUG):
+        assert run("simulator", "run", URL) == 1
+
+    captured = capsys.readouterr()
+    assert captured.err.strip() == board.UNUSABLE_WEBSOCKET
+    for surface in (captured.out, captured.err, logged(caplog)):
+        assert PASTED not in surface
+        assert DEVICE_TOKEN not in surface
+
+
+def test_the_conversation_verb_reads_no_api_token_without_a_claim(
+    run, far_side, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The two credentials kept distinct, asserted for the second verb
+    the only way that means anything: with the operator-side one absent
+    from the environment.
+
+    The command still fails, because the far side here admits the board
+    and there is no socket at the address it named. What matters is which
+    refusal it fails with: a command that had read the API secret would
+    name the variable instead.
+    """
+    monkeypatch.delenv(API_SECRET_ENV, raising=False)
+    # A loopback port nothing listens on, so the socket is refused at
+    # once: a hostname would put a DNS lookup between this case and its
+    # assertion, and what is being asserted is not the network.
+    far_side(answering(body=admitted(url="wss://127.0.0.1:9/xiaozhi/v1/")))
+
+    assert run("simulator", "run", URL) == 1
+
+    said = capsys.readouterr().err
+    assert API_SECRET_ENV not in said
+    assert said.strip().startswith("cannot open a conversation with ")
