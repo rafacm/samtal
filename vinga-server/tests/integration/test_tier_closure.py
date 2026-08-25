@@ -11,6 +11,12 @@ exercised here:
   it was given; deriving one is the server's half and refuses;
 - the **server** door, which is the image build: the same project with
   `[serve]`, which must boot;
+- the **simulator** door, which is a person trying vinga with no
+  hardware: the same project with `[sim]`, which must be exactly the
+  client closure plus one distribution and must ANSWER the gated verb
+  rather than refuse it. That is the other half of the gate the client
+  door proves closed, and it is the only place `simulator run` is driven
+  from an installed tier;
 - the **contributor** door, which is `cd vinga-server && uv sync`: the
   project with its default groups, which must yield a runnable server
   with no new flags. It is the one door a mistake in is invisible to
@@ -66,7 +72,7 @@ import pytest
 from packaging.markers import Marker
 
 from tests.support.config_cli import registered
-from tests.support.tiers import SERVE_MODULES, declared
+from tests.support.tiers import SERVE_MODULES, SIM_MODULES, declared
 from vinga_server.config import cli
 
 PROJECT = Path(__file__).resolve().parents[2]
@@ -88,8 +94,8 @@ GATED = frozenset({("openapi",), ("ota-url",)})
 
 
 @pytest.fixture(scope="module")
-def tiers() -> tuple[set[str], set[str]]:
-    """The two tiers' DIRECT dependencies, read off `pyproject.toml`.
+def tiers() -> tuple[set[str], set[str], set[str]]:
+    """The three tiers' DIRECT dependencies, read off `pyproject.toml`.
 
     The independent oracle, kept beside the lock closure below rather
     than derived from it, so a closure computed from a lock this
@@ -262,6 +268,13 @@ def serve_env(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return _synced(tmp_path_factory.mktemp("serve") / "venv", "--extra", "serve")
 
 
+@pytest.fixture(scope="module")
+def sim_env(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The no-hardware door: the same project with `[sim]` and nothing
+    else, which is what a person trying vinga without a board installs."""
+    return _synced(tmp_path_factory.mktemp("sim") / "venv", "--extra", "sim")
+
+
 def _installed(python: Path) -> set[str]:
     """Every distribution the environment holds, as it reports itself."""
     finished = subprocess.run(
@@ -366,35 +379,57 @@ def test_a_distribution_nobody_declared_would_turn_this_lane_red(
 
 
 def test_the_client_install_carries_every_client_dependency(
-    client_env: Path, tiers: tuple[set[str], set[str]]
+    client_env: Path, tiers: tuple[set[str], set[str], set[str]]
 ) -> None:
     """The independent oracle: the six names written by hand in
     `pyproject.toml`, checked against the environment without going
     through the lock at all."""
-    client, _ = tiers
+    client, _, _ = tiers
     assert len(client) == 6, client
     assert client <= _installed(client_env)
 
 
 def test_the_client_install_carries_no_serve_distribution(
-    client_env: Path, tiers: tuple[set[str], set[str]]
+    client_env: Path, tiers: tuple[set[str], set[str], set[str]]
 ) -> None:
     """And the ten, by name. Implied by the exact comparison above and
     kept anyway: this is the sentence the milestone claims, and a
     reader of a failure should not have to diff two closures to see
     that FastAPI came back."""
-    _, serve = tiers
+    _, serve, _ = tiers
     assert len(serve) == 10, serve
     assert serve & _installed(client_env) == set()
 
 
+def test_the_client_install_carries_no_websocket_client(
+    client_env: Path, tiers: tuple[set[str], set[str], set[str]]
+) -> None:
+    """The negative half the `sim` extra needs, in both the forms the
+    serve tier gets it in: absent as a distribution and absent to the
+    interpreter.
+
+    The second is not the first said twice. `websockets` is the one
+    distribution in this project that arrives transitively as well as
+    directly, through `uvicorn[standard]`, so a tiering mistake here
+    would show up as an importable module rather than as a declared one.
+    """
+    _, _, sim = tiers
+    assert len(sim) == 1, sim
+    assert set(SIM_MODULES) == sim, "the import-name map has drifted from the tier"
+    assert sim & _installed(client_env) == set()
+
+    for module in sorted(SIM_MODULES.values()):
+        finished = _ran(client_env, "python", "-c", f"import {module}")
+        assert finished.returncode != 0, f"{module} is importable from the client install"
+
+
 def test_the_serve_modules_are_not_importable_from_the_client_install(
-    client_env: Path, tiers: tuple[set[str], set[str]]
+    client_env: Path, tiers: tuple[set[str], set[str], set[str]]
 ) -> None:
     """And the same question asked of the interpreter, because a
     distribution can be absent from the metadata while its module is
     importable through something else that vendored it."""
-    _, serve = tiers
+    _, serve, _ = tiers
     assert set(SERVE_MODULES) == serve, "the import-name map has drifted from the tier"
 
     for module in sorted(SERVE_MODULES.values()):
@@ -543,9 +578,9 @@ def test_the_gated_pair_is_what_the_table_says_it_is() -> None:
 
 
 def test_the_serve_install_carries_both_tiers(
-    serve_env: Path, tiers: tuple[set[str], set[str]]
+    serve_env: Path, tiers: tuple[set[str], set[str], set[str]]
 ) -> None:
-    client, serve = tiers
+    client, serve, _ = tiers
     assert client | serve <= _installed(serve_env)
 
 
@@ -590,6 +625,118 @@ def test_the_client_install_cannot_be_asked_to_serve(client_env: Path) -> None:
     assert "Traceback" not in finished.stderr
 
 
+# The simulator tier
+#
+# The third door, and the only one where a GATED command is proven to
+# work rather than to refuse. The client tier says `simulator run` cannot
+# run and says so in a sentence; this says the extra is what it needed.
+
+
+def test_the_sim_install_is_exactly_the_client_closure_plus_one(
+    sim_env: Path, locked: dict[str, dict[str, object]], tiers: tuple[set[str], set[str], set[str]]
+) -> None:
+    """Exactly, both ways, and against two oracles rather than one.
+
+    The lock's own closure for `[sim]` is the comparison; the sentence
+    the extra claims is checked beside it, which is that this tier is the
+    client tier and one distribution. A `sim` extra that grew a
+    dependency would satisfy the first and fail the second, and that is
+    the whole reason for choosing a distribution with an empty closure.
+    """
+    environment = _marker_environment(sim_env)
+    expected = _tier_closure(locked, environment, "sim")
+    _, _, sim = tiers
+
+    assert _installed(sim_env) == expected
+    assert expected == _tier_closure(locked, environment) | sim
+
+
+def test_a_distribution_nobody_declared_would_turn_the_sim_lane_red(
+    sim_env: Path, locked: dict[str, dict[str, object]]
+) -> None:
+    """The bite, on the tier this milestone added, because a comparison
+    is only worth what it rejects."""
+    expected = _tier_closure(locked, _marker_environment(sim_env), "sim")
+    installed = _installed(sim_env)
+
+    assert installed != expected | {"a-transitive-distribution-nobody-declared"}
+    assert installed != expected - {"websockets"}
+    assert installed == expected
+
+
+def test_the_sim_install_carries_no_serve_distribution(
+    sim_env: Path, tiers: tuple[set[str], set[str], set[str]]
+) -> None:
+    """The extra is not a way into the server half. Implied by the exact
+    comparison above and kept anyway, because it is the sentence the
+    tiering claims: trying vinga without hardware must not mean
+    installing a server."""
+    _, serve, _ = tiers
+    assert serve & _installed(sim_env) == set()
+
+    for module in sorted(SERVE_MODULES.values()):
+        finished = _ran(sim_env, "python", "-c", f"import {module}")
+        assert finished.returncode != 0, f"{module} is importable from the sim install"
+
+
+def test_the_conversation_verb_answers_from_the_sim_install(sim_env: Path) -> None:
+    """The other side of the client tier's gate, driven for real.
+
+    Pointed at a port nothing listens on, so the answer is the check-in's
+    transport refusal: the gate is past, the extra was there, and what
+    stopped it is the network rather than the packaging. Anything else
+    and this would be `--help` again, which proves nothing about a
+    command whose import sits inside its own arm.
+    """
+    finished = _ran(sim_env, "vinga", "simulator", "run", "http://127.0.0.1:9/x/ABCDEFGH/")
+
+    assert finished.returncode == 1, (finished.stdout, finished.stderr)
+    assert cli.NEEDS_THE_SIM_EXTRA not in finished.stderr
+    assert "cannot reach" in finished.stderr, finished.stderr
+    assert "Traceback" not in finished.stderr
+
+
+def test_the_conversation_verb_refuses_from_the_client_install(client_env: Path) -> None:
+    """And the gate itself, from the tier that does not have the extra.
+
+    Run rather than imported, which is the whole point of naming it: the
+    `websockets` import sits inside `run`'s own arm, so importing `cli`
+    would have passed a broken one in either direction. The address is
+    the same one the case above uses, and nothing reaches it: the gate
+    fires before any request goes out.
+    """
+    finished = _ran(client_env, "vinga", "simulator", "run", "http://127.0.0.1:9/x/ABCDEFGH/")
+
+    assert finished.returncode == 1, (finished.stdout, finished.stderr)
+    assert finished.stderr.strip() == cli.NEEDS_THE_SIM_EXTRA
+    assert finished.stdout == ""
+    assert "Traceback" not in finished.stderr
+
+
+def test_the_packaged_utterance_arrives_in_an_installed_tier(sim_env: Path) -> None:
+    """The asset, proven present where a checkout cannot say anything
+    about it.
+
+    `simulator run` sends a file the wheel has to carry, and a source
+    tree makes that file readable whether it was packaged or not. This
+    reads it through the same function the command reads it through, in
+    an environment built from the declaration.
+    """
+    finished = _ran(
+        sim_env,
+        "python",
+        "-c",
+        "from vinga_server.simulator.utterance import packaged;"
+        "said = packaged();"
+        "print(len(said.packets), said.sample_rate, said.frame_duration_ms)",
+    )
+
+    assert finished.returncode == 0, finished.stderr
+    packets, rate, duration = (int(part) for part in finished.stdout.split())
+    assert packets > 0
+    assert (rate, duration) == (16000, 60)
+
+
 # The contributor door
 
 
@@ -618,7 +765,7 @@ def synced(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
 
 
 def test_a_plain_sync_still_yields_a_runnable_server(
-    synced: Path, tiers: tuple[set[str], set[str]]
+    synced: Path, tiers: tuple[set[str], set[str], set[str]]
 ) -> None:
     """The contributor door, which is the one this milestone could have
     broken silently.
@@ -629,8 +776,10 @@ def test_a_plain_sync_still_yields_a_runnable_server(
     So the whole serve tier is asserted present, and the entry point is
     asked to serve, which is the shape a contributor meets.
     """
-    _, serve = tiers
-    assert serve <= _installed(synced)
+    _, serve, sim = tiers
+    assert serve | sim <= _installed(synced), (
+        "a plain `uv sync` stopped carrying a shipped extra, which no other lane names"
+    )
 
     finished = _ran(synced, "vinga-server")
 
@@ -652,6 +801,8 @@ def test_the_sync_command_in_agents_md_is_the_one_that_is_proven() -> None:
     assert "\nuv sync  " in commands
     assert "uv sync --extra serve" not in commands
     assert "[serve]" not in commands
+    assert "[sim]" not in commands
+    assert "[serve,sim]" not in commands
 
 
 if __name__ == "__main__":  # pragma: no cover - a hand run of one lane

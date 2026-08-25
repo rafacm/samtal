@@ -317,6 +317,11 @@ jobs:
           # installs bare on purpose is the tier closure, which asserts
           # the opposite of this and would otherwise be testing the same
           # configuration under a different name.
+          #
+          # `[sim]` is not named here and has nothing to do with this
+          # step: it carries a websocket client and no migration. The
+          # tier closure lane is where that extra gets an environment of
+          # its own.
           uv pip install --python "$RUNNER_TEMP/wheel-venv/bin/python" \
             "$(echo "$RUNNER_TEMP"/dist/*.whl)[serve]"
           mkdir -p "$RUNNER_TEMP/wheel-run"
