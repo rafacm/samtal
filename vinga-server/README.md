@@ -1768,7 +1768,11 @@ applications, and `server.ota_path` refuses a path under `/api/`: the
 OTA route is registered before the API is mounted, so it would be found
 first and would answer a request the token gate never saw.
 
-**Fully local is checked, not hoped for.** Every provider type declares
+**Fully local is checked, not hoped for.** This section is how the
+server keeps
+[the first-class local deployment](../docs/architecture/product-promises.md#a-fully-local-deployment-is-first-class),
+which is where the commitment itself is written down.
+Every provider type declares
 whether it sends session data (audio, transcripts, replies) off the
 host, and with `server.local_only: true` the server refuses to boot any
 provider that does, naming the stage and provider. The local engines
@@ -3033,5 +3037,6 @@ bound to devices, MCP tools on both sides, device authentication,
 onboarding by a short URL and an activation code, limits,
 structured logging, and a published multi-arch container image. The v1
 plan and its per-milestone implementation notes live in
-[`docs/plans/`](../docs/plans/); setup notes for a device on your desk are
-in [`../docs/xiaozhi-notes.md`](../docs/xiaozhi-notes.md).
+[`docs/plans/`](../docs/plans/); getting a device on your desk onto it
+is in [`../docs/devices/`](../docs/devices/README.md), and the wire it
+speaks is in [`../docs/xiaozhi-notes.md`](../docs/xiaozhi-notes.md).
