@@ -152,3 +152,20 @@ document that a later milestone creates is mentioned anywhere.
   resolves as heading anchors rather than being taken on trust.
 - No test lane was run and none was owed: this milestone touches no
   file under `vinga-server/`, `docs/reference/` or `.github/`.
+
+### PR review round
+
+External review of PR #321 (backend codex 0.149.1, model
+`gpt-5.6-terra`, 2026-08-26, self-posted). One finding:
+
+1. **P2: the taxonomy left the PlantUML guide unclassified.** The
+   maintained-maps entry linked `architecture/diagrams/` only
+   through its index, while the plan's classification rule reserves
+   by-directory classification for homogeneous directories, leaving
+   the moved `diagrams/plantuml/README.md` (current rendering and
+   drift guidance) covered by nothing. *Resolution:* the entry now
+   classifies the whole `architecture/diagrams/` tree explicitly:
+   the index, each tool directory's authoring guide, and the
+   diagram sources and renders they describe.
+
+Verdict: mergeable after the listed fix.
