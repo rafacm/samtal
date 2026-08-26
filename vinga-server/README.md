@@ -2924,11 +2924,17 @@ vinga-server serves no firmware images: the reply always tells the
 device it is up to date.
 
 The ceremony above has been driven end to end against a simulated
-device and a served server. The checkpoint on a factory-firmware board,
-which is what turns "the firmware shows the code" from a reading of
-upstream's sources into an observation, is still open; the procedure
-and every serial gotcha are in
-[`../docs/xiaozhi-notes.md`](../docs/xiaozhi-notes.md).
+device and a served server, and validated on hardware on 2026-08-13, on
+both of the boards available: the Waveshare factory AMOLED-2.16
+onboarded from its portal with no cable, and the stock-firmware
+Touch-LCD-1.54 pointed at the same server over USB-written NVS. That is
+what turns "the firmware shows the code" from a reading of upstream's
+sources into an observation, and the evidence is recorded with the
+ceremony in
+[`../docs/xiaozhi-notes.md`](../docs/xiaozhi-notes.md#activation-the-6-digit-code-ceremony).
+The serial procedures a board needs, writing its NVS and reading it
+back, are in
+[`../docs/devices/README.md`](../docs/devices/README.md#writing-the-servers-address-into-nvs).
 
 ## Transports
 
