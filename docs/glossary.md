@@ -206,7 +206,9 @@ default. Answers how the device in front of the user works (from the
 per-board device guide, selected by device model at runtime), what
 vinga's concepts mean, and which voice commands the device itself
 publishes as MCP tools. Knows whether its device has a wake word
-enabled, and that the wake word wakes the device, not an agent.
+enabled, and that the wake word wakes the device, not an agent. See
+[the concepts page](concepts.md#the-help-agent), which names the
+issue this direction belongs to.
 
 ### Idle timeout
 
@@ -389,7 +391,11 @@ decision point (`heard`, `barge_in`, `barge_in_suppressed`,
 `filler_played`, `llm_round`, ...), carrying the numbers behind the
 decision (`speech_ms`, `delay_ms`, a suppression's reason). The
 event stream is what field analysis reconstructs timelines from; a
-capture's event track is the same stream scoped to one session.
+capture's event track is the same stream scoped to one session. The
+few named here are examples: every event, every field one may carry
+and every token a reason admits are in
+[the event schema reference](reference/events.md), generated from
+the declarations.
 
 ### Trailing silence
 

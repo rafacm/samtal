@@ -29,7 +29,10 @@ Every test in the suite probes some step of the same loop. The
 step-by-step teaching tour with diagrams is in
 [system-overview.md](system-overview.md); this is the compact version,
 with the structured event each step emits, since those events are what
-the analysis reads.
+the analysis reads. The events named below are the ones a turn walks
+through; what each one carries, and the whole set of them, is in
+[the event schema reference](reference/events.md), generated from the
+declarations.
 
 1. **Session open.** The device connects over WebSocket and is bound
    to its agents; `session_open` records the agent, the device, and
