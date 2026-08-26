@@ -363,3 +363,50 @@ Two, both additive to what M2 names.
   litmus table's rendering.
 - No test lane was run and none was owed: this milestone touches no
   file under `vinga-server/`, `docs/reference/` or `.github/`.
+
+### PR review round
+
+External review of the branch on PR #322. Two findings, condensed as
+received, each with the resolution that landed for it. Both are about
+the same page and the same failure mode: a promise page stating more
+than its supporting record grants.
+
+1. **P2: the in-place floor claimed a guarantee the ADR withholds.**
+   The bullet ended "Every later revision upgrades a database stamped
+   at or after them", a universal statement about future images. The
+   compatibility-floor ADR grants no such thing before a beta: its
+   second Decision bullet promises reviewed migrations, best-effort
+   from the baseline forward, and says outright that what a
+   pre-release deployment does not get is a promise that no future
+   decision will ever require a reset, only that such a decision
+   would be recorded. The #283 addendum moves where "forward" starts
+   and leaves that bound untouched.
+
+   *Resolution.* Adopted. The bullet now states the current floor as
+   a floor: where "forward" starts today, upgraded best-effort
+   through the reviewed migration every schema change arrives as, and
+   explicitly subject to the recorded-reset licence the page already
+   carried two bullets down, which it now names rather than leaving
+   the reader to reconcile. The beta obligation in the paragraph
+   above is unchanged, because that sentence is the guarantee and is
+   the ADR's own.
+
+2. **P3: the wheel-migration cadence claim overstated.** The promise
+   said the check runs "on every build". The server workflow is
+   path-filtered: pull requests and pushes to `main` run it only when
+   the change touches `vinga-server/`, `docs/reference/` or the
+   workflow file, plus a `workflow_dispatch`. A change touching none
+   of those ships without the step having run.
+
+   *Resolution.* Adopted, in the first of the two forms offered:
+   the sentence now credits the CI wheel-migration step with
+   exercising the fresh-database path whenever the server workflow
+   runs, rather than dropping the claim, because what the step proves
+   is worth stating and only its cadence was wrong.
+
+Both fixes are wording inside one page, in one commit each. Re-read
+against the ADR afterwards: the promise's letter now tracks Decision
+bullets one to three and the 2026-08-26 addendum without adding to
+any of them, and no other sentence on the page makes a cadence or
+future-image claim. The link-and-anchor script was re-run on the
+finished branch: `checked 157 files, 0 failures`.
