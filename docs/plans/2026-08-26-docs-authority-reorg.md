@@ -390,7 +390,7 @@ docs/
 
 - [x] **[M1: One landing page per corpus, and the walkthrough moves
   out.](2026-08-26-docs-authority-reorg-implementation.md#m1-one-landing-page-per-corpus-and-the-walkthrough-moves-out)**
-  (PR TBD) `docs/README.md` gains the authority taxonomy (its seven
+  (PR #321) `docs/README.md` gains the authority taxonomy (its seven
   classes, each with the pages that hold them) while keeping
   audience as the routing concern, and its Architecture section
   collapses to one pointer; `docs/architecture/README.md` becomes
