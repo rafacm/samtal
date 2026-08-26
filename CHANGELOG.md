@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-08-27
+
+### Changed
+
+- **The domain model distinguishes what is built from what is
+  decided** (#310). Every section of `docs/concepts.md` opens with its
+  status, `Implemented today` or `Decided direction`, and each
+  direction names the issue or record that owns it: the cross-session
+  conversation (#190), the durable per-device record (#96), memory
+  scopes (#83) and their move to Postgres (#314), the help agent
+  (#21), and the wake-word-audio question that is still open (#112).
+  A direction nobody owns says so in those words rather than
+  borrowing authority from the page, so the page can be read as a
+  decision record for nothing. Where its semantics had drifted from
+  #190 they now defer to it: a fresh wake starts a fresh thread and
+  resuming an earlier one is always asked for, threads are listable,
+  deletable and covered by retention rather than suspended forever, a
+  long thread is recapped only by consent, and a session and a
+  conversation are two views of one set of turns. Protocol and
+  configuration mechanics are linked to the Xiaozhi notes and the
+  generated references instead of restated.
+- **The generated references point back at the domain model** (#310).
+  `docs/reference/domain-config.md` and
+  `docs/reference/conversations-schema.md` each carry one sentence,
+  written through their generators, sending a reader to
+  `docs/concepts.md` for what the fields and the rows mean to a user.
+  The conversation store's sentence also names the collision its own
+  schema invites: the `conversations` schema holds sessions and
+  turns, and the cross-session conversation is a domain noun that has
+  no table yet.
+
 ## 2026-08-26
 
 ### Changed
