@@ -57,6 +57,22 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   schema invites: the `conversations` schema holds sessions and
   turns, and the cross-session conversation is a domain noun that has
   no table yet.
+- **Every summary now answers to a source** (#310, #313). The audit
+  that closes the reorganization read the root, server and firmware
+  READMEs, `AGENTS.md`, the glossary, the regression suite, the device
+  guides and the generated-reference introductions against the pages
+  that own what they summarize. The summaries that stated a
+  commitment in their own words now link it: thin device and smart
+  server to the guidelines, the first-class local deployment to the
+  promises, the event names in the glossary and the regression suite
+  to the generated event reference. `AGENTS.md`'s description of the
+  protocol notes matches the notes as they now stand and names
+  `docs/README.md`, which is where a page's class is declared. Two
+  generated introductions named a source file under a path the
+  repository does not have, corrected through their generators. No
+  page under `docs/` still routes a reader through
+  `architecture/principles.md` for content, including the two server
+  docstrings that did.
 
 ## 2026-08-26
 
