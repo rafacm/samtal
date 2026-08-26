@@ -6,9 +6,10 @@ conversation runtime as the device edge sees it: audio in, the
 protocol's turn-taking acts, and a lifecycle. `DeviceOutput` is the
 device as a runtime sees it: show text, speak, pace, pause, and call the
 device's own tools. Both are described in device terms, deliberately.
-The test for whether something belongs here is the one on the
-[principles page](../../../docs/architecture/principles.md): would it
-still exist if the backend were a telephone call to a human?
+The test for whether something belongs here is the one the
+device-facing-interface subrule states in
+[the guidelines](../../../docs/architecture/guidelines.md#the-internal-interface-is-device-facing):
+would it still exist if the backend were a telephone call to a human?
 
 What that rules out is the trap this boundary exists to avoid. There is
 no universal conversation interface: nothing here says `commit_audio`,

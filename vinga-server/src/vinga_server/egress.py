@@ -1,7 +1,8 @@
 """The one rule behind the local-first promise (#30, #136).
 
-A fully local deployment is first-class, and the principles page makes
-that a guarantee enforced rather than documented: everything that can
+A fully local deployment is first-class, and the product promise makes
+that a guarantee enforced rather than documented
+(`docs/architecture/product-promises.md`): everything that can
 carry session data off the machine declares whether it does, and
 `server.local_only` refuses at startup to build one that does. The
 enforcement used to exist twice, once in the provider registry and once
