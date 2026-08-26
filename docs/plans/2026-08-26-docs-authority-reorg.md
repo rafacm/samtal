@@ -673,3 +673,35 @@ faithful; resolutions appended per amendment commit.
   boards, and the date, so what the notes have caught up to is a
   stated, bumpable fact. This matches the stock-firmware promise's
   version target (boards in the field, not upstream HEAD).
+
+## Delta review round
+
+Delta re-review of the ten amendments (backend codex 0.149.1, model
+`gpt-5.6-terra`, 2026-08-26, on the amended plan branch). Verdict:
+ready after amendments; seven of ten resolutions verified faithful
+and sufficient, three localized consistency repairs found:
+
+1. **P2: The module layout still labels `product-promises.md` as
+   "identity + the three promises"**, contradicting the finding-1
+   resolution that moved Identity to `guidelines.md`.
+
+   *Resolution.* Fixed; the layout now labels the promises file
+   with the three promises and the guidelines file with identity.
+
+2. **P2: M4 still unconditionally requires "each decided direction
+   citing its owner"**, though design decision 7 defines the
+   no-owner marking for directions that have none.
+
+   *Resolution.* Fixed; M4 now requires an owning record where one
+   exists and decision 7's recorded-here status line otherwise.
+
+3. **P2: Three stale gate references contradict the recorded
+   maintainer decision**: M4 sends the #312 question to the
+   maintainer, M5 permits either structure, and Risks says the
+   gate can stall, though the gate was cleared during the plan
+   round.
+
+   *Resolution.* Fixed; the M4 gate action and the stall risk are
+   removed, and M5 now implements the accepted combined
+   authority-labeled document, naming the upstream currency
+   markers in its body.
