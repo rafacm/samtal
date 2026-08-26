@@ -262,6 +262,14 @@ was written; both outcomes are settled inputs here.
     guidance says it is underway. The broader skill refactor
     review the maintainer asked for stays follow-through after
     M6; only the staleness the reorg itself creates is #313's.
+13. **Every milestone carries its changelog entry.** Each PR
+    appends a dated `### Changed` entry to `CHANGELOG.md` naming
+    what a reader of the documentation now finds moved or split
+    (the authority taxonomy and landing pages in M1, the
+    promises/guidelines split in M2, the guide recuts in M3, the
+    concepts status marking in M4, the protocol-notes
+    reorganization in M5, the summary audit in M6), per the
+    AGENTS.md rule that notable changes update the changelog.
 
 ## The standing review lenses, pre-answered
 
@@ -645,6 +653,10 @@ faithful; resolutions appended per amendment commit.
     all six milestone footprints omit it. Add dated `### Changed`
     entries, at minimum for the authority split, the landing-page
     move, and the protocol-document reorganization.
+
+    *Resolution.* Adopted, wider than asked: new design decision
+    13 gives every milestone its own dated `### Changed` entry in
+    the same PR.
 
 ### Maintainer decisions during the round (2026-08-26)
 
