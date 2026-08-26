@@ -1320,7 +1320,7 @@ PR TBD.
 
 ### What landed
 
-Ten commits.
+Eleven commits.
 
 - **`vinga-server/README.md`,** two summaries pointed at what they
   answer to: the `local_only` section, which is how the server keeps a
@@ -1553,8 +1553,11 @@ docstrings above, and they were outside every earlier census's reach.
   --wait` from this worktree's own root (compose project `wt-m6`) and
   stopped afterwards.
 - **The spelling manifest regenerated, not hand-edited**, with the
-  command its own module documents. Its diff is seventeen line numbers
-  and nothing else.
+  command its own module documents. Its diff is 95 moved line numbers
+  and two added rows, the two drift-check commands this record quotes
+  by name, both classified `historical` by the `docs/plans/` rule. No
+  row removed, none reclassified, verified by comparing the two files'
+  spelling-and-class pairs directly.
 - **The event-name set difference**, computed rather than eyeballed:
   the 56 `### ` sections of `docs/reference/events.md` against the 56
   rows of `vinga-server/README.md`'s Logging index, symmetric
