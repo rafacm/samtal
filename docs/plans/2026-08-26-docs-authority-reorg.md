@@ -188,7 +188,24 @@ was written; both outcomes are settled inputs here.
    `**Implemented today.**` or `**Decided direction**` naming the
    owning issue or decision; claims inside a mixed section carry
    the same marking inline. No tables, no icons, nothing a future
-   editor has to maintain in two places.
+   editor has to maintain in two places. M4 opens by building the
+   owner mapping with tooling (a `gh` sweep over the tracker plus a
+   grep over `docs/adr/` and `docs/features/`) and committing it to
+   the implementation doc before the page is edited. Owners known
+   now: the durable device record (#96), activation (#40), the
+   device guides feeding the help agent (#93), the wake-word-audio
+   open question (#112), the conversation store's implemented
+   session-and-turn records (#120), and the agent-not-persona
+   naming (the 2026-08-12 feature doc). Directions with no
+   accepted owner (expected: the cross-session Conversation
+   entity's semantics, switch-for-the-session, suspend-never-end,
+   clean-switch-by-default, the shared user profile, agent-scoped
+   search, meta-turn recording, users and voiceprints) are marked
+   honestly as `**Decided direction** (recorded on this page,
+   YYYY-MM-DD; no owning issue or decision record yet)`, and the
+   M4 PR enumerates them so the maintainer can adopt or file
+   owners; #311 does not itself become a decision record, and this
+   plan does not mint ADRs for domain semantics.
 8. **The M5 recommendation brought to #312's gate is one combined
    document** with authority-labeled sections (maintained protocol
    facts; validated device procedures; dated field observations;
@@ -463,6 +480,15 @@ faithful; resolutions appended per amendment commit.
    accepted owner exists, either create an accepted decision record
    or mark the claim as unowned proposed direction. #311 cannot
    silently become the decision owner.
+
+   *Resolution.* Adopted, in the marking form: design decision 7
+   now requires M4 to build the owner mapping with tooling before
+   editing, commits the known owners into the plan (#96, #40, #93,
+   #112, #120, the agent-not-persona feature doc), and marks every
+   direction without an accepted owner as recorded-here-with-no-
+   owner, enumerated in the M4 PR for the maintainer to adopt or
+   file. No decision records are minted by a documentation
+   milestone.
 
 3. **P2: The database promise still omits the operational
    compatibility floor.** "Best-effort, forward-only" misses that
