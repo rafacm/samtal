@@ -1,20 +1,108 @@
 # Xiaozhi research notes
 
-Findings from studying the upstream projects and getting a working end-to-end
-demo (2026-08-01). Reference clones live in `vendor/` (not committed):
+What this project learned by reading the upstream xiaozhi projects,
+running them, and putting boards in front of them. It is the entry
+point for anything about the wire between a device and vinga-server.
+
+The page carries four kinds of statement and labels each one, because
+they age differently:
+
+- **Maintained protocol facts** describe the exchange as it stands and
+  are corrected when it moves. Every section below opens by saying
+  that it is one of these, and [Upstream
+  currency](#upstream-currency) says what "as it stands" was last read
+  against.
+- **Dated field observations** are what a board actually did on a named
+  day. They keep their date wherever they appear, including inside a
+  maintained section, where they are the evidence that a fact is more
+  than a reading of the sources.
+- **Historical upstream research** is what an upstream project looked
+  like when it was read. It is not chased as upstream moves: it is
+  labeled with when it was read, and kept because it is why vinga is
+  shaped the way it is.
+- **Licensing evidence** is what the upstream licenses say, and what
+  they cost vinga.
+
+Board-specific behavior is not here. What a particular board does, and
+every procedure that involves the board in front of you, is in
+[the device guides](devices/README.md), which say of every fact whether
+it was read from the board support code, verified in hands-on use, or
+not verified at all. This page keeps what every board running the
+upstream firmware shares, and links the guides for the rest.
+
+Reference clones of the two upstream repositories live in `vendor/`,
+which is not committed. Recreate them with:
 
 ```sh
 git clone --depth 1 https://github.com/78/xiaozhi-esp32.git vendor/xiaozhi-esp32
 git clone --depth 1 https://github.com/xinnan-tech/xiaozhi-esp32-server.git vendor/xiaozhi-esp32-server
 ```
 
-## Device firmware (78/xiaozhi-esp32)
+## On this page
 
-- Board support is compile-time: `main/boards/<vendor>/<board>/`, selected via
-  Kconfig (`Xiaozhi Assistant → Board Type`). Our board:
-  `waveshare/esp32-s3-touch-lcd-1.54` (ST7789 240×240 LCD, CST816S touch,
-  ES8311 codec + ES7210 mic ADC with device-side AEC, 16 MB flash / 8 MB
-  PSRAM).
+- [Upstream currency](#upstream-currency): which upstream commits and
+  which firmware versions the maintained facts were last read against.
+- [The firmware, and the one URL that points it at a
+  server](#the-firmware-and-the-one-url-that-points-it-at-a-server):
+  what every board running upstream's firmware does, and the single
+  entry that decides which server it talks to.
+- [The device to server protocol](#the-device-to-server-protocol): the
+  OTA check-in, the 6-digit activation ceremony, and the WebSocket
+  channel with its message types.
+- [What running stock firmware costs the
+  server](#what-running-stock-firmware-costs-the-server): each
+  constraint the device puts on the server, and the one capability the
+  board already has that vinga does not use yet.
+- [The upstream server, as read on
+  2026-08-01](#the-upstream-server-as-read-on-2026-08-01): the
+  reference deployment the first end-to-end demo ran on.
+- [Licensing notes](#licensing-notes): what the upstream licenses cost
+  vinga.
+
+## Upstream currency
+
+**What the maintained sections were last read against.** The protocol
+facts on this page come from the vendored upstream sources rather than
+from a published specification, so which revision they were read from
+is part of the fact:
+
+| Upstream project | Commit | Clone read |
+| --- | --- | --- |
+| [78/xiaozhi-esp32](https://github.com/78/xiaozhi-esp32) | `dd99da00dc4c89ed4ab07fcec038c03f13f4de50` | 2026-07-29 |
+| [xinnan-tech/xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) | `de45f73efdd24e9343427a56b5d22f857b6bb7a7` | 2026-07-28 |
+
+The firmware actually observed on boards is the other half, and the
+half that matters more: **2.2.4**, the Waveshare factory image on the
+AMOLED-2.16, and **2.4.0**, upstream's prebuilt image on the
+Touch-LCD-1.54, both observed 2026-08-12/13.
+
+Those two together are what "caught up to" means here, and the second
+is the one the stock-firmware promise is read against:
+[its version target](architecture/product-promises.md#stock-xiaozhi-firmware-is-the-compatibility-floor)
+is the firmware running on boards in the field, not upstream's HEAD. A
+newer upstream commit therefore does not by itself make this page
+stale; a board in the field running something these sections were never
+read against does.
+
+Bump this section whenever the vendor clones are re-read or a new
+firmware version is observed on a board, and say what moved with it.
+Re-reading against a recorded commit takes a full clone: the shallow
+clones above fetch today's HEAD and can check out nothing else, so
+`git fetch --unshallow` first.
+
+## The firmware, and the one URL that points it at a server
+
+**Maintained protocol facts**, with the dated field observations that
+are the evidence for two of them. This is what every board running
+upstream's firmware does; which board does what is in
+[the device guides](devices/README.md).
+
+- Board support is compile-time: `main/boards/<vendor>/<board>/`,
+  selected via Kconfig (`Xiaozhi Assistant → Board Type`), so which
+  peripherals, buttons and wake word an image has is settled when it is
+  built. The primary test board's directory is
+  `waveshare/esp32-s3-touch-lcd-1.54`, and what that build turned out
+  to contain is in [its guide](devices/waveshare-esp32-s3-touch-lcd-1.54.md).
 - Mainline requires **ESP-IDF v6.0.x**; releases ship prebuilt merged binaries
   per board, flashable at offset `0x0`:
   `esptool.py --chip esp32s3 write_flash 0x0 merged-binary.bin`.
@@ -39,13 +127,12 @@ git clone --depth 1 https://github.com/xinnan-tech/xiaozhi-esp32-server.git vend
   carries that procedure, and each guide says what its own board's
   portal was observed to carry.
 - **The portal may save the URL without its trailing slash** (or the
-  operator may type it that way), and that is field-observed rather
-  than hypothetical. The device then POSTs to the
-  slashless path; a server that answers with a redirect, even a
-  method-preserving 307, bricks the check-in loop, because the
-  firmware's OTA HttpClient does not follow redirects: the board
-  shows `code=307` and restarts over and over. vinga-server
-  therefore serves the slashless spelling directly on every
+  operator may type it that way), which is field-observed rather than
+  hypothetical. The device then POSTs to the slashless path; a server
+  that answers with a redirect, even a method-preserving 307, bricks the
+  check-in loop, because the firmware's OTA HttpClient does not follow
+  redirects: the board shows `code=307` and restarts over and over.
+  vinga-server therefore serves the slashless spelling directly on every
   device-facing route. A device-facing endpoint can never rely on a
   redirect.
 - **An HTTPS backend needs no firmware certificate work.** The firmware
@@ -67,20 +154,32 @@ git clone --depth 1 https://github.com/xinnan-tech/xiaozhi-esp32-server.git vend
   that involve the board in front of you: writing NVS over USB,
   resetting it, and reading its boot log back.
 
-## Device ↔ server protocol
+## The device to server protocol
+
+**Maintained protocol facts.** This is the half vinga-server
+implements, and the vocabulary the rest of the documentation summarizes
+rather than restates. The dated evidence that each part of it was seen
+on real hardware is kept beside the fact it validates.
+
+### The OTA check-in and what it answers
 
 - Device POSTs system info to the OTA URL (headers `Device-Id` = MAC,
   `Client-Id` = UUID); response JSON contains `websocket {url, token,
   version}` (and/or `mqtt {...}`), optional `firmware {version, url}` and
   optional `activation {...}` (omit it and no activation is ever required).
 - **A successful OTA check does not mean the device is authorised.** A
-  board whose MAC is missing from vinga-server's `devices:` allowlist
-  still gets `200 OK`, with `websocket.token` empty; the refusal comes
-  later, at the WebSocket handshake, as a `403` logged as `auth_rejected`
-  with reason `no_token`. Nothing in the OTA response says the device is
-  unwelcome, so a board that provisions perfectly and then never speaks
-  is this, not a network fault. Treat an empty token as a hard
-  provisioning error rather than connecting anyway. One POST from a
+  board the configuration resolves to no agent still gets `200 OK`, with
+  `websocket.token` empty; the refusal comes later, at the WebSocket
+  handshake, as a `403` logged as `auth_rejected` with reason
+  `no_token`. What the reply says about that depends on onboarding: with
+  the activation ceremony enabled, which is the default, the same reply
+  also carries an `activation` section and the board shows a claim code,
+  so an empty token there is a device waiting to be claimed rather than
+  one turned away. With onboarding off, nothing in the OTA response says
+  the device is unwelcome, so a board that provisions perfectly and then
+  never speaks is this, not a network fault. Treat an empty token with
+  no activation section as a hard provisioning error rather than
+  connecting anyway. One POST from a
   laptop, sending the board's MAC as `Device-Id` and its UUID as
   `Client-Id`, answers the question before touching the hardware. A
   plain `GET` on the same URL returns a human-readable line naming the
@@ -92,13 +191,6 @@ git clone --depth 1 https://github.com/xinnan-tech/xiaozhi-esp32-server.git vend
   `--http1.1` and the `Connection`, `Upgrade` and `Sec-WebSocket-*`
   headers, a `403` from an unauthenticated probe is the success signal:
   the route is alive and device auth is enforced.
-- WebSocket handshake headers: `Authorization: Bearer <token>`,
-  `Protocol-Version`, `Device-Id`, `Client-Id`. Then a JSON `hello` exchange;
-  audio is binary **Opus**, device→server 16 kHz mono 60 ms frames,
-  server→device at the rate announced in the server hello (24 kHz typical).
-- JSON control message types: `hello`, `listen`, `abort`, `tts`, `stt`, `llm`
-  (emotion), `mcp` (tool calls), `system`, `alert`. Documented upstream in
-  `docs/websocket.md` and `docs/mcp-protocol.md`.
 
 ### Activation, the 6-digit code ceremony
 
@@ -108,13 +200,17 @@ Feishu wiki that answers 404 anonymously, and upstream's `docs/` never
 describes the OTA HTTP exchange. Device side: `main/ota.cc` and
 `main/application.cc` in `vendor/xiaozhi-esp32`; server side:
 `OTAController.java` and `DeviceServiceImpl.java` in the manager-api of
-`vendor/xiaozhi-esp32-server`. Issue #40 builds vinga's onboarding on
-this ceremony.
+`vendor/xiaozhi-esp32-server`. Issue #40 built vinga's onboarding on
+this ceremony, and the operator's side of it is in
+[the server README](../vinga-server/README.md#onboarding-a-device).
 
 - The OTA response may carry an optional `activation {message, code,
-  challenge, timeout_ms}` object. Omitting it, which is what
-  vinga-server does today, means no activation is ever required and the
-  device proceeds straight to the websocket.
+  challenge, timeout_ms}` object. Omitting it means no activation is
+  ever required and the device proceeds straight to the websocket,
+  which is what vinga-server does for a device its configuration
+  already resolves to an agent, and for every device when the
+  onboarding ceremony is turned off. A device that resolves to nothing
+  gets the object and shows the code.
 - When it is present, the device shows `message` on screen with the
   activation jingle and speaks `code` digit by digit, each digit an OGG
   clip from the firmware's compiled language assets
@@ -154,7 +250,8 @@ this ceremony.
   the same server over USB-written NVS, ran the identical ceremony
   through the restart flow (its agent was created after boot). The one
   firmware behavior the sdk-based test simulator could not have shown is
-  the redirect intolerance recorded in the captive-portal bullet above;
+  the redirect intolerance recorded
+  [in the firmware section above](#the-firmware-and-the-one-url-that-points-it-at-a-server);
   `vinga simulator check-in` can, and does. It follows no redirect at
   all, answers one of its own fixed refusals when it meets one, and its
   own lane asserts that exactly one request is made and the target is
@@ -169,7 +266,21 @@ this ceremony.
   user-only MCP tool `self.assets.set_download_url` plus a reboot, which
   swaps the whole assets bundle and requires hosting one per board.
 
+### The WebSocket channel and its messages
+
+- WebSocket handshake headers: `Authorization: Bearer <token>`,
+  `Protocol-Version`, `Device-Id`, `Client-Id`. Then a JSON `hello` exchange;
+  audio is binary **Opus**, device→server 16 kHz mono 60 ms frames,
+  server→device at the rate announced in the server hello (24 kHz typical).
+- JSON control message types: `hello`, `listen`, `abort`, `tts`, `stt`, `llm`
+  (emotion), `mcp` (tool calls), `system`, `alert`. Documented upstream in
+  `docs/websocket.md` and `docs/mcp-protocol.md`.
+
 ## What running stock firmware costs the server
+
+**Maintained protocol facts**, read as constraints rather than as
+mechanics: each entry below is what the device settles, so the server
+cannot.
 
 vinga-server implements the server half of the protocol above and changes
 nothing about it: the device runs stock xiaozhi firmware, `vinga-esp32/`
@@ -183,76 +294,83 @@ entry is a constraint, the workaround it forced, and what owning the
 firmware would change. Add to it whenever a feature turns out to be shaped
 by the device rather than by the problem.
 
-- **The device owns the listening mode, and the server cannot change it.**
-  `listen` travels device to server only; vinga-server sends none. Manual
-  mode ends an utterance with `listen stop`, auto mode re-arms itself after
-  each `tts stop`, and realtime mode asks once and then streams for the rest
-  of the connection. Barge-in therefore exists only in realtime, because
-  that is the only mode where the microphone is still open during a reply.
-  Owning the firmware would let the mode be a server or per-agent decision
-  instead of a build-time one.
+### The device owns the listening mode, and the server cannot change it
 
-- **Nothing in the firmware ever closes a realtime audio channel.** This is
-  the whole reason for `server.limits.idle_timeout_s`. Worse, the board
-  cannot sleep while an audio channel is open (`CanEnterSleepMode` refuses),
-  so an abandoned realtime conversation keeps the microphone streaming and
-  the board awake until a server-side timer guesses that nobody is there.
-  A device that noticed its own silence would not need the guess.
+`listen` travels device to server only; vinga-server sends none. Manual
+mode ends an utterance with `listen stop`, auto mode re-arms itself after
+each `tts stop`, and realtime mode asks once and then streams for the rest
+of the connection. Barge-in therefore exists only in realtime, because
+that is the only mode where the microphone is still open during a reply.
+Owning the firmware would let the mode be a server or per-agent decision
+instead of a build-time one.
 
-- **Echo cancellation is the device's, and its quality is invisible from
-  here.** How much of the assistant's own voice survives the board's AEC and
-  reaches the endpointer is the number the entire barge-in gate stack is
-  built around: the minimum speech floor, the refractory window, the
-  transcribe-to-confirm step, and the `server.barge_in` off switch for
-  boards that leak too much. It is also why session capture exists at all,
-  since no test lane can produce the number. Owning the firmware means the
-  playback reference is available on the device side, where cancelling it is
-  a signal-processing problem rather than a statistical one.
+### Nothing in the firmware ever closes a realtime audio channel
 
-- **The wake word is spotted on the chip, and the server takes no part in
-  it.** ESP-SR decides on-device, and no server work changes that: the
-  planned English wake word (`wn9_hiesp`) is a custom build and nothing
-  else. The detection itself is not something the server can hear, tune,
-  or substitute for. What the server does get is an after-the-fact report:
-  the firmware sends `listen` `detect` with the fired word in `text`, which
-  vinga-server currently debug-logs (`device/session.py`) and does not
-  retain.
+This is the whole reason for `server.limits.idle_timeout_s`. Worse, the
+board cannot sleep while an audio channel is open (`CanEnterSleepMode`
+refuses), so an abandoned realtime conversation keeps the microphone
+streaming and the board awake until a server-side timer guesses that
+nobody is there. A device that noticed its own silence would not need the
+guess.
 
-  The trigger audio is a build-time question rather than a settled one.
-  `CONFIG_SEND_WAKE_WORD_DATA` defaults to `y` for AFE wake-word builds,
-  and under it `ContinueWakeWordInvoke` drains an Opus-encoded copy of the
-  audio cached around the trigger into `SendAudio` before sending the
-  `detect` report, so such a build does send that span as the
-  conversation's first audio. None of our three boards overrides the flag,
-  and nothing has been observed on the wire from the prebuilt images we
-  actually run, so what those do is open (#112). Earlier versions of this
-  note said flatly that the audio never reaches the server; that was read
-  from the wrong end of this code path.
+### Echo cancellation is the device's, and its quality is invisible from here
 
-- **The device is the MCP server, and discovery is a race.** Tools are
-  fetched in a background task after `hello`, deliberately so, because the
-  conversation must not wait on a board that may never answer. A first
-  utterance that beats discovery runs without device tools; if discovery
-  completes, later utterances have them, possibly only from the second one
-  on. A device that declared its tools in `hello` would remove the race.
+How much of the assistant's own voice survives the board's AEC and reaches
+the endpointer is the number the entire barge-in gate stack is built
+around: the minimum speech floor, the refractory window, the
+transcribe-to-confirm step, and the `server.barge_in` off switch for
+boards that leak too much. It is also why session capture exists at all,
+since no test lane can produce the number. Owning the firmware means the
+playback reference is available on the device side, where cancelling it is
+a signal-processing problem rather than a statistical one.
 
-- **The OTA URL is the only field an operator can put a secret into.**
-  Every request identifies the board by `Device-Id`, a MAC printed on
-  the box and broadcast in the clear in every Wi-Fi frame, and a stock
-  board can present no other credential at its first OTA call. The
-  token issuer therefore has to be protected by the URL path itself,
-  which is why `server.ota_path` carries a long random segment and why
-  onboarding means typing a secret into a captive portal. Activation
-  (#40) changes what an unknown MAC receives, a claim code instead of
-  an empty token, but a bound MAC presented by anyone still gets that
-  device's real token, so the path stays load-bearing. Owning the
-  firmware would let a device hold a real per-device credential
-  instead.
+### The wake word is spotted on the chip, and the server takes no part in it
 
-- **We serve configuration through OTA and never images**, but that is our
-  choice rather than a limit: the update channel is fully built on the
-  device and merely unused. See the next section, which is the one entry
-  here that is an unclaimed capability instead of a constraint.
+ESP-SR decides on-device, and no server work changes that: the planned
+English wake word (`wn9_hiesp`) is a custom build and nothing else. The
+detection itself is not something the server can hear, tune, or substitute
+for. What the server does get is an after-the-fact report: the firmware
+sends `listen` `detect` with the fired word in `text`, which vinga-server
+currently debug-logs (`device/session.py`) and does not retain.
+
+The trigger audio is a build-time question rather than a settled one.
+`CONFIG_SEND_WAKE_WORD_DATA` defaults to `y` for AFE wake-word builds, and
+under it `ContinueWakeWordInvoke` drains an Opus-encoded copy of the audio
+cached around the trigger into `SendAudio` before sending the `detect`
+report, so such a build does send that span as the conversation's first
+audio. None of our three boards overrides the flag, and nothing has been
+observed on the wire from the prebuilt images we actually run, so what
+those do is open (#112). Earlier versions of this note said flatly that
+the audio never reaches the server; that was read from the wrong end of
+this code path.
+
+### The device is the MCP server, and discovery is a race
+
+Tools are fetched in a background task after `hello`, deliberately so,
+because the conversation must not wait on a board that may never answer. A
+first utterance that beats discovery runs without device tools; if
+discovery completes, later utterances have them, possibly only from the
+second one on. A device that declared its tools in `hello` would remove
+the race.
+
+### The OTA URL is the only field an operator can put a secret into
+
+Every request identifies the board by `Device-Id`, a MAC printed on the
+box and broadcast in the clear in every Wi-Fi frame, and a stock board can
+present no other credential at its first OTA call. The token issuer
+therefore has to be protected by the URL path itself, which is why
+`server.ota_path` carries a long random segment and why onboarding means
+typing a secret into a captive portal. Activation (#40) changes what an
+unknown MAC receives, a claim code instead of an empty token, but a bound
+MAC presented by anyone still gets that device's real token, so the path
+stays load-bearing. Owning the firmware would let a device hold a real
+per-device credential instead.
+
+### We serve configuration through OTA and never images
+
+That is our choice rather than a limit: the update channel is fully
+built on the device and merely unused. See the next section, which is the
+one entry here that is an unclaimed capability instead of a constraint.
 
 ### Updating firmware over the air, once there is firmware
 
@@ -304,7 +422,16 @@ and hosting, not plumbing.
   and turn on Secure Boot v2 with signed images before a device leaves a
   network you control.
 
-## Server (xinnan-tech/xiaozhi-esp32-server)
+## The upstream server, as read on 2026-08-01
+
+**Historical upstream research**, and the only section here that is not
+maintained. This is xinnan-tech/xiaozhi-esp32-server as it was read and
+run for the first end-to-end demo on 2026-08-01, at the commit
+[Upstream currency](#upstream-currency) records. vinga-server is a
+separate implementation and does not track it, so nothing here is
+corrected as that project moves: it is kept because it is the reference
+deployment vinga's own behavior was first checked against, and because
+its configuration is what a reader comparing the two projects meets.
 
 - Components: `xiaozhi-server` (Python 3.10, the conversation core) plus an
   optional Java/Vue management console. **Python-only mode needs no database
@@ -362,6 +489,10 @@ and hosting, not plumbing.
   join the LLM's function-calling list alongside the device's own MCP tools.
 
 ## Licensing notes
+
+**Licensing evidence.** What the upstream licenses say, and what they
+cost vinga. The rules this project holds itself to as a result are in
+[`../AGENTS.md`](../AGENTS.md).
 
 - Both upstream repos are MIT; reuse, modification, and redistribution are
   fine with attribution and preserved license notices
