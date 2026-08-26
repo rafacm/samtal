@@ -1316,7 +1316,7 @@ with it, so the file's tests are green in full.
 
 ## M6: The summaries answer to their sources
 
-PR TBD.
+PR #326.
 
 ### What landed
 
