@@ -66,6 +66,28 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   space is the database server's own storage maintenance. The
   `secure_delete` pragma, the truncating checkpoint and the promise of
   zero overwritten bytes go with the file they were about.
+- **The documentation tree declares what each page may claim** (#310).
+  `docs/README.md` now states one closed set of seven authority
+  classes (product promises, guidelines, maintained maps and
+  explanations, generated references, decisions, dated execution
+  records, and research and field notes) and classifies every page
+  against it, by directory where a directory holds one class and page
+  by page where it does not. Audience stays what it always was, a
+  routing concern, and is no longer read as a claim to authority.
+- **The architecture corpus has one landing page, organized by reader
+  question** (#310). `docs/architecture/README.md` routes by what
+  brought you: designing a feature or deciding direction, splitting a
+  file or naming an interface, adding a command, placing a datum, or
+  understanding a conversation end to end.
+- **The conversation walkthrough is `docs/system-overview.md`**
+  (#310). The step-by-step tour of one turn, from the wake word to the
+  spoken reply, moved out of the architecture README to a page of its
+  own for the audience it was written for. Its old callers point at
+  the new path.
+- **Diagrams live under `docs/architecture/diagrams/`** (#310), still
+  a directory per authoring tool, now with one index over both that
+  says which question each diagram answers, including what separates
+  the two architecture-overview pictures.
 
 ### Removed
 
