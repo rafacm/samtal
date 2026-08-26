@@ -245,11 +245,16 @@ was written; both outcomes are settled inputs here.
     (M3), the restructured Xiaozhi notes (M5), and
     `product-promises.md` only if its final length warrants one.
     `concepts.md` is judged by its post-#311 length in M4.
-12. **The skills are current callers.** `.claude/skills/` files
-    referencing `architecture/principles.md` update in M2 with the
-    other callers. The separate cleanup the skills need afterward
-    (removing their #310-to-#313 reorg caveats once the reorg is
-    real) is follow-through outside these issues, done after M6.
+12. **The skills are current callers, and M6 leaves them
+    current.** `.claude/skills/` files referencing
+    `architecture/principles.md` update in M2 with the other
+    callers, and M6 removes the implement-issue skill's two
+    "being reorganized by #310 to #313" caveats, replacing them
+    with a pointer to the authority taxonomy in `docs/README.md`,
+    so the reorganization does not finish while live workflow
+    guidance says it is underway. The broader skill refactor
+    review the maintainer asked for stays follow-through after
+    M6; only the staleness the reorg itself creates is #313's.
 
 ## The standing review lenses, pre-answered
 
@@ -471,7 +476,9 @@ docs/
   `compatibility floor`, `fully local`, `thin device`, `decided
   direction`, `implemented today`) classifies every current hit as
   source or summary; the observability four-surface model and event
-  vocabulary are confirmed hand-copied nowhere; the final
+  vocabulary are confirmed hand-copied nowhere; the
+  implement-issue skill's two reorg caveats are replaced with the
+  taxonomy pointer per design decision 12; the final
   link-and-anchor run and moved-path classification close #310's
   verification list. Design footprint: none; this milestone deepens
   nothing and exists to prove locality. Documentation footprint:
@@ -580,6 +587,11 @@ faithful; resolutions appended per amendment commit.
    workflow guidance says it is underway, violating the
    current-versus-historical distinction. M6 should remove or
    rewrite those caveats as part of #313.
+
+   *Resolution.* Adopted. Design decision 12 and M6 now replace
+   the two caveats with a pointer to the taxonomy inside M6; the
+   maintainer's broader skill-refactor review stays follow-through
+   after the chain.
 
 8. **P2: M5 does not enforce device-guide ownership of
    board-specific facts.** The combined-document recommendation
