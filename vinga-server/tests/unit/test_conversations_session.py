@@ -848,7 +848,10 @@ async def test_a_failed_write_costs_the_batch_and_not_the_conversation(
             gate.wait()
             # White-box: the failure under test is the database going
             # away between a turn and the close that follows it, and
-            # only a broken engine puts it exactly there.
+            # only a broken engine puts it exactly there. The real one
+            # is let go of first, or its pool outlives this test and a
+            # server-side driver says so where the next test runs.
+            store._engine.dispose()
             store._engine = Broken()  # type: ignore[assignment]
             gate.open_forever()
             await websocket.close(1000, "goodbye")
