@@ -202,7 +202,27 @@ def open_at(settings: DatabaseConfig, chain: StoreChain) -> Engine:
     packages, and their version tables are separate by virtue of living
     in separate schemas rather than by any naming trick.
     """
-    engine = write_engine(settings, chain)
+    return open_url(connection_url(settings), chain)
+
+
+def open_url(url: URL, chain: StoreChain) -> Engine:
+    """`open_at` for a caller that has already resolved its connection.
+
+    The distinction is not decoration, and the bug that produced it says
+    why. The autogeneration entry point made a scratch database from the
+    discrete settings and then opened it with `open_at`, which resolves
+    the connection AGAIN, and `VINGA_DB_URL` wins that resolution whole.
+    So on a machine with an exported production URL, the command created
+    a scratch database on the local instance and ran the migration and
+    the comparison against production.
+
+    A URL passed in is a connection nothing ambient can replace between
+    the moment it is decided and the moment it is used, which is what a
+    caller that derives several databases from one instance needs. Every
+    other caller keeps `open_at` and its settings, because for them
+    resolving from the environment IS the contract.
+    """
+    engine = _write_engine_at(url, chain)
     # Built inside the handler and raised outside it: `from exc` (and
     # `from None`) leave the library's exception reachable from the one
     # that travels out, and both a SQLAlchemy error and a psycopg one
@@ -276,8 +296,14 @@ def write_engine(settings: DatabaseConfig, chain: StoreChain) -> Engine:
     pre-change state and then persist over one another, and would let
     two openers each decide the baseline still needs running.
     """
+    return _write_engine_at(connection_url(settings), chain)
+
+
+def _write_engine_at(url: URL, chain: StoreChain) -> Engine:
+    """`write_engine` for a connection already resolved, which is the
+    half `open_url` and `write_engine` share."""
     engine = create_engine(
-        connection_url(settings),
+        url,
         echo=False,
         connect_args=_connect_args(read_only=False),
     )
@@ -472,6 +498,7 @@ __all__ = [
     "migration_failure",
     "open_at",
     "open_database",
+    "open_url",
     "read_engine",
     "upgrade_to_head",
     "write_engine",
