@@ -41,6 +41,13 @@ PROSE_WIDTH = 78
 # every event.
 EVENT_REFERENCE = "events.md"
 
+# The domain model, one directory up from the committed reference. The
+# schema is named `conversations` and stores sessions and turns, while
+# the domain noun "conversation" is a thread that does not exist yet, so
+# the reference names the page that holds the distinction. Relative to
+# `docs/reference/`, where the reference is committed.
+CONCEPTS = "../concepts.md"
+
 # What an exporter maps onto, per the observability ADR's adoption of
 # the GenAI conventions "where one exists". Left-hand side is this
 # project's field name, right-hand side is the OTel attribute; the third
@@ -77,6 +84,13 @@ def reference() -> str:
             "decision track underneath them. Audio never enters it. The per-frame "
             "endpointer track and the dropped-frame counts stay in the session "
             "capture, which is the recording; this is the queryable record."
+        ),
+        "",
+        *_paragraph(
+            f"[The domain concepts page]({CONCEPTS}) says what a session and a "
+            f"turn mean to a user, and holds the distinction this schema's name "
+            f"invites: these are sessions and turns, not the cross-session "
+            f"conversation the domain model plans."
         ),
         "",
         "## The compatibility promise",

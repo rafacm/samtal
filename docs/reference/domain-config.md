@@ -35,6 +35,10 @@ references do not resolve is refused, so providers and MCP servers come
 first, then the agent defaults and the agents, then the device bindings
 and the default agent.
 
+What those nouns mean to a user, and the decided semantics behind them,
+are on [the domain concepts page](../concepts.md); this document is the
+authority on the fields themselves.
+
 ## Writing an entity
 
 Each entity kind is written from a YAML fragment holding one entity's

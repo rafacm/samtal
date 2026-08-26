@@ -86,6 +86,13 @@ ENTITIES: tuple[DocumentedShape, ...] = (*COMMANDED, *NESTED)
 # reference in the same directory, so the reference points at it by name.
 API_DOCUMENT = "api-openapi.json"
 
+# The domain model, one directory up from the committed reference. This
+# document is the authority on the fields; that page is where what they
+# mean to a user is explained, and it links back here for exactly that
+# division. Relative to `docs/reference/`, where the reference is
+# committed.
+CONCEPTS = "../concepts.md"
+
 # Where the reference's prose wraps. The tables cannot wrap (a row is a
 # line), so only paragraphs go through this.
 PROSE_WIDTH = 78
@@ -241,6 +248,10 @@ def reference() -> str:
         "references do not resolve is refused, so providers and MCP servers come",
         "first, then the agent defaults and the agents, then the device bindings",
         "and the default agent.",
+        "",
+        "What those nouns mean to a user, and the decided semantics behind them,",
+        f"are on [the domain concepts page]({CONCEPTS}); this document is the",
+        "authority on the fields themselves.",
         "",
         "## Writing an entity",
         "",

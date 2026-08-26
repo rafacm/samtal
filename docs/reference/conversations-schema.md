@@ -14,6 +14,10 @@ underneath them. Audio never enters it. The per-frame endpointer track and the
 dropped-frame counts stay in the session capture, which is the recording; this
 is the queryable record.
 
+[The domain concepts page](../concepts.md) says what a session and a turn mean
+to a user, and holds the distinction this schema's name invites: these are
+sessions and turns, not the cross-session conversation the domain model plans.
+
 ## The compatibility promise
 
 Table names, column names and event field names are a compatibility surface.
