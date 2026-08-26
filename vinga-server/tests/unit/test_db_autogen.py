@@ -23,7 +23,7 @@ import psycopg
 import pytest
 
 from vinga_server.config.models import DatabaseConfig
-from vinga_server.db import DOMAIN_CHAIN, StoreChain, connection_url
+from vinga_server.db import DOMAIN_CHAIN, URL_REFUSED, StoreChain, connection_url
 from vinga_server.db.migrations import autogen
 
 
@@ -115,3 +115,94 @@ def test_the_scratch_database_is_made_migrated_and_taken_away(
     written = set((chain.migrations / "versions").glob("*.py")) - before
     assert len(written) == 1, written
     assert not _exists(autogen.SCRATCH)
+
+
+# What a failing maintenance lifecycle is allowed to say
+#
+# This is the one module in the project that connects with psycopg
+# directly and issues `CREATE DATABASE`, and psycopg quotes the DSN it
+# tried in every failure it raises. A module entry point that let one
+# escape would print a connection string, so the sentinel is planted in
+# all three places a credential can ride in and the streams are read.
+
+# Not a credential: fixed strings shaped like one, and shaped so a
+# substring hunt for either cannot match by accident.
+SENTINEL = "sk-live-7d31c9f4-never-a-real-credential"
+OTHER_SENTINEL = "tok-live-2b8e50a1-never-a-real-credential"
+
+# A host nothing can resolve, so the lifecycle fails at its first
+# connection whatever else is planted. `.invalid` is reserved by
+# RFC 2606 for exactly this.
+NOWHERE = "nowhere.invalid"
+
+# The three doors a credential reaches this command through: the
+# authority of a whole URL, the query of a whole URL (`sslpassword` is
+# the one people forget, which is why the plan named it), and the
+# discrete variables.
+PLANTINGS: dict[str, dict[str, str]] = {
+    "a URL authority": {
+        "VINGA_DB_URL": f"postgresql://vinga:{SENTINEL}@{NOWHERE}:5432/vinga",
+    },
+    "a URL query": {
+        "VINGA_DB_URL": (
+            f"postgresql://vinga:pw@{NOWHERE}:5432/vinga?sslpassword={SENTINEL}"
+        ),
+    },
+    "the discrete variables": {
+        "VINGA_DB_HOST": f"{SENTINEL}.invalid",
+        "VINGA_DB_PORT": "5432",
+        "VINGA_DB_NAME": SENTINEL,
+        "VINGA_DB_USER": SENTINEL,
+        "VINGA_DB_PASSWORD": OTHER_SENTINEL,
+    },
+}
+
+
+@pytest.fixture
+def planted(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest):
+    """One of the three plantings, and nothing of this lane's own left in
+    the environment to answer instead."""
+    monkeypatch.delenv("VINGA_CONFIG", raising=False)
+    monkeypatch.delenv("VINGA_DB_URL", raising=False)
+    for name, value in PLANTINGS[request.param].items():
+        monkeypatch.setenv(name, value)
+
+
+@pytest.mark.parametrize("planted", list(PLANTINGS), indirect=True)
+def test_a_failed_lifecycle_says_one_sentence_and_carries_no_credential(
+    planted: None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The entry point, driven at an instance that is not there.
+
+    One fixed sentence on stderr, exit 1, and nothing of the connection:
+    no sentinel, no traceback, and no psycopg wording. `main` returning
+    rather than raising is the rest of the claim, since an exception is
+    what would carry the DSN out on a chain a renderer walks, and this
+    call site would see it.
+    """
+    assert autogen.main(["a probe that cannot connect"]) == 1
+
+    captured = capsys.readouterr()
+    written = captured.out + captured.err
+    assert autogen.MAINTENANCE_FAILED in captured.err, written
+    assert SENTINEL not in written, written
+    assert OTHER_SENTINEL not in written, written
+    assert "Traceback" not in written, written
+    assert "connection to server" not in written, written
+    assert NOWHERE not in written, written
+
+
+def test_a_url_that_is_not_a_postgres_url_refuses_without_repeating_it(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The other arm of the boundary: a refusal this project composed
+    itself is printed as it stands, because `db` builds those outside
+    their handlers precisely so they carry nothing."""
+    monkeypatch.delenv("VINGA_CONFIG", raising=False)
+    monkeypatch.setenv("VINGA_DB_URL", f"mysql://vinga:{SENTINEL}@{NOWHERE}/vinga")
+
+    assert autogen.main(["a probe with the wrong scheme"]) == 1
+
+    captured = capsys.readouterr()
+    assert URL_REFUSED in captured.err
+    assert SENTINEL not in captured.out + captured.err
