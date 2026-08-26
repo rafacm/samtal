@@ -18,9 +18,22 @@ from dataclasses import dataclass
 import pytest
 import uvicorn
 
+from tests.conftest import provision_stores
 from vinga_server.app import create_app
 from vinga_server.audio.resample import Resampler
 from vinga_server.config import Config
+
+# This lane serves real applications, and an application opens a store
+# at its lifespan, so it needs one made. Declared here because the root
+# conftest provisions for the lanes that ask; a lane that stores nothing
+# (tests/smoke) must be able to run with no instance in reach at all.
+#
+# At import, which is before the opt-in check below, so `pytest
+# tests/local` without VINGA_LOCAL_LANE still wants an instance to skip
+# in front of. That is what it did before this was a declaration, and
+# narrowing it further would mean asking a fixture for a database at the
+# moment a test is already inside one.
+provision_stores()
 
 LANE_ENV = "VINGA_LOCAL_LANE"
 OLLAMA_ENV = "VINGA_LOCAL_OLLAMA"

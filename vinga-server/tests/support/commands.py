@@ -19,9 +19,14 @@ So nothing here waits forever, and a wait that expires says what the
 command had written by the time it did. A hung lane is worse than a red
 one: a red lane names the test.
 
-Two budgets, because the lane runs two kinds of thing. Both are ceilings
+Two budgets, because a lane runs two kinds of thing. Both are ceilings
 on a hang rather than expectations, and a run that approaches either is
 already a bug worth reading about.
+
+Most callers are in the integration lane, which is where shelling out
+belongs. The exception is the unit lane's pin that a lane storing
+nothing collects with no database in reach: what it asserts is what a
+whole pytest process does, so it runs one.
 """
 
 import subprocess

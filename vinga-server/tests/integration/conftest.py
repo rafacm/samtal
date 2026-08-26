@@ -29,6 +29,7 @@ import pytest
 import uvicorn
 from xiaozhi_sdk import XiaoZhiWebsocket
 
+from tests.conftest import provision_stores
 from vinga_server.app import create_app
 from vinga_server.config import Config, FileConfig, compose_config
 from vinga_server.config.models import (
@@ -44,6 +45,13 @@ from vinga_server.config.models import (
 )
 from vinga_server.config.store import ConfigStore, Snapshot
 from vinga_server.db import open_database
+
+# Every server in this lane boots the way a deployment boots, which means
+# every one of them opens a store. Said here, at this conftest's import,
+# because the root conftest provisions for the lanes that ask and not for
+# whoever imports it: `tests/smoke` drives a container over HTTP and
+# needs no instance of its own.
+provision_stores()
 
 SAMPLE_RATE = 16000
 FRAME_MS = 60
