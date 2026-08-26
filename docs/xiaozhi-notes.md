@@ -424,9 +424,10 @@ and hosting, not plumbing.
 
 ## The upstream server, as read on 2026-08-01
 
-**Historical upstream research**, and the only section here that is not
-maintained. This is xinnan-tech/xiaozhi-esp32-server as it was read and
-run for the first end-to-end demo on 2026-08-01, at the commit
+**Historical upstream research**, and the one section here whose facts
+are deliberately not kept current. This is
+xinnan-tech/xiaozhi-esp32-server as it was read and run for the first
+end-to-end demo on 2026-08-01, at the commit
 [Upstream currency](#upstream-currency) records. vinga-server is a
 separate implementation and does not track it, so nothing here is
 corrected as that project moves: it is kept because it is the reference
