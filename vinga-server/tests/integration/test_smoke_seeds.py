@@ -25,6 +25,7 @@ one runs its script with the ambient flag stripped so that the
 assignment is what is holding.
 """
 
+import contextlib
 import signal
 import socket
 import subprocess
@@ -34,6 +35,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import throwaway_database
 from tests.integration.conftest import BYTECODE_OFF, script_environment
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.store import ConfigStore, DomainConfig
@@ -57,8 +59,8 @@ def _free_port() -> int:
         return probe.getsockname()[1]
 
 
-def _domain() -> DomainConfig:
-    engine = open_database(DatabaseConfig())
+def _domain(database: str) -> DomainConfig:
+    engine = open_database(DatabaseConfig(name=database))
     try:
         return ConfigStore(engine).load().domain
     finally:
@@ -71,18 +73,21 @@ def seeded(script: str, tmp_path: Path, environment: dict[str, str] | None = Non
     The script is run verbatim, as CI runs it: it starts its own server,
     waits for it, writes through the API, and stops it again.
     """
-    inherited = script_environment(
-        without=["VINGA_CONFIG"],
-        VINGA_SERVER__PORT=str(_free_port()),
-        # The database this lane provisioned, which the script's own
-        # server and the read below both name. Every VINGA_ variable is
-        # inherited from this process, so the four connection names are
-        # already there; only the port has to be chosen per run.
-        **(environment or {}),
-    )
-    subprocess.run(["sh", str(SMOKE / script)], check=True, env=inherited, timeout=180)
+    # A database of this run's own, which is what the throwaway
+    # directory used to be: a seeding script starts a server, and a
+    # server that booted on a store somebody else had already written
+    # is a different scenario from the empty first start these are
+    # about. A test that seeds twice gets two.
+    with throwaway_database() as database:
+        inherited = script_environment(
+            without=["VINGA_CONFIG"],
+            VINGA_SERVER__PORT=str(_free_port()),
+            VINGA_DB_NAME=database,
+            **(environment or {}),
+        )
+        subprocess.run(["sh", str(SMOKE / script)], check=True, env=inherited, timeout=180)
 
-    return _domain()
+        return _domain(database)
 
 
 @pytest.fixture
@@ -157,13 +162,13 @@ def test_a_seed_ignores_an_ambient_api_url(
     The decoy here is a real server on a real database, so "it was
     ignored" is checked by looking at what the decoy holds rather than by
     the script merely not failing."""
-    decoy = tmp_path / "decoy"
-    with served_api(decoy) as decoy_url:
-        domain = seeded(script, tmp_path, {"VINGA_API_URL": decoy_url})
+    with throwaway_database() as decoy:
+        with served_api(DatabaseConfig(name=decoy)) as decoy_url:
+            domain = seeded(script, tmp_path, {"VINGA_API_URL": decoy_url})
 
-    assert domain.default_agent == "assistant"
-    assert _domain(decoy).agents == {}
-    assert _domain(decoy).default_agent is None
+        assert domain.default_agent == "assistant"
+        assert _domain(decoy).agents == {}
+        assert _domain(decoy).default_agent is None
 
 
 def test_an_interrupted_seeding_fails_and_leaves_no_server_behind(
@@ -174,9 +179,12 @@ def test_an_interrupted_seeding_fails_and_leaves_no_server_behind(
     then hold a port and a data volume open for the container that comes
     next."""
     port = _free_port()
+    stack = contextlib.ExitStack()
+    database = stack.enter_context(throwaway_database())
     environment = script_environment(
         without=["VINGA_CONFIG"],
         VINGA_SERVER__PORT=str(port),
+        VINGA_DB_NAME=database,
     )
 
     seeding = subprocess.Popen(
@@ -197,6 +205,9 @@ def test_an_interrupted_seeding_fails_and_leaves_no_server_behind(
         if seeding.poll() is None:  # pragma: no cover, only on a failure
             seeding.kill()
             seeding.communicate(timeout=30)
+        # The database this script's server was on, taken away only once
+        # nothing is connected to it.
+        stack.close()
 
     assert seeding.returncode != 0
     assert "interrupted" in errors
