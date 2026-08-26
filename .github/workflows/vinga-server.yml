@@ -116,10 +116,21 @@ jobs:
   unit:
     runs-on: ubuntu-latest
 
-    # What the lanes connect with. The same values the fixtures default
-    # to, spelled out because the contract is the point: these five are
-    # what a deployment sets too, and a lane that relied on a default
-    # would not be running the shape it documents.
+    # What the lanes connect with, spelled out because the contract is
+    # the point: these five are what a deployment sets too, and a lane
+    # that relied on a default would not be running the shape it
+    # documents.
+    #
+    # Four of them name the INSTANCE and the fixtures take them as
+    # given, which is how the lanes reach the service container below
+    # rather than a loopback default. VINGA_DB_NAME names a DATABASE,
+    # and the fixtures make their own per run and per worker, so this
+    # value is deliberately overridden by tests/conftest.py and reaches
+    # nothing. It is set anyway, and kept: for one milestone the
+    # fixtures moved a model default and left this variable to win,
+    # which the loader lets it do, and four workers spent a whole CI run
+    # writing into this one database. A name here that the lane has to
+    # override is what keeps that from being green again.
     env:
       VINGA_DB_HOST: 127.0.0.1
       VINGA_DB_PORT: "5432"
@@ -213,10 +224,21 @@ jobs:
   integration:
     runs-on: ubuntu-latest
 
-    # What the lanes connect with. The same values the fixtures default
-    # to, spelled out because the contract is the point: these five are
-    # what a deployment sets too, and a lane that relied on a default
-    # would not be running the shape it documents.
+    # What the lanes connect with, spelled out because the contract is
+    # the point: these five are what a deployment sets too, and a lane
+    # that relied on a default would not be running the shape it
+    # documents.
+    #
+    # Four of them name the INSTANCE and the fixtures take them as
+    # given, which is how the lanes reach the service container below
+    # rather than a loopback default. VINGA_DB_NAME names a DATABASE,
+    # and the fixtures make their own per run and per worker, so this
+    # value is deliberately overridden by tests/conftest.py and reaches
+    # nothing. It is set anyway, and kept: for one milestone the
+    # fixtures moved a model default and left this variable to win,
+    # which the loader lets it do, and four workers spent a whole CI run
+    # writing into this one database. A name here that the lane has to
+    # override is what keeps that from being green again.
     env:
       VINGA_DB_HOST: 127.0.0.1
       VINGA_DB_PORT: "5432"
