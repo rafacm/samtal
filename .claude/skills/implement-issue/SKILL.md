@@ -58,6 +58,18 @@ only say it puts a layer beside an existing module has not been
 designed yet. The vocabulary and the worked examples are in
 `docs/architecture/design-guide.md`.
 
+Each milestone likewise names its documentation footprint: the
+hand-maintained pages whose description of current behavior the
+milestone falsifies (the root README's status and feature claims,
+maintained maps and guides under `docs/`, board guides), beyond
+what the generated-reference drift checks already catch. Name
+pages by their role, and confirm where that role currently lives
+before writing the plan: the docs tree is being reorganized by
+#310 to #313, so a path remembered from an earlier session may be
+a compatibility stub rather than the owning page. A milestone
+whose behavior change stales no documentation says so explicitly
+rather than leaving the footprint implied.
+
 ### The standing review lenses
 
 The external reviews of the 2026-08-14 batch applied the same
@@ -119,6 +131,13 @@ possible:
   date-based entries. The implementation-doc section is written in
   the change that ticks its milestone, ticked with "PR TBD" until
   the PR exists.
+- The plan's documentation footprint for this milestone lands in
+  the same milestone as the behavior it describes: update the page
+  that owns the fact and leave summaries linking to it, never a
+  second copy. Generated references change only through their
+  generators. If a footprint page is not where the plan said (the
+  docs tree is being reorganized by #310 to #313), find its
+  current home rather than editing a compatibility stub.
 - Honest verification only: `uv run ruff check .`,
   `uv run pytest tests/unit -q`,
   `uv run pytest tests/integration -q`, and the doc drift checks,
