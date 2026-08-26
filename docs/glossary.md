@@ -93,14 +93,16 @@ that reply to be heard.
 ### Conversation
 
 A dialogue between a user and exactly one agent,
-living on the server independently of any device: it accrues a
-transcript and a cost, is suspended rather than ended, and can be
-resumed later, including from a different device. What accumulates
-and what you come back to, where a session is how audio reaches the
-server. One conversation can span many sessions, and it records the
-sessions it was part of, beginning with the one that opened it. The
-persistent entity is decided direction; today conversation history
-lives only as long as its session. See
+living on the server independently of any device: a durable thread
+that accrues a transcript and can be resumed later, including from a
+different device, though a fresh wake starts a fresh thread and
+resuming an old one is always asked for. What accumulates and what
+you come back to, where a session is how audio reaches the server.
+One conversation can span many sessions, and a turn names both the
+thread it belongs to and the session it was spoken in, so the two
+are views of the same rows. The thread is decided direction (issue
+#190); today conversation history lives only as long as its session.
+See
 [the concepts page](concepts.md#conversation-and-session).
 
 ### Conversational filler
@@ -371,13 +373,13 @@ agent leg that started it, which matters across a handover.
 One connection episode from one device: wake (button
 press or wake word) to close. A session attaches to conversations;
 it is not a conversation. "Sophia... let me talk to Nadia... back to
-Sophia" is one session touching two conversations, and the session
-records, in order, the conversations it touched. Its own transcript
-(everything said and done from wake to close, across every
-conversation touched plus the meta turns) is reconstructed from that
-record and the session's events, never stored twice. Belongs to the
-device side of the model the way a conversation belongs to an agent.
-See [the concepts page](concepts.md#conversation-and-session).
+Sophia" is one session touching two conversations. Its own
+transcript (everything said and done from wake to close, across
+every conversation touched plus the meta turns) is a view over the
+turns that name it, the same rows a conversation reads by thread, so
+no dialogue is stored twice. Belongs to the device side of the model
+the way a conversation belongs to an agent. See
+[the concepts page](concepts.md#conversation-and-session).
 
 ### Structured event
 
