@@ -27,7 +27,7 @@ rounds.
 
 Every test in the suite probes some step of the same loop. The
 step-by-step teaching tour with diagrams is in
-[architecture/](architecture/README.md); this is the compact version,
+[system-overview.md](system-overview.md); this is the compact version,
 with the structured event each step emits, since those events are what
 the analysis reads.
 
