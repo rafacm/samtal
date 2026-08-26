@@ -11,6 +11,14 @@ Opt in with VINGA_SMOKE_OTA_URL, the same pattern as the local lane, so
 a bare `pytest` never picks this up. VINGA_AUTH_SECRET must be the
 secret the server under test was started with: the lane verifies the
 token it is issued, which is only possible with the signing key.
+
+This lane deliberately does NOT call `provision_stores`, which the other
+three lanes call from their own conftest. It stores nothing: the server
+under test owns its database and this side of the wire only speaks HTTP
+and a websocket. In CI that is not a preference but a requirement, since
+the pytest runs on the runner while the database sits on a Docker
+network only the containers can resolve, and reaching for one here is
+what turned a green image into a failed job.
 """
 
 import os

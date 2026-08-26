@@ -284,6 +284,42 @@ def _application_tables() -> list[str]:
 # business taking it away from whoever made it, whatever the name says.
 _PROVISIONED_HERE = False
 
+# Whether this run is one of the lanes that opens a store. Nothing below
+# touches the instance until a lane says so, and `provision_stores` is
+# how it says it.
+_STORING = False
+
+
+def provision_stores() -> None:
+    """This lane's databases, made, and the per-test truncation armed.
+
+    Called from the conftest of every lane that opens a store, at that
+    conftest's own import, which pytest runs before it imports any test
+    module in that directory: the module-scoped fixtures and the two
+    suites that compose a `Config` while being imported all come after
+    it. There is no earlier place that is also a narrower one.
+
+    It used to be called from this file's import instead, which meant
+    every lane under `tests/` provisioned whether it stored anything or
+    not. `tests/smoke` stores nothing at all: it drives a container over
+    HTTP, and in CI it runs on the runner while the database sits on a
+    Docker network the runner cannot resolve. So the smoke lane died at
+    collection, with a sentence about an unreachable instance it had no
+    use for, on the one job that publishes an image. A lane declaring
+    what it needs is also the honest shape: a conftest that connects to
+    a database as a side effect of being imported is a trap whoever
+    reads it next has to discover.
+
+    Opt in rather than opt out, so the failure lands where it can be
+    read. A storing lane that forgets to call this meets "database does
+    not exist" at its first open, named and local; a non-storing lane
+    that had to remember to opt OUT meets exactly the collection failure
+    this replaces.
+    """
+    global _STORING
+    _STORING = True
+    _provision()
+
 
 def _provision() -> None:
     """This worker's database, cloned from the run's migrated template.
@@ -419,11 +455,15 @@ def _database_default(name: str) -> None:
     DatabaseConfig.model_rebuild(force=True)
 
 
-# Both at import, before the first test module is collected: a suite
+# At import, before the first test module is collected, because a suite
 # that composes its `Config` while it is being imported (two of them do)
-# needs the default in place by then, and one that opens a database in a
-# module-scoped fixture needs the database itself.
-_provision()
+# needs the default in place by then.
+#
+# Unconditionally, and for every lane, unlike the provisioning that used
+# to sit beside it: this one names a database rather than reaching for
+# one, so a lane that stores nothing pays nothing and reads no
+# differently. What it buys is that the name is settled once, whoever
+# ends up asking.
 _database_default(LANE_DATABASE)
 
 
@@ -476,9 +516,17 @@ def clean_store() -> Iterator[None]:
     on empty tables whatever the one before it wrote. At teardown rather
     than setup, so the last test of a run leaves the database clean too,
     which is what makes a leftover row a signal rather than noise.
+
+    The condition is the LANE and never the test: within a lane that
+    called `provision_stores`, every test truncates, whether it opened a
+    store or not. A per-test "did this one touch anything" would be the
+    same fixture with a hole in it, since what leaks is exactly the write
+    nobody noticed. What the check answers is whether there is a database
+    to clear at all, which `tests/smoke` has no way to reach.
     """
     yield
-    clear_store()
+    if _STORING:
+        clear_store()
 
 
 @pytest.fixture
