@@ -8,7 +8,7 @@ so explicitly.
 
 ## M1: cut both stores over to Postgres, operator story included
 
-PR TBD.
+PR #307.
 
 ### What landed
 
