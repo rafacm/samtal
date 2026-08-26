@@ -84,7 +84,7 @@ def test_an_empty_start_is_configured_over_http_and_serves_after_a_restart(
     # The restart. A second application, built the way a deployment
     # builds one, from the database the writes above went into.
     booted = load_boot_config()
-    restarted = create_app(booted.config, booted.secrets)
+    restarted = create_app(booted.config, booted.secrets, from_store=True)
 
     # Read through its own lifespan, which is what builds them (#142):
     # the pipeline resolving for that agent is what "serves the

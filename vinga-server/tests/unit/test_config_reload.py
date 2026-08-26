@@ -36,7 +36,7 @@ from typing import Any, cast
 
 import pytest
 from cryptography.fernet import Fernet, MultiFernet
-from sqlalchemy import text
+from sqlalchemy import select, update
 
 from tests.support.apps import entered_client
 from tests.support.configs import config_with, world
@@ -67,7 +67,7 @@ from vinga_server.config.secrets import (
     load_keys,
 )
 from vinga_server.config.store import ConfigStore
-from vinga_server.db import open_database
+from vinga_server.db import open_database, schema
 from vinga_server.filler import FillerClips, build_agent_fillers
 from vinga_server.generation import Generation, Generations
 from vinga_server.logs import JsonFormatter
@@ -1333,11 +1333,17 @@ def envelope_of(directory: Path) -> str:
     try:
         with engine.connect() as connection:
             secrets = connection.execute(
-                text("select secrets from providers where stage = 'llm' and name = 'mock'")
+                select(schema.providers.c.secrets).where(
+                    schema.providers.c.stage == "llm",
+                    schema.providers.c.name == "mock",
+                )
             ).scalar_one()
     finally:
         engine.dispose()
-    return str(json.loads(secrets)["api_key"]["enc"])
+    # A value rather than the text it was dumped to: psycopg reads a
+    # `json` column into Python objects, where the SQLite driver handed
+    # back the string.
+    return str(secrets["api_key"]["enc"])
 
 
 def mark_of(directory: Path) -> str:
@@ -1390,7 +1396,7 @@ def test_a_stored_secret_that_will_not_open_refuses_under_a_fixed_sentence(
     seeded(directory, secret=PLAINTEXT)
     booted = load_boot_config()
 
-    with entered_client(booted.config, booted.secrets) as serving:
+    with entered_client(booted.config, booted.secrets, from_store=True) as serving:
         monkeypatch.setenv(MASTER_KEY_ENV, generate_key())
         refused = serving.post(RELOAD_PATH, headers=bearer())
 
@@ -1428,9 +1434,9 @@ def test_a_stored_domain_that_will_not_compose_refuses_the_same_way(
     """
     seeded(directory, secret=PLAINTEXT)
     booted = load_boot_config()
-    _plant_unknown_provider(directory)
+    _plant_unknown_provider()
 
-    with entered_client(booted.config, booted.secrets) as serving:
+    with entered_client(booted.config, booted.secrets, from_store=True) as serving:
         generations = serving.app.state.composition.generations
         before = generations.current()
 
@@ -1444,9 +1450,9 @@ def test_a_stored_domain_that_will_not_compose_refuses_the_same_way(
 
     # The row put back, so the only thing wrong with the store is the
     # credential that will no longer open.
-    _drop_planted_provider(directory)
+    _drop_planted_provider()
 
-    with entered_client(booted.config, booted.secrets) as serving:
+    with entered_client(booted.config, booted.secrets, from_store=True) as serving:
         monkeypatch.setenv(MASTER_KEY_ENV, generate_key())
         unopenable = serving.post(RELOAD_PATH, headers=bearer())
 
@@ -1457,32 +1463,40 @@ def test_a_stored_domain_that_will_not_compose_refuses_the_same_way(
     assert "api_key" not in unopenable.text
 
 
-def _plant_unknown_provider(directory: Path) -> None:
+def _plant_unknown_provider(name: str = REJECTED) -> None:
     """An agent naming a provider nothing declares, written as a row
     because no write this server offers can produce one. Into the body
     rather than into a column of its own, which is where every non-key
-    field lives since #243; `json_set` leaves the rest of the entry
-    exactly as it was written."""
-    engine = open_database(DatabaseConfig())
-    try:
-        with engine.begin() as connection:
-            connection.execute(
-                text(f"update agents set body = json_set(body, '$.llm', '{REJECTED}')")  # noqa: S608
-            )
-    finally:
-        engine.dispose()
+    field lives since #243.
+
+    Read, edited in Python, written back, which is what replaced the
+    SQLite `json_set` this used to call (#283): the body is a text
+    column holding a dumped model whichever backend it sits in, and
+    editing it here leaves the rest of the entry exactly as it was
+    written without either backend's JSON functions in the way.
+    """
+    _rewrite_agent_body(lambda body: {**body, "llm": name})
 
 
-def _drop_planted_provider(directory: Path) -> None:
-    """The same row without the planted key, which is the entry
-    `seeded` wrote: the agent names no llm of its own and inherits the
+def _drop_planted_provider() -> None:
+    """The same row without the planted key, which is the entry the
+    seeding wrote: the agent names no llm of its own and inherits the
     one `agent_defaults` names."""
+    _rewrite_agent_body(lambda body: {k: v for k, v in body.items() if k != "llm"})
+
+
+def _rewrite_agent_body(edit) -> None:
     engine = open_database(DatabaseConfig())
     try:
         with engine.begin() as connection:
-            connection.execute(
-                text("update agents set body = json_remove(body, '$.llm')")
-            )
+            for name_, body in connection.execute(
+                select(schema.agents.c.name, schema.agents.c.body)
+            ).all():
+                connection.execute(
+                    update(schema.agents)
+                    .where(schema.agents.c.name == name_)
+                    .values(body=json.dumps(edit(json.loads(body))))
+                )
     finally:
         engine.dispose()
 
@@ -1561,7 +1575,9 @@ def test_neither_an_answer_nor_a_refusal_carries_a_credential(
         booted.secrets.fingerprint("provider", "llm.mock"),
     )
 
-    with caplog.at_level("INFO"), entered_client(booted.config, booted.secrets) as serving:
+    with caplog.at_level("INFO"), entered_client(
+        booted.config, booted.secrets, from_store=True
+    ) as serving:
         rotated = serving.put(
             f"{MOUNT_PATH}/providers/llm/mock/secrets/api_key",
             json={"secret": ROTATED},
@@ -1651,7 +1667,9 @@ def test_an_engine_that_will_not_build_refuses_the_route_and_names_none_of_it(
     voiced(directory, {"type": "mock"})
     booted = load_boot_config()
 
-    with caplog.at_level("INFO"), entered_client(booted.config, booted.secrets) as serving:
+    with caplog.at_level("INFO"), entered_client(
+        booted.config, booted.secrets, from_store=True
+    ) as serving:
         composition = serving.app.state.composition
         before = composition.generations.current()
         # The voice this server is really speaking through, rewritten
