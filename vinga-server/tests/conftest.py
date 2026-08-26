@@ -131,13 +131,28 @@ os.environ.setdefault(API_SECRET_ENV, TEST_API_SECRET)
 #     once by the controller and inherited by the workers, so two pytest
 #     runs on one instance never collide and a run's leftovers are
 #     identifiable.
-#   - `VINGA_DB_URL` is cleared and the `VINGA_DB_*` family is
-#     overridden for this process, so an exported production connection
-#     in the developer's environment cannot redirect the fixtures.
+#   - `VINGA_DB_URL` is cleared and `VINGA_DB_NAME` is overridden for
+#     this process, so nothing exported around the lane can redirect the
+#     fixtures onto a database they did not make.
 #   - Every destructive statement checks its target first: a `TRUNCATE`
 #     asks `current_database()` and refuses unless it is this worker's
 #     own generated name, and a `DROP DATABASE` refuses any name outside
 #     this run's prefix.
+#
+# The family splits in two, and the split is the whole of what went
+# wrong once. Four of the variables name the INSTANCE, and an exported
+# value wins: that is how CI points the lane at its service container
+# rather than at a loopback default. The fifth names a DATABASE, and
+# this lane makes its own, so an exported value must lose. It did not:
+# `VINGA_DB_NAME` was never set here at all, only the model default was
+# moved, and the loader reads the environment over the model default
+# (`config/loader.py`'s `_with_database_environment`). CI exports
+# `VINGA_DB_NAME: vinga`, so every code path that composed its settings
+# through the loader (the CLI's own, and every application built the way
+# a deployment builds one) worked in the job's shared `vinga` database
+# while the truncation cleared a per-worker database nothing was
+# writing to. Four workers then wrote over each other and the suite read
+# rows from tests it had never run.
 #
 # The lane refuses rather than skips when the instance is unreachable. A
 # skip would shrink the suite silently and read green while proving
@@ -145,10 +160,16 @@ os.environ.setdefault(API_SECRET_ENV, TEST_API_SECRET)
 
 DB_URL_ENV = "VINGA_DB_URL"
 
-# The connection the lane uses, and the connection it stops anything
-# else from choosing. Defaults match the compose service, so a checkout
-# needs `docker compose up -d --wait` and nothing else; CI's service
-# container sets them explicitly.
+# The one variable this lane owns outright, named because two places
+# below have to set it and one has to take it away again.
+DB_NAME_ENV = "VINGA_DB_NAME"
+
+# The instance the lane connects to, which an exported value may name.
+# Defaults match the compose service, so a checkout needs
+# `docker compose up -d --wait` and nothing else; CI's service container
+# sets them explicitly. A whole URL is not allowed to name it: that
+# variable wins over all five and would take the lane somewhere it
+# cannot safely truncate.
 os.environ.pop(DB_URL_ENV, None)
 DB_HOST = os.environ.setdefault("VINGA_DB_HOST", "127.0.0.1")
 DB_PORT = int(os.environ.setdefault("VINGA_DB_PORT", "5432"))
@@ -367,14 +388,21 @@ def reset_database(name: str) -> None:
 
 
 def _database_default(name: str) -> None:
-    """Point `DatabaseConfig`'s defaults at one database.
+    """Point every door onto the database at one name.
 
-    On the model rather than through the environment, because a
-    `Config(...)` built in Python reads no environment, and most of both
-    lanes composes its configuration exactly that way. The rebuild is
-    not optional: pydantic bakes a default into the validator it builds
-    at class creation, so the field alone is not where the answer comes
-    from.
+    There are two doors and they must not be able to disagree, which is
+    why one function sets both. A `Config(...)` built in Python reads no
+    environment and takes the model's default, and most of both lanes
+    composes its configuration exactly that way; anything composed the
+    way a deployment composes it goes through the loader, which reads
+    `VINGA_DB_NAME` over that default. Setting the model alone leaves
+    the environment answering for every caller of the second kind, which
+    is what it did, and an environment that named a different database
+    was the whole of the leak.
+
+    The model rebuild is not optional: pydantic bakes a default into the
+    validator it builds at class creation, so the field alone is not
+    where the answer comes from.
 
     The model is imported here and not at module scope because
     everything above has to run before the first import of anything
@@ -383,6 +411,7 @@ def _database_default(name: str) -> None:
     """
     from vinga_server.config.models import DatabaseConfig
 
+    os.environ[DB_NAME_ENV] = name
     DatabaseConfig.model_fields["host"].default = DB_HOST
     DatabaseConfig.model_fields["port"].default = DB_PORT
     DatabaseConfig.model_fields["user"].default = DB_USER
@@ -530,6 +559,14 @@ def packaged_database() -> Iterator[Any]:
     """The shipped defaults back, for a test about what a deployment
     gets rather than about what this lane runs on.
 
+    Both doors, the way `_database_default` sets both: the model's
+    defaults go back to what the package ships, and the name this lane
+    put in the environment is taken away, so a settings composition that
+    reads the environment answers the shipped default too. Restoring one
+    and not the other would make this fixture true through a
+    `DatabaseConfig()` and false through a `load_file_config()`, which is
+    the shape of the leak it sits next to.
+
     Autouse fixtures are set up before the ones a test asks for by name,
     so this runs second and has something to put back, and the teardown
     order is the mirror of that.
@@ -537,6 +574,7 @@ def packaged_database() -> Iterator[Any]:
     from vinga_server.config.models import DatabaseConfig
 
     shipped = {"host": "127.0.0.1", "port": 5432, "name": "vinga", "user": "vinga"}
+    os.environ.pop(DB_NAME_ENV, None)
     for field, value in shipped.items():
         DatabaseConfig.model_fields[field].default = value
     DatabaseConfig.model_rebuild(force=True)
