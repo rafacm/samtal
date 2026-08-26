@@ -28,8 +28,9 @@ board is, and for which firmware.
 **In conversation.** Once the channel is open, what the microphone does
 follows the board's listening mode. Which mode a board starts in is
 settled when its firmware is built, by whether echo cancellation is on.
-The mode belongs to the device either way: the server is told which one
-it is and cannot change it, while on the boards that have the
+The mode belongs to the device either way: the server is
+[told which one it is and cannot change it](../xiaozhi-notes.md#the-device-owns-the-listening-mode-and-the-server-cannot-change-it),
+while on the boards that have the
 echo-cancellation gesture the user can, and switching it moves the
 board between the two modes below. Each guide names the mode its board
 starts in.
@@ -204,7 +205,8 @@ so that a board which never answers cannot stall the conversation. A
 request made in the first breath of a session can therefore arrive
 before that discovery has finished, and discovery is not guaranteed to
 finish at all. If a device command is ignored the first time, asking
-again a moment later is the remedy.
+again a moment later is the remedy. The exchange itself is in
+[`../xiaozhi-notes.md`](../xiaozhi-notes.md#the-device-is-the-mcp-server-and-discovery-is-a-race).
 
 ## What the wake word does, and does not, do
 

@@ -70,17 +70,18 @@ because an always-on microphone deserves a precise answer:
 - After the wake word fires, the device opens the channel and reports
   the word that fired, after the fact, as a message naming it.
   vinga debug-logs that message and does not retain it; the report is
-  described in [`../xiaozhi-notes.md`](../xiaozhi-notes.md).
+  described in
+  [`../xiaozhi-notes.md`](../xiaozhi-notes.md#the-wake-word-is-spotted-on-the-chip-and-the-server-takes-no-part-in-it).
 - One thing is unsettled, and worth knowing rather than glossing over.
   The firmware has a build setting, on by default in its sources, that
   also sends the short span of audio it had buffered around the trigger
   phrase as the conversation's first audio, so that the assistant can
   react to whatever was said in the same breath as the wake word.
-  vinga's own protocol notes describe only the after-the-fact word
-  report reaching the server. Which of the two the prebuilt image
-  actually does has not been checked on the wire, so treat the exact
-  extent of what leaves the board at the moment of waking as an open
-  question until it has been.
+  Whether the prebuilt image this board runs was built that way has not
+  been checked on the wire, and the protocol notes linked above record
+  it as open for exactly that reason, so treat the exact extent of what
+  leaves the board at the moment of waking as an open question until it
+  has been.
 
 ## Voice commands the device answers
 
