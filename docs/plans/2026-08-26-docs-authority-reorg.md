@@ -332,8 +332,8 @@ docs/
 
   architecture/
     README.md                  # THE architecture index, by reader question
-    product-promises.md        # NEW: identity + the three promises
-    guidelines.md              # NEW: revisable defaults
+    product-promises.md        # NEW: the three promises
+    guidelines.md              # NEW: identity + revisable defaults
     principles.md              # compatibility page (a few lines)
     design-guide.md            # unchanged + On this page
     cli-guide.md               # checklist-first (M3)
