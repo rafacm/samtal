@@ -778,8 +778,8 @@ docs/reference/events.md:1316  generated  vinga-server config ota-url
 docs/reference/events.md:1340  generated  vinga-server config ota-url
 docs/reference/events.md:1359  generated  vinga-server config ota-url
 docs/related-projects.md:122  respell  vinga provider
-docs/xiaozhi-notes.md:248  respell  config device pending claim
-docs/xiaozhi-notes.md:255  respell  vinga simulator check-in
+docs/xiaozhi-notes.md:256  respell  config device pending claim
+docs/xiaozhi-notes.md:263  respell  vinga simulator check-in
 spikes/2026-08-20-openapi-ts-client/README.md:24  historical  vinga-server config openapi
 spikes/2026-08-20-openapi-ts-client/hey-api/generated/types.gen.ts:797  generated  config set-secret
 spikes/2026-08-20-openapi-ts-client/hey-api/generated/types.gen.ts:883  generated  vinga-server config prompt
