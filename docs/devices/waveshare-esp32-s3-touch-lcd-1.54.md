@@ -161,11 +161,19 @@ sources and has not been verified against the physical board.
 
 ## Getting this board onto your server
 
-Write your server's OTA/config address into the device's NVS `wifi`
-namespace under the key `ota_url` over USB, then provision WiFi from
-the board's captive portal. The procedure, including how to preserve
-what the partition already holds, is in
-[`../xiaozhi-notes.md`](../xiaozhi-notes.md).
+Verified in hands-on use (2026-08-12/13): the captive portal of the
+upstream prebuilt firmware this board was tested on, version 2.4.0,
+carries no Custom OTA URL field, so the server's address goes in over
+USB rather than through the portal.
+
+Write it into the device's NVS `wifi` namespace under the key
+`ota_url` over USB, then provision WiFi from the board's captive
+portal. The procedure, including how to preserve what the partition
+already holds, is on the
+[common page](README.md#writing-the-servers-address-into-nvs); this
+board's NVS partition is `0x4000`. Resetting the board, reading its
+boot log and reading its NVS back are
+[there too](README.md#driving-a-board-from-a-terminal-session).
 
 ## Known quirks
 

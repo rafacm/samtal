@@ -85,9 +85,109 @@ a backend; the WebSocket endpoint, the device token, and everything
 else arrive from your server at runtime, which is why pointing a board
 somewhere else is a one-key change rather than a reflash.
 
-The procedure in full, with the serial gotchas it has, is in
-[`../xiaozhi-notes.md`](../xiaozhi-notes.md). Each guide links it
-directly as well.
+Some builds let the portal do the whole job. Whether a board's captive
+portal carries a Custom OTA URL field on its Advanced tab is a property
+of the build it is running rather than a firmware-version threshold, so
+each guide says what its own board was observed to have. Where the field
+exists, a board can be pointed at a backend with no USB cable at all.
+Where it is absent, or where a provisioned board offers no way back into
+the portal at all, the USB route below is what works, and it is the
+recovery path to count on rather than retyping the URL into a portal.
+
+What the exchange behind all of this looks like on the wire, and why a
+device-facing route may never answer a board with a redirect, is in
+[`../xiaozhi-notes.md`](../xiaozhi-notes.md#the-firmware-and-the-one-url-that-points-it-at-a-server).
+
+### Writing the server's address into NVS
+
+Verified in hands-on use on the Touch-LCD-1.54 (2026-08-12/13). The
+partition lives at `0x9000`; its size is `0x4000` on the Touch-LCD-1.54
+and `0x6000` on the AMOLED-2.16 factory image, and the honest way to
+know is to read the partition table at `0x8000` of the image actually
+flashed on the board in front of you rather than assuming either.
+
+```csv
+# nvs_input.csv
+key,type,encoding,value
+wifi,namespace,,
+ota_url,data,string,http://<server-ip>:8003/xiaozhi/ota/
+```
+
+```sh
+python nvs_partition_gen.py generate nvs_input.csv nvs_new.bin 0x4000
+esptool.py write_flash 0x9000 nvs_new.bin
+```
+
+Read the partition first (`read_flash 0x9000 0x4000`) if you want to
+preserve the existing device UUID (namespace `board`, key `uuid`).
+Regenerating replaces the whole partition, so carry over everything
+worth keeping: `wifi/ssid`, `wifi/password`, `board/uuid`,
+`display/theme`, `audio/output_volume`. The `phy` namespace can be
+dropped (the board recalibrates on the next boot and says so with a
+`phy_init: Saving new calibration data` line), and so can `websocket`,
+which the first OTA reply repopulates. Comparing the per-entry CRC32s
+before and after proves the carried values survived byte for byte.
+
+## Driving a board from a terminal session
+
+Verified in hands-on use on the Touch-LCD-1.54 (2026-08-12/13). What is
+board-specific here is the port name; the reset behavior below is the
+ESP32-S3's own USB-serial-JTAG rather than anything one board does, so
+it applies to every board on this page.
+
+What a device checkpoint needs when `idf.py monitor` is unavailable (it
+wants an interactive terminal). The port was `/dev/cu.usbmodem101` at
+115200 on macOS: the chip's native USB-serial-JTAG, not a UART bridge.
+
+- **Reset with esptool**, which prints the MAC as a bonus:
+
+  ```sh
+  esptool.py --chip esp32s3 --port /dev/cu.usbmodem101 \
+      --after hard_reset read_mac
+  ```
+
+  **Toggling RTS alone does nothing**, whatever the usual "RTS drives EN"
+  advice says, because there is no reset pin behind this port. DTR and RTS
+  are two bits of a single USB CDC `SET_CONTROL_LINE_STATE` request, and
+  the USB-Serial-JTAG controller decodes the pair the way the classic
+  auto-reset circuit does: EN goes low only when **RTS is high and DTR is
+  low**. pyserial asserts both lines when it opens the port, so a bare
+  `setRTS(True)` / `setRTS(False)` toggle moves (DTR=1, RTS=1) to (1, 0)
+  and never passes through (0, 1). Measured on the board, one open port,
+  each combination held for 200 ms:
+
+  | DTR | RTS | result |
+  | --- | --- | ---------- |
+  | 1   | 1   | no reset   |
+  | 1   | 0   | no reset   |
+  | 0   | 1   | **reset**  |
+
+  From pyserial, one line fixes it: `port.setDTR(False)` before the RTS
+  toggle. esptool arrives at the same place by another road, which is why
+  it works: its bootloader-entry sequence leaves both lines low, so the
+  RTS toggle inside its `HardReset` lands on (0, 1). Replay that same
+  `HardReset` from pyserial's freshly opened state and it resets nothing,
+  which is the trap an earlier version of this note fell into.
+- **Read the boot log** with pyserial from the ESP-IDF Python environment
+  (`~/.espressif/python_env/idf*/bin/python`), not the system `python3`,
+  which has no `serial` module. Reset and read in one process that holds
+  the port open; reopening it races the boot output away.
+- **Read and parse NVS** to prove what the device persisted from an OTA
+  reply (`nvs_tool.py` lives in
+  `components/nvs_flash/nvs_partition_tool/` in ESP-IDF):
+
+  ```sh
+  esptool.py --chip esp32s3 --port /dev/cu.usbmodem101 --baud 460800 \
+      read_flash 0x9000 0x4000 nvs.bin
+  nvs_tool.py -d written nvs.bin
+  ```
+
+  `-d written` matters: NVS is log-structured, so without it erased entries
+  are listed beside live ones and read as though both were current.
+- **A conversation still needs a human.** The board opens its websocket
+  only on a PWR press or the wake word, so that one step cannot be
+  scripted. Everything up to it can be: reset, boot log, the OTA exchange,
+  and the agent the server resolved the device to.
 
 ## Talking to the device itself
 
