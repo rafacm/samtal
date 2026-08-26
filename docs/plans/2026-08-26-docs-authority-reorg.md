@@ -432,7 +432,9 @@ docs/
   immutable callers. Documentation footprint: AGENTS.md's design
   section and the ADR README's description of document types are
   the summaries this milestone stales, and both update here.
-- [ ] **M3: The guides lead with their interfaces.** `cli-guide.md`
+- [x] **[M3: The guides lead with their
+  interfaces.](2026-08-26-docs-authority-reorg-implementation.md#m3-the-guides-lead-with-their-interfaces)**
+  (PR TBD) `cli-guide.md`
   puts the reviewer checklist after its purpose introduction with
   each item linked to its practice, links `reference/cli.md` for
   current spellings, keeps a concise source-and-disposition
