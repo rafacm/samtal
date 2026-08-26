@@ -33,7 +33,7 @@ The new thing is a self-hostable voice agent where the device talks to **your se
 
 ![vinga architecture overview](docs/architecture/diagrams/excalidraw/vinga-architecture-overview.png)
 
-That is the whole picture at a glance; one conversation turn in full detail, from wake word to spoken reply, is diagrammed and explained step by step in [docs/architecture](docs/architecture/README.md).
+That is the whole picture at a glance; one conversation turn in full detail, from wake word to spoken reply, is diagrammed and explained step by step in [docs/system-overview.md](docs/system-overview.md).
 
 ## Features
 

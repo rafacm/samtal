@@ -4,9 +4,9 @@
 
 The concepts, techniques, and technologies this project is built on:
 a short definition of each as vinga uses it, with pointers for going
-deeper. The [architecture walkthrough](architecture/README.md)
-teaches the pipeline-shaped subset of these in order, with diagrams;
-this page is for looking one thing up. Entries are alphabetical,
+deeper. The [system overview](system-overview.md) teaches the
+pipeline-shaped subset of these in order, with diagrams; this
+page is for looking one thing up. Entries are alphabetical,
 and each is a heading, so any of them can be linked directly from
 anywhere in the project: `docs/glossary.md#opus`,
 `docs/glossary.md#barge-in`,
