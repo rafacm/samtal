@@ -98,12 +98,12 @@ README.md:150  respell  vinga device pending claim
 README.md:157  respell  vinga simulator run
 docs/adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md:157  historical  set-secret
 docs/adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md:214  historical  set-secret
-docs/architecture/cli-guide-audit.md:87  respell  vinga-server config schema provider
-docs/architecture/cli-guide-audit.md:104  respell  set-secret
-docs/architecture/cli-guide-audit.md:126  respell  set-secret
-docs/architecture/cli-guide-audit.md:130  respell  clear-default-agent
-docs/architecture/cli-guide-audit.md:139  respell  bind-device
-docs/architecture/cli-guide-audit.md:139  respell  add-device
+docs/architecture/cli-guide-audit.md:87  historical  vinga-server config schema provider
+docs/architecture/cli-guide-audit.md:104  historical  set-secret
+docs/architecture/cli-guide-audit.md:126  historical  set-secret
+docs/architecture/cli-guide-audit.md:130  historical  clear-default-agent
+docs/architecture/cli-guide-audit.md:139  historical  bind-device
+docs/architecture/cli-guide-audit.md:139  historical  add-device
 docs/architecture/cli-guide.md:152  respell  vinga provider set llm local
 docs/architecture/cli-guide.md:153  respell  vinga agent show kids
 docs/architecture/cli-guide.md:200  historical  set-secret
@@ -572,8 +572,11 @@ docs/plans/2026-08-26-docs-authority-reorg-implementation.md:558  historical  vi
 docs/plans/2026-08-26-docs-authority-reorg-implementation.md:559  historical  vinga device bind
 docs/plans/2026-08-26-docs-authority-reorg-implementation.md:596  historical  set-secret
 docs/plans/2026-08-26-docs-authority-reorg-implementation.md:597  historical  bind-device
-docs/plans/2026-08-26-docs-authority-reorg-implementation.md:904  historical  config reference
-docs/plans/2026-08-26-docs-authority-reorg-implementation.md:905  historical  config openapi
+docs/plans/2026-08-26-docs-authority-reorg-implementation.md:920  historical  config reference
+docs/plans/2026-08-26-docs-authority-reorg-implementation.md:921  historical  config openapi
+docs/plans/2026-08-26-docs-authority-reorg-implementation.md:1205  historical  vinga-server config schema
+docs/plans/2026-08-26-docs-authority-reorg-implementation.md:1206  historical  vinga-server config schema
+docs/plans/2026-08-26-docs-authority-reorg-implementation.md:1208  historical  config schema
 docs/plans/2026-08-26-postgres-stores-implementation.md:102  historical  config schema before the
 docs/plans/2026-08-26-postgres-stores-implementation.md:104  historical  config schema
 docs/plans/2026-08-26-postgres-stores-implementation.md:231  historical  config export
@@ -1011,54 +1014,54 @@ vinga-server/tests/unit/test_command_spellings.py:152  historical  bind-device
 vinga-server/tests/unit/test_command_spellings.py:153  historical  set-secret
 vinga-server/tests/unit/test_command_spellings.py:196  historical  bind-device
 vinga-server/tests/unit/test_command_spellings.py:197  historical  set-secret
-vinga-server/tests/unit/test_command_spellings.py:217  historical  vinga set
-vinga-server/tests/unit/test_command_spellings.py:305  historical  vinga list
-vinga-server/tests/unit/test_command_spellings.py:306  historical  vinga list
-vinga-server/tests/unit/test_command_spellings.py:419  historical  vinga-server config provider secret commands
-vinga-server/tests/unit/test_command_spellings.py:451  historical  vinga provider frobnicate
-vinga-server/tests/unit/test_command_spellings.py:547  historical  vinga-server config status
-vinga-server/tests/unit/test_command_spellings.py:554  historical  vinga-server config status
-vinga-server/tests/unit/test_command_spellings.py:560  historical  vinga-server config device pending claim
-vinga-server/tests/unit/test_command_spellings.py:596  historical  vinga-server config set
-vinga-server/tests/unit/test_command_spellings.py:598  historical  vinga-server config set
-vinga-server/tests/unit/test_command_spellings.py:604  historical  config apply
-vinga-server/tests/unit/test_command_spellings.py:606  historical  config apply
-vinga-server/tests/unit/test_command_spellings.py:613  historical  bind-device
-vinga-server/tests/unit/test_command_spellings.py:643  historical  vinga-server config apply
-vinga-server/tests/unit/test_command_spellings.py:645  historical  vinga-server config apply
-vinga-server/tests/unit/test_command_spellings.py:647  historical  vinga-server config apply
-vinga-server/tests/unit/test_command_spellings.py:661  historical  vinga provider
-vinga-server/tests/unit/test_command_spellings.py:662  historical  vinga provider secret
-vinga-server/tests/unit/test_command_spellings.py:663  historical  vinga provider frobnicate
-vinga-server/tests/unit/test_command_spellings.py:664  historical  vinga provider secret frobnicate
-vinga-server/tests/unit/test_command_spellings.py:666  historical  vinga provider set llm local
-vinga-server/tests/unit/test_command_spellings.py:667  historical  vinga-server config device pending list
-vinga-server/tests/unit/test_command_spellings.py:668  historical  vinga device pending frobnicate
-vinga-server/tests/unit/test_command_spellings.py:677  historical  vinga provider frobnicate
-vinga-server/tests/unit/test_command_spellings.py:685  historical  vinga show provider llm claude
-vinga-server/tests/unit/test_command_spellings.py:685  historical  vinga show provider llm claude
-vinga-server/tests/unit/test_command_spellings.py:686  historical  vinga export agent assistant
-vinga-server/tests/unit/test_command_spellings.py:686  historical  vinga export agent assistant
-vinga-server/tests/unit/test_command_spellings.py:688  historical  vinga-server config show device aa-bb
-vinga-server/tests/unit/test_command_spellings.py:689  historical  vinga-server config show device aa-bb
-vinga-server/tests/unit/test_command_spellings.py:692  historical  vinga list agents
-vinga-server/tests/unit/test_command_spellings.py:692  historical  vinga list agents
-vinga-server/tests/unit/test_command_spellings.py:693  historical  vinga status mcp-server
-vinga-server/tests/unit/test_command_spellings.py:693  historical  vinga status mcp-server
-vinga-server/tests/unit/test_command_spellings.py:694  historical  vinga provider show llm claude
-vinga-server/tests/unit/test_command_spellings.py:694  historical  vinga provider show llm claude
-vinga-server/tests/unit/test_command_spellings.py:695  historical  vinga agent export assistant
-vinga-server/tests/unit/test_command_spellings.py:695  historical  vinga agent export assistant
-vinga-server/tests/unit/test_command_spellings.py:696  historical  vinga device show aa-bb
-vinga-server/tests/unit/test_command_spellings.py:696  historical  vinga device show aa-bb
-vinga-server/tests/unit/test_command_spellings.py:698  historical  vinga provider secret set llm claude token
-vinga-server/tests/unit/test_command_spellings.py:699  historical  vinga provider secret set llm claude token
-vinga-server/tests/unit/test_command_spellings.py:702  historical  vinga agent set kids
-vinga-server/tests/unit/test_command_spellings.py:702  historical  vinga agent set kids
-vinga-server/tests/unit/test_command_spellings.py:703  historical  vinga show
-vinga-server/tests/unit/test_command_spellings.py:703  historical  vinga show
-vinga-server/tests/unit/test_command_spellings.py:704  historical  vinga export
-vinga-server/tests/unit/test_command_spellings.py:704  historical  vinga export
+vinga-server/tests/unit/test_command_spellings.py:227  historical  vinga set
+vinga-server/tests/unit/test_command_spellings.py:315  historical  vinga list
+vinga-server/tests/unit/test_command_spellings.py:316  historical  vinga list
+vinga-server/tests/unit/test_command_spellings.py:429  historical  vinga-server config provider secret commands
+vinga-server/tests/unit/test_command_spellings.py:461  historical  vinga provider frobnicate
+vinga-server/tests/unit/test_command_spellings.py:557  historical  vinga-server config status
+vinga-server/tests/unit/test_command_spellings.py:564  historical  vinga-server config status
+vinga-server/tests/unit/test_command_spellings.py:570  historical  vinga-server config device pending claim
+vinga-server/tests/unit/test_command_spellings.py:606  historical  vinga-server config set
+vinga-server/tests/unit/test_command_spellings.py:608  historical  vinga-server config set
+vinga-server/tests/unit/test_command_spellings.py:614  historical  config apply
+vinga-server/tests/unit/test_command_spellings.py:616  historical  config apply
+vinga-server/tests/unit/test_command_spellings.py:623  historical  bind-device
+vinga-server/tests/unit/test_command_spellings.py:653  historical  vinga-server config apply
+vinga-server/tests/unit/test_command_spellings.py:655  historical  vinga-server config apply
+vinga-server/tests/unit/test_command_spellings.py:657  historical  vinga-server config apply
+vinga-server/tests/unit/test_command_spellings.py:671  historical  vinga provider
+vinga-server/tests/unit/test_command_spellings.py:672  historical  vinga provider secret
+vinga-server/tests/unit/test_command_spellings.py:673  historical  vinga provider frobnicate
+vinga-server/tests/unit/test_command_spellings.py:674  historical  vinga provider secret frobnicate
+vinga-server/tests/unit/test_command_spellings.py:676  historical  vinga provider set llm local
+vinga-server/tests/unit/test_command_spellings.py:677  historical  vinga-server config device pending list
+vinga-server/tests/unit/test_command_spellings.py:678  historical  vinga device pending frobnicate
+vinga-server/tests/unit/test_command_spellings.py:687  historical  vinga provider frobnicate
+vinga-server/tests/unit/test_command_spellings.py:695  historical  vinga show provider llm claude
+vinga-server/tests/unit/test_command_spellings.py:695  historical  vinga show provider llm claude
+vinga-server/tests/unit/test_command_spellings.py:696  historical  vinga export agent assistant
+vinga-server/tests/unit/test_command_spellings.py:696  historical  vinga export agent assistant
+vinga-server/tests/unit/test_command_spellings.py:698  historical  vinga-server config show device aa-bb
+vinga-server/tests/unit/test_command_spellings.py:699  historical  vinga-server config show device aa-bb
+vinga-server/tests/unit/test_command_spellings.py:702  historical  vinga list agents
+vinga-server/tests/unit/test_command_spellings.py:702  historical  vinga list agents
+vinga-server/tests/unit/test_command_spellings.py:703  historical  vinga status mcp-server
+vinga-server/tests/unit/test_command_spellings.py:703  historical  vinga status mcp-server
+vinga-server/tests/unit/test_command_spellings.py:704  historical  vinga provider show llm claude
+vinga-server/tests/unit/test_command_spellings.py:704  historical  vinga provider show llm claude
+vinga-server/tests/unit/test_command_spellings.py:705  historical  vinga agent export assistant
+vinga-server/tests/unit/test_command_spellings.py:705  historical  vinga agent export assistant
+vinga-server/tests/unit/test_command_spellings.py:706  historical  vinga device show aa-bb
+vinga-server/tests/unit/test_command_spellings.py:706  historical  vinga device show aa-bb
+vinga-server/tests/unit/test_command_spellings.py:708  historical  vinga provider secret set llm claude token
+vinga-server/tests/unit/test_command_spellings.py:709  historical  vinga provider secret set llm claude token
+vinga-server/tests/unit/test_command_spellings.py:712  historical  vinga agent set kids
+vinga-server/tests/unit/test_command_spellings.py:712  historical  vinga agent set kids
+vinga-server/tests/unit/test_command_spellings.py:713  historical  vinga show
+vinga-server/tests/unit/test_command_spellings.py:713  historical  vinga show
+vinga-server/tests/unit/test_command_spellings.py:714  historical  vinga export
+vinga-server/tests/unit/test_command_spellings.py:714  historical  vinga export
 vinga-server/tests/unit/test_config_api_pending.py:350  respell  config list
 vinga-server/tests/unit/test_config_api_runtime.py:663  respell  config reload
 vinga-server/tests/unit/test_config_apply.py:4  respell  config apply
