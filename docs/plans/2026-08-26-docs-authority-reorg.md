@@ -449,8 +449,9 @@ docs/
   map becomes its small interface, with the evidence behind it
   instead of in front of it. Documentation footprint: the
   architecture router rows for both guides update in this change.
-- [ ] **M4: Concepts distinguishes today from direction (#311).**
-  The introduction states the page's class and its authority
+- [x] **[M4: Concepts distinguishes today from direction
+  (#311).](2026-08-26-docs-authority-reorg-implementation.md#m4-concepts-distinguishes-today-from-direction)**
+  (PR TBD) The introduction states the page's class and its authority
   relative to promises, guidelines, ADRs, issues and generated
   references; every section or claim carries its status per design
   decision 7, each decided direction citing its owning record
