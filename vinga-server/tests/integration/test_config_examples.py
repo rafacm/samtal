@@ -32,7 +32,7 @@ DEPLOY_SEED = SERVER / "config.deploy.example.sh"
 
 
 def test_the_deployment_profile_boots_with_its_measured_values(
-    served_api, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    served_api, blank_database: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The deployment profile in both its halves: the file's server keys
     and the script's domain half, composed the way the server composes
@@ -43,15 +43,19 @@ def test_the_deployment_profile_boots_with_its_measured_values(
     the values, so a rewrite that quietly loses the CPU-quota pin or the
     language ladder fails here instead of in somebody's deployment."""
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
-    directory = tmp_path / "db"
-    with served_api(directory) as api_url:
+    # A blank database, which is what a deployment about to run its
+    # seeding script has: the script writes the whole domain half, and a
+    # row somebody else left would make the read below a read of two
+    # deployments at once.
+    database = DatabaseConfig(name=blank_database)
+    with served_api(database) as api_url:
         subprocess.run(
             ["sh", str(DEPLOY_SEED)],
             check=True,
             env=script_environment(VINGA_API_URL=api_url),
         )
 
-    engine = open_database(DatabaseConfig())
+    engine = open_database(database)
     try:
         snapshot = ConfigStore(engine).load()
     finally:

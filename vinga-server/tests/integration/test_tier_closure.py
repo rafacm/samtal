@@ -392,12 +392,16 @@ def test_the_client_install_carries_every_client_dependency(
 def test_the_client_install_carries_no_serve_distribution(
     client_env: Path, tiers: tuple[set[str], set[str], set[str]]
 ) -> None:
-    """And the ten, by name. Implied by the exact comparison above and
-    kept anyway: this is the sentence the milestone claims, and a
+    """And the eleven, by name. Implied by the exact comparison above
+    and kept anyway: this is the sentence the milestone claims, and a
     reader of a failure should not have to diff two closures to see
-    that FastAPI came back."""
+    that FastAPI came back.
+
+    Eleven since #283, which added the Postgres driver: `serve` carries
+    the plain `psycopg`, so a bare install carrying it would be the
+    server half arriving through the client door."""
     _, serve, _ = tiers
-    assert len(serve) == 10, serve
+    assert len(serve) == 11, serve
     assert serve & _installed(client_env) == set()
 
 

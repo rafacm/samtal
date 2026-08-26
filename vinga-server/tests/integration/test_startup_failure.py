@@ -89,7 +89,7 @@ MCP_SENTENCE = (
 )
 
 
-def seed_domain(directory: Path, entry: dict[str, object] | None = None) -> None:
+def seed_domain(database: str, entry: dict[str, object] | None = None) -> None:
     """A database holding one agent on the mock providers, and one MCP
     server for it to reach when the caller wants one.
 
@@ -102,7 +102,7 @@ def seed_domain(directory: Path, entry: dict[str, object] | None = None) -> None
     agent: dict[str, object] = {"prompt": "A"}
     if entry is not None:
         agent["mcp"] = ["tools"]
-    engine = open_database(DatabaseConfig())
+    engine = open_database(DatabaseConfig(name=database))
     try:
         store = ConfigStore(engine)
         for stage in STAGES:
@@ -116,16 +116,22 @@ def seed_domain(directory: Path, entry: dict[str, object] | None = None) -> None
         engine.dispose()
 
 
-def run_entrypoint(script: str, tmp_path: Path) -> subprocess.CompletedProcess[str]:
+def run_entrypoint(
+    script: str, tmp_path: Path, database: str
+) -> subprocess.CompletedProcess[str]:
     """One server process, on a configuration whose startup refuses.
 
     Run from a directory of its own so no `.env` beside the repository
     reaches it, and with bytecode writing off, which is this
     repository's rule for anything outside pytest.
+
+    On a database of this test's own, which is what makes the refusal
+    the one the test seeded: a boot reads the whole stored half, so a
+    row another test left would refuse first and this would be reading
+    somebody else's sentence.
     """
-    # This process's own, which carries the four VINGA_DB_* names the
-    # lane pointed at the database it provisioned.
     environment = dict(os.environ)
+    environment["VINGA_DB_NAME"] = database
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
     environment.pop(UNSET_VARIABLE, None)
     return subprocess.run(
@@ -158,13 +164,17 @@ def refused(finished: subprocess.CompletedProcess[str], sentence: str) -> str:
     return written
 
 
-def test_a_refused_provider_build_says_one_sentence_and_exits_one(tmp_path: Path) -> None:
-    seed_domain(tmp_path / "db")
+def test_a_refused_provider_build_says_one_sentence_and_exits_one(
+    tmp_path: Path, blank_database: str
+) -> None:
+    seed_domain(blank_database)
 
-    refused(run_entrypoint(PROVIDER_REFUSAL, tmp_path), PROVIDER_SENTENCE)
+    refused(run_entrypoint(PROVIDER_REFUSAL, tmp_path, blank_database), PROVIDER_SENTENCE)
 
 
-def test_a_refused_mcp_entry_says_one_sentence_and_exits_one(tmp_path: Path) -> None:
+def test_a_refused_mcp_entry_says_one_sentence_and_exits_one(
+    tmp_path: Path, blank_database: str
+) -> None:
     """An MCP entry naming an environment variable nothing sets is a
     boot refusal like a bad provider, and reached the operator as a bug
     until it was classified as one (`McpConfigError` is a `ValueError`,
@@ -176,12 +186,14 @@ def test_a_refused_mcp_entry_says_one_sentence_and_exits_one(tmp_path: Path) -> 
         "command": "/usr/bin/true",
         "env": {"API_TOKEN": f"${UNSET_VARIABLE}"},
     }
-    seed_domain(tmp_path / "db", entry)
+    seed_domain(blank_database, entry)
 
-    refused(run_entrypoint(PLAIN_ENTRYPOINT, tmp_path), MCP_SENTENCE)
+    refused(run_entrypoint(PLAIN_ENTRYPOINT, tmp_path, blank_database), MCP_SENTENCE)
 
 
-def test_nothing_a_provider_library_said_reaches_either_stream(tmp_path: Path) -> None:
+def test_nothing_a_provider_library_said_reaches_either_stream(
+    tmp_path: Path, blank_database: str
+) -> None:
     """Two guards, and the sentinel goes past both or neither.
 
     The registry composes the sentence rather than copying the library's,
@@ -190,9 +202,11 @@ def test_nothing_a_provider_library_said_reaches_either_stream(tmp_path: Path) -
     caught the refusal, so there is no `__cause__` or `__context__` for a
     renderer to walk into where one runs.
     """
-    seed_domain(tmp_path / "db")
+    seed_domain(blank_database)
 
-    written = refused(run_entrypoint(PROVIDER_REFUSAL, tmp_path), PROVIDER_SENTENCE)
+    written = refused(
+        run_entrypoint(PROVIDER_REFUSAL, tmp_path, blank_database), PROVIDER_SENTENCE
+    )
 
     assert SENTINEL not in written, written
     assert "api.example" not in written, written

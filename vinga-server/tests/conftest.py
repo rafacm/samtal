@@ -17,6 +17,7 @@ The bytecode setting below is here for the same reason: it has to be in
 place before pytest imports the first test module.
 """
 
+import contextlib
 import itertools
 import logging
 import os
@@ -461,6 +462,24 @@ def blank_database() -> Iterator[str]:
     """
     name = f"{DATABASE_PREFIX}_blank_{os.getpid()}_{next(_THROWAWAY)}"
     create_database(name, template=None)
+    try:
+        yield name
+    finally:
+        drop_database(name)
+
+
+@contextlib.contextmanager
+def throwaway_database(template: str | None = TEMPLATE_DATABASE) -> Iterator[str]:
+    """One database of a caller's own, made and dropped around a block.
+
+    The fixtures below are this with a scope attached. It is also
+    reachable directly, for the one caller that needs more than one per
+    test: a lane that runs a deployment script twice wants each run to
+    meet an empty store, which is what the throwaway directory used to
+    give it.
+    """
+    name = f"{DATABASE_PREFIX}_own_{os.getpid()}_{next(_THROWAWAY)}"
+    create_database(name, template=template)
     try:
         yield name
     finally:
