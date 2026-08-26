@@ -216,8 +216,15 @@ the next paragraph describes.
 A **conversation** is a dialogue between a user and exactly one agent:
 a thread that lives on the server, accrues a transcript, and is
 independent of any device. It is **decided direction** (issue #190),
-not code. Today a session's dialogue lives only as long as the session
-that produced it, and the stored turns are read back per session.
+not code. What does not exist today is the entity: nothing in the
+model spans sessions, and the two halves of that are worth keeping
+apart. An agent's working context is assembled inside one session and
+ends when the session closes, so tomorrow's agent starts with none of
+it. The rows are a separate question with a separate answer: where
+recording is on, the turns are keyed by session and kept for as long
+as the retention policy in
+[the store's reference](reference/conversations-schema.md#retention-and-deletion)
+says, which outlasts the session that wrote them.
 
 In short: sessions are how audio reaches the server; conversations are
 what accumulates and what you come back to. The vocabulary follows the
