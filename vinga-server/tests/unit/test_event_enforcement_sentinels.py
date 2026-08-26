@@ -49,6 +49,7 @@ import pytest
 
 from tests.support.catalog import scratch_catalog
 from tests.support.events import fields_of
+from vinga_server.config.models import DatabaseConfig
 from vinga_server.events import (
     REFUSAL_MESSAGE,
     SESSION_LOGGER,
@@ -836,7 +837,7 @@ def test_a_failing_api_request_refuses_carrying_nothing(
     from vinga_server.config.api import build_api
 
     token = "test-api-token-" + "0123456789abcdef" * 2
-    api = build_api(token, tmp_path / "db")
+    api = build_api(token, DatabaseConfig())
 
     @api.get("/boom")
     def endpoint() -> dict[str, str]:
@@ -900,6 +901,7 @@ from vinga_server import events
 from vinga_server.events import REFUSAL_MESSAGE
 from vinga_server.events.catalog import ConversationsDropped
 from vinga_server.events.values import SessionId
+from vinga_server.config.models import DatabaseConfig
 
 print("DEBUG=" + str(__debug__))
 
