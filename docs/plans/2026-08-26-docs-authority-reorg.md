@@ -147,10 +147,15 @@ was written; both outcomes are settled inputs here.
    guide, dated 2026-08-24 in its header, classified under the
    taxonomy's research class, and linked from the guide's concise
    source-and-disposition summary.
-2. **The Identity section opens `product-promises.md`.** Identity
-   frames what breaking a promise costs ("changes what vinga is"),
-   which is the promises page's register; the guidelines page cites
-   it rather than restating it.
+2. **The Identity section opens `guidelines.md`, and the promises
+   page's own introduction stays non-normative.** Identity assigns
+   implementation ownership between vinga and the conversation
+   runtimes, which is revisable direction, so it belongs with the
+   guidelines it frames (it is the umbrella over the hardware-edge
+   guideline). `product-promises.md` opens with a short
+   introduction saying what a promise is, that promises outrank
+   guidelines, and how one changes; its authoritative contents are
+   exactly the three promises.
 3. **The compatibility page carries no anchors.** No file in the
    repository links a `principles.md#fragment` (grepped 2026-08-26:
    zero hits), so the stub is a title, one paragraph saying what
@@ -343,9 +348,11 @@ docs/
   module its audience implies. Documentation footprint: the pages
   named are the footprint; no behavior claim changes.
 - [ ] **M2: Promises split from guidelines, and pipeline ownership
-  retires.** `product-promises.md` (identity, the stock-firmware
-  floor, fully local, the database promise per design decision 4);
-  `guidelines.md` (thin device; the consolidated hardware-edge
+  retires.** `product-promises.md` (a non-normative introduction,
+  then the stock-firmware floor, fully local, and the database
+  promise per design decision 4);
+  `guidelines.md` (identity as the framing preamble; thin device;
+  the consolidated hardware-edge
   guideline with its litmus table and `ConversationBackend`
   counterexample as subrules; decision ownership recast; the
   owned-versus-shared runtime guideline with the reopen triggers,
@@ -440,6 +447,12 @@ faithful; resolutions appended per amendment commit.
    runtime ownership statements to `guidelines.md`; the promises
    page may keep only a short non-normative introduction, its
    authoritative contents the three promises.
+
+   *Resolution.* Adopted. Design decision 2 now places Identity as
+   the framing preamble of `guidelines.md`, and the promises page
+   opens with a non-normative introduction whose authoritative
+   contents are exactly the three promises; M2's deliverables are
+   updated to match.
 
 2. **P1: M4 assumes owning decisions exist for domain direction
    that has no owner.** Cross-session conversations, switch
