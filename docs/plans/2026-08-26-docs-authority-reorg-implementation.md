@@ -937,3 +937,60 @@ list, and not marked as direction at all: see the discoveries below.
   this page anchors, and hard wrapping. Four lines on
   `concepts.md` exceed 75 columns and each is a single unbreakable
   link URL, the exception M3 recorded.
+
+### PR review round
+
+External review of the PR #324 diff (backend codex 0.149.1, model
+`gpt-5.6-terra`, 2026-08-27). Verdict: mergeable after fixes. Four
+findings, all P2, each fixed in a commit of its own.
+
+1. **The page described the stored record unconditionally.** Two
+   claims said the server records sessions and turns with no mention
+   of the master switch, while the generated reference says recording
+   is off unless a deployment enables it. A maintained map is never
+   allowed to disagree with a generated reference about current
+   behavior, so this was the milestone's own rule broken in the
+   milestone that wrote it.
+
+   *Resolution.* Adopted. Both claims name the switch, and the longer
+   one stops summarizing the storage mechanics at all: whether the
+   store records, what its content switches take away and how long a
+   row is kept are the reference's to state, and are linked.
+
+2. **"History lives only as long as its session" conflated two
+   different things.** The claim was on both the concepts page and
+   the glossary, and it is false about the store: an enabled store
+   keeps a session's turns under its retention policy, which outlasts
+   the session on purpose.
+
+   *Resolution.* Adopted, in the two-part form the finding asked for.
+   What is missing today is the entity, not the rows. The agent-side
+   half was verified in `runtime/pipeline.py`, where the turn list is
+   built per pipeline and never read back from the store, so an
+   agent's working context does end with its session. The store-side
+   half now points at the retention section of the reference. Both
+   pages say it the same way.
+
+3. **The summary paragraph left one claim unmarked.** Its own status
+   line promises the exception is marked inline; it marked the
+   conversation entity and left the users sentence bare, which a
+   reader following the convention would read as implemented.
+
+   *Resolution.* Adopted. The claim carries the recorded-here marking
+   that the section developing it carries, so the summary and the
+   section agree about who owns it.
+
+4. **The architecture index erased the no-owner case.** Its new row
+   said each decided direction names the issue that owns it, which
+   contradicts the marking this milestone introduced and the global
+   index's own description of it.
+
+   *Resolution.* Adopted. The row now says a direction names its
+   owning issue or says plainly that none exists yet, matching
+   `docs/README.md`.
+
+The four fixes are prose on `docs/concepts.md`, `docs/glossary.md`
+and `docs/architecture/README.md`. Nothing under `vinga-server/` or
+`docs/reference/` is touched by them, so no lane was re-run and none
+was owed; the link-and-anchor script was run after each and reports
+`checked 158 files, 0 failures`.
