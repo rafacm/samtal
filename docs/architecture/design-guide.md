@@ -1,7 +1,8 @@
 # Design guide
 
 How vinga's code is shaped inside the boundaries
-[`principles.md`](principles.md) draws. The principles say what vinga
+[`product-promises.md`](product-promises.md) and
+[`guidelines.md`](guidelines.md) draw. Those pages say what vinga
 promises and where its edges are; this page says what a module looks
 like once it is on the right side of one. Read it before splitting a
 file, adding a layer, or naming a new interface.
@@ -200,7 +201,7 @@ is enforceable only because one module owns the joining.
 
 Two details worth copying. The move was justified by a principle, not
 by taste: prompt assembly fails the telephone-call test on
-[`principles.md`](principles.md), so it is runtime code and not
+[`guidelines.md`](guidelines.md), so it is runtime code and not
 configuration code, and that is why it lives under `runtime/`. And it
 was proven behavior-preserving before anything new was added, by a
 test that transcribed the old function and compared the two over an
@@ -314,6 +315,7 @@ the modules each milestone deepens and the seams it adds, and the
 external plan review applies the deletion test to every new module a
 plan proposes.
 
-And it never outranks [`principles.md`](principles.md). A deep module
+And it never outranks
+[`product-promises.md`](product-promises.md). A deep module
 that breaks a product promise is a deep module that is wrong. When
 this page and that one pull in different directions, that one wins.

@@ -8,8 +8,9 @@ how they relate, and the semantics that were decided on purpose. The
 things up; this page explains how the terms fit together and why. The
 model is deliberately ahead of the code: some of it is implemented
 today, some is decided direction, and each section says which. The
-[principles page](architecture/principles.md) holds the promises this
-model must keep; where the two touch, the promise is cited.
+[product promises](architecture/product-promises.md) are the
+commitments this model must keep; where the two touch, the promise is
+cited.
 
 ## The model in one paragraph
 

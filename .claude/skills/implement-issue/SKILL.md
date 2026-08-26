@@ -28,9 +28,10 @@ retargeting discipline under "Merging".
   it, and worktrees are what let milestones proceed in parallel.
 - Read in full before planning: the issue (its decisions are
   settled and not re-litigated; its open questions are the plan's
-  to resolve), AGENTS.md, `docs/architecture/principles.md`, the
-  plans and implementation docs of the work this builds on, and the
-  code the issue touches.
+  to resolve), AGENTS.md, `docs/architecture/product-promises.md`
+  and `docs/architecture/guidelines.md`, the plans and
+  implementation docs of the work this builds on, and the code the
+  issue touches.
 
 ## Step 1: the plan
 
