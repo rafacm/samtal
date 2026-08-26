@@ -217,15 +217,22 @@ was written; both outcomes are settled inputs here.
    plan does not mint ADRs for domain semantics.
 8. **The M5 recommendation brought to #312's gate is one combined
    document** with authority-labeled sections (maintained protocol
-   facts; validated device procedures; dated field observations;
-   historical upstream research; licensing evidence), because the
+   facts; dated field observations; historical upstream research;
+   licensing evidence), because the
    file's chief value is being the single "read this first"
    protocol entry point that `AGENTS.md`, the skills and thirteen
    current callers point at. The alternative put beside it: a split
    into a maintained protocol reference plus a dated research file,
    with `xiaozhi-notes.md` as a compatibility index. The maintainer
-   chooses; the choice is recorded in the implementation doc before
-   any file moves.
+   chose the combined document during the plan review round.
+   Board-specific current guidance is not one of its sections:
+   live board facts and procedures (the Touch-LCD serial, reset
+   and NVS procedures, per-board portal behavior, per-board
+   hardware detail) move to the owning device guide or the device
+   guides' common page, the notes keep only shared protocol
+   behavior plus dated field evidence with provenance, and the
+   AGENTS.md hardware-context pointer follows the procedures to
+   their new home in the same milestone.
 9. **Root README edits stay minimal until the end.** #309 is open
    and reshapes the root README's quick start; M1 touches only the
    overview image path and the architecture pointer, and M6, the
@@ -453,9 +460,11 @@ docs/
   gate: authority-labeled sections or a split behind the stable
   path; clone commands stay at the top; validated procedures,
   dated observations, upstream research and licensing evidence
-  keep their dates and provenance; board-specific behavior cites
-  the device guides and shared protocol behavior is linked from
-  them; activation, onboarding, wake-word-data (#112 stays open),
+  keep their dates and provenance; board-specific current facts
+  and procedures move to the owning device guide or the common
+  device page per design decision 8, with the AGENTS.md
+  hardware-context pointer following them, and shared protocol
+  behavior is linked from the guides rather than copied; activation, onboarding, wake-word-data (#112 stays open),
   MCP-discovery, listening-mode, OTA-routing and stock-firmware
   claims are reconciled across the current pages; On this page per
   the policy. Design footprint: current wire facts get one
@@ -601,6 +610,12 @@ faithful; resolutions appended per amendment commit.
    Touch-LCD serial procedure). Current board-specific guidance
    moves to the owning device guide; the notes may keep dated field
    evidence with provenance but not a competing maintained source.
+
+   *Resolution.* Adopted. Design decision 8 and M5 now move live
+   board-specific facts and procedures to the owning device guide
+   or the common device page, with the AGENTS.md hardware-context
+   pointer following them; the notes keep shared protocol behavior
+   and dated evidence only.
 
 9. **P2: The per-page classification invariant is impossible as
    stated.** "Every page under `docs/` is classified ... on the
