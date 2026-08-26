@@ -43,8 +43,8 @@ effect, and holding BOOT turned the screen off; the
 click-at-startup provisioning gesture in the next list could not be
 made to work there. Once the board is provisioned, no way back into
 the captive portal was found on that image; repointing it at another
-backend means the NVS route in
-[`../xiaozhi-notes.md`](../xiaozhi-notes.md).
+backend means the NVS route on the
+[common page](README.md#writing-the-servers-address-into-nvs).
 
 Read from the board support code, not verified on hardware (and on
 the factory launcher image, contradicted where the previous
@@ -131,16 +131,21 @@ and the server's onboarding URL in one pass, and the board then
 shows a 6-digit code and connects within seconds of
 `vinga-server config device pending claim <code> <agent>`. Two cautions from
 that same session: type the URL exactly as the server printed it,
-and if the board shows `code=307` and keeps restarting, or a save
-does not seem to take, the portal wrote something other than what
-you typed; the NVS route below is the way to see and fix what is
-actually stored.
+and if the board shows `code=307` and keeps restarting, the portal
+wrote something other than what you typed.
+
+Also verified in hands-on use, once, on that same portal: **a save
+can fail silently.** The WiFi fields were submitted and nothing was
+persisted, with nothing on screen saying so. Reading the NVS back
+over USB is the only way to know what was actually written.
 
 For an already-provisioned board (the portal is not reachable again
 on the factory image), write the server's OTA/config address into
 the device's NVS `wifi` namespace under the key `ota_url` over USB.
-The procedure is in [`../xiaozhi-notes.md`](../xiaozhi-notes.md),
-with the size caveat in the next section.
+The procedure is on the
+[common page](README.md#writing-the-servers-address-into-nvs), with
+the size caveat in the next section, and reading the partition back
+is [beside it](README.md#driving-a-board-from-a-terminal-session).
 
 ## Known quirks
 
@@ -160,8 +165,9 @@ with the size caveat in the next section.
   power.
 - **The NVS partition size is a property of the image, not of the
   board.** Verified in hands-on use: on the firmware Waveshare ships,
-  the NVS partition is `0x6000`, where the walkthrough in
-  [`../xiaozhi-notes.md`](../xiaozhi-notes.md) uses `0x4000`.
+  the NVS partition is `0x6000`, where the walkthrough on the
+  [common page](README.md#writing-the-servers-address-into-nvs) uses
+  `0x4000`.
   Upstream's own images use `0x4000` as well, and put the OTA
   bookkeeping and the radio calibration data immediately behind it, so
   a `0x6000` partition written onto an upstream image would overwrite

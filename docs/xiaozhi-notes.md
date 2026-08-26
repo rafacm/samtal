@@ -32,54 +32,22 @@ git clone --depth 1 https://github.com/xinnan-tech/xiaozhi-esp32-server.git vend
   2026-08-12/13; an earlier revision of this bullet inferred "added
   after v2.4.0" from those same boards, wrongly). Where the field
   exists, a board can be pointed at a backend with no USB cable at
-  all. Three field-observed cautions:
-  - **The portal may save the URL without its trailing slash** (or the
-    operator may type it that way). The device then POSTs to the
-    slashless path; a server that answers with a redirect, even a
-    method-preserving 307, bricks the check-in loop, because the
-    firmware's OTA HttpClient does not follow redirects: the board
-    shows `code=307` and restarts over and over. vinga-server
-    therefore serves the slashless spelling directly on every
-    device-facing route. A device-facing endpoint can never rely on a
-    redirect.
-  - **A portal save can fail silently** (observed once on the
-    AMOLED's factory portal: WiFi fields submitted, nothing
-    persisted); re-dumping NVS over USB is the way to know what was
-    actually written.
-  - **No way back into the portal was found on a provisioned factory
-    AMOLED-2.16**: the launcher build ignores the BOOT-at-startup
-    provisioning gesture that the board-support sources describe, so
-    once a board is provisioned, repointing it at a new backend means
-    the NVS route below, not the portal. Retyping the OTA URL in the
-    portal is consequently not a recovery path an operator can count
-    on across the field's builds; the NVS route is.
-
-  Where the field is absent or unreachable, the URL is written
-  directly to NVS over USB (partition at `0x9000`, size `0x4000` on
-  the Touch-LCD-1.54 and `0x6000` on the AMOLED-2.16 factory image;
-  read the partition table at `0x8000` rather than assuming):
-
-  ```csv
-  # nvs_input.csv
-  key,type,encoding,value
-  wifi,namespace,,
-  ota_url,data,string,http://<server-ip>:8003/xiaozhi/ota/
-  ```
-
-  ```sh
-  python nvs_partition_gen.py generate nvs_input.csv nvs_new.bin 0x4000
-  esptool.py write_flash 0x9000 nvs_new.bin
-  ```
-
-  Read the partition first (`read_flash 0x9000 0x4000`) if you want to
-  preserve the existing device UUID (namespace `board`, key `uuid`).
-  Regenerating replaces the whole partition, so carry over everything
-  worth keeping: `wifi/ssid`, `wifi/password`, `board/uuid`,
-  `display/theme`, `audio/output_volume`. The `phy` namespace can be
-  dropped (the board recalibrates on the next boot and says so with a
-  `phy_init: Saving new calibration data` line), and so can `websocket`,
-  which the first OTA reply repopulates. Comparing the per-entry CRC32s
-  before and after proves the carried values survived byte for byte.
+  all. Where it is absent, or where a provisioned board offers no way
+  back into its portal, the URL is written directly to NVS over USB,
+  which is the route that works on every board:
+  [the device guides' common page](devices/README.md#writing-the-servers-address-into-nvs)
+  carries that procedure, and each guide says what its own board's
+  portal was observed to carry.
+- **The portal may save the URL without its trailing slash** (or the
+  operator may type it that way), and that is field-observed rather
+  than hypothetical. The device then POSTs to the
+  slashless path; a server that answers with a redirect, even a
+  method-preserving 307, bricks the check-in loop, because the
+  firmware's OTA HttpClient does not follow redirects: the board
+  shows `code=307` and restarts over and over. vinga-server
+  therefore serves the slashless spelling directly on every
+  device-facing route. A device-facing endpoint can never rely on a
+  redirect.
 - **An HTTPS backend needs no firmware certificate work.** The firmware
   trusts the ESP-IDF certificate bundle and sets
   `CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY=y`, which is
@@ -90,69 +58,14 @@ git clone --depth 1 https://github.com/xinnan-tech/xiaozhi-esp32-server.git vend
   `esp-x509-crt-bundle: Certificate validated`. Pin nothing: `X1` is the
   anchor that actually works, `Root YR` on its own is not self-signed and
   fails strict path building, and the leaf rotates roughly every 90 days.
-- Interaction on this board: short-press PWR toggles the conversation;
-  long-press powers off. Wake word in prebuilt builds is Chinese
-  ("nǐ hǎo xiǎo zhì"); an English model (`wn9_hiesp`, "Hi ESP") is available
-  when building from source.
 - App logic lives in `main/application.cc`; protocol in `main/protocols/`;
   device exposes its own MCP tools (volume, brightness, etc.) to the server
   over the conversation channel.
-
-### Driving the board from a terminal session
-
-What a device checkpoint needs when `idf.py monitor` is unavailable (it
-wants an interactive terminal). The port is `/dev/cu.usbmodem101` at
-115200: the chip's native USB-serial-JTAG, not a UART bridge.
-
-- **Reset with esptool**, which prints the MAC as a bonus:
-
-  ```sh
-  esptool.py --chip esp32s3 --port /dev/cu.usbmodem101 \
-      --after hard_reset read_mac
-  ```
-
-  **Toggling RTS alone does nothing**, whatever the usual "RTS drives EN"
-  advice says, because there is no reset pin behind this port. DTR and RTS
-  are two bits of a single USB CDC `SET_CONTROL_LINE_STATE` request, and
-  the USB-Serial-JTAG controller decodes the pair the way the classic
-  auto-reset circuit does: EN goes low only when **RTS is high and DTR is
-  low**. pyserial asserts both lines when it opens the port, so a bare
-  `setRTS(True)` / `setRTS(False)` toggle moves (DTR=1, RTS=1) to (1, 0)
-  and never passes through (0, 1). Measured on the board, one open port,
-  each combination held for 200 ms:
-
-  | DTR | RTS | result |
-  | --- | --- | ---------- |
-  | 1   | 1   | no reset   |
-  | 1   | 0   | no reset   |
-  | 0   | 1   | **reset**  |
-
-  From pyserial, one line fixes it: `port.setDTR(False)` before the RTS
-  toggle. esptool arrives at the same place by another road, which is why
-  it works: its bootloader-entry sequence leaves both lines low, so the
-  RTS toggle inside its `HardReset` lands on (0, 1). Replay that same
-  `HardReset` from pyserial's freshly opened state and it resets nothing,
-  which is the trap an earlier version of this note fell into.
-- **Read the boot log** with pyserial from the ESP-IDF Python environment
-  (`~/.espressif/python_env/idf*/bin/python`), not the system `python3`,
-  which has no `serial` module. Reset and read in one process that holds
-  the port open; reopening it races the boot output away.
-- **Read and parse NVS** to prove what the device persisted from an OTA
-  reply (`nvs_tool.py` lives in
-  `components/nvs_flash/nvs_partition_tool/` in ESP-IDF):
-
-  ```sh
-  esptool.py --chip esp32s3 --port /dev/cu.usbmodem101 --baud 460800 \
-      read_flash 0x9000 0x4000 nvs.bin
-  nvs_tool.py -d written nvs.bin
-  ```
-
-  `-d written` matters: NVS is log-structured, so without it erased entries
-  are listed beside live ones and read as though both were current.
-- **A conversation still needs a human.** The board opens its websocket
-  only on a PWR press or the wake word, so that one step cannot be
-  scripted. Everything up to it can be: reset, boot log, the OTA exchange,
-  and the agent the server resolved the device to.
+- What a particular board does with all of this, its buttons, its wake
+  word, its display and its own voice commands, is in
+  [the device guides](devices/README.md), and so are the procedures
+  that involve the board in front of you: writing NVS over USB,
+  resetting it, and reading its boot log back.
 
 ## Device ↔ server protocol
 

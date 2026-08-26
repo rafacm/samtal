@@ -105,8 +105,10 @@ off is the PWR button's job.
 
 Write your server's OTA/config address into the device's NVS `wifi`
 namespace under the key `ota_url` over USB, then provision WiFi from
-the board's captive portal. The procedure is in
-[`../xiaozhi-notes.md`](../xiaozhi-notes.md).
+the board's captive portal. The procedure is on the
+[common page](README.md#writing-the-servers-address-into-nvs).
+Whether this board's portal carries a Custom OTA URL field of its own,
+which would make the USB step unnecessary, has not been checked.
 
 ## Known quirks
 
