@@ -104,6 +104,7 @@ from tests.support.config_cli import registered
 from tests.support.deployment import Live, check_in, serving
 from tests.support.tiers import SERVE_MODULES, SIM_MODULES, declared, requirement_names
 from vinga_server.config import cli
+from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
 from vinga_server.ota import OTA_PATH
 from vinga_server.simulator import board, utterance
@@ -247,16 +248,19 @@ def elsewhere(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 @pytest.fixture(scope="module")
-def live(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Live]:
+def live(module_database: str) -> Iterator[Live]:
     """The server the subprocesses talk to, booted once for the module.
 
     In this process, which is what makes it cheap: it is a server, and
-    the artifact under test is on the other end of the socket.
+    the artifact under test is on the other end of the socket. On a
+    database of this module's own, because the lane clears this
+    worker's between tests and everything here stands on what the first
+    of them applied.
     """
     patch = pytest.MonkeyPatch()
     patch.setenv(MASTER_KEY_ENV, generate_key())
     try:
-        with serving(tmp_path_factory.mktemp("lane") / "db") as running:
+        with serving(DatabaseConfig(name=module_database)) as running:
             yield running
     finally:
         patch.undo()

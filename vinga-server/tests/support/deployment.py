@@ -87,13 +87,19 @@ def serving(database: DatabaseConfig | None = None) -> Iterator[Live]:
     machinery, which reads the `VINGA_DB_*` names and the
     `VINGA_SERVER__*` ones and nothing else, and the domain half comes
     from the database that half names.
+
+    `from_store=True`, because the line above is exactly what makes it
+    true: this server's domain half really was read out of the store,
+    so its device bindings resolve live and the two surfaces that span
+    a store and a running world have something to span.
     """
     database = DatabaseConfig() if database is None else database
     with pytest.MonkeyPatch.context() as patch:
         patch.delenv(CONFIG_ENV, raising=False)
         patch.setenv(DATABASE_NAME_ENV, database.name)
         booted = load_boot_config()
-    with served(create_app(booted.config, booted.secrets), database) as running:
+    app = create_app(booted.config, booted.secrets, from_store=True)
+    with served(app, database) as running:
         yield running
 
 

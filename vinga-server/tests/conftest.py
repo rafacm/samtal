@@ -467,6 +467,29 @@ def blank_database() -> Iterator[str]:
         drop_database(name)
 
 
+@pytest.fixture(scope="module")
+def module_database() -> Iterator[str]:
+    """A migrated database for a whole module, cloned from the run's
+    template.
+
+    For the lanes that seed once and then run a dozen tests against what
+    they seeded: the per-test truncation clears this worker's database,
+    which is what keeps ordinary tests independent and is exactly wrong
+    for a module that configured a deployment in its first test. A
+    database the truncation does not name is the honest way to have
+    both.
+
+    Module-scoped rather than session-scoped, so two such modules still
+    cannot see each other's rows.
+    """
+    name = f"{DATABASE_PREFIX}_module_{os.getpid()}_{next(_THROWAWAY)}"
+    create_database(name, template=TEMPLATE_DATABASE)
+    try:
+        yield name
+    finally:
+        drop_database(name)
+
+
 @pytest.fixture
 def spare_database() -> Iterator[str]:
     """A second migrated database of this test's own, cloned from the
