@@ -1,222 +1,350 @@
 # Domain concepts
 
-**Date:** 2026-08-21
+**Date:** 2026-08-27
 
-The domain model of vinga from the user's point of view: the nouns,
-how they relate, and the semantics that were decided on purpose. The
-[glossary](glossary.md) defines each term in one paragraph for looking
-things up; this page explains how the terms fit together and why. The
-model is deliberately ahead of the code: some of it is implemented
-today, some is decided direction, and each section says which. The
-[product promises](architecture/product-promises.md) are the
-commitments this model must keep; where the two touch, the promise is
-cited.
+The domain model of vinga from the user's point of view: the nouns, how
+they relate, and the semantics that were decided on purpose. This is a
+maintained map, and it is deliberately ahead of the code. Some of what
+it describes runs today and some is direction that was decided but not
+built, so every section opens by saying which, and a claim that differs
+from its section says so where it stands.
+
+What outranks this page, and on what:
+
+- [**The product promises**](architecture/product-promises.md) are the
+  commitments this model must keep. Where the two touch, the promise is
+  cited here rather than paraphrased.
+- [**The guidelines**](architecture/guidelines.md) and
+  [**the decision records**](adr/README.md) hold how the code keeps
+  them. This page says what the user gets; those say how vinga is built
+  to give it.
+- **The owning issue or record holds a decided direction.** Direction
+  belongs to whatever decided it, and each one below cites its owner.
+  This page is not itself a decision record: where a direction has no
+  owner, its status line says exactly that, so a reader can tell a
+  settled decision from a sentence written here.
+- **The generated references hold exact current behavior.** The
+  [domain configuration reference](reference/domain-config.md) and the
+  [conversation store schema](reference/conversations-schema.md) are
+  rendered from the code and diffed by CI, so they cannot describe a
+  server this repository does not build. Where this page and one of
+  them disagree about what the server does now, the reference is right.
+- [**The Xiaozhi notes**](xiaozhi-notes.md) hold the protocol and the
+  wire. Mechanics are linked from here, never restated.
+
+The [glossary](glossary.md) defines each term in one paragraph for
+looking things up; this page explains how the terms fit together and
+why.
+
+## On this page
+
+- [The model in one paragraph](#the-model-in-one-paragraph): every noun
+  and its status, in six sentences.
+- [Device](#device): the hardware, what it declares, and what it
+  reports.
+- [Agent](#agent): what answers, and why the word is not persona.
+- [Binding](#binding): which agents a device can reach, and which one
+  answers a fresh wake.
+- [Conversation and session](#conversation-and-session): the
+  load-bearing distinction, the stored record today, and the durable
+  thread ahead.
+- [Configuration changes arrive as whole
+  worlds](#configuration-changes-arrive-as-whole-worlds): when an edit
+  reaches a conversation in progress.
+- [The wake word wakes the device, not an
+  agent](#the-wake-word-wakes-the-device-not-an-agent): the doorbell,
+  and why per-agent wake words cannot exist.
+- [Memory](#memory): what an agent keeps, and what it is keyed by.
+- [Meta capabilities](#meta-capabilities): the questions every
+  conversation must be able to answer.
+- [The help agent](#the-help-agent): the built-in agent that explains
+  the device and the system.
+- [Before users arrive](#before-users-arrive): the named limitation the
+  user slot leaves behind.
 
 ## The model in one paragraph
 
-A **device** is a physical endpoint with no intelligence of its own.
-An **agent** is a named unit of behavior: a system prompt, a model
+**Implemented today, with the exception marked inline.**
+
+A **device** is a physical endpoint with no intelligence of its own. An
+**agent** is a named unit of behavior: a system prompt, a model
 configuration, a voice, and a set of MCP tools. A device is **bound**
-to one or more agents, one of which is its default. A **conversation**
-is a dialogue between a user and exactly one agent; it lives on the
-server, independent of any device. A **session** is one connection
-episode from one device, wake to close; a session attaches to a
-conversation, it is not the conversation. **Users** arrive in a later
-stage, and the model leaves their slot open on purpose.
+to one or more agents, one of which is its default. A **session** is
+one connection episode from one device, wake to close, and the server
+records sessions and the turns inside them. A **conversation** is a
+dialogue between a user and exactly one agent: a durable thread that
+outlives any single session and belongs to no device, which is
+**decided direction** (issue #190), not code. **Users** arrive in a
+later stage, and the model leaves their slot open on purpose.
+
+One name collides, and clearing it up front saves confusion later. The
+database schema named `conversations` stores **sessions and turns**,
+which is what exists today;
+[its reference](reference/conversations-schema.md) is the authority on
+what it holds. The **Conversation** of this page, the thread, is issue
+#190's direction and has no table of its own yet. Where the two meet
+below, each is named explicitly.
 
 ## Device
 
+**Implemented today, with the durable record marked inline.**
+
 A device is hardware: buttons, microphone, speaker, display, battery,
 an identity (the `Device-Id` it presents), and perhaps a location
-("the kitchen"). Under the thin-device promise it holds no
-intelligence and no memory; it does not even know agents exist. What a
-device contributes to a conversation is *context*, never memory: its
-model, its capabilities ("you are speaking through a device with no
-display"), its location. Everything learned in conversation belongs to
-the agent, so replacing or moving hardware loses nothing.
+("the kitchen"). Under
+[thin device, smart server](architecture/guidelines.md#thin-device-smart-server)
+it holds no intelligence and no memory; it does not even know agents
+exist. What a device contributes to a conversation is *context*, never
+memory: its model, its capabilities ("you are speaking through a device
+with no display"), its location. Everything learned in conversation
+belongs to the agent, so replacing or moving hardware loses nothing.
+
+A device joins a deployment before any of this matters, and that is a
+solved problem rather than a planned one: the board is pointed at the
+server, the server's OTA endpoint answers its check-in, and an unclaimed
+board is claimed through the 6-digit activation ceremony (issue #40,
+implemented). The operator's procedure is in
+[the server README](../vinga-server/README.md#onboarding-a-device) and
+the wire exchange behind it is in [the Xiaozhi notes](xiaozhi-notes.md);
+neither is restated here. The word is overloaded, so note which one is
+meant: this is a *device* activation, joining a deployment once, and
+not the *agent* activation that assembles a prompt at the start of a
+session or after a switch.
 
 What the server knows about a device comes from three sources, kept
 distinct on purpose:
 
 - **Identity and declaration.** The `Device-Id` on the wire is what
   bindings key on, and the operator's configuration says what was
-  *declared* for it: which agents, which default.
+  *declared* for it: which agents, which default. The
+  [configuration reference](reference/domain-config.md) documents the
+  fields.
 - **Observed facts**: what the device itself reports, arriving in
   phases rather than all at once. The OTA check-in carries the board
-  model and the firmware version. The hello carries the protocol
-  version and a feature map. After the hello, when the feature map
-  advertises MCP, the server asks the device for its own tool list
-  over a separate background MCP handshake, which a first utterance
-  can beat; [xiaozhi-notes](xiaozhi-notes.md) describes that race.
-  The first listen message carries the listening mode, the empirical
-  echo-cancellation signal, since the firmware chooses realtime
-  exactly when AEC is on. A `listen` `detect` message reports a fired
-  wake word, by word. What survives differs by fact: board model and
-  firmware version cross the OTA-to-session boundary in a bounded
-  in-memory cache, which holds the latest report per device until it
-  is overwritten by the next check-in, evicted by the cache's bound,
-  or lost when the server restarts, and which a session reads into
-  its capture manifest when capture is enabled; the protocol version,
-  the discovered MCP tools, and the listening mode are retained and
-  consumed for the life of the session, the protocol version also
-  entering an enabled capture's manifest; the wake-word report alone
-  is merely debug-logged. None of it enters a durable, queryable
-  per-device record; the record that would keep all of it is planned
+  model and the firmware version; the hello carries the protocol
+  version and a feature map; a separate background MCP handshake asks
+  the device for its own tool list, which a first utterance can beat;
+  the first listen message carries the listening mode, which is the
+  empirical echo-cancellation signal because the firmware chooses
+  realtime exactly when AEC is on; and a `listen` `detect` message
+  reports a fired wake word. Every one of those exchanges, the phases
+  and the discovery race included, is described on the wire in
+  [the Xiaozhi notes](xiaozhi-notes.md). How long each fact survives
+  differs by fact, and is a property of the server rather than of the
+  domain: what matters here is that none of it lands in a durable,
+  queryable per-device record. That record is **decided direction**
   (issue #96).
 - **Hardware facts from the board catalog**: what the model implies
   but the wire never says: microphone count, echo cancellation,
   display, button layout. Keyed by the reported board model; the
-  per-board device guides are the prose form for the help agent, and
-  a machine-readable sibling serves the server.
+  per-board [device guides](devices/README.md) are the prose form for
+  the help agent, and a machine-readable sibling serves the server.
 
 The help agent reads all three ("this board has one microphone and no
-echo cancellation, so I cannot be interrupted mid-reply"). The
-runtime adapts to what they imply rather than controlling the device:
-the device owns its own listening mode, so adaptation is by
-observation, which is the thin-device promise holding.
+echo cancellation, so I cannot be interrupted mid-reply"). The runtime
+adapts to what they imply rather than controlling the device: the
+device owns its own listening mode, so adaptation is by observation,
+which is the thin-device guideline holding.
 
 ## Agent
+
+**Implemented today.**
 
 An agent is what answers: a system prompt, an LLM and the rest of its
 provider choices, a voice, an ASR language pin, and the MCP servers
 whose tools it may call. The compelling property is focus by
 construction: an agent configured with a scoped Home Assistant MCP and
 a prompt about one room is an expert on that room and nothing else.
+Every field an agent has is in the
+[configuration reference](reference/domain-config.md).
 
 The word is chosen deliberately. "Persona" suggests the differences
 between agents are cosmetic (a voice, a tone) when the point is that
 they differ in capability and scope; it also dresses software as a
-human. "Agent" is also what the surrounding ecosystem says, so
-vinga's documentation matches what its users already read. In vinga
-the word means exactly: a named configuration of prompt, providers,
-voice, and tools that holds conversations and accrues memory. Older
-issues say "persona"; new writing says agent.
+human. "Agent" is also what the surrounding ecosystem says, so vinga's
+documentation matches what its users already read. In vinga the word
+means exactly: a named configuration of prompt, providers, voice, and
+tools that holds conversations and accrues memory. Older issues say
+"persona"; new writing says agent. The decision and the sweep that
+carried it through the server's own text are recorded in
+[the 2026-08-12 feature doc](features/2026-08-12-agent-not-persona.md).
 
 ## Binding
 
+**Implemented today, with the exception marked inline.**
+
 A binding connects a device to the agents reachable from it, with one
 designated default. Bindings are many-to-many: one agent can serve
-several devices (the same home agent in every room), and one device
-can reach several agents. Today the binding is the device's agent list
-in the domain configuration, and the first entry is the default. A
-device with no binding reaches the deployment's `default_agent` when
-one is set, and is turned away otherwise, so the devices map doubles
-as an allowlist. A fresh wake always gets the default agent; reaching
-another bound agent is a [handover](glossary.md#handover), and a
-planned meta capability lets the user change a device's default by
-voice ("make Nadia the default agent on this device").
+several devices (the same home agent in every room), and one device can
+reach several agents. Today the binding is the device's agent list in
+the domain configuration, and the first entry is the default. A device
+with no binding reaches the deployment's `default_agent` when one is
+set, and is turned away otherwise, so the devices map doubles as an
+allowlist.
+
+A fresh wake always gets the default agent: the binding is resolved
+when the device connects, so whatever happened in the last session, the
+next one starts where the configuration says. Reaching another bound
+agent is a [handover](glossary.md#handover). Changing a device's
+default by voice ("make Nadia the default agent on this device") is
+**decided direction** and belongs to
+[the meta capabilities](#meta-capabilities) below.
 
 ## Conversation and session
+
+**Implemented today**: the session, and the stored record of sessions
+and turns (issue #120). **Decided direction** (issue #190): the
+Conversation as a durable, agent-scoped thread spanning sessions, which
+owns every semantic below that cites it.
 
 The load-bearing distinction in the model is that a conversation and a
 session are different things.
 
 A **session** is one connection episode: wake (button press or wake
 word) to close. It belongs to a device. Sessions exist in the code
-today.
+today, and so does their record: the server stores one row per session
+and one per turn, with the numbers and the text each behind a switch of
+its own. What is stored, what each switch takes away, and how long a
+row is kept are in
+[the conversation store schema](reference/conversations-schema.md).
+That schema is named `conversations`, which is the collision worth
+holding on to: it is the store of sessions and turns, not of the entity
+the next paragraph describes.
 
-A **conversation** is a dialogue between a user and exactly one agent.
-It lives on the server, accrues a transcript and a cost, and is
-independent of any device. This is decided direction, not yet code:
-today conversation history lives only as long as the session that
-produced it.
+A **conversation** is a dialogue between a user and exactly one agent:
+a thread that lives on the server, accrues a transcript, and is
+independent of any device. It is **decided direction** (issue #190),
+not code. Today a session's dialogue lives only as long as the session
+that produced it, and the stored turns are read back per session.
 
-In short: sessions are how audio reaches the server; conversations
-are what accumulates and what you come back to. "Sophia... let me
-talk to Nadia... back to Sophia" is one session touching two
-conversations; resuming with Sophia tomorrow from another device is
-the same conversation in a new session. The model keeps the link in
-both directions: a session records, in order, the conversations it
-touched, and a conversation records the sessions it was part of,
-beginning with the one that opened it. Meta capabilities read that
-linkage ("what did we talk about this morning on the kitchen
-device").
+In short: sessions are how audio reaches the server; conversations are
+what accumulates and what you come back to. The vocabulary follows the
+same split (issue #190): a session is a connection record, and a
+conversation is a thread. "Sophia... let me talk to Nadia... back to
+Sophia" is one session touching two threads; resuming with Sophia
+tomorrow from another device is the same thread in a new session.
 
-A consequence of the decisions below, stated so nothing rediscovers
-it: the **session transcript** is its own artifact, distinct from any
-conversation's transcript. A session's full record is what was said
-and done on the device from wake to close: the entries of every
-conversation it touched, in order, plus the meta turns that belong to
-no conversation. It is reconstructed from the session's ordered
-conversation references and its session events, so no dialogue is
-stored twice. This is also the record device-side diagnostics
-already live in: capture and the structured event stream are scoped
-to a session, not to a conversation.
+The two are projections of the same rows rather than two stores (issue
+#190). A turn references both the thread it belongs to and the session
+it was spoken in, so the session view (everything said and done on this
+device from wake to close) and the conversation view (this thread,
+across every session it spanned) are two readings of one set of turns.
+No dialogue is written twice, and neither view is reconstructed from
+the other.
+
+Two things sit beside that record rather than inside it. Capture and
+the structured event stream are scoped to a session, never to a thread,
+and that is implemented today. And a turn that is only a meta request
+("increase the volume to 9") is session work rather than dialogue with
+an agent, so it belongs to the session and to no thread; the honest
+edge is that a mixed turn ("set the volume to 9, and what were we
+saying?") belongs to the thread. That recording rule is **decided
+direction** (recorded on this page, 2026-08-21; no owning issue or
+decision record yet).
 
 The split is what makes the desired behaviors ordinary instead of
 special cases:
 
-- **Switching and returning.** "Let me talk to Nadia" suspends the
-  current conversation and opens (or resumes) one with Nadia inside
-  the same session; "back to Sophia" resumes the suspended one.
-- **Resuming elsewhere.** A new session on another device attaches to
-  an existing conversation; "a while ago we were talking about this
-  topic" is a search over past conversations followed by an attach.
-- **Cost.** "How much has this conversation cost so far" is answerable
-  because cost is a property of the conversation entity.
+- **Switching and returning.** "Let me talk to Nadia" leaves the
+  current thread and opens or resumes one with Nadia inside the same
+  session; "back to Sophia" returns. The switch itself exists today as
+  the handover tool, and the stored record already names the agent on
+  every turn.
+- **Resuming elsewhere.** A new session on another device can attach to
+  an existing thread. Discovery is by spoken description ("a while ago
+  we were talking about this topic") and is agent-scoped: an agent
+  finds its own past threads (issue #190).
+- **Cost.** "How much has this conversation cost so far" wants cost to
+  be a property of the thread. It is **decided direction** (recorded on
+  this page, 2026-08-21; no owning issue or decision record yet):
+  issue #190 explicitly leaves budgets and per-conversation accounting
+  out of its scope, so nothing owns this yet.
 
-Three decided semantics:
+The decided semantics, each with its owner:
 
-- **A switch lasts for the session.** The next wake of the device gets
-  its default agent again, so the wake experience stays predictable.
-- **Conversations are suspended, never ended.** There is no "end
-  conversation" in the model. The consequences are features to build:
-  cleanup of old conversations, a warning when one grows very long,
-  and an offer to summarize it and start fresh from the summary.
-- **A switch starts clean by default.** The incoming agent does not
-  read what was said to the outgoing one. Agents are scoped on
-  purpose, and a switch that silently handed the whole session to the
-  incoming agent would leak around that scoping; it would also move
-  words spoken to a local agent to whatever provider the incoming
-  agent uses. Carrying context is explicit: phrasing that asks for
-  continuation ("ask Nadia about this") carries it, and when the
-  phrasing is ambiguous the agent asks rather than guessing. What is
-  deliberately carried becomes part of the new conversation. Nothing
-  is lost by starting clean, since the suspended conversation is
-  still there to come back to. Today's handover behaves differently
-  (the session transcript carries across); it adopts this rule when
-  conversations become persistent entities.
+- **A switch lasts for the session.** *Implemented today.* The next
+  wake of the device gets its default agent again, because the binding
+  is resolved at connect and carries no memory of the last session, so
+  the wake experience stays predictable.
+- **A new activation starts a fresh thread, and resumption is always
+  explicit.** *Decided direction, issue #190.* Waking a device does not
+  silently drop the user back into whatever was being discussed
+  yesterday; continuing an earlier thread is asked for, by describing
+  it. This replaces an earlier formulation on this page under which
+  conversations were suspended and never ended.
+- **Threads are listable, readable and deletable, and retention knows
+  about them.** *Decided direction, issue #190.* An operator can list
+  an agent's threads, read one, and delete one, and the retention
+  policy becomes thread-aware rather than only session-aware. What the
+  release has instead today, a retention window over whole sessions
+  and no delete command at all, is stated exactly in
+  [the store's reference](reference/conversations-schema.md#retention-and-deletion).
+- **A long thread gets a recap only by consent.** *Decided direction,
+  issue #190.* At milestones in a long thread the agent offers to
+  recap rather than silently compressing, and the user says yes. This
+  replaces an earlier formulation on this page, which warned about
+  length and offered to summarize and start fresh from the summary.
+- **Resumption is a deployment switch, and it needs the text.**
+  *Decided direction, issue #190.* A thread cannot be resumed from
+  rows that were never written, so resumption is available only where
+  conversation text is stored, which is one of the two switches
+  [the store's reference](reference/conversations-schema.md) describes.
+- **A switch starts clean by default.** *Decided direction, issue
+  #190*, as the fresh-thread default applied to a handover. The
+  incoming agent does not read what was said to the outgoing one.
+  Agents are scoped on purpose, and a switch that silently handed the
+  whole session to the incoming agent would leak around that scoping;
+  it would also move words spoken to a local agent to whatever provider
+  the incoming agent uses. Carrying context is explicit: phrasing that
+  asks for continuation ("ask Nadia about this") carries it, and when
+  the phrasing is ambiguous the agent asks rather than guessing. What
+  is deliberately carried becomes part of the new thread. Today's
+  handover behaves differently, and this is the gap the direction
+  closes: the session's transcript currently carries across a switch.
 
 ## Configuration changes arrive as whole worlds
+
+**Implemented today.**
 
 Editing the domain configuration (an agent, its prompt, a provider
 entry, an MCP server) neither restarts the server nor mutates it in
 place. The server serves immutable states called
 [worlds](glossary.md#world): a validated configuration, the stored
 secrets opened behind it, and everything built from the pair, frozen
-together. Applying stored changes composes and builds the complete
-next world first, so a refused apply has changed nothing, and then
-swaps it in at one point. This is implemented today (the config
-reload); what still waits for a restart is the server's own file
-(ports, auth), which holds nothing the configuration API writes.
+together. Applying stored changes composes and builds the complete next
+world first, so a refused apply has changed nothing, and then swaps it
+in at one point. What still waits for a restart is the server's own
+file (ports, auth), which holds nothing the configuration API writes.
 
-The user-visible semantic is when a live conversation meets a
-change, and the answer is: at the conversation's own natural
-boundaries, never mid-turn. The tools an agent may reach are read
-per reply, so a moved MCP entry is picked up on the next utterance.
-Prompt text is assembled at activation, so a rewritten persona
-reaches a conversation at its next session or agent switch. Filler
-clips and provider engines are bound by a conversation when it
-opens, so a conversation already speaking finishes on the world it
-was built from, served that world's prompt to the end, even if its
-agent was deleted from the store mid-sentence. A world nothing
-serves and nothing holds retires and releases what it built.
+The user-visible semantic is what happens when a live conversation
+meets a change, and the answer is: it arrives at the conversation's own
+natural boundaries, never mid-turn. A conversation already speaking
+finishes on the world it was built from, served that world's prompt to
+the end, even if its agent was deleted from the store mid-sentence.
+
+Which boundary a particular edit waits for depends on what moved, and
+that is a mechanic rather than a semantic: the
+[configuration reference](reference/domain-config.md) says it kind by
+kind, and [the glossary's world entry](glossary.md#world) states the
+rule in one paragraph.
 
 ## The wake word wakes the device, not an agent
 
+**Implemented today, with one open question marked inline.**
+
 This is settled by hardware reality, and the documentation should say
-it plainly wherever wake words appear. The wake word is spotted
-on-chip by ESP-SR, and the server takes no part in the decision: it
-cannot hear, tune, or substitute for it. What it is told is which word
-fired, after the fact (the firmware's `listen` `detect` report;
-[xiaozhi-notes](xiaozhi-notes.md)). Builds with the firmware's
-send-wake-word-data option enabled, which is the default in current
-upstream sources, additionally send the short span of buffered trigger
-audio as the conversation's first audio; whether the prebuilt images
-on our boards do has not been checked on the wire and is open (issue
-#112). Wake words are also a fixed compiled set, so per-agent wake
-words are impossible on stock firmware, which is the compatibility
-floor.
+it plainly wherever wake words appear. The wake word is spotted on-chip
+and the server takes no part in the decision: it cannot hear, tune, or
+substitute for it, and what it is told is which word fired, after the
+fact. [The Xiaozhi notes](xiaozhi-notes.md) describe the detection, the
+report that carries it, and the firmware option that decides whether
+the buffered trigger audio is sent along with it; whether the prebuilt
+images on our boards send that audio has not been checked on the wire
+and is open (issue #112).
+
+Wake words are also a fixed compiled set, so per-agent wake words are
+impossible on stock firmware, which is
+[the compatibility floor](architecture/product-promises.md#stock-xiaozhi-firmware-is-the-compatibility-floor).
 
 So the wake word is the doorbell: it opens a session, and the device's
 default agent answers. When a board's wake word happens to be "Sophia"
@@ -227,80 +355,116 @@ has a wake word enabled and explains exactly this.
 
 ## Memory
 
+**Implemented today, with the direction marked inline.**
+
 Memory is keyed by agent, never by device, because an agent is one
-entity across rooms. This is already the implemented behavior (one
-memory file per agent) and it survives into the target model with one
-refinement: when users arrive, the key becomes the (user, agent) pair,
-so an agent shared by a household remembers each person separately.
+entity across rooms. This is the implemented behavior, one memory per
+agent, and where it is configured is in the
+[configuration reference](reference/domain-config.md).
+
+Two decided directions build on it, and they are separate decisions:
+
+- **Memory gets scopes and tool operations.** *Decided direction, issue
+  #83.* Three scopes (session, agent, device) with add, update, delete
+  and lookup offered as tools, and no migration of what exists. That
+  issue reaffirms the agent-keyed reasoning above rather than
+  replacing it. Where memory is *stored* moves to Postgres separately
+  (issue #314).
+- **When users arrive the key becomes the (user, agent) pair**, so an
+  agent shared by a household remembers each person separately. This
+  refinement is **decided direction** (recorded on this page,
+  2026-08-21; no owning issue or decision record yet): issue #83 covers
+  neither a user-bearing key nor the profile below.
 
 One deliberate hole in agent isolation is planned: a small shared
 **user profile** (name, language, standing preferences) visible to all
 of a user's agents, so nobody teaches five agents their name five
 times. It is a hole on purpose, and it is documented as one: agents
-stay isolated in what they learn, except for the profile the user
-chose to share with all of them.
+stay isolated in what they learn, except for the profile the user chose
+to share with all of them. This is **decided direction** (recorded on
+this page, 2026-08-21; no owning issue or decision record yet).
 
 Agent memory is distinct from what an agent appears to know inside one
-conversation; the configuration reference documents that distinction
-where memory is configured.
+conversation; the [configuration
+reference](reference/domain-config.md) documents that distinction where
+memory is configured.
 
 ## Meta capabilities
+
+**Decided direction** (recorded on this page, 2026-08-21; no owning
+issue or decision record yet), except where a claim below cites its
+own owner.
 
 Some questions must be answerable in every conversation, whoever is
 answering: "how much has this conversation cost", "find the
 conversation where we discussed the trip and resume it here", "let me
-talk to Nadia". These are not features of any one agent; they are
-vinga capabilities, modeled as a small set of built-in tools injected
-into every agent's tool set, exactly parallel to how the device's own
-controls already reach agents as MCP tools. The switch itself executes
-in vinga-owned code and logs its reason, per the decision-sites
-principle.
+talk to Nadia". These are not features of any one agent; they are vinga
+capabilities, modeled as a small set of built-in tools injected into
+every agent's tool set, exactly parallel to how the device's own
+controls already reach agents as MCP tools. One of them exists today:
+the handover tool, which executes in vinga-owned code and logs its
+reason, per
+[the decision-reason guideline](architecture/guidelines.md#give-every-decision-a-reason-and-know-whose-reason-it-is).
 
-Scoping decision: **conversation search is agent-scoped.** An agent
-can find and resume its own past conversations, not another agent's.
+Scoping decision: **conversation search is agent-scoped** (issue #190).
+An agent can find and resume its own past threads, not another agent's.
 That preserves the focus story and the credential scoping that make
-per-agent MCP configuration worth having; it is a privacy boundary,
-not a convenience default. A cross-agent search may arrive later as a
+per-agent MCP configuration worth having; it is a privacy boundary, not
+a convenience default. A cross-agent search may arrive later as a
 separate, explicitly user-level capability.
 
-Recording decision: **meta turns stay out of the conversation.**
-"Increase the volume to 9" is work for the session, not part of the
-dialogue with the agent, so a turn that is only a meta request
-(device control, a cost question, the switch itself) is recorded as a
-session event rather than an entry in the conversation transcript.
-Resuming a conversation months later replays the dialogue, not the
-volume adjustments. The honest edge: a mixed turn ("set the volume to
-9, and what were we saying?") belongs to the conversation.
+The cost question ("how much has this conversation cost") and the
+recording rule for meta turns are both stated in
+[Conversation and session](#conversation-and-session) above, and both
+are unowned there for the same reason: issue #190 leaves budgets,
+per-conversation accounting and cross-agent threads out of its scope.
 
 ## The help agent
+
+**Decided direction** (issue #21), except the device guides, which
+exist.
 
 A built-in agent, bound to every device by default, that answers three
 kinds of question:
 
-- **This device**: which button starts a conversation, how long to
-  hold it to power off, what the display shows. Its source is the
-  per-board device guide, selected by the device model at runtime, so
-  it explains the hardware actually in front of the user.
-- **This system**: vinga's concepts, the contents of this page: what
-  an agent is, what a conversation is, why the wake word wakes the
-  device and not an agent.
-- **Device commands**: the controls the device itself publishes as
-  MCP tools (volume, screen brightness), phrased as things the user
-  can just say.
+- **This device**: which button starts a conversation, how long to hold
+  it to power off, what the display shows. Its source is the per-board
+  device guide, selected by the device model at runtime, so it explains
+  the hardware actually in front of the user.
+- **This system**: vinga's concepts, the contents of this page: what an
+  agent is, what a conversation is, why the wake word wakes the device
+  and not an agent.
+- **Device commands**: the controls the device itself publishes as MCP
+  tools (volume, screen brightness), phrased as things the user can
+  just say.
 
-The device guides that feed it are user-facing markdown, one per
-supported board, linked from the hardware tables (issue #93), so the
-help agent's knowledge is reviewable documentation rather than prompt
-text.
+There is one help agent, not one per board (issue #21). Its prompt is
+composed at the start of a session from a shared part plus a block of
+facts for the board that checked in, keyed on the reported board model,
+and a board the deployment has no facts for gets an honest vague
+answer rather than a confident wrong one.
+
+The [device guides](devices/README.md) that feed it are user-facing
+markdown, one per supported board, and they exist today (issue #93), so
+the help agent's knowledge is reviewable documentation rather than
+prompt text.
 
 ## Before users arrive
 
+**Implemented today** as a limitation, with the direction marked
+inline.
+
+There is no user entity. "The user" is implicitly whoever is talking to
+the device, and memory is effectively keyed by (device owner, agent). A
+household sharing one device is one "user" to every agent on it, and
+enabling conversation-text storage on a shared device therefore stores
+what guests say to it, which is the same statement
+[the store's reference](reference/conversations-schema.md) makes.
+
 Users, and with them budgets and voiceprint identification for shared
-devices, come in a later stage. Until then "the user" is implicitly
-whoever is talking to the device, and memory is effectively keyed by
-(device owner, agent). A household sharing one device is one
-"user" to every agent on it. This is a documented limitation, stated
-here so the later refactor has a name, not a surprise: when users
-arrive, conversations, memory, and the shared profile all gain a user
-in their key, and voiceprint recognition decides which user is
-speaking on a shared device.
+devices, come in a later stage: when they arrive, conversations, memory
+and the shared profile all gain a user in their key, and voiceprint
+recognition decides which user is speaking on a shared device. That is
+**decided direction** (recorded on this page, 2026-08-21; no owning
+issue or decision record yet). It is stated here so the later refactor
+has a name rather than being a surprise.
