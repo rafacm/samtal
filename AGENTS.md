@@ -12,9 +12,13 @@ display) talk to a Python conversation server over WebSocket. It builds on
   providers (LLM, voice, MCP tools).
 - `vinga-esp32/`: thin firmware customization on top of upstream
   xiaozhi-esp32 (ESP-IDF v6.0.x, target `esp32s3`).
-- `docs/xiaozhi-notes.md`: research notes on the upstream architecture, the
-  device↔server protocol, ports, configuration keys, and the validated
-  end-to-end demo procedure. Read this first for anything protocol-related.
+- `docs/README.md`: the documentation index, and the authority taxonomy
+  that says which class a page belongs to and therefore what it may
+  claim. Start here when you need to know where a fact lives.
+- `docs/xiaozhi-notes.md`: research notes on the device↔server protocol,
+  key by key, and on the upstream projects it came from. Read this first
+  for anything protocol-related. Board procedures and per-board behavior
+  are not here; they are in `docs/devices/`.
 - `docs/architecture/product-promises.md`: the standing commitments to the
   person running vinga, falsifiable from outside. They take precedence over
   everything below.
