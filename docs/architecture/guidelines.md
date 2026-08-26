@@ -37,7 +37,8 @@ security invariants. Everywhere else the guidelines say "prefer" and
   execution model](#normalize-the-hardware-edge-while-runtimes-keep-their-native-execution-model):
   where the seam sits, what its interface talks about, and why
   runtimes plug in beside each other.
-- [Give every decision a reason, and know whose reason it is](#give-every-decision-a-reason-and-know-whose-reason-it-is):
+- [Give every decision a reason, and know whose reason it
+  is](#give-every-decision-a-reason-and-know-whose-reason-it-is):
   closed reasons for the decisions vinga owns, a runtime's own
   diagnostics for the decisions it owns.
 - [A framework may own the shared pipeline, not vinga's own
