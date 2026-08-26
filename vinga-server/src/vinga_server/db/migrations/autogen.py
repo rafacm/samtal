@@ -30,6 +30,16 @@ tables, columns, types and constraints; it does not see why a column is
 nullable, or that a boolean needs a server-side default so a row written
 before it says false itself. Read the file, write its docstring, and fix
 what it got wrong before committing it.
+
+`main` is a command boundary and not a thin wrapper around `generate`.
+This is the one module in the project that connects with psycopg
+directly and issues `CREATE DATABASE` and `DROP DATABASE`, and psycopg
+quotes the DSN it tried in every failure it raises, password and query
+parameters included. Letting one of those escape a module entry point
+would print a connection string to stderr, which is the highest-priority
+thing this project's refusals exist to prevent. So the whole maintenance
+lifecycle sits behind one sanitized answer: a fixed sentence, no
+exception, exit 1.
 """
 
 import sys
@@ -39,12 +49,33 @@ from alembic import command
 from alembic.config import Config as AlembicConfig
 from sqlalchemy import URL
 
-from vinga_server.config.loader import load_file_config
+from vinga_server.config.loader import ConfigError, load_file_config
 from vinga_server.db import (
     DOMAIN_CHAIN,
     StoreChain,
     connection_url,
     open_url,
+)
+
+# What every failure inside the maintenance lifecycle is answered with.
+#
+# Fixed and value-free, like every other refusal this project prints
+# about a database, and for the same reason with one more edge: this
+# command connects with psycopg directly and issues `CREATE DATABASE`
+# and `DROP DATABASE`, and a psycopg failure quotes the DSN it tried,
+# password and query parameters included. A traceback out of a module
+# entry point is that DSN on stderr and in whatever captured it.
+#
+# The one thing that IS repeated is the names of the variables to look
+# at, which is what `db`'s own refusals do: a name is not a value.
+MAINTENANCE_FAILED = (
+    "could not autogenerate a revision. The scratch database on the configured "
+    "instance could not be made, brought to head, compared or dropped. Nothing of "
+    "the connection is repeated here, because a database URL carries credentials in "
+    "its authority and can carry another in its query: check the VINGA_DB_* "
+    "variables, and that the role they name may create databases, which a "
+    "deployment's server role deliberately may not. The development instance starts "
+    "with `docker compose up -d --wait`"
 )
 
 # The scratch database, made and dropped around one run. Named rather
@@ -133,7 +164,38 @@ def main(argv: list[str]) -> int:
             file=sys.stderr,
         )
         return 2
-    generate(arguments[0], chain)
+    return _generated(arguments[0], chain)
+
+
+def _generated(message: str, chain: StoreChain) -> int:
+    """The whole maintenance lifecycle behind one sanitized boundary.
+
+    Every failure from here down is somebody's connection string: an
+    unreachable instance, a role without `CREATEDB`, a `DROP DATABASE`
+    refused because something is still connected, a comparison that
+    could not read the version table. psycopg quotes the DSN it tried in
+    all of them, so none of them may travel.
+
+    A `ConfigError` is this project's own already-sanitized refusal and
+    is printed as it stands: `db` builds those outside their handlers
+    precisely so they carry nothing. Everything else becomes the fixed
+    sentence.
+
+    Nothing is re-raised, which is the strongest form of severing there
+    is: what leaves this function is a string that was written here and
+    an exit code. There is no exception for a renderer to walk, no
+    `__cause__` to follow, and no frame holding the DSN.
+    """
+    problem: str | None = None
+    try:
+        generate(message, chain)
+    except ConfigError as refusal:
+        problem = str(refusal)
+    except Exception:
+        problem = MAINTENANCE_FAILED
+    if problem is not None:
+        print(problem, file=sys.stderr)
+        return 1
     return 0
 
 
