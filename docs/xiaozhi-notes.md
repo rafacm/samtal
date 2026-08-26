@@ -171,15 +171,20 @@ on real hardware is kept beside the fact it validates.
   board the configuration resolves to no agent still gets `200 OK`, with
   `websocket.token` empty; the refusal comes later, at the WebSocket
   handshake, as a `403` logged as `auth_rejected` with reason
-  `no_token`. What the reply says about that depends on onboarding: with
-  the activation ceremony enabled, which is the default, the same reply
-  also carries an `activation` section and the board shows a claim code,
-  so an empty token there is a device waiting to be claimed rather than
-  one turned away. With onboarding off, nothing in the OTA response says
-  the device is unwelcome, so a board that provisions perfectly and then
-  never speaks is this, not a network fault. Treat an empty token with
-  no activation section as a hard provisioning error rather than
-  connecting anyway. One POST from a
+  `no_token`. An empty token is therefore the signal to read, and it has
+  more than one meaning. It comes with an `activation` section when the
+  board is genuinely unbound and a code may be offered, and the board
+  shows a claim code: that is a device waiting to be claimed rather than
+  one turned away. It comes without one when the ceremony is turned off,
+  when the device is bound to an agent this process has not loaded yet
+  and is waiting for a reload, when the server could not read the
+  bindings authoritatively, or when the pending table declined the offer
+  because it is at capacity or has spent its budget for new codes. So an
+  empty token with no activation section is not by itself a hard
+  provisioning error: it is the reply saying no agent is reachable yet,
+  and which of those it is, the server's own log for the check-in says.
+  A board that provisions perfectly and then never speaks is one of
+  them, not a network fault. One POST from a
   laptop, sending the board's MAC as `Device-Id` and its UUID as
   `Client-Id`, answers the question before touching the hardware. A
   plain `GET` on the same URL returns a human-readable line naming the
@@ -206,11 +211,14 @@ this ceremony, and the operator's side of it is in
 
 - The OTA response may carry an optional `activation {message, code,
   challenge, timeout_ms}` object. Omitting it means no activation is
-  ever required and the device proceeds straight to the websocket,
-  which is what vinga-server does for a device its configuration
-  already resolves to an agent, and for every device when the
-  onboarding ceremony is turned off. A device that resolves to nothing
-  gets the object and shows the code.
+  ever required and the device proceeds straight to the websocket.
+  vinga-server offers the object to a device that is genuinely
+  unbound: the ceremony has to be enabled, the binding view has to be
+  authoritative rather than a fallback, the device has to resolve to no
+  agent at all rather than to one this process has yet to load, and the
+  pending table has to have room and budget for another code. A device
+  that fails any of those is answered without an `activation` section,
+  and with the empty token the previous section describes.
 - When it is present, the device shows `message` on screen with the
   activation jingle and speaks `code` digit by digit, each digit an OGG
   clip from the firmware's compiled language assets
