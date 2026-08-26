@@ -663,3 +663,256 @@ finding.
    deployment-facing switch is defined. The other three rows were
    verified against models, routes and generated references; this one
    was not, and it is the one that was wrong.
+
+## M4: Concepts distinguishes today from direction
+
+PR TBD.
+
+### What landed
+
+Six commits.
+
+- **`docs/concepts.md`,** recut, dated 2026-08-27. A new
+  introduction naming the page's class (a maintained map,
+  deliberately ahead of the code) and stating what outranks it and on
+  what: the promises, the guidelines and the decision records, the
+  owning issue for a direction, the generated references for exact
+  current behavior, and the Xiaozhi notes for the wire. The glossary
+  relationship sentence is kept verbatim. An On this page section
+  follows, eleven entries, which the policy's five-or-more test
+  clears comfortably. Every section then opens with a bold status
+  line, and mixed sections mark their exceptions inline.
+- **`vinga-server/src/vinga_server/config/docgen.py`** and
+  **`vinga-server/src/vinga_server/conversations/docgen.py`,** one
+  `CONCEPTS = "../concepts.md"` constant and one sentence of prose
+  each, with **`docs/reference/domain-config.md`** and
+  **`docs/reference/conversations-schema.md`** regenerated in the
+  same commit.
+- **`docs/glossary.md`,** the Conversation and Session entries, for
+  the reason under Deviations below.
+- **`docs/README.md`,** the maintained-maps class paragraph and the
+  concepts reference row; **`docs/architecture/README.md`,** a new
+  row for the page under the conversation question, where it had
+  none.
+- **`CHANGELOG.md`,** two bullets under a new 2026-08-27
+  `### Changed` section.
+- **This section and the milestone tick.**
+
+### The owner mapping as applied
+
+The census was built for this milestone from the tracker and from
+`docs/adr/` and `docs/features/`, per design decision 7, and applied
+as follows. Every issue number the page cites is in this table and
+nowhere else.
+
+| Claim on the page | Status marking | Owner |
+| --- | --- | --- |
+| The Conversation as a durable cross-session thread, and every semantic citing it | Decided direction | #190 |
+| The durable, queryable per-device record of observed facts | Decided direction | #96 |
+| Device activation and onboarding | Implemented today | #40, closed |
+| The stored record of sessions and turns | Implemented today | #120, closed |
+| Whether prebuilt images send the buffered wake-word audio | Open question | #112 |
+| Memory scopes and tool operations | Decided direction | #83 |
+| Memory storage moving to Postgres | Decided direction | #314 |
+| One help agent, prompt composed per session from a shared part and a per-board facts block | Decided direction | #21 |
+| The per-board device guides that feed it | Implemented today | #93, closed |
+| Agent, not persona | Implemented today | `docs/features/2026-08-12-agent-not-persona.md` |
+
+Two owners the plan listed were applied with a correction rather than
+as written. **#93** is cited as implemented (the guides exist and are
+linked from `docs/devices/README.md`), not as the future source the
+old text implied. **#40** was not cited on the page at all before this
+milestone, because activation was not discussed; it is now, as
+implemented, in the Device section.
+
+### The #190 alignments, one by one
+
+`docs/concepts.md` defers to #190 wherever the two disagreed. Each
+change below is a change to the user-visible semantic the page
+states, not a restatement of #190's implementation decisions, which
+stay out of the page.
+
+1. **Suspend-never-end is gone.** The page said "conversations are
+   suspended, never ended", that there is no end in the model, and
+   listed cleanup of old conversations as a consequence to build.
+   #190 has an explicit model instead: a fresh activation starts a
+   fresh thread, operators can list, read and delete threads, and
+   retention becomes thread-aware. The page now states that model and
+   says which formulation it replaces.
+2. **Fresh-by-default replaces silent resumption.** The page implied
+   a session attaches to an existing conversation as the ordinary
+   case. #190 makes resumption always explicit and never silent, so
+   the page states the fresh-thread default first and describes
+   resuming as something the user asks for by describing the thread.
+3. **The clean-switch default gains its owner.** "A switch starts
+   clean by default" was unowned direction; it is #190's fresh-thread
+   default applied to a handover, and it is cited as such. Its
+   scoping and provider-leak reasoning is unchanged, and today's
+   behavior (the session transcript carries across a switch) is now
+   stated as the gap the direction closes rather than as a footnote.
+4. **The warn-and-summarize idea is replaced by consent-based
+   recap.** The page offered "a warning when one grows very long, and
+   an offer to summarize it and start fresh from the summary". #190's
+   decision is recap milestones offered for consent inside the thread,
+   which is what the page now says, naming what it replaces.
+5. **Two projections replace reconstruction.** The page had the
+   session recording an ordered list of the conversations it touched,
+   and the session transcript being reconstructed from that list plus
+   the session events. #190 has turns referencing both their
+   conversation and their session, so the two views read the same
+   rows. The page now says that, and drops the ordered-reference
+   machinery.
+6. **The terminology alignment is stated.** #190 aligns the words:
+   sessions are connection records, conversations are threads. The
+   page says it in one sentence and uses "thread" wherever the
+   distinction is doing work.
+7. **Agent-scoped discovery is cited.** The page already decided
+   conversation search is agent-scoped; that scoping is #190's, and
+   the claim now cites it instead of standing alone.
+8. **Resumption is a switch that needs the text.** New on the page,
+   from #190: a thread cannot be resumed from rows that were never
+   written, so resumption is available only where conversation text
+   is stored, which is one of the two switches the store's reference
+   documents.
+9. **Cost is explicitly excluded from #190.** The page presented "how
+   much has this conversation cost" as a consequence of the entity.
+   Budgets and per-conversation accounting are out of #190's scope,
+   so the claim is marked unowned and says why, in both the
+   Conversation and the Meta capabilities sections.
+
+### Directions with no owning issue or decision record
+
+Marked on the page as `**Decided direction** (recorded on this page,
+2026-08-21; no owning issue or decision record yet)`, and listed here
+for the maintainer to adopt or file owners for. The date is 2026-08-21
+rather than today's because that is when the page recorded them; the
+recut did not decide them.
+
+1. **The shared user profile.** A small profile (name, language,
+   standing preferences) visible to all of one user's agents, as a
+   deliberate hole in agent isolation. #83 covers neither this nor a
+   user-bearing key.
+2. **Meta capabilities as injected builtin tools.** The model of a
+   small set of vinga-owned tools injected into every agent's tool
+   set. The handover tool exists; the model around it is unowned.
+3. **The cost question.** "How much has this conversation cost so
+   far", and cost as a property of a thread. Explicitly out of #190's
+   scope.
+4. **Meta-turn recording.** A turn that is only a meta request
+   belongs to the session and to no thread, and a mixed turn belongs
+   to the thread.
+5. **The (user, agent) memory key.** The refinement that arrives with
+   users, so a household-shared agent remembers each person
+   separately.
+6. **Users and voiceprints, and their timing.** That users, budgets
+   and voiceprint identification arrive together in a later stage,
+   and that conversations, memory and the profile all gain a user in
+   their key when they do.
+
+"A switch lasts for the session" is deliberately **not** on this
+list, and not marked as direction at all: see the discoveries below.
+
+### Deviations from the plan
+
+- **Two glossary entries were corrected, not just re-pointed.** The
+  milestone's stated glossary work is re-pointing inbound links, and
+  all four anchors the glossary uses survived the recut unchanged
+  (`#binding`, `#conversation-and-session`, `#meta-capabilities`,
+  `#configuration-changes-arrive-as-whole-worlds`), so no link needed
+  moving. What did need moving is content: the Conversation entry
+  asserted "suspended rather than ended" and the Session entry
+  asserted the reconstruction model, both of which alignments 1 and 5
+  above retire. Shipping a lookup page that contradicts the model it
+  points at, in the milestone whose subject is authority, was the
+  worse option. Two entries changed, no others, and the glossary's
+  Date line is untouched, following M1, which also edited an entry
+  without bumping it.
+- **`docs/architecture/README.md` gained a row rather than having one
+  updated.** The plan speaks of updating the concepts row; the
+  architecture index had no concepts row at all. Its "Understanding a
+  conversation end to end" section already routes to two pages
+  outside `architecture/`, so the page's location was not what kept
+  it out.
+- **No anchors are used in the links to `xiaozhi-notes.md`.** Every
+  such link is to the file. M5 restructures that document under the
+  accepted combined shape, so anchors written now would be anchors
+  M5 has to fix, and the section names it will use are not yet
+  decided. The notes are linked five times and always as the file.
+- No other deviation.
+
+### Discoveries
+
+- **"A switch lasts for the session" is implemented, not
+  direction.** The plan's design decision 7 lists
+  switch-for-the-session among the directions expected to have no
+  owner. Reading the code, it is current behavior and follows from
+  two things that already exist: `device/bindings.py` resolves the
+  device's bound list and default when the device connects, and the
+  handover state in `runtime/pipeline.py` lives on the session's
+  pipeline object, which the next connection does not inherit. The
+  page marks it implemented and says why, so nothing is left waiting
+  for a feature that shipped.
+- **"The thin-device promise" was a stale citation.** The page cited
+  thin device as a promise in two places. M2 moved "Thin device,
+  smart server" to `guidelines.md`, so the citations now point there.
+  This is exactly the staleness M2's own footprint predicted for
+  pages that cite the split documents, and the concepts page was not
+  on M2's caller list because it links `principles.md` rather than
+  either phrase.
+- **"Activation" is overloaded and the page used both senses.** A
+  device activation joins a deployment once, through the 6-digit
+  ceremony (#40). An agent activation assembles a prompt at the start
+  of a session or after a switch, which is what the reload section
+  means by "prompt text is assembled at activation". Both senses were
+  on the page with nothing distinguishing them; the Device section
+  now names the collision in one sentence.
+- **A generated paragraph can break a link across a line.** The
+  conversation store's renderer wraps prose with `textwrap`, which
+  split the first draft of the new sentence between the link text and
+  its target. It renders correctly, but the scratchpad link checker
+  reads links per line and would have skipped it silently. The
+  sentence was rewritten to open with the link, which fits inside the
+  78-column wrap whole. Worth knowing for M6, which may add prose to
+  a generated introduction the same way.
+- **Two unit tests were already failing at the branch point.**
+  `test_command_spellings.py::test_the_manifest_is_the_census` and
+  `::test_every_live_spelling_names_a_command_the_tree_has` fail on
+  `7cb3131c`, M3's tip, before any change of this milestone: the
+  spelling manifest does not know about
+  `docs/architecture/cli-guide-audit.md`, which M3 created, and its
+  recorded `AGENTS.md` line numbers moved. Verified by running the
+  file in a detached worktree at `7cb3131c`, which fails identically.
+  Not this milestone's to fix, and named here so M5 does not
+  rediscover it.
+
+### Verification
+
+- The scratchpad link-and-anchor script on the finished branch:
+  `checked 158 files, 0 failures`. Run after every commit that
+  touched a link.
+- `uv run ruff check .` from `vinga-server/`: `All checks passed!`.
+- `uv run pytest tests/unit -q`: **2 failed, 4020 passed, 19
+  skipped** in 451s. Both failures are the pre-existing
+  `test_command_spellings.py` pair described above, reproduced
+  unchanged at the branch point.
+- `uv run pytest tests/integration -q`: **200 passed** in 267s.
+- The development Postgres was started with `docker compose up -d
+  --wait` from this worktree's own root, which both lanes need; the
+  compose project is `wt-m4`, isolated from any other checkout's.
+- **All five generated-document drift checks reproduced by hand**,
+  with the workflow's own commands, after the regeneration commit:
+  `config reference`, `conversations schema`, `events reference`,
+  `config openapi`, and the two CLI steps (the whole-page rebuild
+  through the markers and the recipe region against
+  `cli.cli_recipes()`). Every `diff -u` was empty. Only the two
+  intended files moved: four added lines on `domain-config.md`, four
+  on `conversations-schema.md`, both exactly the generator change's
+  output.
+- **Issue numbers on the page audited by grep.** The page cites #190,
+  #120, #96, #93, #83, #40, #314, #112 and #21, and nothing else;
+  each appears in the owner table above with the subject it is cited
+  for.
+- Source review of every changed page: heading levels, the eleven On
+  this page anchors, and hard wrapping. Four lines on
+  `concepts.md` exceed 75 columns and each is a single unbreakable
+  link URL, the exception M3 recorded.
