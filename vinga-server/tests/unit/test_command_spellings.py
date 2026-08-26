@@ -198,6 +198,16 @@ _HISTORICAL_PATHS = (
     # tree answers to. A guard that flagged its own examples would be a
     # guard nobody could state a rule in.
     "vinga-server/tests/unit/test_command_spellings.py",
+    # And the CLI guide's source audit, the dated 2026-08-24 walk of
+    # four published guides that the guide's practices were
+    # dispositioned from. Its rows quote the merged grammar as the
+    # evidence of what was audited on that day, which is what they did
+    # while they lived in the guide, where the program-word rule below
+    # classified every one of them historical. Respelling an audit row
+    # would falsify the audit. Unlike the guide it is a record whole,
+    # so it is classified by path like the other records rather than by
+    # its program word.
+    "docs/architecture/cli-guide-audit.md",
 )
 
 # The CLI guide is the one page that is both. It states the standard in
