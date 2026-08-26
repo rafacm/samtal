@@ -465,6 +465,152 @@ other direction by reinstating the import-time `_provision()` and
 watching the pin come back with the runner's exact exit code and
 sentence.
 
+### PR review round
+
+External review of PR #307 (diff `main...32fb554a`), 2026-08-26.
+Backend: codex CLI 0.149.1, model `gpt-5.6-sol`, read-only sandbox,
+runtime 8m30s. Verdict as received: mergeable after the listed fixes.
+Six findings, three P1 that are one another's neighbours, one P1 in the
+operator documentation, one P2 and one P3. All valid, all accepted.
+Condensed but faithful, each with its resolution:
+
+1. **P1: autogeneration can migrate the real database instead of its
+   scratch database.** `autogen.py` created the scratch database from
+   bare defaults and passed a copied name to `open_at`, which resolves
+   the connection again and lets an ambient `VINGA_DB_URL` override the
+   name wholesale. With a local Postgres running and a URL naming
+   production, the command creates a local scratch database and
+   upgrades and compares production. It ignores the discrete
+   `VINGA_DB_*` names entirely besides. Resolve the connection once,
+   derive maintenance and scratch URLs by replacing only the database
+   component, run creation, migration, comparison and cleanup through
+   those explicit URLs, and prove a URL override never touches its
+   original database.
+
+   *Resolution*: accepted, `e81856d3`. The connection is resolved once
+   through `load_file_config`, which is the machinery the server itself
+   resolves the discrete names with, and both databases are derived
+   from that URL with `.set(database=...)`. `db` gains `open_url`,
+   which is `open_at` for a caller that has already decided its
+   connection: a URL passed in cannot be replaced by anything ambient
+   between the decision and the use, while every other caller keeps
+   `open_at` because for them resolving from the environment is the
+   contract. Two pins: a URL pointed at a database with nothing in it
+   comes back with nothing in it, and beside it a case asserting the
+   scratch database really was made, migrated and dropped, so the first
+   cannot be satisfied by a command that does nothing. Reinstating the
+   old `open_at` call reddens the first and leaves the second green.
+
+2. **P1: the autogeneration command exposes unsanitized database
+   failures as tracebacks.** It performs raw psycopg maintenance and
+   lets every failure escape the module entry point, so an unreachable
+   instance or a failed `CREATE`/`DROP DATABASE` writes psycopg's
+   wording and the DSN it tried to stderr. Put the whole maintenance
+   lifecycle behind a sanitized CLI boundary: one fixed value-free
+   sentence, severed chain, nonzero exit; test credentials in URL
+   authority, URL query and discrete fields against both streams.
+
+   *Resolution*: accepted, `b1018a42`. `main` is a command boundary
+   rather than a wrapper around `generate`: a `ConfigError`, which this
+   project composes outside its own handlers precisely so it carries
+   nothing, is printed as it stands, and everything else becomes one
+   fixed sentence naming only the variables to look at. Nothing is
+   re-raised, which is a stronger severing than `from None`: what
+   leaves the function is a string written there and an exit code, so
+   there is no chain for a renderer to walk. Sentinels in all three
+   doors, read back off both streams. The bug reinstated prints
+   `password: 'sk-live-...'` from a frame's locals, which is the
+   finding exactly.
+
+3. **P1: the test-lane refusal repeats connection values and leaks
+   malformed ports.** `tests/conftest.py` converted `VINGA_DB_PORT`
+   with an unguarded `int`, so a rejected value rides a collection
+   traceback, and interpolated `VINGA_DB_HOST` and `VINGA_DB_PORT` into
+   the unreachable sentence, contradicting the plan's rule that
+   discrete connection values never appear on an error surface.
+   Validate the port behind a chain-severing boundary, use a fixed
+   refusal naming only the variable keys, and add secret-shaped
+   sentinels for every discrete field.
+
+   *Resolution*: accepted, `533188a6`. Both refusals are built inside
+   their handler and raised outside it, and the unreachable sentence
+   now names the four keys and none of their values, the way
+   `db.UNREACHABLE` is written. The exception the plan's rule was
+   protecting against is exactly the one this had: these five variables
+   sit beside each other in one `.env`, so the value most likely to be
+   in the wrong one is the credential from the right one, and a rule
+   that excuses a host does not cover it. The pins collect a storing
+   lane under sentinels in every discrete field, once at an instance
+   that is not there and once with a port that is not one, as
+   subprocesses, since a refusal raised at conftest import is not
+   reachable from a test that is already running.
+
+4. **P1: the operator CLI reference still prescribes SQLite recovery.**
+   `docs/reference/cli.md`'s hand-written head told an operator to
+   delete "the database", said a lost row was "gone with the file", and
+   pointed surgical repairs at `sqlite3`. The workflow cannot catch it:
+   the regeneration step copies the committed head verbatim and diffs
+   only the region between the markers. Rewrite it with
+   `dropdb`/`createdb` or a domain-schema reset, rerunning
+   `postgres-init.sql`, reapplying the export and re-entering secrets,
+   with the export-before-upgrade ordering and the old files'
+   disposition.
+
+   *Resolution*: accepted, `724ce8bf`. The section now carries the
+   procedure this milestone shipped, in the README's own words and
+   order, with the domain-schema drop beside it for a deployment that
+   is recording and wants to keep the record, and a section of its own
+   for the export-before-upgrade ordering, which is the one the README
+   says lives here. The two surviving mentions of the old filenames are
+   the deliberate ones: what to do with files this build will never
+   look at again.
+
+5. **P2: the provisioning tests do not exercise the two failure modes
+   they claim to pin.** The file was executed as the same default
+   superuser it named as `VINGA_DB_USER`, so removing `AUTHORIZATION`
+   or the role parameterization would not fail the suite; and the
+   "reset" case merely reran the file against the same database,
+   leaving the schemas and the database-local default privileges
+   intact. Execute as a distinct administrator naming a non-superuser
+   server role, assert schema ownership and migration as that role,
+   then really drop and recreate the database with `vinga_ro`
+   surviving, rerun the file and reassert current and future-table
+   grants.
+
+   *Resolution*: accepted, `c57a4f1e`. The file is executed by an
+   administrator while naming a server role that is a different,
+   non-superuser role which does not own the database and therefore has
+   no `CREATE` on it, so both chains migrate as that role only because
+   the file handed it schemas it owns. The reset case drops and
+   recreates the database, asserts the instance-level `vinga_ro`
+   survived, reruns the file and reasserts both halves of the grant.
+   One case is new for a gap the reset alone leaves: run before the
+   first migration every table is a future table, so the default
+   privileges carry the whole contract on their own, and it takes a
+   database the server role owns, migrated first and provisioned
+   second, to make `GRANT SELECT ON ALL TABLES` load-bearing. Verified
+   by mutation against the previously green suite: dropping
+   `AUTHORIZATION` reddens eight cases, dropping the `\getenv` line
+   reddens eight, and dropping either grant reddens the cases that name
+   it.
+
+6. **P3: the architecture map still identifies the live store as
+   `conversations.db`.** On a page whose own rule is that it changes
+   when the design does. Identify the `conversations` Postgres schema
+   and its `vinga_ro` access boundary instead.
+
+   *Resolution*: accepted, `6e9bffa1`. The row names the schema, and
+   the access column gains the boundary that came with it: live
+   read-only SQL as `vinga_ro`, which reaches that schema and not
+   `domain`.
+
+**After the round**, on the same machine: `ruff` clean; the unit lane
+4022 passed and 19 skipped, 6m55s serial and 56.1s under
+`-n auto --dist loadfile`; the integration lane 200 passed in 4m20s.
+The eight tests added are the round's own pins (four for the
+autogeneration command, two for the lane's refusals, two for the
+provisioning file), and neither lane's time moved outside its noise.
+
 ### Not verified locally
 
 Stated plainly rather than claimed:
