@@ -409,8 +409,9 @@ docs/
   callers stop having to know the tree; the walkthrough gets the
   module its audience implies. Documentation footprint: the pages
   named are the footprint; no behavior claim changes.
-- [ ] **M2: Promises split from guidelines, and pipeline ownership
-  retires.** `product-promises.md` (a non-normative introduction,
+- [x] **[M2: Promises split from guidelines, and pipeline ownership
+  retires.](2026-08-26-docs-authority-reorg-implementation.md#m2-promises-split-from-guidelines-and-pipeline-ownership-retires)**
+  (PR TBD) `product-promises.md` (a non-normative introduction,
   then the stock-firmware floor, fully local, and the database
   promise per design decision 4);
   `guidelines.md` (identity as the framing preamble; thin device;
