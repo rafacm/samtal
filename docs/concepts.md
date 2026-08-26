@@ -108,7 +108,8 @@ server, the server's OTA endpoint answers its check-in, and an unclaimed
 board is claimed through the 6-digit activation ceremony (issue #40,
 implemented). The operator's procedure is in
 [the server README](../vinga-server/README.md#onboarding-a-device) and
-the wire exchange behind it is in [the Xiaozhi notes](xiaozhi-notes.md);
+the wire exchange behind it is in
+[the Xiaozhi notes](xiaozhi-notes.md#activation-the-6-digit-code-ceremony);
 neither is restated here. The word is overloaded, so note which one is
 meant: this is a *device* activation, joining a deployment once, and
 not the *agent* activation that assembles a prompt at the start of a
@@ -132,9 +133,9 @@ distinct on purpose:
   realtime exactly when AEC is on; and a `listen` `detect` message
   reports a fired wake word. Every one of those exchanges, the phases
   and the discovery race included, is described on the wire in
-  [the Xiaozhi notes](xiaozhi-notes.md). How long each fact survives
-  differs by fact, and is a property of the server rather than of the
-  domain: what matters here is that none of it lands in a durable,
+  [the Xiaozhi notes](xiaozhi-notes.md#the-device-to-server-protocol).
+  How long each fact survives differs by fact, and is a property of the
+  server rather than of the domain: what matters here is that none of it lands in a durable,
   queryable per-device record. That record is **decided direction**
   (issue #96).
 - **Hardware facts from the board catalog**: what the model implies
@@ -347,9 +348,11 @@ This is settled by hardware reality, and the documentation should say
 it plainly wherever wake words appear. The wake word is spotted on-chip
 and the server takes no part in the decision: it cannot hear, tune, or
 substitute for it, and what it is told is which word fired, after the
-fact. [The Xiaozhi notes](xiaozhi-notes.md) describe the detection, the
-report that carries it, and the firmware option that decides whether
-the buffered trigger audio is sent along with it; whether the prebuilt
+fact.
+[The Xiaozhi notes](xiaozhi-notes.md#the-wake-word-is-spotted-on-the-chip-and-the-server-takes-no-part-in-it)
+describe the detection, the report that carries it, and the firmware
+option that decides whether the buffered trigger audio is sent along
+with it; whether the prebuilt
 images on our boards send that audio has not been checked on the wire
 and is open (issue #112).
 
