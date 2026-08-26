@@ -621,7 +621,7 @@ nothing half-applied.
 ## Milestones
 
 - [x] **[M1: cut both stores over to Postgres, operator story
-  included.](2026-08-26-postgres-stores-implementation.md#m1-cut-both-stores-over-to-postgres-operator-story-included)** (PR TBD) One atomic milestone for the same reason #243 was
+  included.](2026-08-26-postgres-stores-implementation.md#m1-cut-both-stores-over-to-postgres-operator-story-included)** (PR #307) One atomic milestone for the same reason #243 was
   one, and one more the review round added: two storage backends
   cannot coexist releasably, a half-cut state (one store moved, or
   code moved with the lane still SQLite) is exactly what the
