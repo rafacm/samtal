@@ -577,8 +577,8 @@ docs/plans/2026-08-26-docs-authority-reorg-implementation.md:921  historical  co
 docs/plans/2026-08-26-docs-authority-reorg-implementation.md:1205  historical  vinga-server config schema
 docs/plans/2026-08-26-docs-authority-reorg-implementation.md:1206  historical  vinga-server config schema
 docs/plans/2026-08-26-docs-authority-reorg-implementation.md:1208  historical  config schema
-docs/plans/2026-08-26-docs-authority-reorg-implementation.md:1489  historical  config reference
-docs/plans/2026-08-26-docs-authority-reorg-implementation.md:1490  historical  config openapi
+docs/plans/2026-08-26-docs-authority-reorg-implementation.md:1546  historical  config reference
+docs/plans/2026-08-26-docs-authority-reorg-implementation.md:1547  historical  config openapi
 docs/plans/2026-08-26-postgres-stores-implementation.md:102  historical  config schema before the
 docs/plans/2026-08-26-postgres-stores-implementation.md:104  historical  config schema
 docs/plans/2026-08-26-postgres-stores-implementation.md:231  historical  config export
