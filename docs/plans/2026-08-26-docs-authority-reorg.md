@@ -275,16 +275,25 @@ was written; both outcomes are settled inputs here.
   summaries that quietly become second sources of truth, is exactly
   what #313 exists to close.
 - **Inventories by tooling.** The current-caller census was grepped
-  2026-08-26 and is what the milestones' link work is sized
-  against: `architecture/principles.md` has 6 current callers
-  (AGENTS.md, docs/README.md, concepts.md, adr/README.md, two
-  skills), `pipeline-ownership.md` has 1 (docs/README.md), the
-  architecture README 4, the diagram directories 3 files plus the
-  root README image, `cli-guide.md` 3, `observability-surfaces.md`
-  2, `xiaozhi-notes.md` 13 current files; no `principles.md#`
-  anchor exists anywhere. Counts are refreshed after every rebase,
-  and every moved-path search result at the end is classified
-  current, historical, or error.
+  2026-08-26 and re-grepped the same day with relative-link-aware
+  patterns after the review round caught the first pass missing
+  in-directory links. `principles.md` has these current callers:
+  AGENTS.md and the two skills (path references in prose),
+  `docs/README.md`, `docs/adr/README.md`, `docs/concepts.md`, the
+  architecture README, `design-guide.md` (three links),
+  `cli-guide.md` (two links), and `pipeline-ownership.md` (one
+  link, and the file retires in the same milestone).
+  `pipeline-ownership.md` itself has one current caller
+  (`docs/README.md`); the architecture README has four; the
+  diagram paths appear in the root README's image plus
+  `docs/README.md` and the architecture README's seven relative
+  references; `cli-guide.md` has three callers,
+  `observability-surfaces.md` two, `xiaozhi-notes.md` thirteen
+  current files. No `principles.md#` anchor exists anywhere.
+  Counts are refreshed after every rebase, censuses always use
+  patterns that catch both path-prefixed and same-directory
+  relative spellings, and every moved-path search result at the
+  end is classified current, historical, or error.
 
 ## Module layout
 
@@ -384,9 +393,12 @@ docs/
   owned-versus-shared runtime guideline with the reopen triggers,
   absorbing `pipeline-ownership.md`, whose dated measurements
   remain only in the spike record and whose file deletes);
-  `principles.md` becomes the compatibility page; current callers
-  (AGENTS.md, `concepts.md`, `adr/README.md` as governance, the
-  two skills, the architecture router rows) link the new pages.
+  `principles.md` becomes the compatibility page; every current
+  caller links the new pages in this same milestone: AGENTS.md,
+  `concepts.md`, `adr/README.md` as governance, the two skills,
+  the architecture router rows, and the three `design-guide.md`
+  and two `cli-guide.md` links, so no current caller routes
+  through the compatibility page at any merge.
   Design footprint: two modules whose parts change for different
   reasons stop sharing a file; the stub is a deliberate adapter for
   immutable callers. Documentation footprint: AGENTS.md's design
@@ -523,6 +535,12 @@ faithful; resolutions appended per amendment commit.
    both guides directly; deferring the CLI guide's to M3 routes a
    current caller through the compatibility page and contradicts
    the coherent-per-merge claim.
+
+   *Resolution.* Adopted. The census is corrected in the lenses
+   section with the relative-link-aware counts and a standing rule
+   that censuses catch same-directory spellings, and M2 now names
+   the five in-guide links among the callers it updates, so no
+   current caller ever routes through the compatibility page.
 
 5. **P2: M1 misses a current caller of the moved walkthrough.**
    `glossary.md:7` links the architecture README specifically as
