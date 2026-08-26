@@ -423,3 +423,110 @@ docs/
   verification list. Design footprint: none; this milestone deepens
   nothing and exists to prove locality. Documentation footprint:
   whatever the audit corrects, enumerated in the PR.
+
+## Plan review round
+
+External review of commit `15a0d37e` (backend codex 0.149.1, model
+`gpt-5.6-sol`, 2026-08-26, runtime 4m50s, 201,815 tokens). Verdict:
+not ready; ready after the P1/P2 amendments. Findings condensed but
+faithful; resolutions appended per amendment commit.
+
+1. **P1: Identity in `product-promises.md` recreates the authority
+   mixing the issue removes.** The Identity section assigns
+   implementation ownership between vinga and conversation runtimes
+   (`principles.md:26`), which is revisable architecture direction,
+   not an externally falsifiable promise; design decision 2 puts the
+   whole section on the promises page. Move the appliance-versus-
+   runtime ownership statements to `guidelines.md`; the promises
+   page may keep only a short non-normative introduction, its
+   authoritative contents the three promises.
+
+2. **P1: M4 assumes owning decisions exist for domain direction
+   that has no owner.** Cross-session conversations, switch
+   semantics, shared profiles, agent-scoped search and meta-turn
+   recording (`concepts.md:117,157,235`) cite no issue or ADR, and
+   the plan only says each direction will cite "its owner".
+   Enumerate an owner mapping before implementation; where no
+   accepted owner exists, either create an accepted decision record
+   or mark the claim as unowned proposed direction. #311 cannot
+   silently become the decision owner.
+
+3. **P2: The database promise still omits the operational
+   compatibility floor.** "Best-effort, forward-only" misses that
+   the floor now begins at the two Postgres baselines, that the
+   build cannot open SQLite at all, and that conversation history
+   is explicitly not migrated (floor ADR, 2026-08-26 addendum).
+   The promise must state the current floor revisions, that
+   pre-beta recorded decisions may require a reset, and the
+   export/reseed path with manual archiving of history.
+
+4. **P2: The `principles.md` caller census omits live architecture
+   guides.** `design-guide.md` and `cli-guide.md` are current
+   callers via relative links (three and two respectively) that the
+   census's path-prefixed grep missed. M2 must update every link in
+   both guides directly; deferring the CLI guide's to M3 routes a
+   current caller through the compatibility page and contradicts
+   the coherent-per-merge claim.
+
+5. **P2: M1 misses a current caller of the moved walkthrough.**
+   `glossary.md:7` links the architecture README specifically as
+   the teaching walkthrough; M1 names the root README and the
+   regression suite only. Repoint the glossary in M1.
+
+6. **P2: M6's generated-reference audit conflicts with the declared
+   change and test boundary.** The plan says only M4 changes
+   generators, yet M6 audits generated-reference introductions,
+   and a correction there (for example the compatibility sentence
+   in `conversations-schema.md:17`) can only be made through
+   `conversations/docgen.py`. Either M4 recuts every generated
+   introduction exhaustively or M6 may modify generators and then
+   owes lint, both test lanes, regeneration and every drift check.
+
+7. **P2: The plan deliberately leaves current skill guidance stale
+   at completion.** The implement-issue skill says the tree "is
+   being reorganized by #310 to #313" in two places; postponing the
+   caveat removal past M6 finishes the reorganization while live
+   workflow guidance says it is underway, violating the
+   current-versus-historical distinction. M6 should remove or
+   rewrite those caveats as part of #313.
+
+8. **P2: M5 does not enforce device-guide ownership of
+   board-specific facts.** The combined-document recommendation
+   keeps "validated device procedures", and M5 only says
+   board-specific behavior "cites" device guides, while the notes
+   hold live board facts (board hardware, portal behavior, the
+   Touch-LCD serial procedure). Current board-specific guidance
+   moves to the owning device guide; the notes may keep dated field
+   evidence with provenance but not a competing maintained source.
+
+9. **P2: The per-page classification invariant is impossible as
+   stated.** "Every page under `docs/` is classified ... on the
+   index line and the page's own introduction" collides with the
+   prohibition on editing unnamed pages, with immutable dated
+   records, and with generated JSON that cannot carry a Markdown
+   introduction. Classify classes and directories centrally in
+   `docs/README.md`; require page-level authority introductions
+   only for maintained hand-written pages and for generated
+   Markdown whose generator owns the introduction.
+
+10. **P2: No milestone owns the required changelog update.**
+    AGENTS.md requires `CHANGELOG.md` for every notable change;
+    all six milestone footprints omit it. Add dated `### Changed`
+    entries, at minimum for the authority split, the landing-page
+    move, and the protocol-document reorganization.
+
+### Maintainer decisions during the round (2026-08-26)
+
+- **The #312 gate is cleared ahead of M5**: the maintainer accepted
+  the recommended structure, one combined `xiaozhi-notes.md` with
+  authority-labeled sections. M5 implements that shape; the gate is
+  not re-asked, and the acceptance is recorded in the
+  implementation doc's M5 section.
+- **Upstream catch-up markers join M5's scope**: the maintained
+  protocol sections gain an explicit currency statement recording
+  which upstream `xiaozhi-esp32` and `xiaozhi-esp32-server`
+  commits the facts were last read against (taken from the vendor
+  clones' SHAs), which firmware versions were actually observed on
+  boards, and the date, so what the notes have caught up to is a
+  stated, bumpable fact. This matches the stock-firmware promise's
+  version target (boards in the field, not upstream HEAD).
