@@ -91,13 +91,13 @@ new provider type skipping the egress declaration because it is
 From the first image called a beta onward, every database that image
 creates or touches is upgradeable by every later image: a migration
 that cannot upgrade in place is a bug, not a decision. Until a beta
-is declared, upgrades are best-effort forward-only, which the
-wheel-migration check exercises on every build by taking a fresh
-database from the shipped artifact to the head of both chains, and
-migration history is never rewritten as a cleanup: a squash or a
-prune is a compatibility decision requiring a record that supersedes
-the standing one, a statement of which databases become unsupported,
-and a tested reset path.
+is declared, upgrades are best-effort forward-only, which the CI
+wheel-migration step exercises whenever the server workflow runs, by
+taking a fresh database from the shipped artifact to the head of both
+chains, and migration history is never rewritten as a cleanup: a
+squash or a prune is a compatibility decision requiring a record that
+supersedes the standing one, a statement of which databases become
+unsupported, and a tested reset path.
 
 Where "forward" starts is a fact an operator needs, so the promise
 states it rather than leaving it to be inferred:
