@@ -169,6 +169,15 @@ RUN_ENV = "VINGA_TEST_RUN"
 RUN = os.environ.setdefault(RUN_ENV, f"{int(time.time())}_{os.getpid()}")
 WORKER = os.environ.get("PYTEST_XDIST_WORKER", "main")
 
+# A pytest started from inside another pytest, which is what the lane
+# guard's own tests do (`pytester` runs a whole session in a
+# subprocess). It inherits this process's environment, prefix included,
+# so without a name of its own it would provision nothing, truncate the
+# outer run's database between its own tests, and drop it at its own
+# session finish. `PYTEST_CURRENT_TEST` is set while a test is running
+# and is therefore in the environment exactly when a run is nested.
+NESTED = "PYTEST_CURRENT_TEST" in os.environ
+
 DATABASE_PREFIX = f"vinga_test_{RUN}"
 
 # Migrated once and cloned, so each worker pays one `CREATE DATABASE`
@@ -177,7 +186,7 @@ TEMPLATE_DATABASE = f"{DATABASE_PREFIX}_template"
 
 # This process's own. Every fixture, every app and every `DatabaseConfig()`
 # built in Python during this run points here.
-LANE_DATABASE = f"{DATABASE_PREFIX}_{WORKER}"
+LANE_DATABASE = f"{DATABASE_PREFIX}_{WORKER}" + (f"_nested{os.getpid()}" if NESTED else "")
 
 # What serializes the workers while they provision. `CREATE DATABASE`
 # cannot run inside a transaction, so the product's transaction-scoped
@@ -245,6 +254,15 @@ def _application_tables() -> list[str]:
     ]
 
 
+# Whether this process is the one that created its own database, which
+# is the only process allowed to drop it. Set by `_provision` below.
+#
+# Belt as well as braces beside the nested-run name above: a process
+# that inherited a prefix and found the database already there has no
+# business taking it away from whoever made it, whatever the name says.
+_PROVISIONED_HERE = False
+
+
 def _provision() -> None:
     """This worker's database, cloned from the run's migrated template.
 
@@ -252,6 +270,7 @@ def _provision() -> None:
     same moment and only one of them may create the template. The loser
     finds it already there and clones it, which is the same answer.
     """
+    global _PROVISIONED_HERE
     connection = _maintenance()
     try:
         connection.execute("select pg_advisory_lock(%s)", (PROVISIONING_LOCK,))
@@ -262,6 +281,7 @@ def _provision() -> None:
             connection.execute(
                 f'create database "{LANE_DATABASE}" template "{TEMPLATE_DATABASE}"'
             )
+            _PROVISIONED_HERE = True
     finally:
         connection.execute("select pg_advisory_unlock(%s)", (PROVISIONING_LOCK,))
         connection.close()
@@ -495,7 +515,14 @@ def _drop_this_process_databases() -> None:
     is the process that finds nothing else of this run's left. A run
     that is killed outright leaves its databases behind, which is what
     the per-run prefix makes cleanable rather than confusing.
+
+    Only the process that created its database drops it. A run that
+    found one already there is a nested session or a hand-exported
+    prefix, and taking somebody else's database away at the end of it
+    would leave every test after this point without one.
     """
+    if not _PROVISIONED_HERE:
+        return
     drop_database(LANE_DATABASE)
     connection = _maintenance()
     try:
