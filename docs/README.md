@@ -40,7 +40,9 @@ and are corrected when it moves:
 [`system-overview.md`](system-overview.md),
 [`concepts.md`](concepts.md), [`glossary.md`](glossary.md),
 [`architecture/observability-surfaces.md`](architecture/observability-surfaces.md),
-[`architecture/diagrams/`](architecture/diagrams/README.md),
+the whole [`architecture/diagrams/`](architecture/diagrams/README.md)
+tree (its index, each tool directory's own authoring guide, and the
+diagram sources and renders they describe),
 [`devices/`](devices/README.md), and the three READMEs: the
 [project](../README.md), the [server](../vinga-server/README.md), and
 the [firmware](../vinga-esp32/README.md). Such a page may summarize an
