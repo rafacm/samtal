@@ -96,6 +96,10 @@ inventory being the last guideline.
 - [**diagrams/**](diagrams/README.md): all five diagrams, indexed by
   the question each answers, with the rendering and synchronization
   instructions beside the files they apply to.
-- [**../xiaozhi-notes.md**](../xiaozhi-notes.md): the upstream
-  architecture and the device to server protocol key by key. What the
-  overview calls a `hello` exchange, this describes on the wire.
+- [**../xiaozhi-notes.md**](../xiaozhi-notes.md): the device to server
+  protocol key by key, and the upstream projects it came from. What the
+  overview calls a `hello` exchange, this describes on the wire. Its
+  protocol sections are maintained and say which upstream commits and
+  which observed firmware versions they were last read against; its
+  dated observations and its reading of the upstream server say that
+  too, and are not corrected as upstream moves.
