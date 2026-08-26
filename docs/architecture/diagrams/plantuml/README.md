@@ -8,7 +8,7 @@ Each `.puml` file is the source. The rendered `.png` and `.svg` take their names
 
 ```bash
 brew install plantuml   # brings Graphviz, which the overview needs
-cd docs/architecture/plantuml
+cd docs/architecture/diagrams/plantuml
 PLANTUML_LIMIT_SIZE=16384 plantuml -tpng -failfast2 *.puml
 PLANTUML_LIMIT_SIZE=16384 plantuml -tsvg -failfast2 *.puml
 ```
