@@ -27,6 +27,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.store import ConfigStore
 from vinga_server.db import open_database
 
@@ -101,7 +102,7 @@ def seed_domain(directory: Path, entry: dict[str, object] | None = None) -> None
     agent: dict[str, object] = {"prompt": "A"}
     if entry is not None:
         agent["mcp"] = ["tools"]
-    engine = open_database(directory)
+    engine = open_database(DatabaseConfig())
     try:
         store = ConfigStore(engine)
         for stage in STAGES:

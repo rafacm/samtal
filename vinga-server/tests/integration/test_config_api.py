@@ -11,19 +11,16 @@ configured.
 """
 
 import os
-import sqlite3
-from pathlib import Path
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 from tests.support.problems import PROBLEM_KEYS
-from vinga_server import db as db_module
+from tests.support.stores import holding_the_write_lock, the_lock_held
 from vinga_server.app import create_app
 from vinga_server.config import cli
 from vinga_server.config.boot import load_boot_config
-from vinga_server.db import DATABASE_FILENAME
 
 # The pipeline a first deployment writes, in the order the write-time
 # reference checks require: providers, then what names them.
@@ -47,16 +44,14 @@ def _token() -> str:
 
 
 @pytest.fixture
-def boot_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """The database directory both application lifetimes read, named the
-    way a deployment names it: through the environment the settings
-    machinery reads."""
+def no_config_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A boot with nothing but the environment, which is how a
+    deployment names its database."""
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
-    return tmp_path / "db"
 
 
 def test_an_empty_start_is_configured_over_http_and_serves_after_a_restart(
-    served_api, boot_directory: Path
+    served_api, no_config_file: None
 ) -> None:
     """Getting Started, executed. An empty domain half is a valid boot,
     which is what makes the whole procedure work: the server comes up
@@ -67,7 +62,7 @@ def test_an_empty_start_is_configured_over_http_and_serves_after_a_restart(
     writes and never sees their effect, because configuration is a
     boot-time snapshot; the second is the restart, and it is the one that
     has to serve the conversation."""
-    with served_api(boot_directory) as api_url:
+    with served_api() as api_url:
         client = httpx.Client(
             base_url=api_url, headers={"Authorization": f"Bearer {_token()}"}, timeout=30
         )
@@ -116,37 +111,30 @@ def test_an_empty_start_is_configured_over_http_and_serves_after_a_restart(
 
 
 def test_a_contended_write_answers_over_a_real_socket(
-    served_api, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    served_api, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The retryable refusal through the client the CLI actually builds,
     over a real connection, with a real lock held.
 
     The unit suite forces the same 409 through an injected test client,
     which cannot show what this one does: that the answer arrives rather
-    than being cut short by the client's own read timeout. The thresholds
-    here are deliberately short so the test finishes; that the production
-    read timeout outlasts the production busy timeout is asserted
+    than being cut short by the client's own read timeout. The threshold
+    here is deliberately short so the test finishes; that the production
+    read timeout outlasts the production lock timeout is asserted
     directly in the unit suite, where nothing is shortened."""
-    directory = tmp_path / "db"
-    monkeypatch.setattr(db_module, "BUSY_TIMEOUT_MS", 500)
-
-    with served_api(directory) as api_url:
-        # The API opens the database per request, so one read is what
-        # creates the file this then takes the lock on.
+    with holding_the_write_lock(monkeypatch), served_api() as api_url:
         opener = cli.build_client(api_url, _token())
         try:
             assert opener.get("/config").status_code == 200
         finally:
             opener.close()
 
-        holder = sqlite3.connect(directory / DATABASE_FILENAME, isolation_level=None)
-        holder.execute("BEGIN IMMEDIATE")
-        client = cli.build_client(api_url, _token())
-        try:
-            response = client.put("/agents/sam", json={"prompt": "You are Sam."})
-        finally:
-            client.close()
-            holder.close()
+        with the_lock_held():
+            client = cli.build_client(api_url, _token())
+            try:
+                response = client.put("/agents/sam", json={"prompt": "You are Sam."})
+            finally:
+                client.close()
 
         assert response.status_code == 409
         assert set(response.json()) == PROBLEM_KEYS
@@ -161,7 +149,7 @@ def test_a_contended_write_answers_over_a_real_socket(
         assert answered.status_code == 200
 
 
-def test_the_reload_answers_over_a_real_socket(served_api, tmp_path: Path) -> None:
+def test_the_reload_answers_over_a_real_socket(served_api) -> None:
     """The reload's answer on a real connection, through the client the
     CLI actually builds.
 
@@ -171,7 +159,7 @@ def test_the_reload_answers_over_a_real_socket(served_api, tmp_path: Path) -> No
     asserting, and it is proven in `test_mcp_reload.py` against a server
     holding a connected MCP server and a live grant.
     """
-    with served_api(tmp_path / "db") as api_url:
+    with served_api() as api_url:
         client = cli.build_client(api_url, _token())
         try:
             applied = client.post(RELOAD)
@@ -224,7 +212,7 @@ WEATHER = {"transport": "stdio", "command": "/bin/echo", "args": ["weather"]}
 
 
 def test_the_diff_reports_what_this_server_has_not_picked_up(
-    served_api, boot_directory: Path
+    served_api, no_config_file: None
 ) -> None:
     """One server lifetime, from an empty domain to a configured one.
 
@@ -235,7 +223,7 @@ def test_the_diff_reports_what_this_server_has_not_picked_up(
     never pending at all is the device binding, which the running server
     reads as a device asks for it.
     """
-    with served_api(boot_directory) as api_url:
+    with served_api() as api_url:
         client = httpx.Client(
             base_url=api_url, headers={"Authorization": f"Bearer {_token()}"}, timeout=30
         )

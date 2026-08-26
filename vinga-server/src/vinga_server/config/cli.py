@@ -23,8 +23,8 @@ configuration is a request, so this module opens no database, loads no
 encryption key and knows nothing about how a row is stored. A
 deployment whose server will not start is recovered by booting one on
 an empty database and applying a kept `export`, which is the procedure
-`docs/reference/cli.md` writes out; surgical access to the file itself
-is ordinary SQLite tooling and not this grammar's business.
+`docs/reference/cli.md` writes out; surgical access to the rows
+themselves is ordinary SQL and not this grammar's business.
 
 One command stands outside all of this, because onboarding a board
 happens before there is anything to configure. `ota-url` derives the

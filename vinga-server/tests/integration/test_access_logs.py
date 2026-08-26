@@ -16,7 +16,6 @@ what uvicorn writes, which needs uvicorn to have served something.
 import asyncio
 import json
 import logging
-import tempfile
 
 import httpx
 import pytest
@@ -53,18 +52,19 @@ BOUND_MAC = "11:22:33:44:55:01"
 # that could print it is a library rendering the frame.
 FRAME_SENTINEL = "sk-test-2b7c9f1e-never-a-real-credential"
 
-# A database directory of this module's own. The configuration below is
-# composed while this file is being imported, before any fixture could
-# point it anywhere, so it falls to the lane-wide default in
-# `tests/conftest.py`; two modules that both did that would seed one
-# database between them and read each other's device bindings.
-DATABASE_DIR = tempfile.mkdtemp(prefix="vinga-access-logs-")
+# No database of this module's own any more, and the reason is worth
+# keeping: the configuration below is composed while this file is being
+# imported, before any fixture could point it anywhere, so two modules
+# that did that used to seed one directory between them and read each
+# other's device bindings. The lane now gives each worker one database
+# and clears it between tests (`tests/conftest.py`), so what a test
+# seeds is what it reads and nothing survives into the next one.
 
 CONFIG = Config(
     providers=MOCK_PROVIDERS,
     agents={"assistant": MOCK_AGENT},
     devices={BOUND_MAC: ["assistant"]},
-    server={"ota_path": OTA_PATH, "database": {"dir": DATABASE_DIR}},
+    server={"ota_path": OTA_PATH},
 )
 
 

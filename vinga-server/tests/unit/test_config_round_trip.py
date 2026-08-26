@@ -39,7 +39,7 @@ from vinga_server import logs
 from vinga_server.config.api import build_api
 from vinga_server.config.entities import PROGRAM
 from vinga_server.config.loader import ConfigError
-from vinga_server.config.models import ProviderConfig
+from vinga_server.config.models import DatabaseConfig, ProviderConfig
 from vinga_server.config.secrets import (
     MASK,
     MASTER_KEY_ENV,
@@ -80,7 +80,7 @@ def store(directory: Path, keys: None) -> Iterator[ConfigStore]:
     """A second view of the same database, for reading a value back
     through the repository rather than through the display that masked
     it."""
-    engine = open_database(directory)
+    engine = open_database(DatabaseConfig())
     try:
         yield ConfigStore(engine, load_keys())
     finally:

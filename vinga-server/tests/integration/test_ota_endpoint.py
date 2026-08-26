@@ -9,7 +9,6 @@ address the device actually connected to.
 
 import json
 import socket
-import tempfile
 import threading
 import time
 import urllib.error
@@ -45,15 +44,15 @@ def _free_port() -> int:
         return sock.getsockname()[1]
 
 
-# A database directory of this module's own. The configuration below is
-# composed while this file is being imported, before any fixture could
-# point it anywhere, so it falls to the lane-wide default in
-# `tests/conftest.py`; two modules that both did that would seed one
-# database between them and read each other's device bindings.
-DATABASE_DIR = tempfile.mkdtemp(prefix="vinga-ota-endpoint-")
+# No database of this module's own any more, and the reason is worth
+# keeping: the configuration below is composed while this file is being
+# imported, before any fixture could point it anywhere, so two modules
+# that did that used to seed one directory between them and read each
+# other's device bindings. The lane now gives each worker one database
+# and clears it between tests (`tests/conftest.py`), so what a test
+# seeds is what it reads and nothing survives into the next one.
 
 CONFIG = Config(
-    server={"database": {"dir": DATABASE_DIR}},
     providers=MOCK_PROVIDERS,
     agents={"assistant": MOCK_AGENT, "kitchen": MOCK_AGENT},
     devices={DEVICE_MAC: ["kitchen"]},

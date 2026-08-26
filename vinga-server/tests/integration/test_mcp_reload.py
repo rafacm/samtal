@@ -134,9 +134,9 @@ def control_client(port: int) -> httpx.AsyncClient:
 
 
 async def test_a_written_and_granted_server_is_usable_without_a_restart(
-    serve_app_in, tmp_path: Path
+    serve_app, tmp_path: Path
 ) -> None:
-    async with serve_app_in(tmp_path / "db", one_agent()) as (port, app), control_client(
+    async with serve_app(one_agent()) as (port, app), control_client(
         port
     ) as control:
         device = Device(port)
@@ -192,7 +192,7 @@ async def test_a_written_and_granted_server_is_usable_without_a_restart(
 
 
 async def test_a_refused_reload_leaves_the_running_servers_alone(
-    serve_app_in, tmp_path: Path
+    serve_app, tmp_path: Path
 ) -> None:
     """The other half of the promise, on a server with something to
     lose: a reload the stored configuration refuses changes nothing, and
@@ -211,7 +211,7 @@ async def test_a_refused_reload_leaves_the_running_servers_alone(
         mcp_servers={ENTRY: stdio_entry()},
         agents={"assistant": {"prompt": "ASSISTANT", "mcp": [ENTRY]}},
     )
-    async with serve_app_in(tmp_path / "db", granted) as (port, app), control_client(
+    async with serve_app(granted) as (port, app), control_client(
         port
     ) as control:
         device = Device(port)

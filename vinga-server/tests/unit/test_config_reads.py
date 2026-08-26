@@ -25,6 +25,7 @@ from vinga_server.config import entities, views
 from vinga_server.config.loader import ConfigError, UnknownEntityError
 from vinga_server.config.models import (
     AgentConfig,
+    DatabaseConfig,
     FillerConfig,
     McpServerConfig,
     ProviderConfig,
@@ -47,7 +48,7 @@ PASTED = "sk_test_4f8b2c9e_never_a_real_credential"
 
 @pytest.fixture
 def store(tmp_path: Path):
-    engine = open_database(tmp_path / "db")
+    engine = open_database(DatabaseConfig())
     try:
         yield ConfigStore(engine, MultiFernet([Fernet(generate_key())]))
     finally:

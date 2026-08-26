@@ -47,7 +47,7 @@ from tests.support.config_cli import logged as _logged
 from tests.support.config_cli import showing as _showing
 from tests.support.notices import CHECK_IN, RELOAD, boundaries
 from vinga_server.config import cli
-from vinga_server.config.models import NOT_A_MAC
+from vinga_server.config.models import NOT_A_MAC, DatabaseConfig
 from vinga_server.db import open_database, schema
 
 
@@ -984,7 +984,7 @@ def test_a_row_of_the_wrong_shape_is_reported_rather_than_raised(
     run("provider", "set", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
     capsys.readouterr()
 
-    engine = open_database(tmp_path / "db")
+    engine = open_database(DatabaseConfig())
     try:
         with engine.begin() as connection:
             connection.execute(update(schema.providers).values(body="not json at all"))

@@ -5,7 +5,7 @@ spawned as a subprocess, so what is being diffed, stopped and started
 here is what a deployment diffs, stops and starts. What stands in for
 the database is the `read` callable the reload takes: the re-read is the
 configuration layer's, handed in, which is what lets these tests be
-about the two phases rather than about SQLite.
+about the two phases rather than about the store.
 
 Two properties carry most of the file. An unchanged entry keeps the
 connection it had, proven by identity rather than by state, because a

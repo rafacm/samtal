@@ -35,6 +35,7 @@ from pathlib import Path
 import pytest
 
 from tests.integration.conftest import BYTECODE_OFF, script_environment
+from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.store import ConfigStore, DomainConfig
 from vinga_server.db import open_database
 
@@ -57,7 +58,7 @@ def _free_port() -> int:
 
 
 def _domain(directory: Path) -> DomainConfig:
-    engine = open_database(directory)
+    engine = open_database(DatabaseConfig())
     try:
         return ConfigStore(engine).load().domain
     finally:

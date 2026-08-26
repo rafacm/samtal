@@ -22,7 +22,7 @@ import pytest
 
 from tests.integration.conftest import script_environment
 from vinga_server.config import compose_config, load_file_config
-from vinga_server.config.models import domain_fields
+from vinga_server.config.models import DatabaseConfig, domain_fields
 from vinga_server.config.store import ConfigStore
 from vinga_server.db import open_database
 
@@ -51,7 +51,7 @@ def test_the_deployment_profile_boots_with_its_measured_values(
             env=script_environment(VINGA_API_URL=api_url),
         )
 
-    engine = open_database(directory)
+    engine = open_database(DatabaseConfig())
     try:
         snapshot = ConfigStore(engine).load()
     finally:

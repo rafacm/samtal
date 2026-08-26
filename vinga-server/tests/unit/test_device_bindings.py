@@ -28,7 +28,7 @@ from tests.support.registry import BINDINGS_DEVICE_MAC as DEVICE_MAC
 from vinga_server import logs
 from vinga_server.app import create_app
 from vinga_server.config import Config
-from vinga_server.config.models import API_MOUNT_PATH
+from vinga_server.config.models import API_MOUNT_PATH, DatabaseConfig
 from vinga_server.db import open_database, read_engine, schema
 from vinga_server.device.bindings import DeviceBindings
 from vinga_server.ws import WEBSOCKET_PATH
@@ -393,7 +393,7 @@ class _FailingEngine:
     message quotes the path or the value it choked on. This one puts the
     sentinel in all three places a naive log line would have reached
     for, which is what makes the assertion below about the rule rather
-    than about SQLite's fixed "not a database" text.
+    than about any one driver's fixed wording.
     """
 
     def connect(self) -> object:
@@ -441,7 +441,7 @@ def test_a_failed_read_repeats_nothing_the_failure_carried(
 def _write_agents_column(directory: Path, mac: str, value: object) -> None:
     """A row put beyond what any write could have produced, which is the
     state a live reader has to have an answer for."""
-    engine = open_database(directory)
+    engine = open_database(DatabaseConfig())
     try:
         with engine.begin() as connection:
             connection.execute(
@@ -502,7 +502,7 @@ def test_a_default_agent_that_is_not_a_name_falls_back_too(
     config = booted(tmp_path, devices={BOUND_MAC: ["assistant"]}, default_agent="assistant")
     bindings = DeviceBindings.open(world(config))
     try:
-        engine = open_database(tmp_path)
+        engine = open_database(DatabaseConfig())
         try:
             with engine.begin() as connection:
                 connection.execute(
@@ -629,7 +629,7 @@ async def test_a_held_write_lock_stalls_neither_the_lookup_nor_the_loop(
     there is a device to have one with."""
     config = booted(tmp_path, devices={DEVICE_MAC: ["assistant"]})
     bindings = DeviceBindings.open(world(config))
-    writer = open_database(tmp_path)
+    writer = open_database(DatabaseConfig())
     ticks = 0
 
     async def tick() -> None:

@@ -180,3 +180,62 @@ that cannot read one fails CI until either the model tolerates it or
 the fixture is deliberately updated with a compatibility decision
 recorded beside the change. That is the floor a beta will stand on,
 and it holds from here to that day.
+
+## Addendum, 2026-08-26 (issue #283): both chains re-baseline on Postgres
+
+Both stores move from SQLite files under `server.database.dir` to one
+Postgres database, with SQLite support removed rather than kept as a
+fallback. Each chain gets a new baseline against a schema of its own
+(`3001_postgres_domain`, `1001_postgres_conversations`), and the
+SQLite-era revisions delete.
+
+**This is the second use of the priced exit the Decision above
+grants, and it costs less than the first.** The squash of #243 had to
+answer a database an operator might be holding: a file stamped at a
+revision the squash removed, met by this build, which is why that
+change kept an arm and a sentence for it. This one has nothing to
+answer. No Postgres database can be stamped at a SQLite-era revision,
+because the only databases carrying those stamps are SQLite files and
+this build cannot open one at all: there is no driver, no code path
+and no configuration key that would let it try. The stranded-database
+machinery (`Superseded`, `DOMAIN_SUPERSEDED`, `_stranded`) is
+therefore deleted rather than ported. The floor now starts at the two
+Postgres baselines.
+
+**The pre-release license is the same one #243 spent**, and its
+bounds are unchanged: the project is pre-release, no third-party
+installation is known, and the maintainer's own deployment is a
+database that can be recreated and a configuration that can be
+rebuilt. The bound that ends at a declared beta is untouched.
+
+**The tested reset path is unchanged in kind, and gains a case.**
+Re-seed and re-secret are what they were: the example-fragment
+install suite still installs every committed fragment into an empty
+database and boots a server on the result, and `set-secret` still
+re-encrypts credentials out of the environment the deployment already
+holds. What is added is the cutover itself, tested rather than
+described: a committed export produced by the pre-cutover CLI is
+applied into a truly empty Postgres database, the secrets are entered
+again, and a fresh export is compared against the fixture. The reset
+repetition (drop the database, create it, apply again) is the same
+case run twice, which is what the recovery documentation tells an
+operator to do.
+
+**What does not come across, stated plainly.** Conversation history
+is not migrated. There is no export format for it and no importer,
+and inventing one for a pre-release store would be a migration tool
+this issue explicitly declined to build. A deployment that wants to
+keep what it recorded copies the SQLite file aside before the upgrade
+and reads it with `sqlite3`; a deployment that does not archives or
+deletes `vinga.db`, `conversations.db` and their `-wal` and `-shm`
+sidecars deliberately, because nothing in this build will touch them
+again.
+
+**The wheel-migration CI step keeps its role and its assertions,
+translated.** It still proves that a fresh database built from the
+shipped artifact reaches the head of both chains, that the domain
+head is exactly one revision, and that every entity table has its
+body column; the table and column inventories now read
+`information_schema` instead of `sqlite_master`, and the
+never-reused-id property is asserted as an identity column rather
+than as an `AUTOINCREMENT` keyword in stored DDL.

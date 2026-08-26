@@ -23,13 +23,12 @@ below removes the step and watches the handshake fail.
 import threading
 from collections.abc import Callable, Iterator
 from dataclasses import replace
-from pathlib import Path
 
 import pytest
 
 from tests.integration.conftest import booted
 from tests.support.config_cli import API_SECRET_ENV
-from tests.support.deployment import DATABASE_DIR_ENV, Live, served
+from tests.support.deployment import Live, served
 from vinga_server.config import Config, cli
 from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
 from vinga_server.ota import OTA_PATH
@@ -78,19 +77,19 @@ def deployment() -> Config:
 
 
 @pytest.fixture
-def live(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Live]:
+def live(monkeypatch: pytest.MonkeyPatch) -> Iterator[Live]:
     """A real server holding a conversation-capable deployment.
 
     Per test rather than per module, because every case here is about a
     board arriving unclaimed and a claim is not undone: a second case
     against the same store would start from `Admitted` and prove
-    something else.
+    something else. The lane clears the store between tests, which is
+    what makes "per test" true of the rows as well as of the server.
     """
     monkeypatch.setenv(MASTER_KEY_ENV, generate_key())
     monkeypatch.setenv(API_SECRET_ENV, SECRET)
-    monkeypatch.setenv(DATABASE_DIR_ENV, str(tmp_path))
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
-    with served(booted(deployment()), tmp_path) as running:
+    with served(booted(deployment())) as running:
         monkeypatch.setenv(cli.API_URL_ENV, running.api_url)
         yield running
 

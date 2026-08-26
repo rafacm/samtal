@@ -5,6 +5,84 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-08-26
+
+### Changed
+
+- **Both stores move from SQLite to Postgres, and SQLite support is
+  removed rather than kept as a fallback** (#283). The domain
+  configuration and the conversation record now live in one database,
+  each in a schema of its own (`domain` and `conversations`), which is
+  also where each Alembic chain keeps its version table and what the
+  read-only analyst role is scoped to. **From this release the image
+  refuses to boot without a database**: a server that cannot reach the
+  one it was pointed at stops with a fixed sentence naming the
+  variables to check, and nothing of the connection is repeated back,
+  because a database URL carries a password in its authority and can
+  carry another in its query. The developer loop is
+  `docker compose up -d --wait` from the repository root and nothing
+  else; a deployment names its own instance and provisions it with
+  `deploy/postgres-init.sql`.
+- **`server.database` is four keys instead of a directory** (#283):
+  `host`, `port`, `name` and `user`, defaulting to the compose
+  service's own values. Their documented environment spellings are the
+  short `VINGA_DB_HOST`, `VINGA_DB_PORT`, `VINGA_DB_NAME` and
+  `VINGA_DB_USER`, because the compose file feeds the Postgres image
+  from the same four and one `.env` flows into both sides; the generic
+  `VINGA_SERVER__DATABASE__*` spelling is refused with a sentence
+  naming the short one. `VINGA_DB_PASSWORD` has no configuration key
+  at all, and neither does `VINGA_DB_URL`, which replaces all five when
+  it is set and accepts only the `postgresql` and `postgresql+psycopg`
+  schemes. The image no longer sets any database variable of its own,
+  and `/data` is now model caches alone.
+- **The retryable-409 contract keeps its shape on the new
+  vocabulary** (#283). Every write transaction takes its store's
+  transaction-scoped advisory lock before it reads, so writers still
+  serialize whole and validation still runs against a state no
+  concurrent writer is mutating; `lock_timeout` bounds each lock
+  acquisition at ten seconds, and a writer that cannot take the gate
+  inside it gets the same retryable refusal in the same words. The
+  two string sniffs for "locked" or "busy" collapse into one
+  classifier over a closed set of psycopg errors, matched by type.
+- **The conversation reads answer their ordinary empty shapes for a
+  deployment that never recorded** (#283), where they used to answer
+  404. The distinction that 404 drew was between a `conversations.db`
+  that existed and one that did not; there is no file, boot migrates
+  the schema whether or not recording is on, and empty tables are not
+  a recording. The 404 for a session id that is not there is
+  unchanged. `server.conversations.enabled` still decides whether any
+  row is ever written.
+- **The read-only analyst role replaces copying a database file**
+  (#283). `deploy/postgres-init.sql` provisions `vinga_ro` with
+  `SELECT` on the conversations schema, now and on tables created
+  later, and nothing at all on the domain schema where the stored
+  secrets' ciphertexts are, plus role-level timeouts so a session left
+  open in a terminal cannot make the next boot's migration wait. Reading
+  the record is a live `psql` as that role rather than a WAL-safe copy.
+- **Deletion says what it really promises** (#283). A deleted row is
+  invisible to every transaction that begins after the deletion
+  commits, including the analyst role's; a repeatable-read transaction
+  already in flight keeps seeing it until it ends; and reclaiming the
+  space is the database server's own storage maintenance. The
+  `secure_delete` pragma, the truncating checkpoint and the promise of
+  zero overwritten bytes go with the file they were about.
+
+### Removed
+
+- **Everything that was about a SQLite file** (#283): `server.database.dir`
+  and `VINGA_SERVER__DATABASE__DIR`, the `vinga.db` and
+  `conversations.db` filenames, the stranded-database refusal and the
+  machinery behind it (no Postgres database can be stamped at a
+  SQLite-era revision, because the only databases carrying those stamps
+  are files this build cannot open), the write-ahead-log checkpointing,
+  and the `device_bindings_snapshot_only` event, which said there was no
+  configuration database at a given path and can no longer be reached.
+  Conversation history is **not** migrated by anything: a deployment
+  that wants to keep what it recorded copies `conversations.db` aside
+  before upgrading, and the old files and their `-wal`/`-shm` sidecars
+  are archived or deleted deliberately, because nothing in this build
+  will touch them again.
+
 ## 2026-08-25
 
 ### Added

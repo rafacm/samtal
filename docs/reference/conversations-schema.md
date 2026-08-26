@@ -6,12 +6,13 @@ difference, so an edit here is reverted by the next run. The text of a
 column description lives on the table in
 `vinga-server/vinga_server/conversations/schema.py`.
 
-The store is a SQLite database, `conversations.db`, beside the domain
-configuration in `server.database.dir`. It holds what was said and what it
-cost to say it: the session spine, the turn timeline, the tool invocations a
-turn issued, and the decision track underneath them. Audio never enters it.
-The per-frame endpointer track and the dropped-frame counts stay in the
-session capture, which is the recording; this is the queryable record.
+The store is the `conversations` schema of the Postgres database the
+`VINGA_DB_*` variables name, beside the domain configuration's `domain`
+schema. It holds what was said and what it cost to say it: the session spine,
+the turn timeline, the tool invocations a turn issued, and the decision track
+underneath them. Audio never enters it. The per-frame endpointer track and the
+dropped-frame counts stay in the session capture, which is the recording; this
+is the queryable record.
 
 ## The compatibility promise
 
@@ -63,46 +64,55 @@ reached the store's file directly and that is not a thing a command can do
 once the store is a database elsewhere; erasing a named session returns as an
 act of the API, with a CLI verb in front of it (#190). Until then the window
 above is the whole of the deletion policy, and a deployment that has to erase
-something now stops the server and deletes three files rather than one:
-`conversations.db`, and the `conversations.db-wal` and `conversations.db-shm`
-sidecars beside it. The log is not a cache of the database. It is where a
-committed row's bytes live until a checkpoint folds them back, so a deployment
-that removed the database alone would leave what it meant to erase sitting in
-the file next to it. That takes every session rather than the one that was
-asked about. Whichever way rows go, the deletion the window takes is of a
-session at a time, row and children together: a session that is still running
-when its row goes stops being recorded, because the writer finds the row gone
-at its next turn. Capture files are a separate instrument and are never
-touched by any of it; the session id is the correlation key for whoever needs
-to remove the matching triplet.
+something now does it in SQL, as the server role: `delete from
+conversations.sessions where session = ...` and the same predicate against
+`turns`, `tool_invocations` and `events`, in one transaction, because a
+session's rows go together or the deletion leaves children pointing at
+nothing. Whichever way rows go, the deletion the window takes is of a session
+at a time, row and children together: a session that is still running when its
+row goes stops being recorded, because the writer finds the row gone at its
+next turn. Capture files are a separate instrument and are never touched by
+any of it; the session id is the correlation key for whoever needs to remove
+the matching triplet.
 
-Deletion is physical, not query-level. The database is opened with `PRAGMA
-secure_delete=ON`, so a freed page is overwritten with zeros instead of
-lingering in the freelist, and retention finishes with `PRAGMA
-wal_checkpoint(TRUNCATE)` so the deleted frames do not survive in the
-write-ahead log. Two limits are stated rather than implied. A checkpoint a
-reader is blocking does not fail the deletion: the rows are committed, the
-truncation is owed, and it is retried at the next quiet moment, which is the
-server's next write. And copies that have already left the file (backups,
-filesystem snapshots) are the operator's to manage.
+What deletion means is worth stating exactly, because the database server
+decides it. A deleted row is invisible to every transaction that begins after
+the deletion commits, including the read-only `vinga_ro` role's. A
+repeatable-read transaction that was already in flight when it committed keeps
+seeing the row until that transaction ends, which is what multi-version
+concurrency is and not something this server can prevent: a query left open in
+a terminal is one such transaction. Reclaiming the space the row occupied is
+the database server's own storage maintenance (autovacuum), not a per-delete
+overwrite, so the interval between the delete and the reclamation is the
+instance's to tune rather than this server's to promise. And copies that have
+already left the database (a `pg_dump`, a filesystem snapshot, a replica) are
+the operator's to manage.
 
 ## Reading it
 
-There is no analysis command. The store is SQL, and the way to read it beside
-a running server is a WAL-safe copy rather than `cp`: a plain copy of a
-database in WAL mode without its `-wal` sidecar is a database missing its most
-recent commits.
+There is no analysis command. The store is SQL, and the way to read it is a
+live read-only session as `vinga_ro`, the role `deploy/postgres-init.sql`
+provisions: it has `SELECT` on every table in this schema, now and after the
+next migration, and no access at all to the domain schema where the stored
+secrets' ciphertexts live. There is nothing to copy and nothing to copy
+safely.
 
 ```bash
-sqlite3 /var/lib/vinga/conversations.db ".backup '/tmp/conversations.db'"
-sqlite3 /tmp/conversations.db 'select * from turns order by id desc limit 20'
+psql "postgresql://vinga_ro@127.0.0.1:5432/vinga" \
+  -c 'select * from conversations.turns order by id desc limit 20'
 ```
 
-The ids on `sessions`, `turns` and `events` are monotonic and never reused
-(SQLite `AUTOINCREMENT`), which is what makes them usable as cursors: a client
-that has read up to id N may ask for what came after it and cannot be handed a
-different row under the same number, even after retention has deleted from the
-end.
+The role carries a `statement_timeout` and an
+`idle_in_transaction_session_timeout`, which are not tidiness: a reader's
+locks hold off the schema changes a migration makes, so a session left open in
+a transaction is what would make the next boot's migration wait out its lock
+timeout and refuse.
+
+The ids on `sessions`, `turns` and `events` are `bigint` identity columns, and
+a sequence never hands out a value twice. That is what makes them usable as
+cursors: a client that has read up to id N may ask for what came after it and
+cannot be handed a different row under the same number, even after retention
+has deleted from the end.
 
 ## The event vocabulary
 
@@ -160,7 +170,7 @@ carries the per-leg counts, and the per-round, per-model truth is the
 
 | Column | Type | Null | Description |
 | --- | --- | --- | --- |
-| `id` | `INTEGER` | no | Monotonic row id, never reused. The session list's cursor. |
+| `id` | `BIGINT` | no | Monotonic row id, never reused. The session list's cursor. |
 | `session` | `TEXT` | no | The session's uuid hex: the join key for every other table here, and the correlation key to the capture triplet of the same name. |
 | `device` | `TEXT` | yes | The device's MAC in canonical form. Null when the session was rejected before one was understood. |
 | `client` | `TEXT` | yes | The client identifier the device announced, when it announced one. |
@@ -182,7 +192,7 @@ carries the per-leg counts, and the per-round, per-model truth is the
 
 | Column | Type | Null | Description |
 | --- | --- | --- | --- |
-| `id` | `INTEGER` | no | Monotonic row id, never reused. The turn timeline's cursor. |
+| `id` | `BIGINT` | no | Monotonic row id, never reused. The turn timeline's cursor. |
 | `session` | `TEXT` | no | The `sessions.session` this turn belongs to. |
 | `t_ms` | `INTEGER` | no | The utterance's offset from session open, in milliseconds, aligned with its `heard` event and with the capture's audio. Structural rather than telemetry: it survives both switches. |
 | `agent` | `TEXT` | yes | The agent that answered, which a handover makes different from the session's. |
@@ -205,8 +215,8 @@ carries the per-leg counts, and the per-round, per-model truth is the
 
 | Column | Type | Null | Description |
 | --- | --- | --- | --- |
-| `id` | `INTEGER` | no | Row id. |
-| `turn` | `INTEGER` | no | The `turns.id` this call belongs to, resolved by the writer inserting the turn and its calls in one transaction. |
+| `id` | `BIGINT` | no | Row id. |
+| `turn` | `BIGINT` | no | The `turns.id` this call belongs to, resolved by the writer inserting the turn and its calls in one transaction. |
 | `session` | `TEXT` | no | The `sessions.session` this call belongs to, denormalized so retention and a session-scoped query need no join. |
 | `position` | `INTEGER` | no | Order within the round's call list, as the model issued it, handovers included. |
 | `source` | `TEXT` | no | Where the call was routed, one of: builtin, device, mcp, unknown. |
@@ -222,7 +232,7 @@ carries the per-leg counts, and the per-round, per-model truth is the
 
 | Column | Type | Null | Description |
 | --- | --- | --- | --- |
-| `id` | `INTEGER` | no | Monotonic row id, never reused. The reconcile cursor. |
+| `id` | `BIGINT` | no | Monotonic row id, never reused. The reconcile cursor. |
 | `session` | `TEXT` | no | The `sessions.session` this event belongs to. |
 | `t_ms` | `INTEGER` | no | The event's offset from session open, in milliseconds, aligned with the capture's decision track. |
 | `name` | `TEXT` | no | The event name, from the event vocabulary the README's table defines. |

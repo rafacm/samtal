@@ -34,6 +34,7 @@ from tests.support.config_cli import chain, logged, runner
 from vinga_server.config import cli, transport
 from vinga_server.config import store as config_store
 from vinga_server.config.loader import ConfigError
+from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.secrets import generate_key
 from vinga_server.db import open_database
 
@@ -381,7 +382,7 @@ def test_the_store_path_receives_the_section_alone(
     """The repository's own caller, which is the one that holds the
     addressed location for every OTHER refusal it makes. It hands this
     guard the section and keeps the address for itself."""
-    engine = open_database(tmp_path / "db")
+    engine = open_database(DatabaseConfig())
     try:
         store = config_store.ConfigStore(engine, MultiFernet([Fernet(generate_key())]))
         store.set_provider("llm", NAME_SENTINEL, {"type": "anthropic"})

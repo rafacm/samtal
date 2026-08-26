@@ -11,16 +11,14 @@ the device simulator, all against one uvicorn on a loopback port.
 
 import asyncio
 import os
-import sqlite3
-from pathlib import Path
 
 import httpx
 import pytest
 
 from tests.integration.conftest import spoken
 from tests.support.notices import CHECK_IN, boundaries
+from tests.support.stores import the_lock_held
 from vinga_server.config import Config
-from vinga_server.db import DATABASE_FILENAME
 from vinga_server.ota import OTA_PATH
 
 MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "tts", "vad")}
@@ -64,12 +62,12 @@ async def _check_in(client: httpx.AsyncClient) -> dict:
 
 @pytest.mark.asyncio
 async def test_a_bind_over_the_api_reaches_the_devices_next_check_in(
-    serve_app_in, simulate, tmp_path: Path
+    serve_app, simulate
 ) -> None:
     """The whole ceremony this milestone is for, minus the code M3 adds:
     an unbound board is refused, one API call binds it, and its own
     re-check hands it a token, on the server that was already running."""
-    async with serve_app_in(tmp_path / "db", CONFIG) as (port, _):
+    async with serve_app(CONFIG) as (port, _):
         base = f"http://127.0.0.1:{port}"
         async with httpx.AsyncClient(base_url=base, timeout=30) as client:
             assert (await _check_in(client))["websocket"]["token"] == ""
@@ -94,16 +92,16 @@ async def test_a_bind_over_the_api_reaches_the_devices_next_check_in(
 
 @pytest.mark.asyncio
 async def test_a_held_write_lock_stops_neither_a_lookup_nor_a_conversation(
-    serve_app_in, simulate, tmp_path: Path
+    serve_app, simulate
 ) -> None:
     """The property the read engine exists for, at the size it matters.
 
-    Every repository write holds the database's write lock for its whole
-    transaction, and the two device paths now read that database. If the
-    read took a lock of its own, or waited for one, an operator's write
-    would stall the fleet's check-ins and every connect behind them. It
-    cannot: under WAL a deferred read takes no lock and reads the last
-    committed snapshot.
+    Every repository write holds the domain chain's advisory lock for
+    its whole transaction, and the two device paths now read that
+    database. If the read took a lock of its own, or waited for one, an
+    operator's write would stall the fleet's check-ins and every connect
+    behind them. It cannot: a reader takes no advisory lock and reads
+    its own snapshot, which is what MVCC gives it.
 
     So a real lock is held here, by another connection, across a whole
     conversation: the OTA check that resolves the binding, the
@@ -112,24 +110,15 @@ async def test_a_held_write_lock_stops_neither_a_lookup_nor_a_conversation(
     finished, which is what makes this about the interval rather than
     about the order things happened to run in.
     """
-    directory = tmp_path / "db"
-    async with serve_app_in(directory, CONFIG) as (port, app):
-        holder = sqlite3.connect(directory / DATABASE_FILENAME, isolation_level=None)
-        try:
-            # Taken before anything starts, and held until the assertions
-            # below have run.
-            holder.execute("BEGIN IMMEDIATE")
-            assert holder.in_transaction
-
+    async with serve_app(CONFIG) as (port, app):
+        # Taken before anything starts, and held until the block ends,
+        # which is what makes this about the interval rather than about
+        # the order things happened to run in.
+        with the_lock_held():
             conversation = asyncio.create_task(simulate(port, BOUND_MAC))
             bindings = app.state.composition.bindings
             resolved = await asyncio.wait_for(bindings.resolve(BOUND_MAC), timeout=10)
             events, _ = await asyncio.wait_for(conversation, timeout=60)
-
-            # The whole of it happened while the writer sat on the lock.
-            assert holder.in_transaction
-        finally:
-            holder.close()
 
     assert resolved.names == ("assistant",)
     assert spoken(events), "the conversation produced no reply"

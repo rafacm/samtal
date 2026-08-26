@@ -9,7 +9,7 @@ The structured events are this server's observability surface
 ([ADR](../adr/2026-08-04-json-logs-are-the-observability-surface.md)), and
 they carry metadata and nothing else
 ([ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)).
-This document is that surface written down: 57 events in 82 variants. What was
+This document is that surface written down: 56 events in 81 variants. What was
 said in a conversation is in the conversation store instead, keyed by the same
 `session` ([its reference](conversations-schema.md)).
 
@@ -243,7 +243,6 @@ meets them, from a device's check-in to the server's own lifecycle surfaces.
 | `drain_started` | `vinga_server.registry` | INFO | 1 |
 | `drain_finished` | `vinga_server.registry` | INFO | 1 |
 | `drain_incomplete` | `vinga_server.registry` | WARNING | 1 |
-| `device_bindings_snapshot_only` | `vinga_server.device.bindings` | DEBUG | 1 |
 | `device_bindings_unreadable` | `vinga_server.device.bindings` | WARNING | 1 |
 | `api_error` | `vinga_server.config.api` | ERROR | 1 |
 | `api_storage_error` | `vinga_server.config.api` | ERROR | 1 |
@@ -257,17 +256,14 @@ to it. Said once, before anything connects, and at WARNING for the reason
 #### Variant 1: `vinga_server.conversations.store` at WARNING
 
 ```text
-recording conversations to %s
+recording conversations
 ```
 
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `path` (`PATHLIKE`) | no |  |  |
+No arguments: the sentence is fixed.
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `path` | `IDENTIFIER` | yes | no |  |  |
 
 ### `conversations_dropped`
 
@@ -1974,26 +1970,6 @@ drained with %d session(s) cut mid-reply and %d that did not finish
 | `cut_mid_reply` | `COUNT` | yes | no |  |  |
 | `unfinished` | `COUNT` | yes | no |  |  |
 | `timeout_s` | `FLOAT` | yes | no |  |  |
-
-### `device_bindings_snapshot_only`
-
-There is no configuration database, so bindings resolve from the world this
-server is serving.
-
-#### Variant 1: `vinga_server.device.bindings` at DEBUG
-
-```text
-no configuration database at %s: device bindings resolve from the configuration this server was built with
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `path` (`PATHLIKE`) | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `path` | `IDENTIFIER` | yes | no |  |  |
 
 ### `device_bindings_unreadable`
 

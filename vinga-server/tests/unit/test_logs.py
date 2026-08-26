@@ -270,6 +270,12 @@ def test_a_statement_and_its_parameters_do_not_reach_a_debug_log(
     answer the question would pass with the floor gone."""
     logging.getLogger("sqlalchemy").setLevel(logging.NOTSET)
     logs.quiet_vendor_libraries(logging.DEBUG)
+    # An in-memory SQLite engine on purpose, and the one place this
+    # project still builds one (#283). What is under test is the log
+    # floor over SQLAlchemy's own echo, not this server's stores: the
+    # neutral engine is the right tool because it needs no instance, no
+    # migration and no schema, and using the product's would make a test
+    # about redaction depend on a database being up.
     engine = create_engine("sqlite://")
 
     with caplog.at_level(logging.DEBUG), engine.connect() as connection:
@@ -289,6 +295,7 @@ def test_without_the_floor_the_engine_echoes_its_parameters(
     level does put the statement and the value bound to it on the
     record, which is what the floor above is holding back."""
     logging.getLogger("sqlalchemy").setLevel(logging.NOTSET)
+    # In memory, for the reason the test above gives.
     engine = create_engine("sqlite://")
 
     with caplog.at_level(logging.DEBUG), engine.connect() as connection:
