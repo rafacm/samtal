@@ -39,30 +39,108 @@ record is [`cli-guide-audit.md`](cli-guide-audit.md), dated and kept
 whole, so a later reader can check what was considered rather than
 trusting that it was; the short version is at the foot of this page.
 
+## On this page
+
+- [What a reviewer holds a new command
+  to](#what-a-reviewer-holds-a-new-command-to): the eleven questions a
+  new command answers, each linked to the rule behind it. This page's
+  interface; everything after it is the reasoning.
+- [The two spellings](#the-two-spellings): `vinga` and
+  `vinga-server config`, one grammar, and which one this page uses.
+- [The grammar](#the-grammar): noun first and why, identity
+  addressing, the flat system verbs, naming a noun or a verb, and how
+  deep the tree may go.
+- [The practices](#the-practices): the eleven rules a command is held
+  to, each with an example from the merged CLI and the shape it
+  rejects.
+- [The sources, and what became of
+  them](#the-sources-and-what-became-of-them): the four published
+  guides this was audited against, and where the row-by-row record
+  lives.
+
+## What a reviewer holds a new command to
+
+A short list, in the order the questions come up in review. Each is a
+practice below, restated as the question to ask, and linked to the
+section that carries its reasoning.
+
+1. **Is it noun first?** Does the noun already exist, and is the verb
+   the core-set word if the core set will do?
+   ([Noun first, verb second](#noun-first-verb-second),
+   [Naming a new noun, naming a new
+   verb](#naming-a-new-noun-naming-a-new-verb))
+2. **If it introduces a noun**, is that the configuration's own word
+   for the thing, lowercase, kebab-case, and singular or plural
+   according to whether it addresses one entry?
+   ([Naming a new noun, naming a new
+   verb](#naming-a-new-noun-naming-a-new-verb))
+3. **Do the leading positionals form the address**, in the same order
+   and with the same names the API's path uses, and are there at most
+   three of them? If a payload follows, is there exactly one group of
+   it, is it last, and is every element the same kind of thing?
+   ([Identity addressing](#identity-addressing), and
+   [How deep the tree goes, and
+   why](#how-deep-the-tree-goes-and-why) for a level between the noun
+   and the verb)
+4. **Is everything it prints on stdout about the artifact, and
+   everything on stderr about the run?** A document that explains
+   itself is still the artifact; a count of what this invocation did is
+   not.
+   ([Data on stdout, notices on
+   stderr](#data-on-stdout-notices-on-stderr))
+5. **Does it say when what it wrote takes effect**, in the words the
+   kind's own notice uses rather than new ones?
+   ([A write says what it did and when it takes
+   effect](#a-write-says-what-it-did-and-when-it-takes-effect))
+6. **Can any sentence it prints contain something the caller typed, or
+   something the network handed back?** Both are no.
+   ([A refusal is a fixed sentence that quotes nothing
+   back](#a-refusal-is-a-fixed-sentence-that-quotes-nothing-back))
+7. **Could a credential reach an argument** on any path through it,
+   including a mistyped one?
+   ([A credential is never an argument, and never travels in a
+   read](#a-credential-is-never-an-argument-and-never-travels-in-a-read))
+8. **Is every wait it makes bounded**, and if one is not, is the reason
+   written down where the constant is?
+   ([Bound every wait that has a bound, and write down why one does
+   not](#bound-every-wait-that-has-a-bound-and-write-down-why-one-does-not))
+9. **Is its description one lowercase sentence with no full stop, does
+   its help page render the same on every machine, and does any
+   terminal-dependent behavior it has leave the non-terminal path
+   complete?**
+   ([Naming a new noun, naming a new
+   verb](#naming-a-new-noun-naming-a-new-verb) for the description,
+   [Output is deterministic, and an answer cannot steer a
+   terminal](#output-is-deterministic-and-an-answer-cannot-steer-a-terminal)
+   for the rest)
+10. **Is any part of it written twice?** A verb list, a field name, a
+    section name or an address that also exists on a model is derived
+    from that model, not restated.
+    ([The grammar is derived from the model it
+    addresses](#the-grammar-is-derived-from-the-model-it-addresses))
+11. **If it destroys something**, does its row say so, so that it
+    confirms at a terminal and takes `--force`? And is it destructive
+    by the line the practice draws, rather than merely alarming?
+    ([Prompt where there is somebody to ask, and never require
+    it](#prompt-where-there-is-somebody-to-ask-and-never-require-it))
+
+And the rule that outranks the list: this page never outranks
+[`product-promises.md`](product-promises.md). A command that reads
+beautifully and breaks a product promise is a command that is wrong.
+
 ## The two spellings
 
-The same command has two spellings, and both appear in this
-repository's documents.
+The same command has two spellings, `vinga` and `vinga-server config`,
+and both appear in this repository's documents. Which is which, what
+each entry point is for, what a live `--help` prints and why every
+generated document carries the short one whatever rendered it are in
+[`../reference/cli.md`](../reference/cli.md#the-two-spellings), which
+is where the current spellings belong.
 
-```bash
-vinga provider set llm local          # the console script
-vinga-server config provider set llm local   # inside the image
-```
-
-`vinga-server` is the server's own entry point, and `config` is the
-word that dispatches away from serving to configuring. It has three
-siblings: `conversations`, `events` and `doctor`. `vinga` is the CLI as
-a tool of its own, which the standalone-CLI work (#223) packages, and
-it has no server to dispatch away from, so it drops the `config` word.
-Everything after that word is identical, which is what makes the two
-one grammar rather than two.
-
-Both resolve, and #223 landed the short one as a console script of its
-own. What a live `--help` prints is the spelling it was reached by;
-every generated document carries the short one whatever rendered it,
-because a document may no more vary with the invocation than with the
-terminal. This page uses the short one wherever the point is the grammar
-rather than the invocation.
+What matters here is the one property the pair has: everything after
+the dispatching word is identical, which is what makes the two one
+grammar rather than two. This page uses the short spelling wherever
+the point is the grammar rather than the invocation.
 
 ## The grammar
 
@@ -106,10 +184,14 @@ in its own command list. The core is uniform: `set`, `show` and
 `export` apply to all five configuration kinds and `delete` to the four
 that can be deleted, and every one of those rows is built from the
 descriptor registry rather than written out.
-The periphery is not: `set-secret` and `clear-secret` exist for two
-kinds and not the other three, the devices have two binding verbs of
-their own, and an agent has a prompt nothing else has. The noun set is
-growing too, and growing faster than the verb set: the conversation
+The periphery is not: stored credentials have verbs that two of the
+kinds carry and the other three do not, the devices have two binding
+verbs of their own, and an agent has a prompt nothing else has. Which
+peripheral verbs exist at any moment is
+[`../reference/cli.md`](../reference/cli.md#every-command)'s to say,
+since that half is generated from the command tree; what the argument
+needs is only that the list is uneven and keeps growing. The noun set
+is growing too, and growing faster than the verb set: the conversation
 store work (#190) adds `sessions` and `conversations`, each with verbs
 of its own.
 
@@ -161,7 +243,7 @@ the command line and cannot come to differ.
 
 **Not every positional is an address, and the code says so.** In the
 second line above, the MAC addresses the request and `assistant` is
-the body of it: `bind-device` declares `AGENT` as a variable-length
+the body of it: `device bind` declares `AGENT` as a variable-length
 positional, so `vinga device bind aa:bb:cc:dd:ee:ff kids guest` binds
 one board to two agents. `Invocation` separates the two in its own
 field list, with `stage`, `name`, `mac`, `code` and `slot` under "what
@@ -190,7 +272,7 @@ generated reference identically.
 What the rule caps here is identity depth, and it counts address
 segments only: a payload group is not one of them, however many words
 it runs to. Three segments under a verb is the floor of what is already
-needed (`set-secret provider llm claude api_key` addresses a stage, a
+needed (`provider secret set llm claude api_key` addresses a stage, a
 name and a slot, and its route is
 `/providers/{stage}/{name}/secrets/{slot}`) and it is the ceiling. A
 fourth segment means the noun is wrong: something in the middle of that
@@ -341,7 +423,7 @@ next, and the one sentence a failure gets.
 The line is not prose against data. It is **about the artifact** against
 **about this invocation**. A document that explains itself is still the
 artifact: an export's header says how to reproduce the deployment in
-two steps, and its foot lists a `set-secret` command per stored slot,
+two steps, and its foot lists a `secret set` command per stored slot,
 both as YAML comments, and both belong in the file because the file is
 what somebody opens six months later with no terminal scrollback to
 consult. `apply` reads it back with the comments in it.
@@ -404,7 +486,7 @@ word, while every sibling grammar in this repository already refused to.
 The #194 rebuild closed it by translating Click's `UsageError`
 subclasses by class, and recorded the strengthening in the changelog.
 What made it worth closing is the mistake that produces that sentence
-most often: typing the value after `set-secret ... api_key`.
+most often: typing the value after `secret set ... api_key`.
 
 **Two merged paths did not meet this standard, and both are closed.**
 Both were found by holding this page against `cli.py`, which is what a
@@ -487,12 +569,12 @@ old voice, and has no way to know whether that is a bug or a boundary.
 
 ### A credential is never an argument, and never travels in a read
 
-**Example.** `set-secret` reads the value from stdin, without echo when
-stdin is a terminal, or from the variable `--from-env` names. The
+**Example.** A `secret set` reads the value from stdin, without echo
+when stdin is a terminal, or from the variable `--from-env` names. The
 `MASK` shown in a read is a fixed eight characters rather than the
 value's length, because a mask that tracks the length is a length
 oracle. An `export` carries no credential at all: what it carries is
-the `set-secret` command for each stored slot, as comment lines, which
+the `secret set` command for each stored slot, as comment lines, which
 is also why rebuilding a deployment is two steps in a stated order.
 Every `set` help page carries the sentence saying an inline `key=value`
 is the wrong place for one, ahead of the field list. And the transport
@@ -740,44 +822,3 @@ because the deployment surface is a container. Three rows are
 [above](#the---json-question-deferred). Two things are **owed**: the
 progress line, and examples on the command pages. **Tension recorded**
 is in the vocabulary and no row carries it today.
-
-## What a reviewer holds a new command to
-
-A short list, in the order the questions come up in review. Each is a
-practice above, restated as the question to ask.
-
-1. **Is it noun first?** Does the noun already exist, and is the verb
-   the core-set word if the core set will do?
-2. **If it introduces a noun**, is that the configuration's own word
-   for the thing, lowercase, kebab-case, and singular or plural
-   according to whether it addresses one entry?
-3. **Do the leading positionals form the address**, in the same order
-   and with the same names the API's path uses, and are there at most
-   three of them? If a payload follows, is there exactly one group of
-   it, is it last, and is every element the same kind of thing?
-4. **Is everything it prints on stdout about the artifact, and
-   everything on stderr about the run?** A document that explains
-   itself is still the artifact; a count of what this invocation did is
-   not.
-5. **Does it say when what it wrote takes effect**, in the words the
-   kind's own notice uses rather than new ones?
-6. **Can any sentence it prints contain something the caller typed, or
-   something the network handed back?** Both are no.
-7. **Could a credential reach an argument** on any path through it,
-   including a mistyped one?
-8. **Is every wait it makes bounded**, and if one is not, is the reason
-   written down where the constant is?
-9. **Is its description one lowercase sentence with no full stop, does
-   its help page render the same on every machine, and does any
-   terminal-dependent behavior it has leave the non-terminal path
-   complete?**
-10. **Is any part of it written twice?** A verb list, a field name, a
-    section name or an address that also exists on a model is derived
-    from that model, not restated.
-11. **If it destroys something**, does its row say so, so that it
-    confirms at a terminal and takes `--force`? And is it destructive
-    by the line the practice draws, rather than merely alarming?
-
-And the rule that outranks the list: this page never outranks
-[`product-promises.md`](product-promises.md). A command that reads
-beautifully and breaks a product promise is a command that is wrong.
