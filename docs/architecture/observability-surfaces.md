@@ -1,13 +1,91 @@
 # Observability and conversation-data surfaces
 
-The reference behind
-[the 2026-08-15 ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md):
-which needs the design balances, the four surfaces and what each may
-carry, and the external practice it was checked against. The ADR holds
-the decision; this page holds the reasoning and the map, and changes
-when the design does.
+Where may this datum go? Four surfaces answer it, and this page is the
+map of them: what each carries, which need it serves, how long it is
+kept and who may read it, and what is true of it in the code today.
+[The 2026-08-15 ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)
+holds the decision itself and is not restated here; the evidence that
+decision was taken on is dated at the foot of this page. The map
+changes when the design does.
 
-## The needs
+## On this page
+
+- [The four surfaces](#the-four-surfaces): the table this page exists
+  for, one row per surface, with its current status.
+- [The invariants](#the-invariants): the four rules that decide where
+  a new field goes, and that hold whatever the surfaces grow into.
+- [Where each piece lands](#where-each-piece-lands): which document
+  says what, and what is still open.
+- [Decision evidence, gathered
+  2026-08-15](#decision-evidence-gathered-2026-08-15): the seven needs
+  and the external practice the design was checked against, as they
+  were written on the day the decision was taken.
+
+## The four surfaces
+
+The Serves column numbers the needs in
+[the appendix](#the-needs). The Carries column says what class of
+thing a surface may hold, never the vocabulary itself: the exact
+fields and columns are generated from the declarations and are linked
+in the row.
+
+| Surface | Carries | Serves | Retention and access | Status |
+| --- | --- | --- | --- | --- |
+| **Structured events** (`vinga_server/events/`, the JSON log) | Metadata only: closed field sets, reason tokens from closed sets, trusted identifiers, counts, durations. No conversation text, no far-side bytes, no exception prose. Every variant is in [`reference/events.md`](../reference/events.md) | 1, feedstock for 5 | Operator log retention (weeks) | **Landed.** Every emission is a typed variant declared in `events/catalog.py`, so a shape that is not declared cannot be constructed at all and the no-leak contract holds by construction rather than by review |
+| **Conversation store** (the `conversations` schema) | Content as the system of record: the session spine, the turn timeline, the tool invocations a turn issued and the decision track under them. Every column is in [`reference/conversations-schema.md`](../reference/conversations-schema.md). Audio never enters it | 2, 5 (evals), 7 | `server.conversations.retention_days`, 90 by default, deleting whole sessions with their children; access-controlled reads under `/api`; live read-only SQL as `vinga_ro`, which reaches this schema and not `domain` | **Landed** (#120), off unless `server.conversations.enabled` says otherwise, under two independent switches (`metrics`, `text`). Erasing a named session on demand has no command in this release: #190 owns that verb, and until it lands the retention window is the whole of the deletion policy |
+| **Capture** (`vinga_server/capture.py`) | Raw audio plus the decision track, three files per session sharing one timeline | 1 (deep diagnosis) | Bounded per session and by a total budget for the directory, oldest captures pruned first | **Landed**, and off unless a directory is configured. It writes room audio to disk, which is the opposite of what the rest of the project promises, so it says so on every session it records |
+| **Audit** | Admin and config actions, auth refusals, reload invocations | 4 | Long, append-only, narrow content | **Future.** Nothing writes one today and no issue owns it yet |
+
+## The invariants
+
+Four rules decide where a new field goes. They are the ADR's, restated
+as the questions a placement has to answer.
+
+- **What a person said never rides the events.** Metadata on the log,
+  content in the store. The line the
+  [2026-08-17 amendment](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md#amendment-device-descriptors-are-metadata-2026-08-17)
+  draws is between the two: what a device says about itself at
+  check-in may ride the events once its decision site bounds and
+  sanitizes it, and what a person said through the device may not,
+  however it was recovered.
+- **Restriction is at the source, not at the sink.** A field is
+  lawful because it was declared, not because a scrubber failed to
+  match it. On the events that is the catalog; on the store it is the
+  schema and the two switches.
+- **Live and history are two transports over one set of events, not
+  two stores.** The admin UI's "what is happening now" is one more
+  `EventTap` consumer of the tap #138 built, and the store is a tap
+  too. Same events, two transports, no polling.
+- **Every surface answers the retention question.** How long, who can
+  see it, can it be deleted: a surface with no policy retains
+  forever, which is why the store ships a default window rather than
+  a later feature, and why the capture directory has a budget.
+
+## Where each piece lands
+
+- The decision, and why it was taken:
+  [the 2026-08-15 ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md),
+  with its 2026-08-17 amendment on device descriptors.
+- The exact vocabulary of the two landed surfaces:
+  [`reference/events.md`](../reference/events.md) and
+  [`reference/conversations-schema.md`](../reference/conversations-schema.md),
+  both generated from the declarations and diffed by CI. Nothing on
+  this page repeats a field name or a column name, so neither can go
+  stale here.
+- Still open, each with its owner: erasing a named session on demand
+  (#190), exporters over the same tap and vocabulary (#66/#67), the
+  audit surface (no issue yet), and the household-consent question
+  #120 named and did not close.
+
+## Decision evidence, gathered 2026-08-15
+
+What follows was written on 2026-08-15, when the decision was taken,
+and is kept as it was: the seven needs the design balances and the
+external practice it was checked against. It is evidence about a
+decision, not current guidance, and the map above is what a placement
+is held to.
+
+### The needs
 
 Seven, gathered in the 2026-08-15 assessment:
 
@@ -40,20 +118,7 @@ design's core: transparency is served from an access-controlled store,
 never from logs, so the log surface can hold the no-leak line without
 starving the UI.
 
-## The four surfaces
-
-| Surface | Carries | Serves | Retention and access |
-| --- | --- | --- | --- |
-| **Structured events** (`vinga_server/events.py`, the JSON log) | Metadata only: closed field sets, reason tokens from closed sets, trusted identifiers, counts, durations. No conversation text, no far-side bytes, no exception prose. | 1, feedstock for 5 | Operator log retention (weeks); the no-leak contract holds by construction once #155 lands |
-| **Conversation store** (#120, the `conversations` schema) | Content as system of record: turns, tool and MCP calls with arguments and results, keyed by session and user | 2, 5 (evals), 7 | Configured retention with a stated default; per-session and per-user deletion; access-controlled reads under `/api`, and live read-only SQL as `vinga_ro`, which reaches this schema and not `domain` |
-| **Capture** (existing) | Raw audio plus decision track, explicit opt-in | 1 (deep diagnosis) | Short-lived, pruned, already governed |
-| **Audit** (future, small) | Admin/config actions, auth refusals, reload invocations | 4 | Long, append-only, narrow content |
-
-Live views (need 6) are fed from the event tap #138 built (a
-WebSocket/SSE subscriber is one more `EventTap` consumer); the store
-answers history. Same events, two transports, no polling.
-
-## The external practice it was checked against
+### The external practice it was checked against
 
 Collected 2026-08-15 (a tavily research pass plus targeted
 verification; links below):
@@ -96,13 +161,3 @@ langfuse.com/docs/administration/data-retention,
 langfuse.com/docs/administration/data-deletion), store-separation
 surveys (arize.com/blog/the-role-of-opentelemetry-in-llm-observability,
 patronus.ai/llm-testing/llm-observability).
-
-## Where each piece lands
-
-- The decision: the
-  [2026-08-15 ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md).
-- The store, its content path, tool results, retention, deletion, and
-  the consent question: #120 (revision 2026-08-15).
-- The registry that makes the event tier's contract structural: #155.
-- Exporters and the audit surface: #66/#67 and a future audit issue,
-  both consuming the same tap and vocabulary.
