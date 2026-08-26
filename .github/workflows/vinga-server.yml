@@ -847,11 +847,13 @@ jobs:
       # that the providers are built and the server serves, not that a
       # conversation runs, which the smoke suite below covers.
       #
-      # The domain half of each check's configuration is written into a
-      # database on the data volume first, by running the CLI from the
+      # The domain half of each check's configuration is written into
+      # the scenario's own database first, by running the CLI from the
       # image itself, so the seeding exercises the shipped artifact and
       # the server finds what a deployment's server would find. The
-      # mounted YAML is the server half only.
+      # mounted YAML is the server half only, and no longer says
+      # anything about where the state is: that is the VINGA_DB_*
+      # family, passed to every container below.
       #
       # Seeding starts a server of its own inside the seeding container,
       # because the CLI writes through the configuration API, so those
@@ -931,8 +933,8 @@ jobs:
       # The milestone acceptance, encoded: one seeded database, one
       # mounted YAML, one docker run, one whole conversation. The
       # seeding runs the CLI from the image being tested, against the
-      # volume the server then reads, which is the deployment procedure
-      # rather than a fixture.
+      # database the server then reads, which is the deployment
+      # procedure rather than a fixture.
       #
       # The CLI writes through the configuration API, so the seeding
       # script starts a server of its own inside this container, waits
