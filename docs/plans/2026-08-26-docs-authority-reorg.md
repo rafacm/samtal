@@ -328,7 +328,7 @@ docs/
   system-overview.md           # NEW: the conversation walkthrough
   concepts.md                  # future-aware domain model (M4)
   glossary.md                  # lookup adapter (unchanged role)
-  xiaozhi-notes.md             # restructured in M5 (shape per the gate)
+  xiaozhi-notes.md             # restructured in M5 (combined, labeled)
 
   architecture/
     README.md                  # THE architecture index, by reader question
@@ -382,10 +382,6 @@ docs/
   classification lines and link moves; #310's out-of-scope list is
   restated in every milestone brief, and a page not named by a
   milestone is not edited by it.
-- **The M5 gate stalls the chain.** The structure choice is put to
-  the maintainer when M4 starts, not when M5 does, so the answer is
-  normally in hand before the milestone needs it; M6 is blocked by
-  #311 and #312 either way.
 - **Transient index states between milestones.** Accepted by design
   decision 5; each milestone updates the router rows for the pages
   it moves, in the same change.
@@ -462,8 +458,7 @@ docs/
   entity and the current session-and-turn store are disambiguated
   in both directions, the reference side through the generators;
   glossary inbound links re-point; the drift checks and the full
-  test suite run. The #312 structure question goes to the
-  maintainer as this milestone starts. Design footprint: the page
+  test suite run. Design footprint: the page
   stops being a second protocol description and becomes the domain
   model with links where implementation facts live. Documentation
   footprint: `reference/domain-config.md` and
@@ -471,11 +466,12 @@ docs/
   generators; the glossary rows that pointed into replaced sections
   update.
 - [ ] **M5: The Xiaozhi notes get the accepted shape (#312).**
-  Implement whichever structure the maintainer accepted at the
-  gate: authority-labeled sections or a split behind the stable
-  path; clone commands stay at the top; validated procedures,
-  dated observations, upstream research and licensing evidence
-  keep their dates and provenance; board-specific current facts
+  Implement the accepted combined document with authority-labeled
+  sections (the gate was cleared during the plan review round),
+  including the upstream currency markers recording the vendor
+  clones' commits, the observed firmware versions and the date;
+  clone commands stay at the top; dated observations, upstream
+  research and licensing evidence keep their dates and provenance; board-specific current facts
   and procedures move to the owning device guide or the common
   device page per design decision 8, with the AGENTS.md
   hardware-context pointer following them, and shared protocol
