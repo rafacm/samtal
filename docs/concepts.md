@@ -76,7 +76,9 @@ turns inside it. A **conversation** is a
 dialogue between a user and exactly one agent: a durable thread that
 outlives any single session and belongs to no device, which is
 **decided direction** (issue #190), not code. **Users** arrive in a
-later stage, and the model leaves their slot open on purpose.
+later stage, and the model leaves their slot open on purpose, which is
+**decided direction** (recorded on this page, 2026-08-21; no owning
+issue or decision record yet).
 
 One name collides, and clearing it up front saves confusion later. The
 database schema named `conversations` stores **sessions and turns**,
