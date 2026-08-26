@@ -100,6 +100,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.support.commands import BUILD_SECONDS, ran
 from tests.support.config_cli import registered
 from tests.support.deployment import Live, check_in, serving
 from tests.support.tiers import SERVE_MODULES, SIM_MODULES, declared, requirement_names
@@ -191,12 +192,11 @@ def wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
     if shutil.which("uv") is None:  # pragma: no cover - uv is how this repo runs
         pytest.skip("uv is not on PATH, and it is what builds a wheel here")
     where = tmp_path_factory.mktemp("dist")
-    subprocess.run(
+    ran(
         ["uv", "build", "--wheel", "--out-dir", str(where)],
+        seconds=BUILD_SECONDS,
         cwd=PROJECT,
         check=True,
-        capture_output=True,
-        text=True,
     )
     built = sorted(where.glob("*.whl"))
     assert len(built) == 1, built
@@ -216,17 +216,11 @@ def installed(wheel: Path, tmp_path_factory: pytest.TempPathFactory) -> Path:
     tree rather than from the wheel.
     """
     where = tmp_path_factory.mktemp("wheel") / "venv"
-    subprocess.run(
-        ["uv", "venv", "--python", "3.12", str(where)],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    subprocess.run(
+    ran(["uv", "venv", "--python", "3.12", str(where)], seconds=BUILD_SECONDS, check=True)
+    ran(
         ["uv", "pip", "install", "--python", str(where / "bin" / "python"), str(wheel)],
+        seconds=BUILD_SECONDS,
         check=True,
-        capture_output=True,
-        text=True,
     )
     return where / "bin" / "python"
 
@@ -291,13 +285,11 @@ def _ran(
 ) -> subprocess.CompletedProcess[str]:
     """One program of the installed environment, run as the binary it
     is."""
-    return subprocess.run(
+    return ran(
         [str(installed.parent / argv[0]), *argv[1:]],
         cwd=elsewhere,
         env=_environment(live),
         input=stdin,
-        capture_output=True,
-        text=True,
     )
 
 
@@ -416,13 +408,11 @@ def test_the_wheel_declares_no_extra_the_project_does_not(wheel: Path) -> None:
     """The gates themselves, held closed. An extra nobody declared is a
     door into this package that no lane and no document knows about."""
     project = json.loads(
-        subprocess.run(
+        ran(
             [sys.executable, "-c", "import json,tomllib,sys;"
              "print(json.dumps(tomllib.load(open(sys.argv[1],'rb'))['project']))",
              str(PROJECT / "pyproject.toml")],
             check=True,
-            capture_output=True,
-            text=True,
         ).stdout
     )
 

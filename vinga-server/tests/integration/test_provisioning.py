@@ -40,6 +40,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
+from tests.support.commands import COMMAND_SECONDS
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations import schema as conversations_schema
 from vinga_server.conversations.store import open_conversations
@@ -81,6 +82,9 @@ def _psql(database: str, *arguments: str, user: str, password: str) -> subproces
         env=os.environ | {"PGPASSWORD": password},
         capture_output=True,
         text=True,
+        # psql waits on a connection and then on a statement, and
+        # neither wait is this lane's to make unbounded.
+        timeout=COMMAND_SECONDS,
     )
 
 
