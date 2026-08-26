@@ -21,6 +21,24 @@ preference. The short form an agent carries into every session is the
 design section of [`../../AGENTS.md`](../../AGENTS.md); this page is
 where its terms are defined and its claims are shown.
 
+## On this page
+
+- [The vocabulary](#the-vocabulary): module, interface,
+  implementation, depth, seam, adapter and locality, each defined
+  against code in this repository rather than in the abstract.
+- [The deletion test](#the-deletion-test): the one question that tells
+  a layer apart from a pass-through, and what it does not ask.
+- [The interface is the test
+  surface](#the-interface-is-the-test-surface): why an underscore
+  reach-in in a new test is a review flag, and which of the two things
+  it is evidence of.
+- [Worked examples](#worked-examples): four merged changes, each with
+  the shape it had before, the shape it took, and the lens it teaches.
+- [What this guide does not
+  license](#what-this-guide-does-not-license): why depth is bought at
+  plan time and not by rewriting working code, and what outranks this
+  page.
+
 ## The vocabulary
 
 **Module.** A file, or a package when its parts have separate reasons
