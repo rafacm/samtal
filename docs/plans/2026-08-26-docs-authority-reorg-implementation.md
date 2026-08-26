@@ -1256,3 +1256,60 @@ partition-size comparison.
   table rows, four single unbreakable link URLs, two headings, and text
   that arrived already wrapped at 78 in blocks this milestone did not
   rewrap.
+
+### PR review round
+
+External review of PR #325 (backend codex 0.149.1, model
+`gpt-5.6-terra`, 2026-08-27). Verdict: mergeable after fixes. Three
+P2 findings, each fixed in its own commit.
+
+1. **P2: the root README's provisioning step contradicted the guides
+   this milestone made authoritative.** Step 6 sent every reader to the
+   portal's Custom OTA URL field and named the button that opens it,
+   PWR on the Touch-LCD-1.54 and BOOT on the others. The Touch-LCD
+   guide records that the 2.4.0 image tested on it has no such field,
+   which is why the USB route is the one there, and the AMOLED guide
+   records that its factory image ignored the BOOT provisioning gesture
+   in hands-on use. *Resolution:* the step routes through the board's
+   guide first, offers the portal only where the image exposes the
+   field, names the NVS procedure for where it does not, and asserts no
+   button. One paragraph, since the rest of that file is #309's.
+
+2. **P2: the notes overstated when activation is offered.** Two
+   passages said an enabled ceremony means a device resolving to no
+   agent gets a code. `activation_for` withholds the offer in three
+   further cases, all of which are answered with an empty token and no
+   `activation` section: a device bound to an agent this process has
+   not loaded yet (`resolution.unloaded`), a binding view that is the
+   stale snapshot fallback rather than authoritative, and a pending
+   table that refuses because it is at `PENDING_CAPACITY` or has spent
+   its code budget. That is the exact shape the page told a reader to
+   treat as a hard provisioning error. *Resolution:* the check-in
+   bullet now lists what an empty token can mean and sends the reader
+   to the check-in's own log line for which of them it is, and the
+   ceremony bullet states the four conditions an offer is made under.
+   Both were written against `onboarding/unbound.py` (lines 103 to
+   128), `ota/reply.py`'s `token_for` and its event branches, and
+   `onboarding/pending.py`'s two bounds.
+
+3. **P2: deferring the `vinga-server/README.md` paragraph was
+   rejected.** This section's Deviations recorded the stale
+   factory-firmware sentence and left it for M6, on the milestone
+   brief's `vinga-server/` boundary. The reviewer held that #312's own
+   acceptance criterion requires onboarding claims reconciled, and the
+   coordinator amended the boundary for exactly that paragraph.
+   *Resolution:* it now states the 2026-08-13 validation on both
+   boards, links the notes' ceremony section for the evidence, and
+   sends the serial procedures to `docs/devices/README.md`, their home
+   since this milestone. Nothing else in that README was touched, and
+   the Deviations entry above stands as the record of what was decided
+   and then overruled.
+
+Verification after the three fixes: the link-and-anchor script,
+`checked 158 files, 0 failures`; `uv run pytest
+tests/unit/test_command_spellings.py -q`, **35 passed**, after
+regenerating the manifest, which moved the notes' two recorded
+spellings eight lines down and changed nothing else. The
+`cli-guide-audit.md` classification failure this section reported under
+Discoveries is gone: the rebase onto merged `main` brought the fix
+with it, so the file's tests are green in full.
