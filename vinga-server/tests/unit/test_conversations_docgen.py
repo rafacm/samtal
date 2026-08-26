@@ -77,17 +77,27 @@ def test_the_reference_states_the_retention_default_and_its_opt_out() -> None:
     assert "retention_days: 0" in flat(rendered)
 
 
-def test_the_reference_says_what_deletion_means_in_the_file() -> None:
-    """A right to delete honored in the query planner and broken in the
-    file bytes is not honored, so the document says which one this is,
-    and names the two limits rather than implying they do not exist."""
-    rendered = docgen.reference()
-    assert "secure_delete=ON" in rendered
-    assert "wal_checkpoint(TRUNCATE)" in rendered
-    assert "A checkpoint a reader is blocking does not fail the deletion" in flat(rendered)
-    assert "retried at the next quiet moment" in flat(rendered)
-    assert "backups, filesystem snapshots" in flat(rendered)
-    assert "Capture files are a" in flat(rendered)
+def test_the_reference_says_what_deletion_really_promises() -> None:
+    """The backend decides what deletion means, so the document says
+    which one this is and names its limits rather than implying they do
+    not exist.
+
+    Three of them, and each was a promise the SQLite-era wording made
+    that a server-side store cannot keep: the row disappears for
+    transactions that begin after the commit, not for one already in
+    flight; reclaiming the space is the instance's maintenance rather
+    than a per-delete overwrite; and copies that have already left are
+    still the operator's."""
+    flattened = flat(docgen.reference())
+
+    assert "invisible to every transaction that begins after the deletion" in flattened
+    assert "keeps seeing the row until that transaction ends" in flattened
+    assert "autovacuum" in flattened
+    assert "the operator's to manage" in flattened
+    assert "Capture files are a" in flattened
+    # And the file-era promises are gone rather than softened.
+    assert "secure_delete" not in flattened
+    assert "wal_checkpoint" not in flattened
 
 
 def test_the_document_says_once_that_targeted_erasure_is_absent() -> None:
@@ -115,32 +125,53 @@ def test_the_document_says_once_that_targeted_erasure_is_absent() -> None:
     assert "`vinga-server conversations purge` was one and is gone" in flattened
 
 
-def test_the_manual_erasure_names_every_file_that_holds_the_words() -> None:
+def test_the_manual_erasure_names_every_table_a_session_has_rows_in() -> None:
     """The one destructive instruction this document gives, and the way
     it goes wrong is silent.
 
-    A committed row's bytes are in the write-ahead log until a checkpoint
-    folds them back, so an operator who deletes `conversations.db` alone
-    has left what they meant to erase in the file beside it, with nothing
-    to tell them. The instruction is only correct while it names all
-    three files, which is why each is asserted by name rather than the
-    paragraph being read for its sense."""
+    A session has rows in four tables, so an operator who deletes from
+    `sessions` alone has left the turns, the calls and the events they
+    meant to erase behind, pointing at nothing, with nothing to tell
+    them. The instruction is only correct while it names all four, which
+    is why each is asserted by name rather than the paragraph being read
+    for its sense.
+
+    Its SQLite-era form named three files instead, for exactly the same
+    reason: a committed row's bytes lived in the write-ahead log until a
+    checkpoint folded them back.
+    """
     flattened = flat(docgen.reference())
 
-    for name in ("conversations.db", "conversations.db-wal", "conversations.db-shm"):
+    for name in ("sessions", "turns", "tool_invocations", "events"):
         assert name in flattened, f"the manual erasure does not name {name}"
-    # And says why, so the third file is not read as a typo for the
-    # second and dropped by whoever tidies the sentence next.
-    assert "The log is not a cache of the database" in flattened
+    # And in one transaction, so a half-done deletion is not a state an
+    # operator can leave behind.
+    assert "in one transaction" in flattened
 
 
-def test_the_reference_gives_the_wal_safe_copy_recipe() -> None:
-    """A plain `cp` of a database in WAL mode without its sidecar is a
-    database missing its most recent commits, which is exactly the
-    commits somebody copying it wants."""
+def test_the_reference_gives_the_read_only_access_recipe() -> None:
+    """There is nothing to copy any more, and that is the point: the way
+    to read the record beside a running server is a live session as the
+    role `deploy/postgres-init.sql` provisions, which reads what was
+    said and cannot reach the stored secrets next door.
+
+    Its SQLite-era form gave a WAL-safe copy recipe, because a plain
+    `cp` of a database in WAL mode without its sidecar is a database
+    missing exactly the commits somebody copying it wants.
+    """
     rendered = docgen.reference()
-    assert ".backup" in rendered
-    assert "WAL-safe copy" in flat(rendered)
+    flattened = flat(rendered)
+
+    assert "psql" in rendered
+    assert "vinga_ro" in rendered
+    assert "deploy/postgres-init.sql" in flattened
+    # What the role may not do, which is why it exists rather than the
+    # server role being used for a read.
+    assert "no access at all to the domain schema" in flattened
+    # And why it carries timeouts, which is a fact about migrations
+    # rather than about tidiness.
+    assert "statement_timeout" in rendered
+    assert "wait out its lock timeout" in flattened
 
 
 def test_the_reference_points_at_the_event_vocabularys_authority() -> None:

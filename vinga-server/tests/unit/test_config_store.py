@@ -1344,10 +1344,11 @@ def test_two_concurrent_writers_serialize(
     The pacing below is what makes the failure deterministic rather than
     a race that usually does not happen: each writer announces that it
     has read the snapshot and then waits for the other to announce the
-    same. Under BEGIN IMMEDIATE that wait always times out, because the
-    second writer cannot have read anything while the first holds the
-    write lock. Under a deferred BEGIN both read the state before either
-    change, and the invariant this asserts is what breaks.
+    same. With the advisory lock taken in the begin listener that wait
+    always times out, because the second writer cannot have read
+    anything while the first holds the gate. With the lock taken at the
+    first write instead, both read the state before either change, and
+    the invariant this asserts is what breaks.
     """
     from vinga_server.config import store as store_module
 

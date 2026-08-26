@@ -662,12 +662,12 @@ class ConfigStore:
 
     @contextmanager
     def _transaction(self) -> Iterator[Connection]:
-        """One BEGIN IMMEDIATE around the read, the check and the
-        persist, with every database failure normalized: the library's
-        own message carries the statement and its bound parameters, so
-        it is never quoted, and the refusal is raised outside the
-        handler so that the exception holding them is not attached to
-        it either."""
+        """One advisory-locked transaction around the read, the check
+        and the persist, with every database failure normalized: the
+        library's own message carries the statement and its bound
+        parameters, so it is never quoted, and the refusal is raised
+        outside the handler so that the exception holding them is not
+        attached to it either."""
         problem: ConfigError | None = None
         try:
             with self._engine.begin() as connection:
