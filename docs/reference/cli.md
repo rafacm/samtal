@@ -376,33 +376,105 @@ no longer resolves) leaves nothing to write through: every command above
 is a request, and there is nobody to answer it. The way back is to
 rebuild the store rather than to operate on it.
 
+Both halves of the configuration live in one Postgres database, in two
+schemas: `domain`, which is what refuses to boot, and `conversations`,
+which is the record. Which of the two procedures below to run is decided
+by whether the deployment is recording and wants to keep what it
+recorded.
+
+**The whole database, which is the ordinary case.**
+
 ```bash
-# 1. Stop the server.
-# 2. Delete the database it will not boot on.
-# 3. Start it again, which boots clean on an empty one.
-# 4. Put the configuration back.
+# 1. Stop the server. Nothing is connected to the database while it is
+#    down, which is what lets the database be dropped rather than
+#    emptied table by table.
+docker stop vinga && docker rm vinga
+
+# 2. Take the database away and make it again, owned by the server role.
+dropdb "$VINGA_DB_NAME" && createdb --owner "$VINGA_DB_USER" "$VINGA_DB_NAME"
+
+# 3. Rerun the provisioning file. Dropping the database took the two
+#    schemas and their default privileges with it; vinga_ro is an
+#    instance-level role and is still there, which the file expects.
+psql "$ADMIN_URL" -f deploy/postgres-init.sql
+
+# 4. Start it again, which migrates from nothing and boots clean.
+docker run -d --name vinga ...
+
+# 5. Put the configuration back.
 vinga-server config apply -f deployment.yaml
-# 5. Re-enter each stored credential, one per secret set command the
+
+# 6. Re-enter each stored credential, one per secret set command the
 #    export listed at the foot of that file.
 vinga-server config provider secret set -- llm claude api_key
 ```
 
-The document in step 4 is a `vinga-server config export` taken while the
+**The domain schema alone, when the record is worth keeping.** A dropped
+database takes the conversation record with it, since both halves live
+in one. What is broken here is the domain half, so drop that schema as
+the server role and rerun the provisioning file after it:
+
+```sql
+drop schema domain cascade;
+```
+
+The rerun is the same either way, and for the same reason: a
+`CREATE SCHEMA ... AUTHORIZATION` is what puts the schema back under the
+server role's ownership, and a dropped database also took the default
+privileges that let `vinga_ro` read tables the server has not created
+yet. Steps 4 to 6 then run unchanged.
+
+The document in step 5 is a `vinga-server config export` taken while the
 deployment was healthy, which is why an export belongs in version
 control beside the YAML file rather than in a drawer. What that document
 does not carry is the credentials themselves: a stored credential never
 travels in a read, so what the export carries is the command that enters
-each of them, and step 5 is running those commands. The values come from
+each of them, and step 6 is running those commands. The values come from
 wherever the deployment keeps its secrets, the same place the first
 secret set read them from.
 
 This is a rebuild and not a repair, and the difference matters: it puts
 back what the export says and nothing else, so a row nobody knew about
-is gone with the file. A deployment that wants a surgical edit to the
-stored rows instead has one, through ordinary SQLite tooling against the
-database file. That is not wrapped in this grammar, and deliberately: a
-second way in with its own vocabulary is a second thing to keep honest,
-and `sqlite3` is already documented by the people who wrote it.
+goes with the schema. A deployment that wants a surgical edit to the
+stored rows instead has one, through ordinary SQL against the `domain`
+schema as the server role. That is not wrapped in this grammar, and
+deliberately: a second way in with its own vocabulary is a second thing
+to keep honest, and `psql` is already documented by the people who wrote
+it.
+
+## Upgrading from a build that kept its configuration in a file
+
+The same rebuild, with one ordering that has to be right: **export
+first, then upgrade.** This build reads Postgres and only Postgres.
+There is no driver in it for the old file, no configuration key that
+would point at one, and no importer, so an export attempted after the
+image has rolled is an export from a server that will not start.
+
+```bash
+# 1. With the build you are still running, take the export.
+vinga-server config export > deployment.yaml
+
+# 2. Point the VINGA_DB_* variables at an empty Postgres database and
+#    provision it, as in steps 2 and 3 above.
+
+# 3. Roll the image, which migrates from nothing on first boot.
+
+# 4. Put the configuration back and re-enter each stored credential,
+#    exactly as in steps 5 and 6 above.
+vinga-server config apply -f deployment.yaml
+vinga-server config provider secret set -- llm claude api_key
+```
+
+**Conversation history does not come across, and nothing pretends
+otherwise.** There is no export format for it and no importer, and
+inventing one for a pre-release store was not worth the tool it would
+have become. A deployment that wants to keep what it recorded copies the
+old `conversations.db` aside before the upgrade and reads it with
+`sqlite3`, which is a file it now owns rather than anything this server
+will look at again. The same goes for the old `vinga.db` and for both
+files' `-wal` and `-shm` sidecars: nothing in this build touches them,
+nothing removes them, and they sit on the data volume until somebody
+archives or deletes them deliberately.
 
 <!-- generated: cli reference -->
 
