@@ -172,7 +172,7 @@ Verdict: mergeable after the listed fix.
 
 ## M2: Promises split from guidelines, and pipeline ownership retires
 
-PR TBD.
+PR #322.
 
 ### What landed
 
