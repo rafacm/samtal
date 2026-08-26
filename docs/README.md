@@ -1,16 +1,95 @@
 # vinga documentation
 
-Two kinds of page live here, and the difference is the first thing to
-navigate by. **User-facing documentation** describes vinga to somebody
-running it: the READMEs, the device guides, and the reference section
-below. **Working notes** are how this project thinks and what it
-decided: the research notes, the architecture pages, and the records.
+Two questions place a page. **What may it claim?** is authority, and
+the seven classes below answer it. **Who is it for?** is audience,
+and it decides only where a page is listed and how it is written:
+**user-facing documentation** describes vinga to somebody running it
+(the READMEs, the device guides, and the reference section below),
+**working notes** are how this project thinks and what it decided
+(the research notes, the architecture pages, and the record).
+Audience never settles authority. A working note does not outrank a
+user-facing page by being a working note, and a page is not
+authoritative for being written for the person running vinga.
+
+## Authority
+
+Seven classes, covering every page under `docs/`, the three READMEs,
+[`../AGENTS.md`](../AGENTS.md) and the changelog. The set is closed:
+a new page joins one of these classes, or this list changes in the
+commit that adds it. Three directories hold one class each and are
+classified as directories; every other page is classified here rather
+than by claiming a rank for itself.
+
+**Product promises** are commitments to the person running vinga,
+falsifiable from outside. Breaking one does not refactor vinga, it
+changes what vinga is, and they outrank every other class here. Today
+they are the product-promise half of
+[`architecture/principles.md`](architecture/principles.md).
+
+**Guidelines** are how the code keeps those promises. Any of them can
+be revised given new evidence, provided the promises still hold: the
+architecture principles in that same
+[`architecture/principles.md`](architecture/principles.md),
+[`architecture/design-guide.md`](architecture/design-guide.md),
+[`architecture/cli-guide.md`](architecture/cli-guide.md),
+[`architecture/pipeline-ownership.md`](architecture/pipeline-ownership.md),
+and [`../AGENTS.md`](../AGENTS.md).
+
+**Maintained maps and explanations** describe the system as it is now
+and are corrected when it moves:
+[`system-overview.md`](system-overview.md),
+[`concepts.md`](concepts.md), [`glossary.md`](glossary.md),
+[`architecture/observability-surfaces.md`](architecture/observability-surfaces.md),
+[`architecture/diagrams/`](architecture/diagrams/README.md),
+[`devices/`](devices/README.md), and the three READMEs: the
+[project](../README.md), the [server](../vinga-server/README.md), and
+the [firmware](../vinga-esp32/README.md). Such a page may summarize an
+authoritative source and link it; it may not quietly become a second
+one.
+
+**Generated references** are rendered from the code and diffed by CI,
+so they cannot come to describe a server this repository does not
+build: [`reference/`](reference/), whole directory.
+[`reference/cli.md`](reference/cli.md) is hand-written prose around
+two generated halves and is held to the same rule, since what it says
+the grammar is comes from the command tree. Correcting a generated
+page means changing its generator.
+
+**Decisions** are one immutable, date-prefixed record per decision
+that was hard to reverse, surprising without context, and the result
+of a real trade-off: [`adr/`](adr/README.md), whole directory. A
+record is superseded by a later one, never edited into agreement with
+the code.
+
+**Dated execution records** report what was true when they were
+written and are not rewritten when the code moves on:
+[`plans/`](plans/) with their `-implementation` companions and
+[`features/`](features/), both whole directories, plus
+[`../CHANGELOG.md`](../CHANGELOG.md), which is the same thing in one
+file. They are evidence about a change, never current guidance.
+
+**Research and field notes** are what was read, measured, or observed,
+carrying the date and provenance that make them worth trusting:
+[`xiaozhi-notes.md`](xiaozhi-notes.md),
+[`related-projects.md`](related-projects.md), and
+[`conversational-quality-regression-suite.md`](conversational-quality-regression-suite.md).
+
+Index pages carry no authority of their own, because they route
+rather than claim: this page,
+[`architecture/README.md`](architecture/README.md),
+[`architecture/diagrams/README.md`](architecture/diagrams/README.md),
+[`devices/README.md`](devices/README.md) and
+[`adr/README.md`](adr/README.md) say where a thing is, and the page
+they send you to is the one that says it.
 
 ## Start here
 
 - [**The project overview**](../README.md): what vinga is, the hardware
   it targets, and the seven-step path from a container to a board that
   answers.
+- [**system-overview.md**](system-overview.md): one conversation turn
+  from the wake word to the spoken reply, with the diagrams and each
+  concept explained before its acronym is used.
 - [**vinga-server**](../vinga-server/README.md): the server in full.
   Every provider option, the two halves of the configuration, the
   security defaults, running it in a container, and onboarding a device.
@@ -81,36 +160,27 @@ Where the boundaries are, and what a change is held to. Issues hold
 evidence, ADRs hold decisions, plans hold execution, and these pages
 hold direction and standard.
 
-- [**architecture/principles.md**](architecture/principles.md): the
-  standing fundamentals: vinga's identity, its product promises, and
-  the architecture principles that keep them, each with an example and
-  a counterexample. Promises take precedence over architecture. Read
-  this before designing a feature or deciding direction.
-- [**architecture/design-guide.md**](architecture/design-guide.md): what
-  a module looks like once it is on the right side of one of those
-  boundaries. The vocabulary (module, interface, seam, adapter, depth,
-  locality) defined against this codebase, the deletion test, the rule
-  that a test reaches the interface, and four merged changes worked
-  through: what each one's shape was before, what it became, and the
-  lens it teaches. Its short form is the design section of
-  [`../AGENTS.md`](../AGENTS.md).
-- [**architecture/cli-guide.md**](architecture/cli-guide.md): what a
-  command looks like, and what a reviewer holds a new one to. Read it
-  before adding a command, a noun, a verb or a flag;
-  [`reference/cli.md`](reference/cli.md) is the other half of the pair
-  and says what the grammar currently is.
-- [**architecture/observability-surfaces.md**](architecture/observability-surfaces.md):
-  which needs the design balances, the four surfaces and what each may
-  carry, and the external practice it was checked against. The reasoning
-  behind the ADR that separates content from telemetry.
-- [**architecture/pipeline-ownership.md**](architecture/pipeline-ownership.md):
-  which parts of the conversation pipeline are shared shape that any
-  streaming voice framework provides, and which parts are vinga's own
-  semantics that none of them has.
+- [**architecture/**](architecture/README.md): the index for that
+  corpus, organized by the question you arrived with. Designing a
+  feature or deciding direction, splitting a file or naming an
+  interface, adding a command, placing a datum, and understanding a
+  conversation end to end: each routes to the page that answers it,
+  and the promises, the principles, the design and CLI guides, the
+  observability map and the diagrams are behind it.
 
 ### Diagrams
 
-[**architecture/**](architecture/README.md) embeds the hand-drawn diagrams and walks through them: the high-level overview the root README leads with, and a step-by-step teaching tour of one conversation turn, from wake word to spoken reply, that explains each concept and the problem it solves before using its acronym. A directory per authoring tool sits under it. `architecture/diagrams/excalidraw/` holds those two, whose editable originals are scenes of the same names in the team workspace and whose committed files are exports kept in sync by hand, so flag them when a pipeline change makes them stale. `architecture/diagrams/plantuml/` holds three whose source is text here and whose renders come from a command, so they cannot drift unnoticed: what leaves the host, the ordering inside one turn, and the barge-in decision.
+The diagrams live under
+[**architecture/diagrams/**](architecture/diagrams/README.md), one
+index over a directory per authoring tool.
+`architecture/diagrams/excalidraw/` holds the hand-drawn pair, whose
+editable originals are scenes of the same names in the team workspace
+and whose committed files are exports kept in sync by hand, so flag
+them when a pipeline change makes them stale.
+`architecture/diagrams/plantuml/` holds three whose source is text
+here and whose renders come from a command, so they cannot drift
+unnoticed: what leaves the host, the ordering inside one turn, and
+the barge-in decision.
 
 ## Research notes
 
