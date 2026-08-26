@@ -170,11 +170,51 @@ DB_NAME_ENV = "VINGA_DB_NAME"
 # sets them explicitly. A whole URL is not allowed to name it: that
 # variable wins over all five and would take the lane somewhere it
 # cannot safely truncate.
+DB_HOST_ENV = "VINGA_DB_HOST"
+DB_PORT_ENV = "VINGA_DB_PORT"
+DB_USER_ENV = "VINGA_DB_USER"
+DB_PASSWORD_ENV = "VINGA_DB_PASSWORD"
+
+# What a port that is not a port is answered with. Its own sentence,
+# because the alternative is the one this replaces: a bare `int()` at
+# import, whose ValueError quotes what it was given and carries it out
+# on a collection traceback. These variables are set beside a password
+# and read from the same `.env`, so the value most likely to be in the
+# wrong one is the credential from the right one.
+PORT_REFUSED = (
+    f"the test lane cannot read {DB_PORT_ENV}: it has to be a port number between 1 "
+    f"and 65535. What was set is not quoted back, because these variables are set "
+    f"beside a password and a refusal that echoed its input would be one typo away "
+    f"from echoing the wrong one"
+)
+
+
+def _port(value: str) -> int:
+    """One `VINGA_DB_PORT`, or a refusal that repeats nothing of it.
+
+    Built inside the handler and raised outside it, so the `ValueError`
+    holding the rejected text is not reachable from the exception that
+    travels: `raise ... from None` would still leave it on the frame a
+    traceback renderer walks.
+    """
+    problem: str | None = None
+    try:
+        port = int(value)
+    except ValueError:
+        problem = PORT_REFUSED
+    else:
+        if not 1 <= port <= 65535:
+            problem = PORT_REFUSED
+    if problem is not None:
+        raise RuntimeError(problem)
+    return port
+
+
 os.environ.pop(DB_URL_ENV, None)
-DB_HOST = os.environ.setdefault("VINGA_DB_HOST", "127.0.0.1")
-DB_PORT = int(os.environ.setdefault("VINGA_DB_PORT", "5432"))
-DB_USER = os.environ.setdefault("VINGA_DB_USER", "vinga")
-DB_PASSWORD = os.environ.setdefault("VINGA_DB_PASSWORD", "vinga")
+DB_HOST = os.environ.setdefault(DB_HOST_ENV, "127.0.0.1")
+DB_PORT = _port(os.environ.setdefault(DB_PORT_ENV, "5432"))
+DB_USER = os.environ.setdefault(DB_USER_ENV, "vinga")
+DB_PASSWORD = os.environ.setdefault(DB_PASSWORD_ENV, "vinga")
 
 # The maintenance database every `CREATE`/`DROP DATABASE` is issued
 # from. Never one of ours: a database cannot be dropped from a
@@ -216,13 +256,22 @@ LANE_DATABASE = f"{DATABASE_PREFIX}_{WORKER}" + (f"_nested{os.getpid()}" if NEST
 # autocommit maintenance connection, which is the shape that can.
 PROVISIONING_LOCK = 0x76_69_6E_67_00_00_00_09
 
+# The refusal, naming the variables to look at and none of their
+# values, which is the rule the product's own database refusals are
+# written to (`db.UNREACHABLE`). It used to interpolate the host and the
+# port, on the reasoning that a host is not a credential. It is still a
+# connection value, the plan says none of them appear on an error
+# surface, and the two that would have been printed sit in the same
+# `.env` as the password: a value pasted into the wrong variable is
+# exactly the case a rule with an exception in it does not cover.
 UNREACHABLE = (
-    "the test lane needs a Postgres to run against and could not reach one at "
-    f"{DB_HOST}:{DB_PORT}. Start the development instance with "
-    "`docker compose up -d --wait` from the repository root, or point "
-    "VINGA_DB_HOST, VINGA_DB_PORT, VINGA_DB_USER and VINGA_DB_PASSWORD at an "
-    "instance whose role may create databases. The lane refuses rather than "
-    "skipping, because a suite that quietly stops exercising storage reads "
+    "the test lane needs a Postgres to run against and could not reach one. Nothing "
+    "of the connection is repeated here, because these variables are set beside a "
+    f"password: check {DB_HOST_ENV} and {DB_PORT_ENV}, and that {DB_USER_ENV} and "
+    f"{DB_PASSWORD_ENV} are credentials the instance accepts for a role that may "
+    "create databases. Start the development instance with "
+    "`docker compose up -d --wait` from the repository root. The lane refuses rather "
+    "than skipping, because a suite that quietly stops exercising storage reads "
     "green while proving nothing"
 )
 
