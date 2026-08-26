@@ -997,7 +997,7 @@ was owed; the link-and-anchor script was run after each and reports
 
 ## M5: The Xiaozhi notes get the accepted shape
 
-PR TBD.
+PR #325.
 
 ### The accepted shape, restated
 

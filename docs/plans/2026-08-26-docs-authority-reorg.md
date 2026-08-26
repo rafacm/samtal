@@ -472,7 +472,7 @@ docs/
   update.
 - [x] **[M5: The Xiaozhi notes get the accepted
   shape.](2026-08-26-docs-authority-reorg-implementation.md#m5-the-xiaozhi-notes-get-the-accepted-shape)**
-  (PR TBD)
+  (PR #325)
   Implement the accepted combined document with authority-labeled
   sections (the gate was cleared during the plan review round),
   including the upstream currency markers recording the vendor
