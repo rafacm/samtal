@@ -101,8 +101,9 @@ you come back to, where a session is how audio reaches the server.
 One conversation can span many sessions, and a turn names both the
 thread it belongs to and the session it was spoken in, so the two
 are views of the same rows. The thread is decided direction (issue
-#190); today conversation history lives only as long as its session.
-See
+#190): what is missing today is the entity, not the rows. An agent's
+working context ends when its session closes, while an enabled store
+keeps that session's turns under its retention policy. See
 [the concepts page](concepts.md#conversation-and-session).
 
 ### Conversational filler
