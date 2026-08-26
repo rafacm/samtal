@@ -26,6 +26,28 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   conversation are two views of one set of turns. Protocol and
   configuration mechanics are linked to the Xiaozhi notes and the
   generated references instead of restated.
+- **The Xiaozhi notes separate what is maintained from what is dated**
+  (#310, #312). `docs/xiaozhi-notes.md` now says of every section which
+  of four things it holds: maintained protocol facts, dated field
+  observations, the historical reading of the upstream server, or
+  licensing evidence. The maintained sections carry an explicit
+  upstream currency statement, naming the two vendor-clone commits they
+  were last read against and the two firmware versions actually
+  observed on boards, which is what the stock-firmware promise's
+  version target is measured in. The clone commands stay at the top,
+  and the constraints stock firmware puts on the server each have an
+  anchor now, so a page that summarizes one can link it.
+- **Board procedures live with the device guides** (#310, #312).
+  Writing an `ota_url` into NVS over USB, resetting a board, reading
+  its boot log and reading its NVS back moved from the notes to
+  `docs/devices/README.md`, and the AMOLED's silent portal save to that
+  board's own guide; `AGENTS.md`, the root README and the firmware
+  README point there now. The notes keep the shared protocol behavior
+  those procedures exercise. Four claims were reconciled in the same
+  pass: the root README's "no activation" against the activation code
+  its own quick start describes, the notes' two claims that predate
+  onboarding landing (#40), and the Touch-LCD guide's account of what
+  the notes say about wake-word audio, which is open (#112).
 - **The generated references point back at the domain model** (#310).
   `docs/reference/domain-config.md` and
   `docs/reference/conversations-schema.md` each carry one sentence,
