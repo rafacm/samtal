@@ -259,7 +259,7 @@ acceptance criterion: the after may not double the before.
 | --- | --- | --- | --- |
 | unit, `-n auto --dist loadfile` | 56.4s | 58.1s | 1.03 |
 | unit, serial | 4m58s | 6m35s | 1.33 |
-| integration | TBD | TBD | |
+| integration | 4m00s (190) | 4m18s (196) | 1.07 |
 
 **The budget holds.** The acceptance criterion is the parallel lane,
 because that is the one CI runs, and it is 1.03: three per cent, which
@@ -328,6 +328,12 @@ re-run here: the import surface it counted (`open_database`,
 milestone rewrote, so the number it would produce is a fact about the
 new shape rather than a check on the old one. What replaces it is the
 lane itself, which does not collect if a caller was missed.
+
+All three lanes are green at the end of the milestone: 4011 passed and
+19 skipped in the unit lane, serial and under xdist alike, and 196
+passed in the integration lane. The integration lane gained six tests
+(the analyst role's five and the cutover proof) and cost eighteen
+seconds, which is those six.
 
 ### Not verified locally
 
