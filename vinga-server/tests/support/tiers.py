@@ -44,6 +44,11 @@ SERVE_MODULES = {
     "fastapi": "fastapi",
     "mcp": "mcp",
     "openai": "openai",
+    # The Postgres driver. The plain source distribution, which is what
+    # `serve` declares: the binary one is a separate distribution the
+    # dev group and the image name for themselves, so a negative check
+    # for `psycopg` is a check for this one being absent.
+    "psycopg": "psycopg",
     "pysilero-vad": "pysilero_vad",
     "sqlalchemy": "sqlalchemy",
     "uvicorn": "uvicorn",

@@ -116,7 +116,7 @@ PLANTED = "sk-planted-9b3e7d41-never-a-real-credential"
 
 
 @pytest.fixture(scope="module")
-def live(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Live]:
+def live(module_database: str) -> Iterator[Live]:
     """The lane's server, booted once for the whole module.
 
     Once rather than per test, because the boot is the expensive part
@@ -124,6 +124,11 @@ def live(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Live]:
     a sequence of commands against one deployment, and that is what this
     is. The two tests that need a store nobody else has wrote to ask for
     `isolated` instead.
+
+    On a database of this module's own, which is the whole reason
+    `module_database` exists: the lane clears this worker's database
+    between tests, and a module that configured a deployment in its
+    first fixture would find it emptied under the second test.
 
     The environment is this module's for the length of it: the address
     the CLI resolves, the encryption key both halves share, and no
@@ -134,7 +139,7 @@ def live(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Live]:
     patch.setenv(MASTER_KEY_ENV, generate_key())
     patch.setenv(SECRET_ENV, SECRET)
     try:
-        with serving() as running:
+        with serving(DatabaseConfig(name=module_database)) as running:
             # Resolved from the environment rather than passed with every
             # command, which is the documented remote shape and the one
             # an operator's shell is set up for. The `--api-url` half is
@@ -147,14 +152,14 @@ def live(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Live]:
 
 
 @pytest.fixture
-def isolated(tmp_path: Path) -> Iterator[Live]:
+def isolated(spare_database: str) -> Iterator[Live]:
     """A second server on a store of its own, for the two tests whose
     claim is about what the store holds afterwards.
 
     Reached by `--api-url`, because the environment names the lane's own
     server and the point of this one is that nothing else wrote to it.
     """
-    with serving() as running:
+    with serving(DatabaseConfig(name=spare_database)) as running:
         yield running
 
 

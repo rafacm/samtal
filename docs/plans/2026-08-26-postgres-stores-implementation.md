@@ -255,11 +255,28 @@ two commands the recovery documentation names.
 Recorded here because the plan makes the unit lane's runtime an
 acceptance criterion: the after may not double the before.
 
-| Lane | Before | After |
-| --- | --- | --- |
-| unit, serial | TBD | TBD |
-| unit, `-n auto --dist loadfile` | TBD | TBD |
-| integration | TBD | TBD |
+| Lane | Before | After | Ratio |
+| --- | --- | --- | --- |
+| unit, `-n auto --dist loadfile` | 56.4s | 58.1s | 1.03 |
+| unit, serial | 4m58s | 6m35s | 1.33 |
+| integration | TBD | TBD | |
+
+**The budget holds.** The acceptance criterion is the parallel lane,
+because that is the one CI runs, and it is 1.03: three per cent, which
+is inside the noise of two runs on one machine. Serial is 1.33, well
+under the doubling the plan forbids, and the shape of the difference is
+what the design predicted: a `TRUNCATE` per test costs milliseconds and
+there are four thousand of them, which shows up as about a hundred
+seconds spread evenly and disappears almost entirely when four workers
+run in parallel because each is truncating its own database.
+
+Measured on the same fourteen-core development machine, one lane at a
+time, with the before numbers taken from a detached worktree of
+`79a8b3d1` (the branch's last commit before any code landed) so that
+both sides are the same suite on the same hardware. The plan's own
+before number for the parallel lane is ~2m25s in CI, where four cores
+rather than fourteen are the constraint; nothing here predicts the CI
+after number, which the first workflow run will produce.
 
 ### Inventories
 
