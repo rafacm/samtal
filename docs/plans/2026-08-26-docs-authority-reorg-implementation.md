@@ -994,3 +994,265 @@ and `docs/architecture/README.md`. Nothing under `vinga-server/` or
 `docs/reference/` is touched by them, so no lane was re-run and none
 was owed; the link-and-anchor script was run after each and reports
 `checked 158 files, 0 failures`.
+
+## M5: The Xiaozhi notes get the accepted shape
+
+PR TBD.
+
+### The accepted shape, restated
+
+The #312 structure gate was cleared during the plan review round, on
+2026-08-26, and the plan records the decision: **one combined
+`xiaozhi-notes.md` with authority-labeled sections**, not a split into
+a maintained reference plus a dated research file. Two things came with
+the acceptance and are implemented here. The maintained sections carry
+an **upstream currency statement** naming the vendor-clone commits they
+were last read against, the firmware versions actually observed on
+boards, and the dates. And **board-specific current facts and
+procedures leave the page** for the device guides, per the plan's
+design decision 8 as amended by review finding 8: the notes keep shared
+protocol behavior and dated field evidence, and a live board procedure
+is not one of their sections. The gate was not re-asked.
+
+### What landed
+
+Eight commits.
+
+- **The board procedures move.** `docs/devices/README.md` gains the NVS
+  write with its carry-over rules, as a subsection of the onboarding
+  section that used to point at the notes for it, and a
+  `Driving a board from a terminal session` section holding the esptool
+  reset with the DTR/RTS table, the boot-log reading and the NVS
+  read-back. `docs/devices/waveshare-esp32-s3-touch-amoled-2.16.md`
+  gains the silent portal save as its own observation. The three guides
+  and the common page point at the new homes.
+- **The notes are labeled and reordered.** A purpose introduction
+  naming the four classes and what each means for the reader, the clone
+  commands still on the first screen, then `Upstream currency`, an
+  `On this page` section of six entries, and the content in reader
+  order: the firmware and its one URL, the protocol vinga-server
+  implements (check-in, ceremony, channel), what stock firmware costs
+  the server, the upstream server as read on 2026-08-01, licensing.
+- **`AGENTS.md`'s hardware context** points at the device area for the
+  procedures and keeps the notes for the protocol and the upstream
+  reply-language trap. Nothing else in that file was touched.
+- **The claim sweep**, listed in full below.
+- **The concepts anchors.** Three of the four links from
+  `docs/concepts.md` name their section; the fourth is the authority
+  line about the whole document.
+- **`docs/README.md` and `docs/architecture/README.md`** describe the
+  page as the mixed one it now is.
+- **`CHANGELOG.md`,** two bullets under the existing 2026-08-27
+  `### Changed`.
+- **The spellings manifest,** regenerated, and this section with the
+  milestone tick.
+
+### What moved, and what changed inside the moves
+
+Both blocks moved by cut and paste and were diffed against the pre-move
+file:
+
+- **The NVS write procedure** (the `nvs_input.csv` block, the
+  `nvs_partition_gen`/`write_flash` pair, and the carry-over paragraph
+  ending in the CRC32 comparison): **byte-identical** once the
+  two-space indent it carried as a nested list item is removed.
+- **The terminal-session block** (all four bullets, including the
+  DTR/RTS table and the `-d written` warning): **byte-identical**.
+
+The wording that is not identical, all of it authored deliberately:
+
+- The section heading `Driving the board from a terminal session`
+  became `Driving a board from a terminal session`, at `##` level on
+  the common page, and gained a provenance sentence above it, per the
+  device docs' convention: verified in hands-on use on the
+  Touch-LCD-1.54 (2026-08-12/13), with the note that the reset behavior
+  is the ESP32-S3's own USB port rather than a board fact. Inside it,
+  "The port is `/dev/cu.usbmodem101`" became "The port was
+  `/dev/cu.usbmodem101` ... on macOS", because a port name observed on
+  one host is not a standing fact.
+- The NVS block's parenthetical about partition offsets and sizes
+  became the sentence introducing the new subsection, unchanged in
+  content: `0x9000`, `0x4000` on the Touch-LCD-1.54, `0x6000` on the
+  AMOLED-2.16 factory image, read the partition table at `0x8000`
+  rather than assuming.
+- The captive-portal bullet's three field-observed cautions were split
+  by owner. The redirect intolerance stayed in the notes, promoted from
+  a sub-bullet to a bullet, with "Three field-observed cautions"
+  becoming "which is field-observed rather than hypothetical" inside
+  it. The silent portal save moved to the AMOLED guide, which already
+  carried a vaguer version, and gained the detail the notes had (the
+  WiFi fields were submitted and nothing was persisted, nothing on
+  screen said so). The AMOLED's unreachable portal was already in that
+  guide in the same words; the notes' general conclusion, that the NVS
+  route rather than the portal is the recovery path to count on, moved
+  to the common page's onboarding section, where it is about boards
+  rather than about one board.
+- The seven entries of "What running stock firmware costs the server"
+  became `###` headings. Each heading is that entry's bolded lead
+  sentence with the trailing period dropped, and the body is the rest
+  of the entry rewrapped, unchanged in wording, except the last one,
+  whose body opened with "but that is our choice" and now opens with
+  "That is our choice" because the sentence it continued is now the
+  heading.
+
+Nothing was dropped without a home except one bullet, deliberately:
+"Interaction on this board: short-press PWR toggles the conversation;
+long-press powers off. Wake word in prebuilt builds is Chinese ...
+an English model (`wn9_hiesp`, 'Hi ESP') is available when building
+from source." Every clause of it is already carried, better, elsewhere:
+the PWR gestures in the Touch-LCD guide's Controls table, the wake word
+in that guide's Wake word section, and `wn9_hiesp` in
+`vinga-esp32/README.md`'s planned customizations. Its generalization
+about prebuilt images was also wrong, which the next section records.
+The board hardware parenthetical (ST7789, CST816S, ES8311 + ES7210,
+16 MB / 8 MB) was likewise dropped rather than moved: the part numbers
+are in `vinga-esp32/README.md`'s hardware table and the memory sizes in
+`AGENTS.md`'s hardware context, so moving it would have made a third
+copy. The Kconfig board directory itself stayed in the notes, as the
+worked example of the compile-time board-support fact.
+
+### The claim sweep, one row per claim
+
+Every claim #312 names, checked across the root README,
+`vinga-server/README.md`, `vinga-esp32/README.md`, the three device
+guides and their common page, `docs/concepts.md`,
+`docs/system-overview.md`, `docs/glossary.md` and the notes.
+
+| Claim | Page | Verdict |
+| --- | --- | --- |
+| Activation and onboarding | `xiaozhi-notes.md`, ceremony section | **Fixed.** "Omitting it, which is what vinga-server does today" predated #40 landing; the reply carries an `activation` section for a device that resolves to nothing. |
+| | `xiaozhi-notes.md`, OTA check-in | **Fixed.** "Nothing in the OTA response says the device is unwelcome" is true only with onboarding off; the bullet now says which of the two cases an empty token is. |
+| | root README, features bullet and the paragraph above it | **Fixed.** "No account, no activation" contradicted step 7 of the same page, where an unbound board shows a six-digit activation code. The bullet now says vendor cloud; the prose says nobody else's activation. |
+| | root README, step 7 | Consistent already: code shown and spoken, polled while it waits, one command binds it. |
+| | `vinga-server/README.md`, Onboarding a device | **Contradiction found, not fixed.** See Deviations. |
+| | `concepts.md`, Device | Consistent already, and it cites #40 as implemented. |
+| | AMOLED guide | Consistent already: portal onboarding verified hands-on, code shown, claimed by command. |
+| Wake-word data (#112) | `xiaozhi-notes.md` | Consistent already: the build option, the report, and the question left open. Unchanged. |
+| | Touch-LCD guide | **Fixed.** It said the protocol notes "describe only the after-the-fact word report", which they do not; it now says what is unchecked and links the section. |
+| | `concepts.md`, `glossary.md` | Consistent already; both cite #112 and neither claims to know. |
+| | `devices/README.md` | Consistent already: it makes no claim about the trigger audio. |
+| MCP tool discovery and its race | `xiaozhi-notes.md` | Consistent already; the entry now has an anchor. |
+| | `devices/README.md` | Consistent already, and it now links the notes rather than only asserting the race. |
+| | three device guides, `concepts.md` | Consistent already; each states the caveat and defers. |
+| | `system-overview.md`, step 7 | Consistent already: it describes device tools without claiming discovery is synchronous. |
+| Listening modes | `xiaozhi-notes.md` | Consistent already; the entry now has an anchor. |
+| | `devices/README.md` | Consistent already, and it now links the notes for the fact the server cannot change the mode. |
+| | three device guides | Consistent already: realtime on the two AEC boards, auto on the ePaper, manual used by none. |
+| | `glossary.md`, Listening modes | Consistent already: "the firmware picks realtime whenever AEC is on". |
+| | `vinga-server/README.md`, Listening and barge-in | Consistent already. |
+| | `system-overview.md`, step 11 | Consistent already: auto re-arms, realtime never stopped, idle timeout closes. |
+| OTA routing and the redirect | `xiaozhi-notes.md` | Consistent already; the finding stayed and is now its own bullet. |
+| | `vinga-server/README.md`, Onboarding a device | Consistent already: both spellings served, no redirect, because the firmware follows none. |
+| | AMOLED guide (`code=307`), `glossary.md` (OTA endpoint), root README steps 5 and 6 | Consistent already. |
+| Device-token behavior | `xiaozhi-notes.md` | **Fixed**, with the activation row above: `200 OK` plus an empty token, refused at the handshake with `auth_rejected` / `no_token`, verified against `ota/reply.py` and `events/values.py`. |
+| | `glossary.md`, OTA endpoint | Consistent already: a summary that says the reply carries the token, claiming nothing about the empty case. |
+| | `concepts.md`, Device | Consistent already: the devices map doubles as an allowlist. |
+| Stock-firmware compatibility | `xiaozhi-notes.md`, costs section | Consistent already, and re-verified: `vinga-esp32/` still ships no code, it is one README. |
+| | `architecture/product-promises.md`, root README, `vinga-esp32/README.md`, `devices/README.md` | Consistent already. |
+| Which wake word a prebuilt image carries | `xiaozhi-notes.md` | **Fixed by removal.** "Wake word in prebuilt builds is Chinese" is contradicted by the AMOLED guide's hands-on "Sophia"; the guides already carry the honest version, that prebuilt and vendor-shipped are channels rather than versions. |
+
+Five links followed the procedures rather than the claims: the root
+README's flashing step, `vinga-esp32/README.md`'s NVS sentence, and the
+three device guides' pointers into the notes, plus the AMOLED guide's
+partition-size comparison.
+
+### Deviations from the plan
+
+- **`vinga-server/README.md` carries a contradiction this milestone
+  found and did not fix.** Its onboarding section ends "The ceremony
+  above has been driven end to end against a simulated device and a
+  served server. The checkpoint on a factory-firmware board ... is
+  still open", which the notes contradict: the ceremony was validated
+  on hardware on 2026-08-13, on the Waveshare factory AMOLED-2.16 and
+  on the stock Touch-LCD-1.54, and the notes have recorded it since
+  `e000264d`. The README paragraph is from `b10c9027`, dated
+  2026-08-12, so it is stale by one day and has been since. It is not
+  fixed here because this milestone's brief confines
+  `vinga-server/` to the spellings manifest and verifies that boundary
+  by `git diff --name-only`. M6 audits the server README and owns this;
+  the correction is one paragraph, replacing the still-open sentence
+  with the 2026-08-13 validation and a link to the ceremony section.
+- **The notes are linked four times from `concepts.md`, not five.**
+  M4's section says five; the count is four, and three of them name a
+  section now. The fourth is the authority bullet in the page's
+  "what outranks this page" list, which is about the document as a
+  whole, so it stays a link to the document.
+- **The devices common page gained a developer procedure.** Its stated
+  subject is the hardware in front of a user, and an `esptool`
+  invocation is not that. It goes there anyway because the page already
+  told the reader to write NVS over USB and then sent them elsewhere
+  for how, and because the alternative homes are worse: repeating the
+  procedure in three guides, or leaving it on the page whose subject is
+  the wire. Every moved section says where its facts come from, which
+  is the convention the guides already hold themselves to.
+- No other deviation. The combined shape, the currency markers, the
+  clone commands' position, the labels, the anchors and the
+  `On this page` section are as the plan specifies.
+
+### Discoveries
+
+- **The census's second failure is M3's, and regeneration cannot fix
+  it.** `test_command_spellings.py` had two failures at the M4 tip.
+  Regenerating the manifest fixed one. The other,
+  `test_every_live_spelling_names_a_command_the_tree_has`, reports five
+  `respell` rows in `docs/architecture/cli-guide-audit.md` naming
+  commands the tree does not have. That page is M3's new dated record,
+  and the test classifies by path: it needs an entry in the test's
+  `_HISTORICAL_PATHS`, beside `docs/plans/` and `docs/adr/`, which is a
+  change to `vinga-server/` that this milestone may not make. Named
+  here so M6 does not rediscover it.
+- **One census row is a false positive and always was.**
+  `AGENTS.md:164 respell vinga-server config schema` is the sentence
+  "When the vinga-server config schema changes, update
+  `config.example.yaml`", which is prose about a schema and not an
+  invocation. It passes the guard because `config schema` is still a
+  registered spelling, so it costs nothing; it is worth knowing before
+  somebody edits that line to satisfy a scanner.
+- **The wake-word overgeneralization outlived its own correction.** The
+  2026-08-12 device-guide work established that "the upstream prebuilt"
+  and "the vendor's shipped image" are channels rather than versions,
+  and the AMOLED guide records `wn9_sophia_tts` on the shipped image.
+  The notes' firmware bullet still said prebuilt builds carry the
+  Chinese word. The sweep in that milestone was for wake-word
+  *audio* claims, which is why this one survived it.
+- **A dated observation and a maintained fact can be the same
+  sentence,** which is why the classes are not sections. The
+  captive-portal field, the trailing slash, the ceremony validation:
+  each is a current protocol fact whose warrant is a day in August. The
+  page keeps them where the fact is and makes the date visible, rather
+  than moving the evidence away from what it supports, which the M5
+  brief explicitly licenses.
+
+### Verification
+
+- **The scratchpad link-and-anchor script**, after every commit that
+  touched a link and on the finished branch:
+  `checked 158 files, 0 failures`.
+- **The moved blocks diffed against the pre-move file**: the NVS
+  procedure byte-identical modulo its former list indent, the
+  terminal-session block byte-identical. Recorded above.
+- `uv run pytest tests/unit/test_command_spellings.py -q` before the
+  doc work: **2 failed, 33 passed**, both failures pre-existing at the
+  M4 tip. After the doc work and the regeneration: **1 failed, 34
+  passed**, the remaining failure the `cli-guide-audit.md`
+  classification gap described under Discoveries.
+- `uv run pytest tests/unit -q`: **1 failed, 4021 passed, 19 skipped**
+  in 434s, that same pre-existing failure. Postgres for the lane was
+  started with `docker compose up -d --wait` from this worktree's root
+  (compose project `wt-m5`) and stopped after.
+- `uv run ruff check .` from `vinga-server/`: `All checks passed!`.
+- **The integration lane was not run.** This milestone changes no
+  server code, no generator and nothing under `docs/reference/`, so the
+  drift checks have nothing to catch; `git diff --name-only` against
+  the M4 tip lists no path under `docs/reference/` or `.github/`, and
+  exactly one under `vinga-server/`, the regenerated manifest.
+- **The two reconciled server behaviors were read from the code**, not
+  inferred: `onboarding/unbound.py` for when an `activation` section is
+  offered, `ota/reply.py`'s `token_for` for the empty token, and
+  `events/values.py` for `no_token`.
+- Source review of every changed page: heading levels, the six
+  `On this page` anchors, the three new inbound anchors, and hard
+  wrapping. The lines over 75 columns in the notes are the two currency
+  table rows, four single unbreakable link URLs, two headings, and text
+  that arrived already wrapped at 78 in blocks this milestone did not
+  rewrap.
