@@ -169,7 +169,16 @@ was written; both outcomes are settled inputs here.
    (#243's squash, #283's Postgres re-baseline), and the
    counterexample is an unrecorded reset, since the recorded kind
    has now legitimately happened and the old counterexample text
-   ("folding the four configuration revisions") describes it.
+   ("folding the four configuration revisions") describes it. The
+   promise also states the operational floor as it stands: in-place
+   upgrades begin at the two Postgres baselines
+   (`3001_postgres_domain`, `1001_postgres_conversations`), the
+   current build opens no SQLite file at all, a pre-beta recorded
+   decision may still require a reset, recovery is export and
+   reapply with secrets re-entered from the environment, and
+   conversation history crossed the Postgres cutover only by manual
+   archiving. It links the server README's upgrade and recovery
+   procedure rather than restating it.
 5. **Milestone order inside #310 is navigation first.** M1 lands
    the taxonomy and the landing pages while `principles.md` and the
    guides are still in their old shapes; the architecture router
@@ -498,6 +507,14 @@ faithful; resolutions appended per amendment commit.
    The promise must state the current floor revisions, that
    pre-beta recorded decisions may require a reset, and the
    export/reseed path with manual archiving of history.
+
+   *Resolution.* Adopted. Design decision 4 now requires the
+   promise to state the two Postgres baseline revisions as the
+   in-place floor, that the build opens no SQLite file, the
+   possibility of a recorded pre-beta reset, the export-and-reapply
+   recovery with environment-sourced secrets, and the
+   manual-archiving fate of conversation history, linking the
+   server README's procedure.
 
 4. **P2: The `principles.md` caller census omits live architecture
    guides.** `design-guide.md` and `cli-guide.md` are current
