@@ -48,24 +48,35 @@ inventory being the last guideline.
 
 ## Adding a command, a noun, a verb or a flag
 
-- [**cli-guide.md**](cli-guide.md): what a command looks like, and
-  what a reviewer holds a new one to. The noun-verb grammar and why
-  it is that way, and each practice with an example and a
-  counterexample.
+- [**cli-guide.md**](cli-guide.md): what a reviewer holds a new
+  command to, as eleven questions at the top of the page, each linked
+  to the rule behind it. Everything after that checklist is the
+  reasoning: the noun-verb grammar and why it is that way, and each
+  practice with an example and a counterexample.
 - [**../reference/cli.md**](../reference/cli.md): the other half of
   that pair, and a different question. Half generated from the
   command tree, so it says what the grammar currently *is* and cannot
-  describe a CLI this repository does not build.
+  describe a CLI this repository does not build. It is where a
+  current spelling is looked up; the guide links it rather than
+  restating one.
+- [**cli-guide-audit.md**](cli-guide-audit.md): the evidence behind
+  the guide, dated. Four published CLI guides walked one guideline at
+  a time on 2026-08-24, every guideline with a disposition. A
+  research record, not a standard: where it and the guide disagree
+  about today, the guide is right.
 
 ## Placing a datum: where may this go?
 
 - [**observability-surfaces.md**](observability-surfaces.md): the
-  four surfaces (structured events, the conversation store, capture,
-  and a future audit surface), what each may carry, which needs the
-  split serves, and the external practice it was checked against. The
-  reasoning behind
-  [the 2026-08-15 ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md),
-  which holds the decision itself.
+  current map, four surfaces to a table. Structured events, the
+  conversation store and capture, all three landed, and a future
+  audit surface: what each may carry, how long it is kept, who may
+  read it, and where it stands in the code today. Then the four
+  invariants a new field is placed by. The 2026-08-15 needs
+  assessment and external survey are a dated appendix at the foot,
+  and
+  [the 2026-08-15 ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)
+  holds the decision itself.
 - [**../reference/events.md**](../reference/events.md) and
   [**../reference/conversations-schema.md**](../reference/conversations-schema.md):
   the exact vocabulary each of the two landed surfaces has, generated

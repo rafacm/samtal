@@ -71,8 +71,14 @@ file. They are evidence about a change, never current guidance.
 **Research and field notes** are what was read, measured, or observed,
 carrying the date and provenance that make them worth trusting:
 [`xiaozhi-notes.md`](xiaozhi-notes.md),
-[`related-projects.md`](related-projects.md), and
-[`conversational-quality-regression-suite.md`](conversational-quality-regression-suite.md).
+[`related-projects.md`](related-projects.md),
+[`conversational-quality-regression-suite.md`](conversational-quality-regression-suite.md),
+and
+[`architecture/cli-guide-audit.md`](architecture/cli-guide-audit.md),
+the 2026-08-24 walk of four published CLI guides that the CLI guide's
+practices were dispositioned from. A note is evidence: where one and
+the guideline it fed disagree about the code today, the guideline is
+the one that was corrected.
 
 Index pages carry no authority of their own, because they route
 rather than claim: this page,
