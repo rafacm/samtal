@@ -376,7 +376,8 @@ docs/
   `architecture/diagrams/` with a question-organized
   `diagrams/README.md`; the root README's image path and
   architecture pointer, the regression suite's walkthrough link,
-  and `docs/README.md`'s diagram paragraph update. Design
+  the glossary's walkthrough link (`glossary.md:7`), and
+  `docs/README.md`'s diagram paragraph update. Design
   footprint: `docs/README.md` deepens into the one authority
   interface; the architecture README becomes a pure router, so its
   callers stop having to know the tree; the walkthrough gets the
@@ -546,6 +547,9 @@ faithful; resolutions appended per amendment commit.
    `glossary.md:7` links the architecture README specifically as
    the teaching walkthrough; M1 names the root README and the
    regression suite only. Repoint the glossary in M1.
+
+   *Resolution.* Adopted; M1 now names the glossary's walkthrough
+   link among its updates.
 
 6. **P2: M6's generated-reference audit conflicts with the declared
    change and test boundary.** The plan says only M4 changes
