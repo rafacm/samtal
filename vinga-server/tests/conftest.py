@@ -377,9 +377,14 @@ _provision()
 _database_default(LANE_DATABASE)
 
 
-def _truncate() -> None:
+def clear_store() -> None:
     """Everything both stores hold, gone, with the identity counters
-    back at one and the migration stamps untouched."""
+    back at one and the migration stamps untouched.
+
+    Public because one caller is not a fixture: the event baseline
+    drives every emit path in one test, and two of its drivers open a
+    session of the same name, which one database cannot hold at once.
+    """
     import psycopg
 
     connection = psycopg.connect(
@@ -423,7 +428,7 @@ def clean_store() -> Iterator[None]:
     which is what makes a leftover row a signal rather than noise.
     """
     yield
-    _truncate()
+    clear_store()
 
 
 @pytest.fixture

@@ -6,6 +6,14 @@ board does while the server runs. Nothing is rebuilt afterwards: the
 whole claim of this milestone is that the same running app answers
 differently, so a test that built a second app would be asserting the
 boot-time snapshot instead.
+
+`from_store=True` on every app here, and it is not ceremony: a server
+whose domain half was read from a store resolves bindings live, and one
+composed from a `Config` handed to it serves that snapshot
+authoritatively (#283). `booted()` really does read the store, so these
+apps say so; the two tests below whose subject IS the snapshot-only mode
+compose their configuration in Python and say nothing, which is how they
+get it.
 """
 
 import asyncio
@@ -16,7 +24,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import inspect, text, update
+from sqlalchemy import text, update
 from sqlalchemy.exc import OperationalError
 from starlette.websockets import WebSocketDisconnect
 
@@ -79,11 +87,11 @@ def hello(websocket) -> dict:
 def test_a_bind_is_seen_by_the_next_check_in_with_no_restart(tmp_path: Path) -> None:
     """The ceremony this exists for: an operator binds the board on the
     desk, and the board's own re-check hands it a token."""
-    config = booted(tmp_path)
-    with TestClient(create_app(config)) as client:
+    config = booted()
+    with TestClient(create_app(config, from_store=True)) as client:
         assert token_of(client) == ""
 
-        with store_at(tmp_path) as store:
+        with store_at() as store:
             store.bind_device(DEVICE_MAC, ["assistant"])
 
         assert token_of(client) != ""
@@ -92,8 +100,8 @@ def test_a_bind_is_seen_by_the_next_check_in_with_no_restart(tmp_path: Path) -> 
 def test_a_bind_is_seen_by_the_next_connection_with_no_restart(tmp_path: Path) -> None:
     """The same app, the same socket path: what the device does three
     seconds later once the OTA reply has given it a token."""
-    config = booted(tmp_path)
-    with TestClient(create_app(config)) as client:
+    config = booted()
+    with TestClient(create_app(config, from_store=True)) as client:
         # Signed the way the OTA reply would sign it, so this is the
         # handshake gate's real path and only the binding is in
         # question. Before the bind the socket is accepted and then
@@ -105,7 +113,7 @@ def test_a_bind_is_seen_by_the_next_connection_with_no_restart(tmp_path: Path) -
                 websocket.receive_text()
         assert refusal.value.code == 1008
 
-        with store_at(tmp_path) as store:
+        with store_at() as store:
             store.bind_device(DEVICE_MAC, ["assistant"])
 
         with connect(client, token) as websocket:
@@ -115,11 +123,11 @@ def test_a_bind_is_seen_by_the_next_connection_with_no_restart(tmp_path: Path) -
 def test_the_default_agent_is_live_too(tmp_path: Path) -> None:
     """Both inputs of the resolution are read, not just one: an unknown
     MAC follows `default_agent` as it stands now."""
-    config = booted(tmp_path)
-    with TestClient(create_app(config)) as client:
+    config = booted()
+    with TestClient(create_app(config, from_store=True)) as client:
         assert token_of(client) == ""
 
-        with store_at(tmp_path) as store:
+        with store_at() as store:
             store.set_default_agent("assistant")
 
         assert token_of(client) != ""
@@ -129,11 +137,11 @@ def test_deleting_a_binding_stops_the_next_token(tmp_path: Path) -> None:
     """The allowlist is what it is now. A device removed while the
     server runs is refused at its next check-in rather than at the next
     restart."""
-    config = booted(tmp_path, devices={DEVICE_MAC: ["assistant"]})
-    with TestClient(create_app(config)) as client:
+    config = booted(devices={DEVICE_MAC: ["assistant"]})
+    with TestClient(create_app(config, from_store=True)) as client:
         assert token_of(client) != ""
 
-        with store_at(tmp_path) as store:
+        with store_at() as store:
             store.delete_device(DEVICE_MAC)
 
         assert token_of(client) == ""
@@ -144,13 +152,13 @@ def test_a_deleted_binding_does_not_reach_a_conversation_in_flight(
 ) -> None:
     """Deliberate: a delete stops the next token and the next
     connection, not a conversation already happening."""
-    config = booted(tmp_path, devices={DEVICE_MAC: ["assistant"]})
-    with TestClient(create_app(config)) as client:
+    config = booted(devices={DEVICE_MAC: ["assistant"]})
+    with TestClient(create_app(config, from_store=True)) as client:
         token = token_of(client)
         with connect(client, token) as websocket:
             assert hello(websocket)["type"] == "hello"
 
-            with store_at(tmp_path) as store:
+            with store_at() as store:
                 store.delete_device(DEVICE_MAC)
 
             # Still a conversation: the session resolved at connect and
@@ -169,9 +177,9 @@ def test_a_binding_to_an_unloaded_agent_resolves_to_nothing(tmp_path: Path) -> N
     """A binding written after boot can name an agent whose providers
     were never built. Handing that device a token would invite a
     websocket the session layer has to refuse."""
-    config = booted(tmp_path)
-    with TestClient(create_app(config)) as client:
-        with store_at(tmp_path) as store:
+    config = booted()
+    with TestClient(create_app(config, from_store=True)) as client:
+        with store_at() as store:
             store.set_agent("poet", dict(AGENT))
             store.bind_device(DEVICE_MAC, ["poet"])
 
@@ -183,9 +191,9 @@ def test_the_ota_line_names_the_restart_rather_than_the_binding(
 ) -> None:
     """The generic advice would send the operator to bind a device that
     is already bound. What is missing is this process."""
-    config = booted(tmp_path)
-    with TestClient(create_app(config)) as client:
-        with store_at(tmp_path) as store:
+    config = booted()
+    with TestClient(create_app(config, from_store=True)) as client:
+        with store_at() as store:
             store.set_agent("poet", dict(AGENT))
             store.bind_device(DEVICE_MAC, ["poet"])
 
@@ -214,10 +222,10 @@ def test_the_session_line_names_the_reload_too(
     that named two different remedies would be worse than either, since
     an operator reads whichever one their query happened to reach.
     """
-    config = booted(tmp_path, devices={DEVICE_MAC: ["assistant"]})
-    with TestClient(create_app(config)) as client:
+    config = booted(devices={DEVICE_MAC: ["assistant"]})
+    with TestClient(create_app(config, from_store=True)) as client:
         token = token_of(client)
-        with store_at(tmp_path) as store:
+        with store_at() as store:
             store.set_agent("poet", dict(AGENT))
             store.bind_device(DEVICE_MAC, ["poet"])
 
@@ -248,9 +256,9 @@ def test_a_loaded_name_beside_an_unloaded_one_still_answers(tmp_path: Path) -> N
     not its question; the split against the world being served is what
     separates them, and it is the same call the check-in above made.
     """
-    config = booted(tmp_path)
-    with TestClient(create_app(config)) as client:
-        with store_at(tmp_path) as store:
+    config = booted()
+    with TestClient(create_app(config, from_store=True)) as client:
+        with store_at() as store:
             store.set_agent("poet", dict(AGENT))
             store.bind_device(DEVICE_MAC, ["assistant", "poet"])
 
@@ -288,8 +296,8 @@ def test_an_agent_added_by_an_apply_is_served_at_the_next_check_in(tmp_path: Pat
     still pending: before the apply the binding is live and the agent is
     not, and the sentence says exactly that and which command fixes it.
     """
-    config = booted(tmp_path)
-    with TestClient(create_app(config)) as client:
+    config = booted()
+    with TestClient(create_app(config, from_store=True)) as client:
         assert (
             client.put(
                 f"{API_MOUNT_PATH}/agents/poet", json=dict(AGENT), headers=BEARER
@@ -335,11 +343,11 @@ def test_an_agent_removed_by_an_apply_is_out_of_reach_at_the_next_one(
     and is pinned where a conversation is: it finishes on the world it
     was built from.
     """
-    config = booted(tmp_path, devices={DEVICE_MAC: ["assistant"]})
-    with TestClient(create_app(config)) as client:
+    config = booted(devices={DEVICE_MAC: ["assistant"]})
+    with TestClient(create_app(config, from_store=True)) as client:
         assert token_of(client) != ""
 
-        with store_at(tmp_path) as store:
+        with store_at() as store:
             store.delete_device(DEVICE_MAC)
             store.delete_agent("assistant")
 
@@ -354,13 +362,20 @@ def test_an_agent_removed_by_an_apply_is_out_of_reach_at_the_next_one(
 
 
 def test_an_unreadable_database_answers_from_the_boot_snapshot(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The OTA endpoint is every device's boot dependency, so a /data
-    hiccup must not refuse the fleet's check-ins."""
-    config = booted(tmp_path, devices={DEVICE_MAC: ["assistant"]})
-    with TestClient(create_app(config)) as client:
-        (tmp_path / "vinga.db").write_bytes(b"this is not a database")
+    """The OTA endpoint is every device's boot dependency, so a database
+    hiccup must not refuse the fleet's check-ins.
+
+    The engine is replaced rather than the file corrupted, which is what
+    a database going away looks like from this side: there is no file to
+    overwrite with rubbish (#283), and what the view meets either way is
+    a read it cannot make."""
+    config = booted(devices={DEVICE_MAC: ["assistant"]})
+    with TestClient(create_app(config, from_store=True)) as client:
+        view = client.app.state.composition.bindings
+        view._engine.dispose()
+        monkeypatch.setattr(view, "_engine", _FailingEngine())
 
         with caplog.at_level(logging.WARNING):
             assert token_of(client) != ""
@@ -414,7 +429,6 @@ def test_a_failed_read_repeats_nothing_the_failure_carried(
     configuration can reach, so it is a fixed sentence plus the
     exception's class name, and nothing else."""
     config = Config(
-        server={"database": {"dir": "/nowhere/at/all"}},
         providers={stage: {"mock": {"type": "mock"}} for stage in STAGES},
         agents={"assistant": AGENT},
         devices={DEVICE_MAC: ["assistant"]},
@@ -438,7 +452,7 @@ def test_a_failed_read_repeats_nothing_the_failure_carried(
     assert len(text.splitlines()) == len(caplog.records)
 
 
-def _write_agents_column(directory: Path, mac: str, value: object) -> None:
+def _write_agents_column(mac: str, value: object) -> None:
     """A row put beyond what any write could have produced, which is the
     state a live reader has to have an answer for."""
     engine = open_database(DatabaseConfig())
@@ -476,10 +490,10 @@ def test_a_row_no_write_could_have_made_falls_back_rather_than_refusing(
     reader runs them. A row that breaks one is unreadable, not empty:
     reading it as "bound to nothing" would turn a device away over a
     fact nobody established."""
-    config = booted(tmp_path, devices={DEVICE_MAC: ["assistant"]})
+    config = booted(devices={DEVICE_MAC: ["assistant"]})
     bindings = DeviceBindings.open(world(config))
     try:
-        _write_agents_column(tmp_path, DEVICE_MAC, stored)
+        _write_agents_column(DEVICE_MAC, stored)
 
         with caplog.at_level(logging.WARNING):
             resolved = bindings.names_for(DEVICE_MAC)
@@ -499,7 +513,7 @@ def test_a_default_agent_that_is_not_a_name_falls_back_too(
     """The other row, and the one that used to be read as None: a
     malformed default agent would have quietly turned every unbound
     device away."""
-    config = booted(tmp_path, devices={BOUND_MAC: ["assistant"]}, default_agent="assistant")
+    config = booted(devices={BOUND_MAC: ["assistant"]}, default_agent="assistant")
     bindings = DeviceBindings.open(world(config))
     try:
         engine = open_database(DatabaseConfig())
@@ -526,13 +540,14 @@ def test_a_default_agent_that_is_not_a_name_falls_back_too(
     )
 
 
-def test_the_fallback_is_the_snapshot_and_not_an_empty_answer(tmp_path: Path) -> None:
+def test_the_fallback_is_the_snapshot_and_not_an_empty_answer() -> None:
     """"Fall back" means the configuration this server booted with, so a
     device the snapshot does not bind is still refused."""
-    config = booted(tmp_path, devices={DEVICE_MAC: ["assistant"]})
+    config = booted(devices={DEVICE_MAC: ["assistant"]})
     bindings = DeviceBindings.open(world(config))
     try:
-        (tmp_path / "vinga.db").write_bytes(b"this is not a database")
+        bindings._engine.dispose()
+        bindings._engine = _FailingEngine()  # type: ignore[assignment]
 
         assert bindings.names_for(DEVICE_MAC).names == ("assistant",)
         assert bindings.names_for("11:22:33:44:55:66").names == ()
@@ -540,71 +555,70 @@ def test_the_fallback_is_the_snapshot_and_not_an_empty_answer(tmp_path: Path) ->
         bindings.dispose()
 
 
-def test_a_missing_database_is_the_snapshot_without_a_warning(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+def test_a_composed_configuration_is_the_snapshot_without_a_warning(
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """A configuration composed in memory has no database to read, which
-    is a state and not a failure: it is what most of this lane is."""
+    """A configuration composed in memory is a world no store describes,
+    which is a state and not a failure: it is what most of this lane is.
+
+    It used to be decided by a database file not being there, and the
+    probe went with the file (#283). What decides now is how the server
+    was composed, which is why this builds the view the way a server
+    composed from a `Config` builds it.
+    """
     config = Config(
-        server={"database": {"dir": str(tmp_path / "nothing")}},
         providers={stage: {"mock": {"type": "mock"}} for stage in STAGES},
         agents={"assistant": AGENT},
         devices={DEVICE_MAC: ["assistant"]},
     )
-    bindings = DeviceBindings.open(world(config))
+    bindings = DeviceBindings.snapshot_only(world(config))
     try:
         with caplog.at_level(logging.WARNING):
             assert bindings.names_for(DEVICE_MAC).names == ("assistant",)
+        assert bindings.snapshot_authoritative
     finally:
         bindings.dispose()
 
     assert caplog.records == []
 
 
-def test_a_database_that_goes_away_is_not_created_again(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+def test_a_database_that_goes_away_is_a_loud_fallback(
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """The engine connects lazily, so the file can disappear between the
-    app being built and the first device asking: a volume unmounts, a
-    restore moves it aside. What must not happen then is a new empty
-    database, which would answer every device "bound to nothing" for as
-    long as nobody noticed."""
-    config = booted(tmp_path, devices={DEVICE_MAC: ["assistant"]})
+    """The engine connects lazily, so the database can go between the
+    app being built and the first device asking: an instance restarts, a
+    network partitions, a restore is in progress. What must not happen
+    then is a device answered "bound to nothing" for as long as nobody
+    noticed."""
+    config = booted(devices={DEVICE_MAC: ["assistant"]})
     bindings = DeviceBindings.open(world(config))
     try:
-        for sidecar in tmp_path.glob("vinga.db*"):
-            sidecar.unlink()
+        bindings._engine.dispose()
+        bindings._engine = _FailingEngine()  # type: ignore[assignment]
 
         with caplog.at_level(logging.WARNING):
             resolved = bindings.names_for(DEVICE_MAC)
     finally:
         bindings.dispose()
 
-    # The loud fallback, and no database where one was deleted.
     assert resolved.names == ("assistant",)
     assert any(
         getattr(record, "event", None) == "device_bindings_unreadable"
         for record in caplog.records
     )
-    assert not (tmp_path / "vinga.db").exists()
-    assert sorted(path.name for path in tmp_path.iterdir()) == []
 
 
-def test_the_read_path_never_migrates(tmp_path: Path) -> None:
-    """No Alembic on a device path, asserted rather than assumed: an
-    empty file stays an empty file, where `open_database` would have
-    built the whole schema in it."""
-    (tmp_path / "vinga.db").touch()
-    config = Config(server={"database": {"dir": str(tmp_path)}})
-    bindings = DeviceBindings.open(world(config))
+def test_the_read_path_never_migrates(blank_database: str) -> None:
+    """No Alembic on a device path, asserted rather than assumed: a
+    blank database stays blank, where `open_database` would have created
+    the schema and built the whole shape in it."""
+    settings = DatabaseConfig(name=blank_database)
+    engine = read_engine(settings)
     try:
-        assert bindings.names_for(DEVICE_MAC).names == ()
-    finally:
-        bindings.dispose()
-
-    engine = read_engine(tmp_path)
-    try:
-        assert inspect(engine).get_table_names() == []
+        with engine.connect() as connection:
+            assert not connection.execute(
+                text("select to_regnamespace('domain') is not null")
+            ).scalar()
     finally:
         engine.dispose()
 
@@ -616,8 +630,8 @@ async def test_a_held_write_lock_stalls_neither_the_lookup_nor_the_loop(
     tmp_path: Path,
 ) -> None:
     """The property the read engine exists for. Every repository write
-    holds the write lock for its whole transaction, and under WAL a
-    deferred read takes no lock at all, so a device asking which agent
+    holds the chain's advisory lock for its whole transaction, and a
+    reader takes no advisory lock at all, so a device asking which agent
     it may talk to cannot queue behind an operator's write.
 
     The counter is read on both sides of the lookup rather than at the
@@ -627,7 +641,7 @@ async def test_a_held_write_lock_stalls_neither_the_lookup_nor_the_loop(
     ran in is the interval the lock was held. That a whole conversation
     also stays live under the same lock is the integration lane's, where
     there is a device to have one with."""
-    config = booted(tmp_path, devices={DEVICE_MAC: ["assistant"]})
+    config = booted(devices={DEVICE_MAC: ["assistant"]})
     bindings = DeviceBindings.open(world(config))
     writer = open_database(DatabaseConfig())
     ticks = 0
@@ -641,13 +655,13 @@ async def test_a_held_write_lock_stalls_neither_the_lookup_nor_the_loop(
     ticker = asyncio.create_task(tick())
     try:
         with writer.connect() as held:
-            # BEGIN IMMEDIATE fires on the first statement, so the write
-            # lock is held from here until this block exits.
+            # The begin listener takes the advisory lock on the first
+            # statement, so it is held from here until this block exits.
             held.execute(text("SELECT 1"))
             assert held.in_transaction()
             before = ticks
 
-            # Well inside the 10 second busy timeout a blocked read
+            # Well inside the 10 second lock timeout a blocked read
             # would spend before failing.
             resolution = await asyncio.wait_for(bindings.resolve(DEVICE_MAC), timeout=2)
 
@@ -672,20 +686,22 @@ async def test_a_held_write_lock_stalls_neither_the_lookup_nor_the_loop(
 
 
 def test_a_failed_read_answers_but_does_not_call_a_device_unbound(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The fallback keeps a fleet's check-ins served, and that is all it
     may do. An empty answer out of it is not the database saying nothing
     is bound; it is this server not having been able to find out, and
     the activation ceremony reads exactly that emptiness as an invitation
     to mint a claim ticket."""
-    config = booted(tmp_path, devices={BOUND_MAC: ["assistant"]})
-    with TestClient(create_app(config)) as client:
+    config = booted(devices={BOUND_MAC: ["assistant"]})
+    with TestClient(create_app(config, from_store=True)) as client:
         # Bound after boot, so the snapshot this server holds knows
         # nothing about it: the database is the only place it exists.
-        with store_at(tmp_path) as store:
+        with store_at() as store:
             store.bind_device(DEVICE_MAC, ["assistant"])
-        (tmp_path / "vinga.db").write_bytes(b"this is not a database")
+        view = client.app.state.composition.bindings
+        view._engine.dispose()
+        monkeypatch.setattr(view, "_engine", _FailingEngine())
 
         with caplog.at_level(logging.WARNING):
             body = check_in(client)
@@ -700,13 +716,17 @@ def test_a_failed_read_answers_but_does_not_call_a_device_unbound(
     )
 
 
-def test_a_stale_answer_still_carries_the_snapshots_binding(tmp_path: Path) -> None:
+def test_a_stale_answer_still_carries_the_snapshots_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The other half: what the fallback is for. A device bound at boot
     keeps being served through a database hiccup, which is why the
     fallback exists at all."""
-    config = booted(tmp_path, devices={DEVICE_MAC: ["assistant"]})
-    with TestClient(create_app(config)) as client:
-        (tmp_path / "vinga.db").write_bytes(b"this is not a database")
+    config = booted(devices={DEVICE_MAC: ["assistant"]})
+    with TestClient(create_app(config, from_store=True)) as client:
+        view = client.app.state.composition.bindings
+        view._engine.dispose()
+        monkeypatch.setattr(view, "_engine", _FailingEngine())
 
         body = check_in(client)
 
@@ -714,7 +734,7 @@ def test_a_stale_answer_still_carries_the_snapshots_binding(tmp_path: Path) -> N
     assert "activation" not in body
 
 
-def test_a_view_with_no_database_answers_authoritatively(tmp_path: Path) -> None:
+def test_a_view_with_no_database_answers_authoritatively() -> None:
     """A configuration composed in memory has no database to be stale
     against: the snapshot is the whole truth there is, which is what the
     unit lane and an embedded server have, and a code is minted there."""

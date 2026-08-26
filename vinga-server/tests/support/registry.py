@@ -21,7 +21,6 @@ it is a definition of its own rather than a second spelling of that one.
 import asyncio
 import contextlib
 from collections.abc import Iterator
-from pathlib import Path
 from typing import Any, cast
 
 from fastapi.testclient import TestClient
@@ -79,11 +78,11 @@ AGENT = dict.fromkeys(STAGES, "mock")
 
 
 @contextlib.contextmanager
-def store_at(directory: Path) -> Iterator[ConfigStore]:
-    """The repository over the database in `directory`, the way the CLI
-    and the API reach it: opened, used, disposed. This is the write side
-    of every test here, and it is deliberately a different connection
-    from the one the running app reads through."""
+def store_at() -> Iterator[ConfigStore]:
+    """The repository over this lane's database, the way the CLI and the
+    API reach it: opened, used, disposed. This is the write side of
+    every test here, and it is deliberately a different connection from
+    the one the running app reads through."""
     engine = open_database(DatabaseConfig())
     try:
         yield ConfigStore(engine)
@@ -92,23 +91,22 @@ def store_at(directory: Path) -> Iterator[ConfigStore]:
 
 
 def booted(
-    directory: Path,
     *,
     agents: tuple[str, ...] = ("assistant",),
     devices: dict[str, list[str]] | None = None,
     default_agent: str | None = None,
 ) -> Config:
-    """The configuration a server booting on a database in `directory`
-    would hold: the domain half written through the repository, read
-    back, and composed onto a file half that names the same directory.
+    """The configuration a server booting on this lane's database would
+    hold: the domain half written through the repository, read back, and
+    composed onto a file half naming the same database.
 
-    The directory is what makes this different from the rest of the unit
-    lane, where a `Config` is composed in memory and there is no database
-    to write to afterwards.
+    Really writing it is what makes this different from the rest of the
+    unit lane, where a `Config` is composed in memory and there is no
+    stored half at all.
     """
     if devices is None:
         devices = {BOUND_MAC: [agents[0]]}
-    with store_at(directory) as store:
+    with store_at() as store:
         for stage in STAGES:
             store.set_provider(stage, "mock", {"type": "mock"})
         for name in agents:
@@ -119,7 +117,7 @@ def booted(
             store.set_default_agent(default_agent)
         snapshot = store.load()
     return compose_config(
-        FileConfig(server={"database": {"dir": str(directory)}}),
+        FileConfig(),
         domain_fields(snapshot.domain),
         "the test's database",
     )

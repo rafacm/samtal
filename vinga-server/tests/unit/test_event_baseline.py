@@ -87,11 +87,15 @@ def capture(
 
 def test_every_driver_names_a_path_of_its_own() -> None:
     """One driver per emit path, so a capture keyed by identity is a
-    capture of eighty-one paths rather than of however many survived a
-    collision."""
+    capture of eighty paths rather than of however many survived a
+    collision.
+
+    Eighty rather than eighty-one since #283: `BindingsSnapshotOnly`
+    retired with the file-existence probe that was the only thing able
+    to emit it."""
     claimed = [driver.identity for driver in DRIVERS]
 
-    assert len(set(claimed)) == len(claimed) == 81
+    assert len(set(claimed)) == len(claimed) == 80
 
 
 def test_every_driven_path_produces_the_event_it_emits(
@@ -302,7 +306,7 @@ def test_no_unlisted_record_rides_a_scoped_channel_untyped(run: Run) -> None:
 # here fails the check below rather than being silently uncovered.
 CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
     "vinga_server.conversations.store:ConversationStore.start #1": (
-        ("ConversationsEnabled", ("event", "path")),
+        ("ConversationsEnabled", ("event",)),
     ),
     "vinga_server.conversations.store:ConversationStore.record_event #1": (
         ("ConversationsDropped", ("event", "session")),
@@ -444,9 +448,6 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
     ),
     "vinga_server.config.api:_refusal.handler #1": (
         ("ApiStorageError", ("event",)),
-    ),
-    "vinga_server.device.bindings:DeviceBindings.open #1": (
-        ("BindingsSnapshotOnly", ("event", "path")),
     ),
     "vinga_server.device.bindings:DeviceBindings._warn #1": (
         ("BindingsUnreadable", ("device", "event", "failure")),

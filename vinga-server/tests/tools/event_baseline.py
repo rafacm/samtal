@@ -65,8 +65,10 @@ import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from openai import AsyncOpenAI
+from sqlalchemy.exc import OperationalError
 from starlette.websockets import WebSocketDisconnect
 
+from tests.conftest import clear_store
 from tests.support.apps import entered_client
 from tests.support.checkin import (
     MOCK_AGENT,
@@ -108,9 +110,7 @@ from tests.support.providers import (
     built_world,
 )
 from tests.support.registry import (
-    AGENT,
     BINDINGS_DEVICE_MAC,
-    STAGES,
     FakeSession,
     booted,
     registry_with,
@@ -161,6 +161,7 @@ from vinga_server.capture import CaptureStore, SessionCapture
 from vinga_server.config import Config
 from vinga_server.config.api import build_api
 from vinga_server.config.loader import StorageError
+from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations import store as store_module
 from vinga_server.conversations.records import ToolInvocation, TurnRecord
 from vinga_server.conversations.store import ConversationStore
@@ -269,7 +270,7 @@ def a_turn() -> TurnRecord:
 
 def drive_enabled(directory: Path) -> None:
     """`start()` says this server is recording."""
-    store = ConversationStore(directory)
+    store = ConversationStore(DatabaseConfig())
     try:
         store.start()
     finally:
@@ -282,7 +283,7 @@ def drive_dropped(directory: Path) -> None:
     ceiling = store_module.MAX_EVENTS_IN_FLIGHT
     store_module.MAX_EVENTS_IN_FLIGHT = 4
     gate = Gate()
-    store = ConversationStore(directory, gate=gate)
+    store = ConversationStore(DatabaseConfig(), gate=gate)
     try:
         store.start()
         store.open_session("alpha", 100.0, a_manifest(NOW))
@@ -300,7 +301,7 @@ def drive_write_failed(directory: Path) -> None:
     turn's own transaction, which is what makes the swap hit exactly
     that one."""
     gate = Gate()
-    store = ConversationStore(directory, gate=gate, retention_days=0)
+    store = ConversationStore(DatabaseConfig(), gate=gate, retention_days=0)
     try:
         store.start()
         store.open_session("alpha", 100.0, a_manifest(NOW))
@@ -310,7 +311,9 @@ def drive_write_failed(directory: Path) -> None:
         gate.wait()
         # White-box, as in `test_conversations_store.py`: an accepted
         # write that the database then refuses is only reachable with a
-        # broken engine.
+        # broken engine. The real one is let go of first, or its pool
+        # outlives this driver.
+        store._engine.dispose()
         store._engine = Raising()  # type: ignore[assignment]
         gate.open_forever()
     finally:
@@ -319,8 +322,9 @@ def drive_write_failed(directory: Path) -> None:
 
 def drive_prune_failed(directory: Path) -> None:
     """Retention that could not delete."""
-    store = ConversationStore(directory, retention_days=90, now=lambda: NOW)
+    store = ConversationStore(DatabaseConfig(), retention_days=90, now=lambda: NOW)
     try:
+        store._engine.dispose()
         store._engine = Raising()  # type: ignore[assignment]
         store._prune()
     finally:
@@ -329,7 +333,7 @@ def drive_prune_failed(directory: Path) -> None:
 
 def drive_pruned(directory: Path) -> None:
     """Retention that did: two sessions seeded old enough to go."""
-    seeding = ConversationStore(directory, retention_days=0, now=lambda: NOW)
+    seeding = ConversationStore(DatabaseConfig(), retention_days=0, now=lambda: NOW)
     seeding.start()
     for name, age in (("old-one", 200), ("old-two", 300)):
         seeding.open_session(name, 100.0, a_manifest(NOW - dt.timedelta(days=age)))
@@ -337,7 +341,7 @@ def drive_pruned(directory: Path) -> None:
         seeding.close_session(name, duration_s=5.0, reason="client")
     seeding.stop()
 
-    pruning = ConversationStore(directory, retention_days=90, now=lambda: NOW)
+    pruning = ConversationStore(DatabaseConfig(), retention_days=90, now=lambda: NOW)
     try:
         pruning.start()
     finally:
@@ -442,15 +446,18 @@ async def turned_away(
 
 
 def apart(config: Config, directory: Path) -> Config:
-    """Where this driver's app keeps its configuration database.
+    """This driver's configuration, unchanged.
 
-    A driver that builds an app migrates one, and the next app to find a
-    migrated database resolves its device bindings from it rather than
-    from the configuration it was built with, which turns the session
-    after into a rejection. One directory per driver is what keeps the
-    drivers independent of the order they run in.
+    It used to point the app at a database directory of its own,
+    because a driver that built an app migrated one and the next app to
+    find a migrated database resolved its bindings from it rather than
+    from the configuration it was built with. Neither half of that is
+    true any more (#283): an app composed from a `Config` handed to it
+    is snapshot-authoritative and reads no store at all, and what a
+    driver writes into the conversation record is cleared between
+    drivers by `driven()`. Kept as a name rather than deleted at every
+    call site, so the reason survives where a reader will meet it.
     """
-    config.server.database.dir = directory
     return config
 
 
@@ -1060,7 +1067,7 @@ def drive_capture_started(directory: Path) -> None:
 
 
 def api_raising(directory: Path, exc: Exception) -> FastAPI:
-    api = build_api(API_TOKEN, directory / "db")
+    api = build_api(API_TOKEN, DatabaseConfig())
 
     @api.get("/boom")
     def endpoint() -> dict[str, str]:
@@ -1081,24 +1088,33 @@ def drive_api_storage_error(directory: Path) -> None:
     assert answer.status_code == 500
 
 
-def drive_bindings_snapshot_only(directory: Path) -> None:
-    config = Config(
-        server={"database": {"dir": str(directory / "nothing")}},
-        providers={stage: {"mock": {"type": "mock"}} for stage in STAGES},
-        agents={"assistant": dict(AGENT)},
-        devices={BINDINGS_DEVICE_MAC: ["assistant"]},
-    )
-    DeviceBindings.open(world(config)).dispose()
+def drive_bindings_unreadable(_: Path) -> None:
+    """A lookup whose read fails, which is loud and not fatal.
 
-
-def drive_bindings_unreadable(directory: Path) -> None:
-    config = booted(directory, devices={BINDINGS_DEVICE_MAC: ["assistant"]})
+    Its SQLite-era form overwrote the database file with rubbish. There
+    is no file, so the engine is replaced with one whose every connect
+    raises, which is the same thing from the view's side: a read it
+    cannot make, answered from the generation being served.
+    """
+    config = booted(devices={BINDINGS_DEVICE_MAC: ["assistant"]})
     bindings = DeviceBindings.open(world(config))
     try:
-        (directory / "vinga.db").write_bytes(b"this is not a database")
+        bindings._engine.dispose()
+        bindings._engine = _Unreadable()  # type: ignore[assignment]
         bindings.names_for(BINDINGS_DEVICE_MAC)
     finally:
         bindings.dispose()
+
+
+class _Unreadable:
+    """An engine whose every connection fails, which is what a database
+    a lookup cannot reach looks like from the bindings view."""
+
+    def connect(self) -> object:
+        raise OperationalError("select 1", None, Exception("the instance went away"))
+
+    def dispose(self) -> None:
+        return None
 
 
 async def drive_filler_disabled(_: Path) -> None:
@@ -1199,12 +1215,19 @@ def drive_ota_check_resolved(directory: Path) -> None:
         post_system_info(client)
 
 
-def drive_activation_not_offered_unreadable(directory: Path) -> None:
+def drive_activation_not_offered_unreadable(_: Path) -> None:
     """An unbound device whose bindings answer is a fallback rather than
-    an answer, so minting would offer a ticket for a bound board."""
-    config = booted(directory, devices={BOUND_MAC: ["assistant"]})
-    with TestClient(create_app(config)) as client:
-        (directory / "vinga.db").write_bytes(b"this is not a database")
+    an answer, so minting would offer a ticket for a bound board.
+
+    The engine is replaced with one whose every connection fails, which
+    is what a database a lookup cannot reach looks like from the view's
+    side. Its SQLite-era form overwrote the file with rubbish (#283).
+    """
+    config = booted(devices={BOUND_MAC: ["assistant"]})
+    with TestClient(create_app(config, from_store=True)) as client:
+        view = client.app.state.composition.bindings
+        view._engine.dispose()
+        view._engine = _Unreadable()  # type: ignore[assignment]
         bindings_check_in(client)
 
 
@@ -1452,11 +1475,6 @@ SERVER_DRIVERS: tuple[Driver, ...] = (
     Driver((CONFIG_API, "_SanitizedErrors.__call__", 1), drive_api_error, "api_error"),
     Driver((CONFIG_API, "_refusal.handler", 1), drive_api_storage_error, "api_storage_error"),
     Driver(
-        (BINDINGS, "DeviceBindings.open", 1),
-        drive_bindings_snapshot_only,
-        "device_bindings_snapshot_only",
-    ),
-    Driver(
         (BINDINGS, "DeviceBindings._warn", 1),
         drive_bindings_unreadable,
         "device_bindings_unreadable",
@@ -1636,6 +1654,11 @@ def driven() -> Run:
                 if inspect.isawaitable(answer):
                     asyncio.run(answer)
             said[driver.key] = list(collector.records)
+            # The store, emptied between drivers. Two of them open a
+            # session of the same name, which one database cannot hold
+            # at once; the throwaway directory above used to keep them
+            # apart and no longer holds a database (#283).
+            clear_store()
     return Run(said=said)
 
 
