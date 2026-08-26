@@ -88,6 +88,24 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   a directory per authoring tool, now with one index over both that
   says which question each diagram answers, including what separates
   the two architecture-overview pictures.
+- **The promises and the guidelines are two documents** (#310).
+  `docs/architecture/product-promises.md` holds the three commitments
+  to the person running vinga, and the database promise there now
+  states the operational floor it always implied: in-place upgrades
+  begin at the two Postgres baselines, this build opens no SQLite
+  file, a pre-beta reset is possible if recorded, and recovery is
+  export and reapply with the secrets re-entered from the
+  environment. `docs/architecture/guidelines.md` holds vinga's
+  identity and the revisable defaults, with the three hardware-edge
+  principles consolidated into one guideline.
+  `docs/architecture/principles.md` stays as a compatibility page for
+  the dated records that link it and holds nothing of its own.
+- **`docs/architecture/pipeline-ownership.md` is gone** (#310). Which
+  parts of the pipeline any framework provides and which are vinga's
+  own semantics, and the three conditions that reopen the framework
+  question, are now a guideline; the dated pipecat measurements stay
+  where they were taken, in the alignment spike's implementation
+  record.
 
 ### Removed
 
