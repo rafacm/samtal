@@ -104,8 +104,12 @@ states it rather than leaving it to be inferred:
 
 - **In-place upgrades begin at the two Postgres baselines**,
   `3001_postgres_domain` for the domain configuration and
-  `1001_postgres_conversations` for the conversation record. Every
-  later revision upgrades a database stamped at or after them.
+  `1001_postgres_conversations` for the conversation record. That is
+  where "forward" starts today: a database stamped at or after them
+  is what a later image is built to upgrade, best-effort, through the
+  reviewed migration every schema change arrives as. Before a beta
+  that is the floor rather than a guarantee about every future image,
+  because the recorded-reset licence two bullets below still stands.
 - **The current build opens no SQLite file at all.** There is no
   driver in it, no code path and no configuration key that would let
   it try, so a SQLite-era database is not something this build can
