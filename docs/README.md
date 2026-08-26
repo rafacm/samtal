@@ -82,6 +82,11 @@ the 2026-08-24 walk of four published CLI guides that the CLI guide's
 practices were dispositioned from. A note is evidence: where one and
 the guideline it fed disagree about the code today, the guideline is
 the one that was corrected.
+[`xiaozhi-notes.md`](xiaozhi-notes.md) is the mixed one and says so on
+its own first screen: its protocol sections are maintained, and carry a
+statement of which upstream commits and which observed firmware
+versions they were last read against, while its reading of the upstream
+server and its field observations keep their dates and are not chased.
 
 Index pages carry no authority of their own, because they route
 rather than claim: this page,
@@ -200,10 +205,15 @@ the barge-in decision.
 
 ## Research notes
 
-- [**xiaozhi-notes.md**](xiaozhi-notes.md): the upstream architecture, the
-  device↔server protocol, ports, configuration keys, and the validated
-  end-to-end demo procedure. Read this first for anything protocol-related,
-  and for every serial gotcha a board has.
+- [**xiaozhi-notes.md**](xiaozhi-notes.md): the device↔server protocol,
+  key by key, and the upstream projects it came from. Read this first
+  for anything protocol-related. Its sections say which of four things
+  each is: maintained protocol facts, corrected as the wire moves and
+  carrying an explicit statement of which upstream commits and which
+  observed firmware versions they were last read against; dated field
+  observations; the historical reading of the upstream server; and
+  licensing evidence. Board procedures and board behavior are not here,
+  they are in [`devices/`](devices/README.md).
 - [**related-projects.md**](related-projects.md): the neighbouring voice
   assistant and agent projects, and the projects vinga is built from.
   For an alternative: what it is, where it overlaps, where vinga is
