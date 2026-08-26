@@ -266,7 +266,51 @@ acceptance criterion: the after may not double the before.
 The census greps the plan's lenses section asks for, run over the
 finished tree.
 
-TBD
+**`grep -rn "sqlite\|SQLite" src tests`**: 29 lines, every one of them
+prose. Two kinds, and no third: `test_logs.py`'s two in-memory
+`sqlite://` engines, which the plan keeps because what they test is the
+log floor over SQLAlchemy's own echo rather than this server's stores,
+each now carrying a comment saying so; and sentences that describe what
+something used to be (a baseline replacing the SQLite-era one, a test
+saying which mechanism it retired, a recovery case naming the build
+that produced its fixture). No live code path names SQLite anywhere.
+
+**The mechanism vocabulary** (`BUSY_TIMEOUT`, `busy_timeout`, `PRAGMA`,
+`journal_mode`, `-wal`, `-shm`, `mode=rw`, `BEGIN IMMEDIATE`,
+`sqlite_master`, `sqlite_autoincrement`, `database.dir`,
+`DATABASE__DIR`, `DATABASE_FILENAME`, `database_path`,
+`conversations_path`, `secure_delete`) over `src`, `tests` and
+`.github`: five lines, all prose, all history-describing.
+
+    src/vinga_server/conversations/migrations/versions/1001_postgres_conversations.py:10
+      "for `sqlite_autoincrement` because a plain `INTEGER PRIMARY KEY` reuses"
+    tests/unit/test_conversations_docgen.py:99
+      assert "secure_delete" not in flattened
+    tests/unit/test_conversations_store.py:878
+      "write-ahead log and a `mode=rw` URI, both of which retired with the"
+    tests/unit/test_conversations_store.py:915
+      "a `mode=rw` URI refusing to create a missing file and is now the"
+    tests/support/stores.py:58
+      "`BEGIN IMMEDIATE`, repeated in four suites. What it proved then is"
+
+The docgen line is an assertion that the word is gone, which is the
+opposite of a survivor. Nothing else in either tree names any of the
+sixteen.
+
+**`grep -rn "VINGA_DB_"`** over the same trees plus the compose file,
+`deploy/` and the example configs, as the census of the new contract:
+110 lines across 27 files. The distribution is what a contract should
+look like: the workflow (45, three jobs and the wheel step), the
+compose file (8), the config schema and its loader (6), the db package
+(10), the two example configs (5), the provisioning file (2), and the
+rest in tests naming the variables they set or refuse.
+
+The 46-file test-import census from the pre-plan inventory is not
+re-run here: the import surface it counted (`open_database`,
+`open_conversations`, `read_engine` and their callers) is what this
+milestone rewrote, so the number it would produce is a fact about the
+new shape rather than a check on the old one. What replaces it is the
+lane itself, which does not collect if a caller was missed.
 
 ### Not verified locally
 
