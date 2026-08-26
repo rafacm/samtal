@@ -106,6 +106,30 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   question, are now a guideline; the dated pipecat measurements stay
   where they were taken, in the alignment spike's implementation
   record.
+- **The CLI guide leads with its reviewer checklist** (#310). The
+  eleven questions a new command answers are the first section of
+  `docs/architecture/cli-guide.md` instead of the last, each linked to
+  the practice or grammar rule behind it, with the reasoning after
+  them and an On this page section over both. Where the guide restated
+  current command spellings it now links
+  `docs/reference/cli.md`, whose generated half cannot describe a CLI
+  this repository does not build.
+- **The CLI guide's source audit is a dated record of its own**
+  (#310). The walk of four published CLI guides, one row per
+  guideline, is `docs/architecture/cli-guide-audit.md`, dated
+  2026-08-24 and classified as research: evidence behind the guide,
+  outranked by it wherever the two disagree about the code today. The
+  guide keeps a short summary of the four sources and what became of
+  them.
+- **The observability page leads with the current data map** (#310).
+  `docs/architecture/observability-surfaces.md` opens with the
+  four-surface table and a status column read from the repository:
+  the structured events, the conversation store and capture have all
+  landed, and the audit surface is still future with no issue owning
+  it. Exact event variants and schema columns are linked to their
+  generated references rather than copied. The 2026-08-15 needs
+  assessment and external survey are now a dated decision-evidence
+  appendix at the foot of the page.
 
 ### Removed
 
