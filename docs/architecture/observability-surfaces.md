@@ -45,7 +45,7 @@ starving the UI.
 | Surface | Carries | Serves | Retention and access |
 | --- | --- | --- | --- |
 | **Structured events** (`vinga_server/events.py`, the JSON log) | Metadata only: closed field sets, reason tokens from closed sets, trusted identifiers, counts, durations. No conversation text, no far-side bytes, no exception prose. | 1, feedstock for 5 | Operator log retention (weeks); the no-leak contract holds by construction once #155 lands |
-| **Conversation store** (#120, `conversations.db`) | Content as system of record: turns, tool and MCP calls with arguments and results, keyed by session and user | 2, 5 (evals), 7 | Configured retention with a stated default; per-session and per-user deletion; access-controlled reads under `/api` |
+| **Conversation store** (#120, the `conversations` schema) | Content as system of record: turns, tool and MCP calls with arguments and results, keyed by session and user | 2, 5 (evals), 7 | Configured retention with a stated default; per-session and per-user deletion; access-controlled reads under `/api`, and live read-only SQL as `vinga_ro`, which reaches this schema and not `domain` |
 | **Capture** (existing) | Raw audio plus decision track, explicit opt-in | 1 (deep diagnosis) | Short-lived, pruned, already governed |
 | **Audit** (future, small) | Admin/config actions, auth refusals, reload invocations | 4 | Long, append-only, narrow content |
 
