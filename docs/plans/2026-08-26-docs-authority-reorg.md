@@ -326,14 +326,18 @@ docs/
 
 - The five generated-document drift checks (domain-config,
   conversations-schema, events, api-openapi, the two generated
-  halves of cli.md) via the integration lane; only M4 changes their
-  inputs, through the generators, and every other milestone leaves
+  halves of cli.md) via the integration lane; M4 changes their
+  inputs through the generators, M6 may where its audit finds a
+  generated introduction making an unsupported claim (also through
+  the generators), and every other milestone leaves
   `docs/reference/` untouched.
 - The scratchpad link-and-anchor script, run green before every PR.
 - `uv run ruff check .`, `uv run pytest tests/unit -q`,
   `uv run pytest tests/integration -q` from `vinga-server/` for M4
-  (the docgen change); the other milestones do not touch the
-  package but state so rather than claiming runs they did not need.
+  (the docgen change) and for M6 whenever it modifies a generator,
+  together with regeneration and every drift check; the other
+  milestones do not touch the package but state so rather than
+  claiming runs they did not need.
 - Rendered inspection of every changed page (headings, links,
   On this page anchors), recorded in each PR's verification list.
 
@@ -459,7 +463,10 @@ docs/
   READMEs, AGENTS.md, the glossary, the regression suite, the
   device-guide introductions and the generated-reference
   introductions are audited to summarize and link the authoritative
-  source without introducing any unique commitment; the
+  source without introducing any unique commitment (a
+  generated-introduction correction goes through its generator,
+  and that PR then owes lint, both test lanes, regeneration and
+  the drift checks); the
   authority-sensitive phrase search (`product promise`,
   `compatibility floor`, `fully local`, `thin device`, `decided
   direction`, `implemented today`) classifies every current hit as
@@ -559,6 +566,12 @@ faithful; resolutions appended per amendment commit.
    `conversations/docgen.py`. Either M4 recuts every generated
    introduction exhaustively or M6 may modify generators and then
    owes lint, both test lanes, regeneration and every drift check.
+
+   *Resolution.* Adopted in the second form: M6 may modify
+   generators where its audit requires, and the Tests section and
+   M6 both now carry the full obligations (lint, both lanes,
+   regeneration, drift checks) for that case. M4 is not asked to
+   pre-empt an audit that has not run yet.
 
 7. **P2: The plan deliberately leaves current skill guidance stale
    at completion.** The implement-issue skill says the tree "is
