@@ -413,7 +413,7 @@ finished branch: `checked 157 files, 0 failures`.
 
 ## M3: The guides lead with their interfaces
 
-PR TBD.
+PR #323.
 
 ### What landed
 
