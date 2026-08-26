@@ -3,9 +3,11 @@
 Device firmware for Vinga, based on
 [78/xiaozhi-esp32](https://github.com/78/xiaozhi-esp32).
 
-The device side stays deliberately thin: the firmware's only hard link to a
-backend is one OTA/config URL, from which the server delivers the WebSocket
-endpoint and everything else at runtime. Planned customizations:
+The device side stays deliberately thin, which is
+[a guideline the whole project is held to](../docs/architecture/guidelines.md#thin-device-smart-server):
+the firmware's only hard link to a backend is one OTA/config URL, from
+which the server delivers the WebSocket endpoint and everything else at
+runtime. Planned customizations:
 
 - Vinga server as the default OTA/config endpoint
 - English wake word (`Hi ESP`, ESP-SR `wn9_hiesp`) instead of the default
