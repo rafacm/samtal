@@ -451,7 +451,7 @@ docs/
   architecture router rows for both guides update in this change.
 - [x] **[M4: Concepts distinguishes today from direction
   (#311).](2026-08-26-docs-authority-reorg-implementation.md#m4-concepts-distinguishes-today-from-direction)**
-  (PR TBD) The introduction states the page's class and its authority
+  (PR #324) The introduction states the page's class and its authority
   relative to promises, guidelines, ADRs, issues and generated
   references; every section or claim carries its status per design
   decision 7, each decided direction citing its owning record
