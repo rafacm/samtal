@@ -310,8 +310,8 @@ async def test_the_turn_lands_on_its_heard_events_instant(tmp_path: Path) -> Non
     finally:
         store.stop()
 
-    (turn,) = rows(tmp_path, "turns")
-    (event,) = rows(tmp_path, "events")
+    (turn,) = rows("turns")
+    (event,) = rows("events")
     assert turn["t_ms"] == event["t_ms"]
 
 

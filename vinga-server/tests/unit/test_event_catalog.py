@@ -29,6 +29,7 @@ import pytest
 
 from tests.support.catalog import scratch_catalog
 from vinga_server.events.catalog import (
+    CaptureStarted,
     CatalogError,
     ConversationsDropped,
     ConversationsEnabled,
@@ -97,12 +98,18 @@ def test_a_variant_derives_its_sentence_and_its_arguments() -> None:
 
 def test_the_payload_carries_plain_builtins_rather_than_the_wrappers() -> None:
     """A tap, a JSON formatter and a `%` rendering meet exactly what
-    they met before the value types existed."""
-    built = ConversationsEnabled(path=ConfiguredPath(Path("/var/lib/vinga")))
+    they met before the value types existed.
 
-    assert built.payload() == {"path": "/var/lib/vinga"}
+    Through a capture event since #283, which is where a configured
+    path still lives: `conversations_enabled` used to carry one and
+    stopped when the store's file became a connection."""
+    built = CaptureStarted(
+        session=SessionId("a" * 32), path=ConfiguredPath(Path("/var/lib/vinga"))
+    )
+
+    assert built.payload() == {"session": "a" * 32, "path": "/var/lib/vinga"}
     assert type(built.payload()["path"]) is str
-    assert built.logged().args == (Path("/var/lib/vinga"),)
+    assert built.logged().args == ("a" * 32, Path("/var/lib/vinga"))
 
 
 def test_a_rendered_value_the_payload_does_not_keep_stays_out_of_it() -> None:

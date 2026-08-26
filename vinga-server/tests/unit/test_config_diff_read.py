@@ -27,7 +27,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import select, update
 
 from tests.support.apps import entered_client
 from tests.support.configs import config_with, world
@@ -52,7 +52,7 @@ from vinga_server.config.secrets import (
     load_keys,
 )
 from vinga_server.config.store import ConfigStore
-from vinga_server.db import open_database
+from vinga_server.db import open_database, schema
 from vinga_server.logs import JsonFormatter
 from vinga_server.tools.mcp import McpServers
 
@@ -137,14 +137,20 @@ def envelope_of(directory: Path) -> str:
     try:
         with engine.connect() as connection:
             secrets = connection.execute(
-                text("select secrets from providers where stage = 'llm' and name = 'mock'")
+                select(schema.providers.c.secrets).where(
+                    schema.providers.c.stage == "llm",
+                    schema.providers.c.name == "mock",
+                )
             ).scalar_one()
     finally:
         engine.dispose()
     # Read as a column rather than through the store, so what comes
     # back is the text the file holds rather than a value some accessor
     # decoded.
-    return str(json.loads(secrets)["api_key"]["enc"])
+    # A value rather than the text it was dumped to: psycopg reads a
+    # `json` column into Python objects, where the SQLite driver handed
+    # back the string.
+    return str(secrets["api_key"]["enc"])
 
 
 def mark_of(directory: Path) -> str:
@@ -187,7 +193,7 @@ def test_a_stored_secret_that_will_not_open_refuses_under_the_reload_s_status(
     stored(directory, secret=PLAINTEXT)
     booted = load_boot_config()
 
-    with entered_client(booted.config, booted.secrets) as served:
+    with entered_client(booted.config, booted.secrets, from_store=True) as served:
         # The key the secret was written under is gone from the
         # environment, which is what a mistaken rotation looks like from
         # the inside of a running server.
@@ -227,16 +233,16 @@ def test_a_stored_domain_that_will_not_compose_refuses_the_same_way(
     routes do."""
     stored(directory, secret=PLAINTEXT)
     booted = load_boot_config()
-    _plant_unknown_provider(directory)
+    _plant_unknown_provider()
 
-    with entered_client(booted.config, booted.secrets) as served:
+    with entered_client(booted.config, booted.secrets, from_store=True) as served:
         uncomposable = served.get(DIFF_PATH, headers=headers())
 
     # The row put back, so the only thing wrong with the store is the
     # credential that will no longer open.
-    _drop_planted_provider(directory)
+    _drop_planted_provider()
 
-    with entered_client(booted.config, booted.secrets) as served:
+    with entered_client(booted.config, booted.secrets, from_store=True) as served:
         monkeypatch.setenv(MASTER_KEY_ENV, generate_key())
         unopenable = served.get(DIFF_PATH, headers=headers())
 
@@ -247,32 +253,40 @@ def test_a_stored_domain_that_will_not_compose_refuses_the_same_way(
     assert "api_key" not in unopenable.text
 
 
-def _plant_unknown_provider(directory: Path) -> None:
+def _plant_unknown_provider() -> None:
     """An agent naming a provider nothing declares, written as a row
     because no write this server offers can produce one. Into the body
     rather than into a column of its own, which is where every non-key
-    field lives since #243; `json_set` leaves the rest of the entry
-    exactly as it was written."""
-    engine = open_database(DatabaseConfig())
-    try:
-        with engine.begin() as connection:
-            connection.execute(
-                text("update agents set body = json_set(body, '$.llm', 'ghost')")
-            )
-    finally:
-        engine.dispose()
+    field lives since #243.
+
+    Read, edited in Python, written back, which is what replaced the
+    SQLite `json_set` this used to call (#283): the body is a text
+    column holding a dumped model whichever backend it sits in, and
+    editing it here leaves the rest of the entry exactly as it was
+    written without either backend's JSON functions in the way.
+    """
+    _rewrite_agent_body(lambda body: {**body, "llm": "ghost"})
 
 
-def _drop_planted_provider(directory: Path) -> None:
+def _drop_planted_provider() -> None:
     """The same row without the planted key, which is the entry
     `stored` wrote: the agent names no llm of its own and inherits the
     one `agent_defaults` names."""
+    _rewrite_agent_body(lambda body: {k: v for k, v in body.items() if k != "llm"})
+
+
+def _rewrite_agent_body(edit) -> None:
     engine = open_database(DatabaseConfig())
     try:
         with engine.begin() as connection:
-            connection.execute(
-                text("update agents set body = json_remove(body, '$.llm')")
-            )
+            for name, body in connection.execute(
+                select(schema.agents.c.name, schema.agents.c.body)
+            ).all():
+                connection.execute(
+                    update(schema.agents)
+                    .where(schema.agents.c.name == name)
+                    .values(body=json.dumps(edit(json.loads(body))))
+                )
     finally:
         engine.dispose()
 
@@ -386,7 +400,7 @@ def test_neither_an_answer_nor_a_refusal_carries_a_credential(
     )
 
     with caplog.at_level("INFO"):
-        with entered_client(booted.config, booted.secrets) as served:
+        with entered_client(booted.config, booted.secrets, from_store=True) as served:
             rotated = served.put(
                 f"{MOUNT_PATH}/providers/llm/mock/secrets/api_key",
                 json={"secret": ROTATED},
@@ -562,7 +576,7 @@ def test_a_running_server_hands_its_own_comparison_to_the_api(
     stored(directory)
     booted = load_boot_config()
 
-    with entered_client(booted.config, booted.secrets) as served:
+    with entered_client(booted.config, booted.secrets, from_store=True) as served:
         # Booted from exactly what is stored, so there is nothing
         # pending and every kind still says where it converges.
         settled = served.get(DIFF_PATH, headers=headers()).json()

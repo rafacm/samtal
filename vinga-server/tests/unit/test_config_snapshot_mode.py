@@ -17,7 +17,6 @@ a stub would be asserting on the stub.
 """
 
 from collections.abc import Iterator
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -40,13 +39,10 @@ DIFF = f"{MOUNT_PATH}/runtime/config/diff"
 RELOAD = f"{MOUNT_PATH}/runtime/config/reload"
 
 
-def handed(directory: Path) -> Config:
-    """A configuration composed in memory, naming a directory nothing
-    has put a database in."""
-    return config_with(
-        server={"database": {"dir": str(directory / "db")}},
-        devices={DEVICE: ["assistant"]},
-    )
+def handed() -> Config:
+    """A configuration composed in memory, which is a world no store
+    describes however complete the database beside it looks."""
+    return config_with(devices={DEVICE: ["assistant"]})
 
 
 def seed(served: TestClient) -> None:
@@ -67,11 +63,11 @@ def seed(served: TestClient) -> None:
 
 
 @pytest.fixture
-def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
     monkeypatch.setenv(API_SECRET_ENV, TOKEN)
     with entered_client(
-        handed(tmp_path), headers={"Authorization": f"Bearer {TOKEN}"}
+        handed(), headers={"Authorization": f"Bearer {TOKEN}"}
     ) as served:
         seed(served)
         yield served
@@ -145,16 +141,21 @@ def test_every_live_write_names_the_same_boundary(client: TestClient) -> None:
 
 
 def test_a_server_reading_a_store_answers_all_three_as_usual(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The other side of the fact, so that the mode is what is being
     pinned rather than the routes. A second server started over the
-    directory the first one's API created reads its configuration from
-    it, and both surfaces answer."""
+    database the first one's API wrote reads its configuration from it,
+    and both surfaces answer.
+
+    `create_app` with no configuration at all is what makes it the
+    other side: it composes from the store itself, which is what a
+    deployment's ASGI entry point does, so the mode is the one this
+    file's fixture is not in."""
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
     monkeypatch.setenv(API_SECRET_ENV, TOKEN)
     with entered_client(
-        handed(tmp_path), headers={"Authorization": f"Bearer {TOKEN}"}
+        handed(), headers={"Authorization": f"Bearer {TOKEN}"}
     ) as first:
         seed(first)
         first.put(f"{MOUNT_PATH}/devices/{DEVICE}", json={"agents": ["assistant"]})
