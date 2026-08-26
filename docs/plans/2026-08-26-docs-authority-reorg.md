@@ -280,9 +280,14 @@ was written; both outcomes are settled inputs here.
   called out in the PR rather than slipped into the move.
 - **Closed sets mapped to decision sites.** The authority taxonomy
   is a closed set of seven classes declared once in
-  `docs/README.md`; every page under `docs/` is classified into
-  exactly one, and the classification lives on the index line and
-  the page's own introduction, nowhere else.
+  `docs/README.md`, which classifies every page centrally, by
+  directory where a directory is homogeneous (`adr/`, `plans/`,
+  `features/`) and by page where it is not. A page-level authority
+  introduction is carried only by maintained hand-written pages,
+  and by generated Markdown only through its generator; dated
+  records, generated JSON, and pages this reorganization does not
+  otherwise touch are classified by the index alone and not
+  edited.
 - **Honest seams.** Not applicable to prose; the nearest analogue,
   summaries that quietly become second sources of truth, is exactly
   what #313 exists to close.
@@ -626,6 +631,14 @@ faithful; resolutions appended per amendment commit.
    `docs/README.md`; require page-level authority introductions
    only for maintained hand-written pages and for generated
    Markdown whose generator owns the introduction.
+
+   *Resolution.* Adopted. The lens now states central
+   classification in `docs/README.md` (by directory where
+   homogeneous, by page where not), with page-level authority
+   introductions only on maintained hand-written pages and on
+   generated Markdown through its generator; dated records,
+   generated JSON and untouched pages are classified by the index
+   alone.
 
 10. **P2: No milestone owns the required changelog update.**
     AGENTS.md requires `CHANGELOG.md` for every notable change;
