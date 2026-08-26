@@ -503,14 +503,24 @@ cited rather than carried from the plan. Each row, and what was read:
   verb returns with #190, and per-user scoping needs a voiceprint
   identification that does not exist. The row now states the
   retention window as the whole deletion policy and names #190.
-- **Capture: landed, off by default.**
+- **Capture: landed, off unless `server.capture.enabled` is true.**
   `vinga-server/src/vinga_server/capture.py` and
-  `device/capture_audio.py`. Its module docstring gives the three
-  files per session and says it is off unless a directory is
-  configured and says so on every session it records;
-  `config/models.py` carries the total directory budget and
-  `capture.py`'s `prune` deletes oldest first, which is what the old
-  row's "short-lived, pruned, already governed" meant.
+  `device/capture_audio.py` give the three files per session.
+  `config/models.py`'s `CaptureConfig` is where the switch is:
+  `enabled: bool = False`, with `dir` required even when disabled
+  and the comment saying the flag rather than the section's presence
+  is what switches it, because a field round records and then stops
+  and the tuning is worth keeping across that.
+  `tests/unit/test_config.py:test_capture_is_off_until_it_is_enabled`
+  pins it, and `app.py`'s composition root builds a `CaptureStore`
+  only when the section exists and the flag is set. The room-audio
+  warning is `CaptureEnabled` in `events/catalog.py`, WARNING on the
+  app channel and, in its own words, "said once at startup"; the
+  per-session `capture_started` is INFO and says only which path a
+  session is being written to. `config/models.py` carries the total
+  directory budget and `capture.py`'s `prune` deletes oldest first,
+  which is what the old row's "short-lived, pruned, already governed"
+  meant.
 - **Audit: still future, and unowned.** A case-insensitive grep for
   `audit` over `vinga-server/src/` returns one hit, an unrelated
   comment in `config/api.py`. No table, no route, no writer. The old
@@ -619,3 +629,37 @@ historical passages that own them.
   columns), and the table's rendering with its fifth column.
 - No test lane was run and none was owed: this milestone touches no
   file under `vinga-server/`, `docs/reference/` or `.github/`.
+
+### PR review round
+
+External review of PR #323 (backend codex 0.149.1, model
+`gpt-5.6-terra`, 2026-08-27). Verdict: mergeable after the fix. One
+finding.
+
+1. **P2: the capture row got both halves of its own status wrong.**
+   "Off unless a directory is configured" is not the switch: `dir` is
+   required even when capture is disabled, `enabled` defaults to
+   false, and `app.py` builds a store only when the section exists
+   and the flag is set, which
+   `tests/unit/test_config.py:test_capture_is_off_until_it_is_enabled`
+   pins. And the explicit room-audio warning is emitted once at
+   startup (`capture_enabled`, WARNING), not on every session: the
+   per-session `capture_started` is INFO and says only which path a
+   session is being written to.
+
+   *Resolution.* Adopted. The row now names
+   `server.capture.enabled` as the switch, says why the flag rather
+   than the section carries it, and distinguishes the startup warning
+   from what the per-session event honestly says. The
+   source-verification bullet above is corrected the same way, and
+   now cites the four files the claim is actually read from rather
+   than the module docstring.
+
+   *What produced the error.* The status was read from
+   `capture.py`'s module docstring, which says "It is off unless a
+   directory is configured, and says so on every session it records".
+   That sentence is loose against the configuration model and the
+   composition root beside it, and a docstring is not where a
+   deployment-facing switch is defined. The other three rows were
+   verified against models, routes and generated references; this one
+   was not, and it is the one that was wrong.
