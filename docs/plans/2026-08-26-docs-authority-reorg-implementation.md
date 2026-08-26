@@ -666,7 +666,7 @@ finding.
 
 ## M4: Concepts distinguishes today from direction
 
-PR TBD.
+PR #324.
 
 ### What landed
 
