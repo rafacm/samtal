@@ -70,8 +70,9 @@ A **device** is a physical endpoint with no intelligence of its own. An
 **agent** is a named unit of behavior: a system prompt, a model
 configuration, a voice, and a set of MCP tools. A device is **bound**
 to one or more agents, one of which is its default. A **session** is
-one connection episode from one device, wake to close, and the server
-records sessions and the turns inside them. A **conversation** is a
+one connection episode from one device, wake to close, and a
+deployment that has turned recording on stores the session and the
+turns inside it. A **conversation** is a
 dialogue between a user and exactly one agent: a durable thread that
 outlives any single session and belongs to no device, which is
 **decided direction** (issue #190), not code. **Users** arrive in a
@@ -202,11 +203,12 @@ session are different things.
 
 A **session** is one connection episode: wake (button press or wake
 word) to close. It belongs to a device. Sessions exist in the code
-today, and so does their record: the server stores one row per session
-and one per turn, with the numbers and the text each behind a switch of
-its own. What is stored, what each switch takes away, and how long a
-row is kept are in
-[the conversation store schema](reference/conversations-schema.md).
+today, and so does their record wherever a deployment has turned
+recording on: the store then holds one row per session and one per
+turn. Whether it records at all, what its content switches take away
+when it does, and how long a row is kept are all in
+[the conversation store schema](reference/conversations-schema.md),
+which this page does not restate.
 That schema is named `conversations`, which is the collision worth
 holding on to: it is the store of sessions and turns, not of the entity
 the next paragraph describes.
