@@ -490,7 +490,9 @@ docs/
   history. Documentation footprint: the pages whose claims the
   reconciliation corrects are enumerated in the PR, not discovered
   by its readers.
-- [ ] **M6: The summaries answer to their sources (#313).** After a
+- [x] **[M6: The summaries answer to their
+  sources.](2026-08-26-docs-authority-reorg-implementation.md#m6-the-summaries-answer-to-their-sources)**
+  (PR TBD) After a
   rebase over whatever #309 landed: the root, server and firmware
   READMEs, AGENTS.md, the glossary, the regression suite, the
   device-guide introductions and the generated-reference

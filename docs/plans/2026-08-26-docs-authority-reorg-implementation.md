@@ -1313,3 +1313,259 @@ spellings eight lines down and changed nothing else. The
 `cli-guide-audit.md` classification failure this section reported under
 Discoveries is gone: the rebase onto merged `main` brought the fix
 with it, so the file's tests are green in full.
+
+## M6: The summaries answer to their sources
+
+PR TBD.
+
+### What landed
+
+Ten commits.
+
+- **`vinga-server/README.md`,** two summaries pointed at what they
+  answer to: the `local_only` section, which is how the server keeps a
+  product promise and named it only as "the promise", and the Status
+  section, which sent a reader after device setup to a page M5 emptied
+  of board procedures.
+- **`README.md` and `vinga-esp32/README.md`,** the three claims each
+  stated in its own words: thin device and smart server (a guideline
+  since M2), the loop that runs entirely on your own hardware (the
+  first-class local deployment), and the project layout's docs row,
+  which still called the architecture corpus "the architecture and its
+  principles".
+- **`AGENTS.md`,** the repository-layout entry for the protocol notes,
+  which promised "ports, configuration keys, and the validated
+  end-to-end demo procedure" after M5 moved every procedure out, plus a
+  new entry for `docs/README.md`, the page that classifies the rest.
+- **`docs/glossary.md` and
+  `docs/conversational-quality-regression-suite.md`,** the event names
+  each carries, sent back to the generated reference; and the
+  glossary's Help agent entry, which described a planned agent without
+  linking the page that names its owner.
+- **`vinga-server/src/vinga_server/egress.py` and
+  `device/boundary.py`,** the two callers still routing through
+  `principles.md` for content.
+- **`vinga-server/src/vinga_server/config/docgen.py` and
+  `conversations/docgen.py`,** one sentence each, with
+  `docs/reference/domain-config.md` and
+  `docs/reference/conversations-schema.md` regenerated in the same
+  commit.
+- **`.claude/skills/implement-issue/SKILL.md`,** the two "being
+  reorganized by #310 to #313" caveats, replaced with the taxonomy
+  pointer per design decision 12.
+- **`CHANGELOG.md`,** one bullet under the existing 2026-08-27
+  `### Changed` section, and the regenerated spellings manifest, this
+  section and the milestone tick.
+
+### The audit set, page by page
+
+Every page the milestone names, what was fixed on it, and what was
+checked and found already correct. A fix is a sentence; nothing here
+rewrote a page.
+
+| Page | Fixed | Checked and clean |
+| --- | --- | --- |
+| `README.md` (root) | The fully-local claim links the promise; "thin device and a smart server" links the guideline; the project layout's docs row named `principles.md`'s old contents | The WebSocket-only bound against the promise's own transport bound; the activation prose M5 reconciled; the hardware table against `vinga-esp32/README.md`'s, which lists the same three boards at the same statuses; the simulator bullet against `reference/cli.md`'s supported list (check-in, `--claim`, one turn, one packaged utterance) |
+| `AGENTS.md` | The protocol-notes entry, which described a page M5 replaced; `docs/README.md` added to the layout | The promises and guidelines entries M2 wrote; the hardware-context pointer M5 moved; the design conventions, which link `design-guide.md`; the command conventions, which link `cli-guide.md` |
+| `docs/glossary.md` | Structured event links `reference/events.md`; Help agent links `concepts.md#the-help-agent` | Conversation and Session as M4 corrected them; Listening modes, Wake word (#112) and OTA endpoint as M5's sweep left them; Idle timeout, which names no number; Capture, Barge-in and Gate ladder, which link the ADR; World, which links the concepts page |
+| `docs/conversational-quality-regression-suite.md` | The turn walkthrough links the generated event reference | All nine events it names exist in that reference; `vad` is described as a record that never reaches the server log, which is what the reference says about the endpointer track |
+| `docs/devices/README.md` | Nothing | It links the notes for each protocol fact it summarizes (the listening mode the server cannot change, the discovery race, the one URL); the idle timeout is stated as "two minutes with no conversation by default", which is `server.limits.idle_timeout_s`'s 120.0 and is not unique to this page |
+| The three device guides | Nothing | Each introduction defers to the common page, states the provenance convention its sections follow, and names the listening mode its board starts in; the AMOLED's NVS-size warning links the common page's procedure instead of repeating it |
+| `vinga-server/README.md` | The `local_only` section links the promise; the Status section points at `docs/devices/` for a board and keeps the notes for the wire | The Logging index names exactly the 56 events `reference/events.md` declares, no extras either way, and the reference itself designates that index as its human half; the conversation-store section agrees with `observability-surfaces.md` and the generated schema on both switches, the 90-day retention and the absent delete verb. Its onboarding paragraph is M5's, see Deviations |
+| `vinga-esp32/README.md` | The thin-device sentence links the guideline | The hardware table against the root README's; the NVS and protocol links M5 repointed |
+| `docs/reference/` introductions | `domain-config.md` and `conversations-schema.md` named a source file under a path the tree does not have, corrected through their generators | `events.md`, `cli.md` and `api-openapi.json`, whose introductions claim only what their generators can support |
+
+### The authority-sensitive phrase sweep
+
+Case-insensitive over the whole tree, for `product promise`,
+`compatibility floor`, `fully local`, `thin device`, `decided
+direction` and `implemented today`, plus the close variants
+`first-class`, `local-first` and `thin fork`. Dated records
+(`docs/plans/`, `docs/adr/`, `docs/features/`, `CHANGELOG.md`) are
+excluded by the rule that they are not rewritten. Every remaining hit
+is one of the rows below.
+
+| Phrase | Where | Classification |
+| --- | --- | --- |
+| `product promise` | `architecture/product-promises.md`, title and introduction | **The source** |
+| | `architecture/cli-guide.md:129`, `architecture/design-guide.md:338` | Summary: each says its page never outranks the promises, and links them |
+| | `architecture/guidelines.md:3` | Summary: the guidelines open by naming what they keep |
+| | `docs/README.md:23`, `architecture/README.md:16`, `concepts.md:14` | Summary: taxonomy and router rows, each linking |
+| | root `README.md:169` | Summary, **fixed here**: the row named the retired page's contents |
+| `compatibility floor` | `product-promises.md:23` | **The source** |
+| | `architecture/README.md:16`, `principles.md:14`, `concepts.md:361` | Summary: each links the promise |
+| | `architecture/cli-guide-audit.md:148` | Dated record (2026-08-24), untouched |
+| | `tests/unit/test_onboarding_activation.py:370` | Summary: "the compatibility floor this project promises" attributes rather than defines |
+| `fully local`, `first-class`, `local-first` | `product-promises.md:62` | **The source** |
+| | root `README.md:23,32,45,114` | Summary; line 32 is the strongest of them and now links the promise, **fixed here** |
+| | `vinga-server/README.md:80,85,1125,1771,2730` | Summary; the enforcement section links the promise, **fixed here** |
+| | `egress.py:1,3`, `providers/openai_asr.py:13`, `providers/openai_tts.py:10`, `config.example.yaml:236`, `tests/local/test_real_conversation.py:3` | Summary; `egress.py` names the promises page, **fixed here** |
+| | `architecture/README.md:16`, `principles.md:14`, `guidelines.md:51` | Summary: router lines and the identity preamble |
+| `thin device`, `thin fork` | `guidelines.md:34,68` | **The source** |
+| | root `README.md:40`, `vinga-esp32/README.md:6` | Summary, **fixed here**: both stated the premise and linked nothing |
+| | `concepts.md:98`, `architecture/README.md:23`, `principles.md:16` | Summary: each links the guideline |
+| | root `README.md:48` | Not this guideline: a status claim about the firmware fork, marked 🚧 |
+| | `related-projects.md:106` | Not a vinga claim: another project's division of labour |
+| `decided direction`, `implemented today` | `docs/concepts.md`, 26 lines | **The source** for each claim's status; the marking itself is declared in `docs/README.md:49,154` |
+| | `glossary.md:103` | Summary: cites #190 and links the concepts page |
+| | `architecture/README.md:94`, `docs/README.md:154` | Summary of the convention, both admitting the no-owner case as M4's review round required |
+
+No current page states a promise, a guideline or a status that its
+source does not, and no page but the sources states one without
+linking.
+
+### The observability check
+
+Design decision 12's companion: the four-surface model and the exact
+event vocabulary are hand-copied nowhere.
+
+- **The four-surface model** appears in
+  `architecture/observability-surfaces.md` (the table and its own
+  navigation) and in `architecture/README.md`'s router row, which
+  describes it in one line and links it. Nowhere else: the grep for
+  `four surface`, `four-surface` and `observability surface` over
+  current pages returns the ADRs that hold the decision, the
+  guidelines' one citation of the json-logs ADR, `docs/README.md`'s
+  reference row, and the generated `reference/events.md`.
+- **The exact vocabulary** is `reference/events.md`, generated. The
+  server README's Logging index is the one other place event names are
+  written out, and it is not a second source: `reference/events.md`
+  designates it by name as "the human overview, with one line per event
+  saying when it fires", the README links back to the reference for
+  what an event carries, and the two sets are identical. Verified by
+  set difference: 56 events in the reference, 56 rows in the index, no
+  name on either side that is not on the other.
+- **Two summaries named events without their source**, the glossary's
+  Structured event entry and the regression suite's turn walkthrough.
+  Both now say their names are examples and link the reference.
+
+### The moved-path classification
+
+The final search #310's verification list asks for, over the whole
+tree, for `principles.md`, "the principles page", `pipeline-ownership`,
+`architecture/excalidraw`, `architecture/plantuml`, and links to
+`architecture/README.md` as the walkthrough.
+
+| Match class | Where | Classification |
+| --- | --- | --- |
+| `principles.md` as a signpost | `docs/README.md:98`, `architecture/README.md:34` | **Current and correct**: both describe the page as a signpost rather than routing a reader through it |
+| `principles.md` by path or by name | `docs/adr/2026-08-10-normalize-the-hardware-edge.md` and nine files under `docs/plans/`, plus `CHANGELOG.md` | **Intentionally historical**: the paths these link are exactly what the compatibility page exists to keep resolving |
+| `principles.md` from the server's source | `egress.py:3`, `device/boundary.py:10` | **Errors, fixed here**: both routed through the signpost for content. See Discoveries |
+| `pipeline-ownership` | `architecture/README.md:35`, one sentence saying the file is gone and where its content went | **Current and correct** |
+| | `CHANGELOG.md` and `docs/plans/` | **Intentionally historical** |
+| `architecture/excalidraw`, `architecture/plantuml` | `CHANGELOG.md:4133,4144` (the day the diagrams were added) and this reorganization's own plan and record | **Intentionally historical** |
+| Links to `architecture/README.md` | `docs/README.md:93,184`, `system-overview.md:12`, `SKILL.md:70` | **Current and correct**: every one links it as the index or the router, and none as the walkthrough, which is `system-overview.md` |
+
+**Errors after this milestone: zero.** The two that existed were the
+docstrings above, and they were outside every earlier census's reach.
+
+### Deviations from the plan
+
+1. **The onboarding contradiction is not fixed here.** M5's record
+   named it and left it to M6, and this milestone's brief made it
+   deliverable 2; it was implemented here and then dropped, because
+   #325's review round rejected deferring the fix out of #312 and it
+   landed in M5 instead. `vinga-server/README.md`'s onboarding
+   paragraph, including the pointer that still names the notes for the
+   serial procedures, is M5's; every other claim in that file was
+   audited here.
+2. **The audit reached two module docstrings and two generators**,
+   neither of which is in the named audit set. Both came from #310's
+   own final verification, which is a search over the repository rather
+   than over the audit set, and both were errors by the plan's own rule
+   that no current caller routes through the compatibility page.
+   Changing the two generators is the case the plan's review finding 6
+   provided for, and it carries the full obligations, which the
+   Verification section below discharges.
+3. **`AGENTS.md` gained an entry the milestone does not name**, for
+   `docs/README.md`. Design decision 12 has the skill tell a session to
+   confirm where a role lives through the taxonomy, and `AGENTS.md`
+   listed three pages under `docs/` without ever naming the page that
+   classifies them, so the pointer had nowhere to land.
+4. **One glossary entry was linked beyond the phrase sweep's
+   findings.** The Help agent entry describes a direction and named no
+   owner; it links the concepts page, which carries the marking and the
+   issue.
+5. **The rebase over #309 was moot.** Design decision 9 and the M6
+   milestone both begin "after a rebase over whatever #309 landed".
+   #309 has not landed: it is not on `main` and nothing of it is on
+   this chain, so the root README was audited exactly as M1 left it,
+   and the two links this milestone adds to it are the whole of its
+   diff here.
+6. No other deviation.
+
+### Discoveries
+
+- **A caller census that stops at Markdown misses the callers that
+  matter most.** M2's census covered `README.md`, `AGENTS.md`,
+  `CHANGELOG.md`, `docs/`, `.claude/` and both component READMEs, and
+  was exact over that set. It never looked in `vinga-server/src/`,
+  where two module docstrings cited `principles.md`: one for the
+  enforced-not-documented guarantee, one linking it for the
+  telephone-call test. A docstring is read at the moment somebody is
+  about to change the code the rule governs, which makes it the worst
+  place for a pointer at a page holding nothing.
+- **A generated introduction can be stale about the repository rather
+  than about the model.** The drift checks compare a generated document
+  against its generator, so a sentence that is wrong in the generator
+  is green forever. Two of them told a reader that a field description
+  lives in `vinga-server/vinga_server/config/models.py` and a column
+  description in `vinga-server/vinga_server/conversations/schema.py`,
+  paths that stopped existing when the package moved under `src/`. The
+  events generator beside them says `src/` and has since that move, so
+  the three disagreed about the same tree and nothing could notice.
+- **The spellings census is a documentation tripwire.** It was green at
+  this branch's start, which M5's regeneration had just made true, and
+  went red on eight lines of prose: four added to `AGENTS.md` and four
+  to `vinga-server/README.md`, above rows that record a line number.
+  Seventeen rows moved and not one spelling changed. M4 recorded the
+  mechanism; this is its cheapest possible instance, and it still costs
+  a commit.
+- **The server README's event index is the exception that proves the
+  rule.** It writes out 56 event names, which is exactly what the
+  hand-copy prohibition is about, and it is correct anyway: the
+  generated reference names it as its own human half, it links back for
+  everything it does not say, and the two sets are identical. A second
+  copy is defined by what it can drift into, not by how much of the
+  vocabulary it repeats, and this one is cross-declared in both
+  directions.
+
+### Verification
+
+- **The scratchpad link-and-anchor script**, run after every commit
+  that touched a link and last on the finished branch:
+  `checked 158 files, 0 failures`.
+- `uv run ruff check .` from `vinga-server/`: `All checks passed!`.
+  `uv run mypy` (CI's events type check): `Success: no issues found in
+  4 source files`.
+- `uv run pytest tests/unit -q`: **4022 passed, 19 skipped** in 432s,
+  after the manifest regeneration; before it, the one expected failure
+  was `test_the_manifest_is_the_census` on the shifted line numbers.
+- `uv run pytest tests/integration -q`: **200 passed** in 267s.
+- **All five generated-document drift checks reproduced by hand**, with
+  the workflow's own commands (`config reference`, `conversations
+  schema`, `events reference`, `config openapi`, and the two CLI steps,
+  the whole-page rebuild through the markers and the recipe region
+  against `cli.cli_recipes()`). Every `diff -u` empty. The only moved
+  bytes under `docs/reference/` are the two source paths, one line
+  each, exactly the generator change's output.
+- Postgres for both lanes was started with `docker compose up -d
+  --wait` from this worktree's own root (compose project `wt-m6`) and
+  stopped afterwards.
+- **The spelling manifest regenerated, not hand-edited**, with the
+  command its own module documents. Its diff is seventeen line numbers
+  and nothing else.
+- **The event-name set difference**, computed rather than eyeballed:
+  the 56 `### ` sections of `docs/reference/events.md` against the 56
+  rows of `vinga-server/README.md`'s Logging index, symmetric
+  difference empty.
+- `git diff --name-only` against the M5 tip, by area: seventeen files.
+  Six under `docs/` (the glossary, the regression suite, the two
+  generated references, and this plan and its record), three at the
+  repository root (`README.md`, `AGENTS.md`, `CHANGELOG.md`), one
+  under `.claude/`, one under `vinga-esp32/`, and six under
+  `vinga-server/` (its README, the two docstrings, the two generators,
+  and the spellings manifest).
+- Source review of every changed page: heading levels, link targets and
+  hard wrapping. No line this milestone wrote exceeds 75 columns except
+  the table rows above, which are cells rather than prose.
