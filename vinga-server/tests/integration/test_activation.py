@@ -21,7 +21,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.integration.conftest import booted_in
+from tests.integration.conftest import booted
 from tests.support.notices import CHECK_IN, boundaries
 from vinga_server.config import Config
 from vinga_server.onboarding import onboarding_key, onboarding_path
@@ -82,10 +82,9 @@ async def _poll(client: httpx.AsyncClient, path: str) -> int:
 
 @pytest.mark.asyncio
 async def test_a_board_is_onboarded_by_the_code_it_shows(
-    serve_app_in, simulate, tmp_path: Path
+    serve_app, simulate, tmp_path: Path
 ) -> None:
-    directory = tmp_path / "db"
-    async with serve_app_in(directory, CONFIG) as (port, app):
+    async with serve_app(CONFIG) as (port, app):
         # The URL an operator reads off the startup banner and types
         # into the board's captive portal. Everything below is what the
         # board does with it.
@@ -140,7 +139,7 @@ async def test_a_board_is_onboarded_by_the_code_it_shows(
     # The binding survives the server. A second app booted from the same
     # directory hands the board its token straight away, at the same
     # onboarding URL, because the key is derived from the same secret.
-    restarted = booted_in(directory, CONFIG)
+    restarted = booted(CONFIG)
     with TestClient(restarted) as client:
         server = restarted.state.composition.server
         assert onboarding_path(onboarding_key(server)) == short
@@ -151,12 +150,12 @@ async def test_a_board_is_onboarded_by_the_code_it_shows(
 
 @pytest.mark.asyncio
 async def test_a_stale_code_is_refused_by_the_running_server(
-    serve_app_in, tmp_path: Path
+    serve_app, tmp_path: Path
 ) -> None:
     """The other half of the same ceremony: the operator types a number
     that is no longer the one on the screen, and is told so rather than
     binding something."""
-    async with serve_app_in(tmp_path / "db", CONFIG) as (port, app):
+    async with serve_app(CONFIG) as (port, app):
         short = onboarding_path(onboarding_key(app.state.composition.server))
         async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}", timeout=30) as client:
             code = (await _check_in(client, short))["activation"]["code"]

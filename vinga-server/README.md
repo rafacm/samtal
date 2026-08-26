@@ -41,9 +41,12 @@ request to `/api` carries a bearer token.
 
 ## Goals
 
-- Python-only, and no database server to run: the domain half of the
-  configuration lives in an embedded SQLite file on the data volume,
-  and a conversation needs no store at all
+- Python, and one Postgres database holding everything this server
+  stores: the domain half of the configuration in a `domain` schema,
+  and the conversation record, when it is turned on, in a
+  `conversations` schema beside it. Both are migrated at every boot,
+  so a blank database is a valid state to start on and there is no
+  init command to forget
 - Configurable providers:
   - **LLM**: Anthropic, any OpenAI-compatible endpoint (Ollama, LM Studio,
     gateways)
@@ -1051,10 +1054,11 @@ Over the API it is `POST /api/runtime/config/reload`.
 
 Python 3.12 with [FastAPI](https://fastapi.tiangolo.com), managed with
 [uv](https://docs.astral.sh/uv/). Pydantic models validate both halves
-of the configuration, the YAML file and the rows of the SQLite database
-behind `vinga-server config` (SQLAlchemy Core, Alembic migrations run
-on open); the same types and the same repository back the configuration
-API, of which the command grammar is a client. Integration tests
+of the configuration, the YAML file and the rows of the Postgres
+database behind `vinga-server config` (SQLAlchemy Core over psycopg 3,
+Alembic migrations run on open); the same types and the same repository
+back the configuration API, of which the command grammar is a client.
+Integration tests
 drive the server with the [xiaozhi-sdk](https://pypi.org/project/xiaozhi-sdk/)
 device simulator, so CI holds real conversations without hardware. The wire
 protocol is kept isolated behind a small interface, separate from the
@@ -1063,6 +1067,13 @@ conversation pipeline.
 ## Development
 
 ```bash
+# From the repository root: the Postgres both stores live in. The
+# server refuses to boot on a database it cannot reach, so this comes
+# first, and --wait is what makes "first" mean ready rather than
+# started.
+docker compose up -d --wait
+
+# The rest, from vinga-server/:
 uv sync                             # install dependencies, server half included
 uv sync --extra faster-whisper --extra piper  # add the local ASR/TTS engines
 uv run vinga-server                # run the server
@@ -1075,6 +1086,27 @@ uv run ruff check .                 # lint
 # shows up in CI. Local runs are serial by default.
 uv run pytest tests/unit -q -n auto --dist loadfile
 ```
+
+**A Postgres is a prerequisite of running the server at all**, because
+both halves of what it stores live in one, and the compose service at
+the repository root is the development instance. Its defaults are the
+server's own defaults (`127.0.0.1:5432`, database `vinga`, role
+`vinga`, password `vinga`), so a checkout needs no configuration for
+any of it, and the password being shipped in the open is exactly why
+the service is published on loopback and nowhere else. Starting it
+also runs [`../deploy/postgres-init.sql`](../deploy/postgres-init.sql)
+once, which creates the two schemas and the read-only `vinga_ro` role
+the conversation record is read through; the tables inside them are
+Alembic's, made by the server on its first boot. `docker compose down
+-v` throws the whole thing away, and the next `up` rebuilds it from
+nothing.
+
+The test lanes use that same instance, and refuse to run rather than
+skipping when they cannot reach it, so a suite that has stopped
+exercising storage cannot read green. They create databases of their
+own to isolate a run, which is why the lane wants a role that may
+create them (the compose superuser is one) while the server itself
+never needs that privilege.
 
 `uv sync` with no flags is deliberately the whole of it. The package's
 default install is the configuration CLI, and the server half is the
@@ -1125,29 +1157,43 @@ A fourth lane runs nothing itself. It points at a server that is already
 up and holds one whole conversation with it: healthz, an OTA check whose
 token it verifies, and a full utterance-to-audio exchange through the
 device simulator. CI runs it against the image it just built, seeding
-that image's own CLI into the volume it then reads, which is what turns
-"a seeded volume and one `docker run` serve a conversation" into
-something checked rather than remembered.
+that image's own CLI into the database it then reads, which is what
+turns "a seeded database and one `docker run` serve a conversation"
+into something checked rather than remembered.
+
+Both containers below have to reach the same database, and a container
+does not reach the development instance at `127.0.0.1`, since that
+address is its own. Join them to the network compose made for it
+(`docker network ls` lists it as your project's `_default`) and name
+the service instead, which is what `VINGA_DB_HOST` is doing here; CI
+does the same thing with a network and a database container of its
+own.
 
 ```bash
 docker build -t vinga-server:local .
 
+# The network compose made for the database, named after the directory
+# the compose file is in: `docker network ls` says which it is.
+net=vinga_default
+
 # The domain half first, written by the CLI from the image itself into
-# the volume the server then reads. tests/smoke/seed.sh is what CI runs:
+# the database the server then reads. tests/smoke/seed.sh is what CI runs:
 # it starts a server of its own inside this container, configures it over
 # loopback, and stops it again, which is why the container gets what a
 # server needs.
-docker run --rm \
+docker run --rm --network "$net" \
   -e VINGA_AUTH_SECRET=smoke-secret \
   -e VINGA_API_SECRET=smoke-api-token \
+  -e VINGA_DB_HOST=postgres \
   -v smoke-data:/data \
   -v "$PWD/tests/smoke:/smoke:ro" \
   -v "$PWD/tests/smoke/config.yaml:/config/config.yaml:ro" \
   --entrypoint sh vinga-server:local /smoke/seed.sh
 
-docker run -d --name vinga-smoke -p 8003:8003 \
+docker run -d --name vinga-smoke -p 8003:8003 --network "$net" \
   -e VINGA_AUTH_SECRET=smoke-secret \
   -e VINGA_API_SECRET=smoke-api-token \
+  -e VINGA_DB_HOST=postgres \
   -v smoke-data:/data \
   -v "$PWD/tests/smoke/config.yaml:/config/config.yaml:ro" \
   vinga-server:local
@@ -1169,10 +1215,11 @@ how the process runs is decided when it is deployed, and what it says
 and to whom is decided while it runs.
 
 **The server half is one YAML file.** `server:` (host, port, auth,
-onboarding, limits, logging, capture, where the database lives) and an
-optional `memory:`. It is passed as `--config /path/to/config.yaml` or through
-the `VINGA_CONFIG` environment variable; with neither set, defaults
-apply, and it is handled by
+onboarding, limits, logging, capture, which database to connect to)
+and an optional `memory:`. It is passed as
+`--config /path/to/config.yaml` or through the `VINGA_CONFIG`
+environment variable; with neither set, defaults apply, and it is
+handled by
 [pydantic-settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/).
 [`config.example.yaml`](config.example.yaml) documents every key of it,
 and [`config.deploy.example.yaml`](config.deploy.example.yaml) is a
@@ -1183,14 +1230,14 @@ deployment. That profile's domain half is the runnable script beside it,
 suite runs against a real server, so its measured values are checked
 rather than merely written down.
 
-**The domain half lives in a database**, one SQLite file under
-`server.database.dir`, written with the `vinga` CLI: named
-`providers` per stage (`llm`, `asr`, `tts`, `vad`), named `mcp_servers`,
-named `prompt_fragments` holding the blocks of prompt text agents share,
-`agent_defaults` holding what every agent uses unless it says otherwise,
-`agents` combining a prompt with provider, fragment and MCP references,
-`devices` binding MAC addresses to agents, and `default_agent` for
-unknown devices.
+**The domain half lives in a database**, the `domain` schema of the
+Postgres database `server.database` names, written with the `vinga`
+CLI: named `providers` per stage (`llm`, `asr`, `tts`, `vad`), named
+`mcp_servers`, named `prompt_fragments` holding the blocks of prompt
+text agents share, `agent_defaults` holding what every agent uses
+unless it says otherwise, `agents` combining a prompt with provider,
+fragment and MCP references, `devices` binding MAC addresses to agents,
+and `default_agent` for unknown devices.
 
 The CLI writes it through the configuration API on the running server,
 so these commands need one to be up, and an empty database is a valid
@@ -1310,7 +1357,7 @@ rest are the ones `switch_agent` can reach.
 
 Every key of the file half can be overridden with a `VINGA_`-prefixed
 environment variable, nested keys joined with `__`:
-`VINGA_SERVER__PORT=9000`, `VINGA_SERVER__DATABASE__DIR=./var`.
+`VINGA_SERVER__PORT=9000`, `VINGA_SERVER__LOG_FORMAT=text`.
 Environment variables beat the YAML file, and a `.env` file in the
 directory the server is started from is read at startup (real
 environment variables beat `.env` too). This layering matches container
@@ -1321,18 +1368,46 @@ the file, refuses the boot and names the command that writes it now,
 because a configuration that quietly stopped applying is worse than one
 that will not start.
 
-`server.database.dir` defaults to `/var/lib/vinga`, which is the
-generic answer rather than any deployment's: the container image points
-it at its volume, and a development machine that cannot write there gets
-an error naming the key. Point it somewhere writable for local work:
+**The database is named by four keys and five variables.**
+`server.database` carries `host` (`127.0.0.1`), `port` (`5432`), `name`
+(`vinga`) and `user` (`vinga`), which are the compose service's own
+values, so a checkout says nothing about any of it. Those four have
+short environment names of their own, and those are the documented
+spellings, because the compose file feeds the Postgres image from the
+same four and a fact with two names is a fact with a disagreement
+pending:
 
 ```bash
-VINGA_SERVER__DATABASE__DIR=./var uv run vinga-server
+VINGA_DB_HOST=db.internal VINGA_DB_NAME=vinga_prod uv run vinga-server
 ```
 
-The server reads it at boot, and the config commands do not read it at
-all: they are clients of the API, and where the rows are kept is the
+The generic `VINGA_SERVER__DATABASE__HOST` spelling would otherwise
+work by accident of the nesting scheme, so it is refused instead, with
+a sentence naming the short one to use.
+
+Two more variables have no configuration key at all, deliberately.
+`VINGA_DB_PASSWORD` is the password, which a file that gets committed,
+diffed and printed back is the wrong home for; it defaults to `vinga`
+to match the compose service, and that default is a convenience on an
+instance bound to loopback rather than anything to deploy on.
+`VINGA_DB_URL` is the whole connection at once and wins over the other
+five when it is set, accepting `postgresql://` and
+`postgresql+psycopg://` and refusing everything else, because a second
+storage backend is not a thing this server has.
+
+The server reads all of it at boot, and the config commands read none
+of it: they are clients of the API, and where the rows are kept is the
 server's business.
+
+**A database the server cannot reach is a boot that refuses**, with a
+sentence naming those variables and telling a checkout to run `docker
+compose up -d --wait`. It is never a traceback, and it quotes nothing
+of the connection back, not even the parts that look harmless: a URL
+carries a password in its authority and can carry another in its
+query, so none of the five travels into a message or a log line.
+Restarting is the orchestrator's job rather than the entrypoint's,
+which is why the image waits for nothing and simply says why it
+stopped.
 
 ### The configuration API
 
@@ -1525,8 +1600,8 @@ to override it: such a flag's only purpose would be
 sending the token in clear. A URL carrying a username or a password is
 refused outright, and any URL the client prints has that stripped. Its
 timeouts are explicit (5 s to connect, 30 s to read) so that the
-server's own retryable answer, which can take up to the database's 10
-second busy timeout to arrive, reaches you as itself rather than as a
+server's own retryable answer, which can take up to the database's ten
+second lock timeout to arrive, reaches you as itself rather than as a
 transport error. `apply` is the exception, and deliberately: its
 transaction loads the whole existing configuration and validates the
 whole resulting one, whose size no request bound limits, so it waits for
@@ -1583,7 +1658,7 @@ forms are supported:
 Instance configs stay out of the repository; `*.local.yaml` and `.env`
 are gitignored for local experiments, and the domain half of a local
 experiment is a short script of `config <noun> set` calls against a
-database directory of its own.
+database of its own, which `VINGA_DB_NAME` is enough to give it.
 
 ## Security
 
@@ -2080,7 +2155,9 @@ after each session; a field recording is not repeatable.
 
 **This keeps what was said in a database.** It is off by default and off
 until `enabled` says otherwise, and a warning at startup says when it is
-on and names the file.
+on. It names nothing further: which database a server records into is
+its own configuration's answer, given once, rather than a line per
+start, and a connection is not a thing a log line may carry.
 
 ```yaml
 server:
@@ -2094,23 +2171,25 @@ server:
     retention_days: 90
 ```
 
-What lands is `conversations.db`, beside `vinga.db` in
-`server.database.dir`: one row per session (device, agents, protocol,
-the resolved providers, when it opened, when and why it closed), one row
-per turn (what was heard and what was replied, the ASR, LLM and TTS
-timings, the rounds and the token counts), one row per tool call a turn
-made (its source, its arguments and its result), and one row per
-structured event, which is the same decision track the capture writes
-beside its audio. Audio never enters it: the capture is the recording,
+What lands is the `conversations` schema of the same database the
+domain half's `domain` schema is in, which means the same instance, the
+same credentials and the same backup: one row per session (device,
+agents, protocol, the resolved providers, when it opened, when and why
+it closed), one row per turn (what was heard and what was replied, the
+ASR, LLM and TTS timings, the rounds and the token counts), one row per
+tool call a turn made (its source, its arguments and its result), and
+one row per structured event, which is the same decision track the
+capture writes beside its audio. Audio never enters it: the capture is the recording,
 this is the queryable record. The columns are documented in
 [`../docs/reference/conversations-schema.md`](../docs/reference/conversations-schema.md),
 generated from the schema itself, and `vinga-server conversations
 schema` prints the same document.
 
 The section's absence, and `enabled: false`, both mean the same thing:
-nothing is recorded and no file is created. An existing file is still
-brought up to the current schema at every start, because switching
-recording off does not make what was already recorded unreadable.
+no writer is started and no row is ever written. The tables are still
+brought up to the current schema at every start, because empty tables
+are not a recording and switching recording off does not make what was
+already recorded unreadable.
 
 The two switches under the flag are independent, and all four
 combinations are supported configurations:
@@ -2154,13 +2233,24 @@ the store's file, which is not a thing a command can keep doing once the
 store is a database somewhere else.
 
 Until it lands, retention above is what deletes, and a deployment that
-has to erase something now stops the server and deletes three files
-rather than one: `conversations.db`, and the `conversations.db-wal` and
-`conversations.db-shm` sidecars beside it. The log is not a cache of the
-database: a committed row's bytes live there until a checkpoint folds
-them back, so removing the database alone leaves what was meant to be
-erased sitting in the file next to it. That takes every session rather
-than the one that was asked about, which is the honest shape of the gap.
+has to erase something now does it in SQL, as the server role, taking
+the session's rows from all four tables in one transaction:
+
+```sql
+begin;
+delete from conversations.events where session = '...';
+delete from conversations.tool_invocations where session = '...';
+delete from conversations.turns where session = '...';
+delete from conversations.sessions where session = '...';
+commit;
+```
+
+The same predicate four times, because every table carries the
+session's uuid, and one transaction because a session's rows go
+together or the deletion leaves children pointing at nothing. It is a
+hand-written statement rather than a command, which is the honest
+shape of the gap; what it is not any more is the whole store, which is
+what deleting a file took.
 
 Whichever way rows go, they go a session at a time, row and children
 together. A session that is still running when its row goes stops being
@@ -2169,29 +2259,48 @@ session, so what is said afterwards is not recorded. Capture files are a
 separate instrument and are never touched by any of this; the session id
 is the correlation key for whoever needs to remove the matching triplet.
 
-Deletion is physical rather than query-level. The database runs with
-`PRAGMA secure_delete=ON`, so a freed page is overwritten with zeros
-instead of lingering in the freelist, and retention finishes with
-`PRAGMA wal_checkpoint(TRUNCATE)` so the deleted frames do not survive
-in the write-ahead log. Two limits, stated rather than implied: a
-checkpoint a reader is blocking does not fail the deletion, which is
-committed either way, and the truncation is retried at the next quiet
-moment, which is the server's next write; and copies that have already
-left the file are yours to manage.
+What deletion means is worth stating exactly, because the database
+server decides it rather than this one. A deleted row is invisible to
+every transaction that begins after the deletion commits, the
+read-only `vinga_ro` role's included. A repeatable-read transaction
+that was already in flight when it committed keeps seeing the row
+until that transaction ends, which is what multi-version concurrency
+is and not something this server can prevent: a query left open in a
+terminal is one such transaction. Reclaiming the space the row
+occupied is the instance's own storage maintenance (autovacuum), not a
+per-delete overwrite, so the interval between the delete and the
+reclamation is yours to tune rather than this server's to promise.
+There is no write-ahead log to truncate here and no sidecar file to
+take with it, and copies that have already left the database (a
+`pg_dump`, a filesystem snapshot, a replica) are yours to manage.
 
-**Read it with SQL over a WAL-safe copy, never a plain `cp` of a live
-file.** The database runs in WAL mode, where a copy on its own can miss
-committed data still sitting in the `-wal` file, exactly as for
-`vinga.db`:
+**Read it live, as `vinga_ro`.** There is nothing to copy first, and
+nothing to copy safely: the store is SQL, and the way in is a
+read-only session as the role
+[`../deploy/postgres-init.sql`](../deploy/postgres-init.sql)
+provisions. It has `SELECT` on every table in the `conversations`
+schema, now and after the next migration, and nothing at all on the
+`domain` schema next door, where the stored secrets' ciphertexts live:
 
 ```bash
-sqlite3 /var/lib/vinga/conversations.db ".backup '/tmp/conversations.db'"
-sqlite3 /tmp/conversations.db 'select * from turns order by id desc limit 20'
+psql "postgresql://vinga_ro@127.0.0.1:5432/vinga" \
+  -c 'select * from conversations.turns order by id desc limit 20'
 ```
 
-There is deliberately no analysis command: the store is SQL, and the ids
-on `sessions`, `turns` and `events` are monotonic and never reused, so a
-client that has read up to one can ask for what came after it.
+Its password under compose is `vinga_ro`, which is a loopback-only
+convenience in the same way the server's own default password is. The
+role also carries a `statement_timeout` and an
+`idle_in_transaction_session_timeout`, which are not tidiness: a
+reader's locks hold off the schema changes a migration makes, so a
+session left open inside a transaction is what would make the next
+boot's migration wait out its lock timeout and refuse. A database
+provisioned without that file simply has no analyst role, and serves
+exactly the same.
+
+There is deliberately no analysis command, and the ids on `sessions`,
+`turns` and `events` are identity columns a sequence never hands out
+twice, so a client that has read up to one can ask for what came after
+it and cannot be handed a different row under the same number.
 
 Writing never happens on the conversation's path. One background thread
 does every database call behind a queue nothing on the session loop ever
@@ -2257,8 +2366,10 @@ docker build --build-arg VINGA_REVISION=$(git rev-parse --short HEAD) -t vinga-s
 ## Running in a container
 
 The default image carries both local engines, so one seeded database
-serves a conversation. The server starts first, on whatever the database
-holds (nothing, the first time, which is a valid state to serve), and
+serves a conversation. The database itself is the deployment's to
+provide, and the server refuses to boot without one it can reach. It
+starts on whatever that database holds (nothing, the first time, which
+is a valid state to serve), and
 the domain half is written into it over the API it is already serving,
 with the `vinga` client on whichever machine administers this
 deployment. The image ships that same client under the server's own
@@ -2280,6 +2391,7 @@ docker run -d --name vinga \
   -p 8003:8003 \
   -e VINGA_API_SECRET \
   -e VINGA_AUTH_SECRET \
+  -e VINGA_DB_HOST -e VINGA_DB_NAME -e VINGA_DB_USER -e VINGA_DB_PASSWORD \
   -v /path/to/config.yaml:/config/config.yaml:ro \
   -v vinga-data:/data \
   ghcr.io/rafacm/vinga-server:latest
@@ -2298,11 +2410,13 @@ vinga reload
 - `/data` is the volume every engine caches into (`HOME` points there):
   whisper models and Piper voices download at first start and survive a
   new image. Model weights are never baked in.
-- The configuration database lives on that volume too: the image sets
-  `VINGA_SERVER__DATABASE__DIR=/data/db`, since the volume is the only
-  place an unprivileged user with a read-only root filesystem can
-  write. It is created and migrated on first open, so there is no init
-  command to forget.
+- The database is not on that volume and not in this container: the
+  image sets no database variable at all, and the deployment points
+  `VINGA_DB_HOST` and the rest of that family at the Postgres it
+  provides. Both schemas are migrated on first open, so there is no
+  init command to forget, and a database the server cannot reach is a
+  boot that refuses with a sentence rather than a container that waits.
+  Give it a restart policy, which is where that decision belongs.
 - Logs default to `json` in the image, which is the only default that
   differs from running it directly. Override with
   `VINGA_SERVER__LOG_FORMAT=text`.
@@ -2319,8 +2433,46 @@ uvicorn honours from the environment.
 
 ### The configuration database in a deployment
 
-Five things a deployment has to get right about it, none of which the
+Eight things a deployment has to get right about it, none of which the
 server can decide for you.
+
+**The database is yours to provide, and five variables name it.**
+`VINGA_DB_HOST`, `VINGA_DB_PORT`, `VINGA_DB_NAME` and `VINGA_DB_USER`
+go wherever the deployment keeps its environment, and
+`VINGA_DB_PASSWORD` goes wherever it keeps its secrets, beside
+`VINGA_AUTH_SECRET`, `VINGA_API_SECRET` and `VINGA_MASTER_KEY`, since
+that is what it is. `VINGA_DB_URL` replaces all five when a
+deployment's convention is one connection string, and is a secret for
+the same reason: a URL carries a password in its authority and can
+carry another in its query. **The shipped default password is `vinga`,
+which is a development convenience on an instance bound to loopback
+and never anything else**; set a real one before anything reachable
+runs on it.
+
+**What the server role needs is ordinary DML and nothing exotic.** No
+`CREATEDB`: the server migrates schemas, never databases, so the
+database exists before it starts. Run
+[`../deploy/postgres-init.sql`](../deploy/postgres-init.sql) against it
+once, which creates the `domain` and `conversations` schemas
+`WITH AUTHORIZATION` to the server role and provisions the read-only
+`vinga_ro` role beside them:
+
+```bash
+psql "$ADMIN_URL" -f deploy/postgres-init.sql
+```
+
+The executor needs to be able to create roles and to create schemas in
+that database (a superuser, or the database's owner with `CREATEROLE`);
+the server role needs neither, because it is given schemas it already
+owns. Provisioning them any other way works as long as the server role
+owns them: `CREATE` on the database does not grant it `CREATE` inside a
+schema somebody else owns, which is where Alembic would then fail to
+make its tables. Grant the server role `CREATE` on the database
+instead, and it creates the two schemas itself at first boot. Either
+way, **rerun that file after any database reset**: a `dropdb`/`createdb`
+takes the schemas and the database-local default privileges with it,
+while the instance-level `vinga_ro` role survives, which is why every
+statement in the file is written to be run again.
 
 **The master key is generated once and escrowed.** Set
 `VINGA_MASTER_KEY` wherever the deployment keeps its environment
@@ -2351,30 +2503,56 @@ remains in the database. Re-running `config <kind> secret set` for each stored
 secret rewrites it under the newest key, which is the interim path
 until a re-encrypt command exists.
 
-**Backups use SQLite's own mechanisms, never a plain copy of a live
-file.** The database runs in WAL mode, where a copy of `vinga.db` on
-its own can miss committed data still sitting in the `-wal` file:
+**Backups are `pg_dump`, and the server keeps running through one.**
+A dump reads inside one transaction with a snapshot of its own, so
+what it writes is the database as of the moment it started, whatever
+lands afterwards, and there is nothing to stop and nothing to quiesce:
 
 ```bash
-sqlite3 /data/db/vinga.db "VACUUM INTO '/backup/vinga-$(date +%F).db'"
+pg_dump --format=custom --file "/backup/vinga-$(date +%F).dump" \
+  "postgresql://vinga@db.internal:5432/vinga"
 ```
 
-`.backup` does the same job through the backup API. A plain `cp` is
-only safe against a stopped, checkpointed database. Back it up with the
-memory directory, which is ordinary files on the same volume.
+Both schemas travel in one dump, because both halves are one database.
+A restore is `pg_restore` into an empty database for the custom format
+above (`pg_restore --dbname ...`), or `psql --file` for a plain-text
+dump, and it is worth rehearsing on something disposable rather than
+first attempting on the day it is needed. Back it up alongside the
+memory directory, which is ordinary files on the data volume and is
+not in the database.
 
-**A restore needs both halves of the secret.** The backup file, and
-every master key still required to decrypt what it holds, which is why
-the keys are escrowed with the deployment's other environment secrets
-and separately from the backup itself. A restored database with no key
-is a configuration whose credentials will not open.
+**A restore needs both halves of the secret.** The dump, and every
+master key still required to decrypt what it holds, which is why the
+keys are escrowed with the deployment's other environment secrets and
+separately from the backup itself. A restored database with no key is
+a configuration whose credentials will not open.
 
-**What a copy of the file exposes.** No stored plaintext secret: the
-encrypted values are ciphertext and the environment references are
+**What a copy of the database exposes.** No stored plaintext secret:
+the encrypted values are ciphertext and the environment references are
 variable names rather than values. It does expose the rest of the
 domain configuration, which is to say the prompts, the endpoints and
-the variable names, so the file belongs on the data volume and in
-access-controlled backups, not in a repository.
+the variable names, and, where recording is on, everything the
+conversation record holds. Dumps belong in access-controlled storage,
+not in a repository.
+
+**Reading what was said is a `vinga_ro` session, never the server's.**
+The instance has no reason to be reachable from anywhere but the
+server, so the way in is a port forward for the length of a session,
+or a one-shot `psql` beside the database on its own host:
+
+```bash
+psql "postgresql://vinga_ro@127.0.0.1:5432/vinga" \
+  -c 'select * from conversations.turns order by id desc limit 20'
+```
+
+Always that role, and not the one the server connects as. `vinga_ro`
+can read the conversation record and nothing else: the `domain` schema
+holds the stored secrets' ciphertexts, and it is not granted there. It
+also carries the timeouts that stop a forgotten session from holding a
+lock the next boot's migration needs. Give it a real password
+(`VINGA_DB_RO_PASSWORD` when the provisioning file is run) for the
+same reason the server role gets one; the compose default of
+`vinga_ro` is a loopback convenience.
 
 And the operational one, said again because it is the trap of a
 configuration a running server is not re-reading on its own: **an edit
@@ -2454,12 +2632,16 @@ was healthy, and re-enter each stored credential through the
 
 ```bash
 # Stop the container that will not serve, and take the database away.
-# A container of its own, because the one that serves is the one that
-# is down: same image, same volume, no port and no secret.
+# Nothing is connected to it while the server is down, which is what
+# lets it be dropped rather than emptied table by table.
 docker stop vinga && docker rm vinga
-docker run --rm -v vinga-data:/data --entrypoint sh \
-  ghcr.io/rafacm/vinga-server:latest \
-  -c 'rm -f /data/db/vinga.db /data/db/vinga.db-wal /data/db/vinga.db-shm'
+dropdb "$VINGA_DB_NAME" && createdb --owner "$VINGA_DB_USER" "$VINGA_DB_NAME"
+
+# Rerun the provisioning file: dropping the database took the two
+# schemas and their default privileges with it, while vinga_ro, which
+# is an instance-level role, is still there. The file expects that and
+# rotates it rather than failing.
+psql "$ADMIN_URL" -f deploy/postgres-init.sql
 
 # Start it again, which boots clean on the empty database, then put the
 # configuration back and re-enter the credentials it could not carry.
@@ -2469,9 +2651,22 @@ docker exec -i vinga vinga-server \
   config provider secret set -- llm claude api_key
 ```
 
-The `-wal` and `-shm` files go with the database because the database is
-them: SQLite runs in WAL mode here, and a `vinga.db` deleted on its own
-leaves a write-ahead log the next boot reads.
+**A dropped database takes the conversation record with it**, since
+both halves live in one. What is broken here is the domain half, so a
+deployment that is recording and wants to keep what it recorded drops
+that half alone, as the server role, and reruns the provisioning file
+after it:
+
+```sql
+drop schema domain cascade;
+```
+
+The rerun is the same either way, and the reason is the same: a
+`create schema` is what puts the schema back under the server role's
+ownership, and a dropped database also took the default privileges
+that let `vinga_ro` read tables the server has not created yet. The
+next boot then migrates from nothing, which is the state this
+procedure needs and the state a first-ever boot is in.
 
 That is what makes `vinga-server config export` worth keeping in version
 control beside the YAML file: it is the document the apply takes. A
@@ -2481,12 +2676,42 @@ come from wherever the deployment keeps its secrets.
 
 It is a rebuild rather than a repair, and the difference is real: it
 puts back what the export says and nothing else, so a row nobody knew
-about goes with the file. A deployment that wants a surgical edit to the
-stored rows has one, through ordinary SQLite tooling against the
-database file. That is deliberately not wrapped in this project's own
-grammar: a second way in with its own vocabulary is a second thing to
-keep honest, and `sqlite3` is already documented by the people who wrote
-it.
+about goes with the schema. A deployment that wants a surgical edit to
+the stored rows has one, through ordinary SQL against the `domain`
+schema as the server role. That is deliberately not wrapped in this
+project's own grammar: a second way in with its own vocabulary is a
+second thing to keep honest, and `psql` is already documented by the
+people who wrote it.
+
+**Coming from a build that kept its configuration in a local file, it
+is the same rebuild with one ordering to get right: export first, then
+upgrade.** This build reads Postgres and only Postgres. There is no
+driver in it for the old file, no configuration key that would point
+at one, and no importer, so an export attempted after the image has
+rolled is an export from a server that will not start:
+
+```bash
+# With the build you are still running.
+docker exec -i vinga vinga-server config export > deployment.yaml
+
+# Then point VINGA_DB_* at an empty database, roll the image, and put
+# the configuration back exactly as above: apply, then re-enter each
+# stored credential from wherever the deployment keeps its secrets.
+docker exec -i vinga vinga-server config apply -f - < deployment.yaml
+docker exec -i vinga vinga-server \
+  config provider secret set -- llm claude api_key
+```
+
+**Conversation history does not come across, and nothing pretends
+otherwise.** There is no export format for it and no importer, and
+inventing one for a pre-release store was not worth the tool it would
+have become. A deployment that wants to keep what it recorded copies
+the old `conversations.db` aside before the upgrade and reads it with
+`sqlite3`, which is a file it now owns rather than anything this
+server will look at again. The same goes for the old `vinga.db` and
+for both files' `-wal` and `-shm` sidecars: nothing in this build
+touches them, nothing removes them, and they sit on the data volume
+until somebody archives or deletes them deliberately.
 
 The full procedure, step by step, is in
 [`../docs/reference/cli.md`](../docs/reference/cli.md).

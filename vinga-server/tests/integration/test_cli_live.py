@@ -69,6 +69,7 @@ from typing import NamedTuple
 import pytest
 import yaml
 
+from tests.conftest import reset_database
 from tests.support.config_cli import document, registered
 from tests.support.deployment import (
     BOARD,
@@ -78,7 +79,12 @@ from tests.support.deployment import (
     serving,
 )
 from vinga_server.config import ConfigError, cli, docgen, entities
-from vinga_server.config.models import API_MOUNT_PATH, DOMAIN_KEYS, NOT_A_MAC
+from vinga_server.config.models import (
+    API_MOUNT_PATH,
+    DOMAIN_KEYS,
+    NOT_A_MAC,
+    DatabaseConfig,
+)
 from vinga_server.config.secrets import (
     MASK,
     MASTER_KEY_ENV,
@@ -87,7 +93,7 @@ from vinga_server.config.secrets import (
     load_keys,
 )
 from vinga_server.config.store import APPLY_LIMIT, TOO_MANY_ENTRIES, ConfigStore
-from vinga_server.db import DATABASE_FILENAME, open_database
+from vinga_server.db import open_database
 from vinga_server.device_endpoint import SUPPLIED_ENDPOINT
 from vinga_server.ota import OTA_PATH
 from vinga_server.simulator import board, conversation
@@ -128,7 +134,7 @@ def live(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Live]:
     patch.setenv(MASTER_KEY_ENV, generate_key())
     patch.setenv(SECRET_ENV, SECRET)
     try:
-        with serving(tmp_path_factory.mktemp("lane") / "db") as running:
+        with serving() as running:
             # Resolved from the environment rather than passed with every
             # command, which is the documented remote shape and the one
             # an operator's shell is set up for. The `--api-url` half is
@@ -148,7 +154,7 @@ def isolated(tmp_path: Path) -> Iterator[Live]:
     Reached by `--api-url`, because the environment names the lane's own
     server and the point of this one is that nothing else wrote to it.
     """
-    with serving(tmp_path / "db") as running:
+    with serving() as running:
         yield running
 
 
@@ -1078,13 +1084,20 @@ def test_the_store_exports_as_a_document_it_applies_back_unchanged(
 # Recovery, which is what an export is for
 #
 # The one procedure that used to have a flag of its own. A deployment
-# whose server will not start is repaired by stopping it, deleting the
-# database, booting clean and applying a kept export, and the stored
-# credentials come back through the commands the export annotated. That
-# is a claim about a server with a lifetime and a store on disk, which
-# is why it is here rather than in an acceptance suite: nothing
-# in-process can stop a server, take its file away and start another on
-# the same path.
+# whose server will not start is repaired by stopping it, dropping and
+# recreating the database, booting clean and applying a kept export, and
+# the stored credentials come back through the commands the export
+# annotated. That is a claim about a server with a lifetime and a store
+# of its own, which is why it is here rather than in an acceptance
+# suite: nothing in-process can stop a server, take its database away
+# and start another on a new one.
+#
+# The cutover of #283 is the same procedure met from the other side, and
+# gets a case of its own below: the export an operator keeps is the one
+# their SQLite-era CLI printed, so what has to be applicable into a
+# fresh Postgres database is that file rather than one this build wrote
+# a minute earlier. The fixture beside this suite is that file, produced
+# by the pre-cutover build and committed.
 
 
 def _annotated_secret_command(exported: str) -> tuple[str, ...]:
@@ -1114,7 +1127,7 @@ def _annotated_secret_command(exported: str) -> tuple[str, ...]:
 RECOVERED_SLOT = SecretLocation.provider("llm", "spare", "api_key")
 
 
-def stored_plaintext(directory: Path, location: SecretLocation) -> str | None:
+def stored_plaintext(database: DatabaseConfig, location: SecretLocation) -> str | None:
     """One stored credential, decrypted the way a provider build reads
     it.
 
@@ -1127,7 +1140,7 @@ def stored_plaintext(directory: Path, location: SecretLocation) -> str | None:
     The keys are read from the environment at the moment of the call,
     which after the rotation below is the new key and only the new key.
     """
-    engine = open_database(directory)
+    engine = open_database(database)
     try:
         return ConfigStore(engine, load_keys()).load().secrets.secret(location)
     finally:
@@ -1135,15 +1148,23 @@ def stored_plaintext(directory: Path, location: SecretLocation) -> str | None:
 
 
 def test_a_deployment_is_rebuilt_from_its_export_on_an_empty_database(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    blank_database: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The recovery procedure, end to end over a real socket.
 
     Seed a deployment and store a credential on it, keep the export,
-    stop the server, delete the database, rotate to a key the old one is
-    not in, boot another server on the same empty directory, apply the
-    export, re-run the secret set command the export annotated, and start
-    the server once more. Then read the credential back, and export.
+    stop the server, drop and recreate the database, rotate to a key the
+    old one is not in, boot another server on the empty one, apply the
+    export, re-run the secret set command the export annotated, and
+    start the server once more. Then read the credential back, and
+    export.
+
+    The drop and recreate is the documented reset run rather than
+    described: `dropdb` then `createdb`, which is exactly what the
+    helper below does.
 
     A new key rather than the old one, because that is the case the
     deployment notes promise: the key is lost with the database it
@@ -1167,10 +1188,10 @@ def test_a_deployment_is_rebuilt_from_its_export_on_an_empty_database(
     monkeypatch.delenv(CONFIG_ENV, raising=False)
     monkeypatch.setenv(MASTER_KEY_ENV, generate_key())
     monkeypatch.setenv(SECRET_ENV, SECRET)
-    directory = tmp_path / "db"
+    database = DatabaseConfig(name=blank_database)
     document_path = written(tmp_path, "deployment.yaml", DEPLOYMENT)
 
-    with serving(directory) as before:
+    with serving(database) as before:
         seeded = ("--api-url", before.api_url)
         assert run(*seeded, "apply", "-f", document_path) == 0
         # A deployment that can be started, which an empty database also
@@ -1187,14 +1208,10 @@ def test_a_deployment_is_rebuilt_from_its_export_on_an_empty_database(
         assert run(*seeded, "export") == 0
         exported = capsys.readouterr().out
 
-    # The database, gone: what an operator does when a stored row is what
-    # the boot refuses. The file is named rather than the directory
-    # removed wholesale, so this fails loudly if the store ever moves.
-    database = directory / DATABASE_FILENAME
-    assert database.exists()
-    for path in directory.iterdir():
-        path.unlink()
-    assert not database.exists()
+    # The database, gone and made again: what an operator does when a
+    # stored row is what the boot refuses, and the same two commands the
+    # recovery documentation names.
+    reset_database(blank_database)
 
     # And the key with it. Nothing that follows can open an envelope
     # written above, which is the point: the rebuild puts the
@@ -1203,7 +1220,7 @@ def test_a_deployment_is_rebuilt_from_its_export_on_an_empty_database(
     assert replacement != lost
     monkeypatch.setenv(MASTER_KEY_ENV, replacement)
 
-    with serving(directory) as after:
+    with serving(database) as after:
         rebuilt = ("--api-url", after.api_url)
         # Clean, which is what makes the apply below a reproduction
         # rather than a no-op against what was already there.
@@ -1231,16 +1248,103 @@ def test_a_deployment_is_rebuilt_from_its_export_on_an_empty_database(
     # application is built, so a server that starts here is a server
     # whose credentials the new key opens; one that cannot refuses, and
     # this context manager raises rather than yielding.
-    with serving(directory) as restarted:
+    with serving(database) as restarted:
         recovered = ("--api-url", restarted.api_url)
 
         # The value itself, which is the one thing neither the boot nor
         # the export can be asked about: the boot proves the ciphertext
         # opens, and opening the wrong plaintext is exactly as openable.
-        assert stored_plaintext(directory, RECOVERED_SLOT) == SECRET
+        assert stored_plaintext(database, RECOVERED_SLOT) == SECRET
 
         assert run(*recovered, "export") == 0
         assert capsys.readouterr().out == exported
+
+
+# The export a deployment kept before the cutover, produced by the
+# pre-cutover build's own `config export` against a SQLite store and
+# committed as it was printed. Nothing in this repository can produce it
+# again, which is the whole reason it is a file: after this milestone
+# there is no build that writes a SQLite database to export from.
+PRE_CUTOVER_EXPORT = Path(__file__).resolve().parent / "data" / "pre-cutover-export.yaml"
+
+
+def test_a_pre_cutover_export_applies_into_an_empty_postgres_database(
+    blank_database: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The cutover, as the procedure an operator actually runs.
+
+    #283 migrates no data. What crosses is the document: a deployment
+    exports its configuration with the build it is running, upgrades,
+    boots on an empty database and applies what it kept, then enters its
+    credentials again through the commands the export annotated. This is
+    that path, with a real pre-cutover export as its input.
+
+    The comparison at the end is the proof rather than a formality. The
+    export format is rendered from the domain models and not from the
+    rows, so it does not depend on the backend; asserting it byte for
+    byte is what says so, and what would catch a model change that
+    silently reshaped a document an operator is holding. The
+    `set-secret` annotation is the one line that cannot match, because
+    an export names where a credential goes and never its value, so the
+    fixture's commands are run rather than compared and the two
+    documents are compared with those lines taken off.
+    """
+    monkeypatch.delenv(CONFIG_ENV, raising=False)
+    monkeypatch.setenv(MASTER_KEY_ENV, generate_key())
+    monkeypatch.setenv(SECRET_ENV, SECRET)
+    database = DatabaseConfig(name=blank_database)
+    kept = PRE_CUTOVER_EXPORT.read_text(encoding="utf-8")
+
+    with serving(database) as upgraded:
+        rebuilt = ("--api-url", upgraded.api_url)
+        # Empty, which is what an upgraded deployment boots on: the
+        # schemas are migrated and hold nothing.
+        assert run(*rebuilt, "show") == 0
+        assert document(capsys.readouterr().out)["agents"] == {}
+
+        path = tmp_path / "kept.yaml"
+        path.write_text(kept, encoding="utf-8")
+        assert run(*rebuilt, "apply", "-f", str(path)) == 0
+        outcomes = [line.split(": ")[-1] for line in capsys.readouterr().out.splitlines()]
+        assert outcomes and set(outcomes) == {"wrote"}
+
+        # The half a document cannot carry, entered through the command
+        # the kept export named.
+        assert run(*rebuilt, *_annotated_secret_command(kept), stdin=SECRET) == 0
+        capsys.readouterr()
+
+    # The boot the whole procedure exists to reach, on the new backend:
+    # every stored envelope opens under the configured key before the
+    # application is built, so a server that starts here is one whose
+    # credentials came back.
+    with serving(database) as after:
+        assert stored_plaintext(database, RECOVERED_SLOT) == SECRET
+
+        assert run("--api-url", after.api_url, "export") == 0
+        assert _without_secret_commands(capsys.readouterr().out) == (
+            _without_secret_commands(kept)
+        )
+
+
+def _without_secret_commands(exported: str) -> str:
+    """One export with its `set-secret` annotations taken off.
+
+    They are the one part two exports of one configuration may differ
+    in: the heading and its commands are present only when something is
+    stored, and the point of the comparison is the configuration rather
+    than which credentials happen to be filled in at the moment it was
+    printed.
+    """
+    lines = exported.splitlines(keepends=True)
+    kept = [
+        line
+        for line in lines
+        if " secret set " not in line and "Stored credentials are not exported" not in line
+    ]
+    return "".join(kept).rstrip() + "\n"
 
 
 # One refusal per family, and where each of them is composed
@@ -1826,12 +1930,12 @@ def test_the_lane_s_server_booted_from_the_environment_alone(
 
     The server every case above talked to was composed by
     `load_boot_config()` with no path and no `VINGA_CONFIG`, so its file
-    half came from the settings machinery reading `VINGA_SERVER__*` and
-    the packaged defaults, and the one variable that was set is where
-    the database goes. Three things say that worked: the variable was
-    not left lying in this process's environment for something else to
-    have supplied, the server answers on its own port, and the database
-    in the directory the variable named is the one holding what this
+    half came from the settings machinery reading the `VINGA_DB_*` names
+    and the `VINGA_SERVER__*` ones, and the one variable that was set is
+    which database it serves. Three things say that worked: the config
+    variable was not left lying in this process's environment for
+    something else to have supplied, the server answers on its own port,
+    and the database the variable named is the one holding what this
     lane wrote through the API.
     """
     assert CONFIG_ENV not in os.environ
@@ -1839,8 +1943,7 @@ def test_the_lane_s_server_booted_from_the_environment_alone(
     with urllib.request.urlopen(f"{deployed.origin}/healthz", timeout=10) as response:
         assert response.status == 200
 
-    assert (deployed.directory / DATABASE_FILENAME).is_file()
-    engine = open_database(deployed.directory)
+    engine = open_database(deployed.database)
     try:
         stored = ConfigStore(engine, load_keys()).load()
     finally:

@@ -332,6 +332,19 @@ def create_database(name: str, template: str | None) -> None:
         connection.close()
 
 
+def reset_database(name: str) -> None:
+    """One of this run's databases, taken back to blank.
+
+    Dropped and made again from `template0`, which is the documented
+    reset an operator runs (`dropdb` then `createdb`, then the
+    provisioning file again). The lane needs it because the recovery
+    case destroys the deployment half way through, and destroying a
+    database is not something a connection inside it can do.
+    """
+    drop_database(name)
+    create_database(name, template=None)
+
+
 def _database_default(name: str) -> None:
     """Point `DatabaseConfig`'s defaults at one database.
 

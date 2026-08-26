@@ -43,6 +43,7 @@ from vinga_server.config.loader import (
     RunningConfigMovedError,
     StorageError,
 )
+from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.secrets import (
     MASTER_KEY_ENV,
     SecretLocation,
@@ -111,7 +112,7 @@ def stored(directory: Path, secret: str | None = None, **entries: object) -> Non
     """A deployment's stored domain half, written the way the API writes
     it: four mock providers, the defaults that name them, one agent and
     the default agent, plus whatever a case adds."""
-    engine = open_database(directory)
+    engine = open_database(DatabaseConfig())
     try:
         store = ConfigStore(engine, load_keys())
         for stage in STAGES:
@@ -132,7 +133,7 @@ def envelope_of(directory: Path) -> str:
     """The ciphertext the database holds for the planted slot, read as a
     row rather than through the store: what must not travel is the bytes
     on disk, so the sentinel has to be taken from the disk."""
-    engine = open_database(directory)
+    engine = open_database(DatabaseConfig())
     try:
         with engine.connect() as connection:
             secrets = connection.execute(
@@ -150,7 +151,7 @@ def mark_of(directory: Path) -> str:
     """The mark the comparison takes over what the database holds for
     the planted slot right now, which is the stored side's half of the
     question `same_provider` asks."""
-    engine = open_database(directory)
+    engine = open_database(DatabaseConfig())
     try:
         snapshot = ConfigStore(engine, load_keys()).load()
     finally:
@@ -252,7 +253,7 @@ def _plant_unknown_provider(directory: Path) -> None:
     rather than into a column of its own, which is where every non-key
     field lives since #243; `json_set` leaves the rest of the entry
     exactly as it was written."""
-    engine = open_database(directory)
+    engine = open_database(DatabaseConfig())
     try:
         with engine.begin() as connection:
             connection.execute(
@@ -266,7 +267,7 @@ def _drop_planted_provider(directory: Path) -> None:
     """The same row without the planted key, which is the entry
     `stored` wrote: the agent names no llm of its own and inherits the
     one `agent_defaults` names."""
-    engine = open_database(directory)
+    engine = open_database(DatabaseConfig())
     try:
         with engine.begin() as connection:
             connection.execute(

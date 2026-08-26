@@ -18,7 +18,12 @@ from sqlalchemy import select, update
 from tests.support.stores import planted, stored_row, stored_rows
 from vinga_server.config import ConfigError
 from vinga_server.config.loader import StorageError, UnknownEntityError
-from vinga_server.config.models import NOT_A_MAC, PROVIDER_STAGES, mcp_entry_fragment
+from vinga_server.config.models import (
+    NOT_A_MAC,
+    PROVIDER_STAGES,
+    DatabaseConfig,
+    mcp_entry_fragment,
+)
 from vinga_server.config.secrets import MASK, SecretLocation, generate_key
 from vinga_server.config.store import ConfigStore, verify_secrets
 from vinga_server.db import open_database, schema
@@ -57,7 +62,7 @@ def keys() -> MultiFernet:
 
 @pytest.fixture
 def store(tmp_path: Path, keys: MultiFernet):
-    engine = open_database(tmp_path / "db")
+    engine = open_database(DatabaseConfig())
     try:
         yield ConfigStore(engine, keys)
     finally:
@@ -1153,7 +1158,7 @@ def test_storing_a_secret_without_a_key_is_refused(tmp_path: Path) -> None:
     """The one command that needs a key. Everything else treats
     ciphertext as opaque, so the CLI stays usable as the recovery tool
     when the key is missing or wrong."""
-    engine = open_database(tmp_path / "db")
+    engine = open_database(DatabaseConfig())
     try:
         keyless = ConfigStore(engine)
         keyless.set_provider("llm", "claude", {"type": "anthropic", "model": "claude-sonnet-5"})
@@ -1177,7 +1182,7 @@ def test_verify_secrets_passes_when_every_token_opens(store: ConfigStore) -> Non
 def test_verify_secrets_names_the_entity_and_slot_it_cannot_open(
     tmp_path: Path, keys: MultiFernet
 ) -> None:
-    engine = open_database(tmp_path / "db")
+    engine = open_database(DatabaseConfig())
     try:
         store = ConfigStore(engine, keys)
         store.set_provider("llm", "claude", {"type": "anthropic", "model": "claude-sonnet-5"})
@@ -1208,7 +1213,7 @@ def test_a_row_that_is_not_loadable_is_reported_as_a_config_error(
 ) -> None:
     """A hand-edited database is the case this exists for: the failure
     names the entry, and no pydantic traceback reaches the caller."""
-    engine = open_database(tmp_path / "db")
+    engine = open_database(DatabaseConfig())
     try:
         store = ConfigStore(engine, keys)
         store.set_provider("llm", "claude", {"type": "anthropic", "model": "claude-sonnet-5"})
@@ -1241,7 +1246,7 @@ CORRUPTIONS = [
 def test_a_json_column_of_the_wrong_shape_is_a_config_error(
     store: ConfigStore, table: str, column: str, written: object
 ) -> None:
-    """SQLite enforces no shape on a JSON column, so a hand-edited or
+    """A `json` column enforces no shape beyond being JSON, so a hand-edited or
     half-restored row can hold a string where a mapping belongs. Every
     reader would then raise a TypeError or an AttributeError, which is
     neither a database error nor a validation error, and would travel
@@ -1346,8 +1351,7 @@ def test_two_concurrent_writers_serialize(
     """
     from vinga_server.config import store as store_module
 
-    directory = tmp_path / "db"
-    setup = open_database(directory)
+    setup = open_database(DatabaseConfig())
     try:
         ConfigStore(setup, keys).set_provider("llm", "claude", {"type": "anthropic", "model": "m"})
     finally:
@@ -1379,7 +1383,7 @@ def test_two_concurrent_writers_serialize(
     lock = threading.Lock()
 
     def writer(change) -> None:
-        engine = open_database(directory)
+        engine = open_database(DatabaseConfig())
         store = ConfigStore(engine, keys)
         try:
             start.wait(timeout=10)
@@ -1416,7 +1420,7 @@ def test_two_concurrent_writers_serialize(
     # could not take: the loser waited, and then read the winner's state.
     assert "references unresolved" in str(refused[0])
 
-    engine = open_database(directory)
+    engine = open_database(DatabaseConfig())
     try:
         from vinga_server.config.models import check_references
 
@@ -1455,8 +1459,7 @@ def test_a_marked_write_resolves_and_persists_under_one_lock(
     """
     from vinga_server.config import store as store_module
 
-    directory = tmp_path / "db"
-    setup = open_database(directory)
+    setup = open_database(DatabaseConfig())
     try:
         ConfigStore(setup, keys).set_provider(
             "llm",
@@ -1484,7 +1487,7 @@ def test_a_marked_write_resolves_and_persists_under_one_lock(
     lock = threading.Lock()
 
     def writer(name: str, change) -> None:
-        engine = open_database(directory)
+        engine = open_database(DatabaseConfig())
         store = ConfigStore(engine, keys)
         try:
             start.wait(timeout=10)
@@ -1529,7 +1532,7 @@ def test_a_marked_write_resolves_and_persists_under_one_lock(
     if outcomes["resubmit"] is not None:
         assert "nothing is stored there" in str(outcomes["resubmit"])
 
-    engine = open_database(directory)
+    engine = open_database(DatabaseConfig())
     try:
         entry = ConfigStore(engine, keys).read_provider("llm", "claude").entry
     finally:

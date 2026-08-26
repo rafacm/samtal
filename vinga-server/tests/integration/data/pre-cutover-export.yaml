@@ -1,0 +1,59 @@
+# The domain configuration of this deployment, in the shape
+# `vinga apply` takes. Reproduce it in two steps, in this order:
+#
+#   1. vinga apply -f <this file>
+#   2. the secret set commands at the foot of this file, if any
+#
+# A stored credential never travels in a read, which is what the second
+# step is for. Applying is additive: a section this document does not
+# name is left alone, and nothing in it deletes.
+providers:
+  llm:
+    brain:
+      type: mock
+      reply: You said {text}.
+    spare:
+      type: anthropic
+      api_key_env: ANTHROPIC_API_KEY
+      model: m
+  asr:
+    ears:
+      type: mock
+      text: hello
+  tts:
+    voice:
+      type: mock
+  vad:
+    gate:
+      type: mock
+mcp_servers:
+  house:
+    transport: stdio
+    command: /bin/echo
+    args:
+    - house
+    tool_timeout_s: 15.0
+    use_server_instructions: false
+  weather:
+    transport: streamable_http
+    url: https://example.invalid/mcp
+    tool_timeout_s: 15.0
+    use_server_instructions: false
+prompt_fragments:
+  household:
+    text: The bins go out on Tuesday.
+agent_defaults:
+  llm: brain
+  asr: ears
+  tts: voice
+  vad: gate
+agents:
+  sam:
+    prompt: You are Sam.
+    prompt_includes:
+    - household
+devices: {}
+default_agent: sam
+
+# Stored credentials are not exported. Enter each of them after applying:
+#   vinga provider secret set -- llm spare api_key

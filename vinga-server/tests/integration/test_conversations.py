@@ -13,7 +13,6 @@ its invocation row is what the text switch governs.
 """
 
 import asyncio
-from pathlib import Path
 from typing import Any
 
 from sqlalchemy import text
@@ -21,14 +20,15 @@ from xiaozhi_sdk import XiaoZhiWebsocket
 
 from tests.integration.conftest import FRAME_BYTES, SAMPLE_RATE, speech_pcm
 from vinga_server.config import Config
-from vinga_server.conversations.store import read_conversations
+from vinga_server.config.models import DatabaseConfig
+from vinga_server.db import read_engine
 
 DEVICE_MAC = "aa:bb:cc:dd:ee:31"
 
 BATTERY = "72 percent"
 
 
-def recording_config(directory: Path) -> Config:
+def recording_config() -> Config:
     """One agent on the mock pipeline, recording into `directory`.
 
     The mock LLM asks for the device's own tool on the first round of
@@ -36,10 +36,7 @@ def recording_config(directory: Path) -> Config:
     conversation with a tool call in it deterministic.
     """
     return Config(
-        server={
-            "database": {"dir": str(directory)},
-            "conversations": {"enabled": True},
-        },
+        server={"conversations": {"enabled": True}},
         providers={
             "llm": {
                 "mock": {
@@ -110,8 +107,8 @@ async def two_turns(port: int, mac: str) -> list[dict]:
     return events
 
 
-def read(directory: Path, statement: str) -> list[dict[str, Any]]:
-    engine = read_conversations(directory)
+def read(statement: str) -> list[dict[str, Any]]:
+    engine = read_engine(DatabaseConfig())
     try:
         with engine.connect() as connection:
             return [dict(row) for row in connection.execute(text(statement)).mappings()]
@@ -119,17 +116,17 @@ def read(directory: Path, statement: str) -> list[dict[str, Any]]:
         engine.dispose()
 
 
-async def test_a_deployment_records_what_was_said(serve, tmp_path: Path) -> None:
-    config = recording_config(tmp_path)
+async def test_a_deployment_records_what_was_said(serve) -> None:
+    config = recording_config()
     async with serve(config) as port:
         await two_turns(port, DEVICE_MAC)
     # Read after the server has gone: its lifespan drains the writer on
     # the way out, so what is on disk then is the whole record.
 
-    (session,) = read(tmp_path, "select * from sessions")
-    turns = read(tmp_path, "select * from turns order by id")
-    calls = read(tmp_path, "select * from tool_invocations order by id")
-    events = read(tmp_path, "select * from events order by id")
+    (session,) = read("select * from conversations.sessions")
+    turns = read("select * from conversations.turns order by id")
+    calls = read("select * from conversations.tool_invocations order by id")
+    events = read("select * from conversations.events order by id")
 
     assert session["device"] == DEVICE_MAC
     assert session["agent"] == "assistant"
@@ -166,15 +163,16 @@ async def test_a_deployment_records_what_was_said(serve, tmp_path: Path) -> None
     assert named.count("tool_call") == sum(turn["tool_calls"] for turn in turns)
 
 
-async def test_a_deployment_that_was_not_asked_records_nothing(
-    serve, tmp_path: Path
-) -> None:
-    # Criterion 1 against a real boot: no section, no file, and a
-    # conversation that behaves exactly as the rest of this lane's do.
-    config = recording_config(tmp_path)
+async def test_a_deployment_that_was_not_asked_records_nothing(serve) -> None:
+    # Criterion 1 against a real boot: no section, no writer, no row,
+    # and a conversation that behaves exactly as the rest of this
+    # lane's do. The tables are there either way, because boot migrates
+    # the schema whether or not recording is on; empty tables are not a
+    # recording, and this is what says so end to end (#283).
+    config = recording_config()
     config.server.conversations = None
     async with serve(config) as port:
         events = await two_turns(port, DEVICE_MAC)
 
     assert events, "the conversation did not run"
-    assert not (tmp_path / "conversations.db").exists()
+    assert read("select * from conversations.sessions") == []

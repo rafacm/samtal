@@ -2720,7 +2720,7 @@
             }
           },
           "404": {
-            "description": "There is no conversation store to read, or no session of that id in it. The body says which.",
+            "description": "No session of that id is in the conversation store.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2790,7 +2790,7 @@
             }
           },
           "404": {
-            "description": "There is no conversation store to read, or no session of that id in it. The body says which.",
+            "description": "No session of that id is in the conversation store.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2896,7 +2896,7 @@
             }
           },
           "404": {
-            "description": "There is no conversation store to read, or no session of that id in it. The body says which.",
+            "description": "No session of that id is in the conversation store.",
             "content": {
               "application/problem+json": {
                 "schema": {

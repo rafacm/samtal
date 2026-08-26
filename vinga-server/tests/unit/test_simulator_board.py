@@ -32,7 +32,7 @@ from tests.support.config_cli import API_SECRET_ENV, chain, logged, runner
 from vinga_server import device_endpoint
 from vinga_server.config import cli
 from vinga_server.config.loader import ConfigError
-from vinga_server.config.models import NOT_A_MAC
+from vinga_server.config.models import NOT_A_MAC, DatabaseConfig
 from vinga_server.config.store import ALREADY_BOUND, ConfigStore
 from vinga_server.db import open_database
 from vinga_server.device_endpoint import SUPPLIED_ENDPOINT
@@ -725,7 +725,7 @@ def test_a_claim_the_configuration_superseded_says_the_condition_and_no_address(
     the refusal resolved rather than one anybody sent.
     """
     code = bound(run)
-    engine = open_database(tmp_path / "db")
+    engine = open_database(DatabaseConfig())
     try:
         ConfigStore(engine).bind_device(board.DEFAULT_MAC, ["sam"])
     finally:

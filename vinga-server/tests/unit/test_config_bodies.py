@@ -36,6 +36,7 @@ from vinga_server.config.entities import EntityDescriptor
 from vinga_server.config.loader import StorageError
 from vinga_server.config.models import (
     PROVIDER_STAGES,
+    DatabaseConfig,
     McpServerConfig,
     is_env_name,
     is_mcp_secret_key,
@@ -112,7 +113,7 @@ IDS = [_identifier(descriptor, path) for descriptor, path in FIXTURES]
 
 @pytest.fixture
 def store(tmp_path: Path) -> Iterator[ConfigStore]:
-    engine = open_database(tmp_path / "db")
+    engine = open_database(DatabaseConfig())
     try:
         yield ConfigStore(engine)
     finally:

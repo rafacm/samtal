@@ -204,13 +204,13 @@ async def test_every_granted_agent_speaks_the_guidance_and_the_opted_out_one_doe
 
 
 async def test_the_api_reads_back_the_prompt_the_model_was_given(
-    serve_app_in, tmp_path: Path
+    serve_app, tmp_path: Path
 ) -> None:
     """The inspection surface over a real socket, against the one thing
     that can contradict it: what the model actually received. The two
     are assembled by the same code, and this is what says so from
     outside."""
-    async with serve_app_in(tmp_path / "db", granting_config()) as (port, _), control_client(
+    async with serve_app(granting_config()) as (port, _), control_client(
         port
     ) as control:
         device = Device(port, HOUSE_MAC)
@@ -269,13 +269,13 @@ def opting_in_config() -> Config:
 
 
 async def test_a_servers_own_guidance_is_spoken_only_where_the_entry_opted_in(
-    serve_app_in, tmp_path: Path
+    serve_app, tmp_path: Path
 ) -> None:
     """The issue's third deliverable, end to end. The same server is
     behind both entries, so what separates them is the opt-in: the words
     it ships reach the model once, under the entry that asked for them,
     and the surface says whose words they are."""
-    async with serve_app_in(tmp_path / "db", opting_in_config()) as (port, _), control_client(
+    async with serve_app(opting_in_config()) as (port, _), control_client(
         port
     ) as control:
         device = Device(port, SHIPPED_MAC)
@@ -306,11 +306,10 @@ FRAGMENT = "Bins on Tuesday."
 REWRITTEN = "Bins on Friday."
 
 
-def sharing_config(directory: Path) -> Config:
+def sharing_config() -> Config:
     """Two agents that include one fragment, and one that does not, each
     on a device of its own."""
     return Config(
-        server={"database": {"dir": str(directory)}},
         providers={
             "llm": {"mock": speaks_its_prompt()},
             "asr": {"mock": {"type": "mock", "text": "what can you do"}},
@@ -330,16 +329,15 @@ def sharing_config(directory: Path) -> Config:
 
 
 async def test_a_fragment_written_once_is_spoken_by_every_agent_that_includes_it(
-    serve_app_in, simulate, tmp_path: Path
+    serve_app, simulate, tmp_path: Path
 ) -> None:
     """The issue's verification for the shared half, end to end: one
     block of text, written in one place, reaching two agents and not the
     third, and an edit of it reaching both of them at the reload the
     write says it will, on the server that was already running.
     """
-    directory = tmp_path / "db"
-    config = sharing_config(directory)
-    async with serve_app_in(directory, config) as (port, _), control_client(port) as control:
+    config = sharing_config()
+    async with serve_app(config) as (port, _), control_client(port) as control:
         house, _ = await simulate(port, HOUSE_MAC)
         kids, _ = await simulate(port, KIDS_MAC)
         quiet, _ = await simulate(port, QUIET_MAC)
@@ -494,7 +492,7 @@ async def reconnect(app, shipping: str) -> None:
 
 
 async def test_one_session_across_a_reload_a_switch_and_a_memory_write(
-    serve_app_in, monkeypatch, tmp_path: Path
+    serve_app, monkeypatch, tmp_path: Path
 ) -> None:
     """The clocks, proven where they can only be proven: inside one
     conversation on one socket.
@@ -509,7 +507,7 @@ async def test_one_session_across_a_reload_a_switch_and_a_memory_write(
     """
     fact = "the user is vegetarian"
     monkeypatch.setenv(SHIPPED_TEXT_ENV, FIRST_SHIPPED)
-    async with serve_app_in(tmp_path / "db", held_config(tmp_path / "memory")) as (
+    async with serve_app(held_config(tmp_path / "memory")) as (
         port,
         app,
     ), control_client(port) as control:

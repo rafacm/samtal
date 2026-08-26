@@ -720,7 +720,7 @@ class Raising:
 def test_a_failed_marker_drops_its_batch_and_names_only_the_class(
     stores, caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Rollback is SQLite's own unit, so the batch is atomically gone;
+    """Rollback is the database's own unit, so the batch is atomically gone;
     what leaves the store is the exception's class name and nothing
     else, because a SQLAlchemy error holds the statement it failed on
     and the parameters bound to it."""

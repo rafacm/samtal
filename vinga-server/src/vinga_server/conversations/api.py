@@ -756,7 +756,7 @@ def _nest_invocations(reader: Connection, items: list[dict[str, Any]]) -> None:
     issued them, nested under the turn that issued them.
 
     One statement for the whole page rather than one per turn: a page
-    holds at most `LIMIT_MAX` turns, which is well inside what SQLite
+    holds at most `LIMIT_MAX` turns, which is well inside what a driver
     takes bound into an `IN`.
     """
     grouped: dict[int, list[dict[str, Any]]] = {turn["id"]: [] for turn in items}

@@ -28,7 +28,7 @@ from fastapi.testclient import TestClient
 
 from tests.support.configs import BOUND_MAC, DEVICE_UUID
 from vinga_server.config import Config, FileConfig, compose_config
-from vinga_server.config.models import domain_fields
+from vinga_server.config.models import DatabaseConfig, domain_fields
 from vinga_server.config.store import ConfigStore
 from vinga_server.db import open_database
 from vinga_server.ota import OTA_PATH
@@ -84,7 +84,7 @@ def store_at(directory: Path) -> Iterator[ConfigStore]:
     and the API reach it: opened, used, disposed. This is the write side
     of every test here, and it is deliberately a different connection
     from the one the running app reads through."""
-    engine = open_database(directory)
+    engine = open_database(DatabaseConfig())
     try:
         yield ConfigStore(engine)
     finally:

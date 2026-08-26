@@ -1773,8 +1773,8 @@ def _body[Model: BaseModel](model: type[Model], location: str, body: object) -> 
 # The value columns that are not bodies, and the guards they still need.
 # `devices` and `domain_settings` hold JSON values rather than a dumped
 # model, and the two `secrets` columns hold envelopes no model declares,
-# so SQLite's willingness to put a string where an object belongs is
-# still something a reader has to meet in words. The four reshaped kinds
+# so a `json` column's willingness to hold a string where an object
+# belongs is still something a reader has to meet in words. The four reshaped kinds
 # do not come through here: their reader holds a string, and a body that
 # is not an object, or is not JSON at all, is refused by the parser
 # rather than by a container check.
@@ -1783,9 +1783,9 @@ def _body[Model: BaseModel](model: type[Model], location: str, body: object) -> 
 def _mapping(location: str, column: str, value: object) -> dict[str, object]:
     """A JSON column that has to hold an object.
 
-    SQLite enforces no shape on a JSON column, so a hand-edited or
-    half-restored row can hold a string or a list where a mapping
-    belongs. Every reader below would then raise a TypeError or an
+    A `json` column enforces no shape beyond being JSON, so a
+    hand-edited or half-restored row can hold a string or a list where a
+    mapping belongs. Every reader below would then raise a TypeError or an
     AttributeError, which is not a database error and not a validation
     error, so it would travel straight through the sanitized boundary
     and reach the operator as a traceback."""

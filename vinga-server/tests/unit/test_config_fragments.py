@@ -21,6 +21,7 @@ from vinga_server.config.loader import ConfigError, StorageError, compose_config
 from vinga_server.config.models import (
     AgentConfig,
     AgentDefaults,
+    DatabaseConfig,
     FileConfig,
     McpServerConfig,
     PromptFragmentConfig,
@@ -166,7 +167,7 @@ def test_no_boundary_hands_out_pydantics_rendering_of_the_name(
     something truncating a representation rather than by anything
     keeping it out.
     """
-    engine = open_database(tmp_path / "db")
+    engine = open_database(DatabaseConfig())
     caught: list[BaseException] = []
     try:
         store = ConfigStore(engine)

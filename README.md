@@ -63,23 +63,38 @@ Any board supported by xiaozhi-esp32 can work; these are the ones vinga targets 
 
 Seven steps. The device runs upstream's prebuilt xiaozhi firmware; the server is vinga's and ships as a container image, configured over the API it serves with the `vinga` command line. [`vinga-server/README.md`](vinga-server/README.md) has every option, the security defaults, and the container details.
 
-**1. Start the server.** No configuration file is needed and an empty database is a valid state to start on: the server comes up serving no agents, and the next two steps configure it over the API. Generate the secrets **once** and keep them somewhere you can read them back:
+**1. Start the server.** It keeps everything it stores in one Postgres database, which is the one thing it needs from you before it will boot; an empty database is a valid state to start on, so no configuration file is needed either. The server comes up serving no agents, and the next two steps configure it over the API. Generate the secrets **once** and keep them somewhere you can read them back:
 
 ```bash
 openssl rand -hex 32 > ~/.vinga-api-secret       # once, ever
 openssl rand -hex 32 > ~/.vinga-auth-secret      # once, ever
 
+# The database. A network of its own, because the server reaches it by
+# name: inside a container, 127.0.0.1 is the container itself.
+docker network create vinga-net
+docker run -d --name vinga-db --network vinga-net \
+  -e POSTGRES_DB=vinga -e POSTGRES_USER=vinga -e POSTGRES_PASSWORD=vinga \
+  postgres:17-alpine
+
+# Wait for it, because the server refuses to boot on a database it
+# cannot reach yet rather than retrying: a restart policy is where that
+# decision belongs, and here it is one line.
+until docker exec vinga-db pg_isready -U vinga -d vinga; do sleep 1; done
+
 export VINGA_API_SECRET=$(cat ~/.vinga-api-secret)
 export VINGA_AUTH_SECRET=$(cat ~/.vinga-auth-secret)
-docker run -d --name vinga -p 8003:8003 \
+docker run -d --name vinga -p 8003:8003 --network vinga-net \
   -e VINGA_API_SECRET \
   -e VINGA_AUTH_SECRET \
+  -e VINGA_DB_HOST=vinga-db \
   -e VINGA_SERVER__AUTH__ENABLED=false \
   -v vinga-data:/data \
   ghcr.io/rafacm/vinga-server:latest
 ```
 
 `VINGA_API_SECRET` is the bearer token for the configuration API and `VINGA_AUTH_SECRET` signs the device tokens, so neither is minted inline in the `docker run`: a regenerated device secret invalidates the token every device has stored ([Security](vinga-server/README.md#security)). `VINGA_SERVER__AUTH__ENABLED=false` is for a trial on a network you trust; drop that line for anything that outlives an afternoon, since device authentication is on by default. Every other key of the server half, and the YAML file that is the alternative to a handful of variables, are in [Running in a container](vinga-server/README.md#running-in-a-container).
+
+The `VINGA_DB_*` family is how the server is told where that database is (`VINGA_DB_HOST`, `VINGA_DB_PORT`, `VINGA_DB_NAME`, `VINGA_DB_USER`, `VINGA_DB_PASSWORD`, or a single `VINGA_DB_URL` that replaces all five), and everything unset above is a default that matches the values in the command. **The password `vinga` is a trial convenience and nothing more**: a deployment sets a real one, and [The configuration database in a deployment](vinga-server/README.md#the-configuration-database-in-a-deployment) covers that along with the privileges the server needs, the provisioning file at [`deploy/postgres-init.sql`](deploy/postgres-init.sql) and backups. A checkout skips all of this with `docker compose up -d --wait`, which starts the same database on loopback with the same defaults. The server migrates its schemas at every boot, so there is no init step to run, and it refuses to start rather than waiting when the database is not there.
 
 **2. Install the CLI**, and point it at the server you just started. `vinga` is a client of the configuration API rather than a second way into the database, so this is how a deployment is administered from here on, whether it runs on this machine or across the network.
 
@@ -150,6 +165,7 @@ Which image tag to deploy from, and the slim variant that carries neither local 
 | --- | --- |
 | [`vinga-server/`](vinga-server/) | The conversation server (Python): OTA/config endpoint, WebSocket audio channel, VAD → ASR → LLM → TTS pipeline with pluggable providers, MCP tools, device authentication. Published as a multi-arch container image. |
 | [`vinga-esp32/`](vinga-esp32/) | Thin firmware customization: vinga server as default endpoint, English wake word, minimal UI changes. 🚧 |
+| [`deploy/`](deploy/) | What a deployment runs against its own Postgres before the server does: [`postgres-init.sql`](deploy/postgres-init.sql) creates the two schemas the server owns and the read-only role the conversation record is read through. The `docker-compose.yml` at the root runs the same file against the development database. |
 | [`docs/`](docs/README.md) | The reference pages (the CLI, every configuration field, the API contract, the events), the per-board device guides, the architecture and its principles, and the record: research notes, plans, features and decisions. |
 | `vendor/` | Reference clones of the upstream projects (not committed). |
 

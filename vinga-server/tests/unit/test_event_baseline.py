@@ -58,6 +58,7 @@ from tests.tools.event_baseline import (
     payload,
     shape,
 )
+from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations.store import ConversationStore
 from vinga_server.events.catalog import Variant, catalog, payload_shape
 
@@ -662,7 +663,7 @@ def test_the_store_says_nothing_else(
     every turn would conform to its declaration, carry the fields the
     table above expects, and change what a deployment keeps.
     """
-    store = ConversationStore(tmp_path, retention_days=0)
+    store = ConversationStore(DatabaseConfig(), retention_days=0)
 
     with caplog.at_level(logging.DEBUG):
         store.start()

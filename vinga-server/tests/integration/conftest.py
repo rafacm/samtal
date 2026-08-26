@@ -52,51 +52,36 @@ FRAME_BYTES = SAMPLE_RATE * FRAME_MS // 1000 * 2
 
 def booted(config: Config):
     """The app the server would serve, from the same configuration after
-    a round trip through a database of this test's own.
+    a round trip through the database this run provisioned.
 
     The fragments are the entities the test wrote, dumped as the fields
     it set, which is exactly what a fragment is. The order is the one
     the write-time reference checks require.
 
-    This used to seed a scratch database, throw the directory away, and
-    compose the snapshot onto a configuration still naming the packaged
-    default, on the grounds that a boot reads the configuration once and
-    does not consult the file again. That stopped being a true picture
-    of a boot at #142: the server now opens the configuration database
-    at startup and holds it, so an app pointed at a directory with no
-    database creates an empty one and then reads device bindings out of
-    it, which is the wrong answer given to the right question.
+    Seeding and serving are the same database: what the app reads
+    afterwards is what a write through its own API wrote, and a second
+    server started on it reads what the first one left. The lane's
+    conftest points `DatabaseConfig`'s defaults at a database of this
+    worker's own, cleared between tests, so a test that names nothing
+    still gets isolation.
 
-    So the seeding directory stays, which is what a deployment has
-    anyway, and this is `booted_in` over the directory the configuration
-    already names. Every configuration names one: the lane's own
-    conftest points the default at a directory of the test's own.
+    `from_store=True` because that is what this stands for: the domain
+    half really was read out of the database a line above, so the
+    server's device bindings resolve live and the surfaces that span a
+    store and a running world have something to span.
     """
-    return booted_in(config.server.database.dir, config)
-
-
-def booted_in(directory, config: Config):
-    """`booted`, over a directory the caller names.
-
-    Seeding and serving are the same directory, composed onto the file
-    half so the app reads and writes where the seeding went: what the app
-    reads afterwards is what a write through its own API wrote. The
-    caller names it when it wants to read the database itself, or to
-    start a second server on what the first one left.
-    """
-    directory = Path(directory)
-    engine = open_database(directory)
+    database = config.server.database
+    engine = open_database(database)
     try:
         snapshot = _seeded(ConfigStore(engine), config)
     finally:
         engine.dispose()
-    server = config.server.model_copy(update={"database": DatabaseConfig(dir=directory)})
     composed = compose_config(
-        FileConfig(server=server, memory=config.memory),
+        FileConfig(server=config.server, memory=config.memory),
         domain_fields(snapshot.domain),
-        str(directory),
+        "the domain schema of the vinga database",
     )
-    return create_app(composed, snapshot.secrets)
+    return create_app(composed, snapshot.secrets, from_store=True)
 
 
 def _seeded(store: ConfigStore, config: Config) -> Snapshot:
@@ -143,35 +128,30 @@ async def running_app(config: Config):
 
 
 @contextlib.asynccontextmanager
-async def running_app_in(directory, config: Config):
-    """The same, on a database that stays where it was seeded, for a
-    test that writes to it while the server runs."""
-    async with _serving(booted_in(directory, config)) as served:
-        yield served
-
-
-@contextlib.asynccontextmanager
-async def restarted_app_in(directory, config: Config):
+async def restarted_app(config: Config):
     """A second server start on a database somebody has already written.
 
     Nothing is seeded: the domain half is read as it stands, which is
-    what a restart is, and the difference from `running_app_in` is the
+    what a restart is, and the difference from `running_app` is the
     whole point of the tests that use it. `config` is only there for its
     file half, the port and the memory directory this process runs with.
+
+    There is no directory argument any more, and the reason is the whole
+    of the reshape (#283): a test's database is the one the lane
+    provisioned for its worker, cleared between tests, so "the same
+    database the last server used" is what a restart gets by default.
     """
-    directory = Path(directory)
-    engine = open_database(directory)
+    engine = open_database(config.server.database)
     try:
         snapshot = ConfigStore(engine).load()
     finally:
         engine.dispose()
-    server = config.server.model_copy(update={"database": DatabaseConfig(dir=directory)})
     composed = compose_config(
-        FileConfig(server=server, memory=config.memory),
+        FileConfig(server=config.server, memory=config.memory),
         domain_fields(snapshot.domain),
-        str(directory),
+        "the domain schema of the vinga database",
     )
-    async with _serving(create_app(composed, snapshot.secrets)) as served:
+    async with _serving(create_app(composed, snapshot.secrets, from_store=True)) as served:
         yield served
 
 
@@ -329,7 +309,7 @@ def no_bytecode_left_behind() -> Iterator[None]:
 
 
 @contextlib.contextmanager
-def _served_api(directory):
+def _served_api(database: DatabaseConfig | None = None):
     """A real server on an ephemeral loopback port, serving an empty
     domain half, yielding the base URL of its configuration API.
 
@@ -345,20 +325,27 @@ def _served_api(directory):
     the main thread, which is the one thing that would otherwise need
     care here.
     """
-    # A deployment's directory holds a database before its app is
-    # built: `main()` composes through `load_boot_config` and the ASGI
-    # entry point through `create_app` with no configuration, and both
-    # open and migrate it on the way. This fixture hands a configuration
-    # in, so it migrates the directory itself rather than composing the
-    # other shape, where the world a server serves is one no store
-    # describes and the surfaces that span both sides refuse.
-    open_database(directory).dispose()
+    # A deployment's database is migrated before its app is built:
+    # `main()` composes through `load_boot_config` and the ASGI entry
+    # point through `create_app` with no configuration, and both open
+    # and migrate it on the way. This fixture hands a configuration in,
+    # so it migrates the database itself and says `from_store=True`
+    # rather than composing the other shape, where the world a server
+    # serves is one no store describes and the surfaces that span both
+    # sides refuse.
+    database = DatabaseConfig() if database is None else database
+    open_database(database).dispose()
     # The port lives on the socket rather than in the configuration: the
     # models refuse 0, which is right for a deployment and is not what
     # binding an ephemeral port means.
-    config = Config(server={"database": {"dir": str(directory)}})
+    config = Config(server={"database": database.model_dump()})
     server = uvicorn.Server(
-        uvicorn.Config(create_app(config), host="127.0.0.1", port=0, log_level="warning")
+        uvicorn.Config(
+            create_app(config, from_store=True),
+            host="127.0.0.1",
+            port=0,
+            log_level="warning",
+        )
     )
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
@@ -375,9 +362,10 @@ def _served_api(directory):
 
 
 @pytest.fixture
-def served_api(tmp_path):
-    """`with served_api(directory) as url: ...`, for the scripts that
-    document themselves as running against a running server."""
+def served_api():
+    """`with served_api() as url: ...`, for the scripts that document
+    themselves as running against a running server. A second, isolated
+    one takes a `DatabaseConfig` naming the `spare_database` fixture."""
     return _served_api
 
 
@@ -394,19 +382,10 @@ def serve_app():
 
 
 @pytest.fixture
-def serve_app_in():
-    """A server whose database outlives its seeding, for a test that
-    writes to it while the server runs:
-    `async with serve_app_in(directory, config) as (port, app):`."""
-    return running_app_in
-
-
-@pytest.fixture
-def restart_in():
+def restart():
     """The same database served again with nothing re-seeded, which is
-    what a restart reads: `async with restart_in(directory, config) as
-    (port, app):`."""
-    return restarted_app_in
+    what a restart reads: `async with restart(config) as (port, app):`."""
+    return restarted_app
 
 
 @pytest.fixture

@@ -29,7 +29,7 @@ import pytest
 from cryptography.fernet import Fernet, MultiFernet
 
 from vinga_server.config import ConfigError
-from vinga_server.config.models import DOMAIN_KEYS
+from vinga_server.config.models import DOMAIN_KEYS, DatabaseConfig
 from vinga_server.config.secrets import MASK, SecretLocation, generate_key
 from vinga_server.config.store import APPLY_LIMIT, ConfigStore
 from vinga_server.db import open_database
@@ -46,7 +46,7 @@ def keys() -> MultiFernet:
 
 @pytest.fixture
 def store(tmp_path: Path, keys: MultiFernet):
-    engine = open_database(tmp_path / "db")
+    engine = open_database(DatabaseConfig())
     try:
         yield ConfigStore(engine, keys)
     finally:

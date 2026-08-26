@@ -30,6 +30,7 @@ from vinga_server.config.api import (
     mount_api,
 )
 from vinga_server.config.loader import DatabaseBusyError
+from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
 from vinga_server.config.store import ALREADY_BOUND, ALREADY_COVERED, ConfigStore
 from vinga_server.db import open_database
@@ -410,7 +411,7 @@ def _beside(directory: Path) -> Iterator[ConfigStore]:
     """The repository opened directly on the same database, which is
     what a second process would be: a writer this table cannot be told
     about."""
-    engine = open_database(directory)
+    engine = open_database(DatabaseConfig())
     try:
         yield ConfigStore(engine)
     finally:

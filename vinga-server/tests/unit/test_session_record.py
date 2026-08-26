@@ -46,6 +46,7 @@ from tests.support.sockets import QuietSocket
 from tests.support.stores import CONVERSATIONS_MANIFEST as MANIFEST
 from tests.support.stores import rows
 from vinga_server.config import Config
+from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations import schema
 from vinga_server.conversations.records import TurnRecord
 from vinga_server.conversations.store import ConversationStore
@@ -299,7 +300,7 @@ async def test_the_turn_lands_on_its_heard_events_instant(tmp_path: Path) -> Non
 
     # And through the store, which is what turns both readings into the
     # offsets a reader compares.
-    store = ConversationStore(tmp_path)
+    store = ConversationStore(DatabaseConfig())
     store.start()
     try:
         store.open_session("s", 1000.0, MANIFEST)

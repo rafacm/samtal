@@ -55,6 +55,7 @@ from vinga_server.config.loader import (
     ReloadInProgressError,
     StorageError,
 )
+from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.reload import ConfigReload
 from vinga_server.config.responses import ConfigReloadResult
 from vinga_server.config.secrets import (
@@ -1310,7 +1311,7 @@ def keys(monkeypatch: pytest.MonkeyPatch) -> str:
 def seeded(directory: Path, secret: str | None = None, **entries: object) -> None:
     """A deployment's stored domain half, written the way the API writes
     it, plus whatever a case adds."""
-    engine = open_database(directory)
+    engine = open_database(DatabaseConfig())
     try:
         store = ConfigStore(engine, load_keys())
         for stage in STAGES:
@@ -1328,7 +1329,7 @@ def envelope_of(directory: Path) -> str:
     """The ciphertext the database holds for the planted slot, read as a
     row rather than through the store: what must not travel is the bytes
     on disk, so the sentinel has to be taken from the disk."""
-    engine = open_database(directory)
+    engine = open_database(DatabaseConfig())
     try:
         with engine.connect() as connection:
             secrets = connection.execute(
@@ -1343,7 +1344,7 @@ def mark_of(directory: Path) -> str:
     """The mark taken over what the database holds for the planted slot
     right now, which is the stored side of the comparison a later
     milestone will rebuild providers by."""
-    engine = open_database(directory)
+    engine = open_database(DatabaseConfig())
     try:
         snapshot = ConfigStore(engine, load_keys()).load()
     finally:
@@ -1462,7 +1463,7 @@ def _plant_unknown_provider(directory: Path) -> None:
     rather than into a column of its own, which is where every non-key
     field lives since #243; `json_set` leaves the rest of the entry
     exactly as it was written."""
-    engine = open_database(directory)
+    engine = open_database(DatabaseConfig())
     try:
         with engine.begin() as connection:
             connection.execute(
@@ -1476,7 +1477,7 @@ def _drop_planted_provider(directory: Path) -> None:
     """The same row without the planted key, which is the entry
     `seeded` wrote: the agent names no llm of its own and inherits the
     one `agent_defaults` names."""
-    engine = open_database(directory)
+    engine = open_database(DatabaseConfig())
     try:
         with engine.begin() as connection:
             connection.execute(
@@ -1625,7 +1626,7 @@ def voiced(directory: Path, entry: dict[str, object]) -> None:
     choosing, so that the entry an apply refuses on is one this server
     is really speaking through: a world builds the entries its agents
     reference and no others."""
-    engine = open_database(directory)
+    engine = open_database(DatabaseConfig())
     try:
         store = ConfigStore(engine, load_keys())
         store.set_provider("tts", PLANTED_ENTRY, entry)

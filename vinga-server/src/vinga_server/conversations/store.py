@@ -812,7 +812,7 @@ def _delete_sessions(
     The children are matched by a subquery against the same criteria
     rather than by a list of ids read out first, so a deletion of many
     sessions is one statement per table instead of a bound parameter per
-    session against SQLite's limit."""
+    session against the driver's limit."""
     doomed = select(sessions.c.session).where(*criteria)
     counts = {}
     for name, table in (
