@@ -110,10 +110,10 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     lifespans = contextlib.ExitStack()
 
     def factory(base_url: str, token: str) -> TestClient:
-        directory = load_file_config(None).server.database.dir
+        database = load_file_config(None).server.database
         # Mounted where the server mounts it, since that prefix is part
         # of the address the CLI resolves on its own.
-        served = mounted(build_api(token, directory))
+        served = mounted(build_api(token, database))
         return lifespans.enter_context(
             TestClient(
                 served, base_url=base_url, headers={"Authorization": f"Bearer {token}"}

@@ -1287,7 +1287,7 @@ def test_a_pre_cutover_export_applies_into_an_empty_postgres_database(
     rows, so it does not depend on the backend; asserting it byte for
     byte is what says so, and what would catch a model change that
     silently reshaped a document an operator is holding. The
-    `set-secret` annotation is the one line that cannot match, because
+    `secret set` annotation is the one line that cannot match, because
     an export names where a credential goes and never its value, so the
     fixture's commands are run rather than compared and the two
     documents are compared with those lines taken off.
@@ -1330,7 +1330,7 @@ def test_a_pre_cutover_export_applies_into_an_empty_postgres_database(
 
 
 def _without_secret_commands(exported: str) -> str:
-    """One export with its `set-secret` annotations taken off.
+    """One export with its `secret set` annotations taken off.
 
     They are the one part two exports of one configuration may differ
     in: the heading and its commands are present only when something is

@@ -57,7 +57,7 @@ def _free_port() -> int:
         return probe.getsockname()[1]
 
 
-def _domain(directory: Path) -> DomainConfig:
+def _domain() -> DomainConfig:
     engine = open_database(DatabaseConfig())
     try:
         return ConfigStore(engine).load().domain
@@ -71,16 +71,18 @@ def seeded(script: str, tmp_path: Path, environment: dict[str, str] | None = Non
     The script is run verbatim, as CI runs it: it starts its own server,
     waits for it, writes through the API, and stops it again.
     """
-    directory = tmp_path / "db"
     inherited = script_environment(
         without=["VINGA_CONFIG"],
-        VINGA_SERVER__DATABASE__DIR=str(directory),
         VINGA_SERVER__PORT=str(_free_port()),
+        # The database this lane provisioned, which the script's own
+        # server and the read below both name. Every VINGA_ variable is
+        # inherited from this process, so the four connection names are
+        # already there; only the port has to be chosen per run.
         **(environment or {}),
     )
     subprocess.run(["sh", str(SMOKE / script)], check=True, env=inherited, timeout=180)
 
-    return _domain(directory)
+    return _domain()
 
 
 @pytest.fixture
@@ -174,7 +176,6 @@ def test_an_interrupted_seeding_fails_and_leaves_no_server_behind(
     port = _free_port()
     environment = script_environment(
         without=["VINGA_CONFIG"],
-        VINGA_SERVER__DATABASE__DIR=str(tmp_path / "db"),
         VINGA_SERVER__PORT=str(port),
     )
 
@@ -237,7 +238,6 @@ def test_a_seeding_script_reports_a_server_that_will_not_start(
     nothing at all."""
     environment = script_environment(
         without=["VINGA_CONFIG", "VINGA_API_SECRET"],
-        VINGA_SERVER__DATABASE__DIR=str(tmp_path / "db"),
         VINGA_SERVER__PORT=str(_free_port()),
     )
 

@@ -123,8 +123,9 @@ def run_entrypoint(script: str, tmp_path: Path) -> subprocess.CompletedProcess[s
     reaches it, and with bytecode writing off, which is this
     repository's rule for anything outside pytest.
     """
+    # This process's own, which carries the four VINGA_DB_* names the
+    # lane pointed at the database it provisioned.
     environment = dict(os.environ)
-    environment["VINGA_SERVER__DATABASE__DIR"] = str(tmp_path / "db")
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
     environment.pop(UNSET_VARIABLE, None)
     return subprocess.run(
