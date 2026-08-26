@@ -1053,7 +1053,7 @@ vinga-server/tests/unit/test_command_spellings.py:703  historical  vinga show
 vinga-server/tests/unit/test_command_spellings.py:703  historical  vinga show
 vinga-server/tests/unit/test_command_spellings.py:704  historical  vinga export
 vinga-server/tests/unit/test_command_spellings.py:704  historical  vinga export
-vinga-server/tests/unit/test_config_api_pending.py:349  respell  config list
+vinga-server/tests/unit/test_config_api_pending.py:350  respell  config list
 vinga-server/tests/unit/test_config_api_runtime.py:663  respell  config reload
 vinga-server/tests/unit/test_config_apply.py:4  respell  config apply
 vinga-server/tests/unit/test_config_cli_onboarding.py:1  respell  config ota-url
@@ -1074,8 +1074,8 @@ vinga-server/tests/unit/test_config_docgen.py:320  respell  vinga-server config 
 vinga-server/tests/unit/test_config_docgen.py:676  respell  vinga-server config cli-reference
 vinga-server/tests/unit/test_config_docgen.py:710  respell  vinga-server config cli-reference
 vinga-server/tests/unit/test_config_examples.py:51  respell  vinga provider set llm claude
-vinga-server/tests/unit/test_config_round_trip.py:433  respell  config export
-vinga-server/tests/unit/test_config_round_trip.py:434  respell  config apply
+vinga-server/tests/unit/test_config_round_trip.py:435  respell  config export
+vinga-server/tests/unit/test_config_round_trip.py:436  respell  config apply
 vinga-server/tests/unit/test_device_bindings.py:207  respell  vinga-server config reload
 vinga-server/tests/unit/test_device_bindings.py:238  respell  vinga-server config reload
 vinga-server/tests/unit/test_device_endpoint.py:4  respell  vinga simulator
