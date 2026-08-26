@@ -10,82 +10,82 @@
 .github/workflows/vinga-server.yml:368  respell  vinga-server config cli-reference
 .github/workflows/vinga-server.yml:392  respell  vinga-server config cli-reference
 AGENTS.md:164  respell  vinga-server config schema
-CHANGELOG.md:185  historical  vinga simulator run URL
-CHANGELOG.md:205  historical  vinga simulator check-in URL
-CHANGELOG.md:295  historical  vinga list
-CHANGELOG.md:321  historical  vinga-server config provider set
-CHANGELOG.md:321  historical  config set provider llm local
-CHANGELOG.md:323  historical  bind-device
-CHANGELOG.md:323  historical  add-device
-CHANGELOG.md:325  historical  set-default-agent
-CHANGELOG.md:346  historical  vinga provider set
-CHANGELOG.md:347  historical  vinga-server config provider set llm local
-CHANGELOG.md:405  historical  vinga agent show kids
-CHANGELOG.md:451  historical  vinga-server config schema
-CHANGELOG.md:485  historical  vinga-server config schema
-CHANGELOG.md:492  historical  vinga-server config set provider
-CHANGELOG.md:544  historical  set-secret
-CHANGELOG.md:544  historical  clear-secret
-CHANGELOG.md:561  historical  config export
-CHANGELOG.md:561  historical  config apply
-CHANGELOG.md:564  historical  set-secret
-CHANGELOG.md:660  historical  config apply
-CHANGELOG.md:667  historical  set-secret
-CHANGELOG.md:691  historical  config schema
-CHANGELOG.md:704  historical  config apply
-CHANGELOG.md:715  historical  config apply
-CHANGELOG.md:739  historical  vinga-server config cli-reference
-CHANGELOG.md:749  historical  vinga-server config set
-CHANGELOG.md:812  historical  vinga-server config apply
-CHANGELOG.md:816  historical  config set
-CHANGELOG.md:840  historical  vinga-server config export
-CHANGELOG.md:841  historical  vinga-server config export
-CHANGELOG.md:842  historical  config set
-CHANGELOG.md:843  historical  config show
-CHANGELOG.md:848  historical  vinga-server config set-secret
-CHANGELOG.md:855  historical  vinga-server config set
-CHANGELOG.md:856  historical  config set provider llm claude
-CHANGELOG.md:866  historical  config set-secret
-CHANGELOG.md:896  historical  vinga-server config set-secret
-CHANGELOG.md:1014  historical  config schema
-CHANGELOG.md:1246  historical  config set agent
-CHANGELOG.md:1247  historical  set-default-agent
-CHANGELOG.md:1378  historical  vinga-server config reload
-CHANGELOG.md:1497  historical  vinga-server config reload
-CHANGELOG.md:1804  historical  config show
-CHANGELOG.md:1869  historical  set-secret
-CHANGELOG.md:2773  historical  config status
-CHANGELOG.md:2877  historical  config ota-url
-CHANGELOG.md:2993  historical  config prompt
-CHANGELOG.md:3017  historical  config prompt
-CHANGELOG.md:3060  historical  config reload
-CHANGELOG.md:3061  historical  set-secret
-CHANGELOG.md:3061  historical  clear-secret
-CHANGELOG.md:3081  historical  config status
-CHANGELOG.md:3121  historical  config status
-CHANGELOG.md:3153  historical  config reload
-CHANGELOG.md:3263  historical  config ota-url
-CHANGELOG.md:3296  historical  config add-device CODE
-CHANGELOG.md:3298  historical  config pending
-CHANGELOG.md:3300  historical  add-device
-CHANGELOG.md:3301  historical  bind-device
-CHANGELOG.md:3419  historical  config list
-CHANGELOG.md:3494  historical  clear-secret
-CHANGELOG.md:3494  historical  set-secret
-CHANGELOG.md:3563  historical  config show
-CHANGELOG.md:3684  historical  config openapi
-CHANGELOG.md:3687  historical  config schema
-CHANGELOG.md:3688  historical  config reference
-CHANGELOG.md:3698  historical  config schema
-CHANGELOG.md:3699  historical  config reference
-CHANGELOG.md:3701  historical  config set
-CHANGELOG.md:3709  historical  config set
-CHANGELOG.md:3729  historical  bind-device
-CHANGELOG.md:3729  historical  set-default-agent
-CHANGELOG.md:3730  historical  clear-default-agent
-CHANGELOG.md:3730  historical  set-secret
-CHANGELOG.md:3730  historical  clear-secret
-CHANGELOG.md:3735  historical  set-secret
+CHANGELOG.md:207  historical  vinga simulator run URL
+CHANGELOG.md:227  historical  vinga simulator check-in URL
+CHANGELOG.md:317  historical  vinga list
+CHANGELOG.md:343  historical  vinga-server config provider set
+CHANGELOG.md:343  historical  config set provider llm local
+CHANGELOG.md:345  historical  bind-device
+CHANGELOG.md:345  historical  add-device
+CHANGELOG.md:347  historical  set-default-agent
+CHANGELOG.md:368  historical  vinga provider set
+CHANGELOG.md:369  historical  vinga-server config provider set llm local
+CHANGELOG.md:427  historical  vinga agent show kids
+CHANGELOG.md:473  historical  vinga-server config schema
+CHANGELOG.md:507  historical  vinga-server config schema
+CHANGELOG.md:514  historical  vinga-server config set provider
+CHANGELOG.md:566  historical  set-secret
+CHANGELOG.md:566  historical  clear-secret
+CHANGELOG.md:583  historical  config export
+CHANGELOG.md:583  historical  config apply
+CHANGELOG.md:586  historical  set-secret
+CHANGELOG.md:682  historical  config apply
+CHANGELOG.md:689  historical  set-secret
+CHANGELOG.md:713  historical  config schema
+CHANGELOG.md:726  historical  config apply
+CHANGELOG.md:737  historical  config apply
+CHANGELOG.md:761  historical  vinga-server config cli-reference
+CHANGELOG.md:771  historical  vinga-server config set
+CHANGELOG.md:834  historical  vinga-server config apply
+CHANGELOG.md:838  historical  config set
+CHANGELOG.md:862  historical  vinga-server config export
+CHANGELOG.md:863  historical  vinga-server config export
+CHANGELOG.md:864  historical  config set
+CHANGELOG.md:865  historical  config show
+CHANGELOG.md:870  historical  vinga-server config set-secret
+CHANGELOG.md:877  historical  vinga-server config set
+CHANGELOG.md:878  historical  config set provider llm claude
+CHANGELOG.md:888  historical  config set-secret
+CHANGELOG.md:918  historical  vinga-server config set-secret
+CHANGELOG.md:1036  historical  config schema
+CHANGELOG.md:1268  historical  config set agent
+CHANGELOG.md:1269  historical  set-default-agent
+CHANGELOG.md:1400  historical  vinga-server config reload
+CHANGELOG.md:1519  historical  vinga-server config reload
+CHANGELOG.md:1826  historical  config show
+CHANGELOG.md:1891  historical  set-secret
+CHANGELOG.md:2795  historical  config status
+CHANGELOG.md:2899  historical  config ota-url
+CHANGELOG.md:3015  historical  config prompt
+CHANGELOG.md:3039  historical  config prompt
+CHANGELOG.md:3082  historical  config reload
+CHANGELOG.md:3083  historical  set-secret
+CHANGELOG.md:3083  historical  clear-secret
+CHANGELOG.md:3103  historical  config status
+CHANGELOG.md:3143  historical  config status
+CHANGELOG.md:3175  historical  config reload
+CHANGELOG.md:3285  historical  config ota-url
+CHANGELOG.md:3318  historical  config add-device CODE
+CHANGELOG.md:3320  historical  config pending
+CHANGELOG.md:3322  historical  add-device
+CHANGELOG.md:3323  historical  bind-device
+CHANGELOG.md:3441  historical  config list
+CHANGELOG.md:3516  historical  clear-secret
+CHANGELOG.md:3516  historical  set-secret
+CHANGELOG.md:3585  historical  config show
+CHANGELOG.md:3706  historical  config openapi
+CHANGELOG.md:3709  historical  config schema
+CHANGELOG.md:3710  historical  config reference
+CHANGELOG.md:3720  historical  config schema
+CHANGELOG.md:3721  historical  config reference
+CHANGELOG.md:3723  historical  config set
+CHANGELOG.md:3731  historical  config set
+CHANGELOG.md:3751  historical  bind-device
+CHANGELOG.md:3751  historical  set-default-agent
+CHANGELOG.md:3752  historical  clear-default-agent
+CHANGELOG.md:3752  historical  set-secret
+CHANGELOG.md:3752  historical  clear-secret
+CHANGELOG.md:3757  historical  set-secret
 README.md:50  respell  vinga simulator
 README.md:109  respell  vinga list
 README.md:122  respell  vinga apply
@@ -98,12 +98,12 @@ README.md:150  respell  vinga device pending claim
 README.md:157  respell  vinga simulator run
 docs/adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md:157  historical  set-secret
 docs/adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md:214  historical  set-secret
-docs/architecture/cli-guide-audit.md:87  historical  vinga-server config schema provider
-docs/architecture/cli-guide-audit.md:104  historical  set-secret
-docs/architecture/cli-guide-audit.md:126  historical  set-secret
-docs/architecture/cli-guide-audit.md:130  historical  clear-default-agent
-docs/architecture/cli-guide-audit.md:139  historical  bind-device
-docs/architecture/cli-guide-audit.md:139  historical  add-device
+docs/architecture/cli-guide-audit.md:87  respell  vinga-server config schema provider
+docs/architecture/cli-guide-audit.md:104  respell  set-secret
+docs/architecture/cli-guide-audit.md:126  respell  set-secret
+docs/architecture/cli-guide-audit.md:130  respell  clear-default-agent
+docs/architecture/cli-guide-audit.md:139  respell  bind-device
+docs/architecture/cli-guide-audit.md:139  respell  add-device
 docs/architecture/cli-guide.md:152  respell  vinga provider set llm local
 docs/architecture/cli-guide.md:153  respell  vinga agent show kids
 docs/architecture/cli-guide.md:200  historical  set-secret
@@ -572,8 +572,8 @@ docs/plans/2026-08-26-docs-authority-reorg-implementation.md:558  historical  vi
 docs/plans/2026-08-26-docs-authority-reorg-implementation.md:559  historical  vinga device bind
 docs/plans/2026-08-26-docs-authority-reorg-implementation.md:596  historical  set-secret
 docs/plans/2026-08-26-docs-authority-reorg-implementation.md:597  historical  bind-device
-docs/plans/2026-08-26-docs-authority-reorg-implementation.md:920  historical  config reference
-docs/plans/2026-08-26-docs-authority-reorg-implementation.md:921  historical  config openapi
+docs/plans/2026-08-26-docs-authority-reorg-implementation.md:904  historical  config reference
+docs/plans/2026-08-26-docs-authority-reorg-implementation.md:905  historical  config openapi
 docs/plans/2026-08-26-postgres-stores-implementation.md:102  historical  config schema before the
 docs/plans/2026-08-26-postgres-stores-implementation.md:104  historical  config schema
 docs/plans/2026-08-26-postgres-stores-implementation.md:231  historical  config export
@@ -775,8 +775,8 @@ docs/reference/events.md:1316  generated  vinga-server config ota-url
 docs/reference/events.md:1340  generated  vinga-server config ota-url
 docs/reference/events.md:1359  generated  vinga-server config ota-url
 docs/related-projects.md:122  respell  vinga provider
-docs/xiaozhi-notes.md:239  respell  config device pending claim
-docs/xiaozhi-notes.md:245  respell  vinga simulator check-in
+docs/xiaozhi-notes.md:248  respell  config device pending claim
+docs/xiaozhi-notes.md:255  respell  vinga simulator check-in
 spikes/2026-08-20-openapi-ts-client/README.md:24  historical  vinga-server config openapi
 spikes/2026-08-20-openapi-ts-client/hey-api/generated/types.gen.ts:797  generated  config set-secret
 spikes/2026-08-20-openapi-ts-client/hey-api/generated/types.gen.ts:883  generated  vinga-server config prompt
@@ -1011,54 +1011,54 @@ vinga-server/tests/unit/test_command_spellings.py:152  historical  bind-device
 vinga-server/tests/unit/test_command_spellings.py:153  historical  set-secret
 vinga-server/tests/unit/test_command_spellings.py:196  historical  bind-device
 vinga-server/tests/unit/test_command_spellings.py:197  historical  set-secret
-vinga-server/tests/unit/test_command_spellings.py:227  historical  vinga set
-vinga-server/tests/unit/test_command_spellings.py:315  historical  vinga list
-vinga-server/tests/unit/test_command_spellings.py:316  historical  vinga list
-vinga-server/tests/unit/test_command_spellings.py:429  historical  vinga-server config provider secret commands
-vinga-server/tests/unit/test_command_spellings.py:461  historical  vinga provider frobnicate
-vinga-server/tests/unit/test_command_spellings.py:557  historical  vinga-server config status
-vinga-server/tests/unit/test_command_spellings.py:564  historical  vinga-server config status
-vinga-server/tests/unit/test_command_spellings.py:570  historical  vinga-server config device pending claim
-vinga-server/tests/unit/test_command_spellings.py:606  historical  vinga-server config set
-vinga-server/tests/unit/test_command_spellings.py:608  historical  vinga-server config set
-vinga-server/tests/unit/test_command_spellings.py:614  historical  config apply
-vinga-server/tests/unit/test_command_spellings.py:616  historical  config apply
-vinga-server/tests/unit/test_command_spellings.py:623  historical  bind-device
-vinga-server/tests/unit/test_command_spellings.py:653  historical  vinga-server config apply
-vinga-server/tests/unit/test_command_spellings.py:655  historical  vinga-server config apply
-vinga-server/tests/unit/test_command_spellings.py:657  historical  vinga-server config apply
-vinga-server/tests/unit/test_command_spellings.py:671  historical  vinga provider
-vinga-server/tests/unit/test_command_spellings.py:672  historical  vinga provider secret
-vinga-server/tests/unit/test_command_spellings.py:673  historical  vinga provider frobnicate
-vinga-server/tests/unit/test_command_spellings.py:674  historical  vinga provider secret frobnicate
-vinga-server/tests/unit/test_command_spellings.py:676  historical  vinga provider set llm local
-vinga-server/tests/unit/test_command_spellings.py:677  historical  vinga-server config device pending list
-vinga-server/tests/unit/test_command_spellings.py:678  historical  vinga device pending frobnicate
-vinga-server/tests/unit/test_command_spellings.py:687  historical  vinga provider frobnicate
-vinga-server/tests/unit/test_command_spellings.py:695  historical  vinga show provider llm claude
-vinga-server/tests/unit/test_command_spellings.py:695  historical  vinga show provider llm claude
-vinga-server/tests/unit/test_command_spellings.py:696  historical  vinga export agent assistant
-vinga-server/tests/unit/test_command_spellings.py:696  historical  vinga export agent assistant
-vinga-server/tests/unit/test_command_spellings.py:698  historical  vinga-server config show device aa-bb
-vinga-server/tests/unit/test_command_spellings.py:699  historical  vinga-server config show device aa-bb
-vinga-server/tests/unit/test_command_spellings.py:702  historical  vinga list agents
-vinga-server/tests/unit/test_command_spellings.py:702  historical  vinga list agents
-vinga-server/tests/unit/test_command_spellings.py:703  historical  vinga status mcp-server
-vinga-server/tests/unit/test_command_spellings.py:703  historical  vinga status mcp-server
-vinga-server/tests/unit/test_command_spellings.py:704  historical  vinga provider show llm claude
-vinga-server/tests/unit/test_command_spellings.py:704  historical  vinga provider show llm claude
-vinga-server/tests/unit/test_command_spellings.py:705  historical  vinga agent export assistant
-vinga-server/tests/unit/test_command_spellings.py:705  historical  vinga agent export assistant
-vinga-server/tests/unit/test_command_spellings.py:706  historical  vinga device show aa-bb
-vinga-server/tests/unit/test_command_spellings.py:706  historical  vinga device show aa-bb
-vinga-server/tests/unit/test_command_spellings.py:708  historical  vinga provider secret set llm claude token
-vinga-server/tests/unit/test_command_spellings.py:709  historical  vinga provider secret set llm claude token
-vinga-server/tests/unit/test_command_spellings.py:712  historical  vinga agent set kids
-vinga-server/tests/unit/test_command_spellings.py:712  historical  vinga agent set kids
-vinga-server/tests/unit/test_command_spellings.py:713  historical  vinga show
-vinga-server/tests/unit/test_command_spellings.py:713  historical  vinga show
-vinga-server/tests/unit/test_command_spellings.py:714  historical  vinga export
-vinga-server/tests/unit/test_command_spellings.py:714  historical  vinga export
+vinga-server/tests/unit/test_command_spellings.py:217  historical  vinga set
+vinga-server/tests/unit/test_command_spellings.py:305  historical  vinga list
+vinga-server/tests/unit/test_command_spellings.py:306  historical  vinga list
+vinga-server/tests/unit/test_command_spellings.py:419  historical  vinga-server config provider secret commands
+vinga-server/tests/unit/test_command_spellings.py:451  historical  vinga provider frobnicate
+vinga-server/tests/unit/test_command_spellings.py:547  historical  vinga-server config status
+vinga-server/tests/unit/test_command_spellings.py:554  historical  vinga-server config status
+vinga-server/tests/unit/test_command_spellings.py:560  historical  vinga-server config device pending claim
+vinga-server/tests/unit/test_command_spellings.py:596  historical  vinga-server config set
+vinga-server/tests/unit/test_command_spellings.py:598  historical  vinga-server config set
+vinga-server/tests/unit/test_command_spellings.py:604  historical  config apply
+vinga-server/tests/unit/test_command_spellings.py:606  historical  config apply
+vinga-server/tests/unit/test_command_spellings.py:613  historical  bind-device
+vinga-server/tests/unit/test_command_spellings.py:643  historical  vinga-server config apply
+vinga-server/tests/unit/test_command_spellings.py:645  historical  vinga-server config apply
+vinga-server/tests/unit/test_command_spellings.py:647  historical  vinga-server config apply
+vinga-server/tests/unit/test_command_spellings.py:661  historical  vinga provider
+vinga-server/tests/unit/test_command_spellings.py:662  historical  vinga provider secret
+vinga-server/tests/unit/test_command_spellings.py:663  historical  vinga provider frobnicate
+vinga-server/tests/unit/test_command_spellings.py:664  historical  vinga provider secret frobnicate
+vinga-server/tests/unit/test_command_spellings.py:666  historical  vinga provider set llm local
+vinga-server/tests/unit/test_command_spellings.py:667  historical  vinga-server config device pending list
+vinga-server/tests/unit/test_command_spellings.py:668  historical  vinga device pending frobnicate
+vinga-server/tests/unit/test_command_spellings.py:677  historical  vinga provider frobnicate
+vinga-server/tests/unit/test_command_spellings.py:685  historical  vinga show provider llm claude
+vinga-server/tests/unit/test_command_spellings.py:685  historical  vinga show provider llm claude
+vinga-server/tests/unit/test_command_spellings.py:686  historical  vinga export agent assistant
+vinga-server/tests/unit/test_command_spellings.py:686  historical  vinga export agent assistant
+vinga-server/tests/unit/test_command_spellings.py:688  historical  vinga-server config show device aa-bb
+vinga-server/tests/unit/test_command_spellings.py:689  historical  vinga-server config show device aa-bb
+vinga-server/tests/unit/test_command_spellings.py:692  historical  vinga list agents
+vinga-server/tests/unit/test_command_spellings.py:692  historical  vinga list agents
+vinga-server/tests/unit/test_command_spellings.py:693  historical  vinga status mcp-server
+vinga-server/tests/unit/test_command_spellings.py:693  historical  vinga status mcp-server
+vinga-server/tests/unit/test_command_spellings.py:694  historical  vinga provider show llm claude
+vinga-server/tests/unit/test_command_spellings.py:694  historical  vinga provider show llm claude
+vinga-server/tests/unit/test_command_spellings.py:695  historical  vinga agent export assistant
+vinga-server/tests/unit/test_command_spellings.py:695  historical  vinga agent export assistant
+vinga-server/tests/unit/test_command_spellings.py:696  historical  vinga device show aa-bb
+vinga-server/tests/unit/test_command_spellings.py:696  historical  vinga device show aa-bb
+vinga-server/tests/unit/test_command_spellings.py:698  historical  vinga provider secret set llm claude token
+vinga-server/tests/unit/test_command_spellings.py:699  historical  vinga provider secret set llm claude token
+vinga-server/tests/unit/test_command_spellings.py:702  historical  vinga agent set kids
+vinga-server/tests/unit/test_command_spellings.py:702  historical  vinga agent set kids
+vinga-server/tests/unit/test_command_spellings.py:703  historical  vinga show
+vinga-server/tests/unit/test_command_spellings.py:703  historical  vinga show
+vinga-server/tests/unit/test_command_spellings.py:704  historical  vinga export
+vinga-server/tests/unit/test_command_spellings.py:704  historical  vinga export
 vinga-server/tests/unit/test_config_api_pending.py:350  respell  config list
 vinga-server/tests/unit/test_config_api_runtime.py:663  respell  config reload
 vinga-server/tests/unit/test_config_apply.py:4  respell  config apply
