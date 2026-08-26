@@ -21,6 +21,13 @@
 # An explicit VINGA_CONFIG always wins, mounted file or not. Somebody who
 # named a path meant that path, including when it is wrong.
 #
+# There is deliberately no wait loop for the database either. A database
+# the server cannot reach is a boot that refuses with a fixed sentence,
+# which is the contract; restart policy belongs to the orchestrator, and
+# a shell script retrying here would turn a misconfiguration that says
+# what is wrong into a container that looks busy. The development loop
+# is `docker compose up -d --wait`, which waits where waiting belongs.
+#
 # `exec`, so the server replaces this shell as PID 1 and SIGTERM reaches
 # it: that is what lets `docker stop` run the shutdown drain rather than
 # killing the process part-way through.
