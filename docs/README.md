@@ -23,17 +23,15 @@ than by claiming a rank for itself.
 **Product promises** are commitments to the person running vinga,
 falsifiable from outside. Breaking one does not refactor vinga, it
 changes what vinga is, and they outrank every other class here. Today
-they are the product-promise half of
-[`architecture/principles.md`](architecture/principles.md).
+they are the three in
+[`architecture/product-promises.md`](architecture/product-promises.md).
 
 **Guidelines** are how the code keeps those promises. Any of them can
-be revised given new evidence, provided the promises still hold: the
-architecture principles in that same
-[`architecture/principles.md`](architecture/principles.md),
+be revised given new evidence, provided the promises still hold:
+[`architecture/guidelines.md`](architecture/guidelines.md),
 [`architecture/design-guide.md`](architecture/design-guide.md),
-[`architecture/cli-guide.md`](architecture/cli-guide.md),
-[`architecture/pipeline-ownership.md`](architecture/pipeline-ownership.md),
-and [`../AGENTS.md`](../AGENTS.md).
+[`architecture/cli-guide.md`](architecture/cli-guide.md), and
+[`../AGENTS.md`](../AGENTS.md).
 
 **Maintained maps and explanations** describe the system as it is now
 and are corrected when it moves:
@@ -83,6 +81,10 @@ rather than claim: this page,
 [`devices/README.md`](devices/README.md) and
 [`adr/README.md`](adr/README.md) say where a thing is, and the page
 they send you to is the one that says it.
+[`architecture/principles.md`](architecture/principles.md) is one of
+these too, and only that: the promises and the guidelines it used to
+hold are now the two pages above, and the path stays because dated
+records link it.
 
 ## Start here
 
@@ -167,7 +169,7 @@ hold direction and standard.
   feature or deciding direction, splitting a file or naming an
   interface, adding a command, placing a datum, and understanding a
   conversation end to end: each routes to the page that answers it,
-  and the promises, the principles, the design and CLI guides, the
+  and the promises, the guidelines, the design and CLI guides, the
   observability map and the diagrams are behind it.
 
 ### Diagrams

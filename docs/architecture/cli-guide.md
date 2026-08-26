@@ -1,7 +1,8 @@
 # CLI guide
 
 What vinga's command line looks like, and what a reviewer holds a new
-command to. [`principles.md`](principles.md) says what vinga promises;
+command to. [`product-promises.md`](product-promises.md) says what
+vinga promises;
 [`design-guide.md`](design-guide.md) says what a module inside one of
 those promises looks like; this page says what a command looks like.
 Read it before adding a command, a noun, a verb or a flag.
@@ -965,5 +966,5 @@ practice above, restated as the question to ask.
     by the line the practice draws, rather than merely alarming?
 
 And the rule that outranks the list: this page never outranks
-[`principles.md`](principles.md). A command that reads beautifully and
-breaks a product promise is a command that is wrong.
+[`product-promises.md`](product-promises.md). A command that reads
+beautifully and breaks a product promise is a command that is wrong.

@@ -11,22 +11,29 @@ question you arrived with rather than by filename.
 
 ## Designing a feature or deciding direction
 
-- [**principles.md**](principles.md): the standing fundamentals.
-  vinga's identity, its product promises, and the architecture
-  principles that keep them, each with an example and a
-  counterexample. Promises take precedence over architecture, and the
-  page is meant to be read before a direction is chosen, so a
-  boundary is never crossed one reasonable-looking pull request at a
-  time.
-- [**pipeline-ownership.md**](pipeline-ownership.md): which parts of
-  the conversation pipeline are shared shape, the thing any streaming
-  voice framework provides, and which parts are vinga's own semantics
-  that none of them has. The inventory a framework question is
-  answered against, with the conditions that reopen it.
+- [**product-promises.md**](product-promises.md): the three standing
+  commitments to the person running vinga, each falsifiable from
+  outside. The stock-firmware compatibility floor, the first-class
+  local deployment, and the database promise. They take precedence
+  over everything else in this corpus, so read them before a
+  direction is chosen and a boundary is never crossed one
+  reasonable-looking pull request at a time.
+- [**guidelines.md**](guidelines.md): vinga's identity and the
+  revisable defaults that keep those promises, each with an example
+  and a counterexample. Thin device and smart server, where the
+  hardware edge is normalized and why runtimes stay siblings, whose
+  reason a decision carries, and which half of the pipeline a
+  framework could own, with the conditions that reopen that last
+  question.
 - [**../adr/**](../adr/README.md): one record per decision that was
   hard to reverse, surprising without context, and the result of a
-  real trade-off. When a principle cites a decision, this is where
-  its reasoning is; records are immutable and date-prefixed.
+  real trade-off. When a promise or a guideline cites a decision, this
+  is where its reasoning is; records are immutable and date-prefixed.
+
+The first two used to be one page, and dated records cite it by name.
+[`principles.md`](principles.md) is now a signpost to them and holds
+nothing of its own; `pipeline-ownership.md` is gone, its durable
+inventory being the last guideline.
 
 ## Splitting a file, adding a layer, or naming an interface
 

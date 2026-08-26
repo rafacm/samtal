@@ -33,9 +33,12 @@ repository uses date prefixes instead, matching `docs/plans/` and
 ## Relationship to the rest of the repository
 
 Issues hold evidence, ADRs hold decisions, plans hold execution, and
-[`../architecture/principles.md`](../architecture/principles.md) holds
-direction: the standing principles distilled from these records. A
-record cites the issues and measurements that motivated it; the plan or
-feature doc that implements a change links back to the records it rests
-on; a record that establishes or reverses a principle is cited from the
-principles page in the same change.
+the architecture corpus holds direction: the standing commitments in
+[`../architecture/product-promises.md`](../architecture/product-promises.md)
+and the revisable defaults in
+[`../architecture/guidelines.md`](../architecture/guidelines.md),
+both distilled from these records. A record cites the issues and
+measurements that motivated it; the plan or feature doc that
+implements a change links back to the records it rests on; a record
+that establishes or reverses a promise or a guideline is cited from
+the page that carries it, in the same change.

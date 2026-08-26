@@ -85,8 +85,9 @@ the reviewer confirms rather than discovers.
    skill's directory, fill the placeholders, and append the issue
    body. Keep the reading list explicit and complete: the plan, the
    prior plans and implementation docs it builds on, the code it
-   touches, AGENTS.md, `docs/architecture/principles.md`, the CI
-   workflow, and the test assets it converts.
+   touches, AGENTS.md, `docs/architecture/product-promises.md` and
+   `docs/architecture/guidelines.md`, the CI workflow, and the test
+   assets it converts.
 3. Run the reviewer in the background; read stdout when it
    completes.
 4. Record the findings as received, condensed but faithful, in a
