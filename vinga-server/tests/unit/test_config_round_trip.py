@@ -66,8 +66,10 @@ PADDED = "  $HOME_ASSISTANT_TOKEN  "
 
 
 @pytest.fixture
-def directory(tmp_path: Path) -> Path:
-    return tmp_path / "db"
+def database() -> DatabaseConfig:
+    """The database this lane provisioned, which is where the store
+    writes and the application reads."""
+    return DatabaseConfig()
 
 
 @pytest.fixture
@@ -76,7 +78,7 @@ def keys(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def store(directory: Path, keys: None) -> Iterator[ConfigStore]:
+def store(database: DatabaseConfig, keys: None) -> Iterator[ConfigStore]:
     """A second view of the same database, for reading a value back
     through the repository rather than through the display that masked
     it."""
@@ -88,8 +90,8 @@ def store(directory: Path, keys: None) -> Iterator[ConfigStore]:
 
 
 @pytest.fixture
-def api(directory: Path, keys: None) -> FastAPI:
-    return build_api(TOKEN, directory)
+def api(database: DatabaseConfig, keys: None) -> FastAPI:
+    return build_api(TOKEN, database)
 
 
 @pytest.fixture
@@ -514,7 +516,9 @@ def _exported_secret_commands(exported: str) -> list[list[str]]:
 
 
 def test_an_export_reproduces_the_store_it_came_from(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    spare_database: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The whole supported reproduction, end to end and byte for byte.
 
@@ -524,7 +528,7 @@ def test_an_export_reproduces_the_store_it_came_from(
     export itself names, so a slot the annotation forgot would show up
     as a missing credential rather than as a passing test.
     """
-    first = runner(tmp_path / "one", monkeypatch)
+    first = runner(monkeypatch)
     _seed(first)
     capsys.readouterr()
 
@@ -543,7 +547,7 @@ def test_an_export_reproduces_the_store_it_came_from(
     assert _exported_secret_commands(exported) == _SET_SECRETS
 
     # A fresh store, built from the export and from nothing else.
-    second = runner(tmp_path / "two", monkeypatch)
+    second = runner(monkeypatch, database=spare_database)
     assert second("apply", "-f", "-", stdin=exported) == 0
     _enter_secrets(second, _exported_secret_commands(exported))
     capsys.readouterr()

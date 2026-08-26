@@ -58,7 +58,7 @@ FRAGMENT_INPUT = "text: |2\n" + "".join(
 )
 
 
-def runner(monkeypatch: pytest.MonkeyPatch):
+def runner(monkeypatch: pytest.MonkeyPatch, database: str | None = None):
     """Run one command the way the entry point runs it, against a server
     of this test's own.
 
@@ -77,6 +77,12 @@ def runner(monkeypatch: pytest.MonkeyPatch):
     """
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
     monkeypatch.delenv(cli.API_URL_ENV, raising=False)
+    # A database of this runner's own when the caller names one, which
+    # is how a test gets two stores: the round trip's whole claim is
+    # that the document one deployment exports is the document another
+    # is built from, and one store cannot be two deployments.
+    if database is not None:
+        monkeypatch.setenv("VINGA_DB_NAME", database)
     monkeypatch.setenv(MASTER_KEY_ENV, generate_key())
     monkeypatch.setenv(API_SECRET_ENV, TOKEN)
 

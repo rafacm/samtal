@@ -42,7 +42,7 @@ from vinga_server import logs
 from vinga_server.app import _prompt_preview
 from vinga_server.config import Config, cli
 from vinga_server.config.api import build_api, mount_api
-from vinga_server.config.models import API_MOUNT_PATH
+from vinga_server.config.models import API_MOUNT_PATH, DatabaseConfig
 from vinga_server.tools.mcp import CONNECTED, REDACTED, McpServers, transport
 
 # Not a real credential, and shaped so a substring check for it cannot
@@ -104,7 +104,7 @@ def reflecting_http_server() -> FastMCP:
 
 
 def cli_status(
-    directory: Path,
+    database: DatabaseConfig,
     servers: McpServers,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -118,7 +118,7 @@ def cli_status(
 
     def factory(base_url: str, token: str) -> TestClient:
         served = FastAPI()
-        mount_api(served, build_api(TOKEN, directory, mcp_servers=servers))
+        mount_api(served, build_api(TOKEN, database, mcp_servers=servers))
         return TestClient(
             served, base_url=base_url, headers={"Authorization": f"Bearer {token}"}
         )
@@ -129,7 +129,7 @@ def cli_status(
     return captured.out + captured.err
 
 
-def prompt_api(directory: Path, servers: McpServers, entry: dict[str, object]) -> FastAPI:
+def prompt_api(database: DatabaseConfig, servers: McpServers, entry: dict[str, object]) -> FastAPI:
     """An application serving the assembled-prompt read over these
     managers, wired the way the composition root wires it, so what the
     read answers is what a session would be sent."""
@@ -138,7 +138,7 @@ def prompt_api(directory: Path, servers: McpServers, entry: dict[str, object]) -
         served,
         build_api(
             TOKEN,
-            directory,
+            database,
             mcp_servers=servers,
             agent_prompt=_prompt_preview(world(config_with(entry)), servers, None),
         ),
@@ -147,11 +147,11 @@ def prompt_api(directory: Path, servers: McpServers, entry: dict[str, object]) -
 
 
 def api_prompt(
-    directory: Path, servers: McpServers, entry: dict[str, object]
+    database: DatabaseConfig, servers: McpServers, entry: dict[str, object]
 ) -> dict[str, object]:
     """`GET /runtime/agents/assistant/prompt`, as a client sees it."""
     with TestClient(
-        prompt_api(directory, servers, entry),
+        prompt_api(database, servers, entry),
         headers={"Authorization": f"Bearer {TOKEN}"},
     ) as client:
         answered = client.get(f"{API_MOUNT_PATH}/runtime/agents/assistant/prompt")
@@ -160,7 +160,7 @@ def api_prompt(
 
 
 def cli_prompt(
-    directory: Path,
+    database: DatabaseConfig,
     servers: McpServers,
     entry: dict[str, object],
     monkeypatch: pytest.MonkeyPatch,
@@ -176,7 +176,7 @@ def cli_prompt(
 
     def factory(base_url: str, token: str) -> TestClient:
         return TestClient(
-            prompt_api(directory, servers, entry),
+            prompt_api(database, servers, entry),
             base_url=base_url,
             headers={"Authorization": f"Bearer {token}"},
         )

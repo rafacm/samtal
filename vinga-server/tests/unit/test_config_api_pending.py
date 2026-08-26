@@ -14,7 +14,6 @@ import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
-from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -56,16 +55,18 @@ def pending(clock: Clock) -> PendingDevices:
 
 
 @pytest.fixture
-def directory(tmp_path: Path) -> Path:
-    return tmp_path / "db"
+def database() -> DatabaseConfig:
+    """The database this lane provisioned, which is where the store
+    writes and the application reads."""
+    return DatabaseConfig()
 
 
 @pytest.fixture
 def client(
-    directory: Path, pending: PendingDevices, monkeypatch: pytest.MonkeyPatch
+    database: DatabaseConfig, pending: PendingDevices, monkeypatch: pytest.MonkeyPatch
 ) -> Iterator[TestClient]:
     monkeypatch.setenv(MASTER_KEY_ENV, generate_key())
-    api = build_api(TOKEN, directory, lambda: frozenset({"assistant"}), pending)
+    api = build_api(TOKEN, database, lambda: frozenset({"assistant"}), pending)
     with TestClient(api, headers={"Authorization": f"Bearer {TOKEN}"}) as client:
         _agents(client)
         yield client
@@ -151,14 +152,14 @@ def test_the_literal_word_pending_never_enters_mac_normalization(
 
 
 def test_the_listing_is_reachable_where_the_server_mounts_it(
-    directory: Path, pending: PendingDevices
+    database: DatabaseConfig, pending: PendingDevices
 ) -> None:
     """The same route through the mount, since the route order that
     matters is the one inside the sub-application and the prefix is what
     a client actually types."""
     _waiting(pending)
     served = FastAPI()
-    mount_api(served, build_api(TOKEN, directory, lambda: frozenset({"assistant"}), pending))
+    mount_api(served, build_api(TOKEN, database, lambda: frozenset({"assistant"}), pending))
     client = TestClient(served, headers={"Authorization": f"Bearer {TOKEN}"})
 
     response = client.get(f"{MOUNT_PATH}/devices/pending")
@@ -407,7 +408,7 @@ def test_each_waiting_device_is_claimed_by_its_own_code(
 
 
 @contextmanager
-def _beside(directory: Path) -> Iterator[ConfigStore]:
+def _beside(database: DatabaseConfig) -> Iterator[ConfigStore]:
     """The repository opened directly on the same database, which is
     what a second process would be: a writer this table cannot be told
     about."""
@@ -419,7 +420,7 @@ def _beside(directory: Path) -> Iterator[ConfigStore]:
 
 
 def test_a_claim_will_not_replace_a_binding_made_underneath_it(
-    client: TestClient, pending: PendingDevices, directory: Path
+    client: TestClient, pending: PendingDevices, database: DatabaseConfig
 ) -> None:
     """A code sits on a screen for minutes, and the configuration may
     move under it. Bound by MAC where this table cannot be reached, so
@@ -427,7 +428,7 @@ def test_a_claim_will_not_replace_a_binding_made_underneath_it(
     upsert would have replaced the newer decision with the older one,
     silently."""
     code = _waiting(pending)
-    with _beside(directory) as store:
+    with _beside(database) as store:
         store.bind_device(MAC, ["written-since-boot"])
 
     refused = _claim(client, code, "assistant")
@@ -449,10 +450,10 @@ def test_a_claim_will_not_replace_a_binding_made_underneath_it(
 
 
 def test_a_claim_will_not_bind_a_device_a_default_agent_now_covers(
-    client: TestClient, pending: PendingDevices, directory: Path
+    client: TestClient, pending: PendingDevices, database: DatabaseConfig
 ) -> None:
     code = _waiting(pending)
-    with _beside(directory) as store:
+    with _beside(database) as store:
         store.set_default_agent("assistant")
 
     refused = _claim(client, code, "written-since-boot")
@@ -466,7 +467,7 @@ def test_a_claim_will_not_bind_a_device_a_default_agent_now_covers(
 def test_a_superseded_claim_leaves_the_address_on_no_surface(
     client: TestClient,
     pending: PendingDevices,
-    directory: Path,
+    database: DatabaseConfig,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """The refusal a race produces, on every surface it reaches.
@@ -481,7 +482,7 @@ def test_a_superseded_claim_leaves_the_address_on_no_surface(
     address in the answer is one the refusal resolved and handed back.
     """
     code = _waiting(pending)
-    with _beside(directory) as store:
+    with _beside(database) as store:
         store.bind_device(MAC, ["written-since-boot"])
 
     with caplog.at_level(logging.DEBUG):

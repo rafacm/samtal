@@ -26,6 +26,7 @@ shapes and the table decides which one a type gets.
 """
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -1183,20 +1184,31 @@ def test_the_selector_needs_the_stage_because_a_type_name_is_not_unique() -> Non
 # CLI to staying clear of. In a subprocess, because this suite's own
 # `sys.modules` has the whole server in it already.
 _WRITE = """
-import json, sys, tempfile
-from pathlib import Path
+import json, os, sys
 
+from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.store import ConfigStore
 from vinga_server.db import open_database
 
-with tempfile.TemporaryDirectory() as directory:
-    engine = open_database(Path(directory) / "db")
-    try:
-        store = ConfigStore(engine)
-        store.set_provider("asr", "whisper", {"type": "faster_whisper", "model": "small"})
-        stored = store.load().domain.providers.asr["whisper"].type
-    finally:
-        engine.dispose()
+# The connection named explicitly rather than left to the model
+# defaults: this is a child process, and the lane's conftest, which is
+# what points those defaults at the database this run provisioned, does
+# not run in it. Without this the write would land in whatever database
+# the packaged defaults name.
+engine = open_database(
+    DatabaseConfig(
+        host=os.environ["VINGA_DB_HOST"],
+        port=int(os.environ["VINGA_DB_PORT"]),
+        name=os.environ["VINGA_DB_NAME"],
+        user=os.environ["VINGA_DB_USER"],
+    )
+)
+try:
+    store = ConfigStore(engine)
+    store.set_provider("asr", "whisper", {"type": "faster_whisper", "model": "small"})
+    stored = store.load().domain.providers.asr["whisper"].type
+finally:
+    engine.dispose()
 
 print(json.dumps({
     "stored": stored,
@@ -1212,12 +1224,17 @@ print(json.dumps({
 """
 
 
-def test_writing_a_provider_loads_no_engine() -> None:
+def test_writing_a_provider_loads_no_engine(spare_database: str) -> None:
+    """A database of this test's own, because the child writes a
+    provider and this suite's subject is what got imported rather than
+    what got stored: a row left in the lane's database would be a row
+    the next test opens on."""
     finished = subprocess.run(
         [sys.executable, "-B", "-c", textwrap.dedent(_WRITE)],
         capture_output=True,
         text=True,
         check=True,
+        env=os.environ | {"VINGA_DB_NAME": spare_database},
     )
     written = json.loads(finished.stdout)
 
