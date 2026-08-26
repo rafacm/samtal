@@ -110,7 +110,7 @@ hold direction and standard.
 
 ### Diagrams
 
-[**architecture/**](architecture/README.md) embeds the hand-drawn diagrams and walks through them: the high-level overview the root README leads with, and a step-by-step teaching tour of one conversation turn, from wake word to spoken reply, that explains each concept and the problem it solves before using its acronym. A directory per authoring tool sits under it. `architecture/excalidraw/` holds those two, whose editable originals are scenes of the same names in the team workspace and whose committed files are exports kept in sync by hand, so flag them when a pipeline change makes them stale. `architecture/plantuml/` holds three whose source is text here and whose renders come from a command, so they cannot drift unnoticed: what leaves the host, the ordering inside one turn, and the barge-in decision.
+[**architecture/**](architecture/README.md) embeds the hand-drawn diagrams and walks through them: the high-level overview the root README leads with, and a step-by-step teaching tour of one conversation turn, from wake word to spoken reply, that explains each concept and the problem it solves before using its acronym. A directory per authoring tool sits under it. `architecture/diagrams/excalidraw/` holds those two, whose editable originals are scenes of the same names in the team workspace and whose committed files are exports kept in sync by hand, so flag them when a pipeline change makes them stale. `architecture/diagrams/plantuml/` holds three whose source is text here and whose renders come from a command, so they cannot drift unnoticed: what leaves the host, the ordering inside one turn, and the barge-in decision.
 
 ## Research notes
 

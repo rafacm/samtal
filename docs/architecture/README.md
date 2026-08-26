@@ -4,19 +4,19 @@ Three files here are not diagrams. [`principles.md`](principles.md) holds vinga'
 
 Diagrams live in a directory per authoring tool, so a second tool can join without either one's files having to be picked out of a shared folder.
 
-[`excalidraw/`](excalidraw/) holds the hand-drawn pair below, which describe the system at two altitudes. Their editable originals are scenes of the same names in the team Excalidraw workspace (vinga collection); the committed `.excalidraw` files are those scenes' exports and the `.png` files their renders, kept in sync by hand. That last part is the catch: nothing in the repository can tell you an export has drifted from its scene, so flag them when a pipeline change makes them stale.
+[`diagrams/excalidraw/`](diagrams/excalidraw/) holds the hand-drawn pair below, which describe the system at two altitudes. Their editable originals are scenes of the same names in the team Excalidraw workspace (vinga collection); the committed `.excalidraw` files are those scenes' exports and the `.png` files their renders, kept in sync by hand. That last part is the catch: nothing in the repository can tell you an export has drifted from its scene, so flag them when a pipeline change makes them stale.
 
-[`plantuml/`](plantuml/) holds diagrams whose source is text in this repository and whose renders come from a command. They are plainer to look at and they cannot drift unnoticed: a pipeline change and the picture of it move in the same commit, and a reviewer reads the diff. Three of them, covering what leaves the host, the ordering inside one turn, and the barge-in decision; the directory's own [README](plantuml/README.md) says what each one is for and how to render them.
+[`diagrams/plantuml/`](diagrams/plantuml/) holds diagrams whose source is text in this repository and whose renders come from a command. They are plainer to look at and they cannot drift unnoticed: a pipeline change and the picture of it move in the same commit, and a reviewer reads the diff. Three of them, covering what leaves the host, the ordering inside one turn, and the barge-in decision; the directory's own [README](diagrams/plantuml/README.md) says what each one is for and how to render them.
 
 ## The overview
 
-[![vinga architecture overview](excalidraw/vinga-architecture-overview.png)](excalidraw/vinga-architecture-overview.excalidraw)
+[![vinga architecture overview](diagrams/excalidraw/vinga-architecture-overview.png)](diagrams/excalidraw/vinga-architecture-overview.excalidraw)
 
 The picture the root README leads with: a human talks to an ESP32-S3 device, the device talks to your vinga-server over one WebSocket, and the server talks to whatever providers you configured. Everything that follows is that loop, zoomed in.
 
 ## One conversation turn, in detail
 
-[![vinga conversation flow, detailed](excalidraw/vinga-conversation-flow-detailed.png)](excalidraw/vinga-conversation-flow-detailed.excalidraw)
+[![vinga conversation flow, detailed](diagrams/excalidraw/vinga-conversation-flow-detailed.png)](diagrams/excalidraw/vinga-conversation-flow-detailed.excalidraw)
 
 The diagram reads top to bottom as one turn of conversation: flow 1 (blue) carries your speech up to the language model, flow 2 (green) carries its reply back down to your ears. Dashed gray lines are the control and tool messages riding the same connection. Before the first turn, the device has already fetched its configuration from the server's over-the-air (OTA) endpoint, opened the WebSocket with the token that response contained, and agreed on audio codecs in a `hello` exchange; that setup is the thin note at the top of the diagram, and the [xiaozhi research notes](../xiaozhi-notes.md) document it key by key.
 
@@ -48,8 +48,8 @@ The diagram reads top to bottom as one turn of conversation: flow 1 (blue) carri
 
 ## What this diagram leaves out
 
-It draws one turn going well, which is what makes it readable, and two things that matter are therefore not on it. Both have their own picture in [`plantuml/`](plantuml/).
+It draws one turn going well, which is what makes it readable, and two things that matter are therefore not on it. Both have their own picture in [`diagrams/plantuml/`](diagrams/plantuml/).
 
-**Interrupting a reply.** Speaking while the assistant is speaking cancels it, but only on evidence that you really did speak: acoustics alone, mid-reply, are as often the room or the assistant's own voice leaking past the echo cancellation. Too little speech is a noise blip and is ignored, the moment right after playback starts is ignored, and anything else pauses the reply and asks the transcriber before deciding, so a wrong guess costs one transcription rather than the answer. The branches are drawn in [`barge-in-decision`](plantuml/vinga-barge-in-decision.png).
+**Interrupting a reply.** Speaking while the assistant is speaking cancels it, but only on evidence that you really did speak: acoustics alone, mid-reply, are as often the room or the assistant's own voice leaking past the echo cancellation. Too little speech is a noise blip and is ignored, the moment right after playback starts is ignored, and anything else pauses the reply and asks the transcriber before deciding, so a wrong guess costs one transcription rather than the answer. The branches are drawn in [`barge-in-decision`](diagrams/plantuml/vinga-barge-in-decision.png).
 
-**Which of these stages leaves your machine.** Every provider declares whether it sends session data off the host, and `server.local_only` refuses at startup to build one that does, so a server that starts is one that keeps the conversation home. Some types cannot answer for themselves, an OpenAI-compatible base URL being equally a vendor or an Ollama on localhost, and those must say so explicitly. [`architecture-overview`](plantuml/vinga-architecture-overview.png) colours every provider by that declaration.
+**Which of these stages leaves your machine.** Every provider declares whether it sends session data off the host, and `server.local_only` refuses at startup to build one that does, so a server that starts is one that keeps the conversation home. Some types cannot answer for themselves, an OpenAI-compatible base URL being equally a vendor or an Ollama on localhost, and those must say so explicitly. [`architecture-overview`](diagrams/plantuml/vinga-architecture-overview.png) colours every provider by that declaration.

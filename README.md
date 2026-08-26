@@ -31,7 +31,7 @@ We took two projects we liked, the [78/xiaozhi-esp32](https://github.com/78/xiao
 
 The new thing is a self-hostable voice agent where the device talks to **your server** and nothing else. Every stage is a **pluggable provider**: bring your own LLM (a local [Ollama](https://ollama.com), Anthropic, or any OpenAI-compatible endpoint), your own voices, and your own tools via [MCP](https://modelcontextprotocol.io). The whole loop (wake word → speech recognition → language model → speech synthesis) can run entirely on your own hardware, and wherever you choose a cloud provider instead, it is exactly that, your choice: your keys, through your server, swappable at will. No vendor cloud, no account, no activation. Your thing.
 
-![vinga architecture overview](docs/architecture/excalidraw/vinga-architecture-overview.png)
+![vinga architecture overview](docs/architecture/diagrams/excalidraw/vinga-architecture-overview.png)
 
 That is the whole picture at a glance; one conversation turn in full detail, from wake word to spoken reply, is diagrammed and explained step by step in [docs/architecture](docs/architecture/README.md).
 
