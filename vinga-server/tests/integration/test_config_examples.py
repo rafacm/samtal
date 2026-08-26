@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from tests.integration.conftest import script_environment
+from tests.support.commands import COMMAND_SECONDS
 from vinga_server.config import compose_config, load_file_config
 from vinga_server.config.models import DatabaseConfig, domain_fields
 from vinga_server.config.store import ConfigStore
@@ -53,6 +54,11 @@ def test_the_deployment_profile_boots_with_its_measured_values(
             ["sh", str(DEPLOY_SEED)],
             check=True,
             env=script_environment(VINGA_API_URL=api_url),
+            # The script is a row of commands against a server that is
+            # already up, so it has nothing to wait for; the deadline is
+            # here because a lane that hangs is read as a lane that is
+            # slow, and this one already cost a job.
+            timeout=COMMAND_SECONDS,
         )
 
     engine = open_database(database)
