@@ -45,7 +45,10 @@ diagram sources and renders they describe),
 [project](../README.md), the [server](../vinga-server/README.md), and
 the [firmware](../vinga-esp32/README.md). Such a page may summarize an
 authoritative source and link it; it may not quietly become a second
-one.
+one. [`concepts.md`](concepts.md) is the one that also carries
+decided direction, and it stays inside this class by marking every
+such claim with the record that owns it, or by saying plainly that
+nothing owns it yet.
 
 **Generated references** are rendered from the code and diffed by CI,
 so they cannot come to describe a server this repository does not
@@ -141,8 +144,11 @@ it cannot come to describe a server this repository does not build.
 - [**concepts.md**](concepts.md): the domain model from the user's
   point of view: device, agent, binding, conversation, session, and
   the decided semantics that connect them (wake word, switching,
-  memory, meta capabilities, the help agent). Says which parts are
-  implemented and which are decided direction.
+  memory, meta capabilities, the help agent). Deliberately ahead of
+  the code, and explicit about it: every section opens with its
+  status, each decided direction names the issue that owns it, and a
+  direction with no owner says so rather than borrowing authority
+  from the page.
 - [**glossary.md**](glossary.md): the concepts, techniques, and
   technologies the project is built on, one short definition each with
   pointers for going deeper.

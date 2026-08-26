@@ -87,6 +87,12 @@ inventory being the last guideline.
 - [**../system-overview.md**](../system-overview.md): one turn from
   the wake word to the spoken reply, explained step by step with the
   diagrams, each concept introduced before its acronym is used.
+- [**../concepts.md**](../concepts.md): the nouns the overview moves
+  audio between, and what they mean to a user. Device, agent,
+  binding, conversation and session, and the semantics decided on
+  purpose. It is ahead of the code and says where: every section
+  carries its status, and each decided direction names the issue that
+  owns it.
 - [**diagrams/**](diagrams/README.md): all five diagrams, indexed by
   the question each answers, with the rendering and synchronization
   instructions beside the files they apply to.
