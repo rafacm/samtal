@@ -71,6 +71,7 @@ from pathlib import Path
 import pytest
 from packaging.markers import Marker
 
+from tests.support.commands import BUILD_SECONDS, ran
 from tests.support.config_cli import registered
 from tests.support.tiers import SERVE_MODULES, SIM_MODULES, declared
 from vinga_server.config import cli
@@ -91,6 +92,12 @@ PROJECT = Path(__file__).resolve().parents[2]
 # the assertion below is two-way: a third gated command fails this lane
 # from the side it joined.
 GATED = frozenset({("openapi",), ("ota-url",)})
+
+# A port nothing listens on, which is how the serve door below is asked
+# to refuse rather than to serve. The lane's own instance is reachable
+# and an empty store boots, so "no configuration" is not a refusal any
+# more and asking for one has to be deliberate.
+NOWHERE_PORT = "1"
 
 
 @pytest.fixture(scope="module")
@@ -147,9 +154,7 @@ def _normalized(name: str) -> str:
 
 
 def _marker_environment(python: Path) -> dict[str, str]:
-    finished = subprocess.run(
-        [str(python), "-c", _ENVIRONMENT_SOURCE], check=True, capture_output=True, text=True
-    )
+    finished = ran([str(python), "-c", _ENVIRONMENT_SOURCE], check=True)
     environment: dict[str, str] = json.loads(finished.stdout)
     return environment
 
@@ -245,13 +250,12 @@ def _synced(where: Path, *extras: str) -> Path:
         pytest.skip("uv is not on PATH, and it is what builds an environment here")
     environment = dict(os.environ) | {"UV_PROJECT_ENVIRONMENT": str(where)}
     environment.pop("VIRTUAL_ENV", None)
-    subprocess.run(
+    ran(
         ["uv", "sync", "--frozen", "--no-dev", "--no-editable", *extras],
+        seconds=BUILD_SECONDS,
         cwd=PROJECT,
         env=environment,
         check=True,
-        capture_output=True,
-        text=True,
     )
     return where / "bin" / "python"
 
@@ -277,7 +281,7 @@ def sim_env(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 def _installed(python: Path) -> set[str]:
     """Every distribution the environment holds, as it reports itself."""
-    finished = subprocess.run(
+    finished = ran(
         [
             str(python),
             "-c",
@@ -286,13 +290,13 @@ def _installed(python: Path) -> set[str]:
             "d.metadata['Name'].lower().replace('_','-') for d in distributions())))",
         ],
         check=True,
-        capture_output=True,
-        text=True,
     )
     return set(json.loads(finished.stdout))
 
 
-def _ran(python: Path, *argv: str) -> subprocess.CompletedProcess[str]:
+def _ran(
+    python: Path, *argv: str, environment: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     """One command of the installed grammar, run as the binary it is.
 
     Outside the checkout and with `PYTHONPATH` and its relatives
@@ -300,17 +304,18 @@ def _ran(python: Path, *argv: str) -> subprocess.CompletedProcess[str]:
     environment installed. The source tree makes every module importable
     whether it was installed or not, which is the one way a lane like
     this can quietly test nothing.
+
+    `environment` is laid over this process's own, for the one command
+    here that has to be told where NOT to find something.
     """
-    environment = dict(os.environ)
+    inherited = dict(os.environ) | (environment or {})
     for name in ("PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP"):
-        environment.pop(name, None)
-    environment["PYTHONDONTWRITEBYTECODE"] = "1"
-    return subprocess.run(
+        inherited.pop(name, None)
+    inherited["PYTHONDONTWRITEBYTECODE"] = "1"
+    return ran(
         [str(python.parent / argv[0]), *argv[1:]],
         cwd=python.parent,
-        env=environment,
-        capture_output=True,
-        text=True,
+        env=inherited,
     )
 
 
@@ -602,18 +607,30 @@ def test_the_serve_install_can_be_asked_to_serve(serve_env: Path) -> None:
     client: `vinga-server` with no command word reaches serving rather
     than the sentence that says it cannot.
 
-    It is asked with no configuration and no secret, so it refuses at
-    the boot rather than binding a port, which is what makes this cheap
-    and still an assertion about the serve path: the refusal it gives is
-    the boot's, and the client install cannot reach it at all.
-    """
-    finished = _ran(serve_env, "vinga-server")
+    It is asked for a database on a port nothing listens on, so it
+    refuses at the boot rather than binding a port, which is what makes
+    this cheap and still an assertion about the serve path: the sentence
+    it gives is the boot's own, and the client install cannot reach it
+    at all, because it exits at the dispatch above without ever opening
+    anything.
 
-    assert finished.returncode == 1, finished.stdout
+    A port nothing listens on, and not "nothing configured", which is
+    what this used to rely on. Under SQLite a server with no
+    configuration had nowhere to put a store and refused for that; under
+    Postgres the shipped connection defaults name a real instance, both
+    lanes have one running, and an empty store boots perfectly well. So
+    the process bound a port and served, and a lane that expected an
+    exit code waited for one until CI killed the job seventy-three
+    minutes later. The refusal is arranged now rather than assumed.
+    """
+    from vinga_server.db import UNREACHABLE
     from vinga_server.main import CANNOT_SERVE
 
+    finished = _ran(serve_env, "vinga-server", environment={"VINGA_DB_PORT": NOWHERE_PORT})
+
+    assert finished.returncode == 1, finished.stdout + finished.stderr
     assert CANNOT_SERVE not in finished.stderr
-    assert finished.stderr.strip(), "the serve path said nothing at all"
+    assert UNREACHABLE in finished.stderr, finished.stdout + finished.stderr
 
 
 def test_the_client_install_cannot_be_asked_to_serve(client_env: Path) -> None:
@@ -757,13 +774,12 @@ def synced(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
     where = tmp_path_factory.mktemp("contributor") / "venv"
     environment = dict(os.environ) | {"UV_PROJECT_ENVIRONMENT": str(where)}
     environment.pop("VIRTUAL_ENV", None)
-    subprocess.run(
+    ran(
         ["uv", "sync", "--frozen"],
+        seconds=BUILD_SECONDS,
         cwd=PROJECT,
         env=environment,
         check=True,
-        capture_output=True,
-        text=True,
     )
     yield where / "bin" / "python"
 
@@ -779,18 +795,25 @@ def test_a_plain_sync_still_yields_a_runnable_server(
     notice if that entry went away: every other lane names its tier.
     So the whole serve tier is asserted present, and the entry point is
     asked to serve, which is the shape a contributor meets.
+
+    Asked for a database on a port nothing listens on, for the reason
+    the serve door above is: a boot with a reachable instance and an
+    empty store SERVES, and a lane that reads an exit code from a server
+    that is running waits until something kills it.
     """
     _, serve, sim = tiers
     assert serve | sim <= _installed(synced), (
         "a plain `uv sync` stopped carrying a shipped extra, which no other lane names"
     )
 
-    finished = _ran(synced, "vinga-server")
-
+    from vinga_server.db import UNREACHABLE
     from vinga_server.main import CANNOT_SERVE
 
+    finished = _ran(synced, "vinga-server", environment={"VINGA_DB_PORT": NOWHERE_PORT})
+
     assert CANNOT_SERVE not in finished.stderr
-    assert finished.returncode == 1, finished.stdout
+    assert finished.returncode == 1, finished.stdout + finished.stderr
+    assert UNREACHABLE in finished.stderr, finished.stdout + finished.stderr
 
 
 def test_the_sync_command_in_agents_md_is_the_one_that_is_proven() -> None:
