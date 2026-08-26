@@ -874,16 +874,31 @@ list, and not marked as direction at all: see the discoveries below.
   sentence was rewritten to open with the link, which fits inside the
   78-column wrap whole. Worth knowing for M6, which may add prose to
   a generated introduction the same way.
-- **Two unit tests were already failing at the branch point.**
+- **Two unit tests were already failing at the branch point, and a
+  docs-only merge is how they got there.**
   `test_command_spellings.py::test_the_manifest_is_the_census` and
-  `::test_every_live_spelling_names_a_command_the_tree_has` fail on
-  `7cb3131c`, M3's tip, before any change of this milestone: the
-  spelling manifest does not know about
-  `docs/architecture/cli-guide-audit.md`, which M3 created, and its
-  recorded `AGENTS.md` line numbers moved. Verified by running the
-  file in a detached worktree at `7cb3131c`, which fails identically.
-  Not this milestone's to fix, and named here so M5 does not
-  rediscover it.
+  `::test_every_live_spelling_names_a_command_the_tree_has` failed on
+  M3's tip before any change of this milestone: the spelling manifest
+  did not know about `docs/architecture/cli-guide-audit.md`, which M3
+  created, and the `AGENTS.md` line numbers it records had moved.
+  Verified by running the file in a detached worktree at that commit,
+  which failed identically. The mechanism is worth recording exactly,
+  because it will recur: the spelling census scans the whole tracked
+  tree including documentation, while the server workflow's path
+  filter runs only on changes touching `vinga-server/`,
+  `docs/reference/` or the workflow file, so a documentation-only
+  merge can stale the census with no lane going red to say so. M3 was
+  such a merge, and this branch is the chain's first pull request
+  whose diff the filter admits, which is why the resynchronization
+  lands here rather than where it was caused.
+- **The audit rows needed a classification, not just a fresh scan.**
+  Regenerating the manifest alone would have left the guard red: the
+  six spellings M3 moved out of the guide were classified `historical`
+  there by the program-word rule, and in their new file they fell
+  through to the default `respell`, where five of them name commands
+  the tree retired. `cli-guide-audit.md` is a dated record whole,
+  unlike the guide, so it joins the paths classified `historical`
+  outright and all six rows come back to the class they had.
 
 ### Verification
 
@@ -892,9 +907,10 @@ list, and not marked as direction at all: see the discoveries below.
   touched a link.
 - `uv run ruff check .` from `vinga-server/`: `All checks passed!`.
 - `uv run pytest tests/unit -q`: **2 failed, 4020 passed, 19
-  skipped** in 451s. Both failures are the pre-existing
-  `test_command_spellings.py` pair described above, reproduced
-  unchanged at the branch point.
+  skipped** in 451s on the first pass, both failures the inherited
+  `test_command_spellings.py` pair described above; **4022 passed, 19
+  skipped** after the commit that resynchronizes the manifest, with
+  no failure left.
 - `uv run pytest tests/integration -q`: **200 passed** in 267s.
 - The development Postgres was started with `docker compose up -d
   --wait` from this worktree's own root, which both lanes need; the
@@ -908,6 +924,11 @@ list, and not marked as direction at all: see the discoveries below.
   intended files moved: four added lines on `domain-config.md`, four
   on `conversations-schema.md`, both exactly the generator change's
   output.
+- **The spelling manifest regenerated, not hand-edited**, with the
+  command its own module documents, from `vinga-server/`. Its diff is
+  the shifted line numbers of the four files this branch lengthened,
+  the rows for this record's own quoted spellings, and the six audit
+  rows arriving under their new path in the class they left with.
 - **Issue numbers on the page audited by grep.** The page cites #190,
   #120, #96, #93, #83, #40, #314, #112 and #21, and nothing else;
   each appears in the owner table above with the subject it is cited
