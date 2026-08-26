@@ -453,7 +453,9 @@ docs/
   The introduction states the page's class and its authority
   relative to promises, guidelines, ADRs, issues and generated
   references; every section or claim carries its status per design
-  decision 7, each decided direction citing its owner; device-fact,
+  decision 7, each decided direction citing its owning record
+  where one exists and carrying decision 7's recorded-here status
+  line otherwise; device-fact,
   wake-word, listening-mode, tool-discovery, activation and
   reload mechanics link `xiaozhi-notes.md` and the configuration
   references instead of restating them; the future Conversation
