@@ -1016,7 +1016,7 @@ is not one of their sections. The gate was not re-asked.
 
 ### What landed
 
-Eight commits.
+The commits, in the order the tree needed them.
 
 - **The board procedures move.** `docs/devices/README.md` gains the NVS
   write with its carry-over rules, as a subsection of the onboarding
