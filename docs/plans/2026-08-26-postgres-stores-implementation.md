@@ -335,6 +335,90 @@ passed in the integration lane. The integration lane gained six tests
 (the analyst role's five and the cutover proof) and cost eighteen
 seconds, which is those six.
 
+### What the first CI run found, and what no local run could
+
+Both lanes were recorded green locally, serial and under xdist, and
+both failed on the first workflow run: the unit lane red on thirty
+tests, the integration lane hung for seventy-three minutes and killed.
+Neither failure is about Postgres being the wrong choice, and neither is
+random. What they share is that a lane's environment had stopped being
+the lane's own: one because CI exports a variable a developer's shell
+does not, the other because a boot that used to refuse for want of a
+place to put a file now has one. Both are the same lesson from opposite
+ends, which is that a suite has to state the conditions it runs under
+rather than inherit them.
+
+**The unit lane: four workers in one database.** Decision 8 says the
+suite's connection settings are its own, and the conftest's own comment
+said the `VINGA_DB_*` family is overridden for the test process. It was
+not: the fixture moved `DatabaseConfig`'s model default onto the
+per-worker database and left the environment alone. The loader reads
+`VINGA_DB_NAME` *over* the model default
+(`config/loader.py`'s `_with_database_environment`), so every settings
+composition made the way a deployment makes one, which is most of the
+CLI suites, opened the job's shared `vinga` database, while the autouse
+`TRUNCATE` cleared a per-worker database nothing was writing to. Four
+workers wrote over each other; thirty tests failed on symptoms that
+named a default agent or a provider they had never created. Two doors
+reached one fact and the environment's answer won.
+
+`_database_default` now sets both doors, which is what makes it the
+fact's one home, and `packaged_database` takes the variable away for its
+span so that "the shipped defaults" is true through the loader as well
+as through a bare `DatabaseConfig()`. The family's split is written down
+where it is read: four variables name the INSTANCE and an exported value
+wins, which is how CI points the lane at its service container; the
+fifth names a DATABASE this lane makes for itself, so an exported value
+must lose. `tests/unit/test_lane_database.py` pins the agreement rather
+than either half, because a test asserting only the door it happened to
+use would have passed through the whole failure. Reproduced exactly
+before the fix with `VINGA_DB_NAME=vinga uv run pytest
+tests/unit/test_config_cli.py`: the same twenty-five failures, in the
+same order, that CI's `gw3` reported.
+
+**The integration lane: a boot that no longer refuses.** The lane hung
+for seventy-three minutes and was killed with no test named. The last
+line it printed was the test before
+`test_the_serve_install_can_be_asked_to_serve`, which runs
+`vinga-server` from a built environment and reads its exit code. Its
+premise was that a server with no configuration cannot start, which was
+true of a SQLite build with nowhere to put a file and is false now: the
+shipped connection defaults name a real instance, both lanes have one
+running, and an empty store migrates and serves. So the process bound a
+port, and `subprocess.run` had been written with no `timeout=`. The
+contributor door's test next to it had the same premise and would have
+hung next.
+
+Both now ask for a database on a port nothing listens on and assert the
+boot's own fixed sentence, which is a stronger proof of the same claim:
+a client install exits at the dispatch and cannot reach that sentence at
+all. And the lane stops being able to hang. `tests/support/commands.py`
+holds one runner with two budgets (a command of a built grammar, an
+environment built with uv), and an expiry raises an `AssertionError`
+carrying the command line and both streams: a red lane names the test,
+a hung lane names nothing. Every `subprocess.run` in the integration
+lane now has a deadline. The bound is a ceiling on a hang and not a
+measurement; a run that approaches either budget is already a bug.
+
+This is what caught the second one: with the first fix in place the
+contributor door's server booted locally too, and the deadline turned
+what would have been a second silent hang into a named failure inside
+one run.
+
+**And one plain staleness.** The committed spelling census records the
+line each quoted invocation sits on, and three files moved under it
+after it was last generated. Nothing to do with either failure above,
+and red on any machine: the milestone's last local run predated its own
+last documentation edits. Regenerated.
+
+**After the repair**, on the same machine the measurements above were
+taken on: `ruff` clean; the unit lane 4013 passed and 19 skipped, 6m35s
+serial and 57.1s under `-n auto --dist loadfile`; the integration lane
+196 passed in 4m17s. Every number is inside the milestone's own table,
+so nothing here spends the runtime budget. The two tests this adds are
+the lane-database pin; the deadlines cost nothing when nothing hangs,
+which is the point of a ceiling.
+
 ### Not verified locally
 
 Stated plainly rather than claimed:
