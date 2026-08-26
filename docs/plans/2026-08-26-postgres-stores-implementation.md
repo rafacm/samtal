@@ -340,13 +340,14 @@ seconds, which is those six.
 Both lanes were recorded green locally, serial and under xdist, and
 both failed on the first workflow run: the unit lane red on thirty
 tests, the integration lane hung for seventy-three minutes and killed.
-Neither failure is about Postgres being the wrong choice, and neither is
-random. What they share is that a lane's environment had stopped being
-the lane's own: one because CI exports a variable a developer's shell
-does not, the other because a boot that used to refuse for want of a
-place to put a file now has one. Both are the same lesson from opposite
-ends, which is that a suite has to state the conditions it runs under
-rather than inherit them.
+With those fixed the image job failed too, at a third place. None of
+the three is about Postgres being the wrong choice, and none is random.
+What they share is that a lane's conditions had stopped being the
+lane's own: one because CI exports a variable a developer's shell does
+not, one because a boot that used to refuse for want of a place to put
+a file now has one, one because a lane that stores nothing was made to
+provision a store anyway. The same lesson from three sides, which is
+that a suite has to state what it runs on rather than inherit it.
 
 **The unit lane: four workers in one database.** Decision 8 says the
 suite's connection settings are its own, and the conftest's own comment
@@ -405,6 +406,43 @@ contributor door's server booted locally too, and the deadline turned
 what would have been a second silent hang into a named failure inside
 one run.
 
+**The image lane: a conftest that provisioned on the way past.** With
+the two above fixed, the unit and integration jobs went green and the
+re-dispatched image run failed in the same place for both variants:
+`uv run pytest tests/smoke` died at collection, importing
+`tests/conftest.py`, on `_provision()` reaching `vinga-postgres:5432`.
+The smoke container itself had booted and migrated perfectly well; the
+pytest that checks it runs on the RUNNER, where that name resolves to
+nothing, because the database lives on a Docker network and is not
+mapped to the host. And it needs no database at all: the smoke lane
+drives the container over HTTP and a websocket, and the server under
+test owns its own store.
+
+The root conftest provisioned at its own import, unconditionally, for
+every lane under `tests/`. That is decision 8's machinery applied to a
+lane it was never about. It is now a declaration: `provision_stores()`
+is called from the conftest of each lane that opens a store (unit,
+integration, local), at that conftest's import, which pytest runs before
+it imports any test module in that directory, so nothing that needed the
+old timing loses it. The per-test truncation follows the same
+declaration, since a lane with no database has nothing to truncate; the
+condition is the LANE and never the test, because a per-test "did this
+one touch anything" would be the same fixture with a hole in it.
+`tests/smoke/conftest.py` says in words that it deliberately does not
+declare, so the absence reads as a decision.
+
+Opt in rather than opt out, deliberately. A storing lane that forgets
+meets "database does not exist" at its first open, named and local; a
+non-storing lane that had to remember to opt out meets exactly the
+collection failure this replaces. Two other things fall out: the
+unreachable-instance refusal still fires, unchanged, for all three
+storing lanes (verified with the instance stopped and with a host in
+`.invalid`), and an xdist controller running a bare `pytest` no longer
+creates a `_main` database no worker uses. The pin runs a real pytest
+over `tests/smoke` with `VINGA_DB_HOST` pointed at a name that resolves
+nowhere, because what broke was collection itself and a flag is what a
+future conftest could satisfy while still connecting on the way past.
+
 **And one plain staleness.** The committed spelling census records the
 line each quoted invocation sits on, and three files moved under it
 after it was last generated. Nothing to do with either failure above,
@@ -412,12 +450,20 @@ and red on any machine: the milestone's last local run predated its own
 last documentation edits. Regenerated.
 
 **After the repair**, on the same machine the measurements above were
-taken on: `ruff` clean; the unit lane 4013 passed and 19 skipped, 6m35s
-serial and 57.1s under `-n auto --dist loadfile`; the integration lane
-196 passed in 4m17s. Every number is inside the milestone's own table,
-so nothing here spends the runtime budget. The two tests this adds are
-the lane-database pin; the deadlines cost nothing when nothing hangs,
-which is the point of a ceiling.
+taken on: `ruff` clean; the unit lane 4014 passed and 19 skipped, 6m55s
+serial and 57.6s under `-n auto --dist loadfile`; the integration lane
+196 passed in 4m19s. The parallel lane, which is the one the budget is
+about, is unmoved. Serial gains twenty seconds, all of it the
+smoke-collection pin, which starts a pytest of its own. The three tests
+this adds are that pin and the two lane-database ones; the deadlines
+cost nothing when nothing hangs, which is the point of a ceiling.
+
+`tests/smoke` also collects and runs against no instance at all, which
+is the whole of the third fix: verified both with the compose service
+stopped and with `VINGA_DB_HOST=nowhere.invalid`, and verified in the
+other direction by reinstating the import-time `_provision()` and
+watching the pin come back with the runner's exact exit code and
+sentence.
 
 ### Not verified locally
 
