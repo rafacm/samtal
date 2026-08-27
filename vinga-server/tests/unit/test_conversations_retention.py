@@ -26,6 +26,7 @@ approached.
 import datetime as dt
 import logging
 import time
+import uuid
 from typing import Any
 
 import pytest
@@ -45,6 +46,20 @@ NOW = dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC)
 SENTINEL = "hunter2-not-a-real-credential-9f31c7"
 
 
+def thread_for(session: str) -> str:
+    """One thread per session, in the shape the runtime mints.
+
+    A fresh wake starts a fresh thread, so two sessions in these suites
+    are two conversations rather than one; deriving the id from the
+    session name keeps that true without every test having to say it.
+    """
+    return uuid.uuid5(uuid.NAMESPACE_OID, session).hex
+
+
+# The thread a turn belongs to when a test does not care which.
+CONVERSATION = thread_for("a-session")
+
+
 def manifest(started_at: dt.datetime, device: str = "aa:bb:cc:dd:ee:ff") -> dict[str, Any]:
     return {
         "started_at": started_at.isoformat(),
@@ -57,9 +72,10 @@ def manifest(started_at: dt.datetime, device: str = "aa:bb:cc:dd:ee:ff") -> dict
     }
 
 
-def a_turn(heard: str = "hello there") -> TurnRecord:
+def a_turn(heard: str = "hello there", conversation: str = CONVERSATION) -> TurnRecord:
     return TurnRecord(
         at=101.0,
+        conversation=conversation,
         agent="sam",
         heard=heard,
         reply="Hi.",

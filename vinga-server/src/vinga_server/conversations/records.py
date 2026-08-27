@@ -84,6 +84,16 @@ class TurnRecord:
     # opened at, which is what the offset is measured from and what
     # aligns a turn with its event and with the capture's audio.
     at: float
+    # The thread this turn was spoken on. Snapshotted with `agent` below
+    # when the turn began rather than read when it ended, because a
+    # handover moves the active agent mid-reply and this record is
+    # assembled in the reply's `finally`: reading either of them there
+    # would put the handover turn on the thread it handed over TO. The
+    # writer derives the conversation row from these two fields alone,
+    # which is why they travel together and why neither is optional.
+    conversation: str
+    # The agent that owned the turn, which is the one it started with.
+    # A split reply's per-agent truth is in `legs`.
     agent: str | None = None
     heard: str | None = None
     heard_duration_s: float | None = None

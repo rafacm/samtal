@@ -259,6 +259,7 @@ def a_manifest(started_at: dt.datetime) -> dict[str, Any]:
 def a_turn() -> TurnRecord:
     return TurnRecord(
         at=101.0,
+        conversation="c0ffee",
         agent="sam",
         heard="hello there",
         reply="Hi.",

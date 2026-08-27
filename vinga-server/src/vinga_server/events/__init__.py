@@ -507,6 +507,12 @@ class SessionEvents:
         # the agent active at fire time, which a tool-only handover
         # before the first audio makes a different one.
         self.agent: str | None = None
+        # The thread that agent is talking on, written by the same
+        # activation and for the same reason: an event that names the
+        # agent names the conversation it was speaking in, and both
+        # sides of the boundary emit such events. A server-minted id and
+        # therefore metadata, never content.
+        self.conversation: str | None = None
         # An explicit dependency rather than an assumption, so what
         # stamps an event is visible at construction and swappable in a
         # test.
