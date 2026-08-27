@@ -440,6 +440,22 @@ reserves them against MCP entries by construction), declared in
   decision 11: a refusal the model voices gracefully, not an error),
   each refusal a fixed sentence naming no user input.
 
+**Discovery matches, it does not merely list.** The description and
+each candidate's title and opening excerpt are normalized the same
+way (casefold, punctuation stripped, whitespace-split into tokens),
+a candidate's score is how many description tokens appear among its
+tokens, and candidates order by score descending, then
+`last_active_at` descending, then id descending, so the answer is
+deterministic and a relevant older thread outranks a newer unrelated
+one. The tool returns the top `RESUME_CANDIDATES` with a positive
+score; when nothing scores, it returns the newest
+`RESUME_CANDIDATES` with a result sentence saying nothing matched
+the description, so the user can still pick or refine rather than
+dead-end. This is deliberately not full-text search over turns,
+which the issue defers; it is matching over what the listing already
+carries. The tests include the reviewer's case: a relevant
+conversation outside the five newest is found by its title tokens.
+
 **Flow state is runtime-owned and enforced.** Tool results live only
 inside one reply's working list, so the flow cannot lean on the model
 remembering candidates: the runtime keeps a small per-agent pending
@@ -818,8 +834,10 @@ New coverage, by milestone:
   (budget edges, whole-unit truncation order and role sequences,
   the pinned milestone with a trimmed tail, the one-unit-over-budget
   case, tool-note rendering, text-off gaps counted, deterministic
-  output); tools: candidates bounded and
-  newest first, ambiguous description, selection by id, refusals
+  output); tools: candidate scoring (normalization, token overlap, the
+  (score, activity, id) order, a relevant older thread beating newer
+  unrelated ones, the no-match fallback sentence), ambiguous
+  description, selection by id, refusals
   when off for both tools (spoken result, not error, and no context
   mutation), `new_conversation` resets context and rebinds when
   resumption is on; the pending-state enforcement (stale id, foreign-agent
@@ -1178,6 +1196,11 @@ resolution once the amendment addressing it lands.
     normalization, title and excerpt matching, relevance and
     recency ordering, no-match behavior, tie-breaking and bounds;
     test a relevant older conversation outside the five newest.
+    *Resolution*: adopted. The discovery paragraph now specifies
+    normalization, token-overlap scoring over title and opening
+    excerpt, the (score, activity, id) ordering, the no-match
+    fallback with its stated sentence, and the older-relevant-thread
+    test.
 16. **P2: mutable activity ordering has no pagination contract.**
     Newest-first by `last_active_at` cannot be paginated with the
     immutable row-id cursor. Define keyset ordering and cursor
