@@ -8,7 +8,7 @@ device as a runtime sees it: show text, speak, pace, pause, and call the
 device's own tools. Both are described in device terms, deliberately.
 The test for whether something belongs here is the one the
 device-facing-interface subrule states in
-[the guidelines](../../../docs/architecture/guidelines.md#the-internal-interface-is-device-facing):
+[the guidelines](../../../../docs/architecture/guidelines.md#the-internal-interface-is-device-facing):
 would it still exist if the backend were a telephone call to a human?
 
 What that rules out is the trap this boundary exists to avoid. There is
@@ -16,7 +16,7 @@ no universal conversation interface: nothing here says `commit_audio`,
 `set_turn_detection` or `truncate_response`, because a boundary that
 grows those is a home-grown, slightly wrong copy of every runtime's own
 session protocol
-([ADR](../../../docs/adr/2026-08-10-normalize-the-hardware-edge.md)).
+([ADR](../../../../docs/adr/2026-08-10-normalize-the-hardware-edge.md)).
 
 The boundary is inline awaited calls, not a frame queue. Every method is
 called from where that code runs today, so ordering and backpressure are
