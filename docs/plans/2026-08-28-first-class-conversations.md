@@ -288,27 +288,37 @@ state. The split (decision 10) lands inside the store:
 ### Thread-aware retention, exactly
 
 The cutoff is unchanged (`retention_days`, 90 by default, 0 keeps
-forever); what changes is the unit. Rules, applied in one pass in the
-writer where pruning already runs:
+forever); what changes is the unit. The whole ruleset lands
+atomically in milestone 1, replacing the session-age pass in the same
+change that creates thread rows, because the old pass and the new
+rows cannot coexist in a release: session-age pruning would delete
+the turns of a thread still active (once threads span sessions), and
+a partial ruleset would leave either conversation rows or turn-less
+sessions unpruned. Rules, applied in one pass in the writer where
+pruning already runs:
 
 1. A conversation whose `last_active_at` is older than the cutoff is
-   pruned: its milestones, its turns' tool invocations, its turns,
-   then the row.
-2. A turn with a null `conversation` (recorded before threads
-   existed) follows its session's age, as today.
-3. A session whose `started_at` is older than the cutoff is pruned
-   (row and events) only when no turns reference it any more; a
-   session kept alive by a live thread keeps its row and its events,
-   so the cross-reference from a resumable thread's turns to their
-   sessions never dangles.
+   pruned whole: its milestones, its turns' tool invocations, its
+   turns, then the row. Turns die only here and through the explicit
+   deletion endpoints, never by session age.
+2. Events are session-scoped telemetry, not part of the projection:
+   they are pruned by their session's `started_at` age alone,
+   whether or not the session row itself survives, so a live thread
+   never pins old telemetry indefinitely.
+3. A session row whose `started_at` is older than the cutoff is
+   deleted only when no turns reference it any more; a session kept
+   alive by a live thread keeps its row (the minimal spine the
+   turn-to-session cross-reference needs), with its events already
+   gone under rule 2.
 
 With resumption unused, threads never span sessions, thread
 inactivity coincides with session age, and the pass degenerates to
 today's behavior, which is what story 11 requires of the stricter
 deployments. `ConversationsPruned` gains a `conversations` count
-beside `sessions` (additive). Milestone 1 ships rule 1 alone (so a
-release between milestones never grows conversation rows without a
-pruning rule); milestone 2 ships rules 2 and 3 and the event field.
+beside `sessions` (additive), in milestone 1 with the rules. The
+milestone-1 tests include the reviewer's case: a session begun
+before the cutoff holding a thread active after it keeps its row and
+that thread's turns while losing its events.
 
 ### The resumption switch and its boot refusal
 
@@ -611,8 +621,10 @@ New coverage, by milestone:
   the first turn and not at activation; per-agent minting across a
   handover (two threads, the handover turn on the first); title
   derivation (truncation boundary, text-off null title);
-  `last_active_at` moves with each turn; conversations pruned at the
-  cutoff; the renamed API routes round-trip with pins moved and the
+  `last_active_at` moves with each turn; the retention ruleset (a
+  thread past the cutoff dies whole; a pre-cutoff session holding a
+  live thread keeps its row and turns and loses its events; a
+  turn-less session past the cutoff goes); the renamed API routes round-trip with pins moved and the
   route inventory updated; `conversation` on turn responses;
   events carry `conversation` beside `agent` (the event-assertion
   suites extend); both generated documents byte-green; the sentinel
@@ -620,11 +632,8 @@ New coverage, by milestone:
 - **Milestone 2**: acknowledgement resolves on commit (gate seam);
   resolves false on tombstone, exhausted retries and shutdown;
   transient-failure retry proven with a raising-then-working engine;
-  non-transient failure keeps today's counting; thread-aware
-  retention: a session past the cutoff whose turns belong to a
-  live thread keeps its row, turns and events; a thread past the
-  cutoff dies whole; null-conversation turns follow session age;
-  DELETE session round trip (row and children gone, live thread
+  non-transient failure keeps today's counting; DELETE session
+  round trip (row and children gone, live thread
   keeps its other turns, empty conversation shells deleted);
   running-session deletion ends its recording (existing tombstone
   test extended over HTTP); 401 without the token; CLI `session
@@ -711,7 +720,8 @@ implementation-doc section when written.
   refusal and changelog breaking entry; the
   `TurnRecord` conversation id; minting at `_activate_agent` per
   session and agent; the writer's conversation rows, titles and
-  `last_active_at`; the minimal conversation pruning rule; the API
+  `last_active_at`; the whole thread-aware retention ruleset with
+  the `ConversationsPruned` count field; the API
   rename with moved pins and the regenerated OpenAPI document;
   `conversation` on turn responses and on the agent-bearing events;
   the workflow's conversations-chain assertion moved; generated
@@ -726,8 +736,7 @@ implementation-doc section when written.
   `CHANGELOG.md`.
 - [ ] **Durable turns, thread-aware retention, session erasure**
   (branch `feature/conversations-m2`): `Acknowledgement` and the
-  bounded transient retry; retention rules 2 and 3 and the
-  `ConversationsPruned` field; `conversations/threads.py` with
+  durable turn commits; `conversations/threads.py` with
   session deletion; `DELETE /api/sessions/{session}`; the `session`
   CLI noun (`list`, `show`, `delete`); the spellings manifest;
   cli-guide's owed spelling updated. Design footprint: deepens
@@ -946,6 +955,10 @@ resolution once the amendment addressing it lands.
     reference the session, though events are session-scoped
     telemetry not needed for the projection. Preserve only the
     minimal session spine and prune expired events independently.
+    *Resolution*: adopted. Rule 2 now prunes events by session age
+    alone, whether or not the row survives; rule 3 keeps only the
+    spine row while turns need it, and the crossing-cutoff test
+    asserts the events are gone.
 20. **P2: new hot query paths have no supporting indexes.** Listing
     and discovery by agent and activity, retention by
     `last_active_at`, hydration by conversation and latest-milestone
