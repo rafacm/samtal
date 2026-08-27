@@ -480,7 +480,18 @@ compared `is not None`), because it is a read that changes nothing;
 selection (`conversation`) and `new_conversation` are intercepted in
 the runtime's tool loop as above. Store reads run under the existing
 per-source tool timeout through `asyncio.to_thread`, so a slow
-database is a timed-out tool call, never a stalled reply.
+database is a timed-out tool call, never a stalled reply. The seam
+is a sanitized boundary, because `_run_one` embeds a raised
+exception's own words into the model-visible and stored tool result:
+every thread-store failure, on the dispatch path and the
+interception path alike, is caught at the adapter, answered as a
+fixed value-free spoken result chosen by exception class, and never
+re-raised, so no driver wording, DSN, SQL or credential can reach
+what the model sees or the store keeps. The poisoned-driver sentinel
+test plants a credential-and-DSN-shaped message in a raising engine
+and hunts it through the spoken reply, the model context, the stored
+invocation row, both log formats, the events, an attached tap and
+both process streams.
 
 ### Per-thread context, and the clean switch
 
@@ -793,7 +804,10 @@ New coverage, by milestone:
   when off for both tools (spoken result, not error, and no context
   mutation), `new_conversation` resets context and rebinds when
   resumption is on; the pending-state enforcement (stale id, foreign-agent
-  id, recap with no offer, the two-utterance selection); runtime:
+  id, recap with no offer, the two-utterance selection); the
+  poisoned-driver sentinel through the tool seam (absent from
+  speech, context, invocation rows, logs, events, taps and both
+  streams); runtime:
   the clean switch (the
   incoming agent's provider never receives the outgoing agent's
   words, asserted on `RecordingLlm`), switch-back continuity, resume
@@ -1107,6 +1121,11 @@ resolution once the amendment addressing it lands.
     discard cause and context, return fixed value-free results, and
     hunt a poisoned driver message across speech, context, stored
     invocation, logs, events, taps and both streams.
+    *Resolution*: adopted. The execution-split section now names the
+    sanitized adapter boundary (fixed value-free results by
+    exception class, nothing re-raised, both dispatch and
+    interception paths) and the poisoned-driver hunt across every
+    surface the reviewer lists.
 13. **P2: `threads.py` passes the deletion test but violates settled
     ownership.** Issue decision 5 assigns identity, lifecycle,
     listing, milestones and retention to the thread store; the plan
