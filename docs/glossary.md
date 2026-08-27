@@ -100,10 +100,12 @@ resuming an old one is always asked for. What accumulates and what
 you come back to, where a session is how audio reaches the server.
 One conversation can span many sessions, and a turn names both the
 thread it belongs to and the session it was spoken in, so the two
-are views of the same rows. The thread is decided direction (issue
-#190): what is missing today is the entity, not the rows. An agent's
-working context ends when its session closes, while an enabled store
-keeps that session's turns under its retention policy. See
+are views of the same rows. The entity exists (issue #190): a thread
+takes its identity at an agent activation, its row with its first
+stored turn, and its title from that turn's utterance, and retention
+measures the window against its last activity. What is still decided
+direction is the continuity: an agent's working context ends when its
+session closes, and nothing yet asks for an earlier thread back. See
 [the concepts page](concepts.md#conversation-and-session).
 
 ### Conversational filler
@@ -193,10 +195,11 @@ speech cancels it.
 Switching the active agent mid-session, requested by
 name in conversation and executed by the LLM's `switch_agent` tool.
 The tool's enum of bound agents is what maps a near-miss transcript
-("Mark") onto the right agent (`marc`). Today the session transcript
-carries across; once conversations are persistent entities a switch
-starts clean by default, with context carried only on explicit
-request. See
+("Mark") onto the right agent (`marc`). Each agent of a session has
+its own conversation, and the turn a handover happens in belongs to
+the thread it started on. Today the session transcript still carries
+across the switch; the clean start, with context carried only on
+explicit request, is decided direction (issue #190). See
 [the concepts page](concepts.md#conversation-and-session).
 
 ### Help agent
