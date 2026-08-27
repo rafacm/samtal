@@ -221,12 +221,55 @@ starting pair while the legs carry both agents.
   section would churn every deployment for a vocabulary the issue
   already declares correct ("the store already carries the right
   name").
-- **CLI nouns are singular**: `session` and `conversation`, because
-  both address one entry (`show`, `delete`), which is the cli-guide's
-  own rule. The guide's illustrative spelling `vinga sessions list`
-  predates verbs that address one entry and updates in the milestone
-  that lands the noun (the guide marks unimplemented spellings as
-  owed; this plan is the named work).
+- **CLI nouns are singular**: `session` and `conversation`, decided
+  in its own section below.
+
+### The two CLI nouns, exactly
+
+The nouns are singular, and the choice is recorded here because the
+cli-guide's own text pulls both ways: its naming rule says singular
+when a noun addresses one entry and plural only for a collection
+"you only ever ask about as a whole", while its illustrative
+spellings (written before this plan existed, when listing was the
+only imagined verb) say `sessions list` and name plural nouns for
+this work. Both new nouns address one entry (`show`, `delete`), so
+the rule chooses singular, and consistency agrees: every merged noun
+in the grammar is singular (`provider`, `agent`, `device`,
+`mcp-server`, `prompt-fragment`), and `provider list` would not have
+been spelled `providers list`. The milestone that lands the noun
+updates the guide's two spellings and adds one sentence to its
+naming section recording this resolution with this plan as the
+record, so the guide stops contradicting itself rather than being
+silently overruled.
+
+The signatures, all API-client verbs in the `GROUPS`/`COMMANDS`
+registries:
+
+```
+vinga session list [--device MAC] [--limit N]
+vinga session show <session>
+vinga session delete <session> [--force]
+vinga conversation list [--agent NAME] [--limit N]
+vinga conversation show <conversation>
+vinga conversation delete <conversation> [--force]
+```
+
+`--agent` and `--device` are flags, not address segments, because
+they filter a listing rather than address one row, which is how
+story 14 ("list an agent's conversations") is supplied. `--limit`
+mirrors the API's default and maximum; the CLI deliberately exposes
+no cursor flags: one invocation prints one page, and walking history
+is the API's job (the flags exist there), stated in the help. The
+listings are borderless tables in the merged style: sessions print
+`SESSION DEVICE AGENT STARTED CLOSED REASON TURNS`, conversations
+print `CONVERSATION AGENT TITLE LAST-ACTIVE TURNS` with a null
+title rendered as a fixed `-`. `session show` prints the detail
+block; `conversation show` prints a header block (id, agent, title,
+created, last active) and then the dialogue oldest first as
+speaker-labelled blocks, because dialogue lines wrap and a wrapped
+column is not a column. Both `delete` rows are registered
+destructive, so they confirm at a terminal and take `--force`. How
+printed content is bounded is the next section's rule.
 
 ### One-session deletion, not selector-driven purge
 
@@ -1244,6 +1287,14 @@ resolution once the amendment addressing it lands.
     recording a governing decision, and never settles the agent
     filter, signatures, pagination, output columns or null-title
     rendering.
+    *Resolution*: adopted for everything unspecified, declined on
+    the plural with reasons recorded in the new "two CLI nouns"
+    section: the guide's naming rule (singular when a noun addresses
+    one entry) outranks its pre-plan illustrative spellings, every
+    merged noun is singular, and the guide is amended in the landing
+    milestone to record the resolution rather than being silently
+    overruled. Signatures, filters, limits, columns, block shapes
+    and null-title rendering are now spelled out.
 18. **P2: CLI tests omit terminal-control safety for conversation
     content.** Titles and dialogue are printed by design, and the
     guide requires that no server answer can steer a terminal.
