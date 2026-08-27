@@ -393,27 +393,58 @@ reserves them against MCP entries by construction), declared in
 - **`resume_conversation`**: `description` (free text) or
   `conversation` (a candidate id) and, from milestone 5, `start_from`
   (`recap` or `recent`). With `description`, it answers a bounded
-  candidate list (`RESUME_CANDIDATES = 5`, newest first: id, title,
-  last activity, opening excerpt) for the model to read aloud; the
-  tool's result text instructs the model to have the user pick, and
-  the follow-up call carries `conversation`, which is decision 7's
+  candidate list (`RESUME_CANDIDATES = 5`: ordinal, id, title, last
+  activity, opening excerpt) for the model to read aloud; the tool's
+  result text instructs the model to have the user pick, and the
+  follow-up call carries `conversation`, which is decision 7's
   convergence by construction. With `conversation`, the runtime
   performs the resume. When resumption is off, text storage is off,
-  the store is disabled, or the id matches nothing, the tool answers
-  a fixed spoken-refusal result (`is_error` false, per decision 11:
-  a refusal the model voices gracefully, not an error), each refusal
-  a fixed sentence naming no user input.
+  the store is disabled, or the id is not one it offered, the tool
+  answers a fixed spoken-refusal result (`is_error` false, per
+  decision 11: a refusal the model voices gracefully, not an error),
+  each refusal a fixed sentence naming no user input.
+
+**Flow state is runtime-owned and enforced.** Tool results live only
+inside one reply's working list, so the flow cannot lean on the model
+remembering candidates: the runtime keeps a small per-agent pending
+state across utterances. It holds the candidate ids of the agent's
+last discovery answer with their ordinals, and, once an over-budget
+resume has been offered, the one conversation awaiting the recap
+decision. `conversation` is honored only when the id is in the
+asking agent's offered set (anything else gets the fixed
+unknown-candidate refusal), and `start_from` only when that
+conversation holds the pending offer, so a model cannot invoke a
+recap that was never offered. The state clears on a successful
+transition, is replaced by a new discovery answer, and clears on
+handover, on `new_conversation` and at session end. The tests drive
+a stale id after a new search, an id offered to a different agent,
+a direct `start_from="recap"` with no pending offer, and the
+two-utterance flow where "the second one" arrives an utterance after
+the candidates.
+
+**A transition happens at a coherent boundary, never mid-turn.** A
+successful selection follows the `switch_agent` precedent
+(pipeline.py:1143) to its end: it ends the current tool loop, and
+the initiating turn completes wholly on its origin thread, where the
+turn-start snapshot already holds it. The runtime then applies the
+transition (rebinding the agent to the target thread and installing
+the hydrated or fresh history) and starts a new round on the new
+context, seeded with a fixed synthetic user turn in the
+`SWITCH_GREETING` shape, whose reply is the first turn recorded on
+the target thread. At most one transition per reply, mirroring the
+existing `switches_left` latch: the first successful selection or
+handover wins and later calls in the same round answer the fixed
+already-switched refusal, so no turn is ever split across
+conversations and mixed calls have a stated precedence.
 
 Execution split follows the merged precedent exactly: discovery
 (`description`) executes in `BuiltinTools.dispatch` through an
 injected thread-store read seam (a fourth constructor argument,
 compared `is not None`), because it is a read that changes nothing;
 selection (`conversation`) and `new_conversation` are intercepted in
-the runtime's tool loop the way `switch_agent` is (pipeline.py:1143),
-because success swaps the conversation context, which only the
-runtime owns. Store reads run under the existing per-source tool
-timeout through `asyncio.to_thread`, so a slow database is a timed-out
-tool call, never a stalled reply.
+the runtime's tool loop as above. Store reads run under the existing
+per-source tool timeout through `asyncio.to_thread`, so a slow
+database is a timed-out tool call, never a stalled reply.
 
 ### Per-thread context, and the clean switch
 
@@ -700,7 +731,9 @@ New coverage, by milestone:
   gaps counted, deterministic output); tools: candidates bounded and
   newest first, ambiguous description, selection by id, refusals
   when off (spoken result, not error), `new_conversation` resets
-  context with and without a store; runtime: the clean switch (the
+  context; the pending-state enforcement (stale id, foreign-agent
+  id, recap with no offer, the two-utterance selection); runtime:
+  the clean switch (the
   incoming agent's provider never receives the outgoing agent's
   words, asserted on `RecordingLlm`), switch-back continuity, resume
   installs hydrated history and rebinds, read-your-writes through
@@ -918,6 +951,10 @@ resolution once the amendment addressing it lands.
    from that set and recap/recent only after the offer, clear on
    success, new search, switch or new conversation; test stale,
    foreign-agent, direct-recap and two-utterance selection flows.
+   *Resolution*: adopted. The selection-tools section now specifies
+   the runtime-owned per-agent pending state (offered ids with
+   ordinals, the one pending recap offer), enforcement at both
+   arguments, the clearing rules, and the four prescribed tests.
 6. **P1: immediate tool-time rebinding splits a turn across
    conversations.** The tool loop snapshots its working list once;
    the user turn is appended before execution and the final speech
@@ -926,6 +963,12 @@ resolution once the amendment addressing it lands.
    staged transition at a turn boundary (or an explicitly coherent
    loop restart), and precedence for mixed or repeated
    new/resume/switch calls in one round.
+   *Resolution*: adopted in its second form. A successful selection
+   ends the tool loop the way `switch_agent` does: the initiating
+   turn completes on its origin thread, the transition applies at
+   that boundary, and a seeded new round is the target thread's
+   first turn; one transition per reply via the existing latch, with
+   later calls refused.
 7. **P1: `new_conversation` contradicts the disabled-mode
    decision.** The issue says that with resumption or text off the
    selection tools answer with a spoken refusal and behavior stays
