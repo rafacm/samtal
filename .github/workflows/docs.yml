@@ -1,0 +1,118 @@
+name: docs
+
+# The complement of vinga-server.yml, by construction. That workflow
+# runs when a change touches the server, the generated references, the
+# database plumbing or itself; this one runs when a change touches
+# anything else. Between the two, every change to the repository runs
+# the command-spellings census in at least one workflow, which is the
+# hole this file exists to close: the census sweeps every tracked file
+# (`git ls-files` in tests/unit/test_command_spellings.py), so a
+# documentation-only merge is census surface even though the server
+# workflow ignores it. One such merge staled the committed manifest and
+# left main's unit lane red with no run having gone red first; the
+# record is the M4 section of
+# docs/plans/2026-08-26-docs-authority-reorg-implementation.md, and the
+# decision is issue #329.
+#
+# paths-ignore rather than paths, deliberately: the census scans
+# everything, so any enumeration of "documentation paths" here would be
+# a standing lie of omission. The ignore list below is a mirror of the
+# other workflow's paths list, and the two must move together; each
+# file says so beside its own list. A change that touches both surfaces
+# runs both workflows and the census twice, which is harmless.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "vinga-server/**"
+      - "docs/reference/**"
+      - "docker-compose.yml"
+      - "deploy/**"
+      - ".github/workflows/vinga-server.yml"
+  pull_request:
+    paths-ignore:
+      - "vinga-server/**"
+      - "docs/reference/**"
+      - "docker-compose.yml"
+      - "deploy/**"
+      - ".github/workflows/vinga-server.yml"
+  # The same on-demand escape the server workflow carries, and for the
+  # same observed reason: GitHub has dropped this repository's
+  # pull_request events for a whole day (2026-08-27), and a dispatch
+  # run against the branch is the fallback evidence a PR then links.
+  workflow_dispatch:
+
+# One live run per branch, as in the server workflow: a docs PR whose
+# milestone checkbox is ticked a minute after it opens starts two runs
+# and only the second one's result is ever read.
+concurrency:
+  group: docs-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+
+    # The same five variables as the server workflow's lanes, for the
+    # same reason stated there: the fixtures reach the service
+    # container through them, and VINGA_DB_NAME is deliberately set so
+    # the lane keeps having to beat it.
+    env:
+      VINGA_DB_HOST: 127.0.0.1
+      VINGA_DB_PORT: "5432"
+      VINGA_DB_NAME: vinga
+      VINGA_DB_USER: vinga
+      VINGA_DB_PASSWORD: vinga
+
+    # The census runs under pytest in the unit lane's conftest, which
+    # provisions the stores at collection and refuses without a
+    # reachable Postgres rather than skipping. So this job carries the
+    # same service container the unit lane does, even though the one
+    # test it runs never reads a row: the refusal is the lane's
+    # honesty mechanism, and this job does not get an exemption from
+    # it.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: vinga
+          POSTGRES_USER: vinga
+          POSTGRES_PASSWORD: vinga
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U vinga -d vinga"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # The link-and-anchor check first: it needs nothing but the
+      # checkout and a Python, so a broken link fails the run before
+      # the install below spends its minute.
+      - name: Internal links and anchors
+        run: python3 scripts/check_doc_links.py .
+
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "vinga-server/uv.lock"
+          # The unit lane owns this cache key's save; a second writer
+          # on the same run is a race one of them loses (the server
+          # workflow says the same above its integration lane).
+          save-cache: false
+
+      - name: Install
+        working-directory: vinga-server
+        run: uv sync --frozen
+
+      # The census: every command spelling in the tree, found once and
+      # classified once, against the committed manifest. This is the
+      # test a documentation move stales; regeneration is
+      # `uv run python -m tests.unit.test_command_spellings` from
+      # vinga-server/, never a hand edit.
+      - name: Command-spellings census
+        working-directory: vinga-server
+        run: uv run pytest tests/unit/test_command_spellings.py -q

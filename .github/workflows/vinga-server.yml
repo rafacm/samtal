@@ -3,6 +3,10 @@ name: vinga-server
 on:
   push:
     branches: [main]
+    # This paths list is mirrored, inverted, by docs.yml's paths-ignore:
+    # that workflow runs the command-spellings census on everything this
+    # one ignores, so the two lists must move together or a class of
+    # change stops being census-covered anywhere.
     paths:
       - "vinga-server/**"
       # The generated domain-configuration reference is committed there
