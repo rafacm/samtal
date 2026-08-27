@@ -28,15 +28,22 @@ from sqlalchemy import inspect, text
 
 import vinga_server.app as app_module
 from tests.support.configs import config_with_agent
-from vinga_server.app import create_app
+from vinga_server.app import StartupFailed, create_app
 from vinga_server.config import Config
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations import schema
 from vinga_server.conversations import store as store_module
 from vinga_server.conversations.store import ConversationStore, open_conversations
-from vinga_server.db import read_engine
+from vinga_server.db import SUPERSEDED_REVISION, SUPERSEDED_REVISIONS, read_engine
 
-EXPECTED_TABLES = {"sessions", "turns", "tool_invocations", "events"}
+EXPECTED_TABLES = {
+    "sessions",
+    "conversations",
+    "turns",
+    "tool_invocations",
+    "conversation_milestones",
+    "events",
+}
 
 SCHEMA = schema.SCHEMA
 
@@ -209,6 +216,69 @@ def test_the_schema_is_migrated_on_a_boot_that_records_nothing(
     version, tables = _stamped(blank_database)
     assert version == head_revision()
     assert EXPECTED_TABLES <= tables
+
+
+def test_a_database_stamped_at_the_replaced_revision_is_refused(
+    spare_database: str,
+) -> None:
+    """The thread schema arrived as a re-cut baseline with no migration
+    and no backfill, so a database stamped at the revision it replaced
+    cannot be upgraded and must not be half-read.
+
+    Alembic cannot locate the deleted revision, and the classifier turns
+    that into the one sentence that says what to do about it. Stamped
+    directly rather than migrated from an old build, because this build
+    ships no way to produce that state: the stamp IS the state.
+    """
+    engine = open_conversations(DatabaseConfig(name=spare_database))
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(f"update {SCHEMA}.alembic_version set version_num = :old"),
+                {"old": next(iter(SUPERSEDED_REVISIONS))},
+            )
+    finally:
+        engine.dispose()
+
+    with pytest.raises(StartupFailed) as refusal:
+        with TestClient(create_app(recording_config(spare_database))):
+            pass
+
+    said = str(refusal.value)
+    assert said == SUPERSEDED_REVISION
+    # A fixed sentence: it names the procedure and the record, and no
+    # value at all, the revision it found included.
+    assert "deploy/postgres-init.sql" in said
+    assert "database-upgrades-have-a-compatibility-floor" in said
+    assert not any(revision in said for revision in SUPERSEDED_REVISIONS)
+
+
+def test_a_revision_from_a_newer_build_is_not_told_to_reset(
+    spare_database: str,
+) -> None:
+    """The other side of the closed set, and the reason it is closed.
+
+    A database stamped by a later build and then met by an image that
+    was rolled back fails Alembic in exactly the same way, and it is
+    current rather than stranded: telling its operator to drop it would
+    destroy a live volume over a rollback.
+    """
+    engine = open_conversations(DatabaseConfig(name=spare_database))
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(f"update {SCHEMA}.alembic_version set version_num = :later"),
+                {"later": "9999_from_the_future"},
+            )
+    finally:
+        engine.dispose()
+
+    with pytest.raises(StartupFailed) as refusal:
+        with TestClient(create_app(recording_config(spare_database))):
+            pass
+
+    assert str(refusal.value) != SUPERSEDED_REVISION
+    assert "9999_from_the_future" not in str(refusal.value)
 
 
 def test_a_writer_that_cannot_start_leaves_stop_harmless(
