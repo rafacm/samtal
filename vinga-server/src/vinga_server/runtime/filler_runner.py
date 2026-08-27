@@ -34,7 +34,7 @@ from vinga_server.events.catalog import (
     FillerSkippedForBargeIn,
     FillerSkippedForSpeech,
 )
-from vinga_server.events.values import Count, Identifier, Whole
+from vinga_server.events.values import ConversationId, Count, Identifier, Whole
 from vinga_server.filler import FillerClips
 
 if TYPE_CHECKING:
@@ -182,13 +182,17 @@ class FillerRunner:
             self._events.emit(
                 lambda: FillerSkippedForSpeech(
                     agent=Identifier(self._events.agent),
+                    conversation=ConversationId(self._events.conversation),
                     speech_ms=Whole(speech_ms),
                 )
             )
             return
         if self._turn.output_paused:
             self._events.emit(
-                lambda: FillerSkippedForBargeIn(agent=Identifier(self._events.agent))
+                lambda: FillerSkippedForBargeIn(
+                    agent=Identifier(self._events.agent),
+                    conversation=ConversationId(self._events.conversation),
+                )
             )
             return
         clips = self._fillers.get(self._events.agent or "")
@@ -204,6 +208,7 @@ class FillerRunner:
         self._events.emit(
             lambda: FillerPlayed(
                 agent=Identifier(self._events.agent),
+                conversation=ConversationId(self._events.conversation),
                 delay_ms=Whole(elapsed_ms),
                 phrase_index=Count(index),
             )

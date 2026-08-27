@@ -48,6 +48,7 @@ from vinga_server.events.values import (
     ABSENT,
     Absent,
     ClassName,
+    ConversationId,
     Count,
     Flag,
     Fragment,
@@ -183,12 +184,13 @@ def tool_fragment(tool: str | None, entry: str | None) -> Fragment:
 
 
 def builtin_tool_called(
-    agent: str, tool: str, duration_s: float, is_error: bool
+    agent: str, conversation: str, tool: str, duration_s: float, is_error: bool
 ) -> Variant:
     """The `tool_call` shape for a builtin: the one branch that names
     its tool, because a builtin's name is this server's own word."""
     return BuiltinToolCall(
         agent=Identifier(agent),
+        conversation=ConversationId(conversation),
         tool=Identifier(tool),
         duration_ms=Whole(round(duration_s * 1000)),
         is_error=Flag(is_error),
@@ -199,12 +201,13 @@ def builtin_tool_called(
 
 
 def mcp_tool_called(
-    agent: str, entry: str, duration_s: float, is_error: bool
+    agent: str, conversation: str, entry: str, duration_s: float, is_error: bool
 ) -> Variant:
     """The `tool_call` shape for a server tool, which names the entry an
     operator wrote in their YAML and never the far side's own name."""
     return McpToolCall(
         agent=Identifier(agent),
+        conversation=ConversationId(conversation),
         entry=Identifier(entry),
         duration_ms=Whole(round(duration_s * 1000)),
         is_error=Flag(is_error),
@@ -215,7 +218,7 @@ def mcp_tool_called(
 
 
 def unnamed_tool_called(
-    agent: str, source: str, duration_s: float, is_error: bool
+    agent: str, conversation: str, source: str, duration_s: float, is_error: bool
 ) -> Variant:
     """The `tool_call` shape that names nothing.
 
@@ -228,6 +231,7 @@ def unnamed_tool_called(
     """
     return UnnamedToolCall(
         agent=Identifier(agent),
+        conversation=ConversationId(conversation),
         # The classifier answers `runtime/turns.py`'s own constants,
         # which are held equal to the store's column rather than to this
         # vocabulary, so the crossing is spelled here.
@@ -260,12 +264,18 @@ def _namespace(source: str) -> UnnamedToolSource:
 
 
 def llm_retried(
-    agent: str, stage: str, provider: object, round_: int, elapsed: float
+    agent: str,
+    conversation: str,
+    stage: str,
+    provider: object,
+    round_: int,
+    elapsed: float,
 ) -> Variant:
     """The `llm_retry` event for this stall."""
     entry, type_, host, model = _entry_fields(provider)
     return LlmRetry(
         agent=Identifier(agent),
+        conversation=ConversationId(conversation),
         round=Whole(round_),
         duration_ms=Whole(round(elapsed * 1000)),
         stage=Identifier(stage),
@@ -279,6 +289,7 @@ def llm_retried(
 
 def llm_rounded(
     agent: str,
+    conversation: str,
     stage: str,
     provider: object,
     round_: int,
@@ -298,6 +309,7 @@ def llm_rounded(
     entry, type_, host, model = _entry_fields(provider)
     return LlmRound(
         agent=Identifier(agent),
+        conversation=ConversationId(conversation),
         round=Whole(round_),
         turns=Count(turns),
         duration_ms=Whole(round(elapsed * 1000)),
@@ -314,7 +326,12 @@ def llm_rounded(
 
 
 def provider_failure(
-    agent: str, stage: str, provider: object, failure: BaseException, elapsed: float
+    agent: str,
+    conversation: str,
+    stage: str,
+    provider: object,
+    failure: BaseException,
+    elapsed: float,
 ) -> Variant:
     """The `provider_failed` event for this failure.
 
@@ -342,6 +359,7 @@ def provider_failure(
     entry, type_, host, model = _entry_fields(provider)
     return ProviderFailed(
         agent=Identifier(agent),
+        conversation=ConversationId(conversation),
         error=ClassName.of(failure),
         duration_ms=Whole(round(elapsed * 1000)),
         stage=Identifier(stage),

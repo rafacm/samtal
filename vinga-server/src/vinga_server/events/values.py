@@ -201,6 +201,17 @@ ACTIVATION_CODE = Syntax(
     "A claim ticket read off a screen, not a credential.",
 )
 
+CONVERSATION_ID = Syntax(
+    "conversation_id",
+    r"[0-9A-Za-z_-]{1,64}",
+    64,
+    "A token this server minted for one conversation thread. Production "
+    "ids are `uuid4().hex`, the same shape and the same bounded machine "
+    "form a session id takes, and for the same reason: the store suites "
+    "drive threads of their own naming, and a thread id is never far-side "
+    "bytes whoever chose it.",
+)
+
 EVENT_NAME = Syntax(
     "event_name",
     r"[a-z][a-z0-9_]{0,63}",
@@ -218,7 +229,15 @@ LANGUAGE = Syntax(
 
 SYNTAXES: dict[str, Syntax] = {
     one.name: one
-    for one in (MAC, REPORTED_MAC, SESSION_ID, ACTIVATION_CODE, EVENT_NAME, LANGUAGE)
+    for one in (
+        MAC,
+        REPORTED_MAC,
+        SESSION_ID,
+        CONVERSATION_ID,
+        ACTIVATION_CODE,
+        EVENT_NAME,
+        LANGUAGE,
+    )
 }
 
 
@@ -541,9 +560,27 @@ class MachineId(TextValue):
 
 @dataclass(frozen=True)
 class SessionId(MachineId):
-    """The id this server minted for one conversation."""
+    """The id this server minted for one session: one connection
+    episode from one device, wake to close."""
 
     SYNTAX: ClassVar[Syntax | None] = SESSION_ID
+
+
+@dataclass(frozen=True)
+class ConversationId(MachineId):
+    """The id this server minted for one conversation: the durable
+    thread between a user and exactly one agent that a session attaches
+    to.
+
+    Its own type rather than a second use of `SessionId`, because the
+    two identify different entities and a record that named a thread
+    under the session type would invite exactly the confusion the
+    vocabulary split exists to remove. A trusted server-minted
+    identifier either way, and therefore metadata: a conversation's
+    title and its dialogue are content and live in the store.
+    """
+
+    SYNTAX: ClassVar[Syntax | None] = CONVERSATION_ID
 
 
 @dataclass(frozen=True)
@@ -1358,6 +1395,7 @@ __all__ = [
     "ClientId",
     "CloseReason",
     "ConfiguredPath",
+    "ConversationId",
     "Count",
     "Descriptor",
     "DeviceId",

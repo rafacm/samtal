@@ -30,6 +30,10 @@ from vinga_server.runtime.filler_runner import FillerRunner
 
 SESSION = "filler-runner"
 
+# The thread the agent below is talking on, in the shape the runtime
+# mints. Every event a runner emits names it beside the agent.
+THREAD = "9f0c1d2e3a4b5c6d7e8f90a1b2c3d4e5"
+
 # A credential-shaped value, planted in the message of whatever the
 # playback path fails with.
 SENTINEL = "sk-live-6d17b3e0-never-a-real-credential"
@@ -118,10 +122,12 @@ def runner_for(
     agent: str = "poet",
     agents: Sequence[str] = ("poet",),
 ) -> tuple[FillerRunner, FakeDevice]:
-    """One runner on a recording device, talking as `agent` the way an
-    activation leaves the events object."""
+    """One runner on a recording device, talking as `agent` on `THREAD`
+    the way an activation leaves the events object: it writes both, and
+    every event the runner emits names both."""
     session_events = SessionEvents(SESSION)
     session_events.agent = agent
+    session_events.conversation = THREAD
     device = device if device is not None else FakeDevice()
     runner = FillerRunner(
         session_events,

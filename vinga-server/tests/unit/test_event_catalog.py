@@ -115,10 +115,12 @@ def test_the_payload_carries_plain_builtins_rather_than_the_wrappers() -> None:
 def test_a_rendered_value_the_payload_does_not_keep_stays_out_of_it() -> None:
     """The retention window is said and not stored: a record repeating
     it on every prune would be storing a setting."""
-    built = ConversationsPruned(sessions=Count(2), days=Count(90))
+    built = ConversationsPruned(
+        conversations=Count(1), sessions=Count(2), days=Count(90)
+    )
 
-    assert built.payload() == {"sessions": 2}
-    assert built.logged().args == (2, 90)
+    assert built.payload() == {"conversations": 1, "sessions": 2}
+    assert built.logged().args == (1, 2, 90)
 
 
 # --- absence and null are different answers ---------------------------
