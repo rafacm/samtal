@@ -46,8 +46,8 @@ why.
 - [Binding](#binding): which agents a device can reach, and which one
   answers a fresh wake.
 - [Conversation and session](#conversation-and-session): the
-  load-bearing distinction, the stored record today, and the durable
-  thread ahead.
+  load-bearing distinction, the stored record, and what the durable
+  thread can be asked to do next.
 - [Configuration changes arrive as whole
   worlds](#configuration-changes-arrive-as-whole-worlds): when an edit
   reaches a conversation in progress.
@@ -74,19 +74,22 @@ one connection episode from one device, wake to close, and a
 deployment that has turned recording on stores the session and the
 turns inside it. A **conversation** is a
 dialogue between a user and exactly one agent: a durable thread that
-outlives any single session and belongs to no device, which is
-**decided direction** (issue #190), not code. **Users** arrive in a
+outlives any single session and belongs to no device. The entity
+exists: a stored turn names both the session it was spoken in and the
+conversation it belongs to. What is still **decided direction** (issue
+#190) is what a thread can then be asked to do, which is resuming one,
+listing and deleting them, and the recap. **Users** arrive in a
 later stage, and the model leaves their slot open on purpose, which is
 **decided direction** (recorded on this page, 2026-08-21; no owning
 issue or decision record yet).
 
-One name collides, and clearing it up front saves confusion later. The
-database schema named `conversations` stores **sessions and turns**,
-which is what exists today;
+One name is used twice, and clearing it up front saves confusion later.
+The database schema named `conversations` holds sessions, threads and
+the turns both of them project, so SQL spells the thread table
+`conversations.conversations`;
 [its reference](reference/conversations-schema.md) is the authority on
-what it holds. The **Conversation** of this page, the thread, is issue
-#190's direction and has no table of its own yet. Where the two meet
-below, each is named explicitly.
+what it holds. The schema name is the store's and the table name is the
+entity's. Where the two meet below, each is named explicitly.
 
 ## Device
 
@@ -196,10 +199,10 @@ default by voice ("make Nadia the default agent on this device") is
 
 ## Conversation and session
 
-**Implemented today**: the session, and the stored record of sessions
-and turns (issue #120). **Decided direction** (issue #190): the
-Conversation as a durable, agent-scoped thread spanning sessions, which
-owns every semantic below that cites it.
+**Implemented today**: the session, the Conversation as a durable,
+agent-scoped thread, and the stored record of all three (issues #120
+and #190). **Decided direction** (issue #190): what a thread can be
+asked to do, which is every semantic below that cites it.
 
 The load-bearing distinction in the model is that a conversation and a
 session are different things.
@@ -207,27 +210,26 @@ session are different things.
 A **session** is one connection episode: wake (button press or wake
 word) to close. It belongs to a device. Sessions exist in the code
 today, and so does their record wherever a deployment has turned
-recording on: the store then holds one row per session and one per
-turn. Whether it records at all, what its content switches take away
-when it does, and how long a row is kept are all in
+recording on: the store then holds one row per session, one per
+conversation and one per turn. Whether it records at all, what its
+content switches take away when it does, and how long a row is kept
+are all in
 [the conversation store schema](reference/conversations-schema.md),
 which this page does not restate.
-That schema is named `conversations`, which is the collision worth
-holding on to: it is the store of sessions and turns, not of the entity
-the next paragraph describes.
 
 A **conversation** is a dialogue between a user and exactly one agent:
 a thread that lives on the server, accrues a transcript, and is
-independent of any device. It is **decided direction** (issue #190),
-not code. What does not exist today is the entity: nothing in the
-model spans sessions, and the two halves of that are worth keeping
-apart. An agent's working context is assembled inside one session and
+independent of any device. The entity exists: a thread takes its
+identity when an agent is activated, its row when its first turn is
+stored, and its title from that turn's utterance. What is not built
+yet is the continuity, and the two halves are worth keeping apart. An
+agent's working context is still assembled inside one session and still
 ends when the session closes, so tomorrow's agent starts with none of
-it. The rows are a separate question with a separate answer: where
-recording is on, the turns are keyed by session and kept for as long
-as the retention policy in
+it and nothing yet asks for a thread back. The rows already outlast the
+session: they are kept for as long as the retention policy in
 [the store's reference](reference/conversations-schema.md#retention-and-deletion)
-says, which outlasts the session that wrote them.
+says, which is now measured against the thread's own last activity
+rather than the session's age.
 
 In short: sessions are how audio reaches the server; conversations are
 what accumulates and what you come back to. The vocabulary follows the
@@ -237,12 +239,12 @@ Sophia" is one session touching two threads; resuming with Sophia
 tomorrow from another device is the same thread in a new session.
 
 The two are projections of the same rows rather than two stores (issue
-#190). A turn references both the thread it belongs to and the session
-it was spoken in, so the session view (everything said and done on this
-device from wake to close) and the conversation view (this thread,
-across every session it spanned) are two readings of one set of turns.
-No dialogue is written twice, and neither view is reconstructed from
-the other.
+#190), and that is implemented. A turn references both the thread it
+belongs to and the session it was spoken in, so the session view
+(everything said and done on this device from wake to close) and the
+conversation view (this thread, across every session it spanned) are
+two readings of one set of turns. No dialogue is written twice, and
+neither view is reconstructed from the other.
 
 Two things sit beside that record rather than inside it. Capture and
 the structured event stream are scoped to a session, never to a thread,
@@ -259,9 +261,12 @@ special cases:
 
 - **Switching and returning.** "Let me talk to Nadia" leaves the
   current thread and opens or resumes one with Nadia inside the same
-  session; "back to Sophia" returns. The switch itself exists today as
-  the handover tool, and the stored record already names the agent on
-  every turn.
+  session; "back to Sophia" returns. The switch exists today as the
+  handover tool, and so do the threads: the first activation of an
+  agent in a session opens one and every later activation continues it,
+  so the record of that session names two of them and the handover turn
+  belongs to the one it started on. What is still direction is that the
+  incoming agent starts clean, which the last bullet below states.
 - **Resuming elsewhere.** A new session on another device can attach to
   an existing thread. Discovery is by spoken description ("a while ago
   we were talking about this topic") and is agent-scoped: an agent
@@ -284,13 +289,16 @@ The decided semantics, each with its owner:
   yesterday; continuing an earlier thread is asked for, by describing
   it. This replaces an earlier formulation on this page under which
   conversations were suspended and never ended.
-- **Threads are listable, readable and deletable, and retention knows
-  about them.** *Decided direction, issue #190.* An operator can list
-  an agent's threads, read one, and delete one, and the retention
-  policy becomes thread-aware rather than only session-aware. What the
-  release has instead today, a retention window over whole sessions
-  and no delete command at all, is stated exactly in
+- **Retention knows about threads.** *Implemented today, issue #190.*
+  The window is measured against a conversation's last activity rather
+  than a session's age, so a thread that is still being talked to keeps
+  its turns however old the session that began it, and a thread past
+  the window goes whole. Exactly what the three rules do is in
   [the store's reference](reference/conversations-schema.md#retention-and-deletion).
+- **Threads are listable, readable and deletable.** *Decided
+  direction, issue #190.* An operator can list an agent's threads, read
+  one, and delete one. What the release has instead today is no delete
+  command at all, which the same section states exactly.
 - **A long thread gets a recap only by consent.** *Decided direction,
   issue #190.* At milestones in a long thread the agent offers to
   recap rather than silently compressing, and the user says yes. This

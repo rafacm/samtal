@@ -2041,7 +2041,7 @@ This index is the other half: what exists, and when it fires.
 | `conversations_enabled` | the conversation store opens at startup, which means this server is recording what is said to it (no session or device: it is said once, before anything connects) |
 | `conversations_dropped` | the store is behind and events for one session are being dropped, said once per session at its first drop; the total lands on that session's row |
 | `conversations_failed` | a write to the store failed and its batch was dropped, or a prune could not run |
-| `conversations_pruned` | retention deleted sessions older than the window (at INFO: a policy doing its job) |
+| `conversations_pruned` | retention deleted the conversations that aged out of the window, and the session records nothing points at any more (at INFO: a policy doing its job) |
 | `drain_started` | a shutdown begins draining |
 | `drain_finished` | every reply finished speaking |
 | `drain_incomplete` | a reply was cut, or a session hung |
@@ -2178,7 +2178,8 @@ server:
     metrics: true
     # store conversation text, and tool names, arguments and results
     text: true
-    # prune whole sessions older than this; 0 keeps everything
+    # prune conversations inactive for longer than this; 0 keeps
+    # everything
     retention_days: 90
 ```
 
@@ -2186,11 +2187,16 @@ What lands is the `conversations` schema of the same database the
 domain half's `domain` schema is in, which means the same instance, the
 same credentials and the same backup: one row per session (device,
 agents, protocol, the resolved providers, when it opened, when and why
-it closed), one row per turn (what was heard and what was replied, the
-ASR, LLM and TTS timings, the rounds and the token counts), one row per
-tool call a turn made (its source, its arguments and its result), and
-one row per structured event, which is the same decision track the
-capture writes beside its audio. Audio never enters it: the capture is the recording,
+it closed), one row per conversation (its agent, the device it began
+on, a title taken from its first utterance, and when it was last spoken
+to), one row per turn (what was heard and what was replied, the ASR,
+LLM and TTS timings, the rounds and the token counts), one row per tool
+call a turn made (its source, its arguments and its result), and one
+row per structured event, which is the same decision track the capture
+writes beside its audio. A turn names both the session it was spoken in
+and the conversation it belongs to, so the two are views of one set of
+rows rather than two records: one session can touch several
+conversations, and one conversation can span several sessions. Audio never enters it: the capture is the recording,
 this is the queryable record. The columns are documented in
 [`../docs/reference/conversations-schema.md`](../docs/reference/conversations-schema.md),
 generated from the schema itself, and `vinga-server conversations
@@ -2212,9 +2218,11 @@ combinations are supported configurations:
 | off | on | what was said, with no events rows and the numbers null: the transparency-first setting |
 | off | off | the session spine and the shape of each turn, and nothing else |
 
-Session rows land in every enabled configuration, because retention and
-every read key on them, and their timestamps survive both switches for
-the same reason. Each session row also records which way the switches
+Session and conversation rows land in every enabled configuration,
+because retention and every read key on them, and their timestamps
+survive both switches for the same reason. A conversation's title is
+the exception and is content, because it is what somebody said: with
+`text: false` a thread has no title. Each session row also records which way the switches
 were set for it, so a null column is distinguishable from a column that
 was never stored.
 
@@ -2223,29 +2231,39 @@ control this release has.** Until per-user controls exist, enabling text
 storage on a device a household shares stores what guests say to it,
 which is the same statement the capture section makes about audio.
 Attributing a session on a shared device to one member needs voiceprint
-identification, which does not exist here yet, so the session is the
-unit deletion is expressed in: it is what retention takes whole and what
-the erasure API will address. Erasing one named session on demand is not
-enforceable in this release at all, which the deletion section below
-says in full. The session id is surfaced everywhere regardless: on the
+identification, which does not exist here yet, so the units deletion is
+expressed in are the conversation and the session: the first is what
+retention takes whole, and both are what the erasure API will address.
+Erasing either on demand is not enforceable in this release at all,
+which the deletion section below says in full. The session id is surfaced everywhere regardless: on the
 events, on the capture triplet's filenames, and on every row the store
 keeps.
 
-Retention is 90 days by default: whole sessions older than the window
-are deleted, row and children together, at startup and at each session
-close, and a line says how many went. `retention_days: 0` keeps
-everything, which is a deliberate choice rather than a default, because
-a store with no policy retains forever.
+Retention is 90 days by default, and what the window is measured
+against is a conversation's last activity, because the conversation is
+the unit this store retains. A thread inactive for longer than the
+window is deleted whole, with its turns; the events of a session older
+than the window go on the session's own age, whether or not its row
+survives; and a session row goes once no turn names it any more, so a
+session that began before the cutoff while its thread is still being
+talked to keeps the row those turns cross-reference. The pass runs at
+startup and at each session close, and a line says how many
+conversations and how many session records went. `retention_days: 0`
+keeps everything, which is a deliberate choice rather than a default,
+because a store with no policy retains forever. In a deployment that
+never resumes a conversation this is the behaviour it always had: a
+thread never spans sessions there, so its age and its session's
+coincide.
 
 **Deletion on demand is not something this release has a command for.**
-🚧 Erasing one named session is coming back as an act of the API, with a
-CLI verb in front of it. The command that used to do it went straight to
-the store's file, which is not a thing a command can keep doing once the
-store is a database somewhere else.
+🚧 Erasing one named session, and one named conversation, is coming back
+as an act of the API, with a CLI verb in front of it. The command that
+used to do it went straight to the store's file, which is not a thing a
+command can keep doing once the store is a database somewhere else.
 
 Until it lands, retention above is what deletes, and a deployment that
 has to erase something now does it in SQL, as the server role, taking
-the session's rows from all four tables in one transaction:
+the session's rows in one transaction:
 
 ```sql
 begin;
@@ -2253,18 +2271,22 @@ delete from conversations.events where session = '...';
 delete from conversations.tool_invocations where session = '...';
 delete from conversations.turns where session = '...';
 delete from conversations.sessions where session = '...';
+delete from conversations.conversations c
+ where not exists (select 1 from conversations.turns t
+                    where t.conversation = c.conversation);
 commit;
 ```
 
-The same predicate four times, because every table carries the
-session's uuid, and one transaction because a session's rows go
-together or the deletion leaves children pointing at nothing. It is a
-hand-written statement rather than a command, which is the honest
-shape of the gap; what it is not any more is the whole store, which is
-what deleting a file took.
+The same predicate for the session's own four tables, because every one
+of them carries the session's uuid, and one transaction because a
+session's rows go together or the deletion leaves children pointing at
+nothing. The last statement takes the threads that lost their every
+turn to it, since a conversation with no turns is a title and two
+timestamps. It is a hand-written statement rather than a command, which
+is the honest shape of the gap; what it is not any more is the whole
+store, which is what deleting a file took.
 
-Whichever way rows go, they go a session at a time, row and children
-together. A session that is still running when its row goes stops being
+A session that is still running when its row goes stops being
 recorded: the writer finds the row gone and stops writing for that
 session, so what is said afterwards is not recorded. Capture files are a
 separate instrument and are never touched by any of this; the session id
@@ -2309,8 +2331,8 @@ provisioned without that file simply has no analyst role, and serves
 exactly the same.
 
 There is deliberately no analysis command, and the ids on `sessions`,
-`turns` and `events` are identity columns a sequence never hands out
-twice, so a client that has read up to one can ask for what came after
+`conversations`, `turns` and `events` are identity columns a sequence
+never hands out twice, so a client that has read up to one can ask for what came after
 it and cannot be handed a different row under the same number.
 
 Writing never happens on the conversation's path. One background thread
