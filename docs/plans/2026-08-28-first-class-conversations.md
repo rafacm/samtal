@@ -250,17 +250,49 @@ deletion is one transaction over the row and its children; a session
 that is still running when its row goes stops being recorded (the
 writer's tombstone rule already does this); MVCC means an in-flight
 repeatable-read transaction still sees the rows until it ends, which
-the schema reference already states and keeps stating. Deleting a
-session deletes its turns even where they belong to a live thread:
-erasure outranks thread continuity, the thread honestly keeps a gap,
-and the conversation row itself survives unless it loses every turn,
-in which case it is deleted too rather than left as an empty shell.
-Deleting a conversation deletes its turns (and milestones) out of
-their sessions' timelines the same way, and never touches session
-rows or events. Both deletions run over a short-lived write engine
-opened per request (deletion must work when recording is off and no
-store object exists, exactly as reads already do), and the writer's
-tombstone checks make them safe beside a live writer.
+the schema reference already states and keeps stating. Both
+deletions run over a short-lived write engine opened per request
+(deletion must work when recording is off and no store object
+exists, exactly as reads already do).
+
+Erasure outranks every copy the store derived, not only the source
+rows. Deleting a session deletes its turns even where they belong to
+a live thread (the thread honestly keeps a gap), and the same
+transaction erases what those turns fed: a conversation whose title
+was derived from a deleted turn (the title source is the thread's
+first turn, so this is decidable from surviving rows) has its title
+recomputed from the earliest surviving turn or nulled; every
+milestone whose recorded coverage (`from_turn` through `after_turn`)
+intersects a deleted turn is deleted with it, because a summary of
+erased content is that content; and `last_active_at` is recomputed
+from the surviving turns. A conversation that loses every turn is
+deleted whole rather than left as an empty shell. Deleting a
+conversation deletes its turns and milestones out of their sessions'
+timelines the same way, and never touches session rows or events.
+The milestone-2 sentinel test is the reviewer's: a credential-shaped
+utterance whose text has become a title and, in milestone 5's suite,
+a milestone, then the source session deleted, and the sentinel
+hunted through every table and read surface.
+
+Deletion of a conversation never resurrects. Absence of a row cannot
+be the tombstone, because absence is also the ordinary
+pre-first-turn state; the writer therefore keeps the distinction it
+already needs anyway: it remembers the conversation ids it has
+materialized this process, and the deletion endpoints mark deleted
+ids dead through a store-level signal the writer consumes at its
+next marker (a generation counter on the deletion path; the exact
+mechanism is the implementation's, the contract is the writer's).
+A turn arriving for a dead id is discarded, its acknowledgement
+resolves false, and the id is never re-materialized; a turn for an
+id the writer has never seen is a first turn and materializes as
+designed, which is safe across restarts because runtimes do not
+outlive the process and a resume of a deleted conversation fails its
+row lookup with the fixed not-found refusal. The in-memory
+conversation continues speaking (the user's experience is not the
+eraser's to interrupt); its records stop landing, which is what
+erasure means. Tested through the real endpoint with the gate seam:
+a turn queued before the delete commits, and a turn produced after
+it, both discarded with false acknowledgements and no new row.
 
 ### The durable path: turns retry bounded, and writes acknowledge
 
@@ -735,8 +767,13 @@ New coverage, by milestone:
   durable batch latches `incomplete` and the flag lands on the next
   marker and survives metrics-off; an early failed turn followed by
   a later success leaves the flag true; DELETE session
-  round trip (row and children gone, live thread
-  keeps its other turns, empty conversation shells deleted);
+  round trip (row and children gone, live thread keeps its other
+  turns, empty conversation shells deleted, titles recomputed or
+  nulled and `last_active_at` recomputed from survivors, the
+  planted-title sentinel gone from every table and surface);
+  conversation dead-id semantics (queued-before and produced-after
+  turns discarded with false acknowledgements, no row
+  re-materialized);
   running-session deletion ends its recording (existing tombstone
   test extended over HTTP); 401 without the token; CLI `session
   list|show|delete` through the client seam, confirmation and
@@ -797,10 +834,9 @@ New coverage, by milestone:
 - **Two writers and a deleter.** The API deletions run beside the
   writer; the tombstone rule (`_alive` per marker) already covers a
   session deleted mid-flight, and milestone 2 extends the same test
-  over HTTP. Conversation deletion adds a conversation-level
-  tombstone check to the writer: a turn for a conversation whose row
-  is gone materializes a fresh row only if its session still exists
-  and the turn is genuinely new; the review round should press here.
+  over HTTP. Conversation deletion is covered by the dead-id rule in
+  the deletion section: discarded turns, false acknowledgements, no
+  re-materialization, tested through the real endpoint.
 - **Generated-artifact rebases.** Both sides of a stacked rebase can
   regenerate OpenAPI, events.md, the schema reference or the
   spellings manifest; regenerate on the rebased tree and prove green
@@ -1043,6 +1079,13 @@ resolution once the amendment addressing it lands.
     resolve pending acknowledgements false and never be recreated;
     test queued-before-delete and produced-after-delete through the
     real endpoint.
+    *Resolution*: adopted. The deletion section now separates the
+    two states: the writer remembers what it materialized and the
+    deletion endpoints mark ids dead through a store-level signal;
+    a dead id discards turns with false acknowledgements and never
+    re-materializes, the restart case is argued from runtimes not
+    outliving the process, and both interleavings are tested through
+    the endpoint.
 11. **P1: session deletion leaves copied session content behind.**
     A deleted session's first utterance can survive as a
     conversation title, its content inside a later milestone, and
@@ -1051,6 +1094,11 @@ resolution once the amendment addressing it lands.
     test a credential-shaped sentinel copied into title and
     milestone, then delete its source session and inspect every
     table and read surface.
+    *Resolution*: adopted. Session deletion now erases derived
+    copies in the same transaction: the title recomputes or nulls,
+    milestones whose coverage intersects a deleted turn are deleted,
+    `last_active_at` recomputes, and the sentinel test is exactly
+    the reviewer's.
 12. **P1: store-backed tool failures can leak credentials.**
     Discovery runs through `BuiltinTools.dispatch`, whose failures
     `_run_one` embeds as `str(exc)` into the model-visible and
