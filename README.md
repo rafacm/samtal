@@ -63,48 +63,41 @@ Any board supported by xiaozhi-esp32 can work; these are the ones vinga targets 
 
 Seven steps. The device runs upstream's prebuilt xiaozhi firmware; the server is vinga's and ships as a container image, configured over the API it serves with the `vinga` command line. [`vinga-server/README.md`](vinga-server/README.md) has every option, the security defaults, and the container details.
 
-**1. Start the server.** It keeps everything it stores in one Postgres database, which is the one thing it needs from you before it will boot; an empty database is a valid state to start on, so no configuration file is needed either. The server comes up serving no agents, and the next two steps configure it over the API. Generate the secrets **once** and keep them somewhere you can read them back:
+**1. Start the server.** It is two containers, the server and the one Postgres database it keeps everything in, and they come up together from the compose file this repository publishes. No checkout is needed: fetch that file and the provisioning script beside it into a directory of its own, mint the two secrets, and start it.
 
 ```bash
-openssl rand -hex 32 > ~/.vinga-api-secret       # once, ever
-openssl rand -hex 32 > ~/.vinga-auth-secret      # once, ever
+mkdir vinga && cd vinga
+curl -O https://raw.githubusercontent.com/rafacm/vinga/main/docker-compose.yml
+curl --create-dirs -o deploy/postgres-init.sql \
+  https://raw.githubusercontent.com/rafacm/vinga/main/deploy/postgres-init.sql
 
-# The database. A network of its own, because the server reaches it by
-# name: inside a container, 127.0.0.1 is the container itself.
-docker network create vinga-net
-docker run -d --name vinga-db --network vinga-net \
-  -e POSTGRES_DB=vinga -e POSTGRES_USER=vinga -e POSTGRES_PASSWORD=vinga \
-  postgres:17-alpine
+# The two secrets, minted once and kept: this file is what the server
+# is given, and it is where you read the API token back from later.
+umask 077
+{ echo "VINGA_API_SECRET=$(openssl rand -hex 32)"
+  echo "VINGA_AUTH_SECRET=$(openssl rand -hex 32)"
+  echo "VINGA_SERVER__AUTH__ENABLED=false"
+} > .env
 
-# Wait for it, because the server refuses to boot on a database it
-# cannot reach yet rather than retrying: a restart policy is where that
-# decision belongs, and here it is one line.
-until docker exec vinga-db pg_isready -U vinga -d vinga; do sleep 1; done
-
-export VINGA_API_SECRET=$(cat ~/.vinga-api-secret)
-export VINGA_AUTH_SECRET=$(cat ~/.vinga-auth-secret)
-docker run -d --name vinga -p 8003:8003 --network vinga-net \
-  -e VINGA_API_SECRET \
-  -e VINGA_AUTH_SECRET \
-  -e VINGA_DB_HOST=vinga-db \
-  -e VINGA_SERVER__AUTH__ENABLED=false \
-  -v vinga-data:/data \
-  ghcr.io/rafacm/vinga-server:latest
+docker compose --profile server up -d --wait
 ```
 
-`VINGA_API_SECRET` is the bearer token for the configuration API and `VINGA_AUTH_SECRET` signs the device tokens, so neither is minted inline in the `docker run`: a regenerated device secret invalidates the token every device has stored ([Security](vinga-server/README.md#security)). `VINGA_SERVER__AUTH__ENABLED=false` is for a trial on a network you trust; drop that line for anything that outlives an afternoon, since device authentication is on by default. Every other key of the server half, and the YAML file that is the alternative to a handful of variables, are in [Running in a container](vinga-server/README.md#running-in-a-container).
+That is the whole of it: the database, then the server once the database answers, and `--wait` returns when both are healthy. An empty database is a valid state to start on, so no configuration file is needed either; the server comes up serving no agents, and the next two steps configure it over the API. Stop it with `docker compose --profile server down`, and add `-v` to throw the database and the downloaded models away too.
 
-The `VINGA_DB_*` family is how the server is told where that database is (`VINGA_DB_HOST`, `VINGA_DB_PORT`, `VINGA_DB_NAME`, `VINGA_DB_USER`, `VINGA_DB_PASSWORD`, or a single `VINGA_DB_URL` that replaces all five), and everything unset above is a default that matches the values in the command. **The password `vinga` is a trial convenience and nothing more**: a deployment sets a real one, and [The configuration database in a deployment](vinga-server/README.md#the-configuration-database-in-a-deployment) covers that along with the privileges the server needs, the provisioning file at [`deploy/postgres-init.sql`](deploy/postgres-init.sql) and backups. A checkout skips all of this with `docker compose up -d --wait`, which starts the same database on loopback with the same defaults. The server migrates its schemas at every boot, so there is no init step to run, and it refuses to start rather than waiting when the database is not there.
+`VINGA_API_SECRET` is the bearer token for the configuration API and `VINGA_AUTH_SECRET` signs the device tokens. **Neither has a default anywhere**: with no `.env` compose refuses before a container starts, and with one that is missing a secret the server refuses at boot and names the variable. Mint them once and keep them, because a regenerated device secret invalidates the token every device has stored ([Security](vinga-server/README.md#security)). The same file is where every other variable the server should find in its environment goes, a provider credential your agent names among them. `VINGA_SERVER__AUTH__ENABLED=false` is for a trial on a network you trust; drop that line for anything that outlives an afternoon, since device authentication is on by default.
+
+The compose file is the one place the topology is written down, so nothing here restates it: the database is published on loopback while the server's port 8003 is published on every interface, because boards on your LAN have to reach it. **The database password it defaults to is a trial convenience and nothing more**: a deployment sets a real one, and [The configuration database in a deployment](vinga-server/README.md#the-configuration-database-in-a-deployment) covers that along with the privileges the server needs, the provisioning file at [`deploy/postgres-init.sql`](deploy/postgres-init.sql) and backups. The server migrates its schemas at every boot, so there is no init step to run. A checkout already has both files and runs the same command from its root; running the server itself some other way, on one container against a Postgres you provide, is [Running in a container](vinga-server/README.md#running-in-a-container), which also has every key of the server half and the YAML file that is the alternative to a handful of variables.
 
 **2. Install the CLI**, and point it at the server you just started. `vinga` is a client of the configuration API rather than a second way into the database, so this is how a deployment is administered from here on, whether it runs on this machine or across the network.
 
 ```bash
 uv tool install "git+https://github.com/rafacm/vinga#subdirectory=vinga-server"
 
-# Where the API is, and the token from step 1. Plain http is allowed to a
-# loopback address and to nothing else; a deployment anywhere else is https.
+# Where the API is, and the token from step 1, read back out of the file
+# the server was given. Plain http is allowed to a loopback address and to
+# nothing else; a deployment anywhere else is https.
 export VINGA_API_URL=http://127.0.0.1:8003/api
-export VINGA_API_SECRET=$(cat ~/.vinga-api-secret)
+set -a; . ./.env; set +a
 
 vinga list
 ```
@@ -116,9 +109,9 @@ vinga list
 ```bash
 curl -O https://raw.githubusercontent.com/rafacm/vinga/main/vinga-server/examples/presets/local-stack.yaml
 
-# The server dials the model from inside the container, so change the llm
-# base_url in that file from localhost to host.docker.internal. On Linux,
-# add --add-host=host.docker.internal:host-gateway to the docker run above.
+# The server dials the model from inside its container, so change the llm
+# base_url in that file from localhost to host.docker.internal, which the
+# compose file resolves to this machine on every platform.
 vinga apply -f local-stack.yaml
 
 # Which agent an unknown device reaches. Bind specific devices instead
@@ -132,14 +125,14 @@ A write is stored, not yet in effect; `reload` builds the engines and serves the
 
 **4. Flash** the prebuilt xiaozhi merged binary for your board at offset `0x0`. Every serial gotcha is in [`docs/devices/README.md`](docs/devices/README.md#driving-a-board-from-a-terminal-session).
 
-**5. Get the URL to type.** This step runs where the server is, because the URL is derived from the file half and the device-auth secret, which live with the server rather than with the client.
+**5. Get the URL to type.** This step runs where the server is, because the URL is derived from the file half and the device-auth secret, which live with the server rather than with the client. Run it from the directory step 1 made, which is where the compose file names the service.
 
 ```bash
-docker exec -i vinga vinga-server config ota-url
+docker compose exec vinga vinga-server config ota-url
 # http://192.168.1.10:8003/x/AB2C4D5E/
 ```
 
-`docker exec -i vinga vinga-server doctor` says what a device would be told on that URL, or what is wrong. No cable is involved in either; the whole cable-free story is [Onboarding a device](vinga-server/README.md#onboarding-a-device).
+No `--profile` is needed once the stack is up: the profile decides what starts, and this reaches a service that is already running. `docker compose exec vinga vinga-server doctor` says what a device would be told on that URL, or what is wrong. No cable is involved in either; the whole cable-free story is [Onboarding a device](vinga-server/README.md#onboarding-a-device).
 
 **6. Provision WiFi and give the board that URL.** How the URL gets there depends on the image your board runs, so start from your board's guide in [`docs/devices/`](docs/devices/README.md), which says which button brings its portal up and also covers its wake word, its display, and the rest of its controls. Where the image's captive portal carries a Custom OTA URL field in its advanced section, that is the whole step and no cable is needed: join the board's access point and enter your WiFi and the URL together. Where it does not, and the Touch-LCD-1.54 image tested here is one that does not, write the URL into the board's NVS over USB first, by [the procedure on the common page](docs/devices/README.md#writing-the-servers-address-into-nvs), then provision WiFi from the portal.
 
@@ -165,7 +158,7 @@ Which image tag to deploy from, and the slim variant that carries neither local 
 | --- | --- |
 | [`vinga-server/`](vinga-server/) | The conversation server (Python): OTA/config endpoint, WebSocket audio channel, VAD → ASR → LLM → TTS pipeline with pluggable providers, MCP tools, device authentication. Published as a multi-arch container image. |
 | [`vinga-esp32/`](vinga-esp32/) | Thin firmware customization: vinga server as default endpoint, English wake word, minimal UI changes. 🚧 |
-| [`deploy/`](deploy/) | What a deployment runs against its own Postgres before the server does: [`postgres-init.sql`](deploy/postgres-init.sql) creates the two schemas the server owns and the read-only role the conversation record is read through. The `docker-compose.yml` at the root runs the same file against the development database. |
+| [`deploy/`](deploy/) | What a deployment runs against its own Postgres before the server does: [`postgres-init.sql`](deploy/postgres-init.sql) creates the two schemas the server owns and the read-only role the conversation record is read through. The `docker-compose.yml` at the root runs the same file against the database it starts, whether that is the development one alone or the pair a trial runs. |
 | [`docs/`](docs/README.md) | The reference pages (the CLI, every configuration field, the API contract, the events), the per-board device guides, the architecture with its product promises and guidelines, and the record: research notes, plans, features and decisions. Its index says which class each page belongs to and therefore what it may claim. |
 | `vendor/` | Reference clones of the upstream projects (not committed). |
 
