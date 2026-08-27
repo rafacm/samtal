@@ -509,33 +509,52 @@ with the offer:
 1. `resume_conversation(conversation=X)` over budget does not swap
    context; its result instructs the model to offer the user a choice
    between a recap and simply continuing from recent turns.
-2. Consent: `resume_conversation(conversation=X, start_from="recap")`.
-   The runtime hydrates the backlog for summarization (latest
-   milestone plus everything after it, under a wider internal bound,
-   `RECAP_INPUT_BUDGET_TOKENS`, its own named constant), runs one
-   round against the active agent's own LLM provider with a fixed
-   summarization instruction, stores the result as a milestone row
-   (durable path; the acknowledgement is awaited bounded before the
-   tool answers), installs milestone-plus-tail as the thread context,
-   and returns the recap text as the tool result with the instruction
-   to read it to the user. What is stored is what was offered to be
-   spoken, which is the honest form of "speaking it and storing it
-   are one act" a text model can provide; the model is instructed to
-   read it verbatim and the approximation is stated in the reference
-   documentation rather than implied away. A summarization failure
-   (provider error, timeout) falls back to the recent-tail resume
-   with a result that says the recap could not be made; nothing is
-   stored.
+2. Consent: `resume_conversation(conversation=X, start_from="recap")`,
+   honored only against the pending offer, intercepted like every
+   selection. The runtime, not the model, owns everything after the
+   consent:
+   - It hydrates the backlog for summarization (the latest milestone
+     plus the turns after it, truncating oldest first under
+     `RECAP_INPUT_BUDGET_TOKENS`, its own named constant) and records
+     the range actually included: `from_turn`, the first covered
+     turn's id, and `after_turn`, the last.
+   - It runs one round against the active agent's own LLM provider
+     with a fixed summarization instruction, under its own timeout
+     (`RECAP_ROUND_TIMEOUT_S`).
+   - It speaks the recap itself: the summarizer's text is fed to the
+     reply's synthesis path verbatim, with no second model round to
+     rephrase it, so what the user hears is byte-for-byte the text
+     that will be stored. The consent turn records on its origin
+     thread like any turn, with the spoken recap as its reply.
+   - It stores the milestone only after playback completes at the
+     device-facing edge (the reply-completion point the runtime
+     already has), on the durable path with a bounded
+     acknowledgement wait. The ordering is the guarantee: before
+     completion nothing is stored, so a barge-in, a synthesis
+     failure, a disconnect or a crash mid-recap stores nothing and
+     the next resume simply re-offers; a write that lands after an
+     acknowledgement timeout is late but never unheard, because the
+     write is not enqueued until playback finished. A storage
+     failure keeps the installed context for this session and the
+     next resume re-offers.
+   - It installs recap-plus-tail as the thread context at the same
+     transition boundary every selection uses.
+   A summarization failure (provider error, timeout) falls back to
+   the recent-tail resume with a result that says the recap could
+   not be made; nothing is stored.
 3. Decline: `resume_conversation(conversation=X, start_from="recent")`
    hydrates the tail under the ordinary budget and stores nothing.
 
 A milestone row is `conversation_milestones`: `id` (bigint identity),
-`conversation` (text), `after_turn` (bigint, the last `turns.id` the
-recap covers, which is its position in the timeline), `created_at`
-(text, UTC ISO-8601), `text` (text, nullable under the text switch by
-the uniform rule, though the flow that creates one cannot run with
-text off). Milestone-aware hydration reads the latest row and the
-turns with `id > after_turn`.
+`conversation` (text), `from_turn` and `after_turn` (bigint, the
+first and last `turns.id` the summarizer actually read, so a bounded
+recap never claims turns it omitted), `created_at` (text, UTC
+ISO-8601), `text` (text, nullable under the text switch by the
+uniform rule, though the flow that creates one cannot run with text
+off). Milestone-aware hydration reads the latest row and the turns
+with `id > after_turn`; turns at or before `from_turn` are outside
+the recorded coverage, exactly as oldest-first truncation would have
+dropped them, and the reference documentation states the boundary.
 
 ### Events
 
@@ -747,10 +766,16 @@ New coverage, by milestone:
   over websockets, resume by description in the second, the thread
   continues (the lane's one new end-to-end case).
 - **Milestone 5**: over-budget resume offers instead
-  of swapping; consent stores the milestone durably, installs
-  milestone-plus-tail, and the stored text equals the tool result;
-  decline stores nothing and resumes the tail; summarization failure
-  falls back with nothing stored; milestone-aware hydration
+  of swapping; consent speaks the recap through the synthesis path
+  and stores it only after playback completes, the stored text
+  byte-equal to what was synthesized; a barge-in, a synthesis
+  failure and a disconnect mid-recap each store nothing and the next
+  resume re-offers; a storage failure after playback stores nothing
+  and re-offers; decline stores nothing and resumes the tail;
+  summarization failure falls back with nothing stored; a backlog
+  wider than the recap input budget records its true `from_turn` and
+  hydration never skips turns the recap did not cover;
+  milestone-aware hydration
   (latest milestone plus `id > after_turn`); milestones die with
   their thread (retention and delete); the API detail exposes
   milestones; sentinel: recap text never reaches events or logs.
@@ -993,12 +1018,23 @@ resolution once the amendment addressing it lands.
    acknowledgement timeout, TTS failure, interruption, disconnect
    and crash; a timeout must not let a late write create an unheard
    milestone; test spoken-text equality and the failure orderings.
+   *Resolution*: adopted. The recap flow is runtime-owned end to
+   end: the summarizer's text is fed to the synthesis path verbatim
+   with no rephrasing round, the milestone is written only after
+   playback completes at the device-facing edge, every earlier
+   failure (barge-in, synthesis failure, disconnect, crash) stores
+   nothing and re-offers, and a post-timeout write can be late but
+   never unheard.
 9. **P1: a bounded recap can falsely claim to cover omitted
    turns.** With a backlog above the recap input budget, oldest
    turns are omitted but `after_turn` still causes future hydration
    to skip everything through it. Guarantee coverage, chunk, or
    record an exact coverage boundary that does not hide omitted
    turns, with a backlog-larger-than-recap-budget test.
+   *Resolution*: adopted in its third form. The milestone row gains
+   `from_turn`, recording the true start of coverage; hydration
+   treats turns at or before it as truncated rather than
+   summarized, and the over-budget test is named.
 10. **P1: conversation deletion can resurrect the forgotten
     identity.** A missing row is both the pre-first-turn state and
     the deletion tombstone, and the risk section permits
