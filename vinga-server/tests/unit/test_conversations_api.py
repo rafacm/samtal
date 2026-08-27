@@ -74,12 +74,16 @@ def manifest(device: str = DEVICE_MAC.lower(), **overrides: Any) -> dict[str, An
     } | overrides
 
 
+CONVERSATION = "9f0c1d2e3a4b5c6d7e8f90a1b2c3d4e5"
+
+
 def a_turn(**overrides: Any) -> TurnRecord:
     """One turn with both of its calls out of the order the model issued
     them, so nesting by position is a property and not a coincidence of
     insertion order."""
     fields: dict[str, Any] = {
         "at": 101.2,
+        "conversation": CONVERSATION,
         "agent": "sam",
         "heard": "turn the light on",
         "heard_duration_s": 1.4,

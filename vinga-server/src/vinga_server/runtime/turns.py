@@ -81,8 +81,20 @@ class TurnUnderway:
     finished contributes nothing, so `rounds`, `llm_ms` and the token
     sums always describe the same set of rounds: the ones that produced
     an `llm_round` event.
+
+    The two leading fields are the exception to "written by the reply
+    path": they are the pair that owns the turn, taken where the turn
+    begins and never written again. A handover changes who is speaking
+    partway through, and the record is assembled in the reply's
+    `finally`, so a turn that read the current pair there would be
+    attributed to the thread it handed over to. Held here rather than
+    passed to `record` because the reply path is where it would have to
+    be remembered, and remembering it in half a dozen places is the
+    mistake this removes.
     """
 
+    conversation: str
+    agent: str | None
     at: float | None = None
     heard: str | None = None
     heard_duration_s: float | None = None
@@ -222,7 +234,7 @@ class TurnUnderway:
             duration_ms=duration_ms,
         )
 
-    def record(self, agent: str | None, spoken: Sequence[str]) -> TurnRecord | None:
+    def record(self, speaking: str | None, spoken: Sequence[str]) -> TurnRecord | None:
         """The finished record, or None where there is no turn to record.
 
         No transcript means no turn, which mirrors the events: an
@@ -233,6 +245,11 @@ class TurnUnderway:
         `replied` reports. Joined onto the legs before it, so `reply`
         holds the whole of what the user heard while `legs` keeps who
         said which part of it.
+
+        `speaking` is that agent, and it is deliberately not what the
+        record is attributed to: the last leg is whoever finished the
+        reply, while the turn belongs to the pair it started with. The
+        two are the same agent in every reply no handover split.
         """
         if self.at is None or self.heard is None:
             return None
@@ -242,7 +259,7 @@ class TurnUnderway:
             legs = (
                 *self._legs,
                 TurnLeg(
-                    agent=agent,
+                    agent=speaking,
                     text=tail,
                     input_tokens=self._leg_input,
                     output_tokens=self._leg_output,
@@ -251,7 +268,8 @@ class TurnUnderway:
         parts = [*self._said, *([tail] if tail is not None else [])]
         return TurnRecord(
             at=self.at,
-            agent=agent,
+            conversation=self.conversation,
+            agent=self.agent,
             heard=self.heard,
             heard_duration_s=self.heard_duration_s,
             language=self.language,

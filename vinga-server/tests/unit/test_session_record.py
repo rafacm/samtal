@@ -39,6 +39,8 @@ from tests.support.sessions import (
     session_for,
     stamp_with,
     start_reply,
+    talking,
+    talking_thread,
     wait_for_reply,
     with_device,
 )
@@ -376,7 +378,11 @@ async def test_a_handover_records_a_leg_per_agent_with_its_own_tokens() -> None:
     await drive_reply(session, UTTERANCE)
 
     record = only_record(spy)
-    assert record.agent == "tutor"
+    # The agent that OWNS the turn, which is the one it started with:
+    # the record is assembled in the reply's `finally`, long after the
+    # handover moved the active agent, and the legs below are where the
+    # per-agent truth of a split reply lives.
+    assert record.agent == "poet"
     assert record.reply == "One moment. Tutor here."
     assert [(leg.agent, leg.text) for leg in record.legs] == [
         ("poet", "One moment."),
@@ -406,6 +412,93 @@ async def test_a_silent_leg_is_still_a_leg() -> None:
         ("tutor", "Tutor here.", None),
     ]
     assert record.reply == "Tutor here."
+
+
+# Which thread a turn belongs to
+
+
+def a_handover_to_tutor(preamble: str | None) -> dict[str, ScriptedLlm]:
+    """The two scripts a handover needs, in the two shapes it comes in.
+
+    A tool-only handover asks for the switch and says nothing; a spoken
+    one says a sentence first, which is the shape that puts words from
+    two agents in one reply. Both are the same transition and the
+    attribution rule has to hold for each.
+    """
+    asked: list[Any] = [call("switch_agent", agent="tutor")]
+    if preamble is not None:
+        asked.insert(0, preamble)
+    return {
+        "poet": ScriptedLlm([asked]),
+        "tutor": ScriptedLlm(["Tutor here."]),
+    }
+
+
+@pytest.mark.parametrize("preamble", [None, "One moment."])
+async def test_a_handover_turn_belongs_to_the_thread_it_started_on(
+    preamble: str | None,
+) -> None:
+    """The boundary falls between turns and never inside one.
+
+    The active agent moves mid-reply, so a record that read the pair
+    when the reply ended would file the handover turn under the agent
+    the user was handed TO, on a thread that turn did not begin. The
+    legs still carry both agents, which is where a split reply's truth
+    belongs.
+    """
+    session, spy, _ = recording_session(
+        mac=BOTH_MAC, scripts=a_handover_to_tutor(preamble)
+    )
+
+    await drive_reply(session, UTTERANCE)
+
+    record = only_record(spy)
+    assert record.agent == "poet"
+    assert [leg.agent for leg in record.legs] == ["poet", "tutor"]
+    # And the thread is the one the turn opened on: the session is
+    # talking as the tutor, on the tutor's own thread, by the time this
+    # record landed.
+    assert talking(session) == "tutor"
+    assert record.conversation != talking_thread(session)
+
+
+async def test_each_agent_of_a_session_gets_a_thread_and_keeps_it() -> None:
+    """"Sophia, let me talk to Nadia, back to Sophia" is one session
+    touching two threads: the first activation of an agent mints one and
+    every later activation continues it, so switching back returns to
+    the conversation the agent was already on rather than to a third."""
+    session, spy, _ = recording_session(
+        mac=BOTH_MAC,
+        scripts={
+            "poet": ScriptedLlm([[call("switch_agent", agent="tutor")]]),
+            "tutor": ScriptedLlm([[call("switch_agent", agent="poet")]]),
+        },
+    )
+
+    poet = talking_thread(session)
+    await drive_reply(session, UTTERANCE)
+    tutor = talking_thread(session)
+    await drive_reply(session, UTTERANCE)
+
+    assert poet != tutor
+    # Each turn is recorded on the thread it began on, and the second
+    # handover returns the session to the thread the first one left
+    # rather than minting a third.
+    assert [record.conversation for _, record in spy.records] == [poet, tutor]
+    assert (talking(session), talking_thread(session)) == ("poet", poet)
+
+
+async def test_a_thread_id_is_a_minted_token_and_not_the_session_id() -> None:
+    """A conversation outlives the session it was begun in, so its id is
+    its own: the same shape as a session id and never the same value."""
+    session, spy, _ = recording_session(scripts={"poet": ScriptedLlm(["Hello."])})
+
+    await drive_reply(session, UTTERANCE)
+
+    record = only_record(spy)
+    assert record.conversation != session.session_id
+    assert len(record.conversation) == 32
+    assert record.conversation.isalnum()
 
 
 # Every call the model issued, whatever became of it

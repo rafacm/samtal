@@ -463,6 +463,19 @@ def talking(session: DeviceSession) -> str | None:
     return events_of(session).agent
 
 
+def talking_thread(session: DeviceSession) -> str | None:
+    """The conversation that agent is talking on, read in the same
+    place and public for the same reason: an event that names the agent
+    names the thread it was speaking in, so both live on the events
+    object and both sides of the boundary read them there.
+
+    A session's threads are per agent, so this moves with a handover.
+    What it answers is the thread the NEXT turn will be recorded on,
+    which is what a suite about attribution compares a finished record
+    against."""
+    return events_of(session).conversation
+
+
 # What one more round is driven with when the point of the round is to
 # see the history it was handed rather than what it answers.
 PROBE = "and then?"

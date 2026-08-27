@@ -38,6 +38,7 @@ emitted it, and so that every consumer of the events sees it.
 import asyncio
 import contextlib
 import functools
+import uuid
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from typing import Any
 
@@ -250,7 +251,12 @@ class PipelineRuntime:
       the session's language lock survives an interruption.
     - `_turn`: the record being assembled, replaced at the start of each
       reply, written from half a dozen places in the loop, and read once
-      at the end by `_record_turn`.
+      at the end by `_record_turn`. The pair it is stamped with at
+      replacement is the pair the turn is attributed to.
+    - `_conversations`: one thread per agent this session has activated,
+      written by `_activate_agent` alone and read through
+      `self._conversation`, which is a property over the events object
+      for the reason `_agent` is.
     - `_turns`: the conversation history, appended by the reply path and
       by each agent leg, read wherever a round is built.
     - `_llm_round`: reset per reply, counted up per round, read by the
@@ -309,12 +315,21 @@ class PipelineRuntime:
         # the store is wired, and the reply path then behaves exactly as
         # it did before the channel existed.
         self._recorder = recorder
+        # This session's threads, one per agent it has activated. The
+        # first activation of an agent mints a conversation id and every
+        # later one continues it, which is what makes "Sophia, let me
+        # talk to Nadia, back to Sophia" one session touching two
+        # threads. Minted here rather than by the store, because the
+        # boundary is decided at the activation seam and the id has to
+        # exist before the first turn it stamps.
+        self._conversations: dict[str, str] = {}
         # The turn being assembled, replaced at the start of every reply
         # and read once at the end of it. Always present rather than
         # optional: the reply path writes into it from half a dozen
         # places, and a guard at each of them would be six chances to
-        # forget one.
-        self._turn = TurnUnderway()
+        # forget one. Installed below, after the first activation, since
+        # it carries the pair that activation decides.
+        self._turn: TurnUnderway
         # The agents this device may talk to. The one it is talking to
         # now lives on the events object, because both sides of the
         # boundary attribute events to it.
@@ -373,6 +388,7 @@ class PipelineRuntime:
         # here: the reply task is created on the first utterance, and
         # discovery belongs to the edge.
         self._activate_agent(self._agents[0])
+        self._turn = self._fresh_turn()
         # A server that was down at boot, or that dropped since, gets a
         # background reconnect now, so it is picked up by the time this
         # conversation needs it rather than at the next server restart.
@@ -389,6 +405,29 @@ class PipelineRuntime:
     @_agent.setter
     def _agent(self, name: str | None) -> None:
         self._events.agent = name
+
+    @property
+    def _conversation(self) -> str | None:
+        """The thread the active agent is on. A property over the events
+        object for the reason `_agent` is one: both sides of the
+        boundary attribute their events to it, and the edge's pacer
+        stamps `speaking_started` without ever having activated
+        anything."""
+        return self._events.conversation
+
+    @_conversation.setter
+    def _conversation(self, conversation: str | None) -> None:
+        self._events.conversation = conversation
+
+    def _fresh_turn(self) -> TurnUnderway:
+        """A turn beginning, stamped with the pair that owns it.
+
+        The one place that pair is read off the runtime. Everything
+        after it reads the snapshot, which is what keeps a handover turn
+        on the thread it started on rather than the one it ended on.
+        """
+        assert self._conversation is not None
+        return TurnUnderway(self._conversation, self._agent)
 
 
     # --- SessionInput: what the device edge asks of this runtime -------
@@ -723,6 +762,11 @@ class PipelineRuntime:
         if name not in self._agents:
             raise _not_allowed(name, self._agents)
         self._agent = name
+        # The thread this agent is on in this session: minted the first
+        # time it is activated and continued on every later activation,
+        # so switching away and back returns to the same conversation.
+        # A uuid hex, the same shape and role as the session id.
+        self._conversation = self._conversations.setdefault(name, uuid.uuid4().hex)
         self._providers = self._agent_providers[name]
         current = self._generations.current().config
         config = current if name in current.agents else self._generation.config
@@ -776,7 +820,7 @@ class PipelineRuntime:
         spoken: list[str] = []
         self._output.reply_started()
         heard_s = round(len(pcm) / 2 / PIPELINE_SAMPLE_RATE, 2)
-        self._turn = TurnUnderway()
+        self._turn = self._fresh_turn()
         try:
             if result is None:
                 # On the session's clock, which is the loop's: the

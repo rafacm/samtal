@@ -97,9 +97,13 @@ def _until(ready: Any, complaint: str) -> None:
     raise AssertionError(complaint)
 
 
+CONVERSATION = "9f0c1d2e3a4b5c6d7e8f90a1b2c3d4e5"
+
+
 def a_turn(**overrides: Any) -> TurnRecord:
     fields: dict[str, Any] = {
         "at": 101.2,
+        "conversation": CONVERSATION,
         "agent": "sam",
         "heard": "turn the light on",
         "heard_duration_s": 1.4,
