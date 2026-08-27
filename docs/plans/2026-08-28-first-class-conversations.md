@@ -775,3 +775,157 @@ expected non-surface matches are enumerated (the store-name
 allowlist above), and re-run after every rebase. Anything
 unverifiable locally (the published image, the smoke lane) is stated
 plainly in the PR's Verification section, never claimed.
+
+## Plan review round
+
+One external review of the plan as first committed (cd7b8f5f): codex
+CLI 0.149.1, model gpt-5.6-sol, read-only against this repository
+with the issue #190 body and amendment comments supplied, 2026-08-27,
+reviewer runtime 6m46s. Verdict as received: **not ready**. Twelve P1
+and eight P2 findings, condensed but faithful; each carries its
+resolution once the amendment addressing it lands.
+
+1. **P1: the plan reverses the settled no-migration decision.** The
+   issue requires no migration and deletion of existing databases;
+   the plan introduces additive revisions 1002 and 1003 and upgrades
+   populated 1001 databases, and the promise permits a pre-beta
+   reset only through a recorded compatibility decision. Follow the
+   issue with a documented and tested reset, or obtain an explicit
+   amendment first; migration cannot be the concrete implementation
+   of "no migration".
+2. **P1: the durable path still drops product state with
+   telemetry.** Turns and events share one marker transaction, a
+   failed batch is discarded whole after retries, ordinary recording
+   ignores the acknowledgement, and `sessions.dropped` is zeroed in
+   the supported metrics-off, text-on configuration. Separate
+   durable conversation-content commits from lossy event commits;
+   persist or latch an explicit incomplete-thread state that warns
+   on resumption; a later acknowledgement must not imply earlier
+   writes succeeded; test event failure, metrics-off, and an early
+   failure followed by a later success.
+3. **P1: milestone 1 cannot ship with only retention rule 1.** The
+   existing session-age pruning would remove a recently active
+   thread whose session crossed the cutoff, and rule 1 alone stops
+   pruning old null-conversation turns and empty sessions. Land the
+   final retention rules atomically in milestone 1, with a test for
+   a session begun before the cutoff holding a thread active after
+   it.
+4. **P1: handover attribution lacks a turn-start snapshot.** The
+   active agent changes during the reply and `_record_turn` passes
+   the ending agent to `TurnUnderway.record`, so "the handover turn
+   belongs to the conversation that started it" is not implementable
+   as written. Snapshot the originating conversation and owning
+   agent when the turn begins, carry both on `TurnRecord`, derive
+   the conversation row from those fields, and test tool-only and
+   spoken-preamble handovers.
+5. **P1: candidate selection and recap consent have no enforced flow
+   state.** Structured tool results exist only inside one reply's
+   working list, so a later selection has no reliable candidate-id
+   mapping, and a model can invoke `start_from="recap"` without a
+   prior offer. Keep bounded per-agent pending state (offered
+   candidate ids, ordinals, pending recap offer), accept ids only
+   from that set and recap/recent only after the offer, clear on
+   success, new search, switch or new conversation; test stale,
+   foreign-agent, direct-recap and two-utterance selection flows.
+6. **P1: immediate tool-time rebinding splits a turn across
+   conversations.** The tool loop snapshots its working list once;
+   the user turn is appended before execution and the final speech
+   after, so an in-loop rebind leaves the next round on the old
+   context while final speech lands in the new history. Define a
+   staged transition at a turn boundary (or an explicitly coherent
+   loop restart), and precedence for mixed or repeated
+   new/resume/switch calls in one round.
+7. **P1: `new_conversation` contradicts the disabled-mode
+   decision.** The issue says that with resumption or text off the
+   selection tools answer with a spoken refusal and behavior stays
+   session-scoped; the plan offers `new_conversation` unconditionally
+   and mutates context without a store. Make both tools fixed
+   non-mutating refusals when the prerequisites are absent.
+8. **P1: stored recap text is not guaranteed to equal what the user
+   hears.** Returning the recap to another model round with a
+   verbatim instruction permits paraphrase, and playback can fail
+   after storage; the proposed test compares the row only with the
+   tool result. Make recap playback runtime-owned; define pending
+   versus final milestone semantics across write failure,
+   acknowledgement timeout, TTS failure, interruption, disconnect
+   and crash; a timeout must not let a late write create an unheard
+   milestone; test spoken-text equality and the failure orderings.
+9. **P1: a bounded recap can falsely claim to cover omitted
+   turns.** With a backlog above the recap input budget, oldest
+   turns are omitted but `after_turn` still causes future hydration
+   to skip everything through it. Guarantee coverage, chunk, or
+   record an exact coverage boundary that does not hide omitted
+   turns, with a backlog-larger-than-recap-budget test.
+10. **P1: conversation deletion can resurrect the forgotten
+    identity.** A missing row is both the pre-first-turn state and
+    the deletion tombstone, and the risk section permits
+    rematerialization. Add explicit issued/deleted state or
+    coordinate deletion with active runtimes; a deleted id must
+    resolve pending acknowledgements false and never be recreated;
+    test queued-before-delete and produced-after-delete through the
+    real endpoint.
+11. **P1: session deletion leaves copied session content behind.**
+    A deleted session's first utterance can survive as a
+    conversation title, its content inside a later milestone, and
+    `last_active_at` derived from it. Cascade or track provenance:
+    recompute or remove all derived content and activity metadata;
+    test a credential-shaped sentinel copied into title and
+    milestone, then delete its source session and inspect every
+    table and read surface.
+12. **P1: store-backed tool failures can leak credentials.**
+    Discovery runs through `BuiltinTools.dispatch`, whose failures
+    `_run_one` embeds as `str(exc)` into the model-visible and
+    stored tool result; driver exceptions carry DSNs and SQL. Catch
+    and classify all thread-store failures at the adapter seam,
+    discard cause and context, return fixed value-free results, and
+    hunt a poisoned driver message across speech, context, stored
+    invocation, logs, events, taps and both streams.
+13. **P2: `threads.py` passes the deletion test but violates settled
+    ownership.** Issue decision 5 assigns identity, lifecycle,
+    listing, milestones and retention to the thread store; the plan
+    leaves lifecycle, milestone writes and retention in `store.py`,
+    and the claim that the CLI would otherwise duplicate SQL is
+    false because the CLI is API-backed. Make the thread-store
+    module own thread lifecycle, semantic deletion, milestone policy
+    and retention, with the queue writer delegating transactionally.
+14. **P2: hydration truncation can produce incoherent history.**
+    Dropping oldest items can orphan an assistant reply from its
+    user turn and can drop the milestone before later turns. Budget
+    atomic stored-turn units, preserve role ordering, pin the latest
+    milestone while trimming its tail, define the
+    one-unit-over-budget case, and test role sequences.
+15. **P2: discovery has no matching algorithm.** "Five newest" is
+    the only implemented rule named, so the ambiguous-description
+    test cannot distinguish matching from recency. Specify
+    normalization, title and excerpt matching, relevance and
+    recency ordering, no-match behavior, tie-breaking and bounds;
+    test a relevant older conversation outside the five newest.
+16. **P2: mutable activity ordering has no pagination contract.**
+    Newest-first by `last_active_at` cannot be paginated with the
+    immutable row-id cursor. Define keyset ordering and cursor
+    validation (activity plus id), equal-timestamp and
+    changed-between-pages behavior, and the accepted duplicate or
+    skip semantics under concurrent activity.
+17. **P2: the CLI grammar contradicts its governing guide.** The
+    cli-guide names `sessions` and `conversations` as #190's nouns
+    and spells `sessions list`; the plan chooses singular without
+    recording a governing decision, and never settles the agent
+    filter, signatures, pagination, output columns or null-title
+    rendering.
+18. **P2: CLI tests omit terminal-control safety for conversation
+    content.** Titles and dialogue are printed by design, and the
+    guide requires that no server answer can steer a terminal.
+    Specify deterministic bounded rendering (control characters,
+    ANSI, tabs, newlines) and test terminal and redirected output
+    byte for byte.
+19. **P2: thread retention unnecessarily retains expired events.**
+    Rule 3 keeps an old session's events whenever live-thread turns
+    reference the session, though events are session-scoped
+    telemetry not needed for the projection. Preserve only the
+    minimal session spine and prune expired events independently.
+20. **P2: new hot query paths have no supporting indexes.** Listing
+    and discovery by agent and activity, retention by
+    `last_active_at`, hydration by conversation and latest-milestone
+    lookup name no indexes while existing paths are explicitly
+    indexed. Name the concrete indexes in the migration and cover
+    them.
