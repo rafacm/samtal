@@ -163,6 +163,30 @@ services:
       VINGA_DB_NAME: ${VINGA_DB_NAME:-vinga}
       VINGA_DB_USER: ${VINGA_DB_USER:-vinga}
       VINGA_DB_PASSWORD: ${VINGA_DB_PASSWORD:-vinga}
+      # And the variable that would beat all five. `VINGA_DB_URL`
+      # replaces the discrete facts whole when it is set
+      # (`db.connection_url`), so an `.env` written for a psql session
+      # on the host, or kept from another deployment, would silently
+      # send this container somewhere else and the four pins above
+      # would do nothing. Empty rather than absent, because absent is
+      # what the file above could fill in: `connection_url` tests the
+      # value for truth, so an empty string reaches exactly the same
+      # code path an unset one does. Verified against the real
+      # resolver: unset and empty both yield the discrete facts, a set
+      # one yields itself.
+      VINGA_DB_URL: ""
+
+      # Where the server listens, pinned for the same reason one layer
+      # up: the port mapping above, the image's own healthcheck and the
+      # URL a device is told all assume 8003 on every interface inside
+      # the container, and all three are silently invalidated by a
+      # `VINGA_SERVER__HOST` or `VINGA_SERVER__PORT` arriving through
+      # the file. These are the container's listening facts rather than
+      # a preference, so this file owns them; `server.public_url` and
+      # `server.websocket_url` are the keys for saying what a device
+      # should be told, and they stay where configuration lives.
+      VINGA_SERVER__HOST: 0.0.0.0
+      VINGA_SERVER__PORT: "8003"
 
     ports:
       # Every interface, unlike the database's loopback binding
