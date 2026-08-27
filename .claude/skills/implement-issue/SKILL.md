@@ -67,10 +67,10 @@ what the generated-reference drift checks already catch. Name
 pages by their role, and confirm where that role currently lives
 before writing the plan: the authority taxonomy in `docs/README.md`
 says which class a page belongs to and therefore what it may claim,
-and `docs/architecture/README.md` routes the architecture corpus by
-reader question. A milestone
-whose behavior change stales no documentation says so explicitly
-rather than leaving the footprint implied.
+and `docs/architecture/README.md` routes the architecture corpus
+by reader question. A milestone whose behavior change stales no
+documentation says so explicitly rather than leaving the footprint
+implied.
 
 ### The standing review lenses
 
@@ -148,6 +148,14 @@ possible:
 - `PYTHONDONTWRITEBYTECODE=1` outside pytest (the stale-bytecode
   trap in AGENTS.md).
 - No pushes and no GitHub commands from subagents.
+- A documentation move can stale the command-spellings census,
+  which scans the docs tree while the CI path filter skips
+  docs-only diffs (how a green docs merge turned `main`'s unit
+  lane red, 2026-08-27). After moving or renaming documentation,
+  run `tests/unit/test_command_spellings.py`; when stale,
+  regenerate the manifest with
+  `uv run python -m tests.unit.test_command_spellings`, never by
+  hand.
 
 If a subagent dies mid-run (machine sleep), resume it with a status
 recap verified from `git log`, not from memory; its commits
@@ -165,7 +173,15 @@ decisions and recorded deviations, and a Verification section as a
 task list with honestly checked and unchecked boxes; an unchecked
 box carries a note saying why it is not yet verifiable. Substitute
 the PR number into the plan's milestone tick once the PR exists.
-Wait for CI green before the review round.
+Wait for CI green before the review round. Two CI shapes to know:
+a docs-only diff outside `docs/reference/` triggers no workflow at
+all, which the PR's verification section states instead of
+waiting; and a `pull_request` event that never registers a run is
+a GitHub failure mode this repository has seen a whole day of
+(2026-08-27): dispatch the workflow against the branch
+(`gh workflow run vinga-server.yml --repo rafacm/vinga
+--ref <branch>`, which runs everything but publishing) and link
+the run on the PR as the evidence.
 
 ## Step 5: external PR review
 
@@ -185,7 +201,10 @@ contentious. The stacked-PR trap, learned the hard way in #86: a
 rebase merge that deletes the base branch auto-closes stacked
 children unrecoverably. Retarget every child PR to `main` BEFORE
 merging its parent, and rebase children with `git rebase --onto`
-after each merge.
+after each merge. When both sides of a rebase regenerated the same
+generated artifact (a census manifest, a committed reference), the
+textual merge is a state neither side produced: regenerate on the
+rebased tree and prove it green before pushing.
 
 ## Finishing
 
