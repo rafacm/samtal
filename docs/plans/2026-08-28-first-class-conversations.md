@@ -1372,3 +1372,55 @@ resolution once the amendment addressing it lands.
     indexes (unique join key, agent-activity listing, activity scan,
     conversation-turn walk, latest milestone) and the store-suite
     assertion that the baseline created them.
+
+## Plan review round, delta
+
+A delta re-review of the amended plan (969ca1df): codex CLI 0.149.1,
+model gpt-5.6-terra, read-only, 2026-08-28, runtime 4m56s, scoped to
+whether the twenty amendments resolve their findings without
+introducing new contradictions. Verdict as received: **not ready**.
+Five P1 and two P2 findings, condensed but faithful; resolutions
+appended as the amendments land.
+
+1. **P1: the milestone table is scheduled in two incompatible
+   milestones.** The baseline creates `conversation_milestones` in
+   milestone 1 while the module layout still schedules its schema
+   for milestone 5, though milestone 5 ships no migration. Say the
+   table and its metadata land in milestone 1, dormant but
+   documented, and milestone 5 adds only behavior.
+2. **P1: the incomplete latch cannot cover a failed first turn.** A
+   conversation row materializes only with its first turn, so a
+   failed first durable batch leaves no row for the standalone
+   `incomplete = true` transaction to update, and creating one would
+   violate the no-empty-thread rule. Apply a pending incomplete id
+   to the first later successful row-and-turn transaction;
+   standalone latch writes apply only to materialized rows.
+3. **P1: milestone deletion does not erase transitive recap
+   content.** A recap consumes the latest milestone plus later
+   turns, but records only the raw turns it read, so deleting a turn
+   represented only through the parent milestone deletes the parent
+   and leaves the descendant that transitively contains its content.
+   Record parent lineage or inherited coverage, delete descendants
+   of erased content, and add the transitive sentinel test.
+4. **P1: the dead-conversation endpoint test is assigned before its
+   endpoint exists.** Milestone 2 tests dead-id behavior through the
+   real endpoint while `DELETE /api/conversations/{conversation}`
+   lands in milestone 3. Move one or the other.
+5. **P1: the plan declines the settled API-backed purge
+   requirement.** The issue amendment makes the session-record
+   purge, whose retired command supported `--session`, `--device`
+   and `--before`, an authenticated endpoint with a remote CLI
+   caller; the plan replaced it with one-session deletes and told
+   operators to script the rest. Retain the settled selection
+   semantics or obtain an issue amendment.
+6. **P2: `ConversationsPruned.conversations` has conflicting
+   milestone ownership.** Retention says milestone 1, the events
+   section says milestone 2. Put the field, reference and tests in
+   milestone 1 consistently.
+7. **P2: the plural-noun decline relies on reasons that do not
+   hold.** The guide presents `vinga sessions list` as settled
+   grammar and `conversations` and `events` are existing plural
+   command groups, so "every merged noun is singular" is false.
+   Singular may still be chosen for nouns that support `show` and
+   `delete`, but as an explicit revision to the guide, not as a
+   consequence of an already-singular grammar.
