@@ -233,9 +233,32 @@ $ docker compose --profile server config
 env file /path/to/vinga/.env not found: stat /path/to/vinga/.env: no such file or directory
 ```
 
-**An `.env` that is missing one of the two**: compose starts the pair,
-`--wait` reports `container …-vinga-1 exited (1)`, and the server's own
-refusal names the variable and how to mint one:
+**An `.env` present but incomplete** does *not* behave the same for the
+two secrets, and the first version of this record said it did. The
+correction is finding 6 of the review round below; what is true:
+
+`VINGA_API_SECRET` **always** refuses. The configuration API is always
+mounted and always behind its token, with deliberately no enabled
+flag, so `config.api.api_token` reads the variable unconditionally.
+Measured with device authentication *off* and no API secret: compose
+starts the pair, `--wait` reports `container …-vinga-1 exited (1)`,
+and the log carries
+
+```
+the configuration API is mounted at /api but VINGA_API_SECRET is not set.
+Generate a token and put it in the environment:
+  VINGA_API_SECRET=$(openssl rand -hex 32)
+It is the bearer token every request to /api must carry, and it grants
+everything the API can do, so keep it to a loopback connection or TLS.
+```
+
+`VINGA_AUTH_SECRET` refuses **only when device authentication is
+enabled**, which is the default but is not what the quick start
+selects. `auth.build_device_auth` returns `None` before it reads the
+variable when `auth.enabled` is false. Measured with
+`VINGA_SERVER__AUTH__ENABLED=false` and no `VINGA_AUTH_SECRET` at all:
+both services **healthy**, exit 0. With device authentication on, the
+same absence gives
 
 ```
 device authentication is enabled but VINGA_AUTH_SECRET is not set.
@@ -245,6 +268,11 @@ Or turn authentication off for a trial on a trusted network, with
 server.auth.enabled: false in the config file, or
 VINGA_SERVER__AUTH__ENABLED=false in the environment.
 ```
+
+The reason to mint it on day one anyway is not a refusal: the secret
+signs every device token and the key in the onboarding URL is derived
+from it, so regenerating it later invalidates every token a device has
+stored and moves that URL.
 
 **Deviation from the issue, stated plainly.** The issue asked for
 `${VAR:?message}`, "a one-line refusal naming the variable". The
@@ -338,14 +366,17 @@ the `extra_hosts: host-gateway` entry is proven only on Docker
 Desktop, where `host.docker.internal` already resolved; the entry is
 there for the platform that was not tested.
 
-**Noted, not changed.** With `VINGA_SERVER__AUTH__ENABLED=false`, which
-the quick start sets, `config ota-url` prints a keyless
+**Noted, then changed.** With `VINGA_SERVER__AUTH__ENABLED=false`,
+which the quick start sets, `config ota-url` prints a keyless
 `http://…/x/` rather than the `http://…/x/AB2C4D5E/` the README's
 example comment shows; the key is derived from the device-auth secret
-and exists only while device authentication is on. That mismatch
+and exists only while device authentication is on. The mismatch
 predates this change and the URL works either way (a keyless `/x/`
 serves the activation flow, verified: HTTP 200 with an activation
-code). It is left alone as out of this issue's scope.
+code), so the first version of this record left it alone as out of
+scope. The review round's finding 6 landed on the same fact from the
+other side, so step 5 now says it in half a sentence rather than
+leaving a reader to discover it.
 
 ## Files modified
 
