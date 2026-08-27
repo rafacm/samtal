@@ -211,6 +211,15 @@ services:
       # volume rather than a fresh container's empty directory.
       - vinga-data:/data
 
+    # Above `server.drain_s`, which is 20s by default. SIGTERM starts a
+    # drain that lets conversations in flight finish their sentence,
+    # and compose allows 10s before SIGKILL, so the default would cut
+    # every `docker compose down` off halfway through a spoken reply.
+    # The same 30s the server README's `docker stop -t 30` names, and
+    # for the same reason: a deployment that raises `drain_s` raises
+    # this with it.
+    stop_grace_period: 30s
+
     # No restart policy on purpose. A deployment wants one and the
     # server README says so; here it would turn a server refusing to
     # boot into a container restarting until `--wait` times out, and
