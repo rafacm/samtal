@@ -88,19 +88,15 @@ That is the whole of it: the database, then the server once the database answers
 
 The compose file is the one place the topology is written down, so nothing here restates it: the database is published on loopback while the server's port 8003 is published on every interface, because boards on your LAN have to reach it. **The database password it defaults to is a trial convenience and nothing more**: a deployment sets a real one, and [The configuration database in a deployment](vinga-server/README.md#the-configuration-database-in-a-deployment) covers that along with the privileges the server needs, the provisioning file at [`deploy/postgres-init.sql`](deploy/postgres-init.sql) and backups. The server migrates its schemas at every boot, so there is no init step to run. A checkout already has both files and runs the same command from its root; running the server itself some other way, on one container against a Postgres you provide, is [Running in a container](vinga-server/README.md#running-in-a-container), which also has every key of the server half and the YAML file that is the alternative to a handful of variables.
 
-**2. Install the CLI**, and point it at the server you just started. `vinga` is a client of the configuration API rather than a second way into the database, so this is how a deployment is administered from here on, whether it runs on this machine or across the network.
+**2. Install the CLI.** `vinga` is a client of the configuration API rather than a second way into the database, so this is how a deployment is administered from here on, whether it runs on this machine or across the network.
 
 ```bash
 uv tool install "git+https://github.com/rafacm/vinga#subdirectory=vinga-server"
 
-# Where the API is, and the token from step 1, read back out of the file
-# the server was given. Plain http is allowed to a loopback address and to
-# nothing else; a deployment anywhere else is https.
-export VINGA_API_URL=http://127.0.0.1:8003/api
-set -a; . ./.env; set +a
-
 vinga list
 ```
+
+There is nothing to export. Run it from the directory step 1 made and it reads that same `.env` itself, searching upwards from wherever it is invoked, and with anything already in your environment winning over the file; a server it is not told about is assumed to be this machine on the port the server half names, which is where step 1 put one. Name a different one with `VINGA_API_URL` or `--api-url`, remembering that plain http is allowed to a loopback address and to nothing else, since the bearer token crosses every request: a deployment anywhere else is https.
 
 [`docs/reference/cli.md`](docs/reference/cli.md) is the CLI's own page: the one-off `uvx` spelling, reaching a deployment you do not host, and every command's help.
 
