@@ -62,13 +62,28 @@ services:
       # committed.
       - ./deploy/postgres-init.sql:/docker-entrypoint-initdb.d/postgres-init.sql:ro
     healthcheck:
-      # What `--wait` waits for. `-U`/`-d` so the check asks about the
+      # What `--wait` waits for, and what the server service's
+      # `depends_on` gates on. `-U`/`-d` so the check asks about the
       # database the server will use rather than about the default pair
       # the image would otherwise assume.
+      #
+      # `-h 127.0.0.1` is the load-bearing one, and it is not
+      # decoration. While this image runs the files in
+      # /docker-entrypoint-initdb.d, the provisioning script beside
+      # this file among them, it has started a TEMPORARY server that
+      # listens on the Unix socket and on no TCP port at all. A
+      # hostless `pg_isready` connects to that socket and reports
+      # "accepting connections" throughout, so the container would go
+      # healthy while nothing outside it can connect yet, and the
+      # server would be started into a database that refuses it. It
+      # refuses back, once, and has no restart policy to recover with.
+      # Measured with a deliberately slow init script: the hostless
+      # probe said ready at 4s and the TCP listener did not exist until
+      # 22s. Naming a host forces the TCP path the server itself uses.
       test:
         [
           "CMD-SHELL",
-          "pg_isready -U ${VINGA_DB_USER:-vinga} -d ${VINGA_DB_NAME:-vinga}",
+          "pg_isready -h 127.0.0.1 -U ${VINGA_DB_USER:-vinga} -d ${VINGA_DB_NAME:-vinga}",
         ]
       interval: 2s
       timeout: 3s
