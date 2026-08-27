@@ -15,8 +15,44 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   so a documentation-only merge can no longer stale the census with
   no run going red (#329). The link checker is committed as
   `scripts/check_doc_links.py`.
+- **The compose file carries the server too, behind a `server`
+  profile** (#309). `docker compose --profile server up -d --wait`
+  starts the published image and its Postgres together, health-gated
+  on both, with the database on loopback and the server's 8003 on
+  every interface because boards on the LAN have to reach it. The
+  development loop is untouched: `docker compose up -d --wait` with no
+  profile still starts the database alone. The two secrets have no
+  default anywhere and arrive through a required `env_file`
+  (`./.env`), which is the one thing compose resolves for the selected
+  services alone: `${VINGA_API_SECRET:?…}` would have refused the
+  profile-less invocation too. With no file compose refuses before a
+  container starts; with a file missing a secret the server refuses at
+  boot and names the variable.
+- **CI guards the committed compose shape** (#309). The `unit` lane
+  asserts that the profile-less invocation resolves with no secrets
+  and lists exactly `postgres`, that the `server` profile refuses
+  without them, and that it lists both services with them. The `image`
+  job boots the file against the image it has just built, pointed
+  there with `VINGA_IMAGE`, and asserts the revision the served
+  `/healthz` reports.
 
 ### Changed
+
+- **The quick start is the compose pair, and needs no checkout**
+  (#309). Getting Started step 1 was seven commands that spelled the
+  compose file's contents out by hand (a network, two `docker run`s, a
+  `pg_isready` loop, two exports); it is now two `curl`s and one
+  command, with the provisioning file fetched into `deploy/` beside
+  the compose file because that is the relative path the bind mount
+  names. Nothing in the README restates a value the file holds. Step 2
+  reads the API token back out of the same `.env`, step 3 loses its
+  Linux-only `--add-host` caveat because the server service resolves
+  `host.docker.internal` on every platform, and step 5 is
+  `docker compose exec vinga vinga-server config ota-url`, which needs
+  no `--profile` once the stack is up. The single-container
+  `docker run` keeps its one home in the server README's
+  [Running in a container](vinga-server/README.md#running-in-a-container),
+  which now says which of the two stories it is.
 
 - **The domain model distinguishes what is built from what is
   decided** (#310). Every section of `docs/concepts.md` opens with its
