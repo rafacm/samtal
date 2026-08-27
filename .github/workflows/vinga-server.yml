@@ -210,6 +210,14 @@ jobs:
           printf 'VINGA_API_SECRET=%s\nVINGA_AUTH_SECRET=%s\n' \
             not-a-real-token not-a-real-secret > .env
 
+          # Full resolution first, and `--services` only after it.
+          # `--services` alone is NOT the positive of the assertion
+          # above: it enumerates the profile's members without
+          # resolving the services, so it exits 0 even with no env
+          # file at all (measured). On its own it would keep this arm
+          # green while every real invocation refused.
+          docker compose --profile server config --quiet
+
           services=$(docker compose --profile server config --services | sort | tr '\n' ' ')
           [ "$services" = "postgres vinga " ] || {
             echo "::error::the server profile no longer resolves to both services: $services"
