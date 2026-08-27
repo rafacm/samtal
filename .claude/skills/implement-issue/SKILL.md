@@ -149,9 +149,11 @@ possible:
   trap in AGENTS.md).
 - No pushes and no GitHub commands from subagents.
 - A documentation move can stale the command-spellings census,
-  which scans the docs tree while the CI path filter skips
-  docs-only diffs (how a green docs merge turned `main`'s unit
-  lane red, 2026-08-27). After moving or renaming documentation,
+  which scans every tracked file. The `docs` workflow now runs the
+  census on the changes the server workflow ignores (the hole that
+  once turned `main`'s unit lane red with no run going red,
+  2026-08-27), but a PR should arrive synchronized rather than
+  lean on CI to say so: after moving or renaming documentation,
   run `tests/unit/test_command_spellings.py`; when stale,
   regenerate the manifest with
   `uv run python -m tests.unit.test_command_spellings`, never by
