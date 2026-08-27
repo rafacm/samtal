@@ -131,11 +131,20 @@ services:
       #
       # `required: true` is the refusal. With no file, compose stops
       # before a container starts, in one line, rather than booting a
-      # server on a well-known secret; with a file that is missing one
-      # of the two, the server refuses at boot and names the variable.
-      # Neither path has a default, which is the asymmetry against the
-      # database password above: that instance is bound to loopback,
-      # and this server's port is not.
+      # server on a well-known secret. Neither secret has a default,
+      # which is the asymmetry against the database password above:
+      # that instance is bound to loopback, and this server's port is
+      # not.
+      #
+      # What a file present but incomplete does differs by secret, and
+      # the difference is not a wrinkle to smooth over. The
+      # configuration API is always mounted and always behind its
+      # token, so a missing `VINGA_API_SECRET` always refuses the boot
+      # (`config.api.api_token`). `VINGA_AUTH_SECRET` is required
+      # exactly when device authentication is on, because
+      # `auth.build_device_auth` returns before it looks: a trial that
+      # sets `VINGA_SERVER__AUTH__ENABLED=false` boots without one, and
+      # the onboarding URL it serves then carries no key.
       #
       # This is the same `.env` compose already reads for the
       # interpolation on either side of it. That reading feeds the

@@ -26,8 +26,12 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   (`./.env`), which is the one thing compose resolves for the selected
   services alone: `${VINGA_API_SECRET:?…}` would have refused the
   profile-less invocation too. With no file compose refuses before a
-  container starts; with a file missing a secret the server refuses at
-  boot and names the variable.
+  container starts. After that the two secrets differ: the
+  configuration API is always mounted behind its token, so a missing
+  `VINGA_API_SECRET` always refuses the boot, while `VINGA_AUTH_SECRET`
+  is required exactly when device authentication is on, so the quick
+  start's `VINGA_SERVER__AUTH__ENABLED=false` trial boots without one
+  and serves an onboarding URL with no key in it.
 - **CI guards the committed compose shape** (#309). The `unit` lane
   asserts that the profile-less invocation resolves with no secrets
   and lists exactly `postgres`, that the `server` profile refuses
