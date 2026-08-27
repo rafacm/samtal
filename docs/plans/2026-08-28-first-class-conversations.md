@@ -294,6 +294,30 @@ erasure means. Tested through the real endpoint with the gate seam:
 a turn queued before the delete commits, and a turn produced after
 it, both discarded with false acknowledgements and no new row.
 
+### The thread listing's order and its cursor
+
+`GET /api/conversations` orders by activity, and `last_active_at`
+moves, so the immutable row-id cursor the session list uses cannot
+paginate it. The contract is keyset pagination over the pair
+(`last_active_at`, `id`): rows order by `last_active_at` descending
+with `id` descending as the tie-break (UTC ISO-8601 text compares
+lexicographically, which is why the pair is total), and a page after
+the first is requested with two named query parameters,
+`cursor_active` and `cursor_id`, carrying the previous page's last
+row's pair; the page holds rows strictly below that pair. The
+parameters come together or not at all, and a half-supplied or
+malformed pair is the ordinary validation problem naming the
+parameters. The #120 rule that a cursor is a plain value and never
+an opaque encoding to version is kept by spelling the pair out as
+two parameters. Under concurrent activity the semantics are stated
+rather than implied: a thread whose activity moves it ahead of the
+cursor between pages is missed by that listing pass and appears at
+the head of a fresh one, and a page boundary never duplicates or
+skips rows whose pair did not change. The tests drive equal
+timestamps split across a page boundary, an activity change between
+pages, and the ordinary edges (empty, one page, exact boundary,
+cursor past the end).
+
 ### The durable path: turns retry bounded, and writes acknowledge
 
 Today a failed marker transaction rolls back, counts its batch as
@@ -823,9 +847,11 @@ New coverage, by milestone:
   list|show|delete` through the client seam, confirmation and
   `--force`, fixed refusal sentences, sentinel absent from stderr;
   spellings manifest green.
-- **Milestone 3**: conversations list newest-first with agent filter
-  and pagination edges (empty, one page, boundary, cursor past the
-  end); detail; dialogue turns oldest-first with tool rows nested;
+- **Milestone 3**: conversations list ordered by activity with the
+  agent filter and the keyset cursor (empty, one page, exact
+  boundary, cursor past the end, equal timestamps split across a
+  boundary, an activity change between pages, the half-supplied
+  pair refused); detail; dialogue turns oldest-first with tool rows nested;
   DELETE conversation (turns leave their sessions' timelines,
   sessions and events untouched); CLI `conversation list|show|delete`;
   OpenAPI and spellings green.
@@ -1207,6 +1233,11 @@ resolution once the amendment addressing it lands.
     validation (activity plus id), equal-timestamp and
     changed-between-pages behavior, and the accepted duplicate or
     skip semantics under concurrent activity.
+    *Resolution*: adopted. A new section defines keyset pagination
+    over (`last_active_at`, `id`) descending, spelled as the two
+    named parameters `cursor_active` and `cursor_id` so the
+    no-opaque-cursor rule holds, with validation, the stated
+    miss-on-activity semantics, and the boundary tests.
 17. **P2: the CLI grammar contradicts its governing guide.** The
     cli-guide names `sessions` and `conversations` as #190's nouns
     and spells `sessions list`; the plan chooses singular without
