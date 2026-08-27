@@ -1160,6 +1160,11 @@ resolution once the amendment addressing it lands.
    final retention rules atomically in milestone 1, with a test for
    a session begun before the cutoff holding a thread active after
    it.
+   *Resolution*: adopted. The retention section lands the whole
+   ruleset in milestone 1 in the same change that creates thread
+   rows, with the crossing-cutoff test named; the reset resolution
+   to finding 1 removes the null-conversation legacy case entirely,
+   and milestone 2's scope loses retention.
 4. **P1: handover attribution lacks a turn-start snapshot.** The
    active agent changes during the reply and `_record_turn` passes
    the ending agent to `TurnUnderway.record`, so "the handover turn
