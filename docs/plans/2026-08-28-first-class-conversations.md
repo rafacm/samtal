@@ -529,10 +529,19 @@ the one read site use.
   not render so the resume path can say so.
 - The budget is approximate by design: `ESTIMATED_CHARS_PER_TOKEN =
   4`, a named constant, and the reference documentation states the
-  approximation. Overflow truncates oldest first (milestone 4); with
-  a milestone, hydration is the milestone text plus the turns after
-  it (milestone 5), and overflow beyond that still truncates oldest
-  first.
+  approximation. The unit of budgeting and of truncation is the
+  whole stored turn (its user half, its assistant half and its tool
+  note together), never a lone message, so a reply can never survive
+  without the utterance it answered and the rendered history always
+  alternates roles by construction. Overflow drops the oldest whole
+  units first (milestone 4); with a milestone, the milestone text is
+  pinned as the head and overflow drops the oldest units of the tail
+  after it, never the milestone itself (milestone 5). When the
+  single newest unit alone exceeds the budget it is included alone,
+  because an empty resume would be a worse answer than an
+  over-budget one and the budget is an estimate to begin with; the
+  case is stated and pinned. The hydrator's suite asserts the
+  resulting role sequences, not only counts.
 - Output carries the turns, the count rendered, the count skipped,
   and whether the untruncated backlog exceeded the budget, which is
   the recap-offer trigger.
@@ -806,8 +815,10 @@ New coverage, by milestone:
   OpenAPI and spellings green.
 - **Milestone 4**: boot refusals for both contradictory combinations,
   by fixed sentence and json pointer; hydrator input-to-output
-  (budget edges, truncation order, tool-note rendering, text-off
-  gaps counted, deterministic output); tools: candidates bounded and
+  (budget edges, whole-unit truncation order and role sequences,
+  the pinned milestone with a trimmed tail, the one-unit-over-budget
+  case, tool-note rendering, text-off gaps counted, deterministic
+  output); tools: candidates bounded and
   newest first, ambiguous description, selection by id, refusals
   when off for both tools (spoken result, not error, and no context
   mutation), `new_conversation` resets context and rebinds when
@@ -1156,6 +1167,11 @@ resolution once the amendment addressing it lands.
     atomic stored-turn units, preserve role ordering, pin the latest
     milestone while trimming its tail, define the
     one-unit-over-budget case, and test role sequences.
+    *Resolution*: adopted. Budgeting and truncation now operate on
+    whole stored-turn units, the milestone is pinned as the head and
+    only its tail trims, the one-unit-over-budget case is included
+    alone with the reason stated, and the suite asserts role
+    sequences.
 15. **P2: discovery has no matching algorithm.** "Five newest" is
     the only implemented rule named, so the ambiguous-description
     test cannot distinguish matching from recency. Specify
