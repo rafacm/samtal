@@ -7,6 +7,15 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ## 2026-08-27
 
+### Added
+
+- A CI lane for documentation changes: `.github/workflows/docs.yml`
+  runs the internal link-and-anchor check and the command-spellings
+  census on every change the server workflow's path filter ignores,
+  so a documentation-only merge can no longer stale the census with
+  no run going red (#329). The link checker is committed as
+  `scripts/check_doc_links.py`.
+
 ### Changed
 
 - **The domain model distinguishes what is built from what is
