@@ -81,13 +81,13 @@ EXCLUDED: dict[tuple[str, str], str] = {
         "stored is a line of the document show prints, and a read command here would "
         "give one noun a verb no other setting has"
     ),
-    ("GET", "/conversations"): (
+    ("GET", "/sessions"): (
         "the conversation store, which is not the domain configuration at all. Its "
         "reader is the vinga-server conversations group and the admin UI, and it is "
         "behind the server half"
     ),
-    ("GET", "/conversations/{session}"): "the conversation store, as above",
-    ("GET", "/conversations/{session}/turns"): "the conversation store, as above",
+    ("GET", "/sessions/{session}"): "the conversation store, as above",
+    ("GET", "/sessions/{session}/turns"): "the conversation store, as above",
 }
 
 

@@ -2637,11 +2637,11 @@
         }
       }
     },
-    "/conversations": {
+    "/sessions": {
       "get": {
-        "summary": "Read Conversations",
+        "summary": "Read Sessions",
         "description": "The sessions this deployment recorded, newest first.\n\nFiltered by `device` when given, and paginated with `cursor`,\nwhich holds the sessions below it, so a client walks back through\nthe record one page at a time.",
-        "operationId": "read_conversations_conversations_get",
+        "operationId": "read_sessions_sessions_get",
         "parameters": [
           {
             "name": "device",
@@ -2704,7 +2704,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ConversationList"
+                  "$ref": "#/components/schemas/SessionList"
                 }
               }
             }
@@ -2752,11 +2752,11 @@
         }
       }
     },
-    "/conversations/{session}": {
+    "/sessions/{session}": {
       "get": {
-        "summary": "Read Conversation",
+        "summary": "Read Session",
         "description": "One session, whole: every column of its row, with how many\nturns and events hang off it.\n\nThe two counts are read in the same transaction as the row, so\nthey describe one snapshot rather than three moments of a\nsession that may still be running.",
-        "operationId": "read_conversation_conversations__session__get",
+        "operationId": "read_session_sessions__session__get",
         "parameters": [
           {
             "name": "session",
@@ -2774,7 +2774,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ConversationDetail"
+                  "$ref": "#/components/schemas/SessionDetail"
                 }
               }
             }
@@ -2822,11 +2822,11 @@
         }
       }
     },
-    "/conversations/{session}/turns": {
+    "/sessions/{session}/turns": {
       "get": {
-        "summary": "Read Conversation Turns",
+        "summary": "Read Session Turns",
         "description": "One session's timeline, oldest first, each turn carrying the\ncalls it made.\n\n`cursor` holds the turns strictly after it, which is the\ndirection a client reconciling what it has already read asks in:\nthe ids are monotonic and never reused, so what came after one is\na stable question.",
-        "operationId": "read_conversation_turns_conversations__session__turns_get",
+        "operationId": "read_session_turns_sessions__session__turns_get",
         "parameters": [
           {
             "name": "session",
@@ -2880,7 +2880,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ConversationTurns"
+                  "$ref": "#/components/schemas/SessionTurns"
                 }
               }
             }
@@ -3250,616 +3250,6 @@
         ],
         "title": "ConfigReloadResult",
         "description": "What one reload applied to this running server, kind by kind, and\nwhat is running once it had been applied.\n\nOne request applies a stored change and says what the change was, so\nbelieving a write took effect when it did not takes a deliberate act\nof not reading the reply. Every section answers: a reload applies\nthe whole domain half, so there is no kind left whose section would\nhave to say that this build does not touch it. The four that are\ndeclared optional stay optional in the schema, because a client\ngenerated against an earlier one is holding a document that says\nthey may be null and narrowing that is a change to the contract for\nno gain."
-      },
-      "ConversationDetail": {
-        "properties": {
-          "id": {
-            "type": "integer",
-            "title": "Id",
-            "description": "The session's monotonic row id, the listing's cursor."
-          },
-          "session": {
-            "type": "string",
-            "title": "Session",
-            "description": "The session's uuid hex."
-          },
-          "device": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Device",
-            "description": "The device's MAC in canonical form, or null when none was understood."
-          },
-          "client": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Client",
-            "description": "The client identifier the device announced, when it announced one."
-          },
-          "agent": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Agent",
-            "description": "The agent the session opened with, before any handover."
-          },
-          "agents": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Agents",
-            "description": "Every agent the device is bound to, by name, as the binding resolved at open. The first is the agent the session started on."
-          },
-          "protocol": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Protocol",
-            "description": "The device protocol version this session negotiated."
-          },
-          "started_at": {
-            "type": "string",
-            "title": "Started At",
-            "description": "When the session opened, as an ISO-8601 instant in UTC."
-          },
-          "closed_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Closed At",
-            "description": "When it closed, in the same form, or null."
-          },
-          "duration_s": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Duration S",
-            "description": "How long it lasted, in seconds. Null under metrics-off."
-          },
-          "close_reason": {
-            "anyOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "limit",
-                  "idle",
-                  "drain",
-                  "client",
-                  "error"
-                ]
-              },
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Close Reason",
-            "description": "What ended it, one of the five tokens the listing describes, or null until it closes."
-          },
-          "server_version": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Server Version",
-            "description": "The server version that recorded this session."
-          },
-          "revision": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Revision",
-            "description": "The build revision that recorded it."
-          },
-          "providers": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Providers",
-            "description": "The resolved provider entry per pipeline stage, the same structure the capture manifest carries. It holds environment variable names, never credentials."
-          },
-          "metrics": {
-            "type": "boolean",
-            "title": "Metrics",
-            "description": "Whether metrics storage was on for this session, so a null number is distinguishable from a number that was never stored."
-          },
-          "text": {
-            "type": "boolean",
-            "title": "Text",
-            "description": "Whether text storage was on for this session, so a null utterance is distinguishable from an utterance that was never stored."
-          },
-          "dropped": {
-            "type": "integer",
-            "title": "Dropped",
-            "description": "Records this session lost: events refused at the writer's in-flight bound, and anything a failed transaction rolled back. The store recording its own incompleteness, the way the capture manifest records `complete`."
-          },
-          "turns": {
-            "type": "integer",
-            "title": "Turns",
-            "description": "How many turns this session holds."
-          },
-          "events": {
-            "type": "integer",
-            "title": "Events",
-            "description": "How many events rows it holds: the decision track, `session_open` through `session_closed`. Zero under metrics-off, where no events row lands. They are deliberately not served over REST; the database is that surface."
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "id",
-          "session",
-          "device",
-          "client",
-          "agent",
-          "agents",
-          "protocol",
-          "started_at",
-          "closed_at",
-          "duration_s",
-          "close_reason",
-          "server_version",
-          "revision",
-          "providers",
-          "metrics",
-          "text",
-          "dropped",
-          "turns",
-          "events"
-        ],
-        "title": "ConversationDetail",
-        "description": "One session, whole: its row and what hangs off it."
-      },
-      "ConversationList": {
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/ConversationSummary"
-            },
-            "type": "array",
-            "title": "Items",
-            "description": "The sessions on this page, newest first."
-          },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Cursor",
-            "description": "What to send as `cursor` for the page after this one, and null when this was the last: it is the id of the last item here, and the next page holds the sessions below it. Null means there is nothing further right now, not that there never will be; a listing re-read later starts from the top."
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "items",
-          "next_cursor"
-        ],
-        "title": "ConversationList",
-        "description": "One page of the session listing, newest first."
-      },
-      "ConversationSummary": {
-        "properties": {
-          "id": {
-            "type": "integer",
-            "title": "Id",
-            "description": "The session's monotonic row id, never reused. It is this listing's cursor: a page asked for with it holds the sessions before it."
-          },
-          "session": {
-            "type": "string",
-            "title": "Session",
-            "description": "The session's uuid hex, which addresses the two reads below and names the capture triplet of the same conversation."
-          },
-          "device": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Device",
-            "description": "The device's MAC in canonical form, and null when the session was rejected before one was understood."
-          },
-          "agent": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Agent",
-            "description": "The agent the session opened with, before any handover."
-          },
-          "started_at": {
-            "type": "string",
-            "title": "Started At",
-            "description": "When the session opened, as an ISO-8601 instant in UTC."
-          },
-          "closed_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Closed At",
-            "description": "When it closed, in the same form. Null in a session that is still running and in one whose close was never persisted, which a crash leaves behind."
-          },
-          "duration_s": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Duration S",
-            "description": "How long it lasted, in seconds. A measured number: null under metrics-off."
-          },
-          "close_reason": {
-            "anyOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "limit",
-                  "idle",
-                  "drain",
-                  "client",
-                  "error"
-                ]
-              },
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Close Reason",
-            "description": "What ended it, one of `limit`, `idle`, `drain`, `client` or `error`, the first cause to fire winning. Null until it closes. The five tokens are the set a server latches, and the column that holds them is deliberately unconstrained, so a token a later release adds is served as it was stored: a read that refused one would drop a whole page over one row, the same reason the database refuses none."
-          },
-          "turns": {
-            "type": "integer",
-            "title": "Turns",
-            "description": "How many turns this session holds."
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "id",
-          "session",
-          "device",
-          "agent",
-          "started_at",
-          "closed_at",
-          "duration_s",
-          "close_reason",
-          "turns"
-        ],
-        "title": "ConversationSummary",
-        "description": "One session as the listing shows it."
-      },
-      "ConversationTurn": {
-        "properties": {
-          "id": {
-            "type": "integer",
-            "title": "Id",
-            "description": "The turn's monotonic row id, never reused. It is this timeline's cursor: a page asked for with it holds the turns after it."
-          },
-          "t_ms": {
-            "type": "integer",
-            "title": "T Ms",
-            "description": "The utterance's offset from session open, in milliseconds, aligned with its `heard` event and with the capture's audio for the same session."
-          },
-          "agent": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Agent",
-            "description": "The agent that answered, which a handover makes different from the session's."
-          },
-          "heard": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Heard",
-            "description": "What was said to the device, as transcribed. Null under text-off."
-          },
-          "heard_duration_s": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Heard Duration S",
-            "description": "How long the utterance lasted, in seconds. Null under metrics-off."
-          },
-          "language": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Language",
-            "description": "The language the transcript was recognized as. Neither a measured number nor conversation text, so it survives both switches."
-          },
-          "language_confidence": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Language Confidence",
-            "description": "How sure the recognizer was of that language. Null under metrics-off."
-          },
-          "reply": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reply",
-            "description": "What the assistant said, the legs joined. Null under text-off, and null when the reply spoke nothing."
-          },
-          "legs": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/TurnLeg"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Legs",
-            "description": "One entry per agent that took part, and present only when a handover split the reply. Null is a turn one agent answered whole, which is not the same as an empty list and never becomes one."
-          },
-          "asr_ms": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Asr Ms",
-            "description": "Transcription elapsed, in milliseconds. Null where none was measured this turn, and under metrics-off."
-          },
-          "first_token_ms": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "First Token Ms",
-            "description": "Request to the reply's first token, in milliseconds. Null under metrics-off."
-          },
-          "llm_ms": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Llm Ms",
-            "description": "The reply's LLM round durations summed, in milliseconds. Null under metrics-off."
-          },
-          "tts_first_audio_ms": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Tts First Audio Ms",
-            "description": "The reply's first synthesis request to its first audio bytes, in milliseconds, measured at the provider boundary and deliberately not at the device. Null when the reply spoke nothing, and under metrics-off."
-          },
-          "rounds": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rounds",
-            "description": "How many LLM rounds the reply took. Null under metrics-off."
-          },
-          "input_tokens": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Input Tokens",
-            "description": "Input tokens summed across the turn's rounds; OTel's `gen_ai.usage.input_tokens`. Null when the provider reported no usage, and under metrics-off."
-          },
-          "output_tokens": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Output Tokens",
-            "description": "Output tokens summed across the turn's rounds; OTel's `gen_ai.usage.output_tokens`. Null when the provider reported no usage, and under metrics-off."
-          },
-          "tool_calls": {
-            "type": "integer",
-            "title": "Tool Calls",
-            "description": "How many calls this turn issued, which is how many entries the list below holds. Structural rather than telemetry: it survives both switches."
-          },
-          "tool_invocations": {
-            "items": {
-              "$ref": "#/components/schemas/ToolInvocation"
-            },
-            "type": "array",
-            "title": "Tool Invocations",
-            "description": "The calls the reply made, in the order the model issued them."
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "id",
-          "t_ms",
-          "agent",
-          "heard",
-          "heard_duration_s",
-          "language",
-          "language_confidence",
-          "reply",
-          "legs",
-          "asr_ms",
-          "first_token_ms",
-          "llm_ms",
-          "tts_first_audio_ms",
-          "rounds",
-          "input_tokens",
-          "output_tokens",
-          "tool_calls",
-          "tool_invocations"
-        ],
-        "title": "ConversationTurn",
-        "description": "One utterance and the reply it got, with the calls the reply made."
-      },
-      "ConversationTurns": {
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/ConversationTurn"
-            },
-            "type": "array",
-            "title": "Items",
-            "description": "The turns on this page, ascending by id, which is chronological."
-          },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Cursor",
-            "description": "What to send as `cursor` for the page after this one, and null when this was the last. The next page holds the turns after it, which is also how a client that read up to a turn asks for what has happened since."
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "items",
-          "next_cursor"
-        ],
-        "title": "ConversationTurns",
-        "description": "One page of a session's timeline, oldest first."
       },
       "DefaultAgent": {
         "properties": {
@@ -4364,6 +3754,622 @@
         ],
         "title": "SecretSlot",
         "description": "One slot of an entity that holds a secret stored in the database."
+      },
+      "SessionDetail": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "The session's monotonic row id, the listing's cursor."
+          },
+          "session": {
+            "type": "string",
+            "title": "Session",
+            "description": "The session's uuid hex."
+          },
+          "device": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device",
+            "description": "The device's MAC in canonical form, or null when none was understood."
+          },
+          "client": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client",
+            "description": "The client identifier the device announced, when it announced one."
+          },
+          "agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent",
+            "description": "The agent the session opened with, before any handover."
+          },
+          "agents": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agents",
+            "description": "Every agent the device is bound to, by name, as the binding resolved at open. The first is the agent the session started on."
+          },
+          "protocol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protocol",
+            "description": "The device protocol version this session negotiated."
+          },
+          "started_at": {
+            "type": "string",
+            "title": "Started At",
+            "description": "When the session opened, as an ISO-8601 instant in UTC."
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed At",
+            "description": "When it closed, in the same form, or null."
+          },
+          "duration_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration S",
+            "description": "How long it lasted, in seconds. Null under metrics-off."
+          },
+          "close_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "limit",
+                  "idle",
+                  "drain",
+                  "client",
+                  "error"
+                ]
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Close Reason",
+            "description": "What ended it, one of the five tokens the listing describes, or null until it closes."
+          },
+          "server_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Server Version",
+            "description": "The server version that recorded this session."
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision",
+            "description": "The build revision that recorded it."
+          },
+          "providers": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Providers",
+            "description": "The resolved provider entry per pipeline stage, the same structure the capture manifest carries. It holds environment variable names, never credentials."
+          },
+          "metrics": {
+            "type": "boolean",
+            "title": "Metrics",
+            "description": "Whether metrics storage was on for this session, so a null number is distinguishable from a number that was never stored."
+          },
+          "text": {
+            "type": "boolean",
+            "title": "Text",
+            "description": "Whether text storage was on for this session, so a null utterance is distinguishable from an utterance that was never stored."
+          },
+          "dropped": {
+            "type": "integer",
+            "title": "Dropped",
+            "description": "Records this session lost: events refused at the writer's in-flight bound, and anything a failed transaction rolled back. The store recording its own incompleteness, the way the capture manifest records `complete`."
+          },
+          "turns": {
+            "type": "integer",
+            "title": "Turns",
+            "description": "How many turns this session holds."
+          },
+          "events": {
+            "type": "integer",
+            "title": "Events",
+            "description": "How many events rows it holds: the decision track, `session_open` through `session_closed`. Zero under metrics-off, where no events row lands. They are deliberately not served over REST; the database is that surface."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "session",
+          "device",
+          "client",
+          "agent",
+          "agents",
+          "protocol",
+          "started_at",
+          "closed_at",
+          "duration_s",
+          "close_reason",
+          "server_version",
+          "revision",
+          "providers",
+          "metrics",
+          "text",
+          "dropped",
+          "turns",
+          "events"
+        ],
+        "title": "SessionDetail",
+        "description": "One session, whole: its row and what hangs off it."
+      },
+      "SessionList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SessionSummary"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "The sessions on this page, newest first."
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "What to send as `cursor` for the page after this one, and null when this was the last: it is the id of the last item here, and the next page holds the sessions below it. Null means there is nothing further right now, not that there never will be; a listing re-read later starts from the top."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "SessionList",
+        "description": "One page of the session listing, newest first."
+      },
+      "SessionSummary": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "The session's monotonic row id, never reused. It is this listing's cursor: a page asked for with it holds the sessions before it."
+          },
+          "session": {
+            "type": "string",
+            "title": "Session",
+            "description": "The session's uuid hex, which addresses the two reads below and names the capture triplet of the same conversation."
+          },
+          "device": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device",
+            "description": "The device's MAC in canonical form, and null when the session was rejected before one was understood."
+          },
+          "agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent",
+            "description": "The agent the session opened with, before any handover."
+          },
+          "started_at": {
+            "type": "string",
+            "title": "Started At",
+            "description": "When the session opened, as an ISO-8601 instant in UTC."
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed At",
+            "description": "When it closed, in the same form. Null in a session that is still running and in one whose close was never persisted, which a crash leaves behind."
+          },
+          "duration_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration S",
+            "description": "How long it lasted, in seconds. A measured number: null under metrics-off."
+          },
+          "close_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "limit",
+                  "idle",
+                  "drain",
+                  "client",
+                  "error"
+                ]
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Close Reason",
+            "description": "What ended it, one of `limit`, `idle`, `drain`, `client` or `error`, the first cause to fire winning. Null until it closes. The five tokens are the set a server latches, and the column that holds them is deliberately unconstrained, so a token a later release adds is served as it was stored: a read that refused one would drop a whole page over one row, the same reason the database refuses none."
+          },
+          "turns": {
+            "type": "integer",
+            "title": "Turns",
+            "description": "How many turns this session holds."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "session",
+          "device",
+          "agent",
+          "started_at",
+          "closed_at",
+          "duration_s",
+          "close_reason",
+          "turns"
+        ],
+        "title": "SessionSummary",
+        "description": "One session as the listing shows it."
+      },
+      "SessionTurn": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "The turn's monotonic row id, never reused. It is this timeline's cursor: a page asked for with it holds the turns after it."
+          },
+          "conversation": {
+            "type": "string",
+            "title": "Conversation",
+            "description": "The thread this turn belongs to, by its uuid hex. A turn names both its session and its conversation, which is what makes the session timeline and the thread two readings of one set of rows: the turns of one session can belong to several threads, and one thread's turns can come from several sessions."
+          },
+          "t_ms": {
+            "type": "integer",
+            "title": "T Ms",
+            "description": "The utterance's offset from session open, in milliseconds, aligned with its `heard` event and with the capture's audio for the same session."
+          },
+          "agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent",
+            "description": "The agent that owns this turn, which is the one it started with and therefore the one whose thread it is on. A handover makes it different from the session's and from the agent that finished the reply; the legs below are where a split reply comes apart."
+          },
+          "heard": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heard",
+            "description": "What was said to the device, as transcribed. Null under text-off."
+          },
+          "heard_duration_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heard Duration S",
+            "description": "How long the utterance lasted, in seconds. Null under metrics-off."
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language",
+            "description": "The language the transcript was recognized as. Neither a measured number nor conversation text, so it survives both switches."
+          },
+          "language_confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language Confidence",
+            "description": "How sure the recognizer was of that language. Null under metrics-off."
+          },
+          "reply": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply",
+            "description": "What the assistant said, the legs joined. Null under text-off, and null when the reply spoke nothing."
+          },
+          "legs": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/TurnLeg"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legs",
+            "description": "One entry per agent that took part, and present only when a handover split the reply. Null is a turn one agent answered whole, which is not the same as an empty list and never becomes one."
+          },
+          "asr_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asr Ms",
+            "description": "Transcription elapsed, in milliseconds. Null where none was measured this turn, and under metrics-off."
+          },
+          "first_token_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Token Ms",
+            "description": "Request to the reply's first token, in milliseconds. Null under metrics-off."
+          },
+          "llm_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Ms",
+            "description": "The reply's LLM round durations summed, in milliseconds. Null under metrics-off."
+          },
+          "tts_first_audio_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tts First Audio Ms",
+            "description": "The reply's first synthesis request to its first audio bytes, in milliseconds, measured at the provider boundary and deliberately not at the device. Null when the reply spoke nothing, and under metrics-off."
+          },
+          "rounds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rounds",
+            "description": "How many LLM rounds the reply took. Null under metrics-off."
+          },
+          "input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Tokens",
+            "description": "Input tokens summed across the turn's rounds; OTel's `gen_ai.usage.input_tokens`. Null when the provider reported no usage, and under metrics-off."
+          },
+          "output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Tokens",
+            "description": "Output tokens summed across the turn's rounds; OTel's `gen_ai.usage.output_tokens`. Null when the provider reported no usage, and under metrics-off."
+          },
+          "tool_calls": {
+            "type": "integer",
+            "title": "Tool Calls",
+            "description": "How many calls this turn issued, which is how many entries the list below holds. Structural rather than telemetry: it survives both switches."
+          },
+          "tool_invocations": {
+            "items": {
+              "$ref": "#/components/schemas/ToolInvocation"
+            },
+            "type": "array",
+            "title": "Tool Invocations",
+            "description": "The calls the reply made, in the order the model issued them."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "conversation",
+          "t_ms",
+          "agent",
+          "heard",
+          "heard_duration_s",
+          "language",
+          "language_confidence",
+          "reply",
+          "legs",
+          "asr_ms",
+          "first_token_ms",
+          "llm_ms",
+          "tts_first_audio_ms",
+          "rounds",
+          "input_tokens",
+          "output_tokens",
+          "tool_calls",
+          "tool_invocations"
+        ],
+        "title": "SessionTurn",
+        "description": "One utterance and the reply it got, with the calls the reply made."
+      },
+      "SessionTurns": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SessionTurn"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "The turns on this page, ascending by id, which is chronological."
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "What to send as `cursor` for the page after this one, and null when this was the last. The next page holds the turns after it, which is also how a client that read up to a turn asks for what has happened since."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "SessionTurns",
+        "description": "One page of a session's timeline, oldest first."
       },
       "SingletonDiff": {
         "properties": {

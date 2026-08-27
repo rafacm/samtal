@@ -275,7 +275,7 @@ class TurnLeg(BaseModel):
     )
 
 
-class ConversationTurn(BaseModel):
+class SessionTurn(BaseModel):
     """One utterance and the reply it got, with the calls the reply made."""
 
     model_config = ConfigDict(extra="forbid")
@@ -387,7 +387,7 @@ class ConversationTurn(BaseModel):
     )
 
 
-class ConversationSummary(BaseModel):
+class SessionSummary(BaseModel):
     """One session as the listing shows it."""
 
     model_config = ConfigDict(extra="forbid")
@@ -436,12 +436,12 @@ class ConversationSummary(BaseModel):
     turns: int = Field(description="How many turns this session holds.")
 
 
-class ConversationList(BaseModel):
+class SessionList(BaseModel):
     """One page of the session listing, newest first."""
 
     model_config = ConfigDict(extra="forbid")
 
-    items: list[ConversationSummary] = Field(
+    items: list[SessionSummary] = Field(
         description="The sessions on this page, newest first."
     )
     next_cursor: int | None = Field(
@@ -454,7 +454,7 @@ class ConversationList(BaseModel):
     )
 
 
-class ConversationDetail(BaseModel):
+class SessionDetail(BaseModel):
     """One session, whole: its row and what hangs off it."""
 
     model_config = ConfigDict(extra="forbid")
@@ -530,12 +530,12 @@ class ConversationDetail(BaseModel):
     )
 
 
-class ConversationTurns(BaseModel):
+class SessionTurns(BaseModel):
     """One page of a session's timeline, oldest first."""
 
     model_config = ConfigDict(extra="forbid")
 
-    items: list[ConversationTurn] = Field(
+    items: list[SessionTurn] = Field(
         description="The turns on this page, ascending by id, which is chronological."
     )
     next_cursor: int | None = Field(
@@ -647,11 +647,11 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
     """
 
     @api.get(
-        "/conversations",
-        response_model=ConversationList,
+        "/sessions",
+        response_model=SessionList,
         responses=problems(401, 404, 422, 500, instead=PROBLEMS_INSTEAD),
     )
-    def read_conversations(
+    def read_sessions(
         reader: ReaderDep,
         device: DeviceQuery = None,
         limit: LimitQuery = None,
@@ -689,11 +689,11 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
         return _page(found, size)
 
     @api.get(
-        "/conversations/{session}",
-        response_model=ConversationDetail,
+        "/sessions/{session}",
+        response_model=SessionDetail,
         responses=problems(401, 404, 422, 500, instead=PROBLEMS_INSTEAD),
     )
-    def read_conversation(session: str, reader: ReaderDep) -> dict[str, Any]:
+    def read_session(session: str, reader: ReaderDep) -> dict[str, Any]:
         """One session, whole: every column of its row, with how many
         turns and events hang off it.
 
@@ -708,11 +708,11 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
         }
 
     @api.get(
-        "/conversations/{session}/turns",
-        response_model=ConversationTurns,
+        "/sessions/{session}/turns",
+        response_model=SessionTurns,
         responses=problems(401, 404, 422, 500, instead=PROBLEMS_INSTEAD),
     )
-    def read_conversation_turns(
+    def read_session_turns(
         session: str,
         reader: ReaderDep,
         limit: LimitQuery = None,
@@ -861,11 +861,11 @@ __all__ = [
     "LIMIT_DEFAULT",
     "LIMIT_MAX",
     "CloseReason",
-    "ConversationDetail",
-    "ConversationList",
-    "ConversationSummary",
-    "ConversationTurn",
-    "ConversationTurns",
+    "SessionDetail",
+    "SessionList",
+    "SessionSummary",
+    "SessionTurn",
+    "SessionTurns",
     "ToolInvocation",
     "ToolSource",
     "TurnLeg",

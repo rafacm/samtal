@@ -1506,9 +1506,9 @@ changes what the server is doing rather than what is stored.
 [The conversation store](#the-conversation-store) describes:
 
 ```
-GET                 /api/conversations
-GET                 /api/conversations/{session}
-GET                 /api/conversations/{session}/turns
+GET                 /api/sessions
+GET                 /api/sessions/{session}
+GET                 /api/sessions/{session}/turns
 ```
 
 The first lists the sessions, newest first, filtered by `?device=` when

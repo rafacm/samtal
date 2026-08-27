@@ -470,14 +470,14 @@ def test_a_trailing_slash_path_answers_the_one_shape(client: TestClient) -> None
 
 
 def test_a_conversations_refusal_answers_the_same_shape(client: TestClient) -> None:
-    """The conversation reads live in another module, raise the shared
-    refusal types and build no body of their own, so they inherit this
-    shape rather than restating it. That is the claim.
+    """The conversation store's reads live in another module, raise the
+    shared refusal types and build no body of their own, so they inherit
+    this shape rather than restating it. That is the claim.
 
     `errors` is empty, which is the honest answer: what this refusal
     names is a deployment setting, not a field of the request.
     """
-    response = client.get(f"/conversations/{SENTINEL}")
+    response = client.get(f"/sessions/{SENTINEL}")
 
     assert response.status_code == 404
     assert response.headers["content-type"] == PROBLEM_MEDIA_TYPE

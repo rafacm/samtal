@@ -21,10 +21,13 @@ imports pydantic and nothing else. What a read answers is knowledge the
 CLI needs too, and the CLI must not import FastAPI to get it.
 
 One namespace here is not configuration at all. The conversation
-store's reads (`/conversations`) are registered from
-`conversations/api.py`, where their route functions and their response
-models live, because what they answer is that store's business and not
-this one's. They are registered on this application so that the gate,
+store's reads (`/sessions`) are registered from `conversations/api.py`,
+where their route functions and their response models live, because
+what they answer is that store's business and not this one's. The
+namespace is `sessions` and the store is `conversations` deliberately:
+what these three reads answer is one connection episode and the turns
+inside it, and the thread that spans several of them is a different
+entity with a namespace of its own. They are registered on this application so that the gate,
 the sanitized handlers and the committed document cover them by
 construction, which is the whole reason a route belongs on this mount
 rather than on an application of its own.
@@ -2475,7 +2478,7 @@ def _application(lifespan: Lifespan[FastAPI] | None = None) -> FastAPI:
         # how the document says where they actually are.
         servers=[{"url": MOUNT_PATH}],
         # No trailing-slash redirect anywhere in this namespace. The
-        # router's default answers `/config/` or `/conversations/` with a
+        # router's default answers `/config/` or `/sessions/` with a
         # 307 whose Location is the request's own path and query string,
         # which puts an entity name, a session id or a rejected cursor in
         # a response header: the one place this API was still quoting

@@ -23,6 +23,20 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **BREAKING: the conversation store's three reads move to
+  `/api/sessions`** (#190). `GET /api/conversations`,
+  `/api/conversations/{session}` and `/api/conversations/{session}/turns`
+  become `GET /api/sessions`, `/api/sessions/{session}` and
+  `/api/sessions/{session}/turns`, and their response models are renamed
+  to match (`SessionList`, `SessionSummary`, `SessionDetail`,
+  `SessionTurn`, `SessionTurns`; `ToolInvocation` and `TurnLeg` keep
+  their names). What these answer is one connection episode and the
+  turns inside it, which is a session; the thread that spans several of
+  them is a different entity and gets a namespace of its own. The
+  Postgres schema, the config section `server.conversations.*`, the four
+  `conversations_*` events and `vinga-server conversations schema` all
+  keep their names, because those name the store and the store honestly
+  stores conversations now.
 - **BREAKING: retention prunes conversations rather than sessions**
   (#190). `server.conversations.retention_days` is unchanged (90 by
   default, `0` keeps everything); what it is measured against is now a
