@@ -174,9 +174,10 @@ task list with honestly checked and unchecked boxes; an unchecked
 box carries a note saying why it is not yet verifiable. Substitute
 the PR number into the plan's milestone tick once the PR exists.
 Wait for CI green before the review round. Two CI shapes to know:
-a docs-only diff outside `docs/reference/` triggers no workflow at
-all, which the PR's verification section states instead of
-waiting; and a `pull_request` event that never registers a run is
+a docs-only diff outside `docs/reference/` runs the `docs` workflow
+(link check plus the command-spellings census), not the server
+lanes, and its green is the check the PR waits for; and a
+`pull_request` event that never registers a run is
 a GitHub failure mode this repository has seen a whole day of
 (2026-08-27): dispatch the workflow against the branch
 (`gh workflow run vinga-server.yml --repo rafacm/vinga
