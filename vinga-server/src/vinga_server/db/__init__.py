@@ -57,6 +57,8 @@ from pathlib import Path
 import psycopg
 from alembic import command
 from alembic.config import Config as AlembicConfig
+from alembic.script.revision import ResolutionError
+from alembic.util.exc import CommandError
 from sqlalchemy import URL, Engine, create_engine, event, make_url, text
 
 from vinga_server.config.loader import ConfigError, DatabaseBusyError, StorageError
@@ -123,6 +125,44 @@ MIGRATION_BUSY = (
     "for longer than the lock timeout allows. Nothing was changed; start again. A "
     "reader inside a long transaction is what blocks a migration, because the schema "
     "changes it makes need a lock that reads hold off"
+)
+
+# The revisions a re-cut deleted, named one by one because the set is
+# closed and can never grow: it is the list of what one decision
+# removed, and no later change adds to it. Today that is the single
+# conversations baseline the thread schema replaced (#190), which is
+# the second time this project has spent the priced exit its
+# compatibility floor grants.
+#
+# A closed set rather than "any revision this build cannot find", and
+# the difference is the whole of the arm below. Two databases produce
+# the same Alembic failure and want opposite advice: one written before
+# the re-cut, which cannot be upgraded and has to be replaced, and one
+# written by a NEWER build and then met by an older image, which is
+# current and must not be touched. Nothing in an unknown revision id
+# says which it is; membership here does.
+SUPERSEDED_REVISIONS = frozenset({"1001_postgres_conversations"})
+
+# What a database still stamped at one of those is told, and the whole
+# of the operator-facing surface of "unsupported". Fixed and value-free
+# like every other refusal here: the revision it was stamped at is not
+# quoted back, being a value in a table nothing here validates, and the
+# connection is not repeated for the reason the sentences above give.
+#
+# The remedy is the only thing worth saying, because there is no other:
+# there is no export format for conversation history and no importer,
+# so the reset is the path, and it is the one the ADR addendum records
+# and the one this repository tests.
+SUPERSEDED_REVISION = (
+    "the conversations schema of the vinga database is stamped at the revision the "
+    "thread schema replaced, and it cannot be upgraded in place: turns recorded "
+    "before conversations existed name no conversation, and there is nothing to "
+    "derive one from. Drop and recreate the database, or the conversations schema "
+    "on its own, rerun deploy/postgres-init.sql, and start the server again, which "
+    "migrates a blank schema to current in one step. Conversation history is not "
+    "carried across, which the changelog announces and "
+    "docs/adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md records "
+    "with what it costs"
 )
 
 # The advisory-lock keys, one per chain, carrying a namespace rather
@@ -426,15 +466,53 @@ def is_busy(exc: BaseException) -> bool:
 def migration_failure(exc: Exception) -> ConfigError:
     """What an open that did not migrate is answered with.
 
-    Two sentences and no third: the lock that did not arrive, which the
-    caller may retry, and everything else, which is an instance the
-    server cannot use as configured. Neither carries a word of the
-    driver's own text, because a psycopg connection error quotes the DSN
-    it tried.
+    Three sentences and no fourth: the lock that did not arrive, which
+    the caller may retry; a database stamped at a revision a re-cut
+    deleted, which has to be replaced; and everything else, which is an
+    instance the server cannot use as configured. None of them carries a
+    word of the driver's own text, because a psycopg connection error
+    quotes the DSN it tried.
+
+    The middle arm is narrow on purpose, because the sentence it answers
+    with says to throw a database away. Three things have to hold before
+    it is said, and each rules out a case that would be told to destroy
+    something it should keep. It has to be Alembic's own `CommandError`,
+    which a driver failure is not. Its cause has to be a
+    `ResolutionError`, which is the stored revision not being findable
+    rather than an unreadable script directory or a chain with two
+    heads. And the revision it could not find has to be one a re-cut is
+    known to have deleted: a database stamped by a NEWER build, met by
+    an image that was rolled back, raises exactly the same
+    `ResolutionError` and is current rather than stranded, so it falls
+    through to the general sentence and its operator rolls forward
+    instead of deleting a live volume.
     """
     if is_busy(exc):
         return DatabaseBusyError(MIGRATION_BUSY)
+    if _stranded(exc):
+        return StorageError(SUPERSEDED_REVISION)
     return StorageError(UNREACHABLE)
+
+
+def _stranded(exc: Exception) -> bool:
+    """Whether this failure is a database left behind by a re-cut, which
+    is the one failure answered by telling an operator to replace it.
+
+    The cause chain is walked rather than only its first link, because
+    what makes this the right question is Alembic's `ResolutionError`
+    being in it at all; which library happened to wrap it is not this
+    module's business to depend on.
+    """
+    if not isinstance(exc, CommandError):
+        return False
+    seen: set[int] = set()
+    cause: BaseException | None = exc.__cause__
+    while cause is not None and id(cause) not in seen:
+        seen.add(id(cause))
+        if isinstance(cause, ResolutionError):
+            return cause.argument in SUPERSEDED_REVISIONS
+        cause = cause.__cause__
+    return False
 
 
 _RETRYABLE = (
@@ -488,6 +566,8 @@ __all__ = [
     "LOCK_TIMEOUT_MS",
     "MIGRATION_BUSY",
     "PASSWORD_ENV",
+    "SUPERSEDED_REVISION",
+    "SUPERSEDED_REVISIONS",
     "URL_ENV",
     "URL_REFUSED",
     "UNREACHABLE",
