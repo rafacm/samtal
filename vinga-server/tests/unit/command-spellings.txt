@@ -147,6 +147,13 @@ docs/features/2026-08-19-random-number-tool.md:85  historical  config openapi
 docs/features/2026-08-19-refusal-and-debug-hygiene.md:91  historical  config set
 docs/features/2026-08-19-refusal-and-debug-hygiene.md:91  historical  config set
 docs/features/2026-08-19-refusal-and-debug-hygiene.md:242  historical  set-secret
+docs/features/2026-08-27-compose-quick-start.md:40  historical  config ota-url
+docs/features/2026-08-27-compose-quick-start.md:117  historical  config ota-url
+docs/features/2026-08-27-compose-quick-start.md:188  historical  config ota-url
+docs/features/2026-08-27-compose-quick-start.md:196  historical  config ota-url
+docs/features/2026-08-27-compose-quick-start.md:199  historical  config apply
+docs/features/2026-08-27-compose-quick-start.md:300  historical  config ota-url
+docs/features/2026-08-27-compose-quick-start.md:342  historical  config ota-url
 docs/plans/2026-08-02-m6-tools-and-mcp.md:336  historical  config reference says
 docs/plans/2026-08-03-realtime-multi-turn-and-barge-in.md:118  historical  config schema change updates the example in the
 docs/plans/2026-08-11-db-domain-config-implementation.md:162  historical  set-secret
