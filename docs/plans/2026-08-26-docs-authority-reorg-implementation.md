@@ -1572,3 +1572,22 @@ docstrings above, and they were outside every earlier census's reach.
 - Source review of every changed page: heading levels, link targets and
   hard wrapping. No line this milestone wrote exceeds 75 columns except
   the table rows above, which are cells rather than prose.
+
+### PR review round (M6)
+
+External review of PR #326 (backend codex 0.149.1, model
+`gpt-5.6-terra`, 2026-08-27). One finding:
+
+1. **P2: the device-boundary docstring linked a nonexistent
+   path.** Both markdown links in `device/boundary.py` used
+   `../../../docs/`, which from `src/vinga_server/device/` resolves
+   under a nonexistent `vinga-server/docs/`; repository root is four
+   levels up. The off-by-one predates this chain (the retired
+   principles link carried it too) and the retargeting inherited it.
+   *Resolution:* both links now use `../../../../docs/`, and the
+   verified anchor survives. The reviewer's suggestion to teach the
+   link checker to scan source docstrings is noted for the checker's
+   possible future as a committed tool; the checker is a session
+   scratchpad script by plan design decision 10.
+
+Verdict: mergeable after the listed fix.
