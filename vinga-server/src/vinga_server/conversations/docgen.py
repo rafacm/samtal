@@ -42,10 +42,11 @@ PROSE_WIDTH = 78
 EVENT_REFERENCE = "events.md"
 
 # The domain model, one directory up from the committed reference. The
-# schema is named `conversations` and stores sessions and turns, while
-# the domain noun "conversation" is a thread that does not exist yet, so
-# the reference names the page that holds the distinction. Relative to
-# `docs/reference/`, where the reference is committed.
+# schema is named `conversations` and now really stores some: the
+# sessions and turns it always held, and the threads those turns belong
+# to. What a session and a conversation each mean to a user is that
+# page's, and the reference links it rather than restating it. Relative
+# to `docs/reference/`, where the reference is committed.
 CONCEPTS = "../concepts.md"
 
 # What an exporter maps onto, per the observability ADR's adoption of
@@ -80,17 +81,35 @@ def reference() -> str:
             "The store is the `conversations` schema of the Postgres database the "
             "`VINGA_DB_*` variables name, beside the domain configuration's `domain` "
             "schema. It holds what was said and what it cost to say it: the session "
-            "spine, the turn timeline, the tool invocations a turn issued, and the "
-            "decision track underneath them. Audio never enters it. The per-frame "
-            "endpointer track and the dropped-frame counts stay in the session "
-            "capture, which is the recording; this is the queryable record."
+            "spine, the threads that span it, the turn timeline both of them project, "
+            "the tool invocations a turn issued, the recap checkpoints a thread "
+            "accrues, and the decision track underneath all of it. Audio never enters "
+            "it. The per-frame endpointer track and the dropped-frame counts stay in "
+            "the session capture, which is the recording; this is the queryable "
+            "record."
         ),
         "",
         *_paragraph(
-            f"[The domain concepts page]({CONCEPTS}) says what a session and a "
-            f"turn mean to a user, and holds the distinction this schema's name "
-            f"invites: these are sessions and turns, not the cross-session "
-            f"conversation the domain model plans."
+            "The schema name and one table name are the same word, so SQL spells the "
+            "thread table `conversations.conversations`. The schema name is the "
+            "store's and the table name is the entity's: a conversation is a durable "
+            "thread between a user and exactly one agent, spanning sessions, and a "
+            "session is one connection episode from one device."
+        ),
+        "",
+        *_paragraph(
+            f"A `turns` row names both, which is what makes the session view and the "
+            f"thread view two readings of one set of rows rather than two stores: the "
+            f"turns of one session can belong to several threads, and one thread's "
+            f"turns can come from several sessions. No dialogue is stored twice. "
+            f"[The domain concepts page]({CONCEPTS}) says what each means to a user."
+        ),
+        "",
+        *_paragraph(
+            "`conversation_milestones` is created by the baseline and written by "
+            "nothing yet. It is the shape a consented recap checkpoint takes, landing "
+            "with the schema rather than as a migration of its own later; until the "
+            "flow that writes one exists, the table is empty in every deployment."
         ),
         "",
         "## The compatibility promise",
@@ -119,11 +138,15 @@ def reference() -> str:
         "",
         *_paragraph(
             "Three kinds of column survive both switches, and each for a reason worth "
-            "stating. The session spine (`sessions.session`, its device and its "
-            "timestamps) survives because retention and every read key on it, and a "
-            "record that cannot be pruned cannot be kept. The structural "
-            "halves of a turn (`t_ms`, `agent`, `language`, `tool_calls`) survive "
-            "because they are neither a measured number nor conversation text. And "
+            "stating. The two spines survive because retention and every read key on "
+            "them, and a record that cannot be pruned cannot be kept: "
+            "`sessions.session` with its device and its timestamps, and the "
+            "`conversations` row with its agent, its device and its two timestamps. "
+            "Its `title` is the exception and is content, because it is what somebody "
+            "said. The structural halves of a turn (`t_ms`, `conversation`, `agent`, "
+            "`language`, `tool_calls`) survive because they are neither a measured "
+            "number nor conversation text: which thread a turn is on is a fact this "
+            "server decided, not a word anybody spoke. And "
             "`sessions.metrics` and `sessions.text` record which way the switches "
             "were set for that session, so a null column is distinguishable from a "
             "column that was never stored."
@@ -135,20 +158,42 @@ def reference() -> str:
             "say to it, which is the same statement the capture documentation makes "
             "about audio. Attributing a session on a shared device to one member "
             "needs voiceprint identification, which does not exist here yet, so the "
-            "session is the unit deletion is expressed in: it is what retention "
-            "takes whole and what the erasure API will address. Erasing one named "
-            "session on demand is not enforceable in this release at all, and the "
-            "section below says what a deployment has instead."
+            "units deletion is expressed in are the conversation and the session: "
+            "the first is what retention takes whole, and both are what the erasure "
+            "API will address. Erasing either on demand is not enforceable in this "
+            "release at all, and the section below says what a deployment has "
+            "instead."
         ),
         "",
         "## Retention and deletion",
         "",
         *_paragraph(
-            "`server.conversations.retention_days` defaults to 90. Whole sessions "
-            "whose `started_at` is older than the window are deleted, row and "
-            "children together, when the server starts and at each session close. "
-            "`retention_days: 0` keeps everything and is a deliberate choice rather "
-            "than a default: a store without a policy retains forever."
+            "`server.conversations.retention_days` defaults to 90, and "
+            "`retention_days: 0` keeps everything, which is a deliberate choice "
+            "rather than a default: a store without a policy retains forever. What "
+            "the window is measured against is a conversation's last activity, "
+            "because a conversation is the unit this store retains and deletes. The "
+            "pass runs when the server starts and at each session close."
+        ),
+        "",
+        *_paragraph(
+            "Three rules, and the order between them is what keeps a live thread "
+            "whole. A conversation whose `last_active_at` is older than the window is "
+            "deleted whole: its milestones, its turns' invocations, its turns, then "
+            "its row. Events are deleted on their own session's `started_at` age "
+            "alone, whether or not that session's row survives, because they are "
+            "session-scoped telemetry rather than part of the thread. And a session "
+            "row older than the window is deleted once no turn names it any more, so "
+            "a session that began before the cutoff and holds a thread that is still "
+            "being talked to keeps the minimal spine those turns cross-reference "
+            "while losing its own events."
+        ),
+        "",
+        *_paragraph(
+            "Turns are deleted here and nowhere else. A deployment that never resumes "
+            "a conversation sees what it saw before: a thread never spans sessions "
+            "there, so its age and its session's coincide and the pass takes them "
+            "together."
         ),
         "",
         *_paragraph(
@@ -156,20 +201,20 @@ def reference() -> str:
             "`vinga-server conversations purge` was one and is gone (#282), because "
             "it reached the store's file directly and that is not a thing a command "
             "can do once the store is a database elsewhere; erasing a named session "
-            "returns as an act of the API, with a CLI verb in front of it (#190). "
-            "Until then the window above is the whole of the deletion policy, and a "
-            "deployment that has to erase something now does it in SQL, as the "
-            "server role: `delete from conversations.sessions where session = ...` "
-            "and the same predicate against `turns`, `tool_invocations` and "
-            "`events`, in one transaction, because a session's rows go together or "
-            "the deletion leaves children pointing at nothing. Whichever way rows "
-            "go, the deletion the "
-            "window takes is of a session at a time, row and children together: a "
-            "session that is still running when its row goes stops being recorded, "
-            "because the writer finds the row gone at its next turn. Capture files "
-            "are a separate instrument and are never touched by any of it; the "
-            "session id is the correlation key for whoever needs to remove the "
-            "matching triplet."
+            "or a named conversation returns as an act of the API, with a CLI verb "
+            "in front of it (#190). Until then the window above is the whole of the "
+            "deletion policy, and a deployment that has to erase something now does "
+            "it in SQL, as the server role: `delete from conversations.turns where "
+            "session = ...` and the same predicate against `tool_invocations` and "
+            "`events`, then the `sessions` row, in one transaction, because a "
+            "session's rows go together or the deletion leaves children pointing at "
+            "nothing. A `conversations` row whose every turn is gone that way should "
+            "go with them, since a thread with no turns is a title and two "
+            "timestamps. A session that is still running when its row goes stops "
+            "being recorded, because the writer finds the row gone at its next turn. "
+            "Capture files are a separate instrument and are never touched by any of "
+            "it; the session id is the correlation key for whoever needs to remove "
+            "the matching triplet."
         ),
         "",
         *_paragraph(
@@ -213,7 +258,8 @@ def reference() -> str:
         ),
         "",
         *_paragraph(
-            "The ids on `sessions`, `turns` and `events` are `bigint` identity "
+            "The ids on `sessions`, `conversations`, `turns` and `events` are "
+            "`bigint` identity "
             "columns, and a sequence never hands out a value twice. That is what "
             "makes them usable as cursors: a client that has read up to id N may ask "
             "for what came after it and cannot be handed a different row under the "

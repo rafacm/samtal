@@ -9,14 +9,28 @@ column description lives on the table in
 The store is the `conversations` schema of the Postgres database the
 `VINGA_DB_*` variables name, beside the domain configuration's `domain`
 schema. It holds what was said and what it cost to say it: the session spine,
-the turn timeline, the tool invocations a turn issued, and the decision track
-underneath them. Audio never enters it. The per-frame endpointer track and the
-dropped-frame counts stay in the session capture, which is the recording; this
-is the queryable record.
+the threads that span it, the turn timeline both of them project, the tool
+invocations a turn issued, the recap checkpoints a thread accrues, and the
+decision track underneath all of it. Audio never enters it. The per-frame
+endpointer track and the dropped-frame counts stay in the session capture,
+which is the recording; this is the queryable record.
 
-[The domain concepts page](../concepts.md) says what a session and a turn mean
-to a user, and holds the distinction this schema's name invites: these are
-sessions and turns, not the cross-session conversation the domain model plans.
+The schema name and one table name are the same word, so SQL spells the thread
+table `conversations.conversations`. The schema name is the store's and the
+table name is the entity's: a conversation is a durable thread between a user
+and exactly one agent, spanning sessions, and a session is one connection
+episode from one device.
+
+A `turns` row names both, which is what makes the session view and the thread
+view two readings of one set of rows rather than two stores: the turns of one
+session can belong to several threads, and one thread's turns can come from
+several sessions. No dialogue is stored twice. [The domain concepts
+page](../concepts.md) says what each means to a user.
+
+`conversation_milestones` is created by the baseline and written by nothing
+yet. It is the shape a consented recap checkpoint takes, landing with the
+schema rather than as a migration of its own later; until the flow that writes
+one exists, the table is empty in every deployment.
 
 ## The compatibility promise
 
@@ -37,47 +51,67 @@ combination is a supported configuration.
 | `text` | conversation text, and tool names, arguments and results | those columns are null; the rows still land |
 
 Three kinds of column survive both switches, and each for a reason worth
-stating. The session spine (`sessions.session`, its device and its timestamps)
-survives because retention and every read key on it, and a record that cannot
-be pruned cannot be kept. The structural halves of a turn (`t_ms`, `agent`,
-`language`, `tool_calls`) survive because they are neither a measured number
-nor conversation text. And `sessions.metrics` and `sessions.text` record which
-way the switches were set for that session, so a null column is
-distinguishable from a column that was never stored.
+stating. The two spines survive because retention and every read key on them,
+and a record that cannot be pruned cannot be kept: `sessions.session` with its
+device and its timestamps, and the `conversations` row with its agent, its
+device and its two timestamps. Its `title` is the exception and is content,
+because it is what somebody said. The structural halves of a turn (`t_ms`,
+`conversation`, `agent`, `language`, `tool_calls`) survive because they are
+neither a measured number nor conversation text: which thread a turn is on is
+a fact this server decided, not a word anybody spoke. And `sessions.metrics`
+and `sessions.text` record which way the switches were set for that session,
+so a null column is distinguishable from a column that was never stored.
 
 The switches are deployment-wide. Until per-user controls exist, enabling text
 storage on a device a household shares stores what guests say to it, which is
 the same statement the capture documentation makes about audio. Attributing a
 session on a shared device to one member needs voiceprint identification,
-which does not exist here yet, so the session is the unit deletion is
-expressed in: it is what retention takes whole and what the erasure API will
-address. Erasing one named session on demand is not enforceable in this
-release at all, and the section below says what a deployment has instead.
+which does not exist here yet, so the units deletion is expressed in are the
+conversation and the session: the first is what retention takes whole, and
+both are what the erasure API will address. Erasing either on demand is not
+enforceable in this release at all, and the section below says what a
+deployment has instead.
 
 ## Retention and deletion
 
-`server.conversations.retention_days` defaults to 90. Whole sessions whose
-`started_at` is older than the window are deleted, row and children together,
-when the server starts and at each session close. `retention_days: 0` keeps
-everything and is a deliberate choice rather than a default: a store without a
-policy retains forever.
+`server.conversations.retention_days` defaults to 90, and `retention_days: 0`
+keeps everything, which is a deliberate choice rather than a default: a store
+without a policy retains forever. What the window is measured against is a
+conversation's last activity, because a conversation is the unit this store
+retains and deletes. The pass runs when the server starts and at each session
+close.
+
+Three rules, and the order between them is what keeps a live thread whole. A
+conversation whose `last_active_at` is older than the window is deleted whole:
+its milestones, its turns' invocations, its turns, then its row. Events are
+deleted on their own session's `started_at` age alone, whether or not that
+session's row survives, because they are session-scoped telemetry rather than
+part of the thread. And a session row older than the window is deleted once no
+turn names it any more, so a session that began before the cutoff and holds a
+thread that is still being talked to keeps the minimal spine those turns
+cross-reference while losing its own events.
+
+Turns are deleted here and nowhere else. A deployment that never resumes a
+conversation sees what it saw before: a thread never spans sessions there, so
+its age and its session's coincide and the pass takes them together.
 
 Deletion on demand is not something this release has a command for.
 `vinga-server conversations purge` was one and is gone (#282), because it
 reached the store's file directly and that is not a thing a command can do
-once the store is a database elsewhere; erasing a named session returns as an
-act of the API, with a CLI verb in front of it (#190). Until then the window
-above is the whole of the deletion policy, and a deployment that has to erase
-something now does it in SQL, as the server role: `delete from
-conversations.sessions where session = ...` and the same predicate against
-`turns`, `tool_invocations` and `events`, in one transaction, because a
-session's rows go together or the deletion leaves children pointing at
-nothing. Whichever way rows go, the deletion the window takes is of a session
-at a time, row and children together: a session that is still running when its
-row goes stops being recorded, because the writer finds the row gone at its
-next turn. Capture files are a separate instrument and are never touched by
-any of it; the session id is the correlation key for whoever needs to remove
-the matching triplet.
+once the store is a database elsewhere; erasing a named session or a named
+conversation returns as an act of the API, with a CLI verb in front of it
+(#190). Until then the window above is the whole of the deletion policy, and a
+deployment that has to erase something now does it in SQL, as the server role:
+`delete from conversations.turns where session = ...` and the same predicate
+against `tool_invocations` and `events`, then the `sessions` row, in one
+transaction, because a session's rows go together or the deletion leaves
+children pointing at nothing. A `conversations` row whose every turn is gone
+that way should go with them, since a thread with no turns is a title and two
+timestamps. A session that is still running when its row goes stops being
+recorded, because the writer finds the row gone at its next turn. Capture
+files are a separate instrument and are never touched by any of it; the
+session id is the correlation key for whoever needs to remove the matching
+triplet.
 
 What deletion means is worth stating exactly, because the database server
 decides it. A deleted row is invisible to every transaction that begins after
@@ -112,11 +146,11 @@ locks hold off the schema changes a migration makes, so a session left open in
 a transaction is what would make the next boot's migration wait out its lock
 timeout and refuse.
 
-The ids on `sessions`, `turns` and `events` are `bigint` identity columns, and
-a sequence never hands out a value twice. That is what makes them usable as
-cursors: a client that has read up to id N may ask for what came after it and
-cannot be handed a different row under the same number, even after retention
-has deleted from the end.
+The ids on `sessions`, `conversations`, `turns` and `events` are `bigint`
+identity columns, and a sequence never hands out a value twice. That is what
+makes them usable as cursors: a client that has read up to id N may ask for
+what came after it and cannot be handed a different row under the same number,
+even after retention has deleted from the end.
 
 ## The event vocabulary
 
@@ -192,14 +226,28 @@ carries the per-leg counts, and the per-round, per-model truth is the
 | `text` | `BOOLEAN` | no | Whether text storage was on for this session, so a null utterance is distinguishable from an utterance that was never stored. |
 | `dropped` | `INTEGER` | no | Records this session lost: events refused at the in-flight bound, and anything a failed transaction rolled back. Written at close, so the store records its own incompleteness the way the capture manifest records `complete`. Zero under metrics-off. |
 
+### `conversations`
+
+| Column | Type | Null | Description |
+| --- | --- | --- | --- |
+| `id` | `BIGINT` | no | Monotonic row id, never reused. The tie-break half of the thread listing's keyset cursor, since activity moves and two threads can share a timestamp. |
+| `conversation` | `TEXT` | no | The thread's uuid hex: the join key `turns.conversation` and `conversation_milestones.conversation` carry, and what a resume addresses. Minted by the runtime at the activation that opens the thread, the same shape and role as `sessions.session`. |
+| `agent` | `TEXT` | no | The agent this thread belongs to, and the only one it will ever have: a conversation is a dialogue with exactly one agent, so a handover starts a second thread rather than moving this one. Not null, unlike `sessions.agent` and `turns.agent`, because a thread with no agent is not a thread. |
+| `device` | `TEXT` | no | The device the thread was begun on, in canonical MAC form. Provenance rather than ownership: a thread is agent-scoped, so a resume from any device bound to that agent reaches it, and this column says where it started rather than where it may be continued. |
+| `title` | `TEXT` | yes | What the thread is called, derived from its first utterance and truncated. Conversation text, so it is null under text-off, and null in a thread whose first turn had nothing to derive one from. |
+| `incomplete` | `BOOLEAN` | no | Whether a write this thread needed was lost, so a resume can say the record has gaps. Product state rather than telemetry, and therefore deliberately outside the metrics switch: `sessions.dropped` is zeroed under metrics-off and this is not. Written by the durable path, which arrives with the writer's acknowledgements; false in every thread until then. |
+| `created_at` | `TEXT` | no | When the thread's first turn landed, UTC ISO-8601. The row materializes with that turn rather than at activation, so a wake that produced no transcript leaves no empty thread behind. |
+| `last_active_at` | `TEXT` | no | When the thread's most recent turn landed, UTC ISO-8601, rewritten by every turn. The listing orders on it and retention prunes on it, which is what makes retention thread-aware: a thread stays whole while it is being talked to, however old the session that began it. |
+
 ### `turns`
 
 | Column | Type | Null | Description |
 | --- | --- | --- | --- |
 | `id` | `BIGINT` | no | Monotonic row id, never reused. The turn timeline's cursor. |
 | `session` | `TEXT` | no | The `sessions.session` this turn belongs to. |
+| `conversation` | `TEXT` | no | The `conversations.conversation` this turn belongs to, which with the column above is what makes the session view and the thread view two readings of one set of rows rather than two stores. Not null: every stored turn belongs to the thread that was active when it was spoken, the whole of the v1 rule, and a database this build wrote holds no turn from before threads existed. |
 | `t_ms` | `INTEGER` | no | The utterance's offset from session open, in milliseconds, aligned with its `heard` event and with the capture's audio. Structural rather than telemetry: it survives both switches. |
-| `agent` | `TEXT` | yes | The agent that answered, which a handover makes different from the session's. |
+| `agent` | `TEXT` | yes | The agent that owns this turn, which is the one it started with and therefore the one whose thread the column above names. A handover makes it different from the session's, and makes it different from the agent that finished the reply; `legs` is where a split reply's per-agent truth lives. |
 | `heard` | `TEXT` | yes | What the device's user said, as transcribed. Null under text-off. |
 | `heard_duration_s` | `FLOAT` | yes | How long the utterance lasted, in seconds. Null under metrics-off. |
 | `language` | `TEXT` | yes | The language the transcript was recognized as. Neither a measured number nor conversation text, so it survives both switches. |
@@ -231,6 +279,18 @@ carries the per-leg counts, and the per-round, per-model truth is the
 | `result` | `TEXT` | yes | What the call answered, including a refusal. Null under text-off. |
 | `is_error` | `BOOLEAN` | no | Whether the call answered as an error. |
 | `duration_ms` | `INTEGER` | yes | How long the call took, in milliseconds. Null where nothing ran, as for a refused or a successful handover, and under metrics-off. |
+
+### `conversation_milestones`
+
+| Column | Type | Null | Description |
+| --- | --- | --- | --- |
+| `id` | `BIGINT` | no | Row id, and what a later milestone names as its `parent` when it consumed this one. |
+| `conversation` | `TEXT` | no | The `conversations.conversation` this checkpoint is on. |
+| `from_turn` | `BIGINT` | no | The `turns.id` of the first turn the summarizer actually read. Recorded so that a recap bounded by its input budget cannot claim coverage of the turns it omitted: everything at or before this id is truncated rather than summarized, and hydration treats it so. |
+| `after_turn` | `BIGINT` | no | The `turns.id` of the last turn the summarizer read. Hydration reads this milestone plus the turns with a greater id, which is the whole of what the checkpoint replaces. |
+| `parent` | `BIGINT` | yes | The `conversation_milestones.id` whose text was part of this recap's input, and null when none was. The lineage is what makes erasure transitive: content that reached this row only through an earlier checkpoint is still this row's content. |
+| `created_at` | `TEXT` | no | When the checkpoint was stored, UTC ISO-8601. |
+| `text` | `TEXT` | yes | The recap, byte for byte as it was spoken. Conversation content under the uniform rule, so null under text-off, though the flow that writes one cannot run with text off. |
 
 ### `events`
 

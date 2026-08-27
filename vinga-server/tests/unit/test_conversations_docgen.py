@@ -107,17 +107,17 @@ def test_the_document_says_once_that_targeted_erasure_is_absent() -> None:
 
     An operator reading either alone has to reach the same answer, so
     both are asserted here, and the claim the privacy section is not
-    allowed to make back is asserted absent. What the session still is
-    stays sayable: it is the unit retention takes and the one the API
-    will address, which is a different sentence from being erasable
-    now."""
+    allowed to make back is asserted absent. What the two units still
+    are stays sayable: the conversation is what retention takes whole
+    and both are what the API will address, which is a different
+    sentence from either being erasable now."""
     flattened = flat(docgen.reference())
 
-    assert "Erasing one named session on demand is not enforceable in this release" in (
+    assert "Erasing either on demand is not enforceable in this release" in flattened
+    assert "Deletion on demand is not something this release has a command for" in flattened
+    assert "the units deletion is expressed in are the conversation and the session" in (
         flattened
     )
-    assert "Deletion on demand is not something this release has a command for" in flattened
-    assert "the session is the unit deletion is expressed in" in flattened
     # The wording the two sections contradicted each other through.
     assert "enforceable today" not in flattened
     # And the command is named only as something that is gone.
