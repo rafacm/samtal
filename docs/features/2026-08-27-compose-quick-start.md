@@ -378,6 +378,126 @@ scope. The review round's finding 6 landed on the same fact from the
 other side, so step 5 now says it in half a sentence rather than
 leaving a reader to discover it.
 
+## Review round
+
+External adversarial review of PR #331. Backend codex, model
+gpt-5.6-sol, 2026-08-27, reviewed commit `aaad0898`. Six findings,
+verdict "mergeable after the listed fixes". **All six premises were
+checked against the source or measured before anything was changed,
+and all six held**; none was rejected. Two of them (2 and 6) were real
+defects that this change introduced or would have shipped, and neither
+was reachable by reading the diff alone.
+
+**1 (P1). The quick start executed `.env` as shell code.** Step 2 read
+the token back with `set -a; . ./.env; set +a`, while step 1 invites
+provider credentials into that same file: a credential holding a
+backtick or `$(` would run as shell.
+*Verified:* the reviewer's claim that the CLI loads `.env` itself is
+correct. `config/cli.py:run()` calls `load_environment_file()`, which
+is `load_dotenv(find_dotenv(usecwd=True))` with the real environment
+winning. `VINGA_API_URL` is read from the environment too and, when it
+names nothing, `_address` falls back to
+`http://127.0.0.1:{server.port}/api`, which is the exact string the
+export was spelling by hand. Proven against a running stack:
+`vinga list` answered from the `.env` directory with **neither**
+variable exported, and from a directory without the file it refused by
+name.
+*Resolution:* step 2 lost both lines, `c44b70ad`.
+
+**2 (P1). The database could go healthy before it was reachable.** The
+healthcheck ran `pg_isready` with no `-h`; while the image executes
+`/docker-entrypoint-initdb.d`, it runs a temporary server on the Unix
+socket and no TCP port, so the hostless probe reports "accepting
+connections" throughout. Harmless while the file carried the database
+alone, but the new `depends_on: service_healthy` would start the
+server against a database with no listener, and the server refuses
+once with no restart policy to recover with.
+*Verified, and the window is large.* Measured against
+`postgres:17-alpine` with a deliberately slow init script
+(`SELECT pg_sleep(20)`), polling both probes every two seconds:
+
+| t | hostless | `-h 127.0.0.1` |
+| --- | --- | --- |
+| 2s | no response | no response |
+| 4s | **accepting connections** | no response |
+| 4s to 20s | accepting connections | no response |
+| 22s | accepting connections | accepting connections |
+
+Eighteen seconds in which `--wait` and `depends_on` would both have
+been satisfied by a database nothing outside the container could
+reach. The original verification passed only because the real
+`postgres-init.sql` finishes in well under one probe interval, so the
+race was never lost by accident.
+*Resolution:* `pg_isready -h 127.0.0.1`, `fc25852b`. Both invocations
+re-verified healthy on a fresh volume, with `vinga_ro` provisioned, so
+the real script still fits inside the retries' grace.
+
+**3 (P2). `.env` could override endpoints the file claims to own.**
+The `env_file` hands the container every line, and only the four
+discrete `VINGA_DB_*` fields were pinned. `VINGA_DB_URL` replaces all
+five whole (`db.connection_url`), and `VINGA_SERVER__HOST` /
+`VINGA_SERVER__PORT` invalidate the port mapping, the image's
+healthcheck and the URL a device is told.
+*Verified, including the empty-value question the brief flagged.*
+`connection_url` does `override = os.environ.get(URL_ENV)` and
+`if override:`, so an empty string is falsy and takes the same path an
+unset one takes; this is a truth test rather than the `bool_parsing`
+validation that made an empty `VINGA_SERVER__AUTH__ENABLED` unsafe.
+Measured through the real resolver: unset and empty both yield
+`postgresql+psycopg://vinga:***@127.0.0.1:5432/vinga`, a set one
+yields itself. `ServerConfig.host` and `.port` confirmed as live
+fields.
+*Resolution:* `VINGA_DB_URL: ""`, `VINGA_SERVER__HOST: 0.0.0.0`,
+`VINGA_SERVER__PORT: "8003"`, `2c0f0f02`. Proven with an `.env`
+setting all three to hostile values: both services healthy, the
+container sees the pinned values, and the server answers on 8003
+against the compose database.
+
+**4 (P2). Shutdown killed the server before its drain budget.** No
+`stop_grace_period`, so compose's default 10s sat below
+`ServerConfig.drain_s` of 20s.
+*Verified:* `drain_s: float = Field(default=20.0)`, and its own
+comment in `config/models.py` says "`docker stop` needs its own
+timeout raised above this". The server README already spells that
+`docker stop -t 30`.
+*Resolution:* `stop_grace_period: 30s`, `b68b79e1`. Verified: compose
+resolves it, the server logs "draining conversations for up to 20 s"
+on SIGTERM, and the container exits 0 rather than 137.
+
+**5 (P2). The positive CI assertion did not resolve anything.** The
+unit lane's step asserted the profile's membership with
+`config --services`, which enumerates without resolving.
+*Verified, and the reviewer is right:* with `.env` deleted,
+`docker compose --profile server config --services` exits **0** and
+prints both service names, while plain `config` exits 1. So that arm
+would have stayed green while every real invocation refused, and it
+added nothing the negative arm did not already cover.
+*Resolution:* `config --quiet` runs first, `a714c3f5`. The amended
+step was run verbatim: all four assertions pass and the `.env` is
+removed.
+
+**6 (P2). The missing-secret refusal claim was false.** The README,
+the compose comments, the changelog and this record all said an `.env`
+missing either secret makes the server refuse. It does not, for the
+configuration the quick start itself selects.
+*Verified in source and live:* `auth.build_device_auth` returns `None`
+on `if not auth.enabled` **before** reading the variable, while
+`config.api.api_token` has no such gate ("there is deliberately no
+enabled flag"). Measured: `VINGA_SERVER__AUTH__ENABLED=false` with no
+`VINGA_AUTH_SECRET` at all boots **both services healthy**; the same
+configuration with no `VINGA_API_SECRET` refuses, naming it. `ota-url`
+under auth-off yields a keyless `/x/`.
+*Resolution:* the four places now state the two secrets separately and
+the day-one reason for the device secret is given as what it is rather
+than as a refusal, `65ea0baa`. The corrected text is in **The secret
+refusal, verbatim** above, which the same commit rewrote.
+
+**One thing the round could not repair.** Commit `b28b8f72`'s message
+carries the same false generalization finding 6 corrected, and a
+commit message is not editable without rewriting the branch. The
+prose, the comments and this record are the corrected sources; that
+message is not.
+
 ## Files modified
 
 `docker-compose.yml`, `README.md`, `vinga-server/README.md`,
