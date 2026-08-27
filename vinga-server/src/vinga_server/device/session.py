@@ -97,6 +97,7 @@ from vinga_server.events.values import (
     AlsoBoundTo,
     ClientId,
     CloseReason,
+    ConversationId,
     DeviceId,
     Identifier,
     Real,
@@ -301,6 +302,14 @@ class DeviceSession:
         self._events.agent = name
 
     @property
+    def _conversation(self) -> str | None:
+        """The thread that agent is talking on, which lives beside it on
+        the events object for the same reason: this side stamps records
+        (the frame pacer's `speaking_started`) about a conversation the
+        runtime chose."""
+        return self._events.conversation
+
+    @property
     def _realtime(self) -> bool:
         """Whether the device is streaming its mic continuously, which is
         what realtime mode means. It sends `listen start` once and never
@@ -434,6 +443,7 @@ class DeviceSession:
                 lambda: SessionOpen(
                     client=ClientId(said_client) if said_client else None,
                     agent=Identifier(self._agent),
+                    conversation=ConversationId(self._conversation),
                     agents=AgentNames(tuple(self._agents)),
                     protocol=Whole(self.protocol_version),
                     # The widest payoff for one field: the JSON logs
@@ -1121,7 +1131,12 @@ class DeviceSession:
             # measurable (#22). Emitted here rather than by the pacer:
             # the attribution is to whichever agent is speaking, and who
             # that is has never been a fact about the audio clock.
-            self._events.emit(lambda: SpeakingStarted(agent=Identifier(self._agent)))
+            self._events.emit(
+                lambda: SpeakingStarted(
+                    agent=Identifier(self._agent),
+                    conversation=ConversationId(self._conversation),
+                )
+            )
 
         async def deliver(packet: bytes) -> None:
             """What one paced frame's slot is spent on: the wire, then

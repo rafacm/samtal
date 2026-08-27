@@ -50,6 +50,7 @@ from vinga_server.events.catalog import (
 )
 from vinga_server.events.values import (
     ClassName,
+    ConversationId,
     Count,
     Flag,
     FromEntry,
@@ -156,6 +157,10 @@ def carried(built: Variant) -> dict[str, object]:
 
 QUARTET = ("provider", "type", "host", "model")
 
+# The thread every builder here is told about. A uuid hex, the shape the
+# runtime mints, so a builder is exercised with what a session hands it.
+THREAD = "9f0c1d2e3a4b5c6d7e8f90a1b2c3d4e5"
+
 
 @pytest.mark.parametrize("provider", [CLOUD, IN_PROCESS, UNREGISTERED])
 def test_no_builder_names_an_entry_without_naming_its_type(provider: Stamped) -> None:
@@ -168,9 +173,9 @@ def test_no_builder_names_an_entry_without_naming_its_type(provider: Stamped) ->
     cannot say the type of.
     """
     built = [
-        assembly.llm_retried("poet", "llm", provider, 2, 0.5),
-        assembly.llm_rounded("poet", "llm", provider, 2, 3, 0.5, 140, 12, 220),
-        assembly.provider_failure("poet", "llm", provider, ConnectionRefusedError(), 0.5),
+        assembly.llm_retried("poet", THREAD, "llm", provider, 2, 0.5),
+        assembly.llm_rounded("poet", THREAD, "llm", provider, 2, 3, 0.5, 140, 12, 220),
+        assembly.provider_failure("poet", THREAD, "llm", provider, ConnectionRefusedError(), 0.5),
     ]
 
     for one in built:
@@ -181,7 +186,7 @@ def test_no_builder_names_an_entry_without_naming_its_type(provider: Stamped) ->
 def test_an_engine_in_this_process_names_its_entry_and_no_host() -> None:
     """The two halves that are absent on their own: `host` for an engine
     that reaches nothing, `model` for a type with none to name."""
-    payload = carried(assembly.llm_retried("poet", "asr", IN_PROCESS, 1, 0.5))
+    payload = carried(assembly.llm_retried("poet", THREAD, "asr", IN_PROCESS, 1, 0.5))
 
     assert payload["provider"] == "local"
     assert payload["type"] == "sensevoice"
@@ -193,8 +198,9 @@ def test_an_engine_in_this_process_names_its_entry_and_no_host() -> None:
 
 
 def test_a_retry_on_a_configured_provider_carries_its_entry() -> None:
-    assert assembly.llm_retried("poet", "llm", CLOUD, 2, 0.5) == LlmRetry(
+    assert assembly.llm_retried("poet", THREAD, "llm", CLOUD, 2, 0.5) == LlmRetry(
         agent=Identifier("poet"),
+        conversation=ConversationId(THREAD),
         round=Whole(2),
         duration_ms=Whole(500),
         stage=Identifier("llm"),
@@ -210,8 +216,9 @@ def test_a_retry_on_a_provider_with_no_identity_says_less() -> None:
     """The same variant, and the fields it cannot fill left absent:
     since the collapse this is one shape saying less rather than a
     second shape."""
-    assert assembly.llm_retried("poet", "llm", UNREGISTERED, 2, 0.5) == LlmRetry(
+    assert assembly.llm_retried("poet", THREAD, "llm", UNREGISTERED, 2, 0.5) == LlmRetry(
         agent=Identifier("poet"),
+        conversation=ConversationId(THREAD),
         round=Whole(2),
         duration_ms=Whole(500),
         stage=Identifier("llm"),
@@ -220,10 +227,10 @@ def test_a_retry_on_a_provider_with_no_identity_says_less() -> None:
 
 
 def test_a_round_carries_the_numbers_the_provider_reported() -> None:
-    assert assembly.llm_rounded(
-        "poet", "llm", CLOUD, 2, 3, 0.5, 140, 12, 220
+    assert assembly.llm_rounded("poet", THREAD, "llm", CLOUD, 2, 3, 0.5, 140, 12, 220
     ) == LlmRound(
         agent=Identifier("poet"),
+        conversation=ConversationId(THREAD),
         round=Whole(2),
         turns=Count(3),
         duration_ms=Whole(500),
@@ -244,7 +251,7 @@ def test_a_round_that_reported_nothing_carries_no_zeroes() -> None:
     token are absences rather than zeroes, which is a different fact and
     has to stay a different record."""
     payload = carried(
-        assembly.llm_rounded("poet", "llm", UNREGISTERED, 1, 1, 0.5, None, None, None)
+        assembly.llm_rounded("poet", THREAD, "llm", UNREGISTERED, 1, 1, 0.5, None, None, None)
     )
 
     assert "input_tokens" not in payload
@@ -254,9 +261,10 @@ def test_a_round_that_reported_nothing_carries_no_zeroes() -> None:
 
 def test_a_failure_names_the_entry_and_the_host_it_reached() -> None:
     assert assembly.provider_failure(
-        "poet", "llm", CLOUD, ConnectionRefusedError("no route"), 0.5
+        "poet", THREAD, "llm", CLOUD, ConnectionRefusedError("no route"), 0.5
     ) == ProviderFailed(
         agent=Identifier("poet"),
+        conversation=ConversationId(THREAD),
         error=ClassName("ConnectionRefusedError"),
         duration_ms=Whole(500),
         stage=Identifier("llm"),
@@ -276,9 +284,10 @@ def test_a_failure_with_no_entry_renders_nothing_in_both_positions() -> None:
     fragments are the optional forms now, and this is the record that
     made them so."""
     assert assembly.provider_failure(
-        "poet", "asr", UNREGISTERED, ConnectionRefusedError("no route"), 0.5
+        "poet", THREAD, "asr", UNREGISTERED, ConnectionRefusedError("no route"), 0.5
     ) == ProviderFailed(
         agent=Identifier("poet"),
+        conversation=ConversationId(THREAD),
         error=ClassName("ConnectionRefusedError"),
         duration_ms=Whole(500),
         stage=Identifier("asr"),
@@ -293,7 +302,7 @@ def test_a_wait_is_told_from_a_refusal_by_type() -> None:
     """One `isinstance` covers every timeout the five providers raise,
     the watchdog's own included (#137). The outcome is rendered and not
     carried, so the variant is what says it."""
-    timed_out = assembly.provider_failure("poet", "llm", UNREGISTERED, TimeoutError(), 0.5)
+    timed_out = assembly.provider_failure("poet", THREAD, "llm", UNREGISTERED, TimeoutError(), 0.5)
 
     assert timed_out.outcome is ProviderOutcome.TIMED_OUT  # type: ignore[attr-defined]
 
@@ -302,8 +311,9 @@ def test_a_wait_is_told_from_a_refusal_by_type() -> None:
 
 
 def test_a_builtin_call_names_the_tool_this_server_authored() -> None:
-    assert assembly.builtin_tool_called("poet", "remember", 0.25, False) == BuiltinToolCall(
+    assert assembly.builtin_tool_called("poet", THREAD, "remember", 0.25, False) == BuiltinToolCall(
         agent=Identifier("poet"),
+        conversation=ConversationId(THREAD),
         tool=Identifier("remember"),
         duration_ms=Whole(250),
         is_error=Flag(False),
@@ -314,8 +324,9 @@ def test_a_builtin_call_names_the_tool_this_server_authored() -> None:
 
 
 def test_a_server_call_names_the_entry_an_operator_wrote() -> None:
-    assert assembly.mcp_tool_called("poet", "tools", 0.25, True) == McpToolCall(
+    assert assembly.mcp_tool_called("poet", THREAD, "tools", 0.25, True) == McpToolCall(
         agent=Identifier("poet"),
+        conversation=ConversationId(THREAD),
         entry=Identifier("tools"),
         duration_ms=Whole(250),
         is_error=Flag(True),
@@ -331,8 +342,11 @@ def test_a_call_this_surface_may_not_name_names_only_its_namespace(
 ) -> None:
     """A device tool's name is the board's vocabulary and an unknown one
     is whatever the model invented, so the shape carries neither."""
-    assert assembly.unnamed_tool_called("poet", str(source), 0.25, False) == UnnamedToolCall(
+    assert assembly.unnamed_tool_called(
+        "poet", THREAD, str(source), 0.25, False
+    ) == UnnamedToolCall(
         agent=Identifier("poet"),
+        conversation=ConversationId(THREAD),
         source=source,
         duration_ms=Whole(250),
         is_error=Flag(False),

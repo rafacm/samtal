@@ -71,6 +71,7 @@ from vinga_server.events.values import (
     ClientId,
     CloseReason,
     ConfiguredPath,
+    ConversationId,
     Count,
     DeviceId,
     DeviceOrUnidentified,
@@ -1058,6 +1059,14 @@ class SessionOpen(Variant):
         )
     )
     agent: Identifier = value()
+    conversation: ConversationId = value(
+        note=(
+            "The thread the agent was talking on, stamped by the same "
+            "activation that stamped the agent. A server-minted id and "
+            "therefore metadata; what was said on the thread is the "
+            "store's."
+        )
+    )
     agents: AgentNames = value()
     protocol: Whole = value()
     revision: Identifier = value(
@@ -1133,6 +1142,14 @@ class SpeakingStarted(Variant):
     ARGS: ClassVar[tuple[str, ...]] = ("session",)
 
     agent: Identifier = value()
+    conversation: ConversationId = value(
+        note=(
+            "The thread the agent was talking on, stamped by the same "
+            "activation that stamped the agent. A server-minted id and "
+            "therefore metadata; what was said on the thread is the "
+            "store's."
+        )
+    )
 
 
 # --- runtime/pipeline.py: what happens inside a conversation ----------
@@ -1152,6 +1169,14 @@ class Heard(Variant):
     ARGS: ClassVar[tuple[str, ...]] = ("session", "duration_s")
 
     agent: Identifier = value()
+    conversation: ConversationId = value(
+        note=(
+            "The thread the agent was talking on, stamped by the same "
+            "activation that stamped the agent. A server-minted id and "
+            "therefore metadata; what was said on the thread is the "
+            "store's."
+        )
+    )
     duration_s: Real = value()
     language: LanguageTag | Absent = value(
         default=ABSENT, note="Only engines that detected carry this."
@@ -1169,6 +1194,14 @@ class Replied(Variant):
     ARGS: ClassVar[tuple[str, ...]] = ("session", "agent", "sentences")
 
     agent: Identifier = value()
+    conversation: ConversationId = value(
+        note=(
+            "The thread the agent was talking on, stamped by the same "
+            "activation that stamped the agent. A server-minted id and "
+            "therefore metadata; what was said on the thread is the "
+            "store's."
+        )
+    )
     sentences: Count = value(
         note=(
             "How many of them the user heard, so a reply a barge-in cut "
@@ -1187,6 +1220,14 @@ class AgentSaid(Variant):
     ARGS: ClassVar[tuple[str, ...]] = ("session", "agent", "sentences")
 
     agent: Identifier = value()
+    conversation: ConversationId = value(
+        note=(
+            "The thread the agent was talking on, stamped by the same "
+            "activation that stamped the agent. A server-minted id and "
+            "therefore metadata; what was said on the thread is the "
+            "store's."
+        )
+    )
     sentences: Count = value()
 
 
@@ -1201,6 +1242,15 @@ class Handover(Variant):
 
     from_agent: Identifier = value()
     to_agent: Identifier = value()
+    from_conversation: ConversationId = value(
+        note="The thread the outgoing agent was on, which the handover turn belongs to."
+    )
+    to_conversation: ConversationId = value(
+        note=(
+            "The thread the incoming agent is on: its own, minted at its first "
+            "activation in this session and continued at every later one."
+        )
+    )
 
 
 @dataclass(frozen=True)
@@ -1213,6 +1263,14 @@ class PromptAssembled(Variant):
     ARGS: ClassVar[tuple[str, ...]] = ("session", "characters", "agent")
 
     agent: Identifier = value()
+    conversation: ConversationId = value(
+        note=(
+            "The thread the agent was talking on, stamped by the same "
+            "activation that stamped the agent. A server-minted id and "
+            "therefore metadata; what was said on the thread is the "
+            "store's."
+        )
+    )
     characters: Count = value()
     sources: PromptSources = value(
         note=(
@@ -1238,6 +1296,14 @@ class LlmRetry(Variant):
     )
 
     agent: Identifier = value()
+    conversation: ConversationId = value(
+        note=(
+            "The thread the agent was talking on, stamped by the same "
+            "activation that stamped the agent. A server-minted id and "
+            "therefore metadata; what was said on the thread is the "
+            "store's."
+        )
+    )
     round: Whole = value()
     duration_ms: Whole = value()
     stage: Identifier = value()
@@ -1266,6 +1332,14 @@ class LlmRound(Variant):
     )
 
     agent: Identifier = value()
+    conversation: ConversationId = value(
+        note=(
+            "The thread the agent was talking on, stamped by the same "
+            "activation that stamped the agent. A server-minted id and "
+            "therefore metadata; what was said on the thread is the "
+            "store's."
+        )
+    )
     round: Whole = value(
         note=(
             "Counts the whole reply rather than one agent's leg, so the "
@@ -1328,6 +1402,14 @@ class ProviderFailed(Variant):
     )
 
     agent: Identifier = value()
+    conversation: ConversationId = value(
+        note=(
+            "The thread the agent was talking on, stamped by the same "
+            "activation that stamped the agent. A server-minted id and "
+            "therefore metadata; what was said on the thread is the "
+            "store's."
+        )
+    )
     error: ClassName = value(
         note="A round whose retry also stalled carries `FirstTokenTimeout`."
     )
@@ -1360,6 +1442,14 @@ class BuiltinToolCall(Variant):
     )
 
     agent: Identifier = value()
+    conversation: ConversationId = value(
+        note=(
+            "The thread the agent was talking on, stamped by the same "
+            "activation that stamped the agent. A server-minted id and "
+            "therefore metadata; what was said on the thread is the "
+            "store's."
+        )
+    )
     source: ToolSource = value(fixed=ToolSource.BUILTIN)
     tool: Identifier = value(note="The only tool names this server authors.")
     duration_ms: Whole = value()
@@ -1385,6 +1475,14 @@ class McpToolCall(Variant):
     )
 
     agent: Identifier = value()
+    conversation: ConversationId = value(
+        note=(
+            "The thread the agent was talking on, stamped by the same "
+            "activation that stamped the agent. A server-minted id and "
+            "therefore metadata; what was said on the thread is the "
+            "store's."
+        )
+    )
     source: ToolSource = value(fixed=ToolSource.MCP)
     entry: Identifier = value(
         note="The configured entry, never the far side's tool name."
@@ -1416,6 +1514,14 @@ class UnnamedToolCall(Variant):
     )
 
     agent: Identifier = value()
+    conversation: ConversationId = value(
+        note=(
+            "The thread the agent was talking on, stamped by the same "
+            "activation that stamped the agent. A server-minted id and "
+            "therefore metadata; what was said on the thread is the "
+            "store's."
+        )
+    )
     source: UnnamedToolSource = value()
     duration_ms: Whole = value()
     is_error: Flag = value()
@@ -1518,6 +1624,14 @@ class FillerSkippedForSpeech(Variant):
     ARGS: ClassVar[tuple[str, ...]] = ("session", "speech_ms")
 
     agent: Identifier = value()
+    conversation: ConversationId = value(
+        note=(
+            "The thread the agent was talking on, stamped by the same "
+            "activation that stamped the agent. A server-minted id and "
+            "therefore metadata; what was said on the thread is the "
+            "store's."
+        )
+    )
     reason: FillerSkip = value(fixed=FillerSkip.USER_SPEAKING)
     speech_ms: Whole = value()
 
@@ -1533,6 +1647,14 @@ class FillerSkippedForBargeIn(Variant):
     ARGS: ClassVar[tuple[str, ...]] = ("session",)
 
     agent: Identifier = value()
+    conversation: ConversationId = value(
+        note=(
+            "The thread the agent was talking on, stamped by the same "
+            "activation that stamped the agent. A server-minted id and "
+            "therefore metadata; what was said on the thread is the "
+            "store's."
+        )
+    )
     reason: FillerSkip = value(fixed=FillerSkip.BARGE_IN_PENDING)
 
 
@@ -1546,6 +1668,14 @@ class FillerPlayed(Variant):
     ARGS: ClassVar[tuple[str, ...]] = ("session", "delay_ms", "phrase_index")
 
     agent: Identifier = value()
+    conversation: ConversationId = value(
+        note=(
+            "The thread the agent was talking on, stamped by the same "
+            "activation that stamped the agent. A server-minted id and "
+            "therefore metadata; what was said on the thread is the "
+            "store's."
+        )
+    )
     delay_ms: Whole = value(note="Measured, from the transcription to the fire.")
     phrase_index: Count = value()
 

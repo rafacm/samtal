@@ -24,6 +24,7 @@ audio, and `OUTPUT_FRAME_BYTES` below is a frame of 24 kHz reply audio.
 """
 
 import asyncio
+import uuid
 from collections.abc import Sequence
 from typing import Any
 
@@ -57,10 +58,14 @@ class StubRuntime:
         # What the real runtime's constructor does, and what makes this
         # a stand-in rather than a different contract: the session emits
         # `session_open` right after the factory answers, and that event
-        # names the agent talking. A runtime that activated none would
-        # have the edge announce a conversation with nobody in it, which
-        # the event schema refuses (#155).
+        # names the agent talking and the thread it is talking on. A
+        # runtime that activated neither would have the edge announce a
+        # conversation with nobody in it, which the event schema refuses
+        # (#155). The thread is minted here for the same reason the real
+        # activation mints one (#190): a stub that reused the session id
+        # would make two different entities one value.
         self.events.agent = self.agents[0]
+        self.events.conversation = uuid.uuid4().hex
         self.heard = bytearray()
         self.closed = False
         self.aborts: list[str | None] = []

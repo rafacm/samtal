@@ -136,6 +136,7 @@ a bare code span would hide it.
 | `mac` | `'[0-9a-f]{2}(?::[0-9a-f]{2}){5}'` | 17 | The canonical form `normalize_mac` answers with. |
 | `reported_mac` | `'[0-9A-Fa-f]{2}(?:[:-][0-9A-Fa-f]{2}){5}'` | 17 | The Device-Id header as the firmware sent it, which the OTA sentence renders beside the normalized form the field carries. Only a header `normalize_mac` accepted ever reaches that sentence, so the looser separator and case are the whole of the difference. |
 | `session_id` | `'[0-9A-Za-z_-]{1,64}'` | 64 | A token this server minted. Production ids are `uuid4().hex`; the syntax is the bounded machine form rather than that one spelling, because the capture and store suites drive sessions of their own naming and a session id is never far-side bytes whoever chose it. |
+| `conversation_id` | `'[0-9A-Za-z_-]{1,64}'` | 64 | A token this server minted for one conversation thread. Production ids are `uuid4().hex`, the same shape and the same bounded machine form a session id takes, and for the same reason: the store suites drive threads of their own naming, and a thread id is never far-side bytes whoever chose it. |
 | `activation_code` | `'[0-9]{6}'` | 6 | A claim ticket read off a screen, not a credential. |
 | `event_name` | `'[a-z][a-z0-9_]{0,63}'` | 64 | The registry's own key, carried in the payload as `event`. |
 | `language` | `'[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{1,8})*'` | 16 | A language code as an ASR engine reports it: the bare ISO 639 code or a tagged form such as `en-US`. |
@@ -322,24 +323,26 @@ the conversation store could not prune (%s)
 
 ### `conversations_pruned`
 
-Retention deleted sessions older than the window. At INFO: a policy doing its
-job.
+Retention deleted the conversations that had aged out of the window, and the
+session records nothing points at any more. At INFO: a policy doing its job.
 
 #### Variant 1: `vinga_server.conversations.store` at INFO
 
 ```text
-conversations: pruned %d session(s) older than %d days
+conversations: pruned %d conversation(s) and %d session record(s) older than %d days
 ```
 
 | # | Argument | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- |
-| 1 | `sessions` (`COUNT`) | no |  |  |
-| 2 | `days` (`COUNT`) | no |  |  |
+| 1 | `conversations` (`COUNT`) | no |  |  |
+| 2 | `sessions` (`COUNT`) | no |  |  |
+| 3 | `days` (`COUNT`) | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `sessions` | `COUNT` | yes | no |  | A count, not a list. |
+| `conversations` | `COUNT` | yes | no |  | Threads taken whole, with their turns. The unit retention prunes by, so this is the count that says how much dialogue left. |
+| `sessions` | `COUNT` | yes | no |  | Session records taken, which is only the aged ones no surviving turn still names. A count, not a list. |
 
 ### `session_rejected`
 
@@ -446,6 +449,7 @@ session %s open: device %s (client %s) agent %s%s, protocol v%d, %d Hz %d ms fra
 | `device` | `ID` | yes | yes | the `mac` syntax |  |
 | `client` | `DESCRIPTOR` | yes | yes | at most 64 characters, every one printable | The device UUID, bounded for the event only: the capture manifest and the conversation store keep the header as it arrived. |
 | `agent` | `IDENTIFIER` | yes | no |  |  |
+| `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
 | `agents` | `IDENTIFIER_LIST` | yes | no |  |  |
 | `protocol` | `INT` | yes | no |  |  |
 | `revision` | `IDENTIFIER` | yes | no |  | Which build this server is, so every session from here on is attributable to one. |
@@ -538,6 +542,7 @@ session %s: speaking started
 | `session` | `ID` | yes | no | the `session_id` syntax |  |
 | `device` | `ID` | yes | yes | the `mac` syntax |  |
 | `agent` | `IDENTIFIER` | yes | no |  |  |
+| `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
 
 ### `heard`
 
@@ -561,6 +566,7 @@ session %s: heard %.2f s of speech
 | `session` | `ID` | yes | no | the `session_id` syntax |  |
 | `device` | `ID` | yes | yes | the `mac` syntax |  |
 | `agent` | `IDENTIFIER` | yes | no |  |  |
+| `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
 | `duration_s` | `FLOAT` | yes | no |  |  |
 | `language` | `ID` | no | no | the `language` syntax | Only engines that detected carry this. |
 | `language_confidence` | `FLOAT` | no | no |  |  |
@@ -587,6 +593,7 @@ session %s: %s replied in %d sentences
 | `session` | `ID` | yes | no | the `session_id` syntax |  |
 | `device` | `ID` | yes | yes | the `mac` syntax |  |
 | `agent` | `IDENTIFIER` | yes | no |  |  |
+| `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
 | `sentences` | `COUNT` | yes | no |  | How many of them the user heard, so a reply a barge-in cut short reports what went out. |
 
 ### `agent_said`
@@ -611,6 +618,7 @@ session %s: %s said %d sentences
 | `session` | `ID` | yes | no | the `session_id` syntax |  |
 | `device` | `ID` | yes | yes | the `mac` syntax |  |
 | `agent` | `IDENTIFIER` | yes | no |  |  |
+| `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
 | `sentences` | `COUNT` | yes | no |  |  |
 
 ### `handover`
@@ -636,6 +644,8 @@ session %s: handed over from agent %s to %s
 | `device` | `ID` | yes | yes | the `mac` syntax |  |
 | `from_agent` | `IDENTIFIER` | yes | no |  |  |
 | `to_agent` | `IDENTIFIER` | yes | no |  |  |
+| `from_conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the outgoing agent was on, which the handover turn belongs to. |
+| `to_conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the incoming agent is on: its own, minted at its first activation in this session and continued at every later one. |
 
 ### `prompt_assembled`
 
@@ -661,6 +671,7 @@ session %s: assembled %d characters of prompt for %s
 | `session` | `ID` | yes | no | the `session_id` syntax |  |
 | `device` | `ID` | yes | yes | the `mac` syntax |  |
 | `agent` | `IDENTIFIER` | yes | no |  |  |
+| `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
 | `characters` | `COUNT` | yes | no |  |  |
 | `sources` | `SOURCES` | yes | no | keyed by the prompt provenance grammar, with counts for values | Each block's size by provenance: how much of the prompt came from where, never any of the prompt itself. |
 
@@ -691,6 +702,7 @@ session %s: no first token after %.1f s, retrying round %d
 | `session` | `ID` | yes | no | the `session_id` syntax |  |
 | `device` | `ID` | yes | yes | the `mac` syntax |  |
 | `agent` | `IDENTIFIER` | yes | no |  |  |
+| `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
 | `round` | `INT` | yes | no |  |  |
 | `duration_ms` | `INT` | yes | no |  |  |
 | `stage` | `IDENTIFIER` | yes | no |  |  |
@@ -727,6 +739,7 @@ session %s: %s round %d took %.2f s over %d turns
 | `session` | `ID` | yes | no | the `session_id` syntax |  |
 | `device` | `ID` | yes | yes | the `mac` syntax |  |
 | `agent` | `IDENTIFIER` | yes | no |  |  |
+| `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
 | `round` | `INT` | yes | no |  | Counts the whole reply rather than one agent's leg, so the generation after a handover is a round of its own. |
 | `turns` | `COUNT` | yes | no |  | The cheap proxy for payload size. |
 | `duration_ms` | `INT` | yes | no |  |  |
@@ -772,6 +785,7 @@ session %s: %s provider%s %s after %.2f s%s: %s
 | `session` | `ID` | yes | no | the `session_id` syntax |  |
 | `device` | `ID` | yes | yes | the `mac` syntax |  |
 | `agent` | `IDENTIFIER` | yes | no |  |  |
+| `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
 | `error` | `CLASS_NAME` | yes | no |  | A round whose retry also stalled carries `FirstTokenTimeout`. |
 | `duration_ms` | `INT` | yes | no |  |  |
 | `stage` | `IDENTIFIER` | yes | no |  |  |
@@ -805,6 +819,7 @@ session %s: %s tool%s took %.2f s%s
 | `session` | `ID` | yes | no | the `session_id` syntax |  |
 | `device` | `ID` | yes | yes | the `mac` syntax |  |
 | `agent` | `IDENTIFIER` | yes | no |  |  |
+| `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
 | `source` | `TOKEN` | yes | no | one of: `builtin` |  |
 | `tool` | `IDENTIFIER` | yes | no |  | The only tool names this server authors. |
 | `duration_ms` | `INT` | yes | no |  |  |
@@ -830,6 +845,7 @@ session %s: %s tool%s took %.2f s%s
 | `session` | `ID` | yes | no | the `session_id` syntax |  |
 | `device` | `ID` | yes | yes | the `mac` syntax |  |
 | `agent` | `IDENTIFIER` | yes | no |  |  |
+| `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
 | `source` | `TOKEN` | yes | no | one of: `mcp` |  |
 | `entry` | `IDENTIFIER` | yes | no |  | The configured entry, never the far side's tool name. |
 | `duration_ms` | `INT` | yes | no |  |  |
@@ -858,6 +874,7 @@ session %s: %s tool%s took %.2f s%s
 | `session` | `ID` | yes | no | the `session_id` syntax |  |
 | `device` | `ID` | yes | yes | the `mac` syntax |  |
 | `agent` | `IDENTIFIER` | yes | no |  |  |
+| `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
 | `source` | `TOKEN` | yes | no | one of: `device`, `unknown` |  |
 | `duration_ms` | `INT` | yes | no |  |  |
 | `is_error` | `BOOL` | yes | no |  |  |
@@ -986,6 +1003,7 @@ session %s: filler skipped, the user is speaking (%d ms heard)
 | `session` | `ID` | yes | no | the `session_id` syntax |  |
 | `device` | `ID` | yes | yes | the `mac` syntax |  |
 | `agent` | `IDENTIFIER` | yes | no |  |  |
+| `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
 | `reason` | `TOKEN` | yes | no | one of: `user_speaking` |  |
 | `speech_ms` | `INT` | yes | no |  |  |
 
@@ -1005,6 +1023,7 @@ session %s: filler skipped, a barge-in is being confirmed
 | `session` | `ID` | yes | no | the `session_id` syntax |  |
 | `device` | `ID` | yes | yes | the `mac` syntax |  |
 | `agent` | `IDENTIFIER` | yes | no |  |  |
+| `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
 | `reason` | `TOKEN` | yes | no | one of: `barge_in_pending` |  |
 
 ### `filler_played`
@@ -1030,6 +1049,7 @@ session %s: no reply audio after %d ms, playing filler %d
 | `session` | `ID` | yes | no | the `session_id` syntax |  |
 | `device` | `ID` | yes | yes | the `mac` syntax |  |
 | `agent` | `IDENTIFIER` | yes | no |  |  |
+| `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the agent was talking on, stamped by the same activation that stamped the agent. A server-minted id and therefore metadata; what was said on the thread is the store's. |
 | `delay_ms` | `INT` | yes | no |  | Measured, from the transcription to the fire. |
 | `phrase_index` | `COUNT` | yes | no |  |  |
 

@@ -68,6 +68,7 @@ from vinga_server.events.catalog import (
 )
 from vinga_server.events.values import (
     ABSENT,
+    ConversationId,
     Count,
     Fragment,
     Identifier,
@@ -176,7 +177,11 @@ def _tool_fragment(classified: ToolInvocation) -> Fragment:
 
 
 def _tool_called(
-    classified: ToolInvocation, agent: str, duration_s: float, is_error: bool
+    classified: ToolInvocation,
+    agent: str,
+    conversation: str,
+    duration_s: float,
+    is_error: bool,
 ) -> Variant:
     """Which of the three `tool_call` shapes describes this call.
 
@@ -189,10 +194,16 @@ def _tool_called(
     neighbour's.
     """
     if classified.source == BUILTIN:
-        return assembly.builtin_tool_called(agent, classified.name, duration_s, is_error)
+        return assembly.builtin_tool_called(
+            agent, conversation, classified.name, duration_s, is_error
+        )
     if classified.source == MCP and classified.entry is not None:
-        return assembly.mcp_tool_called(agent, classified.entry, duration_s, is_error)
-    return assembly.unnamed_tool_called(agent, classified.source, duration_s, is_error)
+        return assembly.mcp_tool_called(
+            agent, conversation, classified.entry, duration_s, is_error
+        )
+    return assembly.unnamed_tool_called(
+        agent, conversation, classified.source, duration_s, is_error
+    )
 
 
 class FirstTokenTimeout(TimeoutError):
@@ -619,6 +630,7 @@ class PipelineRuntime:
                 self._events.emit(
                     lambda: assembly.llm_retried(
                         self._agent,
+                        self._conversation,
                         "llm",
                         provider,
                         self._llm_round,
@@ -675,6 +687,7 @@ class PipelineRuntime:
         self._events.emit(
             lambda: assembly.llm_rounded(
                 self._agent,
+                self._conversation,
                 "llm",
                 provider,
                 self._llm_round,
@@ -721,7 +734,9 @@ class PipelineRuntime:
         the entry, its type, and the host.
         """
         self._events.emit(
-            lambda: assembly.provider_failure(self._agent, stage, provider, exc, elapsed)
+            lambda: assembly.provider_failure(
+                self._agent, self._conversation, stage, provider, exc, elapsed
+            )
         )
 
     def _activate_agent(self, name: str) -> None:
@@ -800,6 +815,7 @@ class PipelineRuntime:
         self._events.emit(
             lambda: PromptAssembled(
                 agent=Identifier(agent),
+                conversation=ConversationId(self._conversation),
                 characters=Count(half.characters),
                 sources=PromptSources(half.sizes()),
             )
@@ -862,6 +878,7 @@ class PipelineRuntime:
                 heard_at = self._events.emit(
                     lambda: Heard(
                         agent=Identifier(self._agent),
+                        conversation=ConversationId(self._conversation),
                         duration_s=Real(heard_s),
                         language=(
                             ABSENT
@@ -943,7 +960,9 @@ class PipelineRuntime:
                 # inferred.
                 self._events.emit(
                     lambda: Replied(
-                        agent=Identifier(self._agent), sentences=Count(len(spoken))
+                        agent=Identifier(self._agent),
+                        conversation=ConversationId(self._conversation),
+                        sentences=Count(len(spoken)),
                     )
                 )
             # Beside `replied` and for the same reason: this is where a
@@ -1012,11 +1031,16 @@ class PipelineRuntime:
                 # which are the store's (#120).
                 self._events.emit(
                     lambda: AgentSaid(
-                        agent=Identifier(self._agent), sentences=Count(len(spoken))
+                        agent=Identifier(self._agent),
+                        conversation=ConversationId(self._conversation),
+                        sentences=Count(len(spoken)),
                     )
                 )
                 spoken.clear()
             previous = self._agent
+            # Held before the activation replaces it, so the event can
+            # say which thread was left as well as which one was joined.
+            leaving = self._conversation
             # Closed whether or not this agent spoke: a leg that only
             # asked for the handover still spent tokens, and the leg is
             # the only place they can be attributed to the agent that
@@ -1030,6 +1054,8 @@ class PipelineRuntime:
                 lambda: Handover(
                     from_agent=Identifier(previous),  # noqa: B023
                     to_agent=Identifier(target),  # noqa: B023
+                    from_conversation=ConversationId(leaving),  # noqa: B023
+                    to_conversation=ConversationId(self._conversation),
                 )
             )
             greeting = Turn("user", SWITCH_GREETING)
@@ -1277,7 +1303,9 @@ class PipelineRuntime:
             content, is_error = f'the tool "{call.name}" failed: {exc}', True
         elapsed = loop.time() - started
         self._events.emit(
-            lambda: _tool_called(classified, self._agent, elapsed, is_error)
+            lambda: _tool_called(
+                classified, self._agent, self._conversation, elapsed, is_error
+            )
         )
         self._turn.executed(slot, content, is_error, round(elapsed * 1000))
         return ToolResult(tool_call_id=call.id, content=content, is_error=is_error)

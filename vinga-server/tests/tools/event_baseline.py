@@ -256,10 +256,10 @@ def a_manifest(started_at: dt.datetime) -> dict[str, Any]:
     }
 
 
-def a_turn() -> TurnRecord:
+def a_turn(conversation: str = "9f0c1d2e3a4b5c6d7e8f90a1b2c3d4e5") -> TurnRecord:
     return TurnRecord(
         at=101.0,
-        conversation="c0ffee",
+        conversation=conversation,
         agent="sam",
         heard="hello there",
         reply="Hi.",
@@ -332,15 +332,28 @@ def drive_prune_failed(directory: Path) -> None:
         store.stop()
 
 
-def drive_pruned(directory: Path) -> None:
-    """Retention that did: two sessions seeded old enough to go."""
-    seeding = ConversationStore(DatabaseConfig(), retention_days=0, now=lambda: NOW)
+def _seed_old_conversation(name: str, then: dt.datetime) -> None:
+    """One whole session recorded as it would have been at `then`: the
+    session row, its thread and its events all that old."""
+    seeding = ConversationStore(DatabaseConfig(), retention_days=0, now=lambda: then)
     seeding.start()
-    for name, age in (("old-one", 200), ("old-two", 300)):
-        seeding.open_session(name, 100.0, a_manifest(NOW - dt.timedelta(days=age)))
-        seeding.record_turn(name, a_turn())
-        seeding.close_session(name, duration_s=5.0, reason="client")
+    seeding.open_session(name, 100.0, a_manifest(then))
+    seeding.record_turn(name, a_turn(f"{name.replace('-', '0'):0<32}"))
+    seeding.close_session(name, duration_s=5.0, reason="client")
     seeding.stop()
+
+
+def drive_pruned(directory: Path) -> None:
+    """Retention that did: two conversations seeded old enough to go.
+
+    Each seeded through a store whose clock is that old, because what
+    retention measures is a thread's last activity: a session stamped
+    two hundred days ago whose turns landed now holds a live
+    conversation, which is the case the ruleset protects rather than
+    the one this driver needs.
+    """
+    for name, age in (("old-one", 200), ("old-two", 300)):
+        _seed_old_conversation(name, NOW - dt.timedelta(days=age))
 
     pruning = ConversationStore(DatabaseConfig(), retention_days=90, now=lambda: NOW)
     try:

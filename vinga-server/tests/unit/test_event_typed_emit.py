@@ -170,12 +170,19 @@ def test_a_typed_emission_reaches_the_log_on_its_own_channel(
     """A converted path, all the way to the record a deployment keeps.
     The log tap is a consumer like any other, and it is the last one."""
     with caplog.at_level(logging.INFO):
-        emitter.emit(lambda: ConversationsPruned(sessions=Count(2), days=Count(90)))
+        emitter.emit(
+            lambda: ConversationsPruned(
+                conversations=Count(1), sessions=Count(2), days=Count(90)
+            )
+        )
 
     (record,) = [one for one in caplog.records if one.name == CHANNEL]
     assert record.levelno == logging.INFO
-    assert record.msg == "conversations: pruned %d session(s) older than %d days"
-    assert record.args == (2, 90)
+    assert record.msg == (
+        "conversations: pruned %d conversation(s) and %d session record(s) older "
+        "than %d days"
+    )
+    assert record.args == (1, 2, 90)
     assert record.event == "conversations_pruned"  # type: ignore[attr-defined]
     assert record.sessions == 2  # type: ignore[attr-defined]
 
@@ -437,7 +444,11 @@ def test_a_broken_log_does_not_cost_the_reply_a_refusal_was_reported_on(
     cost the emitter nothing."""
     emitter.emit(a_failing_thunk)
 
-    emitter.emit(lambda: ConversationsPruned(sessions=Count(2), days=Count(90)))
+    emitter.emit(
+            lambda: ConversationsPruned(
+                conversations=Count(1), sessions=Count(2), days=Count(90)
+            )
+        )
 
     assert only(tap).payload["event"] == "conversations_pruned"
 
@@ -453,7 +464,11 @@ def test_a_broken_tap_reported_on_a_broken_log_still_costs_nothing(
     broken = BrokenTap()
     attach_server_tap(broken)
     try:
-        emitter.emit(lambda: ConversationsPruned(sessions=Count(2), days=Count(90)))
+        emitter.emit(
+            lambda: ConversationsPruned(
+                conversations=Count(1), sessions=Count(2), days=Count(90)
+            )
+        )
     finally:
         detach_server_tap(broken)
 
