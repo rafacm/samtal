@@ -134,7 +134,24 @@ thread schema at once: the `conversations` table, `turns.conversation`
 (not null: after a reset no pre-thread turn can exist, so the column
 admits no legacy state), the `conversation_milestones` table (dormant
 until milestone 5, and its reference documentation says so), and the
-indexes named below. This is the priced exit the standing promise
+indexes the new query paths need, named here so the baseline carries
+them from its first run:
+
+- `conversations.conversation` unique, the join key, as
+  `sessions.session` is;
+- `ix_conversations_agent_activity` on
+  `(agent, last_active_at, id)`: the agent-filtered listing and
+  discovery, in the keyset order;
+- `ix_conversations_last_active` on `(last_active_at, id)`: the
+  unfiltered listing and retention's inactivity scan;
+- `ix_turns_conversation` on `(conversation, id)`: the dialogue
+  read and hydration's oldest-first walk (the existing
+  `(session, id)` index stays for the session timeline);
+- `ix_conversation_milestones_conversation` on
+  `(conversation, id)`: the latest-milestone lookup.
+
+The milestone-1 store suite asserts the baseline created them, the
+way the current suite pins its own DDL facts. This is the priced exit the standing promise
 grants
 ([product-promises](../architecture/product-promises.md#a-beta-database-is-never-left-behind)),
 exercised the way #243 and #283 exercised it: the same milestone
@@ -1346,3 +1363,7 @@ resolution once the amendment addressing it lands.
     lookup name no indexes while existing paths are explicitly
     indexed. Name the concrete indexes in the migration and cover
     them.
+    *Resolution*: adopted. The baseline section now names the five
+    indexes (unique join key, agent-activity listing, activity scan,
+    conversation-turn walk, latest milestone) and the store-suite
+    assertion that the baseline created them.
