@@ -1101,6 +1101,14 @@ Alembic's, made by the server on its first boot. `docker compose down
 -v` throws the whole thing away, and the next `up` rebuilds it from
 nothing.
 
+That file also carries the server itself, behind a `server` compose
+profile, which is what the project README's quick start starts. The
+profile is what keeps the two apart: the command above selects no
+profile and so starts the database alone, exactly as it always has,
+and `docker compose --profile server up -d --wait` starts the
+published image beside it. A checkout that runs the server from source
+wants the first; there is nothing to opt out of.
+
 The test lanes use that same instance, and refuse to run rather than
 skipping when they cannot reach it, so a suite that has stopped
 exercising storage cannot read green. They create databases of their
@@ -2367,6 +2375,15 @@ docker build --build-arg VINGA_REVISION=$(git rev-parse --short HEAD) -t vinga-s
 ```
 
 ## Running in a container
+
+This is the single container and what it needs, which is what a
+deployment composes into whatever it already runs. For a trial, the
+`docker-compose.yml` at the repository root says all of it once, for
+the server and its database together, and the project README's
+[Getting Started](../README.md#getting-started) fetches and runs it in
+two commands; that file is the trial and development story rather than
+the deployment story, and this section is the one home for what a
+deployment has to decide.
 
 The default image carries both local engines, so one seeded database
 serves a conversation. The database itself is the deployment's to

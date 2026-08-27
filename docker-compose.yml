@@ -157,6 +157,15 @@ services:
       # network, so it stays where it is.
       - "8003:8003"
 
+    extra_hosts:
+      # So a provider running on this machine rather than in a
+      # container, an Ollama being the usual one, is reachable at the
+      # same name whatever the platform. Docker Desktop resolves it
+      # already; on Linux nothing does until something asks for it, and
+      # a preset that names it would otherwise work on one machine and
+      # not the next.
+      - "host.docker.internal:host-gateway"
+
     volumes:
       # What every engine caches into: the whisper models and Piper
       # voices a first conversation downloads, which is why this is a

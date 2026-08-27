@@ -121,8 +121,9 @@ records link it.
   `conversations`, and the read-only role the conversation record is
   read through, and its header says what the executor needs and why
   the file is safe to run again after a reset. The `docker-compose.yml`
-  at the repository root runs the same file against the development
-  database.
+  at the repository root runs the same file against the database it
+  starts, whether that is the development one alone or the pair a trial
+  runs.
 
 ## Reference
 
