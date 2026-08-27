@@ -867,14 +867,29 @@ class PruneFailed(Variant):
 
 @dataclass(frozen=True)
 class ConversationsPruned(Variant):
-    """Retention deleted the sessions older than the window."""
+    """Retention deleted what had aged out of the window."""
 
     CHANNEL: ClassVar[str] = CONVERSATIONS_CHANNEL
     LEVEL: ClassVar[int] = logging.INFO
-    TEMPLATE: ClassVar[str] = "conversations: pruned %d session(s) older than %d days"
-    ARGS: ClassVar[tuple[str, ...]] = ("sessions", "days")
+    TEMPLATE: ClassVar[str] = (
+        "conversations: pruned %d conversation(s) and %d session record(s) older "
+        "than %d days"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("conversations", "sessions", "days")
 
-    sessions: Count = value(note="A count, not a list.")
+    conversations: Count = value(
+        note=(
+            "Threads taken whole, with their turns. The unit retention "
+            "prunes by, so this is the count that says how much dialogue "
+            "left."
+        )
+    )
+    sessions: Count = value(
+        note=(
+            "Session records taken, which is only the aged ones no "
+            "surviving turn still names. A count, not a list."
+        )
+    )
     # Said and not stored: the window is the configuration's, and a
     # record that repeated it on every prune would be storing a setting.
     days: Count = value(carried=False)
@@ -908,7 +923,11 @@ CONVERSATIONS_FAILED = declare(
 
 CONVERSATIONS_PRUNED = declare(
     "conversations_pruned",
-    note="Retention deleted sessions older than the window. At INFO: a policy doing its job.",
+    note=(
+        "Retention deleted the conversations that had aged out of the "
+        "window, and the session records nothing points at any more. At "
+        "INFO: a policy doing its job."
+    ),
     variants=(ConversationsPruned,),
 )
 

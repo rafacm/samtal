@@ -87,8 +87,18 @@ def a_turn(heard: str = "hello there", conversation: str = CONVERSATION) -> Turn
 def stores():
     built: list[ConversationStore] = []
 
-    def _build(**options: Any) -> ConversationStore:
-        store = ConversationStore(DatabaseConfig(), now=lambda: NOW, **options)
+    def _build(at: dt.datetime = NOW, **options: Any) -> ConversationStore:
+        """One store, on a clock the test chose.
+
+        `at` is what this store believes the time is, which decides two
+        things at once: the cutoff a prune measures from, and the
+        `created_at` and `last_active_at` a turn stamps on its thread.
+        Both matter now that retention's unit is the thread, so a suite
+        that wants an old conversation writes it through a store whose
+        clock is old, which is the only difference between a synthetic
+        old thread and a real one.
+        """
+        store = ConversationStore(DatabaseConfig(), now=lambda: at, **options)
         built.append(store)
         return store
 
@@ -102,8 +112,22 @@ def record(store: ConversationStore, session: str, started_at: dt.datetime, **fa
     lose."""
     store.open_session(session, 100.0, manifest(started_at, **facts))
     store.record_event(session, "heard", logging.INFO, {"duration_s": 1.0}, 101.0)
-    store.record_turn(session, a_turn())
+    store.record_turn(session, a_turn(conversation=thread_for(session)))
     store.close_session(session, duration_s=5.0, reason="client")
+
+
+def aged(stores: Any, session: str, at: dt.datetime, **facts: Any) -> None:
+    """One whole session recorded as it would have been at `at`: its
+    row, its thread and its events all that old, which is what a real
+    session of that age left behind.
+
+    A store of its own per session, because the clock is a store's and
+    a suite that wants two ages wants two clocks.
+    """
+    store = stores(at=at, retention_days=0)
+    store.start()
+    record(store, session, at, **facts)
+    store.stop()
 
 
 def _until(ready, complaint: str) -> None:
@@ -131,7 +155,13 @@ def counts() -> dict[str, int]:
                 table: connection.execute(
                     text(f"select count(*) from conversations.{table}")
                 ).scalar_one()
-                for table in ("sessions", "turns", "tool_invocations", "events")
+                for table in (
+                    "sessions",
+                    "conversations",
+                    "turns",
+                    "tool_invocations",
+                    "events",
+                )
             }
     finally:
         engine.dispose()
@@ -158,20 +188,25 @@ def test_retention_deletes_at_the_cutoff_and_not_a_day_inside_it(
     stores,
 ) -> None:
     """The boundary is the whole of the policy: `retention_days` days
-    before the store's own clock, applied to `started_at`, which is the
-    column that survives both storage switches for exactly this
-    reason."""
-    store = stores(retention_days=90)
-    store.start()
-    record(store, "just-inside", NOW - dt.timedelta(days=89, hours=23))
-    record(store, "just-outside", NOW - dt.timedelta(days=90, hours=1))
-    store.stop()
+    before the store's own clock.
 
-    # Pruning runs at each close, so the second session's close is what
-    # took the first one's older neighbour.
+    What it is applied to is the thread's `last_active_at`, which is
+    the change: a conversation is what retention takes, whole, and the
+    session record follows it out once no turn names it any more. In a
+    deployment that never resumes anything the two ages coincide, which
+    is what these two sessions are.
+    """
+    aged(stores, "just-inside", NOW - dt.timedelta(days=89, hours=23))
+    aged(stores, "just-outside", NOW - dt.timedelta(days=90, hours=1))
+
+    pruning = stores(retention_days=90)
+    pruning.start()
+    pruning.stop()
+
     assert stored_sessions() == ["just-inside"]
     assert counts() == {
         "sessions": 1,
+        "conversations": 1,
         "turns": 1,
         "tool_invocations": 1,
         "events": 1,
@@ -196,10 +231,7 @@ def test_retention_runs_at_start_against_what_a_previous_run_left(
 ) -> None:
     """A deployment that recorded and was then restarted must not have
     to hold a conversation before its old sessions go."""
-    first = stores(retention_days=0)
-    first.start()
-    record(first, "ancient", NOW - dt.timedelta(days=400))
-    first.stop()
+    aged(stores, "ancient", NOW - dt.timedelta(days=400))
     assert stored_sessions() == ["ancient"]
 
     second = stores(retention_days=90)
@@ -209,16 +241,14 @@ def test_retention_runs_at_start_against_what_a_previous_run_left(
     assert stored_sessions() == []
 
 
-def test_pruning_says_how_many_sessions_it_took(
+def test_pruning_says_how_many_threads_and_session_records_it_took(
     stores, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """A count and nothing else: which sessions were pruned is a
-    question for the store, not for the log."""
-    seeding = stores(retention_days=0)
-    seeding.start()
-    record(seeding, "old-one", NOW - dt.timedelta(days=200))
-    record(seeding, "old-two", NOW - dt.timedelta(days=300))
-    seeding.stop()
+    """Two counts and nothing else: how much dialogue left, and how many
+    session records went with it. Which ones is a question for the
+    store, not for the log."""
+    aged(stores, "old-one", NOW - dt.timedelta(days=200))
+    aged(stores, "old-two", NOW - dt.timedelta(days=300))
 
     with caplog.at_level(logging.INFO):
         pruning = stores(retention_days=90)
@@ -231,8 +261,84 @@ def test_pruning_says_how_many_sessions_it_took(
         if getattr(record_, "event", "") == "conversations_pruned"
     ]
     assert pruned.levelno == logging.INFO
-    assert pruned.sessions == 2
+    assert (pruned.conversations, pruned.sessions) == (2, 2)
     assert "old-one" not in pruned.getMessage()
+
+
+def test_a_session_older_than_the_cutoff_keeps_the_spine_a_live_thread_needs(
+    stores,
+) -> None:
+    """The case the ruleset exists for.
+
+    A session begun before the cutoff, holding a thread that was spoken
+    to after it. Under session-age pruning its turns would go, taking
+    dialogue out of a conversation somebody is still having. So the
+    thread is kept whole, the session keeps the minimal row those turns
+    cross-reference, and only the part of it that is telemetry, its
+    events, is pruned on the session's own age.
+    """
+    thread = "1a2b3c4d5e6f70819a2b3c4d5e6f7081"
+    began = NOW - dt.timedelta(days=100)
+    opening = stores(at=began, retention_days=0)
+    opening.start()
+    opening.open_session("long-runner", 100.0, manifest(began))
+    opening.record_event("long-runner", "heard", logging.INFO, {"duration_s": 1.0}, 101.0)
+    opening.record_turn("long-runner", a_turn(conversation=thread))
+    opening.stop()
+
+    # The same session, still talking a day ago, which is what makes its
+    # thread live and its own row old at the same time.
+    lately = stores(at=NOW - dt.timedelta(days=1), retention_days=0)
+    lately.start()
+    lately.open_session("long-runner", 100.0, manifest(began))
+    lately.record_turn("long-runner", a_turn(conversation=thread))
+    lately.close_session("long-runner", duration_s=5.0, reason="client")
+    lately.stop()
+
+    pruning = stores(retention_days=90)
+    pruning.start()
+    pruning.stop()
+
+    assert stored_sessions() == ["long-runner"]
+    assert counts() == {
+        "sessions": 1,
+        "conversations": 1,
+        "turns": 2,
+        "tool_invocations": 2,
+        # The decision track of a session this old is gone, whether or
+        # not its row survived: it is telemetry scoped to the session
+        # rather than part of the thread.
+        "events": 0,
+    }
+
+
+def test_a_session_record_past_the_cutoff_goes_once_no_turn_names_it(
+    stores,
+) -> None:
+    """The other half of rule 3. A session that recorded no turn, or
+    whose every turn left with its thread, is a spine holding nothing
+    up, and it is pruned on its own age like any other record."""
+    began = NOW - dt.timedelta(days=200)
+    store = stores(at=began, retention_days=0)
+    store.start()
+    store.open_session("silent", 100.0, manifest(began))
+    store.record_event("silent", "heard", logging.INFO, {"duration_s": 1.0}, 101.0)
+    store.close_session("silent", duration_s=2.0, reason="idle")
+    store.stop()
+    assert stored_sessions() == ["silent"]
+
+    pruning = stores(retention_days=90)
+    pruning.start()
+    pruning.stop()
+
+    assert stored_sessions() == []
+    assert counts() == {
+        "sessions": 0,
+        "conversations": 0,
+        "turns": 0,
+        "tool_invocations": 0,
+        "events": 0,
+    }
 
 
 def test_a_snapshot_open_across_a_prune_keeps_seeing_what_the_prune_took() -> None:
@@ -246,9 +352,10 @@ def test_a_snapshot_open_across_a_prune_keeps_seeing_what_the_prune_took() -> No
 
     Held across the pruning store's start, which is when it prunes.
     """
-    seeding = ConversationStore(DatabaseConfig(), now=lambda: NOW, retention_days=0)
+    long_ago = NOW - dt.timedelta(days=400)
+    seeding = ConversationStore(DatabaseConfig(), now=lambda: long_ago, retention_days=0)
     seeding.start()
-    seeding.open_session("old", 100.0, manifest(NOW - dt.timedelta(days=400)))
+    seeding.open_session("old", 100.0, manifest(long_ago))
     seeding.record_turn("old", a_turn(heard=f"my password is {SENTINEL}"))
     seeding.close_session("old", duration_s=3.0, reason="client")
     seeding.stop()
@@ -258,9 +365,7 @@ def test_a_snapshot_open_across_a_prune_keeps_seeing_what_the_prune_took() -> No
     try:
         # The snapshot is taken by the first statement, so it has to
         # happen before the prune rather than after it.
-        assert held.execute(
-            text("select count(*) from conversations.sessions")
-        ).scalar() == 1
+        assert held.execute(text("select count(*) from conversations.sessions")).scalar() == 1
 
         pruning = ConversationStore(DatabaseConfig(), now=lambda: NOW, retention_days=90)
         pruning.start()
@@ -270,12 +375,11 @@ def test_a_snapshot_open_across_a_prune_keeps_seeing_what_the_prune_took() -> No
             # The transaction that began before the delete committed
             # still sees the row, sentinel and all: this is the
             # weakening the docs state rather than paper over.
-            assert held.execute(
-                text("select count(*) from conversations.sessions")
-            ).scalar() == 1
-            assert held.execute(
-                text("select heard from conversations.turns")
-            ).scalar() == f"my password is {SENTINEL}"
+            assert held.execute(text("select count(*) from conversations.sessions")).scalar() == 1
+            assert (
+                held.execute(text("select heard from conversations.turns")).scalar()
+                == f"my password is {SENTINEL}"
+            )
         finally:
             pruning.stop()
     finally:
@@ -288,14 +392,16 @@ def test_a_snapshot_open_across_a_prune_keeps_seeing_what_the_prune_took() -> No
     fresh = read_engine(DatabaseConfig())
     try:
         with fresh.connect() as connection:
-            assert connection.execute(
-                text("select count(*) from conversations.sessions")
-            ).scalar() == 0
-            assert connection.execute(
-                text(
-                    "select count(*) from conversations.turns where heard like :like"
-                ),
-                {"like": f"%{SENTINEL}%"},
-            ).scalar() == 0
+            assert (
+                connection.execute(text("select count(*) from conversations.sessions")).scalar()
+                == 0
+            )
+            assert (
+                connection.execute(
+                    text("select count(*) from conversations.turns where heard like :like"),
+                    {"like": f"%{SENTINEL}%"},
+                ).scalar()
+                == 0
+            )
     finally:
         fresh.dispose()

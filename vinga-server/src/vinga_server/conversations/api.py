@@ -286,6 +286,15 @@ class ConversationTurn(BaseModel):
             "a page asked for with it holds the turns after it."
         )
     )
+    conversation: str = Field(
+        description=(
+            "The thread this turn belongs to, by its uuid hex. A turn names both "
+            "its session and its conversation, which is what makes the session "
+            "timeline and the thread two readings of one set of rows: the turns of "
+            "one session can belong to several threads, and one thread's turns can "
+            "come from several sessions."
+        )
+    )
     t_ms: int = Field(
         description=(
             "The utterance's offset from session open, in milliseconds, aligned with "
@@ -293,7 +302,12 @@ class ConversationTurn(BaseModel):
         )
     )
     agent: str | None = Field(
-        description="The agent that answered, which a handover makes different from the session's."
+        description=(
+            "The agent that owns this turn, which is the one it started with and "
+            "therefore the one whose thread it is on. A handover makes it different "
+            "from the session's and from the agent that finished the reply; the legs "
+            "below are where a split reply comes apart."
+        )
     )
     heard: str | None = Field(
         description="What was said to the device, as transcribed. Null under text-off."

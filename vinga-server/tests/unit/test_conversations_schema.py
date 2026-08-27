@@ -27,7 +27,14 @@ from vinga_server.conversations import schema
 from vinga_server.conversations.store import CONVERSATIONS_CHAIN, open_conversations
 from vinga_server.db import DOMAIN_CHAIN, open_database
 
-EXPECTED_TABLES = {"sessions", "turns", "tool_invocations", "events"}
+EXPECTED_TABLES = {
+    "sessions",
+    "conversations",
+    "turns",
+    "tool_invocations",
+    "conversation_milestones",
+    "events",
+}
 
 # The three tables whose ids are cursors. `tool_invocations` is declared
 # the same way and is not one: it is read through its parent turn and
@@ -41,9 +48,21 @@ EXPECTED_INDEXES = {
     "ix_tool_invocations_session",
     "ix_tool_invocations_turn",
     "ix_events_session",
+    # The five the thread query paths need, carried by the baseline from
+    # its first run rather than added once a listing was slow: the
+    # agent-filtered listing and discovery in their keyset order, the
+    # unfiltered listing and retention's inactivity scan, the per-thread
+    # turn walk that hydration reads oldest first, and the
+    # latest-milestone lookup. The unique join key is the sixth and is
+    # asserted below, because a unique constraint is not an index entry
+    # under every inspector.
+    "ix_conversations_agent_activity",
+    "ix_conversations_last_active",
+    "ix_turns_conversation",
+    "ix_conversation_milestones_conversation",
 }
 
-HEAD = "1001_postgres_conversations"
+HEAD = "1002_conversation_threads"
 
 
 def _tables(engine, schema_name: str) -> set[str]:
@@ -58,6 +77,11 @@ def _version(engine, schema_name: str) -> list[str]:
                 text(f"select * from {schema_name}.alembic_version")
             )
         ]
+
+
+# The thread every planted turn below belongs to, in the shape the
+# runtime mints.
+CONVERSATION = "9f0c1d2e3a4b5c6d7e8f90a1b2c3d4e5"
 
 
 def _session_row(session_id: str, started_at: str = "2026-08-15T10:00:00+00:00") -> dict:
@@ -208,6 +232,39 @@ def test_every_index_the_queries_need_exists() -> None:
     assert EXPECTED_INDEXES <= found
 
 
+def test_the_thread_join_key_is_unique() -> None:
+    """`conversations.conversation` addresses one thread, the way
+    `sessions.session` addresses one session: a second row under the
+    same id would make a resume ambiguous and a turn's reference
+    meaningless. Asserted as the constraint rather than as an index,
+    which is how the database was told."""
+    from sqlalchemy.exc import IntegrityError
+
+    engine = open_conversations(DatabaseConfig())
+    row = {
+        "conversation": CONVERSATION,
+        "agent": "sam",
+        "device": "aa:bb:cc:dd:ee:ff",
+        "title": None,
+        "incomplete": False,
+        "created_at": "2026-08-15T10:00:00+00:00",
+        "last_active_at": "2026-08-15T10:00:00+00:00",
+    }
+    refused = False
+    try:
+        with engine.begin() as connection:
+            connection.execute(schema.conversations.insert().values(row))
+        try:
+            with engine.begin() as connection:
+                connection.execute(schema.conversations.insert().values(row))
+        except IntegrityError:
+            refused = True
+    finally:
+        engine.dispose()
+
+    assert refused
+
+
 def test_the_source_column_refuses_a_token_outside_the_closed_set() -> None:
     """The value of the column is that a query may enumerate it, so the
     closed set is a property of the schema and not only of the
@@ -219,7 +276,9 @@ def test_the_source_column_refuses_a_token_outside_the_closed_set() -> None:
         with engine.begin() as connection:
             connection.execute(schema.sessions.insert().values(_session_row("s")))
             turn = connection.execute(
-                schema.turns.insert().values(session="s", t_ms=0, tool_calls=1)
+                schema.turns.insert().values(
+                    session="s", conversation=CONVERSATION, t_ms=0, tool_calls=1
+                )
             ).inserted_primary_key[0]
         rejected = False
         try:

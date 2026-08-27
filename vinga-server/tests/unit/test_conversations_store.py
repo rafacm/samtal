@@ -478,9 +478,17 @@ def test_a_session_deleted_under_a_live_one_is_never_resurrected(
     stores, after_a_turn: bool
 ) -> None:
     """Retention is a deleter that can take a session that is still
-    talking, because it selects on `started_at` and asks nothing about
-    whether the conversation ended. A conversation older than the window
-    is unusual and entirely legal, and its row goes at the next close.
+    talking, because it asks nothing about whether the conversation
+    ended. A thread and the session holding it that are both older than
+    the window are unusual and entirely legal, and they go at the next
+    close.
+
+    The clock moves once, deliberately. Retention prunes a thread on
+    its own last activity, so a session this old with turns stamped now
+    would be a session whose conversation is live, which is the case
+    the ruleset exists to protect rather than the case this test is
+    about. Every real session of this age has turns of that age too;
+    only a test can hold a clock still.
 
     Driven through the real prune rather than a hand-written DELETE,
     because what is under test is the interaction between the two and a
@@ -506,8 +514,11 @@ def test_a_session_deleted_under_a_live_one_is_never_resurrected(
     }
     inside_it = {**MANIFEST, "started_at": now.isoformat()}
 
+    long_ago = now - dt.timedelta(days=400)
+    clock = [long_ago]
+
     gate = Gate()
-    store = stores(gate=gate, now=lambda: now, retention_days=90)
+    store = stores(gate=gate, now=lambda: clock[0], retention_days=90)
     store.start()
     store.open_session("alpha", 100.0, older_than_the_window)
     gate.wait()
@@ -517,8 +528,13 @@ def test_a_session_deleted_under_a_live_one_is_never_resurrected(
         store.record_turn("alpha", a_turn())
         gate.wait()
         gate.let_through()
+        # Waited out rather than assumed: the clock moves next, and it
+        # has to move after this turn stamped its thread with the old
+        # reading rather than in the middle of the transaction doing it.
+        _until(lambda: rows("turns"), "alpha's first turn never landed")
         # Committed, and more already on its way.
         store.record_event("alpha", "heard", logging.INFO, {"duration_s": 1.0}, 102.0)
+    clock[0] = now
 
     # A second conversation, inside the window, whose close is when
     # retention runs. Enqueued ahead of the rest of alpha's records, so
