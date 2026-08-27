@@ -1046,7 +1046,7 @@ implementation-doc section when written.
   `docs/reference/api-openapi.json`, `docs/reference/events.md`
   (all generated), `docs/concepts.md`, `docs/glossary.md`,
   `CHANGELOG.md`.
-- [ ] **Durable turns, thread-aware retention, session erasure**
+- [ ] **Durable turns and session erasure**
   (branch `feature/conversations-m2`): `Acknowledgement` and the
   durable turn commits; session deletion and its
   provenance cascade in `threads.py`; `DELETE /api/sessions/{session}`; the `session`
