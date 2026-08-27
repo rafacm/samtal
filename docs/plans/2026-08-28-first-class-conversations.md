@@ -184,6 +184,22 @@ reference, is that every stored turn belongs to the thread that was
 active when it was spoken. Nothing precludes the refinement; it would
 relax the column for meta turns in a migration of its own later.
 
+Attribution is decided when the turn begins, not when it ends. The
+active agent changes mid-reply on a handover, and `_record_turn`
+runs in the reply's `finally`, so reading the current agent there
+would put the handover turn on the wrong thread. The runtime
+therefore snapshots the owning pair (conversation id, agent) when
+the turn starts (where `TurnUnderway` begins, at the confirmed
+transcript), carries it immutably through the reply, and
+`TurnUnderway.record` stamps both onto the `TurnRecord`; the writer
+derives the conversation row from those stamped fields alone.
+`turns.agent` becomes the owning agent (the one the turn started
+with), its column comment moves accordingly, and the per-leg entries
+keep the per-agent truth of a split reply. The tests drive a
+tool-only handover and a spoken-preamble handover through the
+session drivers and assert the turn's conversation and agent are the
+starting pair while the legs carry both agents.
+
 ### The rename, precisely
 
 - **API**: the three existing GETs move from `/api/conversations*` to
@@ -513,7 +529,8 @@ store events keep their names (they name the store), and
 vinga_server/conversations/
     schema.py       + conversations table (m1), conversation_milestones (m5),
                     turns.conversation column (m1)
-    records.py      + conversation id on TurnRecord; Acknowledgement (m2)
+    records.py      + the (conversation, agent) owning snapshot on
+                    TurnRecord (m1); Acknowledgement (m2)
     store.py        writer learns conversation rows, titles and
                     last-activity (m1), bounded turn retries and
                     acknowledgements (m2), milestone records (m5);
@@ -644,7 +661,9 @@ New coverage, by milestone:
   stamped `1001_postgres_conversations` is refused at boot with the
   fixed reset sentence; conversation row lands with
   the first turn and not at activation; per-agent minting across a
-  handover (two threads, the handover turn on the first); title
+  handover (two threads, the handover turn on the first, driven both
+  tool-only and with a spoken preamble, the legs carrying both
+  agents); title
   derivation (truncation boundary, text-off null title);
   `last_active_at` moves with each turn; the retention ruleset (a
   thread past the cutoff dies whole; a pre-cutoff session holding a
@@ -886,6 +905,10 @@ resolution once the amendment addressing it lands.
    agent when the turn begins, carry both on `TurnRecord`, derive
    the conversation row from those fields, and test tool-only and
    spoken-preamble handovers.
+   *Resolution*: adopted. The attribution section now specifies the
+   turn-start snapshot carried on `TurnUnderway` and stamped onto
+   `TurnRecord`, moves `turns.agent` to mean the owning agent with
+   its comment, and names the two handover tests.
 5. **P1: candidate selection and recap consent have no enforced flow
    state.** Structured tool results exist only inside one reply's
    working list, so a later selection has no reliable candidate-id
