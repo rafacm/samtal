@@ -54,7 +54,13 @@ generated-document drift checks, the wheel migration). It runs on pull
 requests, and on pushes to `main`, when the change touches
 `vinga-server/`, `docs/reference/`, or the workflow file itself; a
 `workflow_dispatch` runs it against any branch whatever the change
-touched.
+touched. Every other change (documentation, the skills, this file) runs
+`.github/workflows/docs.yml` instead, whose `paths-ignore` mirrors the
+server workflow's paths: it checks internal links and anchors
+(`scripts/check_doc_links.py`) and runs the command-spellings census,
+which sweeps every tracked file and is therefore staled by pure
+documentation moves. Between the two workflows every change runs the
+census somewhere.
 
 ### Restoring a file mid-experiment
 
