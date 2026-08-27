@@ -174,9 +174,9 @@ def test_the_document_describes_every_route_the_api_serves() -> None:
         # same application, which is what puts them here: a route
         # registered by `build_api` instead would be served without ever
         # reaching this document.
-        "/conversations": ["get"],
-        "/conversations/{session}": ["get"],
-        "/conversations/{session}/turns": ["get"],
+        "/sessions": ["get"],
+        "/sessions/{session}": ["get"],
+        "/sessions/{session}/turns": ["get"],
     }
 
 
@@ -408,11 +408,11 @@ def test_every_field_the_conversation_reads_answer_with_is_required() -> None:
     schemas = json.loads(docgen.openapi())["components"]["schemas"]
 
     for name in (
-        "ConversationList",
-        "ConversationSummary",
-        "ConversationDetail",
-        "ConversationTurns",
-        "ConversationTurn",
+        "SessionList",
+        "SessionSummary",
+        "SessionDetail",
+        "SessionTurns",
+        "SessionTurn",
         "ToolInvocation",
         "TurnLeg",
     ):
@@ -431,7 +431,7 @@ def test_the_conversation_reads_type_what_the_store_types() -> None:
     schemas = json.loads(docgen.openapi())["components"]["schemas"]
 
     assert schemas["ToolInvocation"]["properties"]["source"]["enum"] == list(TOOL_SOURCES)
-    for model in ("ConversationSummary", "ConversationDetail"):
+    for model in ("SessionSummary", "SessionDetail"):
         branches = schemas[model]["properties"]["close_reason"]["anyOf"]
         tokens = [branch for branch in branches if "enum" in branch]
         assert [branch["enum"] for branch in tokens] == [list(CLOSE_REASONS)], model
@@ -441,7 +441,7 @@ def test_the_conversation_reads_type_what_the_store_types() -> None:
         assert {"type": "string"} in branches, model
         assert {"type": "null"} in branches, model
 
-    legs = schemas["ConversationTurn"]["properties"]["legs"]["anyOf"]
+    legs = schemas["SessionTurn"]["properties"]["legs"]["anyOf"]
     array = next(branch for branch in legs if "items" in branch)
     assert array["items"] == {"$ref": "#/components/schemas/TurnLeg"}
     assert set(schemas["TurnLeg"]["required"]) == {
@@ -452,7 +452,7 @@ def test_the_conversation_reads_type_what_the_store_types() -> None:
     }
     assert schemas["TurnLeg"]["additionalProperties"] is False
 
-    agents = schemas["ConversationDetail"]["properties"]["agents"]["anyOf"]
+    agents = schemas["SessionDetail"]["properties"]["agents"]["anyOf"]
     names = next(branch for branch in agents if "items" in branch)
     assert names["items"] == {"type": "string"}
 
@@ -473,7 +473,7 @@ def test_the_conversation_reads_describe_their_pagination() -> None:
     """The three query arguments are parsed by the routes rather than by
     FastAPI, so what a client is told about them is what these
     descriptions say and nothing is derived from a type."""
-    listing = json.loads(docgen.openapi())["paths"]["/conversations"]["get"]
+    listing = json.loads(docgen.openapi())["paths"]["/sessions"]["get"]
     described = {
         parameter["name"]: parameter["description"] for parameter in listing["parameters"]
     }
