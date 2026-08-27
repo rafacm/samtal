@@ -1,10 +1,26 @@
-# The database vinga stores both of its halves in, for development.
+# The two containers a trial of vinga is, and the database half of them
+# on its own for development. One file, because the topology is one
+# thing: two structures that must agree about a network, a health gate
+# and an env contract are one structure with a bug pending.
 #
-# `docker compose up -d --wait` is the whole of the local loop: the
-# server migrates on boot, so a fresh volume is a current schema with no
-# init command to forget. `--wait` matters rather than being tidiness,
-# because the server refuses a database it cannot reach and restarting
-# is the orchestrator's job rather than the entrypoint's.
+# Two invocations, and the profile is what separates them:
+#
+#     docker compose up -d --wait                  the database alone
+#     docker compose --profile server up -d --wait the database and the server
+#
+# The first is the whole of the local loop, unchanged: a checkout runs
+# the server from source against it, and the test lanes refuse rather
+# than skip when they cannot reach it. The second is the trial, and it
+# needs no checkout: this file and `deploy/postgres-init.sql` beside it
+# in a directory of their own are enough, which is why the mount below
+# is a relative path and why the project README's fetch recreates the
+# `deploy/` directory rather than flattening it.
+#
+# `--wait` matters rather than being tidiness, because the server
+# refuses a database it cannot reach and restarting is the
+# orchestrator's job rather than the entrypoint's. The server migrates
+# on boot, so a fresh volume is a current schema with no init command
+# to forget.
 #
 # Every variable below carries the same default the server's own
 # configuration carries, so one `.env` feeds both sides of the loop: the
@@ -12,9 +28,11 @@
 # them onto the image's `POSTGRES_*` names here so that neither side
 # holds the connection facts twice.
 #
-# The defaults are a development convenience on an instance bound to
-# loopback, and nothing else. A deployment sets real values, and the
-# deployment documentation says so where it names the same variables.
+# The database defaults are a development convenience on an instance
+# bound to loopback, and nothing else. A deployment sets real values,
+# and the deployment documentation says so where it names the same
+# variables. The two secrets the server needs have no default at all,
+# for the asymmetry the `vinga` service states beside them.
 services:
   postgres:
     image: postgres:17-alpine
@@ -57,7 +75,102 @@ services:
       retries: 15
       start_period: 5s
 
+  vinga:
+    # Behind a profile, so `docker compose up -d --wait` keeps meaning
+    # the database alone and nothing about the development loop moves.
+    # The profile is also what makes the refusal below possible:
+    # compose interpolates the whole file at config time whatever
+    # profile is selected, so a `${VINGA_API_SECRET:?...}` here would
+    # refuse the profile-less invocation too, and the development loop
+    # has no secrets to give it. `env_file` is the one thing compose
+    # resolves for the selected services alone, which is why the two
+    # secrets arrive through a file rather than through an
+    # interpolation guard.
+    profiles: [server]
+
+    # Overridable so a deployment can pin a digest and so CI can point
+    # this file at an image it has just built. The moving tag is the
+    # right one for a trial and the wrong one to deploy from, which
+    # `Choosing an image` in the server README says in full.
+    image: ${VINGA_IMAGE:-ghcr.io/rafacm/vinga-server:latest}
+
+    depends_on:
+      postgres:
+        # The server refuses a database it cannot reach rather than
+        # waiting for one, so the gate is the database's health rather
+        # than its start. The image carries a HEALTHCHECK of its own
+        # against /healthz, so `--wait` gates on both: the database is
+        # ready, and then the server is serving.
+        condition: service_healthy
+
+    env_file:
+      # The two secrets, and anything else this server should find in
+      # its environment: a provider credential the domain configuration
+      # names, or a server-half override such as
+      # `VINGA_SERVER__AUTH__ENABLED=false` for a trial. Nothing
+      # optional is listed under `environment` below, deliberately: a
+      # bare name there is compose's pass-through form, and when the
+      # host has not set it compose renders it null and *removes* what
+      # this file set, which would silently undo an override written
+      # here.
+      #
+      # `required: true` is the refusal. With no file, compose stops
+      # before a container starts, in one line, rather than booting a
+      # server on a well-known secret; with a file that is missing one
+      # of the two, the server refuses at boot and names the variable.
+      # Neither path has a default, which is the asymmetry against the
+      # database password above: that instance is bound to loopback,
+      # and this server's port is not.
+      #
+      # This is the same `.env` compose already reads for the
+      # interpolation on either side of it. That reading feeds the
+      # substitutions in this file; this one feeds the container.
+      - path: ./.env
+        required: true
+
+    environment:
+      # The connection facts, and the reason they are spelled here
+      # rather than left to the file above: `.env` is written for a
+      # server reached from the host, and inside this network the
+      # database is neither on 127.0.0.1 nor on whichever host port it
+      # was published to. Setting both here means a `.env` carrying the
+      # host's spelling cannot reach in and break the container.
+      #
+      # `postgres` is the service name, which is the hostname compose
+      # gives it on the default network. Inside a container 127.0.0.1
+      # is the container itself.
+      VINGA_DB_HOST: postgres
+      # The container port, always, whatever `VINGA_DB_PORT` published
+      # on the host above.
+      VINGA_DB_PORT: "5432"
+      # The same three substitutions the database service reads, so the
+      # two cannot disagree about the database they are talking about.
+      VINGA_DB_NAME: ${VINGA_DB_NAME:-vinga}
+      VINGA_DB_USER: ${VINGA_DB_USER:-vinga}
+      VINGA_DB_PASSWORD: ${VINGA_DB_PASSWORD:-vinga}
+
+    ports:
+      # Every interface, unlike the database's loopback binding
+      # deliberately: a board on the LAN has to reach the OTA endpoint
+      # and the WebSocket, and both are this one port. What the
+      # database holds is read by the server and by nothing else on the
+      # network, so it stays where it is.
+      - "8003:8003"
+
+    volumes:
+      # What every engine caches into: the whisper models and Piper
+      # voices a first conversation downloads, which is why this is a
+      # volume rather than a fresh container's empty directory.
+      - vinga-data:/data
+
+    # No restart policy on purpose. A deployment wants one and the
+    # server README says so; here it would turn a server refusing to
+    # boot into a container restarting until `--wait` times out, and
+    # the refusal is the thing a trial needs to read.
+
 volumes:
   # Named rather than a bind mount: what is in it is a database, and a
   # `docker compose down -v` is the documented reset.
   vinga-postgres:
+  # The server's cache of downloaded models and voices. Same reset.
+  vinga-data:
