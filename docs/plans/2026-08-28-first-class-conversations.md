@@ -628,19 +628,26 @@ vinga_server/conversations/
                     turns.conversation column (m1)
     records.py      + the (conversation, agent) owning snapshot on
                     TurnRecord (m1); Acknowledgement (m2)
-    store.py        writer learns conversation rows, titles and
-                    last-activity (m1), bounded turn retries and
-                    acknowledgements (m2), milestone records (m5);
-                    retention rules move here too (m1, m2)
-    threads.py      NEW (m2): the thread store read-and-delete surface
-                    over the engine settings: session deletion,
-                    conversation deletion, thread listing and detail,
-                    resume candidates, thread turns for hydration,
-                    milestone reads. What callers stop knowing: the
-                    five-table join topology, the deletion ordering
-                    that keeps children and parents together, and the
-                    MVCC caveats; api.py, cli handlers and the tools
-                    all ask this module instead of composing SQL.
+    store.py        the queue writer: gains the two-transaction
+                    marker, bounded turn retries and acknowledgements
+                    (m2), and executes thread lifecycle and retention
+                    by delegating to threads.py inside its own
+                    transactions (m1)
+    threads.py      NEW (m1): the thread store, owning what decision
+                    5 assigns it: conversation lifecycle (row
+                    materialization, title derivation, last-activity,
+                    the dead-id rule), the retention ruleset, session
+                    and conversation deletion with their provenance
+                    cascades (m2), thread listing, detail and resume
+                    candidates (m2, m3), thread turns for hydration
+                    (m4), and milestone policy (m5). What callers
+                    stop knowing: the five-table join topology, the
+                    deletion ordering that keeps children, parents
+                    and derived copies together, and the MVCC
+                    caveats. Its callers are the writer (which embeds
+                    its lifecycle and retention operations in marker
+                    transactions), the API handlers and the selection
+                    tools.
     hydration.py    NEW (m4): stored rows to LLM context under a
                     budget. What callers stop knowing: how dialogue,
                     tool notes, gaps, milestones and truncation
@@ -669,10 +676,11 @@ vinga_server/config/
                     registries
 ```
 
-The deletion test, answered for the two new modules: inlining
-`threads.py` into `api.py` would put the join topology and deletion
-ordering in a module whose job is transport, and the tools and CLI
-would grow second and third copies; inlining `hydration.py` into
+The deletion test, answered for the two new modules: `threads.py`
+has three callers with no shared parent (the writer, the API
+handlers, the selection tools), so inlining it into any one would
+spread the join topology, deletion ordering and provenance cascades
+across the other two; inlining `hydration.py` into
 `pipeline.py` would put a pure, separately-testable rendering rule
 inside the module this repository has been shrinking since #245.
 Everything else deepens an existing module rather than adding one
@@ -881,8 +889,9 @@ implementation-doc section when written.
   refusal and changelog breaking entry; the
   `TurnRecord` conversation id; minting at `_activate_agent` per
   session and agent; the writer's conversation rows, titles and
-  `last_active_at`; the whole thread-aware retention ruleset with
-  the `ConversationsPruned` count field; the API
+  `last_active_at`; `conversations/threads.py` owning lifecycle and
+  the whole thread-aware retention ruleset, with the
+  `ConversationsPruned` count field; the API
   rename with moved pins and the regenerated OpenAPI document;
   `conversation` on turn responses and on the agent-bearing events;
   the workflow's conversations-chain assertion moved; generated
@@ -890,20 +899,21 @@ implementation-doc section when written.
   the entity stops being direction ("decided direction (issue #190)"
   markers on what this milestone lands); changelog breaking entry
   for the API rename. Design footprint: deepens `schema.py`,
-  `store.py`, `records.py` and the activation seam; no new module.
+  `store.py`, `records.py` and the activation seam; adds
+  `threads.py`, the thread store of decision 5, whose deletion-test
+  answer is in the module layout.
   Documentation footprint: `docs/reference/conversations-schema.md`,
   `docs/reference/api-openapi.json`, `docs/reference/events.md`
   (all generated), `docs/concepts.md`, `docs/glossary.md`,
   `CHANGELOG.md`.
 - [ ] **Durable turns, thread-aware retention, session erasure**
   (branch `feature/conversations-m2`): `Acknowledgement` and the
-  durable turn commits; `conversations/threads.py` with
-  session deletion; `DELETE /api/sessions/{session}`; the `session`
+  durable turn commits; session deletion and its
+  provenance cascade in `threads.py`; `DELETE /api/sessions/{session}`; the `session`
   CLI noun (`list`, `show`, `delete`); the spellings manifest;
   cli-guide's owed spelling updated. Design footprint: deepens
-  `store.py` (durability as an internal property); adds
-  `threads.py` (callers stop knowing join topology and deletion
-  ordering). Documentation footprint:
+  `store.py` (durability as an internal property) and `threads.py`
+  (semantic deletion with its provenance cascade). Documentation footprint:
   `docs/reference/conversations-schema.md` (retention prose via its
   generator), `docs/reference/api-openapi.json`,
   `docs/reference/cli.md` (generated half),
@@ -1134,6 +1144,12 @@ resolution once the amendment addressing it lands.
     false because the CLI is API-backed. Make the thread-store
     module own thread lifecycle, semantic deletion, milestone policy
     and retention, with the queue writer delegating transactionally.
+    *Resolution*: adopted. `threads.py` is born in milestone 1
+    owning lifecycle, title derivation, the dead-id rule, retention
+    and (from milestone 2) semantic deletion and (from milestone 5)
+    milestone policy, with the writer delegating inside its marker
+    transactions; the false CLI-duplication sentence is corrected to
+    the module's real three callers.
 14. **P2: hydration truncation can produce incoherent history.**
     Dropping oldest items can orphan an assistant reply from its
     user turn and can drop the milestone before later turns. Budget
