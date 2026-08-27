@@ -386,10 +386,14 @@ reserves them against MCP entries by construction), declared in
 
 - **`new_conversation`**: no arguments. Ends the agent's current
   thread and starts a fresh one: the runtime mints a new conversation
-  id for the active agent and resets that agent's in-session history.
-  Offered always: it needs no storage at all (with the store off it
-  still resets context; no row was going to land anyway), which is
-  story 2 working on every deployment.
+  id for the active agent and resets that agent's in-session history,
+  through the same boundary transition as a resume. Decision 11 is
+  applied to both tools alike: with resumption off, text storage off
+  or the store disabled, behavior stays exactly today's
+  session-scoped conversation, so the tool answers its fixed spoken
+  refusal and mutates nothing. Both tools are offered always, which
+  is what makes the refusal a spoken sentence the model can convey
+  rather than a hallucinated answer to a tool that does not exist.
 - **`resume_conversation`**: `description` (free text) or
   `conversation` (a candidate id) and, from milestone 5, `start_from`
   (`recap` or `recent`). With `description`, it answers a bounded
@@ -730,8 +734,9 @@ New coverage, by milestone:
   (budget edges, truncation order, tool-note rendering, text-off
   gaps counted, deterministic output); tools: candidates bounded and
   newest first, ambiguous description, selection by id, refusals
-  when off (spoken result, not error), `new_conversation` resets
-  context; the pending-state enforcement (stale id, foreign-agent
+  when off for both tools (spoken result, not error, and no context
+  mutation), `new_conversation` resets context and rebinds when
+  resumption is on; the pending-state enforcement (stale id, foreign-agent
   id, recap with no offer, the two-utterance selection); runtime:
   the clean switch (the
   incoming agent's provider never receives the outgoing agent's
@@ -975,6 +980,10 @@ resolution once the amendment addressing it lands.
    session-scoped; the plan offers `new_conversation` unconditionally
    and mutates context without a store. Make both tools fixed
    non-mutating refusals when the prerequisites are absent.
+   *Resolution*: adopted. `new_conversation` now refuses under the
+   same prerequisites as `resume_conversation`, mutating nothing;
+   the unconditional context reset is withdrawn, and the tools stay
+   offered so the refusal is spoken.
 8. **P1: stored recap text is not guaranteed to equal what the user
    hears.** Returning the recap to another model round with a
    verbatim instruction permits paraphrase, and playback can fail
