@@ -5,6 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-08-28
+
+### Added
+
+- **Conversations are a first-class entity** (#190). A conversation is
+  a durable thread between a user and exactly one agent, with its own
+  identity, a title derived from its first utterance, and created and
+  last-active timestamps. Every recorded turn now names both the
+  session it was spoken in and the thread it belongs to, so the session
+  timeline and the thread are two readings of one set of rows rather
+  than two stores. A session that talks to two agents touches two
+  threads, and a handover turn belongs to the thread it started on.
+- The `conversations_pruned` event gains a `conversations` count beside
+  its `sessions` count, because retention's unit is now the thread.
+- Turn responses on the API carry a `conversation` field.
+
+### Changed
+
+- **BREAKING: retention prunes conversations rather than sessions**
+  (#190). `server.conversations.retention_days` is unchanged (90 by
+  default, `0` keeps everything); what it is measured against is now a
+  thread's last activity. A conversation older than the window is
+  deleted whole, with its turns; events are pruned on their own
+  session's age; and a session record is deleted once no turn names it
+  any more. A deployment that does not resume conversations sees the
+  behavior it saw before, because a thread's age and its session's
+  coincide there.
+- `turns.agent` now records the agent that OWNS a turn, which is the
+  one the turn started with, rather than the one that finished the
+  reply. A handover makes those different, and `turns.legs` is where a
+  split reply's per-agent shares live.
+
+### Removed
+
+- **BREAKING: databases stamped `1001_postgres_conversations` are
+  unsupported** (#190). The conversations migration chain is re-cut:
+  the single baseline is replaced by `1002_conversation_threads`,
+  carrying the whole thread schema. There is no migration and no
+  backfill, because `turns.conversation` is not null and a turn
+  recorded before threads existed names no thread. A server that meets
+  such a database refuses to start with a sentence naming the reset:
+  drop and recreate the database (or the `conversations` schema on its
+  own), rerun `deploy/postgres-init.sql`, and start again, which
+  migrates a blank schema to current in one step. **Conversation
+  history is not carried across**; take a `pg_dump` of the
+  `conversations` schema first if it is wanted. The compatibility
+  decision and the tested path back are recorded in
+  `docs/adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md`.
+
 ## 2026-08-27
 
 ### Added

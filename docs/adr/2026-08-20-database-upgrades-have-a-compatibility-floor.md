@@ -239,3 +239,78 @@ body column; the table and column inventories now read
 `information_schema` instead of `sqlite_master`, and the
 never-reused-id property is asserted as an identity column rather
 than as an `AUTOINCREMENT` keyword in stored DDL.
+
+## Addendum, 2026-08-28 (issue #190): the conversations chain re-cuts
+
+The conversation becomes a first-class entity: a durable thread
+between a user and exactly one agent, with turns naming both the
+session they were spoken in and the thread they belong to. The
+conversations chain is re-cut for it. The single baseline
+`1001_postgres_conversations` is deleted and replaced by
+`1002_conversation_threads`, carrying the whole thread schema at once:
+the four existing tables with `turns.conversation` added, the
+`conversations` table, the `conversation_milestones` table (dormant
+until the recap flow), and the five indexes the thread query paths
+need.
+
+**This is the third use of the priced exit the Decision above grants,
+and it is a decision rather than a convenience.** The issue's
+2026-08-21 amendment settled that the thread schema arrives with no
+migration and no backfill: threads are never derived from historically
+recorded turns. `turns.conversation` is therefore not null, and no
+in-place migration can produce that column, because a turn recorded
+before threads existed names no thread and there is nothing to derive
+one from. Backfilling a synthetic thread per session would invent an
+entity the record does not contain.
+
+**Which databases become unsupported.** Every conversations schema
+stamped `1001_postgres_conversations`, that is, every conversation
+store in existence before this change. There is no upgrade from one
+and there will not be one. Such a database is not mistaken for
+current: Alembic cannot locate the deleted revision, `db._stranded`
+recognizes it by that revision being in the closed set of what this
+re-cut removed, and `db.migration_failure` answers with a fixed
+sentence naming the reset procedure and no value at all. A database
+stamped by a newer build and then met by a rolled-back image fails
+Alembic identically and is current rather than stranded, so it is told
+nothing about resetting anything; the domain chain, which this change
+does not touch, is never told this at all.
+
+**The tested path back**, which is the reset this record owes:
+
+1. Drop and recreate the database, or the `conversations` schema on
+   its own if the domain configuration is to be kept.
+2. Rerun `deploy/postgres-init.sql`, which is written to be run again
+   after any reset and is what restores the analyst role's grants.
+3. Start the server, which migrates a blank schema to current in one
+   step.
+
+The domain half needs no such step when the whole database is
+recreated for the reasons the #283 addendum records: the
+example-fragment install suite installs every committed fragment into
+an empty database and boots a server on the result, and `set-secret`
+re-encrypts credentials out of the environment the deployment already
+holds. The milestone that landed this ran the three steps above
+against a live development database stamped at the deleted revision
+and booted on the result.
+
+**What does not come across, stated plainly.** Conversation history is
+not migrated, exactly as it was not at the Postgres cutover. There is
+no export format for it and no importer, and inventing one for a
+pre-release store would be the migration tool the issue explicitly
+declined to build. A deployment that wants to keep what it recorded
+takes a `pg_dump` of the `conversations` schema before the reset and
+reads it beside the new one.
+
+**The pre-release license is the same one #243 and #283 spent**, and
+its bounds are unchanged: the project is pre-release, no third-party
+installation is known, and the maintainer's own deployment is a
+database that can be recreated and a configuration that can be
+rebuilt. The bound that ends at a declared beta is untouched, and this
+is the last change that may spend it for the conversation store
+without a further record.
+
+**The wheel-migration CI step keeps its role.** Its conversations
+assertions move once, with this re-cut: the chain head becomes exactly
+`['1002_conversation_threads']` and the expected-tables list gains
+`conversations` and `conversation_milestones`.
