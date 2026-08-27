@@ -48,11 +48,15 @@ uv run pytest tests/unit -q -n auto --dist loadfile
 ```
 
 CI (`.github/workflows/vinga-server.yml`) runs the same lint, unit, and
-integration steps in two parallel jobs: `unit` (lint, the events package's
-type check, the unit tests) and `integration` (the integration tests, the
-generated-document drift checks, the wheel migration). It runs on pull
-requests, and on pushes to `main`, when the change touches
-`vinga-server/`, `docs/reference/`, or the workflow file itself; a
+integration steps in two parallel jobs: `unit` (the compose file's two
+resolutions, lint, the events package's type check, the unit tests) and
+`integration` (the integration tests, the generated-document drift
+checks, the wheel migration). A third job, `image`, builds and smokes
+both image variants on everything but a pull request, and boots the
+committed compose file against the image it just built. The workflow
+runs on pull requests, and on pushes to `main`, when the change touches
+`vinga-server/`, `docs/reference/`, `docker-compose.yml`, `deploy/`, or
+the workflow file itself; a
 `workflow_dispatch` runs it against any branch whatever the change
 touched. Every other change (documentation, the skills, this file) runs
 `.github/workflows/docs.yml` instead, whose `paths-ignore` mirrors the

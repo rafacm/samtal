@@ -169,6 +169,53 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # First, because it needs nothing but the checkout: a compose file
+      # that does not resolve fails the run before the install below
+      # spends its minute. What it holds to is the pair of promises the
+      # file makes, which no other lane would notice breaking:
+      #
+      #   - the profile-less invocation, which is the development loop
+      #     and the one the test lanes and a locally-run server depend
+      #     on, resolves with no secrets anywhere and starts the
+      #     database ALONE;
+      #   - the `server` profile refuses rather than defaulting when the
+      #     secrets are not there, and resolves when they are.
+      #
+      # The first is the one at risk. Compose interpolates the whole
+      # file whatever profile is selected, so a `${VINGA_API_SECRET:?}`
+      # written into the server service would refuse the development
+      # loop too, and that is a one-character change away at any time.
+      #
+      # The `.env` written here is removed however this step ends: the
+      # server reads one itself (`find_dotenv(usecwd=True)` walks up
+      # from `vinga-server/` and would find this one), so leaving it
+      # behind would quietly feed every lane below it.
+      - name: The compose file resolves both ways
+        working-directory: .
+        run: |
+          set -eu
+          trap 'rm -f .env' EXIT
+
+          services=$(docker compose config --services | sort | tr '\n' ' ')
+          [ "$services" = "postgres " ] || {
+            echo "::error::the profile-less invocation is no longer the database alone: $services"
+            exit 1
+          }
+
+          if docker compose --profile server config >/dev/null 2>&1; then
+            echo "::error::the server profile resolved with no secrets set; it must refuse"
+            exit 1
+          fi
+
+          printf 'VINGA_API_SECRET=%s\nVINGA_AUTH_SECRET=%s\n' \
+            not-a-real-token not-a-real-secret > .env
+
+          services=$(docker compose --profile server config --services | sort | tr '\n' ' ')
+          [ "$services" = "postgres vinga " ] || {
+            echo "::error::the server profile no longer resolves to both services: $services"
+            exit 1
+          }
+
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: true
@@ -825,6 +872,48 @@ jobs:
       - name: Check the extras import (amd64)
         if: matrix.variant == 'default'
         run: docker run --rm --entrypoint python vinga-server:ci-amd64 -c "import faster_whisper, piper"
+
+      # The quick start, run against the image this job just built. The
+      # unit lane already holds the compose file to resolving, which is
+      # a syntax check; this is the behavior one, and it is the only
+      # place anything proves that the committed file still boots the
+      # artifact its default tag names. `VINGA_IMAGE` is what the file
+      # exposes for exactly this.
+      #
+      # The default variant only: the file is variant-agnostic, and the
+      # image it defaults to is `latest`, which is the default variant.
+      #
+      # Deliberately before the arm64 build and everything after it,
+      # because this publishes 8003 and the seeded smoke container
+      # below publishes the same port. The teardown is a trap rather
+      # than a later step for the same reason: nothing after this may
+      # inherit a port or a volume from it.
+      - name: Check the compose file boots the built image
+        if: matrix.variant == 'default'
+        working-directory: .
+        env:
+          VINGA_IMAGE: vinga-server:ci-amd64
+        run: |
+          set -eu
+          trap 'docker compose -p compose-smoke --profile server logs vinga || true
+                docker compose -p compose-smoke --profile server down -v || true
+                rm -f .env' EXIT
+
+          printf 'VINGA_API_SECRET=%s\nVINGA_AUTH_SECRET=%s\n' \
+            "$VINGA_API_SECRET" "$VINGA_AUTH_SECRET" > .env
+
+          docker compose -p compose-smoke --profile server up -d --wait
+
+          # `--wait` returned, so both healthchecks passed: the
+          # database's, and the image's own against /healthz. What is
+          # asserted here is that the server answering is the build
+          # above rather than a `latest` pulled from the registry.
+          revision=$(curl -fsS http://127.0.0.1:8003/healthz \
+            | python3 -c "import json,sys; print(json.load(sys.stdin)['revision'])")
+          [ "$revision" = "$REVISION" ] || {
+            echo "::error::the compose stack served revision $revision, expected $REVISION"
+            exit 1
+          }
 
       # The slim variant's whole point is their absence, so it is
       # asserted rather than assumed: an extra creeping back in would
