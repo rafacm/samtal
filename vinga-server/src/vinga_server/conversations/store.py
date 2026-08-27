@@ -71,10 +71,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import ColumnElement, Engine, delete, select
+from sqlalchemy import Engine, select
 
 from vinga_server.config.models import DatabaseConfig
-from vinga_server.conversations import schema
+from vinga_server.conversations import schema, threads
 from vinga_server.conversations.records import ToolInvocation, TurnLeg, TurnRecord
 from vinga_server.conversations.schema import events as events_table
 from vinga_server.conversations.schema import sessions, tool_invocations, turns
@@ -302,6 +302,12 @@ class ConversationStore:
         self._warned: set[str] = set()
         # Writer state, touched by the writer thread only.
         self._batches: dict[str, _Batch] = {}
+        # Each recording session's device, kept because a thread's row
+        # records the device it was begun on and a turn record carries
+        # only the pair that owns it. Read at the marker that
+        # materializes a thread, so it is kept for exactly as long as
+        # the batch beside it.
+        self._devices: dict[str, str | None] = {}
         self._unknown: set[str] = set()
         # Records this writer lost to a failed transaction, per session,
         # folded into the session row's count at close. Writer-side, so
@@ -458,6 +464,7 @@ class ConversationStore:
             return
         if isinstance(item, Open):
             self._batches[item.session] = _Batch()
+            self._devices[item.session] = _device_of(item.manifest)
             self._commit(item.session, opening=item)
             return
         if isinstance(item, Turn):
@@ -474,6 +481,7 @@ class ConversationStore:
                 return
             self._commit(item.session, closing=item)
             self._batches.pop(item.session, None)
+            self._devices.pop(item.session, None)
             self._lost.pop(item.session, None)
             self._prune()
 
@@ -548,6 +556,7 @@ class ConversationStore:
                     # so nothing in flight can resurrect it as orphan
                     # rows.
                     self._batches.pop(session_id, None)
+                    self._devices.pop(session_id, None)
                     self._release(len(batch.events))
                     return
                 self._write(connection, session_id, batch)
@@ -574,6 +583,10 @@ class ConversationStore:
         return found is not None
 
     def _write(self, connection: Any, session_id: str, batch: _Batch) -> None:
+        # One stamp for the marker, so a turn and the activity it moves
+        # on its thread land on one instant rather than on two readings
+        # of the clock a microsecond apart.
+        at = self._stamp()
         for item in batch.turns:
             turn = connection.execute(
                 turns.insert().values(self._turn_row(session_id, item))
@@ -584,6 +597,22 @@ class ConversationStore:
             ]
             if rows:
                 connection.execute(tool_invocations.insert(), rows)
+            # The thread this turn is on, materialized with the first
+            # one and moved by every later one, in this same
+            # transaction. Storage policy is applied before the handover
+            # rather than inside the thread store: a title derives from
+            # what was stored, so text-off derives none by the ordinary
+            # path.
+            threads.landed(
+                connection,
+                threads.Landing(
+                    conversation=item.record.conversation,
+                    agent=item.record.agent,
+                    device=self._devices.get(session_id),
+                    heard=item.record.heard if self.text else None,
+                    at=at,
+                ),
+            )
         # No events rows at all under metrics-off, rather than rows with
         # their payload emptied: the events table is the structured
         # telemetry the switch turns off.
@@ -648,6 +677,7 @@ class ConversationStore:
         record = item.record
         return {
             "session": session_id,
+            "conversation": record.conversation,
             "t_ms": item.t_ms,
             "agent": record.agent,
             "heard": record.heard if self.text else None,
@@ -721,10 +751,16 @@ class ConversationStore:
     # --- retention -----------------------------------------------------
 
     def _prune(self) -> None:
-        """Delete whole sessions older than the window, in the writer, so
-        it serializes with the writes by construction. Runs at start and
-        at each session close, which is often enough for a store that
-        only grows when a conversation happens.
+        """Run retention, in the writer, so it serializes with the
+        writes by construction. Runs at start and at each session close,
+        which is often enough for a store that only grows when a
+        conversation happens.
+
+        The ruleset is `threads.prune`, whose unit is the thread: a
+        conversation older than the window goes whole, events go by
+        their session's age, and a session row goes once no turn names
+        it. What is decided here is only when to run it and what to say
+        about it afterwards.
 
         What deletion means here is stated exactly, because the backend
         decides it and the backend has moved. A deleted row is invisible
@@ -745,11 +781,7 @@ class ConversationStore:
         cutoff = (self._now() - dt.timedelta(days=self.retention_days)).isoformat()
         try:
             with self._engine.begin() as connection:
-                # Lexicographic on UTC ISO-8601 text is chronological
-                # when both sides are written by `isoformat` at the same
-                # offset, which they are: the cutoff is built here and
-                # the column is written from the same clock.
-                counts = _delete_sessions(connection, [sessions.c.started_at < cutoff])
+                taken = threads.prune(connection, cutoff)
         except Exception as exc:  # noqa: BLE001 - retention never breaks a session
             # Bound to an ordinary local before the thunk closes over
             # it: `except ... as` unbinds its own name when the block
@@ -759,10 +791,11 @@ class ConversationStore:
             failed: BaseException = exc
             events.emit(lambda: PruneFailed(failure=ClassName.of(failed)))
             return
-        if counts["sessions"]:
+        if taken.anything():
             events.emit(
                 lambda: ConversationsPruned(
-                    sessions=Count(counts["sessions"]),
+                    conversations=Count(taken.conversations),
+                    sessions=Count(taken.sessions),
                     days=Count(self.retention_days),
                 )
             )
@@ -802,30 +835,17 @@ class SessionSink:
         )
 
 
-def _delete_sessions(
-    connection: Any, criteria: list[ColumnElement[bool]]
-) -> dict[str, int]:
-    """One session's rows go together, from every table, or the deletion
-    leaves turns and events pointing at nothing. Inside the caller's
-    transaction, which is what makes that atomic.
+def _device_of(manifest: dict[str, Any]) -> str | None:
+    """The device a session opened on, out of the manifest both the
+    session row and the thread row are built from.
 
-    The children are matched by a subquery against the same criteria
-    rather than by a list of ids read out first, so a deletion of many
-    sessions is one statement per table instead of a bound parameter per
-    session against the driver's limit."""
-    doomed = select(sessions.c.session).where(*criteria)
-    counts = {}
-    for name, table in (
-        ("events", events_table),
-        ("tool_invocations", tool_invocations),
-        ("turns", turns),
-    ):
-        counts[name] = connection.execute(
-            delete(table).where(table.c.session.in_(doomed))
-        ).rowcount
-    # Last, because the subquery above reads it.
-    counts["sessions"] = connection.execute(delete(sessions).where(*criteria)).rowcount
-    return counts
+    One reader for the one nested shape, because the two callers want
+    the same answer at different moments: the row is written at the
+    open, the thread's is wanted at whichever later marker materializes
+    a thread.
+    """
+    device = manifest.get("device")
+    return device.get("mac") if isinstance(device, dict) else None
 
 
 def _utc_now() -> dt.datetime:

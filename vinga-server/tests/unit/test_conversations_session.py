@@ -252,6 +252,92 @@ def test_the_turns_and_their_tool_calls_land_with_their_numbers(
         assert call["duration_ms"] is not None
 
 
+def test_a_real_conversation_lands_a_thread_its_turns_name(tmp_path: Path) -> None:
+    """The thread beside the session, from a conversation nobody
+    scripted below the wire.
+
+    Two sessions of the same device, so the two halves of the entity are
+    both visible: a fresh wake starts a fresh thread, and each session's
+    turns name the thread that session opened rather than a thread the
+    store invented for them.
+    """
+    with TestClient(create_app(recording_config(tmp_path))) as client:
+        with connect(client) as websocket:
+            shake_hands(websocket)
+            say_something(websocket)
+        with connect(client) as websocket:
+            shake_hands(websocket)
+            say_something(websocket)
+
+    threads = read("select * from conversations.conversations order by id")
+    turns = read("select * from conversations.turns order by id")
+
+    assert len(threads) == 2
+    for thread in threads:
+        assert thread["agent"] == "assistant"
+        assert thread["device"] == DEVICE_MAC.lower()
+        assert thread["incomplete"] is False
+        assert thread["created_at"] == thread["last_active_at"]
+        # Derived from the first utterance, which is the whole of the v1
+        # rule, and the same utterance the turn row kept.
+        assert thread["title"] == "remember that I like tea"
+    # Two wakes, two threads, and neither turn belongs to the other's.
+    named = [turn["conversation"] for turn in turns]
+    assert sorted(named) == sorted(thread["conversation"] for thread in threads)
+    assert len(set(named)) == 2
+
+
+def test_what_a_person_said_becomes_a_title_and_reaches_nothing_else(
+    tmp_path: Path, spy: list[Emission], caplog: pytest.LogCaptureFixture
+) -> None:
+    """A title is derived from what somebody said into a microphone, so
+    it is conversation content by the same rule the transcript is.
+
+    Where it belongs: the turn row it was transcribed into, and the
+    title the thread took from it. Where it must not be: any event
+    field, any row of the decision track, any record this server wrote
+    in either format a deployment ships, or any consumer handed the same
+    emission. The presence is asserted beside the absence, so a run that
+    stored nothing cannot pass this by keeping quiet.
+
+    The sentinel rides the mock ear's configured transcript, which is
+    also a provider option and therefore lands in the session row's
+    verbatim `providers` column. That is configuration this deployment
+    wrote rather than conversation, it is the same column the credential
+    case next door already governs, and it is on no surface this test
+    makes a claim about.
+    """
+    config = recording_config(
+        tmp_path, asr_text=SENTINEL, llm={"type": "mock", "reply": "Noted."}
+    )
+    with caplog.at_level("DEBUG"):
+        with TestClient(create_app(config)) as client:
+            with connect(client) as websocket:
+                shake_hands(websocket)
+                say_something(websocket)
+
+    (turn,) = read("select * from conversations.turns")
+    (thread,) = read("select * from conversations.conversations")
+    events = read("select * from conversations.events")
+
+    assert turn["heard"] == SENTINEL
+    assert thread["title"] == SENTINEL
+    assert turn["conversation"] == thread["conversation"]
+
+    assert [e for e in spy if e.payload["event"] == "heard"], "nothing was heard at all"
+    for emission in spy:
+        assert SENTINEL not in json.dumps(emission.payload, default=str)
+        assert SENTINEL not in repr(emission.args)
+    assert events, "the events half of the record is what this claim is about"
+    for row in events:
+        assert SENTINEL not in json.dumps(row, default=str)
+    assert caplog.records, "nothing was logged at all, so this proves nothing"
+    for record in caplog.records:
+        rendered = record.getMessage() + repr(record.args) + repr(record.__dict__)
+        assert SENTINEL not in rendered
+    assert SENTINEL not in caplog.text
+
+
 def test_the_turn_rows_and_the_event_rows_agree(tmp_path: Path) -> None:
     """The two halves are assembled by different code from different
     sources, so drift between them is the risk. One utterance is one

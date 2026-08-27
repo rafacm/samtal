@@ -622,9 +622,16 @@ jobs:
           # The head of the packaged chain. A new migration moves this
           # line, deliberately: a wheel that carried an older chain than
           # the one this commit expects is exactly what the check is for.
-          if revisions != {"1001_postgres_conversations"}:
-              sys.exit(f"the wheel's conversations chain is at {sorted(revisions)}, not ['1001_postgres_conversations']")
-          expected = {"sessions", "turns", "tool_invocations", "events"}
+          if revisions != {"1002_conversation_threads"}:
+              sys.exit(f"the wheel's conversations chain is at {sorted(revisions)}, not ['1002_conversation_threads']")
+          expected = {
+              "sessions",
+              "conversations",
+              "turns",
+              "tool_invocations",
+              "conversation_milestones",
+              "events",
+          }
           missing = expected - store_tables
           if missing:
               sys.exit("the wheel's conversations migrations did not create: " + ", ".join(sorted(missing)))

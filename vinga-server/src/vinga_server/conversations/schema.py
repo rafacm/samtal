@@ -25,6 +25,16 @@ Every column carries a `comment=`. That is what
 test fails on a column without one, the same discipline
 `Field(description=...)` enforces for the domain models.
 
+One entity here is named twice over, and saying so once saves the
+confusion. The schema is called `conversations` and so is a table
+inside it, which is why SQL spells the thread table
+`conversations.conversations`. The schema name is the store's; the
+table name is the entity's, and the entity is a thread between a user
+and exactly one agent, spanning sessions. A `turns` row names both the
+session it was spoken in and the thread it belongs to, so the session
+view and the thread view are two projections of one set of rows rather
+than two stores, and no dialogue is written twice.
+
 Two conventions run through the whole schema:
 
 - **Timestamps are UTC ISO-8601 text and offsets are integer
@@ -242,6 +252,106 @@ sessions = Table(
     Index("ix_sessions_started_at", "started_at"),
 )
 
+conversations = Table(
+    "conversations",
+    metadata,
+    Column(
+        "id",
+        BigInteger,
+        Identity(),
+        primary_key=True,
+        comment=(
+            "Monotonic row id, never reused. The tie-break half of the thread "
+            "listing's keyset cursor, since activity moves and two threads can "
+            "share a timestamp."
+        ),
+    ),
+    Column(
+        "conversation",
+        Text,
+        nullable=False,
+        unique=True,
+        comment=(
+            "The thread's uuid hex: the join key `turns.conversation` and "
+            "`conversation_milestones.conversation` carry, and what a resume "
+            "addresses. Minted by the runtime at the activation that opens the "
+            "thread, the same shape and role as `sessions.session`."
+        ),
+    ),
+    Column(
+        "agent",
+        Text,
+        nullable=False,
+        comment=(
+            "The agent this thread belongs to, and the only one it will ever "
+            "have: a conversation is a dialogue with exactly one agent, so a "
+            "handover starts a second thread rather than moving this one. Not "
+            "null, unlike `sessions.agent` and `turns.agent`, because a thread "
+            "with no agent is not a thread."
+        ),
+    ),
+    Column(
+        "device",
+        Text,
+        nullable=False,
+        comment=(
+            "The device the thread was begun on, in canonical MAC form. "
+            "Provenance rather than ownership: a thread is agent-scoped, so a "
+            "resume from any device bound to that agent reaches it, and this "
+            "column says where it started rather than where it may be "
+            "continued."
+        ),
+    ),
+    Column(
+        "title",
+        Text,
+        nullable=True,
+        comment=(
+            "What the thread is called, derived from its first utterance and "
+            "truncated. Conversation text, so it is null under text-off, and "
+            "null in a thread whose first turn had nothing to derive one from."
+        ),
+    ),
+    Column(
+        "incomplete",
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
+        comment=(
+            "Whether a write this thread needed was lost, so a resume can say "
+            "the record has gaps. Product state rather than telemetry, and "
+            "therefore deliberately outside the metrics switch: "
+            "`sessions.dropped` is zeroed under metrics-off and this is not. "
+            "Written by the durable path, which arrives with the writer's "
+            "acknowledgements; false in every thread until then."
+        ),
+    ),
+    Column(
+        "created_at",
+        Text,
+        nullable=False,
+        comment=(
+            "When the thread's first turn landed, UTC ISO-8601. The row "
+            "materializes with that turn rather than at activation, so a wake "
+            "that produced no transcript leaves no empty thread behind."
+        ),
+    ),
+    Column(
+        "last_active_at",
+        Text,
+        nullable=False,
+        comment=(
+            "When the thread's most recent turn landed, UTC ISO-8601, rewritten "
+            "by every turn. The listing orders on it and retention prunes on "
+            "it, which is what makes retention thread-aware: a thread stays "
+            "whole while it is being talked to, however old the session that "
+            "began it."
+        ),
+    ),
+    Index("ix_conversations_agent_activity", "agent", "last_active_at", "id"),
+    Index("ix_conversations_last_active", "last_active_at", "id"),
+)
+
 turns = Table(
     "turns",
     metadata,
@@ -259,6 +369,19 @@ turns = Table(
         comment="The `sessions.session` this turn belongs to.",
     ),
     Column(
+        "conversation",
+        Text,
+        nullable=False,
+        comment=(
+            "The `conversations.conversation` this turn belongs to, which with "
+            "the column above is what makes the session view and the thread "
+            "view two readings of one set of rows rather than two stores. Not "
+            "null: every stored turn belongs to the thread that was active when "
+            "it was spoken, the whole of the v1 rule, and a database this build "
+            "wrote holds no turn from before threads existed."
+        ),
+    ),
+    Column(
         "t_ms",
         Integer,
         nullable=False,
@@ -272,7 +395,13 @@ turns = Table(
         "agent",
         Text,
         nullable=True,
-        comment="The agent that answered, which a handover makes different from the session's.",
+        comment=(
+            "The agent that owns this turn, which is the one it started with "
+            "and therefore the one whose thread the column above names. A "
+            "handover makes it different from the session's, and makes it "
+            "different from the agent that finished the reply; `legs` is where "
+            "a split reply's per-agent truth lives."
+        ),
     ),
     Column(
         "heard",
@@ -391,6 +520,7 @@ turns = Table(
         ),
     ),
     Index("ix_turns_session", "session", "id"),
+    Index("ix_turns_conversation", "conversation", "id"),
 )
 
 tool_invocations = Table(
@@ -490,6 +620,77 @@ tool_invocations = Table(
     Index("ix_tool_invocations_turn", "turn"),
 )
 
+conversation_milestones = Table(
+    "conversation_milestones",
+    metadata,
+    Column(
+        "id",
+        BigInteger,
+        Identity(),
+        primary_key=True,
+        comment=(
+            "Row id, and what a later milestone names as its `parent` when it "
+            "consumed this one."
+        ),
+    ),
+    Column(
+        "conversation",
+        Text,
+        nullable=False,
+        comment="The `conversations.conversation` this checkpoint is on.",
+    ),
+    Column(
+        "from_turn",
+        BigInteger,
+        nullable=False,
+        comment=(
+            "The `turns.id` of the first turn the summarizer actually read. "
+            "Recorded so that a recap bounded by its input budget cannot claim "
+            "coverage of the turns it omitted: everything at or before this id "
+            "is truncated rather than summarized, and hydration treats it so."
+        ),
+    ),
+    Column(
+        "after_turn",
+        BigInteger,
+        nullable=False,
+        comment=(
+            "The `turns.id` of the last turn the summarizer read. Hydration "
+            "reads this milestone plus the turns with a greater id, which is "
+            "the whole of what "
+            "the checkpoint replaces."
+        ),
+    ),
+    Column(
+        "parent",
+        BigInteger,
+        nullable=True,
+        comment=(
+            "The `conversation_milestones.id` whose text was part of this "
+            "recap's input, and null when none was. The lineage is what makes "
+            "erasure transitive: content that reached this row only through an "
+            "earlier checkpoint is still this row's content."
+        ),
+    ),
+    Column(
+        "created_at",
+        Text,
+        nullable=False,
+        comment="When the checkpoint was stored, UTC ISO-8601.",
+    ),
+    Column(
+        "text",
+        Text,
+        nullable=True,
+        comment=(
+            "The recap, byte for byte as it was spoken. Conversation content "
+            "under the uniform rule, so null under text-off, though the flow "
+            "that writes one cannot run with text off."
+        ),
+    ),
+    Index("ix_conversation_milestones_conversation", "conversation", "id"),
+)
+
 events = Table(
     "events",
     metadata,
@@ -545,6 +746,15 @@ events = Table(
 )
 
 # Declaration order, which is also the order the reference documents
-# them in and the order a reader meets them: the spine, the timeline,
-# what the timeline called, and the decision track underneath.
-TABLES = (sessions, turns, tool_invocations, events)
+# them in and the order a reader meets them: the connection spine, the
+# threads that span it, the timeline both of them project, what the
+# timeline called, the checkpoints a thread accrues, and the decision
+# track underneath all of it.
+TABLES = (
+    sessions,
+    conversations,
+    turns,
+    tool_invocations,
+    conversation_milestones,
+    events,
+)
