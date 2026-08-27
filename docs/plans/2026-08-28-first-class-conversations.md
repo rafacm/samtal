@@ -270,7 +270,7 @@ registries:
 vinga session list [--device MAC] [--limit N]
 vinga session show <session>
 vinga session delete <session> [--force]
-vinga session purge [--device MAC] [--before YYYY-MM-DD] [--force]
+vinga session purge [--session ID] [--device MAC] [--before YYYY-MM-DD] [--force]
 vinga conversation list [--agent NAME] [--limit N]
 vinga conversation show <conversation>
 vinga conversation delete <conversation> [--force]
@@ -325,13 +325,18 @@ Three deletion surfaces, in milestones 2 and 3:
   `DELETE /api/conversations/{conversation}` (milestone 3) one named
   thread, row and children together: story 16 and the #282
   `--session` selector.
-- `DELETE /api/sessions?device=...&before=...` is the purge: at
-  least one of the two selectors, combined with AND when both are
-  given, deleting every matching session in one transaction with
-  exactly the per-session semantics and provenance cascades below
-  applied to the whole set, and answering the deleted counts. The
-  date selector's day semantics carry over unchanged from the #282
-  record.
+- `DELETE /api/sessions?session=...&device=...&before=...` is the
+  purge: at least one of the three settled selectors, combined with
+  AND when several are given, deleting every matching session in one
+  transaction with exactly the per-session semantics and provenance
+  cascades below applied to the whole set, and answering the deleted
+  counts. The selector set and the date selector's day semantics
+  carry over unchanged from the #282 record. A bare `session=`
+  purge and the named `DELETE /api/sessions/{session}` do the same
+  thing through the same `threads.py` helper, and the overlap is
+  deliberate: the named form is the address the UI and the noun
+  grammar want, the selector form is the settled purge surface, and
+  neither is a second bookkeeping path.
 - Retention remains the automatic age-based path, which is what the
   amendment means by the purge being absorbed rather than rivaled:
   the endpoint and the pruning pass share the deletion helpers in
@@ -339,8 +344,9 @@ Three deletion surfaces, in milestones 2 and 3:
 
 The CLI verbs are `session delete <session>`,
 `conversation delete <conversation>` and
-`session purge [--device MAC] [--before YYYY-MM-DD]` (at least one
-selector required, refused otherwise with a fixed sentence), all
+`session purge [--session ID] [--device MAC] [--before YYYY-MM-DD]`
+(at least one selector required, refused otherwise with a fixed
+sentence), all
 registered destructive per the cli-guide (confirm at a terminal,
 `--force`).
 
@@ -799,11 +805,12 @@ vinga_server/conversations/
                     transactions (m1)
     threads.py      NEW (m1): the thread store, owning what decision
                     5 assigns it: conversation lifecycle (row
-                    materialization, title derivation, last-activity,
-                    the dead-id rule), the retention ruleset, session
-                    and conversation deletion with their provenance
-                    cascades (m2), thread listing, detail and resume
-                    candidates (m2, m3), thread turns for hydration
+                    materialization, title derivation,
+                    last-activity), the retention ruleset, session
+                    deletion and the selector purge with their
+                    provenance cascades (m2), conversation deletion
+                    and the dead-id rule (m3), thread listing,
+                    detail and resume candidates (m2, m3), thread turns for hydration
                     (m4), and milestone policy (m5). What callers
                     stop knowing: the five-table join topology, the
                     deletion ordering that keeps children, parents
@@ -943,8 +950,9 @@ New coverage, by milestone:
   suites extend); both generated documents byte-green; the sentinel
   planted as an utterance shows up in the title and nowhere else.
 - **Milestone 2**: acknowledgement resolves on the durable commit
-  (gate seam); resolves false on tombstone, deleted conversation,
-  exhausted retries and shutdown; transient-failure retry proven
+  (gate seam); resolves false on session tombstone, exhausted
+  retries and shutdown (the deleted-conversation case is milestone
+  3's, with its endpoint); transient-failure retry proven
   with a raising-then-working engine; an events-transaction failure
   drops events only while the same marker's turns land; a dropped
   durable batch latches `incomplete` and the flag lands on the next
@@ -954,8 +962,9 @@ New coverage, by milestone:
   turns, empty conversation shells deleted, titles recomputed or
   nulled and `last_active_at` recomputed from survivors, the
   planted-title sentinel gone from every table and surface);
-  the selector purge by device, by date and combined, refused with
-  no selector, its counts answered, cascades applied to the set;
+  the selector purge by session, by device, by date and combined,
+  refused with no selector, its counts answered, cascades applied
+  to the set;
   running-session deletion ends its recording (existing tombstone
   test extended over HTTP); 401 without the token; CLI `session
   list|show|delete` through the client seam, confirmation and
@@ -1495,3 +1504,25 @@ appended as the amendments land.
    in the naming rule the new nouns actually meet, explains why the
    entry-less plural groups keep their names, and names the three
    guide edits the landing milestone makes.
+
+## Plan review round, confirmation
+
+A confirmation pass over the delta amendments (bcdf059d): codex CLI
+0.149.1, model gpt-5.6-terra, read-only, 2026-08-28, runtime 3m40s.
+Verdict as received: **ready after the listed amendments**. Two
+findings, both applied in the same change that records this round:
+
+1. **P1: conversation deletion still appears in milestone 2.** The
+   module layout assigned it to m2 and the m2 tests still named the
+   deleted-conversation acknowledgement case.
+   *Resolution*: adopted. The layout now assigns session deletion
+   and the purge to milestone 2 and conversation deletion with the
+   dead-id rule to milestone 3, and the milestone-2 test list keeps
+   only the session cases.
+2. **P1: the purge still dropped the settled `--session`
+   selector.**
+   *Resolution*: adopted. The purge endpoint and `session purge`
+   carry all three settled selectors, AND-combined per the #282
+   record; the named `DELETE /api/sessions/{session}` remains as
+   the address form, doing the same thing through the same helper,
+   with the deliberate overlap stated.
