@@ -1072,7 +1072,8 @@ New coverage, by milestone:
 One PR per milestone, ticked with its PR number, each linking to its
 implementation-doc section when written.
 
-- [ ] **Sessions are sessions, conversations exist** (branch
+- [x] [**Sessions are sessions, conversations exist**](2026-08-28-first-class-conversations-implementation.md#m1-sessions-are-sessions-conversations-exist)
+  (PR TBD, branch
   `feature/first-class-conversations`): the re-cut baseline
   `1002_conversation_threads` with its ADR addendum, stranded-database
   refusal and changelog breaking entry; the
