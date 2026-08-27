@@ -271,6 +271,26 @@ column is not a column. Both `delete` rows are registered
 destructive, so they confirm at a terminal and take `--force`. How
 printed content is bounded is the next section's rule.
 
+### Printed content cannot steer a terminal
+
+Titles, excerpts, dialogue text and every other content-bearing
+value these commands print originate in what a room said to a
+device, so the cli-guide's determinism rule applies with no content
+exemption: every such value passes through the merged `printable`
+bounding (truncate to a named width, then replace every unprintable
+character, ANSI escapes included, with a question mark) before it
+reaches a table cell or a block line. Inside a table cell, a tab or
+a newline is an unprintable and is substituted, because a cell that
+wraps stops being a cell; in a dialogue block, embedded newlines are
+substituted too and the block's own line structure comes only from
+the renderer, so nothing an utterance carries can add lines, move
+the cursor or recolor the terminal. Output is byte-identical at a
+terminal and through a pipe (no color, no terminal-dependent
+rendering anywhere in these commands). The tests plant
+ANSI-escape-bearing, control-character, tab and newline content in
+titles and dialogue and compare both streams byte for byte,
+terminal and redirected.
+
 ### One-session deletion, not selector-driven purge
 
 The retired `conversations purge` took `--session`, `--device` and
@@ -888,7 +908,9 @@ New coverage, by milestone:
   running-session deletion ends its recording (existing tombstone
   test extended over HTTP); 401 without the token; CLI `session
   list|show|delete` through the client seam, confirmation and
-  `--force`, fixed refusal sentences, sentinel absent from stderr;
+  `--force`, fixed refusal sentences, sentinel absent from stderr,
+  planted control-and-ANSI content bounded byte-identically at a
+  terminal and through a pipe;
   spellings manifest green.
 - **Milestone 3**: conversations list ordered by activity with the
   agent filter and the keyset cursor (empty, one page, exact
@@ -896,7 +918,10 @@ New coverage, by milestone:
   boundary, an activity change between pages, the half-supplied
   pair refused); detail; dialogue turns oldest-first with tool rows nested;
   DELETE conversation (turns leave their sessions' timelines,
-  sessions and events untouched); CLI `conversation list|show|delete`;
+  sessions and events untouched); CLI `conversation list|show|delete`, with
+  planted control-and-ANSI titles and dialogue bounded
+  byte-identically on both streams and the null title rendered as
+  the fixed `-`;
   OpenAPI and spellings green.
 - **Milestone 4**: boot refusals for both contradictory combinations,
   by fixed sentence and json pointer; hydrator input-to-output
@@ -1301,6 +1326,11 @@ resolution once the amendment addressing it lands.
     Specify deterministic bounded rendering (control characters,
     ANSI, tabs, newlines) and test terminal and redirected output
     byte for byte.
+    *Resolution*: adopted. A new section routes every printed
+    content value through the merged `printable` bounding with tabs
+    and newlines substituted in cells and blocks, forbids
+    terminal-dependent rendering in these commands, and names the
+    byte-for-byte tests on both streams.
 19. **P2: thread retention unnecessarily retains expired events.**
     Rule 3 keeps an old session's events whenever live-thread turns
     reference the session, though events are session-scoped
