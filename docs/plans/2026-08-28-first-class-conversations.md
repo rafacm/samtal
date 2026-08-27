@@ -243,21 +243,25 @@ starting pair while the legs carry both agents.
 
 ### The two CLI nouns, exactly
 
-The nouns are singular, and the choice is recorded here because the
-cli-guide's own text pulls both ways: its naming rule says singular
-when a noun addresses one entry and plural only for a collection
-"you only ever ask about as a whole", while its illustrative
-spellings (written before this plan existed, when listing was the
-only imagined verb) say `sessions list` and name plural nouns for
-this work. Both new nouns address one entry (`show`, `delete`), so
-the rule chooses singular, and consistency agrees: every merged noun
-in the grammar is singular (`provider`, `agent`, `device`,
-`mcp-server`, `prompt-fragment`), and `provider list` would not have
-been spelled `providers list`. The milestone that lands the noun
-updates the guide's two spellings and adds one sentence to its
-naming section recording this resolution with this plan as the
-record, so the guide stops contradicting itself rather than being
-silently overruled.
+The nouns are singular, and that is an explicit revision to the
+cli-guide, recorded as one. The guide today presents
+`vinga sessions list` in its noun-first examples and names
+`sessions` and `conversations` as the nouns this issue adds, and two
+merged plural groups exist on the server entry point
+(`vinga-server conversations`, `vinga-server events`), so singular
+is not the status quo and this plan does not pretend it is. The
+ground for the revision is the guide's own naming rule: singular
+when a noun addresses one entry, and both new nouns do (`show`,
+`delete` take an identity), exactly as the five configuration kinds
+(`provider`, `agent`, `device`, `mcp-server`, `prompt-fragment`) are
+singular for the same reason. The two merged plural groups address
+no entry (one renders the store's schema document, the other the
+event reference), so they keep their names under the same rule. The
+milestone that lands the noun revises the guide deliberately: the
+`sessions list` example spellings become `session list`, the
+noun-first sentence naming this issue's nouns moves to the singular,
+and the naming section gains a sentence recording the revision with
+this plan as the record.
 
 The signatures, all API-client verbs in the `GROUPS`/`COMMANDS`
 registries:
@@ -266,6 +270,7 @@ registries:
 vinga session list [--device MAC] [--limit N]
 vinga session show <session>
 vinga session delete <session> [--force]
+vinga session purge [--device MAC] [--before YYYY-MM-DD] [--force]
 vinga conversation list [--agent NAME] [--limit N]
 vinga conversation show <conversation>
 vinga conversation delete <conversation> [--force]
@@ -308,22 +313,36 @@ ANSI-escape-bearing, control-character, tab and newline content in
 titles and dialogue and compare both streams byte for byte,
 terminal and redirected.
 
-### One-session deletion, not selector-driven purge
+### Named deletion, and the purge with its settled selectors
 
 The retired `conversations purge` took `--session`, `--device` and
-`--before` selectors. The replacement is `DELETE
-/api/sessions/{session}` and `DELETE
-/api/conversations/{conversation}`, each deleting one named thing,
-row and children together, plus thread-aware retention as the
-age-based path. Reasons: retention is the module that owns bulk
-age-based deletion (the 2026-08-24 amendment says the purge should be
-absorbed by it, not rival it); a device-scoped or date-scoped bulk
-erase is a loop over the list endpoint an operator can script, and
-each selector combination would triple the test surface of a
-destructive endpoint; and the deletion stories in the issue (16, and
-the #282 record) are about erasing a named thing. The CLI verbs are
-`session delete <session>` and `conversation delete <conversation>`,
-destructive per the cli-guide (confirm at a terminal, `--force`).
+`--before` selectors, and the 2026-08-24 amendment makes that purge
+an authenticated endpoint with the CLI as its remote caller, so the
+selector semantics are settled scope, not this plan's to shrink.
+Three deletion surfaces, in milestones 2 and 3:
+
+- `DELETE /api/sessions/{session}` erases one named session, and
+  `DELETE /api/conversations/{conversation}` (milestone 3) one named
+  thread, row and children together: story 16 and the #282
+  `--session` selector.
+- `DELETE /api/sessions?device=...&before=...` is the purge: at
+  least one of the two selectors, combined with AND when both are
+  given, deleting every matching session in one transaction with
+  exactly the per-session semantics and provenance cascades below
+  applied to the whole set, and answering the deleted counts. The
+  date selector's day semantics carry over unchanged from the #282
+  record.
+- Retention remains the automatic age-based path, which is what the
+  amendment means by the purge being absorbed rather than rivaled:
+  the endpoint and the pruning pass share the deletion helpers in
+  `threads.py`, one bookkeeping path.
+
+The CLI verbs are `session delete <session>`,
+`conversation delete <conversation>` and
+`session purge [--device MAC] [--before YYYY-MM-DD]` (at least one
+selector required, refused otherwise with a fixed sentence), all
+registered destructive per the cli-guide (confirm at a terminal,
+`--force`).
 
 Deletion semantics, from the #282 record and the Postgres cutover:
 deletion is one transaction over the row and its children; a session
@@ -343,8 +362,10 @@ was derived from a deleted turn (the title source is the thread's
 first turn, so this is decidable from surviving rows) has its title
 recomputed from the earliest surviving turn or nulled; every
 milestone whose recorded coverage (`from_turn` through `after_turn`)
-intersects a deleted turn is deleted with it, because a summary of
-erased content is that content; and `last_active_at` is recomputed
+intersects a deleted turn is deleted with it, and so is every
+descendant along the `parent` lineage, because a summary of erased
+content is that content whether it arrived directly or through an
+earlier recap the summarizer consumed; and `last_active_at` is recomputed
 from the surviving turns. A conversation that loses every turn is
 deleted whole rather than left as an empty shell. Deleting a
 conversation deletes its turns and milestones out of their sessions'
@@ -434,9 +455,18 @@ state. The split (decision 10) lands inside the store:
   false, in the baseline), deliberately outside the metrics switch,
   because `sessions.dropped` is zeroed under metrics-off and product
   state may not be. When a durable batch is dropped, the writer
-  latches the affected conversation ids in memory and writes
-  `incomplete = true` as its own small transaction, retried at every
-  subsequent marker until it lands and again at session close. The
+  latches the affected conversation ids in memory. For a
+  conversation whose row is already materialized, `incomplete =
+  true` is written as its own small transaction, retried at every
+  subsequent marker until it lands and again at session close. When
+  the dropped batch held the thread's first turn there is no row to
+  flag and none is created (an empty thread is worse than a pending
+  flag): the pending id stays latched, and the first later
+  successful turn of that thread materializes the row with
+  `incomplete` already true, in that same row-and-turn transaction.
+  A thread whose every write fails leaves no row at all, which is
+  the honest record: there is nothing to resume and nothing claiming
+  otherwise. The
   residual window is stated rather than implied away: if the
   database never recovers before the process ends, neither the tail
   turns nor the flag persist, and the stored thread simply ends
@@ -689,7 +719,8 @@ with the offer:
      plus the turns after it, truncating oldest first under
      `RECAP_INPUT_BUDGET_TOKENS`, its own named constant) and records
      the range actually included: `from_turn`, the first covered
-     turn's id, and `after_turn`, the last.
+     turn's id, `after_turn`, the last, and, when a milestone was in
+     the input, its id as `parent`.
    - It runs one round against the active agent's own LLM provider
      with a fixed summarization instruction, under its own timeout
      (`RECAP_ROUND_TIMEOUT_S`).
@@ -720,10 +751,12 @@ with the offer:
 A milestone row is `conversation_milestones`: `id` (bigint identity),
 `conversation` (text), `from_turn` and `after_turn` (bigint, the
 first and last `turns.id` the summarizer actually read, so a bounded
-recap never claims turns it omitted), `created_at` (text, UTC
-ISO-8601), `text` (text, nullable under the text switch by the
-uniform rule, though the flow that creates one cannot run with text
-off). Milestone-aware hydration reads the latest row and the turns
+recap never claims turns it omitted), `parent` (bigint, nullable:
+the milestone whose text was part of this recap's input, recording
+that its content flows transitively into this one), `created_at`
+(text, UTC ISO-8601), `text` (text, nullable under the text switch
+by the uniform rule, though the flow that creates one cannot run
+with text off). Milestone-aware hydration reads the latest row and the turns
 with `id > after_turn`; turns at or before `from_turn` are outside
 the recorded coverage, exactly as oldest-first truncation would have
 dropped them, and the reference documentation states the boundary.
@@ -747,14 +780,16 @@ dropped them, and the reference documentation states the boundary.
 
 No event is renamed and none is removed; the four `conversations_*`
 store events keep their names (they name the store), and
-`ConversationsPruned` gains its additive count field in milestone 2.
+`ConversationsPruned` gains its additive count field in milestone
+1, with the retention ruleset it counts for.
 
 ## Module layout
 
 ```
 vinga_server/conversations/
-    schema.py       + conversations table (m1), conversation_milestones (m5),
-                    turns.conversation column (m1)
+    schema.py       + conversations table, conversation_milestones
+                    (dormant until m5) and turns.conversation, all in
+                    the m1 baseline
     records.py      + the (conversation, agent) owning snapshot on
                     TurnRecord (m1); Acknowledgement (m2)
     store.py        the queue writer: gains the two-transaction
@@ -919,9 +954,8 @@ New coverage, by milestone:
   turns, empty conversation shells deleted, titles recomputed or
   nulled and `last_active_at` recomputed from survivors, the
   planted-title sentinel gone from every table and surface);
-  conversation dead-id semantics (queued-before and produced-after
-  turns discarded with false acknowledgements, no row
-  re-materialized);
+  the selector purge by device, by date and combined, refused with
+  no selector, its counts answered, cascades applied to the set;
   running-session deletion ends its recording (existing tombstone
   test extended over HTTP); 401 without the token; CLI `session
   list|show|delete` through the client seam, confirmation and
@@ -935,7 +969,9 @@ New coverage, by milestone:
   boundary, an activity change between pages, the half-supplied
   pair refused); detail; dialogue turns oldest-first with tool rows nested;
   DELETE conversation (turns leave their sessions' timelines,
-  sessions and events untouched); CLI `conversation list|show|delete`, with
+  sessions and events untouched); conversation dead-id semantics
+  through the real endpoint (queued-before and produced-after turns
+  discarded with false acknowledgements, no row re-materialized); CLI `conversation list|show|delete`, with
   planted control-and-ANSI titles and dialogue bounded
   byte-identically on both streams and the null title rendered as
   the fixed `-`;
@@ -976,7 +1012,11 @@ New coverage, by milestone:
   hydration never skips turns the recap did not cover;
   milestone-aware hydration
   (latest milestone plus `id > after_turn`); milestones die with
-  their thread (retention and delete); the API detail exposes
+  their thread (retention and delete); the transitive erasure
+  sentinel (a turn represented only through an earlier milestone
+  consumed by a later recap: deleting its session deletes the parent
+  and every descendant along `parent`, the sentinel hunted through
+  every table and surface); the API detail exposes
   milestones; sentinel: recap text never reaches events or logs.
 
 ## Risks and mitigations
@@ -1049,8 +1089,9 @@ implementation-doc section when written.
 - [ ] **Durable turns and session erasure**
   (branch `feature/conversations-m2`): `Acknowledgement` and the
   durable turn commits; session deletion and its
-  provenance cascade in `threads.py`; `DELETE /api/sessions/{session}`; the `session`
-  CLI noun (`list`, `show`, `delete`); the spellings manifest;
+  provenance cascade in `threads.py`; `DELETE /api/sessions/{session}`
+  and the selector purge; the `session`
+  CLI noun (`list`, `show`, `delete`, `purge`); the spellings manifest;
   cli-guide's owed spelling updated. Design footprint: deepens
   `store.py` (durability as an internal property) and `threads.py`
   (semantic deletion with its provenance cascade). Documentation footprint:
@@ -1388,6 +1429,9 @@ appended as the amendments land.
    for milestone 5, though milestone 5 ships no migration. Say the
    table and its metadata land in milestone 1, dormant but
    documented, and milestone 5 adds only behavior.
+   *Resolution*: adopted. The module layout now puts the table, its
+   metadata and its documentation in the milestone-1 baseline,
+   dormant, with milestone 5 adding behavior only.
 2. **P1: the incomplete latch cannot cover a failed first turn.** A
    conversation row materializes only with its first turn, so a
    failed first durable batch leaves no row for the standalone
@@ -1395,6 +1439,11 @@ appended as the amendments land.
    violate the no-empty-thread rule. Apply a pending incomplete id
    to the first later successful row-and-turn transaction;
    standalone latch writes apply only to materialized rows.
+   *Resolution*: adopted. The latch paragraph now distinguishes the
+   two states: standalone flag writes only for materialized rows, a
+   failed first turn kept as a pending id that the first later
+   successful turn materializes with `incomplete` already true, and
+   the all-writes-failed thread honestly leaving no row.
 3. **P1: milestone deletion does not erase transitive recap
    content.** A recap consumes the latest milestone plus later
    turns, but records only the raw turns it read, so deleting a turn
@@ -1402,10 +1451,18 @@ appended as the amendments land.
    and leaves the descendant that transitively contains its content.
    Record parent lineage or inherited coverage, delete descendants
    of erased content, and add the transitive sentinel test.
+   *Resolution*: adopted. The milestone row gains `parent` (the
+   consumed milestone's id, recorded at recap time), deletion
+   removes descendants along that lineage wherever a covering
+   milestone dies, and the transitive sentinel test is in the
+   milestone-5 list.
 4. **P1: the dead-conversation endpoint test is assigned before its
    endpoint exists.** Milestone 2 tests dead-id behavior through the
    real endpoint while `DELETE /api/conversations/{conversation}`
    lands in milestone 3. Move one or the other.
+   *Resolution*: adopted. The dead-id contract and its
+   endpoint-driven tests move to milestone 3 with the endpoint;
+   milestone 2's list keeps the session-deletion and purge cases.
 5. **P1: the plan declines the settled API-backed purge
    requirement.** The issue amendment makes the session-record
    purge, whose retired command supported `--session`, `--device`
@@ -1413,10 +1470,18 @@ appended as the amendments land.
    caller; the plan replaced it with one-session deletes and told
    operators to script the rest. Retain the settled selection
    semantics or obtain an issue amendment.
+   *Resolution*: adopted. The deletion section is recut as named
+   deletion plus the purge endpoint with the settled `--device` and
+   `--before` selectors (AND-combined, one transaction, counts
+   answered, cascades applied to the set) and the `session purge`
+   CLI verb, sharing the `threads.py` helpers with retention so the
+   absorbed-not-rivaled rule holds.
 6. **P2: `ConversationsPruned.conversations` has conflicting
    milestone ownership.** Retention says milestone 1, the events
    section says milestone 2. Put the field, reference and tests in
    milestone 1 consistently.
+   *Resolution*: adopted. The events section now says milestone 1,
+   matching the retention section and the milestone-1 checklist.
 7. **P2: the plural-noun decline relies on reasons that do not
    hold.** The guide presents `vinga sessions list` as settled
    grammar and `conversations` and `events` are existing plural
@@ -1424,3 +1489,9 @@ appended as the amendments land.
    Singular may still be chosen for nouns that support `show` and
    `delete`, but as an explicit revision to the guide, not as a
    consequence of an already-singular grammar.
+   *Resolution*: adopted. The two-nouns section is rewritten as an
+   explicit guide revision: it names the guide's current plural
+   presentation and the two merged plural groups, grounds singular
+   in the naming rule the new nouns actually meet, explains why the
+   entry-less plural groups keep their names, and names the three
+   guide edits the landing milestone makes.
