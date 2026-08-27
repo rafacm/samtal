@@ -253,37 +253,62 @@ lost, and moves on; correct for telemetry, a silent hole for product
 state. The split (decision 10) lands inside the store:
 
 - **Class, not configuration**: `Turn` records (and milestone records
-  in milestone 5) are the durable class whenever the store records;
-  `Event` records stay the lossy class. No mode fork on the
-  resumption switch: one write behavior to test, and a deployment
-  that enables resumption later is not haunted by holes from before
-  the flip.
-- **Bounded retry, in place**: a marker transaction that fails with
-  turns in its batch retries in place up to `TURN_WRITE_ATTEMPTS`
-  (3, a named constant with its reason beside it) when the failure
-  is in the transient class the db classifier already names (lock
-  and serialization failures); a non-transient failure or an
-  exhausted budget falls through to today's behavior: the batch is
-  dropped and counted, `WriteFailed` is emitted, and the hole is
-  loud in the accounting (`sessions.dropped`) rather than silent.
-  Retries run on the writer thread with no sleep between attempts:
-  the transient class either clears at once or is not transient, and
-  the writer must not stall other sessions' batches.
+  in milestone 5), the conversation rows they materialize, and the
+  `Open`/`Close` control records are the durable class whenever the
+  store records; `Event` records stay the lossy class. No mode fork
+  on the resumption switch: one write behavior to test, and a
+  deployment that enables resumption later is not haunted by holes
+  from before the flip.
+- **Two transactions per marker**: the marker commit splits so
+  product state and telemetry never share a fate. Reaching a marker,
+  the writer commits the durable half of that session's batch first
+  (session row work, conversation rows, turns, tool invocations,
+  milestones) in one transaction, then the accumulated event rows in
+  a second. An event-transaction failure drops and counts events
+  exactly as today (`sessions.dropped`, `WriteFailed`) and touches
+  no turn; a durable-transaction failure never takes events' fate
+  either way.
+- **Bounded retry, then a loud hole**: a failed durable transaction
+  retries in place up to `TURN_WRITE_ATTEMPTS` (3, a named constant
+  with its reason beside it) when the failure is in the transient
+  class the db classifier already names (lock and serialization
+  failures); retries run on the writer thread with no sleep, since
+  the transient class either clears at once or is not transient and
+  the writer must not stall other sessions. A non-transient failure
+  or an exhausted budget drops the durable batch, and the hole stops
+  being silent through the next point.
+- **The incomplete latch is product state, not telemetry**: the
+  `conversations` table carries `incomplete` (boolean, default
+  false, in the baseline), deliberately outside the metrics switch,
+  because `sessions.dropped` is zeroed under metrics-off and product
+  state may not be. When a durable batch is dropped, the writer
+  latches the affected conversation ids in memory and writes
+  `incomplete = true` as its own small transaction, retried at every
+  subsequent marker until it lands and again at session close. The
+  residual window is stated rather than implied away: if the
+  database never recovers before the process ends, neither the tail
+  turns nor the flag persist, and the stored thread simply ends
+  earlier; the reference documentation states this bound. Resuming
+  an incomplete thread is warned, not prevented: the resume result
+  carries a fixed sentence saying the record has gaps, for the model
+  to convey.
 - **Acknowledgement**: `ConversationStore.record_turn` (and
   `TurnStore`/`SessionTurns`) return an `Acknowledgement`, a small
-  handle with `wait(timeout) -> bool` resolved by the writer when the
-  turn's marker transaction commits, or resolved false when the turn
-  is dropped (tombstoned session, exhausted retries, writer
-  shutdown). The pipeline's ordinary path ignores the return value,
-  so its never-block contract is untouched (the handle is created,
-  never awaited on the audio path). The consumers are milestone 4's
-  resume path, which waits bounded on the target thread's latest
-  acknowledgement before hydrating so a same-session switch-back
-  cannot read past its own writes, and milestone 5's recap, which
-  waits for the milestone row before speaking the recap as kept.
-  In milestone 2 the handle exists and nothing consumes it, which is
-  dormant machinery in the #120 sense; the store suite proves its
-  semantics through the gate seam.
+  handle with `wait(timeout) -> bool` resolved true by the writer
+  when that turn's durable transaction commits, and false when the
+  turn is dropped (tombstoned session, deleted conversation,
+  exhausted retries, writer shutdown). An acknowledgement speaks
+  only for its own turn: the resume path reads the thread's
+  `incomplete` flag as well, so a later success never implies an
+  earlier write landed. The pipeline's ordinary path ignores the
+  return value, so its never-block contract is untouched (the handle
+  is created, never awaited on the audio path). The consumers are
+  milestone 4's resume path, which waits bounded on the target
+  thread's latest acknowledgement before hydrating so a same-session
+  switch-back cannot read past its own writes, and milestone 5's
+  recap flow. In milestone 2 the handle exists and nothing consumes
+  it, which is dormant machinery in the #120 sense; the store suite
+  proves its semantics through the gate seam.
 
 ### Thread-aware retention, exactly
 
@@ -629,10 +654,14 @@ New coverage, by milestone:
   events carry `conversation` beside `agent` (the event-assertion
   suites extend); both generated documents byte-green; the sentinel
   planted as an utterance shows up in the title and nowhere else.
-- **Milestone 2**: acknowledgement resolves on commit (gate seam);
-  resolves false on tombstone, exhausted retries and shutdown;
-  transient-failure retry proven with a raising-then-working engine;
-  non-transient failure keeps today's counting; DELETE session
+- **Milestone 2**: acknowledgement resolves on the durable commit
+  (gate seam); resolves false on tombstone, deleted conversation,
+  exhausted retries and shutdown; transient-failure retry proven
+  with a raising-then-working engine; an events-transaction failure
+  drops events only while the same marker's turns land; a dropped
+  durable batch latches `incomplete` and the flag lands on the next
+  marker and survives metrics-off; an early failed turn followed by
+  a later success leaves the flag true; DELETE session
   round trip (row and children gone, live thread
   keeps its other turns, empty conversation shells deleted);
   running-session deletion ends its recording (existing tombstone
@@ -835,6 +864,13 @@ resolution once the amendment addressing it lands.
    on resumption; a later acknowledgement must not imply earlier
    writes succeeded; test event failure, metrics-off, and an early
    failure followed by a later success.
+   *Resolution*: adopted. The durable-path section now splits every
+   marker into a durable transaction and an events transaction with
+   independent fates, adds the `conversations.incomplete` latch as
+   product state deliberately outside the metrics switch (written as
+   its own retried transaction, with the never-recovered residual
+   window stated), scopes an acknowledgement to its own turn with
+   the resume path reading the flag, and names the three tests.
 3. **P1: milestone 1 cannot ship with only retention rule 1.** The
    existing session-age pruning would remove a recently active
    thread whose session crossed the cutoff, and rule 1 alone stops
