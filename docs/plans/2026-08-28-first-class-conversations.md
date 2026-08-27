@@ -123,25 +123,34 @@ once, in SQL only, and the schema reference explains it in one
 sentence. This also lands the resolution docgen.py:45-49 already
 anticipates: the store named `conversations` finally stores some.
 
-### The schema change is an in-place migration, and no backfill
+### The schema ships as a re-cut baseline: a recorded reset, no backfill
 
-The issue's 2026-08-21 amendment says there is no migration and no
-backfill, and that pre-existing databases are deleted rather than
-upgraded. That decision was taken when the store was SQLite and any
-schema change meant amending the baseline; since #283, the
-conversations chain has a Postgres baseline
-(`1001_postgres_conversations`) and the standing promise
-([product-promises](../architecture/product-promises.md#a-beta-database-is-never-left-behind))
-is that in-place upgrades begin there. The substance of the
-amendment, no derivation of threads from historical rows, stands
-untouched. The mechanism is now cheaper honored than broken: the
-change ships as one additive migration per milestone that needs one
-(`1002` adds `conversations` and `turns.conversation` in milestone 1,
-`1003` adds `conversation_milestones` in milestone 5), old turns keep
-a null `conversation` meaning "recorded before threads existed", and
-no database is stranded. The CI wheel-migration step's exact chain
-assertion (`vinga-server.yml`, the `1001_postgres_conversations`
-line) moves in the same change as each migration, deliberately.
+The issue's 2026-08-21 amendment is followed as written: there is no
+migration and no backfill, the store's schema is simply the new
+schema, and pre-existing databases are deleted rather than upgraded.
+Concretely, milestone 1 replaces `1001_postgres_conversations` with a
+new sole baseline, `1002_conversation_threads`, carrying the whole
+thread schema at once: the `conversations` table, `turns.conversation`
+(not null: after a reset no pre-thread turn can exist, so the column
+admits no legacy state), the `conversation_milestones` table (dormant
+until milestone 5, and its reference documentation says so), and the
+indexes named below. This is the priced exit the standing promise
+grants
+([product-promises](../architecture/product-promises.md#a-beta-database-is-never-left-behind)),
+exercised the way #243 and #283 exercised it: the same milestone
+appends an addendum to the 2026-08-20 ADR naming the databases it
+strands (anything stamped `1001_postgres_conversations`) and the
+tested path back (drop and recreate the database or the
+`conversations` schema, rerun `deploy/postgres-init.sql`, boot), and
+the changelog carries the breaking entry. A stranded database is
+refused loudly, never half-read: Alembic cannot locate the deleted
+revision, the db classifier maps that failure to a fixed sentence
+naming the reset procedure and no value, and the boot refusal has its
+own test against a database stamped `1001`. The CI wheel-migration
+step's exact chain assertion (`vinga-server.yml`) moves once, in
+milestone 1, to `['1002_conversation_threads']`, and its
+expected-tables list gains the two new tables; milestone 5 ships no
+migration at all.
 
 ### A conversation row lands with its first turn, not at activation
 
@@ -173,7 +182,7 @@ direction with no owning issue, and v1 deliberately does not
 implement it: the honest v1 statement, recorded in the schema
 reference, is that every stored turn belongs to the thread that was
 active when it was spoken. Nothing precludes the refinement; it would
-null the column on meta turns later.
+relax the column for meta turns in a migration of its own later.
 
 ### The rename, precisely
 
@@ -492,7 +501,7 @@ vinga_server/conversations/
     cli.py          untouched (the schema command stays)
     docgen.py       new tables and the retention prose follow their
                     milestones
-    migrations/     1002 (m1), 1003 (m5)
+    migrations/     the re-cut baseline 1002_conversation_threads (m1)
 vinga_server/tools/
     names.py        + NEW_CONVERSATION, RESUME_CONVERSATION (m4)
     builtin.py      + the two tool declarations and the discovery
@@ -567,8 +576,8 @@ writer the store already owns, and a wrapper would be a pass-through.
   command, reference file). The command-spellings manifest
   regenerates in the same commit as the last documentation edit of
   any milestone that moves a spelling (the #309 lesson, verbatim in
-  the briefs). The workflow's chain assertions and expected-tables
-  lists move with migrations 1002 and 1003, named per milestone.
+  the briefs). The workflow's chain assertion and expected-tables
+  list move once, with the re-cut baseline in milestone 1.
 
 ## PR structure
 
@@ -595,8 +604,10 @@ and the per-worker database fixtures.
 
 New coverage, by milestone:
 
-- **Milestone 1**: migration 1002 up on a populated database (old
-  turns readable, `conversation` null); conversation row lands with
+- **Milestone 1**: the re-cut baseline migrates a fresh database and
+  the wheel step proves it from the installed artifact; a database
+  stamped `1001_postgres_conversations` is refused at boot with the
+  fixed reset sentence; conversation row lands with
   the first turn and not at activation; per-agent minting across a
   handover (two threads, the handover turn on the first); title
   derivation (truncation boundary, text-off null title);
@@ -640,7 +651,7 @@ New coverage, by milestone:
   `conversation_resumed` emitted; integration: two real sessions
   over websockets, resume by description in the second, the thread
   continues (the lane's one new end-to-end case).
-- **Milestone 5**: migration 1003; over-budget resume offers instead
+- **Milestone 5**: over-budget resume offers instead
   of swapping; consent stores the milestone durably, installs
   milestone-plus-tail, and the stored text equals the tool result;
   decline stores nothing and resumes the tail; summarization failure
@@ -695,7 +706,9 @@ One PR per milestone, ticked with its PR number, each linking to its
 implementation-doc section when written.
 
 - [ ] **Sessions are sessions, conversations exist** (branch
-  `feature/first-class-conversations`): migration 1002; the
+  `feature/first-class-conversations`): the re-cut baseline
+  `1002_conversation_threads` with its ADR addendum, stranded-database
+  refusal and changelog breaking entry; the
   `TurnRecord` conversation id; minting at `_activate_agent` per
   session and agent; the writer's conversation rows, titles and
   `last_active_at`; the minimal conversation pruning rule; the API
@@ -753,10 +766,10 @@ implementation-doc section when written.
   with dispositions recorded), `CHANGELOG.md` (behavior change: the
   clean switch).
 - [ ] **Recap milestones** (branch `feature/conversations-m5`):
-  migration 1003; the recap offer, consent and decline flow; the
+  the recap offer, consent and decline flow; the
   summarization round with its bounds and fallback; milestone-aware
-  hydration; milestones on the API detail; `milestone_recorded`;
-  the workflow's chain assertion moved again. Design footprint:
+  hydration; milestones on the API detail; `milestone_recorded`.
+  Design footprint:
   deepens `store.py`, `threads.py`, `hydration.py` and the resume
   interception; no new module. Documentation footprint:
   `docs/reference/conversations-schema.md`,
@@ -793,6 +806,16 @@ resolution once the amendment addressing it lands.
    issue with a documented and tested reset, or obtain an explicit
    amendment first; migration cannot be the concrete implementation
    of "no migration".
+   *Resolution*: adopted in its first form. The schema section is
+   rewritten as a recorded reset: one re-cut sole baseline
+   `1002_conversation_threads` carrying the whole thread schema
+   (milestones table included, dormant until milestone 5, so
+   milestone 5 ships no migration), an addendum to the 2026-08-20
+   ADR naming the stranded databases and the tested path back, a
+   fixed boot refusal for a database stamped `1001`, the changelog
+   breaking entry, and the wheel step's chain assertion moving once.
+   A consequence adopted with it: `turns.conversation` is not null,
+   since no pre-thread turn can exist after a reset.
 2. **P1: the durable path still drops product state with
    telemetry.** Turns and events share one marker transaction, a
    failed batch is discarded whole after retries, ordinary recording
