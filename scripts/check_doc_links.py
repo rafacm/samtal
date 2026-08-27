@@ -5,9 +5,16 @@ Usage: python3 scripts/check_doc_links.py <repo-root>
 
 Scans README.md, AGENTS.md, vinga-server/README.md,
 vinga-esp32/README.md and everything under docs/ for markdown links.
-Relative links must resolve to an existing file or directory; a
-#fragment must match a heading anchor (GitHub slugification) in the
-target file. External schemes are skipped. Exit 1 on any failure.
+A relative link must resolve to an existing file or directory inside
+the checkout; a #fragment must match a heading anchor (GitHub
+slugification) in the target file. External schemes are skipped.
+Exit 1 on any failure, 2 on a bad invocation.
+
+A failure line names the file and line and the kind of failure, and
+deliberately nothing else: link destinations are repository content,
+and a value that should never have been in a document must not be
+republished into a CI log by the tool that finds its link broken.
+The file and line are enough to open the failure.
 
 Two stated limits, both discovered in use during the #310 chain. A
 link wrapped across two source lines is invisible to this checker
@@ -22,8 +29,12 @@ import re
 import sys
 from pathlib import Path
 
-LINK_RE = re.compile(r"(?<!\!)\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
-IMG_RE = re.compile(r"\!\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
+LINK_RE = re.compile(
+    r"(?<!\!)\[[^\]]*\]\((<[^>]*>|[^)\s]+)(?:\s+\"[^\"]*\")?\)"
+)
+IMG_RE = re.compile(
+    r"\!\[[^\]]*\]\((<[^>]*>|[^)\s]+)(?:\s+\"[^\"]*\")?\)"
+)
 HEADING_RE = re.compile(r"^#{1,6}\s+(.*)$")
 CODE_FENCE_RE = re.compile(r"^(```|~~~)")
 SKIP_SCHEMES = ("http://", "https://", "mailto:", "ftp://")
@@ -39,9 +50,16 @@ def slugify(heading: str) -> str:
 
 
 def anchors_of(path: Path, cache: dict) -> set:
+    """Every anchor the file's headings occupy.
+
+    Duplicate slugs are suffixed the way github-slugger does it: the
+    base slug's counter advances until it lands on a slug nothing has
+    emitted yet, so `Foo`, `Foo-1`, `Foo` yields `foo`, `foo-1`,
+    `foo-2`, never a second `foo-1`.
+    """
     if path not in cache:
-        seen: dict = {}
-        anchors = set()
+        counters: dict = {}
+        anchors: set = set()
         in_fence = False
         for line in path.read_text(encoding="utf-8").splitlines():
             if CODE_FENCE_RE.match(line):
@@ -53,9 +71,12 @@ def anchors_of(path: Path, cache: dict) -> set:
             if not m:
                 continue
             slug = slugify(m.group(1))
-            n = seen.get(slug, 0)
-            seen[slug] = n + 1
-            anchors.add(slug if n == 0 else f"{slug}-{n}")
+            candidate = slug
+            while candidate in anchors:
+                n = counters.get(slug, 0) + 1
+                counters[slug] = n
+                candidate = f"{slug}-{n}"
+            anchors.add(candidate)
         cache[path] = anchors
     return cache[path]
 
@@ -72,11 +93,21 @@ def links_of(path: Path):
             continue
         for regex in (LINK_RE, IMG_RE):
             for m in regex.finditer(line):
-                yield lineno, m.group(1)
+                raw = m.group(1)
+                if raw.startswith("<") and raw.endswith(">"):
+                    raw = raw[1:-1]
+                yield lineno, raw
 
 
 def main() -> int:
-    root = Path(sys.argv[1]).resolve()
+    if len(sys.argv) != 2:
+        print("usage: check_doc_links.py <repo-root>", file=sys.stderr)
+        return 2
+    root = Path(sys.argv[1])
+    if not root.is_dir():
+        print("the given repo-root is not a directory", file=sys.stderr)
+        return 2
+    root = root.resolve()
     files = [
         p
         for p in [
@@ -89,25 +120,44 @@ def main() -> int:
     ] + sorted((root / "docs").rglob("*.md"))
     cache: dict = {}
     failures = 0
+
+    def fail(md: Path, lineno: int, kind: str) -> None:
+        nonlocal failures
+        print(f"{md.relative_to(root)}:{lineno}: {kind}")
+        failures += 1
+
     for md in files:
-        for lineno, raw in links_of(md):
-            if raw.startswith(SKIP_SCHEMES) or raw.startswith("<"):
+        try:
+            found = list(links_of(md))
+        except (OSError, UnicodeDecodeError):
+            fail(md, 0, "unreadable file")
+            continue
+        for lineno, raw in found:
+            if raw.startswith(SKIP_SCHEMES):
                 continue
             target, _, fragment = raw.partition("#")
             if target == "":
                 resolved = md
             else:
-                resolved = (md.parent / target).resolve()
+                try:
+                    resolved = (md.parent / target).resolve()
+                except OSError:
+                    fail(md, lineno, "unresolvable target")
+                    continue
+                if not resolved.is_relative_to(root) or ".git" in resolved.parts:
+                    fail(md, lineno, "target outside the checkout")
+                    continue
                 if not resolved.exists():
-                    print(f"{md.relative_to(root)}:{lineno}: "
-                          f"missing target {raw}")
-                    failures += 1
+                    fail(md, lineno, "missing target")
                     continue
             if fragment and resolved.suffix == ".md" and resolved.is_file():
-                if fragment not in anchors_of(resolved, cache):
-                    print(f"{md.relative_to(root)}:{lineno}: "
-                          f"missing anchor {raw}")
-                    failures += 1
+                try:
+                    known = anchors_of(resolved, cache)
+                except (OSError, UnicodeDecodeError):
+                    fail(md, lineno, "unreadable target")
+                    continue
+                if fragment not in known:
+                    fail(md, lineno, "missing anchor")
     print(f"checked {len(files)} files, {failures} failures")
     return 1 if failures else 0
 
