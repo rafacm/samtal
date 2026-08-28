@@ -16,10 +16,11 @@ arbitrary:
   or sitting in a per-session batch that no marker has committed. A
   count that stopped at the queue would bound nothing, since a session
   that never reaches a marker holds its events in memory while the
-  producer sees a fresh allowance. `Open`, `Turn` and `Close` are control records
-  and are never refused: they are the store's structural truth, they
-  arrive at conversational pace, and a dropped `Close` would leave the
-  store unable to record its own incompleteness.
+  producer sees a fresh allowance. `Open`, `Turn`, `Milestone` and
+  `Close` are control records and are never refused: they are the
+  store's structural truth, they arrive at conversational pace, and a
+  dropped `Close` would leave the store unable to record its own
+  incompleteness.
 - **The writer commits at markers, into per-session batches.** One queue
   carries every session, so a marker commits exactly its own session's
   accumulated batch inside two short transactions, and the chain's
@@ -28,8 +29,8 @@ arbitrary:
   turn.
 - **Product state and telemetry never share a fate.** The two
   transactions are the durable half (the session row, the threads, the
-  turns and their invocations) and the lossy half (the event rows), in
-  that order and with independent outcomes. A durable transaction that
+  turns and their invocations, the recap checkpoints) and the lossy
+  half (the event rows), in that order and with independent outcomes. A durable transaction that
   fails on the transient class the db classifier names is retried in
   place up to `TURN_WRITE_ATTEMPTS`; when it is finally dropped, the
   hole is latched on the thread as `conversations.incomplete` rather
@@ -100,6 +101,7 @@ from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations import schema, threads
 from vinga_server.conversations.records import (
     Acknowledgement,
+    MilestoneRecord,
     ToolInvocation,
     TurnLeg,
     TurnRecord,
@@ -355,6 +357,22 @@ class Turn:
 
 
 @dataclass(frozen=True)
+class Milestone:
+    """One consented recap checkpoint. A control record and a marker,
+    for the reason a turn is one: it is conversation content on the
+    durable class, and its caller is waiting to hear whether it landed.
+
+    No `t_ms`: a checkpoint is not a moment in a session's timeline, it
+    is a fact about a thread. What it is stamped with is the marker's
+    own clock reading, like the activity a turn moves.
+    """
+
+    session: str
+    record: MilestoneRecord
+    acknowledgement: Acknowledgement
+
+
+@dataclass(frozen=True)
 class Close:
     """A session ended. A marker, and the last record of that session."""
 
@@ -414,6 +432,7 @@ class _Batch:
     that no transaction is open while the writer waits."""
 
     turns: list[Turn] = field(default_factory=list)
+    milestones: list[Milestone] = field(default_factory=list)
     events: list[Event] = field(default_factory=list)
 
 
@@ -652,6 +671,28 @@ class ConversationStore:
             self._queue.put_nowait(Turn(session_id, record, t_ms, acknowledgement))
         return acknowledgement
 
+    def record_milestone(
+        self, session_id: str, record: MilestoneRecord
+    ) -> Acknowledgement:
+        """One consented recap checkpoint. A control record and a
+        marker, exactly as a turn is, and answered with a handle for the
+        same reason: its caller is the one path that has to know whether
+        the write landed.
+
+        It is the only durable record whose handle is really waited on,
+        and the wait happens after the user has already heard the recap.
+        That ordering is the whole guarantee: a checkpoint is enqueued
+        only once its text has been spoken, so a write that lands after
+        its caller stopped waiting is late but never a summary nobody
+        heard."""
+        acknowledgement = Acknowledgement()
+        with self._lock:
+            if self._stopped:
+                acknowledgement.settle(False)
+                return acknowledgement
+            self._queue.put_nowait(Milestone(session_id, record, acknowledgement))
+        return acknowledgement
+
     def close_session(
         self, session_id: str, duration_s: float | None = None, reason: str | None = None
     ) -> None:
@@ -732,6 +773,15 @@ class ConversationStore:
             batch.turns.append(item)
             self._commit(item.session)
             return
+        if isinstance(item, Milestone):
+            batch = self._batches.get(item.session)
+            if batch is None:
+                item.acknowledgement.settle(False)
+                self._refuse(item.session)
+                return
+            batch.milestones.append(item)
+            self._commit(item.session)
+            return
         if isinstance(item, Close):
             if item.session not in self._batches:
                 self._refuse(item.session)
@@ -796,7 +846,7 @@ class ConversationStore:
                 item = self._queue.get_nowait()
             except queuing.Empty:
                 return
-            if isinstance(item, Turn):
+            if isinstance(item, Turn | Milestone):
                 item.acknowledgement.settle(False)
 
     def _commit(
@@ -824,7 +874,13 @@ class ConversationStore:
         batch = self._batches.get(session_id)
         if batch is None:
             return
-        if opening is None and closing is None and not batch.turns and not batch.events:
+        if (
+            opening is None
+            and closing is None
+            and not batch.turns
+            and not batch.milestones
+            and not batch.events
+        ):
             # Nothing to write and no row to touch. A transaction here
             # would be a write lock taken for the sake of taking one,
             # which is exactly what holding no lock between markers is
@@ -844,8 +900,13 @@ class ConversationStore:
         if outcome is _Durable.COMMITTED:
             # Written, and therefore deletable: from here on, a deletion
             # naming one of these threads makes its id dead rather than
-            # leaving it to materialize again.
-            self._written.update(item.record.conversation for item in batch.turns)
+            # leaving it to materialize again. A checkpoint counts as
+            # much as a turn, because it is a row on the thread and an
+            # erasure of that thread has to be able to stop it.
+            self._written.update(
+                item.record.conversation
+                for item in [*batch.turns, *batch.milestones]
+            )
         # Nothing is answered before the transaction that decides it has
         # committed, and that is why the incomplete marks are inside it:
         # a waiter woken by an acknowledgement reads the thread's row
@@ -1078,19 +1139,22 @@ class ConversationStore:
             # A hole in a thread that no longer exists is not a fact
             # about anything, and its flag would never land.
             self._incomplete -= newly
-        if not self._dead or not batch.turns:
+        if not self._dead:
             return
-        kept = []
-        for item in batch.turns:
-            if item.record.conversation in self._dead:
-                item.acknowledgement.settle(False)
-            else:
-                kept.append(item)
-        batch.turns[:] = kept
+        for held in (batch.turns, batch.milestones):
+            kept: list[Any] = []
+            for item in held:
+                if item.record.conversation in self._dead:
+                    item.acknowledgement.settle(False)
+                else:
+                    kept.append(item)
+            held[:] = kept
 
     def _settle(self, batch: _Batch, landed: bool) -> None:
-        """What became of every turn of this batch, said once each."""
-        for item in batch.turns:
+        """What became of every durable record of this batch, said once
+        each. A checkpoint answers the same way a turn does, because
+        what its caller asked was the same question."""
+        for item in [*batch.turns, *batch.milestones]:
             item.acknowledgement.settle(landed)
 
     def _alive(self, connection: Any, session_id: str) -> bool:
@@ -1138,6 +1202,22 @@ class ConversationStore:
                     incomplete=item.record.conversation in self._incomplete,
                 ),
             )
+        for checkpoint in batch.milestones:
+            # After the turns of this marker, because the consent turn
+            # is one of them: a checkpoint is recorded on a thread the
+            # same transaction has just moved, and a thread with no row
+            # is refused here exactly as a misattributed turn is.
+            threads.checkpointed(
+                connection,
+                threads.Checkpoint(
+                    conversation=checkpoint.record.conversation,
+                    from_turn=checkpoint.record.from_turn,
+                    after_turn=checkpoint.record.after_turn,
+                    parent=checkpoint.record.parent,
+                    at=at,
+                    text=checkpoint.record.text if self.text else None,
+                ),
+            )
 
     def _failed(self, session_id: str, batch: _Batch, exc: BaseException) -> None:
         """A durable transaction that did not commit. The batch is gone
@@ -1146,11 +1226,12 @@ class ConversationStore:
         session row stays open-shaped, which is the store's documented
         incomplete state: readable, listed with its null close, and
         pruned on `started_at` like any other."""
-        self._lost[session_id] = self._lost.get(session_id, 0) + len(batch.turns)
+        durable = [*batch.turns, *batch.milestones]
+        self._lost[session_id] = self._lost.get(session_id, 0) + len(durable)
         # Product state, and deliberately not under the metrics switch:
         # `sessions.dropped` above is zeroed under metrics-off and a
         # thread with a hole in it is true either way.
-        self._incomplete.update(item.record.conversation for item in batch.turns)
+        self._incomplete.update(item.record.conversation for item in durable)
         events.emit(lambda: WriteFailed(failure=ClassName.of(exc)))
 
     # --- rows, with both switches applied ------------------------------
@@ -1382,6 +1463,7 @@ __all__ = [
     "ConversationStore",
     "Event",
     "Half",
+    "Milestone",
     "Open",
     "SessionSink",
     "Turn",

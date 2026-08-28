@@ -20,6 +20,10 @@ Three properties, and each is provable only here:
   metrics switch, latched in memory until a transaction lands it, set
   from the first byte of a row that materializes after the loss, and
   true by the time the next turn of that thread is acknowledged.
+
+The last section is the recap checkpoint, which is on this path for the
+same three reasons and is the one record whose handle a caller really
+waits on.
 """
 
 import datetime as dt
@@ -36,7 +40,11 @@ from tests.support.sessions import Gate, until
 from tests.support.stores import CONVERSATIONS_MANIFEST as MANIFEST
 from tests.support.stores import rows
 from vinga_server.config.models import DatabaseConfig
-from vinga_server.conversations.records import SessionTurns, TurnRecord
+from vinga_server.conversations.records import (
+    MilestoneRecord,
+    SessionTurns,
+    TurnRecord,
+)
 from vinga_server.conversations.schema import sessions as sessions_table
 from vinga_server.conversations.store import (
     TURN_WRITE_ATTEMPTS,
@@ -523,3 +531,122 @@ def test_a_loss_flags_only_the_threads_it_touched(stores) -> None:
 
     flagged = {row["conversation"]: row["incomplete"] for row in rows("conversations")}
     assert flagged == {CONVERSATION: False, OTHER: True}
+
+
+# A recap checkpoint on the same path
+
+
+def a_checkpoint(
+    conversation: str = CONVERSATION, text: str = "we talked about galaxies", **overrides: Any
+) -> MilestoneRecord:
+    fields: dict[str, Any] = {
+        "conversation": conversation,
+        "from_turn": 1,
+        "after_turn": 1,
+        "parent": None,
+        "text": text,
+    }
+    fields.update(overrides)
+    return MilestoneRecord(**fields)
+
+
+def test_a_checkpoint_lands_with_the_turn_that_consented_to_it(stores) -> None:
+    """The durable class, and the same marker: the consent turn and the
+    recap it became are one transaction, so a reader never finds a
+    checkpoint on a thread whose last turn is missing."""
+    store = stores()
+    store.start()
+    store.open_session("alpha", 100.0, MANIFEST)
+    store.record_turn("alpha", a_turn())
+    landed = store.record_milestone(
+        "alpha", a_checkpoint(from_turn=4, after_turn=9, parent=None)
+    )
+
+    assert landed.wait(TIMEOUT_S) is True
+    (row,) = rows("conversation_milestones")
+    assert (row["conversation"], row["from_turn"], row["after_turn"]) == (
+        CONVERSATION,
+        4,
+        9,
+    )
+    assert row["text"] == "we talked about galaxies"
+    assert row["parent"] is None
+
+
+def test_a_checkpoints_text_follows_the_text_switch(stores) -> None:
+    """Conversation content under the uniform rule. The flow that writes
+    one cannot run with text off, and the writer applies the switch
+    anyway, because storage policy is the writer's in one place."""
+    store = stores(text=False)
+    store.start()
+    store.open_session("alpha", 100.0, MANIFEST)
+    store.record_turn("alpha", a_turn())
+    store.record_milestone("alpha", a_checkpoint()).wait(TIMEOUT_S)
+
+    (row,) = rows("conversation_milestones")
+    assert row["text"] is None
+    assert row["from_turn"] == 1
+
+
+def test_a_checkpoint_records_the_lineage_it_consumed(stores) -> None:
+    """`parent` is what makes erasure transitive: a recap that folded an
+    earlier one into itself says so, and the row it names is the one
+    this store just wrote."""
+    store = stores()
+    store.start()
+    store.open_session("alpha", 100.0, MANIFEST)
+    store.record_turn("alpha", a_turn())
+    store.record_milestone("alpha", a_checkpoint()).wait(TIMEOUT_S)
+    (first,) = rows("conversation_milestones")
+
+    store.record_milestone(
+        "alpha", a_checkpoint(text="and then about recipes", parent=first["id"])
+    ).wait(TIMEOUT_S)
+
+    assert [row["parent"] for row in rows("conversation_milestones")] == [
+        None,
+        first["id"],
+    ]
+
+
+def test_a_checkpoint_for_an_erased_thread_is_discarded(stores) -> None:
+    """The dead-id rule reaches a checkpoint exactly as it reaches a
+    turn: a thread this writer wrote and a deletion has since named is
+    never written to again, whatever kind of row is on its way."""
+    store, _ = recording(stores, lambda count: None)
+    store.record_turn("alpha", a_turn()).wait(TIMEOUT_S)
+    store.forget({CONVERSATION})
+
+    landed = store.record_milestone("alpha", a_checkpoint())
+
+    assert landed.wait(TIMEOUT_S) is False
+    assert rows("conversation_milestones") == []
+
+
+def test_a_lost_checkpoint_flags_its_thread_and_says_so(stores) -> None:
+    """A checkpoint is product state, so a batch that dropped one is a
+    hole in that thread rather than a counter somewhere: the handle
+    answers false and the thread is marked, which is what makes the next
+    resume warn."""
+    store, _ = recording(
+        stores, lambda count: RuntimeError("no") if count == 2 else None
+    )
+    store.record_turn("alpha", a_turn()).wait(TIMEOUT_S)
+
+    landed = store.record_milestone("alpha", a_checkpoint())
+    assert landed.wait(TIMEOUT_S) is False
+
+    store.record_turn("alpha", a_turn(heard="carrying on")).wait(TIMEOUT_S)
+    store.stop()
+    (thread,) = rows("conversations")
+    assert thread["incomplete"] is True
+    assert rows("conversation_milestones") == []
+
+
+def test_a_checkpoint_the_writer_will_never_see_is_acknowledged_false(stores) -> None:
+    store = stores()
+    store.start()
+    store.open_session("alpha", 100.0, MANIFEST)
+    store.stop()
+
+    assert store.record_milestone("alpha", a_checkpoint()).wait(TIMEOUT_S) is False
