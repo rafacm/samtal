@@ -88,7 +88,8 @@ import enum
 import logging
 import queue as queuing
 import threading
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -226,6 +227,48 @@ _UNKNOWN_WARNED_MAX = 64
 _writers: "list[ConversationStore]" = []
 _writers_lock = threading.Lock()
 
+# The order the two halves of the dead-id rule are put in, above the
+# database's own lock.
+#
+# The chain's advisory lock already serializes a deletion's transaction
+# against a writer's, and for a while that looked like enough. It is not,
+# because the deletion is two steps rather than one: the rows go in the
+# transaction and the ids are published to the writer afterwards, and
+# between the commit that releases the advisory lock and the publication
+# there is an instant in which a writer can take the lock, find nothing
+# published, and write a turn onto a thread that has just been deleted.
+# This lock covers that instant. A deletion holds it across its
+# transaction AND its publication; the writer holds it from before it
+# opens a durable transaction until that transaction has the advisory
+# lock and has read what was published. So the two are totally ordered:
+# whichever went first, the second one sees all of it.
+#
+# The ordering rule that makes it safe is one sentence, and both sides
+# keep it: this lock is taken OUTSIDE the chain's advisory lock, never
+# inside. A holder of the advisory lock that then waited for this one
+# would close a cycle with a holder of this one waiting for the advisory
+# lock. Nothing else in this module takes it: retention and the events
+# half take the advisory lock alone, which is a wait rather than a cycle
+# because neither of them ever wants this.
+#
+# A process-level lock and not a per-store one, for the reason the
+# register above gives: a deletion runs where no store object need
+# exist at all.
+_erasure_order = threading.Lock()
+
+
+@contextmanager
+def erasure_order() -> "Iterator[None]":
+    """Hold a deletion's place in the order above, for its transaction
+    and the publication that follows it.
+
+    Entered before the transaction is opened and left after `erased()`
+    has been called, which is what makes publishing after the commit
+    safe: a writer cannot slip its own transaction between the two.
+    """
+    with _erasure_order:
+        yield
+
 
 def erased(threads_gone: "Iterable[str]") -> None:
     """Tell whatever writer is recording in this process that these
@@ -237,22 +280,14 @@ def erased(threads_gone: "Iterable[str]") -> None:
     so out loud, and the writer decides what that means for a turn
     already on its way.
 
-    Called from inside the deletion's own transaction, which is where
-    the ordering is decided rather than hoped for: that transaction
-    holds the chain's advisory lock, and the writer takes the same lock
-    at every marker, so a writer is never inside a marker while this
-    runs. It either committed before the deletion, in which case its
-    rows are what was deleted, or it begins afterwards and meets this
-    at the marker.
-
-    Said before the commit rather than after it, which is a trade rather
-    than an oversight: an erasure whose transaction then fails leaves
-    these ids marked dead for the rest of the process, and later turns of
-    those threads are discarded although the rows survived. The other
-    ordering leaves a window in which a turn arriving between the commit
-    and this call raises an erased thread from the dead. Erasure
-    outranks, so the loss is the one to take, and a failed deletion
-    answers 500 and is made again.
+    Called after the deleting transaction has committed, and inside
+    `erasure_order()`, which is the pair that makes both directions
+    right. After the commit, because a rolled-back deletion that had
+    already published would leave a live thread marked dead for the rest
+    of the process: its rows survive, its turns are discarded, and
+    nothing brings it back. Inside the order, because after the commit
+    is also after the advisory lock was released, and the writer must
+    not be able to begin a marker in between.
     """
     named = set(threads_gone)
     if not named:
@@ -339,6 +374,13 @@ class Half(enum.Enum):
     deletion lands in the one scenario that can produce an orphan event
     row. A test that arranges that interleaving has to be able to say
     which of the two halves it means to stop in front of.
+
+    `DURABLE` is announced once per attempt rather than once per marker,
+    because an attempt is what it names: a durable transaction that lost
+    its lock is made again, and a deletion can land between two attempts
+    exactly as it can land before the first. Every marker makes one
+    attempt unless the database refuses transiently, so nothing changes
+    for a test that is not arranging that.
     """
 
     DURABLE = enum.auto()
@@ -459,7 +501,8 @@ class ConversationStore:
         # and therefore nothing to flag, which is the honest record.
         self._incomplete: set[str] = set()
         # Threads a deletion has said are gone, published from a request
-        # thread and drained by the writer at its next marker. Guarded,
+        # thread and drained by the writer inside its next durable
+        # transaction. Guarded,
         # because the two sides are different threads; drained rather
         # than kept, because what it is for is the intersection below and
         # a set that only grew would be a backlog nothing ever reads.
@@ -626,12 +669,12 @@ class ConversationStore:
     def forget(self, threads_gone: Iterable[str]) -> None:
         """These threads have been deleted; stop writing to them.
 
-        Called from the deletion's transaction on a request thread, so
+        Called on a request thread once the deletion has committed, so
         it does the least it can: it records what was said and leaves
-        every decision to the writer, which reads it at its next marker
-        where nothing else is in flight. A store that has stopped keeps
-        taking these, because what is queued behind the sentinel is still
-        going to be written.
+        every decision to the writer, which reads it inside its next
+        durable transaction. A store that has stopped keeps taking
+        these, because what is queued behind the sentinel is still going
+        to be written.
         """
         with self._lock:
             self._published.update(threads_gone)
@@ -773,6 +816,10 @@ class ConversationStore:
         the durable half and the inserts that follow it cannot straddle a
         deletion. A failure rolls that half back whole, and the report
         that leaves carries the exception's class name and nothing else.
+
+        What a deletion said is read inside that transaction rather than
+        here, which `_durable` says why: everything this marker knows
+        about erased threads it learns after it holds the lock.
         """
         batch = self._batches.get(session_id)
         if batch is None:
@@ -782,18 +829,6 @@ class ConversationStore:
             # would be a write lock taken for the sake of taking one,
             # which is exactly what holding no lock between markers is
             # about.
-            return
-        if self._gate is not None:
-            self._gate(Half.DURABLE)
-        # After the gate and immediately before the transaction, which is
-        # what "at its next marker" has to mean: a deletion that lands
-        # while this writer is holding a batch has to be read after it
-        # landed, and the last moment before the lock is taken is the
-        # latest this writer can ask.
-        self._discard_dead(batch)
-        if opening is None and closing is None and not batch.turns and not batch.events:
-            # Everything this marker was holding belonged to a thread
-            # that has been erased, so there is nothing left to write.
             return
         outcome = self._durable(session_id, batch, opening, closing)
         if outcome is _Durable.TOMBSTONED:
@@ -861,10 +896,33 @@ class ConversationStore:
         resume with no dialogue behind it. Its id waits here until a
         later turn of the same thread materializes the row, which it
         does with the mark already true (`threads.Landing.incomplete`).
+
+        What a deletion published is read here, inside the transaction
+        and once per attempt, and the placement is the whole of the
+        dead-id rule's ordering. Read before the transaction, it could be
+        read and then overtaken: a deletion committing in the interval
+        before this writer took the lock would be invisible, and the turn
+        it should have discarded would materialize the row again. Read
+        after BEGIN, the two are ordered by the lock they both take, and
+        `_erasure_order` covers the one instant the advisory lock does
+        not (the deletion's publication, which happens after its commit).
+        Once per attempt, because a retry is a new transaction taking the
+        lock again, and a deletion fits between two of them exactly as it
+        fits before the first.
+
+        The gate is per attempt for the same reason: what it stops in
+        front of is one transaction, and there can be three.
         """
         for attempt in range(TURN_WRITE_ATTEMPTS):
+            if self._gate is not None:
+                self._gate(Half.DURABLE)
             try:
-                with self._engine.begin() as connection:
+                # `_erasure_order` outside the chain's advisory lock,
+                # which the engine's begin listener takes: that is the
+                # order both sides keep, and reversing it here would be
+                # the cycle the lock's own comment names.
+                with _erasure_order, self._engine.begin() as connection:
+                    self._discard_dead(batch)
                     if opening is not None:
                         connection.execute(
                             sessions.insert().values(self._session_row(opening))
@@ -976,8 +1034,19 @@ class ConversationStore:
             events.emit(lambda: WriteFailed(failure=ClassName.of(failed)))
 
     def _discard_dead(self, batch: _Batch) -> None:
-        """The dead-id rule, applied at the marker: what a deletion said
-        is gone, taken off this batch before anything is written.
+        """The dead-id rule, applied inside the marker's own transaction:
+        what a deletion said is gone, taken off this batch before
+        anything is written.
+
+        Called with the chain's advisory lock already held and with
+        `_erasure_order` held around it, which is where the ordering
+        against a deletion is decided rather than hoped for. A deletion
+        takes the same two, in the same order, across its transaction and
+        the publication that follows it, so this either runs before that
+        deletion began (and the deletion then erases the rows this
+        writes) or after it published (and the ids are here). There is no
+        third interleaving, which is what reading the signal before the
+        transaction used to leave.
 
         Two states, and keeping them apart is the whole of it. A thread
         whose row is simply absent is one before its first turn, and a
@@ -1317,5 +1386,6 @@ __all__ = [
     "SessionSink",
     "Turn",
     "erased",
+    "erasure_order",
     "open_conversations",
 ]

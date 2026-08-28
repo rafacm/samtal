@@ -21,11 +21,21 @@ What the file is about, beyond the round trip:
 - **Nothing a caller sends is quoted back.** The selectors and the
   session id are the only values these routes are handed, and the
   refusals name the rule instead of the value.
+- **A deletion and the writer are ordered, in both directions.** The
+  ids a deletion took are published after it commits and inside
+  `store.erasure_order()`, and the writer reads them inside its own
+  durable transaction on every attempt. So a deletion that does not
+  commit leaves the thread alive, and one that commits while the writer
+  is between two attempts of the same batch is still seen by the
+  second.
 """
 
+import contextlib
 import datetime as dt
 import json
 import logging
+from collections.abc import Iterator
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -37,12 +47,14 @@ from tests.support.configs import DEVICE_MAC
 from tests.support.problems import refused
 from tests.support.sessions import WRITER_TIMEOUT_S as TIMEOUT_S
 from tests.support.sessions import Gate, until
+from tests.support.stores import holding_the_write_lock, the_lock_held
 from vinga_server import logs
 from vinga_server.config.api import build_api
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations.records import TurnRecord
 from vinga_server.conversations.schema import conversation_milestones
 from vinga_server.conversations.store import (
+    CONVERSATIONS_CHAIN,
     ConversationStore,
     Half,
     open_conversations,
@@ -224,6 +236,39 @@ def purge(client: TestClient, **selectors: str) -> dict[str, int]:
     response = client.request("DELETE", "/sessions", params=selectors)
     assert response.status_code == 200, response.text
     return response.json()
+
+
+def erase_thread(client: TestClient, conversation: str) -> dict[str, int]:
+    response = client.delete(f"/conversations/{conversation}")
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+@contextlib.contextmanager
+def never_committing(api: FastAPI) -> Iterator[None]:
+    """A deletion that does everything but commit.
+
+    The eraser the routes are given is replaced by one that opens the
+    real transaction, hands it over, and then fails before it can be
+    saved, which is what a database refusing a commit leaves behind: the
+    statements ran, the rows are unchanged, and the request is a 500.
+    Replaced at the runtime rather than inside the store, so the failure
+    happens exactly where the endpoint's own boundary is.
+    """
+    runtime = api.state.api_runtime
+    opening = runtime.erasures
+
+    @contextlib.contextmanager
+    def failing() -> Iterator[Any]:
+        with opening() as connection:
+            yield connection
+            raise RuntimeError("the commit that never happened")
+
+    api.state.api_runtime = replace(runtime, erasures=failing)
+    try:
+        yield
+    finally:
+        api.state.api_runtime = runtime
 
 
 # The addressed erasure
@@ -617,6 +662,117 @@ def test_a_thread_this_writer_never_wrote_is_a_first_turn(client) -> None:
     (thread,) = stored("conversations")
     assert thread["conversation"] == SECOND
     assert thread["title"] == "a thread nobody deleted"
+
+
+def test_a_deletion_between_two_attempts_is_read_by_the_second(
+    client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The interval a durable transaction that was made again opens.
+
+    A batch whose transaction met a lock that did not arrive is tried
+    again, and a deletion fits between the two attempts exactly as it
+    fits before the first: it takes the chain's lock the moment the
+    failed attempt lets go of it, commits, and publishes what it took.
+    An attempt that read the ids before the marker began would have read
+    them once, before any of this, and would then write the turn onto a
+    thread that no longer exists.
+
+    So the read is inside the transaction and happens on every attempt.
+    The contention is real rather than injected: the lock is held by a
+    second connection for as long as the first attempt lasts, and the
+    writer parks in front of each attempt, which is what makes the
+    ordering an arrangement rather than a race.
+    """
+    gate = Gate()
+    # The engine has to be opened under the shortened timeout, so the
+    # store is built inside this and not before it.
+    with holding_the_write_lock(monkeypatch, CONVERSATIONS_CHAIN):
+        store = ConversationStore(
+            DatabaseConfig(),
+            now=lambda: dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC),
+            retention_days=0,
+            gate=gate,
+        )
+        store.start()
+        try:
+            store.open_session("alpha", 100.0, manifest())
+            gate.wait()
+            gate.let_through()
+            store.record_turn("alpha", a_turn(FIRST, "the whole of this thread"))
+            gate.wait()
+            gate.let_through()
+            until(lambda: stored("turns"), "the first turn never landed")
+
+            in_flight = store.record_turn("alpha", a_turn(FIRST, "already on its way"))
+            # Parked in front of the first attempt, which is then let
+            # into a lock somebody else is holding and gives up.
+            gate.wait()
+            with the_lock_held(CONVERSATIONS_CHAIN):
+                gate.let_through()
+                # Arriving here is the first attempt having failed: the
+                # writer is parked in front of the second one.
+                gate.wait()
+
+            taken = erase_thread(client, FIRST)
+            assert (taken["conversations"], taken["turns"]) == (1, 1)
+
+            gate.open_forever()
+            assert in_flight.wait(TIMEOUT_S) is False
+            store.close_session("alpha", duration_s=8.0, reason="client")
+        finally:
+            store.stop()
+
+    # The session it was spoken in is still here; the thread is not, and
+    # the attempt that ran after the deletion wrote none of it back.
+    assert [row["session"] for row in stored("sessions")] == ["alpha"]
+    assert stored("conversations") == []
+    assert stored("turns") == []
+
+
+def test_a_deletion_that_never_commits_leaves_the_thread_alive(api, client) -> None:
+    """The other direction, and the one that has no undo.
+
+    Marking an id dead is for the rest of the process: nothing revives
+    it, and every later turn of that thread is discarded with a false
+    acknowledgement. So it may only be said of a deletion that actually
+    happened. A publication from inside the transaction says it of one
+    that then rolls back, and the thread is alive in the database and
+    dead to the writer, which is the worst of both.
+
+    The proof is the conversation carrying on afterwards: the row is
+    where it was, and the turns that follow land and are acknowledged
+    true, which is what a caller waiting on one is entitled to believe.
+    """
+    store = ConversationStore(
+        DatabaseConfig(),
+        now=lambda: dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC),
+        retention_days=0,
+    )
+    store.start()
+    try:
+        store.open_session("alpha", 100.0, manifest())
+        first = store.record_turn("alpha", a_turn(FIRST, "before the deletion"))
+        assert first.wait(TIMEOUT_S) is True
+
+        with never_committing(api):
+            response = client.delete(f"/conversations/{FIRST}")
+        assert response.status_code == 500
+
+        # The row the deletion did not take.
+        assert [row["conversation"] for row in stored("conversations")] == [FIRST]
+
+        # And the thread is still a thread: what is said next is
+        # recorded, and the answer says so.
+        after = store.record_turn("alpha", a_turn(FIRST, "and after that"))
+        assert after.wait(TIMEOUT_S) is True
+        store.close_session("alpha", duration_s=8.0, reason="client")
+    finally:
+        store.stop()
+
+    assert [row["heard"] for row in stored("turns")] == [
+        "before the deletion",
+        "and after that",
+    ]
 
 
 
