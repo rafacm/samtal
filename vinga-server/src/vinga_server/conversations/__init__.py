@@ -1,21 +1,36 @@
 """The conversation store: what was said, kept where it can be queried.
 
 The `conversations` schema sits beside the `domain` one in the database
-`server.database` names, and holds four tables: the session spine, the
-turn timeline, the tool invocations a turn issued, and the decision
-track underneath them (#120). Audio never enters it; the capture triplet
-is the recording and this is the queryable record. A read-only role
-scoped to this schema alone is how an analyst queries it (#283).
+`server.database` names, and holds six tables: the session spine, the
+conversation a turn belongs to, the turn timeline, the tool invocations
+a turn issued, the decision track underneath them (#120), and the
+dormant place for the recap checkpoints of a resumed thread (#190).
+Audio never enters it; the capture triplet is the recording and this is
+the queryable record. A read-only role scoped to this schema alone is
+how an analyst queries it (#283).
+
+The two entities are two readings of one set of rows rather than two
+stores. A session is one connection episode and a conversation is a
+durable thread with exactly one agent, which may span several of them;
+every turn names both, so the turns of one session can belong to
+several threads and one thread's turns can come from several sessions.
 
 The pieces, in the order they are met:
 
 - `schema.py`: the tables, every column carrying the comment the
   reference is rendered from.
 - `records.py`: `TurnRecord` and `ToolInvocation`, what the pipeline
-  hands over per completed turn, and the recorder seam it hands them
-  through.
+  hands over per completed turn, the recorder seam it hands them
+  through, and the `Acknowledgement` a durable write answers.
+- `threads.py`: the thread store. What a conversation's life is as
+  rows: when one becomes a row, what it is called, when it stops being
+  current, what retention takes, what erasure reaches, and how a spoken
+  description is matched against one.
 - `store.py`: the writer thread, its queue, the per-session sink a
   device session attaches, and retention.
+- `api.py`: the two namespaces on the gated `/api`, `/sessions` and
+  `/conversations`, registered by `config/api.py` so a route cannot be
+  served without being in the committed contract.
 - `docgen.py`: the reference renderer behind
   `docs/reference/conversations-schema.md`.
 - `cli.py`: `vinga-server conversations schema`.
