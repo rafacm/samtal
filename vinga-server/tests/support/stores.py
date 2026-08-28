@@ -133,7 +133,7 @@ def rows(table: str, **where: Any) -> list[dict[str, Any]]:
     engine = open_conversations(DatabaseConfig())
     try:
         clause = " and ".join(f"{name} = :{name}" for name in where)
-        query = f"select * from conversations.{table}" + (
+        query = f"select * from record.{table}" + (
             f" where {clause}" if where else ""
         )
         with engine.connect() as connection:

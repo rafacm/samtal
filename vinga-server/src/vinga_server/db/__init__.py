@@ -154,10 +154,10 @@ SUPERSEDED_REVISIONS = frozenset({"1001_postgres_conversations"})
 # so the reset is the path, and it is the one the ADR addendum records
 # and the one this repository tests.
 SUPERSEDED_REVISION = (
-    "the conversations schema of the vinga database is stamped at the revision the "
+    "the record schema of the vinga database is stamped at the revision the "
     "thread schema replaced, and it cannot be upgraded in place: turns recorded "
     "before conversations existed name no conversation, and there is nothing to "
-    "derive one from. Drop and recreate the database, or the conversations schema "
+    "derive one from. Drop and recreate the database, or the record schema "
     "on its own, rerun deploy/postgres-init.sql, and start the server again, which "
     "migrates a blank schema to current in one step. Conversation history is not "
     "carried across, which the changelog announces and "

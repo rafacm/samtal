@@ -135,7 +135,7 @@ server:
   # Unset, the server's own current offset applies.
   # timezone_offset_minutes: 120
 
-  # Recording what was said into the `conversations` schema of the same
+  # Recording what was said into the `record` schema of the same
   # database the configuration lives in. Absent, as here, means no
   # writer is started and no row is ever written. Turn it on
   # deliberately: it keeps conversation text, and the two switches under

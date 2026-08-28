@@ -107,14 +107,14 @@ def upgrade() -> None:
             comment="The recap, byte for byte as it was spoken. Conversation content under the uniform rule, so null under text-off, though the flow that writes one cannot run with text off.",
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_conversation_milestones")),
-        schema="conversations",
+        schema="record",
     )
     op.create_index(
         "ix_conversation_milestones_conversation",
         "conversation_milestones",
         ["conversation", "id"],
         unique=False,
-        schema="conversations",
+        schema="record",
     )
     op.create_table(
         "conversations",
@@ -170,21 +170,21 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_conversations")),
         sa.UniqueConstraint("conversation", name=op.f("uq_conversations_conversation")),
-        schema="conversations",
+        schema="record",
     )
     op.create_index(
         "ix_conversations_agent_activity",
         "conversations",
         ["agent", "last_active_at", "id"],
         unique=False,
-        schema="conversations",
+        schema="record",
     )
     op.create_index(
         "ix_conversations_last_active",
         "conversations",
         ["last_active_at", "id"],
         unique=False,
-        schema="conversations",
+        schema="record",
     )
     op.create_table(
         "events",
@@ -226,10 +226,10 @@ def upgrade() -> None:
             comment="The event's payload minus `event`, `session` and `device`, which live on this row and on the session. Field names are the event vocabulary's own, copied verbatim, which is the contract. Never content: the writer strips an utterance's or a reply's `text` and a tool call's `tool` name whatever the storage switches say, because content has its own tables and its own switch and this table is metadata-only by construction.",
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_events")),
-        schema="conversations",
+        schema="record",
     )
     op.create_index(
-        "ix_events_session", "events", ["session", "id"], unique=False, schema="conversations"
+        "ix_events_session", "events", ["session", "id"], unique=False, schema="record"
     )
     op.create_table(
         "sessions",
@@ -339,13 +339,13 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_sessions")),
         sa.UniqueConstraint("session", name=op.f("uq_sessions_session")),
-        schema="conversations",
+        schema="record",
     )
     op.create_index(
-        "ix_sessions_device", "sessions", ["device"], unique=False, schema="conversations"
+        "ix_sessions_device", "sessions", ["device"], unique=False, schema="record"
     )
     op.create_index(
-        "ix_sessions_started_at", "sessions", ["started_at"], unique=False, schema="conversations"
+        "ix_sessions_started_at", "sessions", ["started_at"], unique=False, schema="record"
     )
     op.create_table(
         "tool_invocations",
@@ -423,21 +423,21 @@ def upgrade() -> None:
             name=op.f("ck_tool_invocations_source"),
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_tool_invocations")),
-        schema="conversations",
+        schema="record",
     )
     op.create_index(
         "ix_tool_invocations_session",
         "tool_invocations",
         ["session"],
         unique=False,
-        schema="conversations",
+        schema="record",
     )
     op.create_index(
         "ix_tool_invocations_turn",
         "tool_invocations",
         ["turn"],
         unique=False,
-        schema="conversations",
+        schema="record",
     )
     op.create_table(
         "turns",
@@ -557,44 +557,44 @@ def upgrade() -> None:
             comment="How many tool invocations this turn issued, which is how many `tool_invocations` rows point at it. Structural rather than telemetry: it survives both switches.",
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_turns")),
-        schema="conversations",
+        schema="record",
     )
     op.create_index(
         "ix_turns_conversation",
         "turns",
         ["conversation", "id"],
         unique=False,
-        schema="conversations",
+        schema="record",
     )
     op.create_index(
-        "ix_turns_session", "turns", ["session", "id"], unique=False, schema="conversations"
+        "ix_turns_session", "turns", ["session", "id"], unique=False, schema="record"
     )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_turns_session", table_name="turns", schema="conversations")
-    op.drop_index("ix_turns_conversation", table_name="turns", schema="conversations")
-    op.drop_table("turns", schema="conversations")
-    op.drop_index("ix_tool_invocations_turn", table_name="tool_invocations", schema="conversations")
+    op.drop_index("ix_turns_session", table_name="turns", schema="record")
+    op.drop_index("ix_turns_conversation", table_name="turns", schema="record")
+    op.drop_table("turns", schema="record")
+    op.drop_index("ix_tool_invocations_turn", table_name="tool_invocations", schema="record")
     op.drop_index(
-        "ix_tool_invocations_session", table_name="tool_invocations", schema="conversations"
+        "ix_tool_invocations_session", table_name="tool_invocations", schema="record"
     )
-    op.drop_table("tool_invocations", schema="conversations")
-    op.drop_index("ix_sessions_started_at", table_name="sessions", schema="conversations")
-    op.drop_index("ix_sessions_device", table_name="sessions", schema="conversations")
-    op.drop_table("sessions", schema="conversations")
-    op.drop_index("ix_events_session", table_name="events", schema="conversations")
-    op.drop_table("events", schema="conversations")
+    op.drop_table("tool_invocations", schema="record")
+    op.drop_index("ix_sessions_started_at", table_name="sessions", schema="record")
+    op.drop_index("ix_sessions_device", table_name="sessions", schema="record")
+    op.drop_table("sessions", schema="record")
+    op.drop_index("ix_events_session", table_name="events", schema="record")
+    op.drop_table("events", schema="record")
     op.drop_index(
-        "ix_conversations_last_active", table_name="conversations", schema="conversations"
+        "ix_conversations_last_active", table_name="conversations", schema="record"
     )
     op.drop_index(
-        "ix_conversations_agent_activity", table_name="conversations", schema="conversations"
+        "ix_conversations_agent_activity", table_name="conversations", schema="record"
     )
-    op.drop_table("conversations", schema="conversations")
+    op.drop_table("conversations", schema="record")
     op.drop_index(
         "ix_conversation_milestones_conversation",
         table_name="conversation_milestones",
-        schema="conversations",
+        schema="record",
     )
-    op.drop_table("conversation_milestones", schema="conversations")
+    op.drop_table("conversation_milestones", schema="record")

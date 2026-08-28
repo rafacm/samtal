@@ -157,7 +157,7 @@ def counts() -> dict[str, int]:
         with engine.connect() as connection:
             return {
                 table: connection.execute(
-                    text(f"select count(*) from conversations.{table}")
+                    text(f"select count(*) from record.{table}")
                 ).scalar_one()
                 for table in (
                     "sessions",
@@ -207,7 +207,7 @@ def rows_of(table: str) -> list[dict[str, Any]]:
             return [
                 dict(row)
                 for row in connection.execute(
-                    text(f"select * from conversations.{table} order by id")
+                    text(f"select * from record.{table} order by id")
                 ).mappings()
             ]
     finally:
@@ -221,7 +221,7 @@ def stored_sessions() -> list[str]:
             return [
                 row[0]
                 for row in connection.execute(
-                    text("select session from conversations.sessions order by id")
+                    text("select session from record.sessions order by id")
                 )
             ]
     finally:
@@ -412,7 +412,7 @@ def test_a_snapshot_open_across_a_prune_keeps_seeing_what_the_prune_took() -> No
     try:
         # The snapshot is taken by the first statement, so it has to
         # happen before the prune rather than after it.
-        assert held.execute(text("select count(*) from conversations.sessions")).scalar() == 1
+        assert held.execute(text("select count(*) from record.sessions")).scalar() == 1
 
         pruning = ConversationStore(DatabaseConfig(), now=lambda: NOW, retention_days=90)
         pruning.start()
@@ -422,9 +422,9 @@ def test_a_snapshot_open_across_a_prune_keeps_seeing_what_the_prune_took() -> No
             # The transaction that began before the delete committed
             # still sees the row, sentinel and all: this is the
             # weakening the docs state rather than paper over.
-            assert held.execute(text("select count(*) from conversations.sessions")).scalar() == 1
+            assert held.execute(text("select count(*) from record.sessions")).scalar() == 1
             assert (
-                held.execute(text("select heard from conversations.turns")).scalar()
+                held.execute(text("select heard from record.turns")).scalar()
                 == f"my password is {SENTINEL}"
             )
         finally:
@@ -440,12 +440,12 @@ def test_a_snapshot_open_across_a_prune_keeps_seeing_what_the_prune_took() -> No
     try:
         with fresh.connect() as connection:
             assert (
-                connection.execute(text("select count(*) from conversations.sessions")).scalar()
+                connection.execute(text("select count(*) from record.sessions")).scalar()
                 == 0
             )
             assert (
                 connection.execute(
-                    text("select count(*) from conversations.turns where heard like :like"),
+                    text("select count(*) from record.turns where heard like :like"),
                     {"like": f"%{SENTINEL}%"},
                 ).scalar()
                 == 0

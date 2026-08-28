@@ -268,7 +268,7 @@ def test_the_file_gives_the_schemas_to_the_role_it_was_told_about(
     be unable to make its own tables.
     """
     assert _owner_of(provisioned, "domain") == server_role
-    assert _owner_of(provisioned, "conversations") == server_role
+    assert _owner_of(provisioned, "record") == server_role
 
 
 def test_a_role_with_nothing_but_its_schemas_migrates_both_chains(
@@ -290,7 +290,7 @@ def test_a_role_with_nothing_but_its_schemas_migrates_both_chains(
     open_conversations(settings).dispose()
 
     for table in conversations_schema.TABLES:
-        assert _as_analyst(provisioned, f"select * from conversations.{table.name}") == (
+        assert _as_analyst(provisioned, f"select * from record.{table.name}") == (
             "allowed"
         ), table.name
 
@@ -308,7 +308,7 @@ def test_the_analyst_role_reads_every_conversation_table(
 
     for table in conversations_schema.TABLES:
         assert (
-            _as_analyst(provisioned, f"select * from conversations.{table.name}")
+            _as_analyst(provisioned, f"select * from record.{table.name}")
             == "allowed"
         ), table.name
 
@@ -330,12 +330,12 @@ def test_the_analyst_role_inherits_a_table_created_after_provisioning(
     try:
         with engine.begin() as connection:
             connection.exec_driver_sql(
-                "create table conversations.later_migration (id bigint)"
+                "create table record.later_migration (id bigint)"
             )
     finally:
         engine.dispose()
 
-    assert _as_analyst(provisioned, "select * from conversations.later_migration") == (
+    assert _as_analyst(provisioned, "select * from record.later_migration") == (
         "allowed"
     )
 
@@ -363,7 +363,7 @@ def test_the_analyst_role_cannot_write_what_it_can_read(
     than silently allowed by a role somebody widened by hand."""
     open_conversations(_as_server_role(provisioned, server_role)).dispose()
 
-    assert _as_analyst(provisioned, "delete from conversations.sessions") == (
+    assert _as_analyst(provisioned, "delete from record.sessions") == (
         "refused: 42501"
     )
 
@@ -411,7 +411,7 @@ def test_the_file_lands_the_same_place_run_after_the_first_migration(
     _run_the_file(owned_database, server_role)
 
     for table in conversations_schema.TABLES:
-        assert _as_analyst(owned_database, f"select * from conversations.{table.name}") == (
+        assert _as_analyst(owned_database, f"select * from record.{table.name}") == (
             "allowed"
         ), table.name
 
@@ -419,12 +419,12 @@ def test_the_file_lands_the_same_place_run_after_the_first_migration(
     try:
         with engine.begin() as connection:
             connection.exec_driver_sql(
-                "create table conversations.later_still (id bigint)"
+                "create table record.later_still (id bigint)"
             )
     finally:
         engine.dispose()
 
-    assert _as_analyst(owned_database, "select * from conversations.later_still") == (
+    assert _as_analyst(owned_database, "select * from record.later_still") == (
         "allowed"
     )
 
@@ -443,7 +443,7 @@ def test_the_file_runs_again_over_what_it_already_made(
     _run_the_file(provisioned, server_role)
 
     open_conversations(_as_server_role(provisioned, server_role)).dispose()
-    assert _as_analyst(provisioned, "select * from conversations.sessions") == "allowed"
+    assert _as_analyst(provisioned, "select * from record.sessions") == "allowed"
 
 
 def test_the_file_runs_again_after_the_documented_reset(
@@ -481,17 +481,17 @@ def test_the_file_runs_again_after_the_documented_reset(
     _run_the_file(provisioned, server_role)
     open_conversations(settings).dispose()
 
-    assert _as_analyst(provisioned, "select * from conversations.sessions") == "allowed"
+    assert _as_analyst(provisioned, "select * from record.sessions") == "allowed"
 
     engine = open_conversations(settings)
     try:
         with engine.begin() as connection:
             connection.exec_driver_sql(
-                "create table conversations.after_the_reset (id bigint)"
+                "create table record.after_the_reset (id bigint)"
             )
     finally:
         engine.dispose()
 
-    assert _as_analyst(provisioned, "select * from conversations.after_the_reset") == (
+    assert _as_analyst(provisioned, "select * from record.after_the_reset") == (
         "allowed"
     )

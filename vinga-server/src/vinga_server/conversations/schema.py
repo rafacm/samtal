@@ -1,6 +1,6 @@
 """The tables holding what was said, and what it cost to say it.
 
-Its own `MetaData` and its own schema (`conversations`), beside the
+Its own `MetaData` and its own schema (`record`), beside the
 domain configuration rather than inside it: the configuration is what an
 operator writes and the server reads at boot, this is what the server
 writes and an operator reads afterwards, and the two have different
@@ -25,12 +25,14 @@ Every column carries a `comment=`. That is what
 test fails on a column without one, the same discipline
 `Field(description=...)` enforces for the domain models.
 
-One entity here is named twice over, and saying so once saves the
-confusion. The schema is called `conversations` and so is a table
-inside it, which is why SQL spells the thread table
-`conversations.conversations`. The schema name is the store's; the
-table name is the entity's, and the entity is a thread between a user
-and exactly one agent, spanning sessions. A `turns` row names both the
+The schema is called `record` and the thread table inside it is called
+`conversations`, so SQL spells that table `record.conversations`. The
+schema name says what the whole of it is, the durable record of what
+was said and what it cost to say it, and the table name is one entity's:
+a thread between a user and exactly one agent, spanning sessions. The
+package, the config section, the events and the reference document all
+keep `conversations`, because they name this store from outside, where
+the entity is the thing a reader is after. A `turns` row names both the
 session it was spoken in and the thread it belongs to, so the session
 view and the thread view are two projections of one set of rows rather
 than two stores, and no dialogue is written twice.
@@ -82,7 +84,7 @@ NAMING_CONVENTION = {
 
 # The schema this store lives in, carried on the metadata rather than
 # arranged with a `search_path`, for the reason `db/schema.py` gives.
-SCHEMA = "conversations"
+SCHEMA = "record"
 
 metadata = MetaData(schema=SCHEMA, naming_convention=NAMING_CONVENTION)
 

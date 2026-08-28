@@ -592,12 +592,12 @@ jobs:
           # into the same database: one database, two schemas, which is
           # the arrangement a deployment has.
           store = open_conversations(settings)
-          conversations = CONVERSATIONS_CHAIN.schema
+          store_schema = CONVERSATIONS_CHAIN.schema
           with store.connect() as connection:
               revisions = {
                   row[0]
                   for row in connection.execute(
-                      text(f"select * from {conversations}.alembic_version")
+                      text(f"select * from {store_schema}.alembic_version")
                   )
               }
               # The cursor tables, whose ids are handed out as pagination
@@ -613,10 +613,10 @@ jobs:
                           "select table_name, is_identity from information_schema.columns "
                           "where table_schema = :schema and column_name = 'id'"
                       ),
-                      {"schema": conversations},
+                      {"schema": store_schema},
                   )
               }
-          store_tables = set(inspect(store).get_table_names(schema=conversations))
+          store_tables = set(inspect(store).get_table_names(schema=store_schema))
           store.dispose()
 
           # The head of the packaged chain. A new migration moves this
