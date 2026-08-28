@@ -818,3 +818,205 @@ two docstrings still describing the pre-fix relay rule (`cli.py`'s
 answer narrative and the new test's opening sentence), both corrected
 in the change that records this pass. No defect in the fixes
 themselves was found.
+
+## M4: resumption
+
+PR TBD.
+
+### What landed
+
+Five changes, in the order the commits tell it: the switch, the
+hydrator, the door the store is read through, the feature, and the
+documents.
+
+- **The two configuration keys.** `server.conversations.resumption`
+  (off by default) and `resumption_budget_tokens` (6000, `ge 512`), with
+  a `@model_validator` refusing resumption with `enabled` off and
+  resumption with `text` off, each a fixed sentence naming both keys and
+  both ways out, raised as `FieldProblemsError` so the pointer names the
+  switch to turn on. Both example configurations gained them.
+- **`conversations/hydration.py`,** stored turns in and messages out
+  under a budget. Whole stored turns are the unit of both budgeting and
+  truncation, gaps are counted rather than rendered, tools are named and
+  nothing else about them is, and the newest unit is taken even when it
+  alone exceeds the budget. Its answer carries the counts and the
+  over-budget flag the resume speaks from.
+- **`threads.backlog` and `threads.Reads`.** The read that produces a
+  thread's turns, and the door a reply asks for one through: a
+  connection per call on a read engine, and nothing raised out of it,
+  because a tool result is model-visible and stored and a driver failure
+  quotes the DSN it tried. What comes back instead is `Unreadable`, with
+  the db classifier's one question answered on it.
+- **`runtime/resumption.py`,** one session's flow: what each agent was
+  offered, what a thread becomes under the budget, and what a failure
+  says. Its reads run in a worker thread under the tool bound.
+- **The tools.** `new_conversation` and `resume_conversation` in
+  `names.BUILTIN_TOOL_NAMES`, declared in `tools/builtin.py` with the
+  whole closed vocabulary of sentences a selection answers with, and
+  offered unconditionally by `BuiltinTools.snapshot`. The search
+  executes in `dispatch` through the injected seam; everything else is
+  the runtime's.
+- **The runtime.** `_Transition` and `_move_to`: a move ends the tool
+  loop, the initiating turn finishes on its origin thread, the rebinding
+  happens at that boundary and a seeded round opens on the other side.
+  One move per reply on the latch the handover already had. `_turns`
+  becomes a property over one history per thread, which is the clean
+  switch: an agent handed a conversation reads its own thread and
+  nothing else. A resume waits, bounded, on the acknowledgement of the
+  last turn this session recorded on the target thread.
+- **`conversation_resumed`,** emitted at the transition: the thread,
+  what was rebuilt, what could not be, and whether there was more of it
+  than the budget had room for.
+- **The documents**: `docs/reference/events.md` (generated),
+  `docs/concepts.md`, `docs/glossary.md`, `vinga-server/README.md`,
+  `CHANGELOG.md` and the command-spellings manifest.
+
+### Deviations from the plan
+
+Ten, each with its reason.
+
+1. **`runtime/resumption.py` is a module the plan's layout does not
+   name.** The plan puts the pending state in "the runtime" and the
+   discovery executor in `BuiltinTools`, which are two modules that then
+   both need it: the tool source makes the offer and the tool loop
+   enforces it. The alternatives were a mutable object both sides write
+   (which the design guide names as the thing a seam is not) or a second
+   constructor argument on `BuiltinTools` carrying a callback back into
+   the pipeline. One module owning the flow, injected once and compared
+   `is not None` on both sides, is the plan's own "a new domain concept
+   gets its own module" applied to the concept the plan describes.
+   `pipeline.py` was the other candidate and is the module this
+   repository has been shrinking since #245.
+
+2. **`StoredTurn` is declared in `records.py`, not in
+   `hydration.py`.** The plan has the hydrator own its input type. It
+   cannot: `hydration.py` imports `providers.Turn` to produce its
+   output, `threads.py` produces its input, and
+   `test_onboarding_import_weight.py` pins that rendering the API
+   document loads no provider. A thread store that imported the
+   hydrator would have pulled the model adapters into every read of the
+   conversations namespace. The leaf both sides already import is
+   `records.py`, which is what it is for.
+
+3. **The three seeds are written into the target thread's history
+   rather than staying ephemeral.** The plan says the greeting is the
+   fresh thread's first turn, and the merged comment said the opposite
+   about `SWITCH_GREETING` because there was one history and writing it
+   in would have falsified the session's transcript. With one history
+   per thread, a thread whose history begins with an assistant greeting
+   begins with an answer to nobody, and both APIs want a completion to
+   end on a user turn. So the seed is the thread's opening line, the
+   `greeting` parameter on `_tool_loop` is gone, and the comment above
+   the constants says what the seed is and is not: it is in the model's
+   context and it is in no stored turn.
+
+4. **The over-budget and incomplete caveats ride the seed, not a tool
+   result.** The plan says the seeded round's result says the thread was
+   resumed from recent turns. A successful move answers the model
+   nothing, exactly as a handover does, so there is no result to carry
+   it; the seed is the only thing the round after the move reads. Two
+   fixed sentences are appended to it, from a closed set chosen at the
+   interception site.
+
+5. **A resume closes a turn leg, although the agent has not changed.**
+   The plan describes legs as a handover's. What a leg records is one
+   context's share of a reply and its token counts, and a reply that
+   spoke before moving to another thread has exactly that shape. Without
+   it the text spoken before the move would have to be either dropped
+   from the turn's `reply` or attributed to the thread it did not
+   happen on.
+
+6. **The already-moved refusal is its own sentence, not
+   `switch_agent`'s.** The plan says later calls answer "the fixed
+   already-switched refusal". The handover's sentence is an error result
+   that names handing over, and a selection refusal is not an error at
+   all (decision 11). Two sentences, one latch.
+
+7. **The two conversation tools are offered unconditionally, which
+   moves three merged snapshot pins.** The plan says they are offered
+   always, so this is the plan; what it does not say is that
+   `test_session_tools.py` pins the offered list in three places. The
+   pins moved with the change, deliberately.
+
+8. **The clean switch is asserted on `ScriptedLlm.seen` rather than on
+   `RecordingLlm`.** The plan names `RecordingLlm`, which keeps system
+   prompts and not turns. What the claim is about is the turns an
+   incoming agent's provider receives, and `ScriptedLlm` is the double
+   that keeps those. The suite plants a credential-shaped utterance in
+   the outgoing agent's thread and asserts it never reaches the incoming
+   agent's provider.
+
+9. **The integration case does not drive selection by id.** The plan
+   asks for a resume by description in a second session with the thread
+   continuing. What is driven is the search, over a socket against
+   Postgres, finding the thread the first session left, and the
+   interception, driven by `new_conversation` moving a session onto a
+   thread the store then records the next turn against. The missing beat
+   is the call naming the conversation the user picked: that argument is
+   an id the model can only have read out of the previous tool result,
+   and `MockLlm` asks for a tool it was configured with rather than one
+   it composed. Teaching a test double to lift a value out of a result
+   would be more machinery than the claim is worth, and the unit lane
+   drives the whole two-utterance flow through the same interception.
+
+10. **`vinga-server/README.md` moved further than "where it states
+    continuity behavior".** The builtins section named two builtins and
+    said a handover carries the conversation over, both of which this
+    milestone falsifies; the store section owed the third switch its own
+    paragraph; and the event index owes every declared event a row,
+    which `test_event_docs.py` enforces.
+
+### The README inventory
+
+`rg -in "conversation|resum" README.md vinga-server/README.md`, with a
+disposition for every match that is not the ordinary English word:
+
+- **Root README**: nine matches, all of them the word in its ordinary
+  sense (a conversation server, holding a conversation, a conversation
+  turn). It makes no claim about continuity, so nothing moved.
+- **`vinga-server/README.md`, moved**: the builtins section (two
+  builtins, and a handover carrying the conversation over), the store
+  section's YAML block and the paragraph the two new keys needed, and
+  the event index.
+- **`vinga-server/README.md`, left**: the retention paragraph's "in a
+  deployment that never resumes a conversation this is the behaviour it
+  always had", which is now a live statement about the switch rather
+  than a hypothetical; "an idle conversation pays nothing extra to
+  resume", which is about a vendor's pricing; "one resumes the reply
+  where it stopped", which is barge-in; and the many sentences about
+  what a reload does to a conversation in flight, which this milestone
+  does not touch.
+- **Recorded rather than fixed**: the deletion paragraph under the store
+  section still says erasing a named session or thread has no command,
+  which milestones 2 and 3 falsified. It is not a continuity claim and
+  it belongs to those milestones' footprint; it is stale on this branch
+  and the coordinator should land the correction where it belongs.
+
+### Discoveries
+
+- **A `ScriptedLlm`'s rounds are consumed per session, not per reply.**
+  Two of this file's first drafts asserted against a reply that had
+  already spent the round they were about. It is the right design for
+  the double (a script is a conversation), and it means a suite driving
+  two replies writes one script across both.
+
+- **A successful move drops the round's other tool results.** The loop
+  ends where the move is decided, and the results list that round built
+  is never appended to the working turns, so a second move refused
+  beside a successful one is refused into nothing. That is merged
+  behaviour, inherited from the handover, and it is why the latch's own
+  test drives the second move in the round AFTER the first rather than
+  beside it.
+
+- **The seam had to be sanitized before it could be injected.** The
+  first shape of `Reads` raised, and `_run_one` embeds a raised
+  exception's own words into the result the model reads and the store
+  keeps. The poisoned-driver test is what holds the boundary: a
+  DSN-shaped message planted in a raising engine, hunted through the
+  spoken reply, the model's context, the log records of both formats, an
+  attached tap and the events.
+
+- **The wait for an acknowledgement is testable without a slow test.**
+  A store double that settles its handle a moment later, and a seam that
+  records whether it was settled when the backlog was read, prove the
+  resume waited rather than proving that a wait exists.
