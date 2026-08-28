@@ -821,7 +821,7 @@ themselves was found.
 
 ## M4: resumption
 
-PR TBD.
+PR #337.
 
 ### What landed
 
