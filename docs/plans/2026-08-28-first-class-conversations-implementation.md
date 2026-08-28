@@ -933,10 +933,14 @@ Ten, each with its reason.
    all (decision 11). Two sentences, one latch.
 
 7. **The two conversation tools are offered unconditionally, which
-   moves three merged snapshot pins.** The plan says they are offered
-   always, so this is the plan; what it does not say is that
-   `test_session_tools.py` pins the offered list in three places. The
-   pins moved with the change, deliberately.
+   moves four merged snapshot pins.** The plan says they are offered
+   always, so this is the plan; what it does not say is that the offered
+   list is pinned in four places, three in `test_session_tools.py` and
+   one in the integration lane's `DUE_BUILTINS`, which is the set that
+   exists precisely so a builtin appearing where its condition does not
+   hold fails rather than passing under a subtraction. All four moved
+   with the change, deliberately, and the integration one gained the
+   reason the two new names are not conditional.
 
 8. **The clean switch is asserted on `ScriptedLlm.seen` rather than on
    `RecordingLlm`.** The plan names `RecordingLlm`, which keeps system

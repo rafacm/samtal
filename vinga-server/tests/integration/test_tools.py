@@ -305,15 +305,18 @@ PUBLISHED = {
     "tools__inside__secret_word",
 }
 
-# The builtins due in this configuration, which is none of them.
-# `switch_agent` is not: each device here is bound to a single agent, so
-# there is nowhere to switch. `remember` is not either: the
-# configuration has no memory section, so no memory store exists. Those
-# two are all there are, and both conditions fail here.
+# The builtins due in this configuration, which is the two that are
+# always due. `switch_agent` is not among them: each device here is
+# bound to a single agent, so there is nowhere to switch. `remember` is
+# not either: the configuration has no memory section, so no memory
+# store exists. The two conversation tools are, because they are offered
+# whether or not a deployment can resume anything: what a server that
+# cannot answers with is a sentence the agent reads out, and a tool that
+# is simply absent is a tool a model invents (#190).
 # Spelled as a set the assertions below compare against, so that a
 # conditional builtin appearing where its condition does not hold fails
 # this test rather than passing under a subtraction.
-DUE_BUILTINS: set[str] = set()
+DUE_BUILTINS: set[str] = {"new_conversation", "resume_conversation"}
 
 
 async def test_a_restricted_agent_is_offered_exactly_its_subset(serve, simulate) -> None:
