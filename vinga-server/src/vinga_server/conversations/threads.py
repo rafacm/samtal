@@ -37,10 +37,12 @@ under text-off produces a null title by the ordinary path rather than
 by a second rule written here.
 """
 
+from bisect import bisect_left
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import ColumnElement, delete, select, update
+from sqlalchemy import ColumnElement, delete, func, select, update
 
 from vinga_server.conversations.schema import (
     conversation_milestones,
@@ -109,6 +111,13 @@ class Landing:
     # The writer's own stamp for this marker, UTC ISO-8601, so a turn
     # and the activity it moves carry one instant.
     at: str
+    # Whether a write this thread needed has already been lost, so a row
+    # materializing now must say so from its first byte. Only the insert
+    # reads it: a thread whose row already exists is flagged by
+    # `flag_incomplete` in a transaction of its own, and a landing never
+    # clears a flag, because a later turn arriving does not fill an
+    # earlier gap.
+    incomplete: bool = False
 
 
 @dataclass(frozen=True)
@@ -131,6 +140,24 @@ class Pruned:
 
     def anything(self) -> bool:
         return bool(self.conversations or self.sessions)
+
+
+@dataclass(frozen=True)
+class Erased:
+    """What one deletion took, per table.
+
+    The same six counts `Pruned` carries, and deliberately a second type
+    rather than the same one: retention answers an event about a policy
+    that ran, and this answers a caller that asked for something to be
+    destroyed. They agree today and have no reason to move together.
+    """
+
+    conversations: int = 0
+    milestones: int = 0
+    tool_invocations: int = 0
+    turns: int = 0
+    events: int = 0
+    sessions: int = 0
 
 
 def title_of(heard: str | None) -> str | None:
@@ -184,7 +211,7 @@ def landed(connection: Any, landing: Landing) -> None:
                 agent=landing.agent,
                 device=landing.device,
                 title=title_of(landing.heard),
-                incomplete=False,
+                incomplete=landing.incomplete,
                 created_at=landing.at,
                 last_active_at=landing.at,
             )
@@ -197,6 +224,37 @@ def landed(connection: Any, landing: Landing) -> None:
         .where(conversations.c.conversation == landing.conversation)
         .values(last_active_at=landing.at)
     )
+
+
+def flag_incomplete(connection: Any, threads: Iterable[str]) -> set[str]:
+    """Say of every one of these threads that a write it needed was
+    lost, and answer which of them there was a row to say it of.
+
+    The answer is the whole point: a thread whose first turn was the
+    dropped batch has no row yet, and this makes no empty one for the
+    flag to sit on. Its caller keeps the id and offers it again at the
+    next marker, where either a later turn has materialized the row (with
+    the flag already true) or the id is still waiting.
+
+    Idempotent by construction: the flag only ever goes true, and a
+    thread already flagged is updated to what it already says.
+    """
+    named = sorted(set(threads))
+    if not named:
+        return set()
+    found = connection.execute(
+        select(conversations.c.conversation).where(
+            conversations.c.conversation.in_(named)
+        )
+    ).scalars()
+    flagged = set(found)
+    if flagged:
+        connection.execute(
+            update(conversations)
+            .where(conversations.c.conversation.in_(sorted(flagged)))
+            .values(incomplete=True)
+        )
+    return flagged
 
 
 def prune(connection: Any, cutoff: str) -> Pruned:
@@ -277,14 +335,238 @@ def prune(connection: Any, cutoff: str) -> Pruned:
     )
 
 
+def selected(
+    connection: Any,
+    session: str | None = None,
+    device: str | None = None,
+    before: str | None = None,
+) -> list[str]:
+    """Which sessions three selectors name, combined with AND.
+
+    The selector set is the retired purge command's, carried over
+    unchanged because the amendment that turned that command into an
+    endpoint settled its semantics rather than reopening them. `before`
+    is a UTC day and the comparison is strict, so a session that began
+    at any moment of that day survives it: what an operator means by
+    "before the fifteenth" is not "up to some time on the fifteenth".
+
+    A caller that names none of them gets every session, which is why no
+    caller may: refusing an unselected purge is the handler's, said in a
+    sentence rather than discovered here.
+    """
+    criteria: list[ColumnElement[bool]] = []
+    if session is not None:
+        criteria.append(sessions.c.session == session)
+    if device is not None:
+        criteria.append(sessions.c.device == device)
+    if before is not None:
+        criteria.append(sessions.c.started_at < before)
+    return list(
+        connection.execute(select(sessions.c.session).where(*criteria)).scalars()
+    )
+
+
+def erase_sessions(connection: Any, named: Sequence[str]) -> Erased:
+    """Erase these sessions and everything they left behind, inside the
+    caller's transaction.
+
+    Erasure outranks every copy the store derived, not only the rows the
+    selector named, and that is the whole of what this function knows
+    that its callers do not. A session's turns go even where they belong
+    to a thread somebody is still talking on (the thread honestly keeps
+    a gap), and in the same transaction:
+
+    - every milestone whose recorded coverage holds one of those turns
+      goes, and so does every milestone descended from it along the
+      `parent` lineage, because a summary of erased content is that
+      content whether it arrived directly or through an earlier recap
+      the summarizer consumed;
+    - a thread whose title was derived from an erased turn is renamed
+      from its earliest surviving turn, or loses its title altogether;
+    - `last_active_at` moves back when the turn that wrote it is gone;
+    - a thread that has lost every turn is deleted whole, because what
+      would be left is a title and two timestamps, and neither is
+      resumable.
+
+    Session rows and their events go last, which is the same ordering
+    retention uses and for the same reason: the questions the later
+    statements ask are decidable only once the earlier ones have run.
+    """
+    if not named:
+        return Erased()
+    # Which turns are dying, and on which thread. Kept per thread rather
+    # than as one set, because turn ids are unique across the store and
+    # the threads interleave in them: a checkpoint's coverage is a range
+    # of ids, and asking it about another thread's dead turn would erase
+    # a summary of something that is still there.
+    dying: dict[str, list[int]] = {}
+    for turn_id, thread in connection.execute(
+        select(turns.c.id, turns.c.conversation).where(turns.c.session.in_(named))
+    ):
+        dying.setdefault(thread, []).append(turn_id)
+    for ids in dying.values():
+        ids.sort()
+
+    milestones = _erase_milestones(connection, dying)
+    invocations = connection.execute(
+        delete(tool_invocations).where(tool_invocations.c.session.in_(named))
+    ).rowcount
+    gone = connection.execute(delete(turns).where(turns.c.session.in_(named))).rowcount
+    telemetry = connection.execute(
+        delete(events).where(events.c.session.in_(named))
+    ).rowcount
+    spines = connection.execute(
+        delete(sessions).where(sessions.c.session.in_(named))
+    ).rowcount
+
+    orphaned = _rederive(connection, dying)
+    milestones += connection.execute(
+        delete(conversation_milestones).where(
+            conversation_milestones.c.conversation.in_(orphaned)
+        )
+    ).rowcount
+    threads = connection.execute(
+        delete(conversations).where(conversations.c.conversation.in_(orphaned))
+    ).rowcount
+
+    return Erased(
+        conversations=threads,
+        milestones=milestones,
+        tool_invocations=invocations,
+        turns=gone,
+        events=telemetry,
+        sessions=spines,
+    )
+
+
+def _erase_milestones(connection: Any, dying: Mapping[str, Sequence[int]]) -> int:
+    """Every checkpoint that summarized an erased turn, and every
+    checkpoint descended from one.
+
+    Coverage is decided here in Python rather than in SQL because it is
+    a question about a range against a set, and the sets are small: a
+    checkpoint is a consented recap, so a thread accrues them at the
+    pace somebody agrees to one. The lineage walk is a closure and not a
+    single statement for the same reason, and because a recursive query
+    would be the one piece of SQL in this module a reader could not
+    check by eye.
+    """
+    if not dying:
+        return 0
+    rows = list(
+        connection.execute(
+            select(
+                conversation_milestones.c.id,
+                conversation_milestones.c.conversation,
+                conversation_milestones.c.from_turn,
+                conversation_milestones.c.after_turn,
+                conversation_milestones.c.parent,
+            ).where(conversation_milestones.c.conversation.in_(sorted(dying)))
+        )
+    )
+    doomed = {
+        row[0] for row in rows if _covers(row[2], row[3], dying.get(row[1], ()))
+    }
+    children: dict[int, list[int]] = {}
+    for row in rows:
+        if row[4] is not None:
+            children.setdefault(row[4], []).append(row[0])
+    pending = list(doomed)
+    while pending:
+        for child in children.get(pending.pop(), ()):
+            if child not in doomed:
+                doomed.add(child)
+                pending.append(child)
+    if not doomed:
+        return 0
+    return int(
+        connection.execute(
+            delete(conversation_milestones).where(
+                conversation_milestones.c.id.in_(sorted(doomed))
+            )
+        ).rowcount
+    )
+
+
+def _covers(first: int, last: int, dead_turns: Sequence[int]) -> bool:
+    """Whether a checkpoint's recorded coverage holds any erased turn.
+    Bisected rather than scanned, because a purge can name a great many
+    turns and a checkpoint asks the same question of all of them."""
+    index = bisect_left(dead_turns, first)
+    return index < len(dead_turns) and dead_turns[index] <= last
+
+
+def _rederive(connection: Any, dying: Mapping[str, Sequence[int]]) -> list[str]:
+    """Recompute what the erased turns fed, and answer the threads that
+    have nothing left.
+
+    The title is recomputed from the earliest surviving turn whatever
+    happened, which is exact rather than approximate: a title IS the
+    first turn's utterance bounded, so a thread whose first turn
+    survived is renamed to the name it already had.
+
+    `last_active_at` cannot be exact, and this says so rather than
+    pretending. A turn carries its offset from its session's open and no
+    wall clock of its own, so the instant a surviving turn landed is not
+    a stored fact. While the thread's newest turn survives, the stamp it
+    wrote is still the truth and is left alone; once that turn is gone,
+    the stamp falls back to the latest fact the store does hold about
+    the survivors, which is when their sessions began, floored at the
+    thread's own `created_at` so the pair stays ordered. The result is
+    never later than the truth, so a thread trimmed this way is retired
+    by retention no later than it would have been.
+    """
+    orphaned: list[str] = []
+    for thread in sorted(dying):
+        surviving = connection.execute(
+            select(turns.c.id, turns.c.heard)
+            .where(turns.c.conversation == thread)
+            .order_by(turns.c.id)
+        ).all()
+        if not surviving:
+            orphaned.append(thread)
+            continue
+        row = connection.execute(
+            select(conversations.c.created_at, conversations.c.last_active_at).where(
+                conversations.c.conversation == thread
+            )
+        ).first()
+        if row is None:
+            continue
+        created_at, last_active_at = row
+        if surviving[-1][0] < max(dying[thread]):
+            last_active_at = max(created_at, _began(connection, thread))
+        connection.execute(
+            update(conversations)
+            .where(conversations.c.conversation == thread)
+            .values(title=title_of(surviving[0][1]), last_active_at=last_active_at)
+        )
+    return orphaned
+
+
+def _began(connection: Any, thread: str) -> str:
+    """The latest a session holding one of this thread's surviving turns
+    began. Empty text when nothing answers, which loses to `created_at`
+    in the comparison above rather than needing an arm of its own."""
+    holding = select(turns.c.session).where(turns.c.conversation == thread).distinct()
+    latest = connection.execute(
+        select(func.max(sessions.c.started_at)).where(sessions.c.session.in_(holding))
+    ).scalar()
+    return latest or ""
+
+
 __all__ = [
     "ANOTHER_AGENT",
     "NO_DEVICE",
     "TITLE_CHARACTERS",
+    "Erased",
     "Landing",
     "MisattributedTurn",
     "Pruned",
+    "erase_sessions",
+    "flag_incomplete",
     "landed",
     "prune",
+    "selected",
     "title_of",
 ]

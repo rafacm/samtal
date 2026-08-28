@@ -45,6 +45,7 @@ unreadable.
 """
 
 from vinga_server.conversations.records import (
+    Acknowledgement,
     SessionTurns,
     ToolInvocation,
     TurnLeg,
@@ -60,6 +61,7 @@ from vinga_server.conversations.store import (
 )
 
 __all__ = [
+    "Acknowledgement",
     "CONVERSATIONS_CHAIN",
     "ConversationStore",
     "SessionSink",
