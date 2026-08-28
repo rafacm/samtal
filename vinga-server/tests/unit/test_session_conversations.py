@@ -794,8 +794,8 @@ async def test_a_poisoned_driver_message_reaches_nothing(
     session.websocket = cast(Any, _Quiet())
     session.send_audio = _nothing  # type: ignore[method-assign]
     session.runtime._speak = _spoken  # type: ignore[method-assign]
-    seen: list[Any] = []
-    events_of(session).attach(seen.append)
+    tap = _Tap()
+    events_of(session).attach(tap)
 
     with caplog.at_level(logging.DEBUG):
         await drive_reply(session, UTTERANCE)
@@ -815,7 +815,8 @@ async def test_a_poisoned_driver_message_reaches_nothing(
     # their renderings (the second of which renders a chained traceback,
     # so a swallowed exception's cause is hunted here too), and the
     # streams the process writes.
-    assert not any(SENTINEL_DSN in repr(vars(emission)) for emission in seen)
+    assert tap.seen, "nothing was emitted, so the hunt below asserts nothing"
+    assert not any(SENTINEL_DSN in repr(vars(one)) for one in tap.seen)
     for line in caplog.records:
         assert SENTINEL_DSN not in line.getMessage() + repr(line.args) + repr(vars(line))
     assert SENTINEL_DSN not in caplog.text
@@ -824,6 +825,22 @@ async def test_a_poisoned_driver_message_reaches_nothing(
     # The class name is what an operator gets, which is the rule the
     # reply path already applies to a provider that fails.
     assert any("RuntimeError" in line.getMessage() for line in caplog.records)
+
+
+class _Tap:
+    """A consumer of this session's events.
+
+    A class rather than a bare `list.append`, because a tap is asked for
+    `emit` and a callable that has none is dropped with a warning: a
+    no-leak hunt through a list nothing was ever appended to asserts
+    nothing at all.
+    """
+
+    def __init__(self) -> None:
+        self.seen: list[Any] = []
+
+    def emit(self, emission: Any) -> None:
+        self.seen.append(emission)
 
 
 class Recorder:
