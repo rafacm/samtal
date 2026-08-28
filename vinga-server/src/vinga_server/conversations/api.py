@@ -35,7 +35,10 @@ Three transport rules the routes hold to:
   `cursor_active` and `cursor_id`. Two values rather than one opaque
   blob is what keeps the rule: what a caller sends back is what it was
   answered with, and there is nothing here a later release has to go on
-  decoding.
+  decoding. The activity half has to carry a UTC offset, because the
+  comparison is lexicographic on text: a naive spelling is shorter than
+  every stored stamp and would page from the wrong place rather than
+  from where it says.
 - **A refused argument is never quoted back.** A limit, a cursor, a
   device or a day that cannot be read answers with a fixed sentence
   describing what the argument has to be, and so does a purge that
@@ -159,8 +162,10 @@ _CURSOR_REFUSED = (
 _CURSOR_PAIR_REFUSED = (
     "cursor_active and cursor_id come together or not at all, and both have to be "
     "values this API answered with: cursor_active is a last_active_at, written as an "
-    "ISO-8601 instant, and cursor_id is the row id beside it. Absent means the first "
-    "page. What was sent is not quoted back"
+    "ISO-8601 instant that carries its UTC offset, and cursor_id is the row id beside "
+    "it. A calendar day or a local time with no offset names no instant and is refused "
+    "rather than guessed at. Absent means the first page. What was sent is not quoted "
+    "back"
 )
 
 # How long the activity half of a cursor may be before it is refused
@@ -371,8 +376,11 @@ CursorActiveQuery = Annotated[
     Query(
         description=(
             "The activity half of where to carry on from: the `last_active_at` of the "
-            "last thread on the previous page, as an ISO-8601 instant. Sent together "
-            "with `cursor_id` or not at all; absent means the first page."
+            "last thread on the previous page, as an ISO-8601 instant carrying its "
+            "UTC offset. Any offset is accepted and read as the instant it names; a "
+            "calendar day or a local time written without one names no instant and is "
+            "refused. Sent together with `cursor_id` or not at all; absent means the "
+            "first page."
         )
     ),
 ]
@@ -981,6 +989,15 @@ def _instant(value: str) -> str | None:
     another offset is brought to the spelling the rows carry instead of
     quietly paging from the wrong place.
 
+    An offset is required rather than assumed, and that is the half that
+    keeps the pagination total. `fromisoformat` reads `2026-08-15` and
+    `2026-08-15T12:00:00` happily, and both of them come back with no
+    offset at all: written out again they are shorter than every stored
+    `last_active_at`, which carries `+00:00`, so a lexicographic
+    comparison puts them before rows they are chronologically after, and
+    a page requested with one silently repeats or skips. Neither names an
+    instant to begin with, so neither is guessed at.
+
     Bounded before it is parsed, because parsing is work no caller
     should be able to ask an unbounded amount of.
     """
@@ -992,9 +1009,12 @@ def _instant(value: str) -> str | None:
         # Answered rather than raised from inside the arm: `fromisoformat`
         # puts the string it could not read into its own message.
         return None
-    if moment.tzinfo is not None:
-        moment = moment.astimezone(dt.UTC)
-    return moment.isoformat()
+    if moment.tzinfo is None or moment.utcoffset() is None:
+        # Both halves, because a tzinfo is an object rather than an
+        # offset: one that answers None to `utcoffset` leaves a datetime
+        # as naive as one with no tzinfo at all.
+        return None
+    return moment.astimezone(dt.UTC).isoformat()
 
 
 def _whole(value: str | None) -> int | None:

@@ -3174,10 +3174,10 @@
                   "type": "null"
                 }
               ],
-              "description": "The activity half of where to carry on from: the `last_active_at` of the last thread on the previous page, as an ISO-8601 instant. Sent together with `cursor_id` or not at all; absent means the first page.",
+              "description": "The activity half of where to carry on from: the `last_active_at` of the last thread on the previous page, as an ISO-8601 instant carrying its UTC offset. Any offset is accepted and read as the instant it names; a calendar day or a local time written without one names no instant and is refused. Sent together with `cursor_id` or not at all; absent means the first page.",
               "title": "Cursor Active"
             },
-            "description": "The activity half of where to carry on from: the `last_active_at` of the last thread on the previous page, as an ISO-8601 instant. Sent together with `cursor_id` or not at all; absent means the first page."
+            "description": "The activity half of where to carry on from: the `last_active_at` of the last thread on the previous page, as an ISO-8601 instant carrying its UTC offset. Any offset is accepted and read as the instant it names; a calendar day or a local time written without one names no instant and is refused. Sent together with `cursor_id` or not at all; absent means the first page."
           },
           {
             "name": "cursor_id",
