@@ -68,6 +68,25 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   title and every dialogue line is bounded and made printable before it
   is written, so nothing a room said can add a line or steer a
   terminal.
+- **Resuming a conversation** (#190), behind
+  `server.conversations.resumption` (off by default, and refused at
+  boot without `enabled` and `text`). Every agent is offered two more
+  builtin tools: `new_conversation`, which leaves the current thread
+  and starts a fresh one, and `resume_conversation`, which takes a
+  spoken description ("that thing we were saying about the trip"),
+  answers a short list of that agent's own past conversations to read
+  out, and picks up the one the user chooses. Only a conversation the
+  tool has just offered can be resumed, and only by the agent it was
+  offered to. Resuming rebuilds the model's context from the stored
+  dialogue, whole turns and newest first, under
+  `resumption_budget_tokens` (6000 by default, an estimate of four
+  characters per token); a thread longer than that resumes from its
+  recent turns and says so, and one whose record has holes in it says
+  that too. With the switch off, both tools answer a fixed sentence the
+  agent reads out and nothing moves.
+- The `conversation_resumed` event: which thread was picked up, how
+  many stored turns were rebuilt, how many could not be, and whether
+  there was more of the thread than the budget had room for.
 - **The store's durable path**: a marker now commits conversation
   content and telemetry in two transactions with independent fates. A
   durable transaction that meets a transient database refusal is
@@ -101,6 +120,16 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   any more. A deployment that does not resume conversations sees the
   behavior it saw before, because a thread's age and its session's
   coincide there.
+- **BEHAVIOR: an agent handed a conversation no longer reads what was
+  said to the agent before it** (#190). A conversation is a thread
+  between a user and exactly one agent, and each agent in a session now
+  keeps its own: `switch_agent` binds the incoming agent to its own
+  thread and its own history, so what it starts with is the instruction
+  to greet and carry on, and switching back returns an agent to what it
+  was saying. Until now the whole session transcript carried across a
+  switch, which moved words spoken to one agent onto whatever provider
+  the next one runs on. Carrying context deliberately ("ask Nadia about
+  this") is a separate capability and is not built.
 - `turns.agent` now records the agent that OWNS a turn, which is the
   one the turn started with, rather than the one that finished the
   reply. A handover makes those different, and `turns.legs` is where a
