@@ -8,6 +8,7 @@ speaks a tone whose length follows the text.
 """
 
 import math
+import re
 import struct
 from collections.abc import AsyncIterator, Sequence
 
@@ -150,7 +151,24 @@ class MockLlm(LlmProvider):
     `tool_name` with `tool_arguments` and says nothing, and the round
     after the results come back speaks the template. That makes the
     whole loop deterministic, which is what the acceptance test needs.
-    Without the tool options this behaves exactly as it did before."""
+    Without the tool options this behaves exactly as it did before.
+
+    Two options extend the script to the flows where one call answers
+    the next, which a template cannot express because the argument is a
+    value only the previous result holds.
+
+    `then_pattern` and `then_arguments` are the second beat: once the
+    results are back, a first capturing group matched against them is
+    substituted for `{found}` in each argument, and the same tool is
+    asked for again. That is how a two-argument tool (search, then pick
+    what the search answered) is driven end to end without teaching this
+    double to read.
+
+    `tool_unless` is the brake: no call at all where that text appears
+    anywhere in the turns this model was handed. A script keyed on what
+    it has already seen is what makes the utterance after a successful
+    flow an ordinary one, in a lane where every utterance transcribes
+    the same."""
 
     egress = False
 
@@ -160,11 +178,17 @@ class MockLlm(LlmProvider):
         tool_when: str | None = None,
         tool_name: str = "",
         tool_arguments: dict[str, object] | None = None,
+        tool_unless: str | None = None,
+        then_pattern: str | None = None,
+        then_arguments: dict[str, object] | None = None,
     ) -> None:
         self._reply = reply
         self._tool_when = tool_when
         self._tool_name = tool_name
         self._tool_arguments = tool_arguments or {}
+        self._tool_unless = tool_unless
+        self._then_pattern = then_pattern
+        self._then_arguments = then_arguments or {}
         self._calls = 0
 
     async def stream(
@@ -180,13 +204,20 @@ class MockLlm(LlmProvider):
         yield StreamStarted()
         last_user = next((turn.content for turn in reversed(turns) if turn.role == "user"), "")
         results = [result for turn in turns for result in turn.tool_results]
+        answered = " ".join(result.content for result in results)
 
-        if self._wants_a_tool(last_user, results, tool_choice):
+        if self._seen(turns) or tool_choice == "none":
+            arguments = None
+        elif results:
+            arguments = self._then(answered)
+        elif self._tool_when is not None and self._tool_when in last_user:
+            arguments = dict(self._tool_arguments)
+        else:
+            arguments = None
+        if arguments is not None:
             self._calls += 1
             yield ToolCall(
-                id=f"call_{self._calls}",
-                name=self._tool_name,
-                arguments=dict(self._tool_arguments),
+                id=f"call_{self._calls}", name=self._tool_name, arguments=arguments
             )
             return
 
@@ -194,19 +225,35 @@ class MockLlm(LlmProvider):
             text=last_user,
             system=system,
             tools=", ".join(tool.name for tool in tools),
-            tool_result=" ".join(result.content for result in results),
+            tool_result=answered,
         )
         for index, word in enumerate(reply.split(" ")):
             yield TextDelta(word if index == 0 else " " + word)
 
-    def _wants_a_tool(
-        self, last_user: str, results: Sequence[object], tool_choice: ToolChoice
-    ) -> bool:
-        """One call per reply, and never when the session has forbidden
-        calling, so the scripted loop always terminates in speech."""
-        if self._tool_when is None or tool_choice == "none":
+    def _seen(self, turns: Sequence[Turn]) -> bool:
+        """Whether what this model has been handed already says the
+        scripted flow has run, in which case it asks for nothing and
+        speaks."""
+        if self._tool_unless is None:
             return False
-        return self._tool_when in last_user and not results
+        return any(self._tool_unless in turn.content for turn in turns)
+
+    def _then(self, answered: str) -> dict[str, object] | None:
+        """The call that answers the previous one, or None where there
+        is no second beat scripted or nothing in the results to make one
+        out of. Without it a round holding results always speaks, which
+        is what keeps the scripted loop terminating."""
+        if self._then_pattern is None:
+            return None
+        found = re.search(self._then_pattern, answered)
+        if found is None:
+            return None
+        return {
+            key: value.replace("{found}", found.group(1))
+            if isinstance(value, str)
+            else value
+            for key, value in self._then_arguments.items()
+        }
 
 
 class MockTts(TtsProvider):
@@ -269,12 +316,18 @@ def build_llm(label: str, config: ProviderConfig) -> MockLlm:
     tool_when = options.string("tool_when")
     tool_name = options.string("tool_name", "") or ""
     tool_arguments = options.mapping("tool_arguments")
+    tool_unless = options.string("tool_unless")
+    then_pattern = options.string("then_pattern")
+    then_arguments = options.mapping("then_arguments")
     options.finish()
     return MockLlm(
         reply=reply,
         tool_when=tool_when,
         tool_name=tool_name,
         tool_arguments=tool_arguments,
+        tool_unless=tool_unless,
+        then_pattern=then_pattern,
+        then_arguments=then_arguments,
     )
 
 
