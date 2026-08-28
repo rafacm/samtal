@@ -602,7 +602,10 @@ class ConversationStore:
             # transaction. Storage policy is applied before the handover
             # rather than inside the thread store: a title derives from
             # what was stored, so text-off derives none by the ordinary
-            # path.
+            # path. A landing the thread store refuses raises out of
+            # here and rolls this marker back, batch and all: losing a
+            # turn is recoverable and counted, while storing one no
+            # thread owns is a row retention can never reach.
             threads.landed(
                 connection,
                 threads.Landing(

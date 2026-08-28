@@ -803,6 +803,49 @@ def test_a_failed_marker_drops_its_batch_and_names_only_the_class(
     assert rows("tool_invocations") == []
 
 
+def test_a_refused_landing_names_only_its_class(
+    stores, caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The store's own refusal, held to the same standard as the
+    database's: a turn it will not attribute to a thread fails the
+    marker, and what leaves is the class name. No engine is swapped
+    here, because this failure is one the shipped write path raises by
+    itself, and the record it refuses carries the sentinel in every
+    field a report could reach for, the agent included."""
+    with caplog.at_level(logging.INFO):
+        store = stores(retention_days=0)
+        store.start()
+        store.open_session("alpha", 100.0, MANIFEST)
+        store.record_turn("alpha", a_turn())
+        store.record_turn(
+            "alpha", a_turn(agent=SENTINEL, heard=SENTINEL, reply=SENTINEL)
+        )
+        store.close_session("alpha", duration_s=1.0, reason="client")
+        store.stop()
+
+    failures = [
+        record
+        for record in caplog.records
+        if getattr(record, "event", "") == "conversations_failed"
+    ]
+    assert len(failures) == 1
+    assert failures[0].failure == "MisattributedTurn"
+
+    rendered = caplog.text + "".join(
+        logs.JsonFormatter().format(record) for record in caplog.records
+    )
+    captured = capsys.readouterr()
+    assert SENTINEL not in rendered
+    assert SENTINEL not in captured.out
+    assert SENTINEL not in captured.err
+    assert all(record.exc_info is None for record in caplog.records)
+    # And the thread is still the one agent's, holding the one turn that
+    # belonged to it.
+    (thread,) = rows("conversations")
+    assert thread["agent"] == "sam"
+    assert len(rows("turns")) == 1
+
+
 def test_a_failed_close_leaves_the_session_open_shaped(stores) -> None:
     """The documented incomplete state: readable, listed with its null
     close, and pruned on `started_at` like any other row, which is the

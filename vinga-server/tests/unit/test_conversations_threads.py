@@ -1,5 +1,5 @@
-"""A conversation's life as rows: when one appears, what it is called,
-and when it stops being current.
+"""A conversation's life as rows: when one appears, which turns it
+refuses, what it is called, and when it stops being current.
 
 Driven through the writer's own surface rather than against
 `threads.py` directly, because that is where the lifecycle actually
@@ -112,6 +112,59 @@ def test_two_agents_in_one_session_are_two_threads(stores) -> None:
         (thread("sam"), "sam"),
         (thread("ada"), "ada"),
     }
+
+
+# What a thread refuses to own
+
+
+def test_a_session_that_understood_no_device_stores_no_turn(stores) -> None:
+    """A thread's device is not null, and a turn stored outside every
+    thread is a turn nothing prunes: retention reaches turns through
+    their conversation row and keeps every session a turn still names,
+    so one such row would outlive the window forever. The turn is
+    dropped and counted instead, exactly as any other failed write is.
+    """
+    store = stores(retention_days=0)
+    store.start()
+    store.open_session("alpha", 100.0, {**MANIFEST, "device": {"client": "test"}})
+    store.record_turn("alpha", a_turn(thread("one")))
+    store.close_session("alpha", duration_s=1.0, reason="client")
+    store.stop()
+
+    assert rows("conversations") == []
+    assert rows("turns") == []
+    assert rows("tool_invocations") == []
+    # The session row is the open's own marker and committed before any
+    # of this; what the refusal leaves on it is the count.
+    (session,) = rows("sessions")
+    assert session["device"] is None
+    assert session["dropped"] == 1
+
+
+def test_a_thread_refuses_a_turn_stamped_with_another_agent(stores) -> None:
+    """A conversation belongs to exactly one agent for its whole life,
+    so a turn naming an existing thread and a different agent is a
+    defect, not a second speaker. Nothing of it commits, and the thread
+    is left where its own agent put it."""
+    store = stores(retention_days=0)
+    store.start()
+    store.open_session("alpha", 100.0, MANIFEST)
+    store.record_turn("alpha", a_turn(thread("one")))
+    intruder = a_turn(thread("one"), heard="and now it is mine")
+    store.record_turn("alpha", TurnRecord(**{**vars(intruder), "agent": "ada"}))
+    store.close_session("alpha", duration_s=1.0, reason="client")
+    store.stop()
+
+    (row,) = rows("conversations")
+    assert row["agent"] == "sam"
+    assert row["title"] == "turn the light on"
+    # The refusal rolled back, so the thread was never even moved
+    # forward by the turn it refused.
+    assert row["last_active_at"] == row["created_at"]
+    (turn,) = rows("turns")
+    assert (turn["agent"], turn["conversation"]) == ("sam", thread("one"))
+    (session,) = rows("sessions")
+    assert session["dropped"] == 1
 
 
 # What a thread is called

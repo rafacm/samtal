@@ -90,11 +90,13 @@ class TurnUnderway:
     attributed to the thread it handed over to. Held here rather than
     passed to `record` because the reply path is where it would have to
     be remembered, and remembering it in half a dozen places is the
-    mistake this removes.
+    mistake this removes. Neither of the two is optional, because the
+    store materializes a thread row out of exactly them and refuses a
+    turn it cannot attribute.
     """
 
     conversation: str
-    agent: str | None
+    agent: str
     at: float | None = None
     heard: str | None = None
     heard_duration_s: float | None = None

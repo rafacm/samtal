@@ -16,7 +16,10 @@ and the selection tools. What all three stop knowing:
   conversation that never happened. The row lands with the thread's
   first turn, in the transaction that stores it, which is also what
   makes referential integrity the writer's in the one place the schema
-  says it lives.
+  says it lives. And when it may not become one at all: a landing this
+  module cannot attribute is refused, which fails the caller's
+  transaction, because a stored turn with no thread is a row retention
+  can never reach.
 - **What a thread is called.** The first utterance, bounded. Content,
   and therefore under the text switch like the utterance it came from.
 - **The retention ruleset**, whose unit is the thread rather than the
@@ -58,6 +61,28 @@ from vinga_server.conversations.schema import (
 # be empty for the transcripts that have none.
 TITLE_CHARACTERS = 80
 
+# What a refusal below says, as fixed sentences with no value in them.
+# The class name is what reaches an operator (the writer reports a
+# failed transaction by class and nothing else), so these are for
+# whoever reads a traceback; a sentence that named the device or the
+# agent would be one edit away from naming it on a retained surface.
+NO_DEVICE = "the session this turn was spoken in understood no device"
+ANOTHER_AGENT = "this thread belongs to a different agent"
+
+
+class MisattributedTurn(Exception):
+    """A turn no thread can honestly own.
+
+    Raised out of the caller's transaction rather than handled here, so
+    the marker rolls back and the batch is dropped and counted exactly
+    as any other failed write is. Loud, because the quiet alternative
+    was tried and is worse: storing the turn and leaving its thread
+    rowless puts a row in the database that nothing will ever prune,
+    since retention reaches turns through their thread's row and keeps
+    every session a turn still names. One defective reply would
+    outlive the retention window forever.
+    """
+
 
 @dataclass(frozen=True)
 class Landing:
@@ -65,15 +90,17 @@ class Landing:
 
     Everything the writer already holds, gathered so the two facts that
     decide a materialization travel together: the pair the turn was
-    stamped with, and the session's device. `agent` and `device` are
-    nullable here and not null in the row, which is the whole reason
-    they are a pair: a thread cannot name an agent it does not have,
-    and a row that named one falsely would be worse than a row that
-    waits.
+    stamped with, and the session's device. `agent` is required, here
+    as on the record the writer took it from: it is not null in the
+    row, it is what a resume addresses, and a thread that named it
+    falsely would put a lie in the column the whole entity is keyed on.
+    `device` is what the session knew, which is nullable on the session
+    row and not on the thread's, and `landed` below is where that
+    difference is answered.
     """
 
     conversation: str
-    agent: str | None
+    agent: str
     device: str | None
     # The utterance the title is derived from, after the text switch, so
     # a deployment storing no text derives no title by the same rule
@@ -131,18 +158,22 @@ def landed(connection: Any, landing: Landing) -> None:
     than by an upsert, because the two do different things and only the
     first one has a title to derive.
 
-    A landing that cannot name its agent or its device materializes
-    nothing and moves nothing. The runtime activates an agent before it
-    can produce a turn and a session knows its device before it can
-    open a runtime, so this is a defect's shape rather than a
-    configuration's; what it does is store the turn and leave the
-    thread rowless, which is exactly the state a thread has before its
-    first turn and therefore a state every reader already handles.
+    A landing this module cannot attribute is refused rather than
+    stored, and the refusal takes the marker's whole batch with it. Two
+    shapes reach it: a session that understood no device, which has no
+    provenance to write into a not-null column, and a turn whose thread
+    already belongs to a different agent. Both are defects rather than
+    configurations, because a session is closed before it records
+    anything unless its device identified itself, the runtime activates
+    an agent before it can produce a turn, and a thread id is minted per
+    agent and never shared. Refusing is what keeps "every stored turn is
+    on a thread, and that thread is its agent's" true of the database
+    rather than only of the code that usually writes it.
     """
-    if landing.agent is None or landing.device is None:
-        return
+    if landing.device is None:
+        raise MisattributedTurn(NO_DEVICE)
     found = connection.execute(
-        select(conversations.c.id).where(
+        select(conversations.c.agent).where(
             conversations.c.conversation == landing.conversation
         )
     ).first()
@@ -159,6 +190,8 @@ def landed(connection: Any, landing: Landing) -> None:
             )
         )
         return
+    if found.agent != landing.agent:
+        raise MisattributedTurn(ANOTHER_AGENT)
     connection.execute(
         update(conversations)
         .where(conversations.c.conversation == landing.conversation)
@@ -244,4 +277,14 @@ def prune(connection: Any, cutoff: str) -> Pruned:
     )
 
 
-__all__ = ["TITLE_CHARACTERS", "Landing", "Pruned", "landed", "prune", "title_of"]
+__all__ = [
+    "ANOTHER_AGENT",
+    "NO_DEVICE",
+    "TITLE_CHARACTERS",
+    "Landing",
+    "MisattributedTurn",
+    "Pruned",
+    "landed",
+    "prune",
+    "title_of",
+]
