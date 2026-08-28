@@ -149,12 +149,20 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   table name is left saying what one entity is.
   `deploy/postgres-init.sql` creates `record` and grants `vinga_ro` on
   it, and every `psql` recipe in the documentation moves with it. There
-  is no migration and none is coming: a database whose store still sits
-  in the old schema is one whose `record` schema does not exist yet, so
-  the server creates it and records into an empty store, and the old
+  is no migration and none is coming. **The upgrade is: rerun the
+  updated `deploy/postgres-init.sql`, then boot.** That is the reset
+  story's own shape, and it is the order rather than a convenience: the
+  supported server role has no `CREATE` on the database, so a
+  deployment provisioned by the previous file has no `record` schema
+  and no role that can make one, and a server started before the rerun
+  refuses with the fixed database refusal that repeats no part of the
+  connection. A deployment whose server role owns its database does
+  create the schema at first boot, and still needs the rerun, because
+  nothing else grants `vinga_ro` on the new schema. Either way the old
   `conversations` schema stays where it is for an operator to read
-  beside the new one or to drop. That is the same pre-release reset this
-  release already prices, recorded in
+  beside the new one or to drop, and what is in it does not come
+  across. That is the same pre-release reset this release already
+  prices, recorded in
   `docs/adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md`.
 - **BREAKING: retention prunes conversations rather than sessions**
   (#190). `server.conversations.retention_days` is unchanged (90 by
@@ -201,8 +209,9 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   blank schema to current in one step. **The conversation record is not
   carried across**; take a `pg_dump` of the schema first if it is
   wanted. The schema rename above means a store recorded by an earlier
-  build meets neither the refusal nor an upgrade, because the schema it
-  lives in is no longer the one the server migrates. The compatibility
+  build meets neither this refusal nor an upgrade, because the schema
+  it lives in is no longer the one the server migrates; what it meets
+  is the rerun above. The compatibility
   decision and the tested path back are recorded in
   `docs/adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md`.
 
