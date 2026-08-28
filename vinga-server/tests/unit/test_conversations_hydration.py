@@ -12,6 +12,10 @@ what a conversation is resumed into. And it says what it could not
 bring: the turns it could not read anywhere in the thread, and whether
 there were more of them than the budget had room for.
 
+The last two sections are the recap's. A checkpoint is a head that
+truncation may not reach, and the range a rebuilt context actually read
+is what a checkpoint is allowed to claim it covers.
+
 Sizes are written as characters and read as tokens through
 `ESTIMATED_CHARS_PER_TOKEN`, so a budget in this file is arithmetic
 rather than a guess about a tokenizer.
@@ -19,6 +23,7 @@ rather than a guess about a tokenizer.
 
 from vinga_server.conversations.hydration import (
     ESTIMATED_CHARS_PER_TOKEN,
+    MILESTONE_NOTE,
     TOOL_NOTE,
     hydrated,
 )
@@ -30,8 +35,11 @@ PLENTY = 6000
 
 
 def said(index: int, size: int = 8) -> StoredTurn:
-    """One whole turn of a known size, distinguishable by its index."""
-    return StoredTurn(heard=f"{index}" * size, reply=f"r{index}" * (size // 2))
+    """One whole turn of a known size, distinguishable by its index, and
+    carrying the row id a recap would record it by."""
+    return StoredTurn(
+        id=index, heard=f"{index}" * size, reply=f"r{index}" * (size // 2)
+    )
 
 
 def roles(turns) -> list[str]:
@@ -254,9 +262,95 @@ def test_the_same_rows_answer_the_same_way_twice() -> None:
     assert hydrated(units, 40) == hydrated(units, 40)
 
 
+# What a recap checkpoint changes
+
+
+def test_a_checkpoint_is_the_head_and_the_turns_after_it_the_tail() -> None:
+    """Milestone-aware hydration: the caller has already left out the
+    turns the checkpoint covers, so what comes back is the recap and
+    then whatever was said since."""
+    answer = hydrated([said(7), said(8)], PLENTY, milestone="we discussed galaxies")
+
+    assert roles(answer.turns) == ["assistant", "user", "assistant", "user", "assistant"]
+    assert texts(answer.turns)[0] == MILESTONE_NOTE.format(text="we discussed galaxies")
+    assert (answer.rendered, answer.over_budget) == (2, False)
+
+
+def test_a_checkpoint_alone_is_the_whole_context_when_nothing_followed_it() -> None:
+    """What a consented recap installs at the moment it is made: the
+    checkpoint covered everything, so there is no tail yet."""
+    answer = hydrated([], PLENTY, milestone="we discussed galaxies")
+
+    assert texts(answer.turns) == [MILESTONE_NOTE.format(text="we discussed galaxies")]
+    assert (answer.rendered, answer.skipped, answer.over_budget) == (0, 0, False)
+    assert (answer.from_turn, answer.after_turn) == (None, None)
+
+
+def test_the_checkpoint_survives_a_tail_that_does_not_fit() -> None:
+    """The head is pinned: it stands for turns that are not in this list
+    at all, so trimming it would delete the oldest part of the thread
+    while keeping the newest."""
+    units = [said(1), said(2), said(3)]
+    recap = "a recap long enough to matter" * 4
+
+    answer = hydrated(units, _cost(units[0]) * 2, milestone=recap)
+
+    assert texts(answer.turns)[0] == MILESTONE_NOTE.format(text=recap)
+    assert answer.over_budget is True
+    assert answer.rendered < 3
+
+
+def test_a_checkpoint_charges_the_budget_before_the_tail_does() -> None:
+    """Trimmed against the head rather than around it: the same rows
+    that fit without a checkpoint do not all fit with one."""
+    units = [said(1), said(2)]
+    recap = "a recap"
+    room = _head(recap) + _cost(units[1])
+
+    assert hydrated(units, room).rendered == 2
+    assert hydrated(units, room, milestone=recap).rendered == 1
+
+
+# The range a recap may claim
+
+
+def test_the_rendered_range_is_the_turns_actually_read() -> None:
+    answer = hydrated([said(4), said(5), said(6)], PLENTY)
+
+    assert (answer.from_turn, answer.after_turn) == (4, 6)
+
+
+def test_a_backlog_wider_than_the_budget_records_its_true_first_turn() -> None:
+    """The finding this field exists for: a bounded recap must not claim
+    coverage of the turns its own budget dropped, so what it records is
+    where its reading really began."""
+    units = [said(index) for index in range(1, 6)]
+
+    answer = hydrated(units, _cost(units[0]) * 2)
+
+    assert answer.over_budget is True
+    assert (answer.from_turn, answer.after_turn) == (4, 5)
+
+
+def test_a_gap_at_the_end_does_not_become_the_range_it_could_not_read() -> None:
+    """A turn with no stored text is not a turn a recap read, so the
+    range stops at the newest one it could."""
+    answer = hydrated([said(1), said(2), StoredTurn(id=3)], PLENTY)
+
+    assert (answer.from_turn, answer.after_turn) == (1, 2)
+
+
 def _cost(turn: StoredTurn) -> int:
     """What one unit is estimated at, computed the way the module does
     rather than written down: a budget in this file is then arithmetic
     on the input rather than a number that has to be kept in step."""
     characters = len(turn.heard or "") + len(turn.reply or "")
+    return -(-characters // ESTIMATED_CHARS_PER_TOKEN)
+
+
+def _head(text: str) -> int:
+    """What the pinned checkpoint costs, framed the way the module
+    frames it, for the same reason `_cost` is computed rather than
+    written down."""
+    characters = len(MILESTONE_NOTE.format(text=text))
     return -(-characters // ESTIMATED_CHARS_PER_TOKEN)
