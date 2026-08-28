@@ -1047,7 +1047,7 @@ vinga-server/tests/unit/data/cli-respelling.txt:310  historical  vinga-server co
 vinga-server/tests/unit/data/cli-respelling.txt:316  historical  vinga-server config apply
 vinga-server/tests/unit/data/cli-respelling.txt:318  historical  vinga-server config apply
 vinga-server/tests/unit/test_api_contract.py:311  respell  vinga simulator
-vinga-server/tests/unit/test_api_openapi.py:37  respell  vinga-server config openapi
+vinga-server/tests/unit/test_api_openapi.py:38  respell  vinga-server config openapi
 vinga-server/tests/unit/test_cli_import_weight.py:52  respell  vinga simulator
 vinga-server/tests/unit/test_command_spellings.py:140  historical  bind-device
 vinga-server/tests/unit/test_command_spellings.py:152  historical  bind-device
