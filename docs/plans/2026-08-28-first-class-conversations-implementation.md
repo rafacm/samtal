@@ -9,7 +9,7 @@ says so explicitly.
 
 ## M1: sessions are sessions, conversations exist
 
-PR TBD.
+PR #332.
 
 ### What landed
 
