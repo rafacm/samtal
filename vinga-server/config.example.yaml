@@ -312,6 +312,18 @@ server:
   #   # and must be chosen deliberately: a store with no policy retains
   #   # forever.
   #   retention_days: 90
+  #   # Whether an agent can find one of its own past conversations by
+  #   # description and carry on with it. Off by default: recording a
+  #   # conversation and reading it back to a model are separate
+  #   # decisions. It needs `enabled` and `text` above, since a thread
+  #   # cannot be rebuilt from text that was never stored, and a boot
+  #   # with either of them off is refused.
+  #   resumption: false
+  #   # How much of a resumed conversation is rebuilt into the model's
+  #   # context, in tokens. Approximate: the count is estimated from the
+  #   # stored text, and what is dropped when the thread is longer than
+  #   # this is whole turns, oldest first.
+  #   resumption_budget_tokens: 6000
 
   # Whether speech that arrives while a reply is playing interrupts it.
   # On by default: a device only keeps streaming its microphone through

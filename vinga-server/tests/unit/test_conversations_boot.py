@@ -20,17 +20,28 @@ The store's own behaviour (the markers, the bound, retention) has its
 own suites next door. This one is about the wiring.
 """
 
+from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from sqlalchemy import inspect, text
 
 import vinga_server.app as app_module
 from tests.support.configs import config_with_agent
 from vinga_server.app import StartupFailed, create_app
 from vinga_server.config import Config
-from vinga_server.config.models import DatabaseConfig
+from vinga_server.config.loader import ConfigError, load_file_config
+from vinga_server.config.models import (
+    RESUMPTION_NEEDS_RECORDING,
+    RESUMPTION_NEEDS_TEXT,
+    ConversationsConfig,
+    DatabaseConfig,
+    FieldProblem,
+    FieldProblemsError,
+)
 from vinga_server.conversations import schema
 from vinga_server.conversations import store as store_module
 from vinga_server.conversations.store import ConversationStore, open_conversations
@@ -216,6 +227,70 @@ def test_the_schema_is_migrated_on_a_boot_that_records_nothing(
     version, tables = _stamped(blank_database)
     assert version == head_revision()
     assert EXPECTED_TABLES <= tables
+
+
+@pytest.mark.parametrize(
+    ("section", "sentence", "pointer"),
+    [
+        (
+            {"enabled": False, "resumption": True},
+            RESUMPTION_NEEDS_RECORDING,
+            "/enabled",
+        ),
+        (
+            {"enabled": True, "text": False, "resumption": True},
+            RESUMPTION_NEEDS_TEXT,
+            "/text",
+        ),
+    ],
+)
+def test_resumption_without_what_it_reads_is_refused_at_boot(
+    tmp_path: Path, section: dict[str, object], sentence: str, pointer: str
+) -> None:
+    """The two combinations in which resumption could only pretend, met
+    where an operator meets them: at the boot's own read of the file.
+
+    Both halves of the refusal are asserted because both are surface. The
+    sentence is what a boot prints, and it names the two keys and the two
+    ways out with no value in it; the pointer is what a form would take
+    somebody to, and it is the switch to turn on rather than the one to
+    turn off. The pointer is read off the model, which is the only place
+    it survives: the loader renders a location and a sentence, and the
+    field a validator knew about travels in the error's own context.
+    """
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(
+        yaml.safe_dump({"server": {"conversations": section}}), encoding="utf-8"
+    )
+
+    with pytest.raises(ConfigError) as refusal:
+        load_file_config(config_file)
+    assert sentence in str(refusal.value)
+
+    with pytest.raises(ValidationError) as raised:
+        ConversationsConfig(**section)
+    (problem,) = _problems(raised.value)
+    assert problem == FieldProblem(pointer, sentence)
+
+
+def test_resumption_with_neither_switch_names_both(tmp_path: Path) -> None:
+    """Two problems rather than the first one found: both are true, and
+    an operator who fixed the one they were shown would meet the other on
+    the next boot."""
+    with pytest.raises(ValidationError) as raised:
+        ConversationsConfig(enabled=False, text=False, resumption=True)
+
+    assert [problem.path for problem in _problems(raised.value)] == ["/enabled", "/text"]
+
+
+def _problems(exc: ValidationError) -> tuple[FieldProblem, ...]:
+    """The field problems a validator raised, out of the error pydantic
+    wrapped them in. `ctx` is where the exception object survives, which
+    is what `_error_problems` reads in the renderers."""
+    (error,) = exc.errors()
+    raised = error["ctx"]["error"]
+    assert isinstance(raised, FieldProblemsError)
+    return raised.problems
 
 
 def test_a_database_stamped_at_the_replaced_revision_is_refused(
