@@ -18,12 +18,7 @@ from typing import Any
 from sqlalchemy import text
 from xiaozhi_sdk import XiaoZhiWebsocket
 
-from tests.integration.conftest import (
-    FRAME_BYTES,
-    SAMPLE_RATE,
-    converse,
-    speech_pcm,
-)
+from tests.integration.conftest import FRAME_BYTES, SAMPLE_RATE, speech_pcm
 from vinga_server.config import Config
 from vinga_server.config.models import DatabaseConfig, ProviderConfig
 from vinga_server.db import read_engine
@@ -188,18 +183,16 @@ async def test_a_deployment_that_was_not_asked_records_nothing(serve) -> None:
 # What only this lane can say about resumption: the switch reaches a
 # booted server, the tools it enables are offered to a model that is
 # really there, the search runs against Postgres rather than a double,
-# and the thread a move lands on is the thread the store then records
-# the next turn against.
+# the id the search answered is what the next call names, and the
+# thread a move lands on is the thread the store then records against,
+# in a second session, against rows a first one left behind.
 #
-# What it deliberately does not drive is the second beat of the search
-# flow, the call naming the conversation the user picked. That argument
-# is an id the model can only have read out of the previous tool result,
-# and the mock LLM asks for a tool it was configured with rather than
-# one it composed; teaching a test double to lift a value out of a
-# result would be more machinery than the claim is worth. The
-# interception that beat goes through is driven end to end below by
-# `new_conversation`, and by the whole of
-# `tests/unit/test_session_conversations.py` against a store double.
+# The second beat of that flow is a call whose argument is an id the
+# model can only have read out of the previous tool result, which is
+# more than a template can express. The scripted provider is given the
+# rule instead: match the results, lift the first group out, and ask
+# for the same tool again with it. That is a test double reading a
+# script, not a test double reading.
 
 
 def moving_config(tool_name: str, **arguments: object) -> Config:
@@ -218,27 +211,112 @@ def moving_config(tool_name: str, **arguments: object) -> Config:
     return config
 
 
-async def test_a_later_session_finds_the_thread_an_earlier_one_left(serve) -> None:
+def resuming_config() -> Config:
+    """An agent that searches for the earlier conversation, picks what
+    the search answered, and then talks on it.
+
+    The script is two beats and a brake. The utterance asks for a
+    search; the results are answered with the same tool naming the id
+    they carried; and once the resumed dialogue is in front of the model
+    it asks for nothing more, which is what makes the utterance after
+    the move an ordinary turn in a lane where every utterance
+    transcribes the same.
+    """
+    config = recording_config()
+    assert config.server.conversations is not None
+    config.server.conversations.resumption = True
+    config.providers.llm["mock"] = ProviderConfig(
+        type="mock",
+        reply="Right, where were we.",
+        tool_when="battery",
+        tool_name="resume_conversation",
+        tool_arguments={"description": "battery"},
+        then_pattern='conversation "([0-9a-f]+)"',
+        then_arguments={"conversation": "{found}"},
+        # The earlier session's reply, which is in front of the model
+        # only once the older thread has been rebuilt.
+        tool_unless=BATTERY,
+    )
+    return config
+
+
+async def test_a_later_session_resumes_the_thread_an_earlier_one_left(serve) -> None:
+    """The whole flow, over a socket and against Postgres: search, pick
+    what the search found, move, and keep recording on the thread that
+    was picked up.
+
+    What the assertions are about is attribution across two sessions.
+    The turn that asked stays on the conversation the second session
+    opened on; the reply the move was greeted with is the first turn the
+    second session recorded on the older thread, and it has nothing
+    heard on it, because what the user said was said before the move;
+    and the utterance after it lands on that same older thread.
+    """
     async with serve(recording_config()) as port:
         await two_turns(port, DEVICE_MAC)
-    (thread,) = read("select * from conversations.conversations")
+    (earlier,) = read("select * from conversations.conversations")
+    assert earlier["title"] == "how is the battery"
+    before = {turn["id"] for turn in read("select id from conversations.turns")}
 
-    async with serve(moving_config("resume_conversation", description="battery")) as port:
-        await converse(port, DEVICE_MAC)
+    async with serve(resuming_config()) as port:
+        await two_turns(port, DEVICE_MAC)
 
-    # The search answered out of the database the first server wrote,
-    # and what the agent said carries what it found. The reply is
-    # content and is read where content lives.
-    said = read("select reply from conversations.turns order by id")[-1]["reply"]
-    assert thread["conversation"] in said
-    assert thread["title"] == "how is the battery"
-    assert thread["title"] in said
+    sessions = read("select * from conversations.sessions order by id")
+    threads = read("select * from conversations.conversations order by id")
+    turns = [
+        turn
+        for turn in read("select * from conversations.turns order by id")
+        if turn["id"] not in before
+    ]
+    assert len(sessions) == 2
+    # The second session opened on a thread of its own and moved onto
+    # the first session's, so there are two and only two.
+    assert [thread["conversation"] for thread in threads][0] == earlier["conversation"]
+    assert len(threads) == 2
+    opened = next(
+        thread["conversation"]
+        for thread in threads
+        if thread["conversation"] != earlier["conversation"]
+    )
+
+    asked, seeded, carried = turns
+    assert {turn["session"] for turn in turns} == {sessions[1]["session"]}
+    # The turn that asked, on the conversation it was asked on, with
+    # both halves of the flow recorded under it: the search, then the
+    # call naming what the search answered.
+    assert asked["conversation"] == opened
+    assert asked["heard"] == "how is the battery"
+    assert [
+        call["name"]
+        for call in read("select * from conversations.tool_invocations order by id")
+        if call["turn"] == asked["id"]
+    ] == ["resume_conversation", "resume_conversation"]
+    # The other side of the move: the greeting, on the older thread,
+    # heard from nobody.
+    assert (seeded["conversation"], seeded["heard"]) == (
+        earlier["conversation"],
+        None,
+    )
+    assert seeded["reply"] == "Right, where were we."
+    # And the conversation carries on there.
+    assert carried["conversation"] == earlier["conversation"]
+    assert carried["heard"] == "how is the battery"
+    # Which is a thread two sessions have now spoken on.
+    assert {
+        turn["session"]
+        for turn in read("select * from conversations.turns")
+        if turn["conversation"] == earlier["conversation"]
+    } == {sessions[0]["session"], sessions[1]["session"]}
 
 
 async def test_a_fresh_conversation_moves_the_session_onto_it(serve) -> None:
     """The interception, end to end: the turn that asked is recorded on
-    the thread it started on, and the turn after it on the one the move
-    landed on."""
+    the thread it was asked on, and the greeting that answered the move
+    opens the thread it landed on.
+
+    Both utterances ask, so one session walks three threads, and the
+    middle one holds a turn of each kind.
+    """
     async with serve(moving_config("new_conversation")) as port:
         await two_turns(port, DEVICE_MAC)
 
@@ -247,7 +325,20 @@ async def test_a_fresh_conversation_moves_the_session_onto_it(serve) -> None:
     sessions = read("select * from conversations.sessions")
 
     assert len(sessions) == 1
-    assert [turn["conversation"] for turn in turns] == [
-        thread["conversation"] for thread in threads
+    first, second, third = (thread["conversation"] for thread in threads)
+    assert [turn["conversation"] for turn in turns] == [first, second, second, third]
+    # The turns that asked carry the utterance; the greetings that
+    # answered the moves were heard from nobody.
+    assert [turn["heard"] for turn in turns] == [
+        "how is the battery",
+        None,
+        "how is the battery",
+        None,
     ]
-    assert len({turn["conversation"] for turn in turns}) == 2
+    # A thread is named by its earliest utterance, so the one that only
+    # ever held a greeting has no name to take.
+    assert [thread["title"] for thread in threads] == [
+        "how is the battery",
+        "how is the battery",
+        None,
+    ]
