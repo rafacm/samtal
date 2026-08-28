@@ -54,7 +54,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import ColumnElement, delete, func, select, update
+from sqlalchemy import ColumnElement, delete, func, select, tuple_, update
 
 from vinga_server.conversations.schema import (
     conversation_milestones,
@@ -156,15 +156,24 @@ class Pruned:
 
 @dataclass(frozen=True)
 class Erased:
-    """What one deletion took, per table.
+    """What one deletion took: five counts and one list of names.
 
-    The same six counts `Pruned` carries, and deliberately a second type
-    rather than the same one: retention answers an event about a policy
-    that ran, and this answers a caller that asked for something to be
-    destroyed. They agree today and have no reason to move together.
+    Deliberately a second type rather than `Pruned`: retention answers
+    an event about a policy that ran, and this answers a caller that
+    asked for something to be destroyed. They agree today and have no
+    reason to move together.
+
+    `threads` is the one field that is not a count, and that is what its
+    caller needs rather than a nicety. A thread this deletion took is a
+    thread a live runtime may still be speaking on, and the writer has
+    to be told which ones so that a turn already on its way to one is
+    discarded instead of raising the row from the dead. The count the
+    API answers is its length, which is why there is no second field
+    holding one: two structures that must agree are one structure with a
+    bug pending.
     """
 
-    conversations: int = 0
+    threads: tuple[str, ...] = ()
     milestones: int = 0
     tool_invocations: int = 0
     turns: int = 0
@@ -274,6 +283,279 @@ def flag_incomplete(connection: Any, threads: Iterable[str]) -> set[str]:
             .values(incomplete=True)
         )
     return flagged
+
+
+# --- the reads --------------------------------------------------------
+#
+# What a thread looks like from outside it, which is three shapes and a
+# search. They live here rather than beside the routes for the reason
+# the deletions do: the join topology is this module's, and a caller
+# that assembled a thread out of `conversations`, `turns` and
+# `conversation_milestones` itself would be a second place for it to be
+# right or wrong. What the routes keep is the transport: which page,
+# which cursor, and how a row becomes a body.
+
+
+# What a listing answers per thread. Everything short about it, which is
+# everything on the row: a thread carries no nested structure, so unlike
+# a session there is nothing here a listing would be paying for.
+SUMMARY_COLUMNS: tuple[Any, ...] = (
+    conversations.c.id,
+    conversations.c.conversation,
+    conversations.c.agent,
+    conversations.c.title,
+    conversations.c.device,
+    conversations.c.incomplete,
+    conversations.c.created_at,
+    conversations.c.last_active_at,
+)
+
+# How many threads a discovery answer may hold, and how much of a
+# thread's opening utterance is matched against and offered with it.
+#
+# Five, because the list is read aloud: a spoken answer that ran past
+# that is one nobody holds in their head to the end of. The excerpt is
+# wider than a title (which is the first utterance bounded at
+# `TITLE_CHARACTERS`) so that a thread whose first sentence ran long is
+# still matchable past the point its name stops.
+RESUME_CANDIDATES = 5
+
+EXCERPT_CHARACTERS = 200
+
+
+@dataclass(frozen=True)
+class Candidate:
+    """One thread a spoken description might have meant.
+
+    Everything the model needs to read it out and nothing else: which
+    thread to ask for, what it is called, when it was last spoken to,
+    and how it opened. `score` is carried because the caller decides
+    what to say about a list nothing matched, and cannot see that from
+    the order alone.
+    """
+
+    conversation: str
+    title: str | None
+    last_active_at: str
+    excerpt: str | None
+    score: int
+
+
+@dataclass(frozen=True)
+class Candidates:
+    """A discovery answer: the threads to offer, and whether any of them
+    was found by matching rather than by being recent.
+
+    Two fields rather than an empty list for "nothing matched", because
+    a dead end is a worse answer than a list somebody can still pick
+    from: the caller offers the newest threads and says that nothing
+    matched, which is a sentence it can only build if it is told.
+    """
+
+    matched: bool
+    found: tuple[Candidate, ...] = ()
+
+
+def listed(
+    connection: Any,
+    agent: str | None = None,
+    limit: int = RESUME_CANDIDATES,
+    cursor: tuple[str, int] | None = None,
+) -> list[dict[str, Any]]:
+    """One page of threads, most recently active first.
+
+    Ordered by `last_active_at` descending with `id` descending as the
+    tie-break, and paged by that pair rather than by the row id alone:
+    activity moves, so an immutable row-id cursor would page an order
+    the rows do not sit in. UTC ISO-8601 text compares
+    lexicographically, which is what makes the pair total.
+
+    `cursor` is the previous page's last row's pair, and the page holds
+    the rows strictly below it. Under concurrent activity that is stated
+    rather than implied: a thread whose activity moves it ahead of the
+    cursor between two pages is missed by that pass and appears at the
+    head of a fresh one, and a boundary never duplicates or skips a row
+    whose pair did not move.
+    """
+    criteria: list[ColumnElement[bool]] = []
+    if agent is not None:
+        criteria.append(conversations.c.agent == agent)
+    if cursor is not None:
+        criteria.append(
+            tuple_(conversations.c.last_active_at, conversations.c.id)
+            < tuple_(*cursor)
+        )
+    return [
+        dict(row)
+        for row in connection.execute(
+            select(*SUMMARY_COLUMNS, _turn_count().label("turns"))
+            .where(*criteria)
+            .order_by(conversations.c.last_active_at.desc(), conversations.c.id.desc())
+            .limit(limit)
+        ).mappings()
+    ]
+
+
+def detail(connection: Any, conversation: str) -> dict[str, Any] | None:
+    """One thread, whole, or None when no row of that id is here.
+
+    The counts are read in the caller's transaction with the row, so
+    they describe one snapshot rather than three moments of a thread
+    that may still be being spoken to.
+    """
+    found = connection.execute(
+        select(
+            *SUMMARY_COLUMNS,
+            _turn_count().label("turns"),
+            select(func.count())
+            .select_from(conversation_milestones)
+            .where(conversation_milestones.c.conversation == conversations.c.conversation)
+            .scalar_subquery()
+            .label("milestones"),
+        ).where(conversations.c.conversation == conversation)
+    ).mappings().first()
+    return dict(found) if found is not None else None
+
+
+def dialogue(
+    connection: Any, conversation: str, after: int | None = None, limit: int = 50
+) -> list[dict[str, Any]]:
+    """One page of a thread's turns, oldest first.
+
+    Forward from `after` rather than backwards from a cursor, which is
+    the direction dialogue is read in and the direction a client
+    reconciling what it has already seen asks in: the ids are monotonic
+    and never reused, so what came after one is a stable question. A
+    thread's turns can come from several sessions and each row says
+    which, which is the half of the two projections a session timeline
+    answers the other way round.
+    """
+    criteria: list[ColumnElement[bool]] = [turns.c.conversation == conversation]
+    if after is not None:
+        criteria.append(turns.c.id > after)
+    return [
+        dict(row)
+        for row in connection.execute(
+            select(turns).where(*criteria).order_by(turns.c.id).limit(limit)
+        ).mappings()
+    ]
+
+
+def candidates(connection: Any, agent: str, description: str) -> Candidates:
+    """The threads of one agent a spoken description might have meant.
+
+    Matching, not merely listing, and deliberately not full-text search
+    over the dialogue, which #190 defers: what is matched is what a
+    listing already carries, which is the thread's title and the opening
+    excerpt beside it.
+
+    The description and each candidate's text are normalized the same
+    way (casefolded, punctuation replaced by a break, split on
+    whitespace), a candidate's score is how many of the description's
+    distinct tokens appear among its own, and the answer orders by score
+    descending, then `last_active_at` descending, then id descending. So
+    a relevant older thread outranks a newer unrelated one, and the same
+    question asked twice of the same rows answers the same way.
+
+    Nothing scoring is not a dead end: the newest `RESUME_CANDIDATES`
+    come back with `matched` false, so the caller can offer them and say
+    that nothing matched rather than answering with a shrug.
+
+    Every token counts the same, an ordinary word included, so a
+    description carrying "the" scores one against every thread that also
+    says it. That is deliberate rather than overlooked: a stop list is a
+    vocabulary per language, this deployment's transcripts are in
+    whatever the room speaks, and the ordering already puts the thread
+    that matched three words ahead of the one that matched a common one.
+
+    The scan is one agent's threads, which is the set the entity is
+    scoped to and the set `ix_conversations_agent_activity` is for. It
+    is not bounded further on purpose: a bound is what would make the
+    reviewer's case (a relevant thread outside the newest few) unfindable,
+    which is the whole property this function exists to have.
+    """
+    wanted = _tokens(description)
+    scored: list[tuple[int, str, int, Candidate]] = []
+    for row in connection.execute(
+        select(
+            conversations.c.id,
+            conversations.c.conversation,
+            conversations.c.title,
+            conversations.c.last_active_at,
+            select(turns.c.heard)
+            .where(turns.c.conversation == conversations.c.conversation)
+            .order_by(turns.c.id)
+            .limit(1)
+            .scalar_subquery()
+            .label("opening"),
+        ).where(conversations.c.agent == agent)
+    ):
+        score = len(wanted & (_tokens(row.title) | _tokens(row.opening)))
+        scored.append(
+            (
+                score,
+                row.last_active_at,
+                row.id,
+                Candidate(
+                    conversation=row.conversation,
+                    title=row.title,
+                    last_active_at=row.last_active_at,
+                    excerpt=_excerpt(row.opening),
+                    score=score,
+                ),
+            )
+        )
+    # One sort with one key, so the fallback below is the same list read
+    # shorter rather than a second ordering rule. The row id is the last
+    # tie-break and stays out of the answer: it orders threads that agree
+    # on everything else, and it is not something to read aloud.
+    ranked = [one[3] for one in sorted(scored, key=lambda one: one[:3], reverse=True)]
+    matching = tuple(one for one in ranked if one.score)[:RESUME_CANDIDATES]
+    if matching:
+        return Candidates(matched=True, found=matching)
+    return Candidates(matched=False, found=tuple(ranked[:RESUME_CANDIDATES]))
+
+
+def _turn_count() -> Any:
+    """How many turns a thread holds, as a correlated count.
+
+    A count rather than a join, so a thread is one row of the page
+    whatever it holds and the page size counts threads.
+    """
+    return (
+        select(func.count())
+        .select_from(turns)
+        .where(turns.c.conversation == conversations.c.conversation)
+        .scalar_subquery()
+    )
+
+
+def _excerpt(heard: str | None) -> str | None:
+    """How a thread opened, bounded, or None where nothing was stored.
+
+    The same shape as a title and a wider bound, for the same reason a
+    title has one: it is read aloud and printed on a line.
+    """
+    if heard is None:
+        return None
+    words = " ".join(heard.split())
+    return words[:EXCERPT_CHARACTERS] if words else None
+
+
+def _tokens(text: str | None) -> set[str]:
+    """Text as the words a match is decided on.
+
+    Casefolded, with everything that is not a letter or a digit becoming
+    a break, and split on whitespace. A break rather than a deletion, so
+    that a hyphenated word matches the two words somebody says instead
+    of a third word neither of them is.
+    """
+    if not text:
+        return set()
+    broken = "".join(
+        character if character.isalnum() else " " for character in text.casefold()
+    )
+    return set(broken.split())
 
 
 def prune(connection: Any, cutoff: str) -> Pruned:
@@ -444,17 +726,76 @@ def erase_sessions(connection: Any, named: Sequence[str]) -> Erased:
             conversation_milestones.c.conversation.in_(orphaned)
         )
     ).rowcount
-    threads = connection.execute(
+    connection.execute(
         delete(conversations).where(conversations.c.conversation.in_(orphaned))
-    ).rowcount
+    )
 
     return Erased(
-        conversations=threads,
+        threads=tuple(orphaned),
         milestones=milestones,
         tool_invocations=invocations,
         turns=gone,
         events=telemetry,
         sessions=spines,
+    )
+
+
+def erase_conversations(connection: Any, named: Sequence[str]) -> Erased:
+    """Erase these threads whole, inside the caller's transaction.
+
+    The other direction through the same door. Erasing a session takes
+    its turns wherever their threads are; erasing a thread takes its
+    turns out of whatever sessions they were spoken in, and the sessions
+    themselves are not touched, nor is their telemetry: a session is a
+    connection episode and it still happened, with a gap in it now where
+    a thread used to be. That asymmetry is the two projections being
+    honest about which one was asked to be forgotten.
+
+    A thread's checkpoints go with it, and so does everything descended
+    from them along the `parent` lineage. A recap consumes its own
+    thread's latest checkpoint, so the lineage is inside the thread by
+    construction; the closure is walked over the whole table anyway,
+    because a rule that holds by construction somewhere else is not a
+    rule this module is entitled to assume.
+
+    No title recomputation and no activity stamp to move: what a thread
+    that is gone was called and when it was last spoken to are gone with
+    it.
+    """
+    if not named:
+        return Erased()
+    threads = list(
+        connection.execute(
+            select(conversations.c.conversation).where(
+                conversations.c.conversation.in_(sorted(set(named)))
+            )
+        ).scalars()
+    )
+    if not threads:
+        return Erased()
+    doomed = set(
+        connection.execute(
+            select(conversation_milestones.c.id).where(
+                conversation_milestones.c.conversation.in_(threads)
+            )
+        ).scalars()
+    )
+    milestones = _erase(connection, _descendants(connection, doomed))
+    dying_turns = select(turns.c.id).where(turns.c.conversation.in_(threads))
+    invocations = connection.execute(
+        delete(tool_invocations).where(tool_invocations.c.turn.in_(dying_turns))
+    ).rowcount
+    gone = connection.execute(
+        delete(turns).where(turns.c.conversation.in_(threads))
+    ).rowcount
+    connection.execute(
+        delete(conversations).where(conversations.c.conversation.in_(threads))
+    )
+    return Erased(
+        threads=tuple(threads),
+        milestones=milestones,
+        tool_invocations=invocations,
+        turns=gone,
     )
 
 
@@ -465,10 +806,7 @@ def _erase_milestones(connection: Any, dying: Mapping[str, Sequence[int]]) -> in
     Coverage is decided here in Python rather than in SQL because it is
     a question about a range against a set, and the sets are small: a
     checkpoint is a consented recap, so a thread accrues them at the
-    pace somebody agrees to one. The lineage walk is a closure and not a
-    single statement for the same reason, and because a recursive query
-    would be the one piece of SQL in this module a reader could not
-    check by eye.
+    pace somebody agrees to one.
     """
     if not dying:
         return 0
@@ -479,23 +817,48 @@ def _erase_milestones(connection: Any, dying: Mapping[str, Sequence[int]]) -> in
                 conversation_milestones.c.conversation,
                 conversation_milestones.c.from_turn,
                 conversation_milestones.c.after_turn,
-                conversation_milestones.c.parent,
             ).where(conversation_milestones.c.conversation.in_(sorted(dying)))
         )
     )
     doomed = {
         row[0] for row in rows if _covers(row[2], row[3], dying.get(row[1], ()))
     }
-    children: dict[int, list[int]] = {}
-    for row in rows:
-        if row[4] is not None:
-            children.setdefault(row[4], []).append(row[0])
-    pending = list(doomed)
-    while pending:
-        for child in children.get(pending.pop(), ()):
-            if child not in doomed:
-                doomed.add(child)
-                pending.append(child)
+    return _erase(connection, _descendants(connection, doomed))
+
+
+def _descendants(connection: Any, doomed: set[int]) -> set[int]:
+    """Those checkpoints and everything descended from them along
+    `parent`.
+
+    A summary of erased content is that content whether it arrived
+    directly or through an earlier recap the summarizer consumed, so a
+    checkpoint dies with its ancestor. Walked as a closure rather than
+    written as a recursive query, because a recursive query would be the
+    one piece of SQL in this module a reader could not check by eye, and
+    because a lineage is as deep as somebody has consented to recaps.
+
+    One walk for both callers: the session erasure reaches it through
+    coverage and the thread erasure through the thread, and a second
+    copy of the closure would be a second answer to one question.
+    """
+    found = set(doomed)
+    frontier = found
+    while frontier:
+        frontier = {
+            child
+            for child in connection.execute(
+                select(conversation_milestones.c.id).where(
+                    conversation_milestones.c.parent.in_(sorted(frontier))
+                )
+            ).scalars()
+            if child not in found
+        }
+        found |= frontier
+    return found
+
+
+def _erase(connection: Any, doomed: set[int]) -> int:
+    """Delete these checkpoints by id, and say how many went."""
     if not doomed:
         return 0
     return int(
@@ -576,15 +939,25 @@ def _began(connection: Any, thread: str) -> str:
 
 __all__ = [
     "ANOTHER_AGENT",
+    "EXCERPT_CHARACTERS",
     "NO_DEVICE",
+    "RESUME_CANDIDATES",
+    "SUMMARY_COLUMNS",
     "TITLE_CHARACTERS",
+    "Candidate",
+    "Candidates",
     "Erased",
     "Landing",
     "MisattributedTurn",
     "Pruned",
+    "candidates",
+    "detail",
+    "dialogue",
+    "erase_conversations",
     "erase_sessions",
     "flag_incomplete",
     "landed",
+    "listed",
     "prune",
     "selected",
     "title_of",
