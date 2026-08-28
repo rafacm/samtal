@@ -5,11 +5,12 @@ the thread store hands it rows, so everything it decides can be asserted
 by writing turns down and reading messages back.
 
 What the assertions are about is the three properties a rebuilt context
-has to have. It alternates roles, because a unit is a whole turn and a
-half unit is never taken. It ends with the newest turn, because that is
+has to have. It alternates roles and opens with the user, whatever
+shape the stored turns are in, because that is what a provider is
+willing to be handed. It ends with the newest turn, because that is
 what a conversation is resumed into. And it says what it could not
-bring: the turns it could not read, and whether there were more of them
-than the budget had room for.
+bring: the turns it could not read anywhere in the thread, and whether
+there were more of them than the budget had room for.
 
 Sizes are written as characters and read as tokens through
 `ESTIMATED_CHARS_PER_TOKEN`, so a budget in this file is arithmetic
@@ -97,6 +98,95 @@ def test_a_thread_with_no_text_at_all_reports_every_turn_as_a_gap() -> None:
 
     assert answer.turns == ()
     assert (answer.rendered, answer.skipped, answer.over_budget) == (0, 3, False)
+
+
+def test_a_turn_that_was_heard_and_never_answered_is_a_gap() -> None:
+    """The shape a failed reply leaves: the utterance was recorded where
+    `heard` is emitted and the reply provider then failed, so the row
+    holds half a turn.
+
+    Rendering that half would put two user messages in a row, which is
+    the one thing the alternation rule exists to prevent and which some
+    vendors refuse outright. The whole partial turn is a hole instead,
+    counted like any other."""
+    answer = hydrated(
+        [
+            StoredTurn(heard="what is the weather", reply="Cloudy."),
+            StoredTurn(heard="and tomorrow"),
+            StoredTurn(heard="are you there", reply="I am."),
+        ],
+        PLENTY,
+    )
+
+    assert roles(answer.turns) == ["user", "assistant", "user", "assistant"]
+    assert texts(answer.turns) == [
+        "what is the weather",
+        "Cloudy.",
+        "are you there",
+        "I am.",
+    ]
+    assert (answer.rendered, answer.skipped) == (2, 1)
+
+
+def test_an_answer_with_nothing_heard_joins_the_answer_before_it() -> None:
+    """The shape a move leaves on the thread it lands on: the round the
+    move seeded is a turn with an answer and no utterance, because what
+    the user said was said on the thread they were moved off.
+
+    It is not a hole, since nothing about it was lost, and it is not a
+    message of its own, since two assistant messages in a row is the
+    same refusal as two user ones. It is joined onto the answer before
+    it, which is what it was: two things said one after the other with
+    nothing from the user in between."""
+    answer = hydrated(
+        [
+            StoredTurn(heard="what is out there", reply="Galaxies."),
+            StoredTurn(reply="We were talking about galaxies."),
+            StoredTurn(heard="go on", reply="Billions of them."),
+        ],
+        PLENTY,
+    )
+
+    assert roles(answer.turns) == ["user", "assistant", "user", "assistant"]
+    assert texts(answer.turns)[1] == "Galaxies.\nWe were talking about galaxies."
+    # Nothing was lost, so nothing is reported as a gap, and the joined
+    # turn is one of the turns this answer rebuilt.
+    assert (answer.rendered, answer.skipped) == (3, 0)
+
+
+def test_an_answer_with_nothing_before_it_is_not_led_with() -> None:
+    """A thread that opens with the greeting a move was answered with
+    has nothing for that greeting to follow. The first message a
+    provider is handed is the user's, so the history opens on the
+    utterance after it rather than on an answer to nobody."""
+    answer = hydrated(
+        [
+            StoredTurn(reply="Starting fresh. What shall we talk about?"),
+            StoredTurn(heard="the moon", reply="It is up there."),
+        ],
+        PLENTY,
+    )
+
+    assert roles(answer.turns) == ["user", "assistant"]
+    assert texts(answer.turns) == ["the moon", "It is up there."]
+    assert (answer.rendered, answer.skipped) == (1, 0)
+
+
+def test_gaps_are_counted_over_the_whole_thread_and_not_the_window() -> None:
+    """What the count answers is whether the record has holes in it,
+    which is a fact about the thread rather than about the budget.
+
+    Ordered as the reviewer's case is: a hole, then a turn too big to
+    keep beside the newest, then the newest. The walk stops at the
+    oversized turn, so a count taken as the walk went would report no
+    gaps at all and the resume would claim a whole record it does not
+    have."""
+    units = [StoredTurn(), said(1, size=400), said(2)]
+
+    answer = hydrated(units, _cost(units[2]))
+
+    assert texts(answer.turns) == ["2" * 8, "r2" * 4]
+    assert (answer.rendered, answer.skipped, answer.over_budget) == (1, 1, True)
 
 
 def test_truncation_drops_whole_units_oldest_first() -> None:
