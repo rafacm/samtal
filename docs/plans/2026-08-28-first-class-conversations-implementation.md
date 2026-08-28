@@ -1252,7 +1252,7 @@ received: mergeable as is, no findings.
 
 ## M5: recap milestones
 
-PR TBD.
+PR #338.
 
 ### What landed
 
