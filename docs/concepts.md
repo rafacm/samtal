@@ -76,9 +76,9 @@ turns inside it. A **conversation** is a
 dialogue between a user and exactly one agent: a durable thread that
 outlives any single session and belongs to no device. The entity
 exists: a stored turn names both the session it was spoken in and the
-conversation it belongs to. What is still **decided direction** (issue
-#190) is what a thread can then be asked to do, which is resuming one,
-listing and deleting them, and the recap. **Users** arrive in a
+conversation it belongs to, and threads can be listed, read and deleted
+over the API and from the command line. What is still **decided
+direction** (issue #190) is resuming one and the recap. **Users** arrive in a
 later stage, and the model leaves their slot open on purpose, which is
 **decided direction** (recorded on this page, 2026-08-21; no owning
 issue or decision record yet).
@@ -200,9 +200,10 @@ default by voice ("make Nadia the default agent on this device") is
 ## Conversation and session
 
 **Implemented today**: the session, the Conversation as a durable,
-agent-scoped thread, and the stored record of all three (issues #120
-and #190). **Decided direction** (issue #190): what a thread can be
-asked to do, which is every semantic below that cites it.
+agent-scoped thread, the stored record of all three, and reading and
+deleting either entity (issues #120 and #190). **Decided direction**
+(issue #190): resuming a thread and the recap, which are the semantics
+below that say so.
 
 The load-bearing distinction in the model is that a conversation and a
 session are different things.
@@ -295,10 +296,13 @@ The decided semantics, each with its owner:
   its turns however old the session that began it, and a thread past
   the window goes whole. Exactly what the three rules do is in
   [the store's reference](reference/conversations-schema.md#retention-and-deletion).
-- **Threads are listable, readable and deletable.** *Decided
-  direction, issue #190.* An operator can list an agent's threads, read
-  one, and delete one. What the release has instead today is no delete
-  command at all, which the same section states exactly.
+- **Threads are listable, readable and deletable.** *Implemented
+  today, issue #190.* An operator lists an agent's threads, reads one
+  with its dialogue, and deletes one, over `/api/conversations` or with
+  `vinga conversation list|show|delete` in front of it. Deleting a
+  thread takes its turns out of whatever sessions they were spoken in
+  and leaves those sessions standing with a gap, which is the opposite
+  direction from deleting a session; neither ever comes back.
 - **A long thread gets a recap only by consent.** *Decided direction,
   issue #190.* At milestones in a long thread the agent offers to
   recap rather than silently compressing, and the user says yes. This

@@ -41,6 +41,33 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   database of their own (#281, #282); the two erasures confirm at a
   terminal and take `--force`. This replaces `vinga-server
   conversations purge`, which was removed with the store's file.
+- **Reading a conversation as a conversation** (#190). `GET
+  /api/conversations` lists the threads this deployment recorded, most
+  recently active first and filterable with `agent`; `GET
+  /api/conversations/{conversation}` reads one whole; and `GET
+  /api/conversations/{conversation}/turns` reads its dialogue oldest
+  first, across every session it was spoken in, with the calls each
+  turn made nested under it. The listing orders on activity, which
+  moves, so it pages on the pair `cursor_active` and `cursor_id`, sent
+  together or not at all, rather than on a row id.
+- **Erasing a recorded conversation on demand** (#190). `DELETE
+  /api/conversations/{conversation}` erases one named thread: its row,
+  its turns out of whatever sessions they were spoken in, the calls
+  those turns made, and its recap checkpoints. The sessions themselves
+  and their telemetry are left standing with a gap in them, which is
+  the opposite direction from erasing a session. A thread a deletion
+  took is never written to again: a turn still on its way to it is
+  discarded rather than recreating the row.
+- **A `conversation` CLI noun**: `vinga conversation list [--agent
+  NAME] [--limit N]`, `vinga conversation show <conversation>` and
+  `vinga conversation delete <conversation>`. All three are requests to
+  the API and reach no database of their own (#281, #282); the erasure
+  confirms at a terminal and takes `--force`. `show` prints the
+  thread's header and then its dialogue as speaker-labelled blocks,
+  because a column holding an utterance is a column that wraps. Every
+  title and every dialogue line is bounded and made printable before it
+  is written, so nothing a room said can add a line or steer a
+  terminal.
 - **The store's durable path**: a marker now commits conversation
   content and telemetry in two transactions with independent fates. A
   durable transaction that meets a transient database refusal is
