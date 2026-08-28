@@ -36,8 +36,9 @@ One row lands when a user is offered a recap of a thread too long to be picked
 up whole and says yes: the agent speaks the summary, and the row is written
 afterwards, so what the column holds is byte for byte what was heard. A thread
 that has one is rebuilt from that checkpoint plus the turns after its
-`after_turn`; the turns at or before its `from_turn` were never read by the
-summarizer and are outside its coverage, which is the boundary that stops a
+`after_turn`. What it covers is the inclusive range `from_turn` through
+`after_turn`; the turns below its `from_turn` were never read by the
+summarizer and are outside that coverage, which is the boundary that stops a
 bounded recap claiming turns it omitted. A deployment where nobody has
 consented to a recap has an empty table.
 
@@ -327,8 +328,8 @@ carries the per-leg counts, and the per-round, per-model truth is the
 | --- | --- | --- | --- |
 | `id` | `BIGINT` | no | Row id, and what a later milestone names as its `parent` when it consumed this one. |
 | `conversation` | `TEXT` | no | The `conversations.conversation` this checkpoint is on. |
-| `from_turn` | `BIGINT` | no | The `turns.id` of the first turn the summarizer actually read. Recorded so that a recap bounded by its input budget cannot claim coverage of the turns it omitted: everything at or before this id is truncated rather than summarized, and hydration treats it so. |
-| `after_turn` | `BIGINT` | no | The `turns.id` of the last turn the summarizer read. Hydration reads this milestone plus the turns with a greater id, which is the whole of what the checkpoint replaces. |
+| `from_turn` | `BIGINT` | no | The `turns.id` of the first turn the summarizer actually read, and the first turn this checkpoint covers. Coverage is the inclusive range `from_turn` through `after_turn`, so that a recap bounded by its input budget cannot claim the turns it omitted: those are the ones below this id, truncated rather than summarized, and hydration treats them so. |
+| `after_turn` | `BIGINT` | no | The `turns.id` of the last turn the summarizer read, and the last turn this checkpoint covers. Hydration reads this milestone plus the turns with a greater id, which is the whole of what the checkpoint replaces. |
 | `parent` | `BIGINT` | yes | The `conversation_milestones.id` whose text was part of this recap's input, and null when none was. The lineage is what makes erasure transitive: content that reached this row only through an earlier checkpoint is still this row's content. |
 | `created_at` | `TEXT` | no | When the checkpoint was stored, UTC ISO-8601. |
 | `text` | `TEXT` | yes | The recap, byte for byte as it was spoken. Conversation content under the uniform rule, so null under text-off, though the flow that writes one cannot run with text off. |

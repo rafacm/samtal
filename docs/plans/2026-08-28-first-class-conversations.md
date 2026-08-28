@@ -763,9 +763,15 @@ that its content flows transitively into this one), `created_at`
 (text, UTC ISO-8601), `text` (text, nullable under the text switch
 by the uniform rule, though the flow that creates one cannot run
 with text off). Milestone-aware hydration reads the latest row and the turns
-with `id > after_turn`; turns at or before `from_turn` are outside
-the recorded coverage, exactly as oldest-first truncation would have
-dropped them, and the reference documentation states the boundary.
+with `id > after_turn`. The recorded coverage is the INCLUSIVE range
+`[from_turn, after_turn]`: turns below `from_turn` are outside it,
+exactly as oldest-first truncation would have dropped them, and the
+reference documentation states the boundary. (Corrected 2026-08-28,
+during PR #338's review round: this paragraph and decision 9 below
+said "at or before `from_turn`", which contradicts the erasure rule
+above, whose coverage is `from_turn` through `after_turn` inclusive,
+and contradicts the hydrator, which assigns `from_turn` the oldest
+turn it rendered. The implementation doc records the correction.)
 
 ### Events
 
@@ -1292,8 +1298,11 @@ resolution once the amendment addressing it lands.
    turns, with a backlog-larger-than-recap-budget test.
    *Resolution*: adopted in its third form. The milestone row gains
    `from_turn`, recording the true start of coverage; hydration
-   treats turns at or before it as truncated rather than
-   summarized, and the over-budget test is named.
+   treats turns below it as truncated rather than summarized, and
+   the over-budget test is named. (Corrected 2026-08-28, with the
+   milestone-row paragraph above: coverage is inclusive at both
+   ends, so `from_turn` is the oldest turn the recap covers rather
+   than the first one outside it.)
 10. **P1: conversation deletion can resurrect the forgotten
     identity.** A missing row is both the pre-first-turn state and
     the deletion tombstone, and the risk section permits
