@@ -881,13 +881,16 @@ vinga-server/README.md:1429  respell  vinga-server config openapi
 vinga-server/README.md:1489  respell  vinga-server config agent preview
 vinga-server/README.md:1499  respell  config status
 vinga-server/README.md:1502  respell  vinga-server config reload
-vinga-server/README.md:1534  respell  config show
-vinga-server/README.md:1626  respell  config export
-vinga-server/README.md:1646  respell  vinga-server config provider secret set llm claude
-vinga-server/README.md:1657  respell  config show
-vinga-server/README.md:1794  respell  vinga-server config provider set llm local
-vinga-server/README.md:1862  respell  vinga-server config agent-defaults set
-vinga-server/README.md:2058  respell  vinga-server config status
+vinga-server/README.md:1548  respell  config show
+vinga-server/README.md:1640  respell  config export
+vinga-server/README.md:1660  respell  vinga-server config provider secret set llm claude
+vinga-server/README.md:1671  respell  config show
+vinga-server/README.md:1808  respell  vinga-server config provider set llm local
+vinga-server/README.md:1876  respell  vinga-server config agent-defaults set
+vinga-server/README.md:2072  respell  vinga-server config status
+vinga-server/README.md:2279  respell  vinga session delete
+vinga-server/README.md:2279  respell  vinga session purge
+vinga-server/README.md:2280  respell  vinga conversation delete
 vinga-server/README.md:2441  respell  vinga provider set llm claude
 vinga-server/README.md:2442  respell  vinga reload
 vinga-server/README.md:2691  respell  config apply
