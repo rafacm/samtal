@@ -26,8 +26,9 @@ import pytest
 from tests.support.stores import CONVERSATIONS_MANIFEST as MANIFEST
 from tests.support.stores import rows
 from vinga_server.config.models import DatabaseConfig
+from vinga_server.conversations import threads
 from vinga_server.conversations.records import TurnRecord
-from vinga_server.conversations.store import ConversationStore
+from vinga_server.conversations.store import ConversationStore, open_conversations
 from vinga_server.conversations.threads import TITLE_CHARACTERS
 
 NOW = dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC)
@@ -254,3 +255,158 @@ def test_every_turn_moves_the_thread_forward(stores) -> None:
     assert row["last_active_at"] == later.isoformat()
     # One thread, two sessions, and its turns are in both of them.
     assert {turn["session"] for turn in rows("turns")} == {"alpha", "beta"}
+
+
+# Discovery: which thread a spoken description meant
+#
+# The read milestone 4's resume tool will consume, tested here against
+# the store rather than through a tool that does not exist yet. What is
+# under test is the matching, which is the part "five newest" could
+# never have: a thread is found because of what was said in it, and the
+# same question asked twice of the same rows answers the same way.
+
+
+def spoken(
+    store: ConversationStore,
+    session: str,
+    name: str,
+    heard: str,
+    agent: str = "sam",
+) -> None:
+    """One thread of one agent, opened with one utterance."""
+    store.open_session(session, 100.0, MANIFEST | {"agent": agent, "agents": [agent]})
+    store.record_turn(
+        session,
+        TurnRecord(
+            at=101.0, conversation=thread(name), agent=agent, heard=heard, reply="Done."
+        ),
+    )
+
+
+def asked(agent: str, description: str) -> threads.Candidates:
+    engine = open_conversations(DatabaseConfig())
+    try:
+        with engine.connect() as connection:
+            return threads.candidates(connection, agent, description)
+    finally:
+        engine.dispose()
+
+
+def test_a_description_matches_on_the_words_the_thread_carries(stores) -> None:
+    """Token overlap over the title and the opening excerpt, not
+    recency: the thread that was talked about is the one that comes
+    back first."""
+    store = stores(retention_days=0)
+    store.start()
+    spoken(store, "a", "bikes", "how do I fix the brakes on my bicycle")
+    spoken(store, "b", "soup", "what goes into a leek and potato soup")
+    store.stop()
+
+    answer = asked("sam", "the bicycle brakes")
+
+    assert answer.matched is True
+    assert [one.conversation for one in answer.found] == [thread("bikes")]
+    assert answer.found[0].title == "how do I fix the brakes on my bicycle"
+    assert answer.found[0].excerpt == "how do I fix the brakes on my bicycle"
+
+
+def test_normalization_makes_case_and_punctuation_irrelevant(stores) -> None:
+    """Casefolded, punctuation broken into whitespace and split. A
+    hyphen becomes a break rather than a deletion, so the two words
+    somebody says match the one word a transcript wrote."""
+    store = stores(retention_days=0)
+    store.start()
+    spoken(store, "a", "wine", "Where did we put the WELL-AGED Rioja?!")
+    store.stop()
+
+    answer = asked("sam", "well aged rioja")
+
+    assert answer.matched is True
+    assert answer.found[0].score == 3
+
+
+def test_a_relevant_older_thread_beats_newer_unrelated_ones(stores) -> None:
+    """The reviewer's case, and the reason this is matching rather than
+    a listing: the thread that answers the description is outside the
+    newest five and still comes first."""
+    store = stores(retention_days=0)
+    store.start()
+    spoken(store, "old", "telescope", "how far away is the andromeda galaxy")
+    store.stop()
+    for index in range(6):
+        newer = stores(at=NOW + dt.timedelta(hours=index + 1), retention_days=0)
+        newer.start()
+        spoken(newer, f"new-{index}", f"chatter-{index}", "what is the weather doing")
+        newer.stop()
+
+    answer = asked("sam", "andromeda galaxy")
+
+    assert answer.matched is True
+    assert [one.conversation for one in answer.found] == [thread("telescope")]
+
+
+def test_equal_scores_fall_back_to_activity_and_then_to_the_row(stores) -> None:
+    """The (score, activity, id) ordering, with the first two forced to
+    tie: two threads that match the description equally come back newest
+    first, and the answer is the same every time it is asked for."""
+    store = stores(retention_days=0)
+    store.start()
+    spoken(store, "a", "first", "the rain in spain")
+    store.stop()
+    later = stores(at=NOW + dt.timedelta(hours=1), retention_days=0)
+    later.start()
+    spoken(later, "b", "second", "the rain in spain")
+    later.stop()
+
+    answer = asked("sam", "rain in spain")
+
+    assert [one.conversation for one in answer.found] == [thread("second"), thread("first")]
+    assert asked("sam", "rain in spain") == answer
+
+
+def test_nothing_matching_answers_the_newest_and_says_so(stores) -> None:
+    """A dead end is a worse answer than a list somebody can still pick
+    from, so the newest come back with `matched` false and the caller
+    is the one that says nothing matched."""
+    store = stores(retention_days=0)
+    store.start()
+    for index in range(6):
+        spoken(store, f"s-{index}", f"thread-{index}", f"the {index} thing said")
+    store.stop()
+
+    answer = asked("sam", "something nobody ever mentioned")
+
+    assert answer.matched is False
+    assert len(answer.found) == threads.RESUME_CANDIDATES
+    assert all(one.score == 0 for one in answer.found)
+
+
+def test_discovery_is_scoped_to_the_agent_that_asked(stores) -> None:
+    """A conversation belongs to exactly one agent, so another agent's
+    thread is not a candidate however well it matches."""
+    store = stores(retention_days=0)
+    store.start()
+    spoken(store, "a", "hers", "the andromeda galaxy", agent="nadia")
+    store.stop()
+
+    assert asked("sam", "the andromeda galaxy").found == ()
+    assert [one.conversation for one in asked("nadia", "andromeda").found] == [
+        thread("hers")
+    ]
+
+
+def test_a_thread_stored_with_no_text_scores_nothing_and_still_lists(stores) -> None:
+    """Text-off leaves a thread with no title and no excerpt. It cannot
+    be found by description, and it is still offered among the newest,
+    which is the honest answer: it exists and there is nothing to match
+    on."""
+    store = stores(retention_days=0, text=False)
+    store.start()
+    spoken(store, "a", "quiet", "said but never stored")
+    store.stop()
+
+    answer = asked("sam", "said but never stored")
+
+    assert answer.matched is False
+    assert [one.conversation for one in answer.found] == [thread("quiet")]
+    assert (answer.found[0].title, answer.found[0].excerpt) == (None, None)

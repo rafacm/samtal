@@ -834,7 +834,7 @@ def _erased(
         "turns": taken.turns,
         "tool_invocations": taken.tool_invocations,
         "events": taken.events,
-        "conversations": taken.conversations,
+        "conversations": len(taken.threads),
         "milestones": taken.milestones,
     }
 
