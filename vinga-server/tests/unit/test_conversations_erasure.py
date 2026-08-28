@@ -35,6 +35,8 @@ from sqlalchemy import insert, text
 
 from tests.support.configs import DEVICE_MAC
 from tests.support.problems import refused
+from tests.support.sessions import WRITER_TIMEOUT_S as TIMEOUT_S
+from tests.support.sessions import Gate, until
 from vinga_server import logs
 from vinga_server.config.api import build_api
 from vinga_server.config.models import DatabaseConfig
@@ -334,6 +336,41 @@ def test_activity_moves_back_when_the_turn_that_wrote_it_is_erased(client) -> No
     assert thread["created_at"] <= thread["last_active_at"]
 
 
+def test_a_thread_whose_surviving_turns_have_no_text_loses_its_title(client) -> None:
+    """The other end of the title rule. A title IS the first utterance
+    bounded, so a thread whose earliest surviving turn stored none has
+    nothing to be called: the name is removed rather than left pointing
+    at an utterance that is gone.
+
+    Text-off is how a turn comes to have no utterance stored, and a
+    deployment can change that switch between two sessions of one
+    thread, which is what makes this reachable rather than theoretical.
+    """
+    recording = Recorder(dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC))
+    recording.session("alpha")
+    recording.turn("alpha", FIRST, "the utterance the title came from")
+    recording.close("alpha")
+    recording.done()
+    quiet = ConversationStore(
+        DatabaseConfig(),
+        now=lambda: dt.datetime(2026, 8, 15, 13, 0, tzinfo=dt.UTC),
+        retention_days=0,
+        text=False,
+    )
+    quiet.start()
+    quiet.open_session("beta", 100.0, manifest())
+    quiet.record_turn("beta", a_turn(FIRST, "said but never stored"))
+    quiet.close_session("beta", duration_s=1.0, reason="client")
+    quiet.stop()
+    assert stored("conversations")[0]["title"] == "the utterance the title came from"
+
+    erase(client, "alpha")
+
+    (thread,) = stored("conversations")
+    assert thread["title"] is None
+    assert len(stored("turns")) == 1
+
+
 def test_only_the_thread_the_deletion_touched_is_recomputed(client) -> None:
     """A session that talked to two agents holds two threads, and the
     one whose turns are elsewhere is not renamed, not moved and not
@@ -431,36 +468,58 @@ def test_the_planted_title_is_gone_from_every_table_and_surface(client) -> None:
 
 
 def test_a_session_deleted_while_it_is_talking_stops_being_recorded(client) -> None:
-    """The tombstone rule, over HTTP. The writer confirms its session
-    still exists at every marker, so a deletion that lands between two
-    turns is final rather than a race the next turn undoes.
+    """The tombstone rule, driven through the real endpoint.
+
+    The writer confirms its session still exists at the start of every
+    durable transaction, so a deletion that lands between two markers is
+    final rather than a race the next turn undoes. The gate is what
+    makes the interleaving an arrangement rather than a wait: the second
+    turn is enqueued and the writer is demonstrably parked in front of
+    the transaction that would write it when the deletion commits.
 
     The conversation itself carries on to its natural end, because
     neither the runtime nor the device edge knows a deletion happened.
     What it says afterwards is not recorded, which is what erasure
-    means.
+    means, and the acknowledgement is what lets a caller tell that from
+    a slow write.
     """
-    recording = Recorder(dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC))
-    recording.session("alpha")
-    recording.turn("alpha", FIRST, "before the deletion")
-    # Drained rather than assumed: the deletion has to land after this
-    # turn's marker committed and before the next one.
-    recording.store.stop()
-    assert len(stored("turns")) == 1
+    gate = Gate()
+    store = ConversationStore(
+        DatabaseConfig(),
+        now=lambda: dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC),
+        retention_days=0,
+        gate=gate,
+    )
+    store.start()
+    try:
+        store.open_session("alpha", 100.0, manifest())
+        gate.wait()
+        gate.let_through()
+        store.record_turn("alpha", a_turn(FIRST, "before the deletion"))
+        gate.wait()
+        gate.let_through()
+        until(lambda: stored("turns"), "the first turn never landed")
 
-    erase(client, "alpha")
+        # Enqueued while the writer is parked, so the deletion below is
+        # guaranteed to land between what is committed and what is not.
+        in_flight = store.record_turn("alpha", a_turn(FIRST, "already on its way"))
+        gate.wait()
 
-    carrying_on = Recorder(dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC))
-    carrying_on.store.stop()
-    talking = ConversationStore(DatabaseConfig(), retention_days=0)
-    talking.start()
-    talking.open_session("alpha", 100.0, manifest())
-    talking.record_turn("alpha", a_turn(FIRST, "after it"))
-    talking.close_session("alpha", duration_s=1.0, reason="client")
-    talking.stop()
-    # The open re-created the session row, which is a new session with
-    # the same id and not a resurrection of the old one's rows.
-    assert [turn["heard"] for turn in stored("turns")] == ["after it"]
+        taken = erase(client, "alpha")
+        assert (taken["sessions"], taken["turns"], taken["conversations"]) == (1, 1, 1)
+
+        gate.open_forever()
+        assert in_flight.wait(TIMEOUT_S) is False
+
+        # And the conversation finishes the way a real one would.
+        after = store.record_turn("alpha", a_turn(FIRST, "and after that"))
+        store.close_session("alpha", duration_s=8.0, reason="client")
+    finally:
+        store.stop()
+
+    assert after.wait(TIMEOUT_S) is False
+    for table in TABLES:
+        assert stored(table) == [], table
 
 
 # The purge and its three selectors
