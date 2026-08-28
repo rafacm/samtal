@@ -485,7 +485,7 @@ def test_a_json_body_with_a_detail_is_not_this_apis_refusal(
     run, capsys, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     """A JSON object with a string `detail` in it is a shape anything
-    can write, and this command prints what it is given.
+    can write, and this command suppresses it for the fixed sentence.
 
     So the media type is what decides: this API answers a refusal as
     `application/problem+json` and a middlebox answering
