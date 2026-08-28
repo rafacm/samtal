@@ -856,51 +856,51 @@ vinga-server/README.md:582  respell  vinga-server config agent set kids
 vinga-server/README.md:593  respell  vinga-server config status
 vinga-server/README.md:608  respell  config status
 vinga-server/README.md:629  respell  vinga-server config mcp-server set home
-vinga-server/README.md:793  respell  vinga-server config agent preview house
-vinga-server/README.md:840  respell  vinga-server config prompt-fragment set household
-vinga-server/README.md:841  respell  vinga-server config agent set house
-vinga-server/README.md:856  respell  vinga-server config reload
-vinga-server/README.md:894  respell  vinga-server config status
-vinga-server/README.md:945  respell  vinga-server config mcp-server set weather
-vinga-server/README.md:948  respell  vinga-server config reload
-vinga-server/README.md:949  respell  vinga-server config agent set house
-vinga-server/README.md:950  respell  vinga-server config reload
-vinga-server/README.md:1286  respell  vinga apply
-vinga-server/README.md:1287  respell  vinga device bind
-vinga-server/README.md:1288  respell  vinga list
-vinga-server/README.md:1303  respell  config device pending list
-vinga-server/README.md:1303  respell  config device pending claim
-vinga-server/README.md:1321  respell  vinga-server config reference
-vinga-server/README.md:1322  respell  vinga-server config schema
-vinga-server/README.md:1329  respell  config list
-vinga-server/README.md:1329  respell  config show
-vinga-server/README.md:1330  respell  config export
-vinga-server/README.md:1331  respell  config apply
-vinga-server/README.md:1353  respell  vinga-server config reload
-vinga-server/README.md:1446  respell  vinga-server config openapi
-vinga-server/README.md:1506  respell  vinga-server config agent preview
-vinga-server/README.md:1516  respell  config status
-vinga-server/README.md:1519  respell  vinga-server config reload
-vinga-server/README.md:1551  respell  config show
-vinga-server/README.md:1643  respell  config export
-vinga-server/README.md:1663  respell  vinga-server config provider secret set llm claude
-vinga-server/README.md:1674  respell  config show
-vinga-server/README.md:1811  respell  vinga-server config provider set llm local
-vinga-server/README.md:1879  respell  vinga-server config agent-defaults set
-vinga-server/README.md:2076  respell  vinga-server config status
-vinga-server/README.md:2485  respell  vinga provider set llm claude
-vinga-server/README.md:2486  respell  vinga reload
-vinga-server/README.md:2735  respell  config apply
-vinga-server/README.md:2737  respell  config provider secret set
-vinga-server/README.md:2757  respell  vinga-server config export
-vinga-server/README.md:2781  respell  config export
-vinga-server/README.md:2786  respell  config apply
-vinga-server/README.md:2788  respell  config provider secret set
-vinga-server/README.md:2877  respell  vinga-server config ota-url
-vinga-server/README.md:2898  respell  config ota-url
-vinga-server/README.md:2956  respell  vinga-server config device pending list
-vinga-server/README.md:2963  respell  vinga-server config device pending claim
-vinga-server/README.md:2984  respell  vinga-server config reload
+vinga-server/README.md:797  respell  vinga-server config agent preview house
+vinga-server/README.md:844  respell  vinga-server config prompt-fragment set household
+vinga-server/README.md:845  respell  vinga-server config agent set house
+vinga-server/README.md:860  respell  vinga-server config reload
+vinga-server/README.md:898  respell  vinga-server config status
+vinga-server/README.md:949  respell  vinga-server config mcp-server set weather
+vinga-server/README.md:952  respell  vinga-server config reload
+vinga-server/README.md:953  respell  vinga-server config agent set house
+vinga-server/README.md:954  respell  vinga-server config reload
+vinga-server/README.md:1290  respell  vinga apply
+vinga-server/README.md:1291  respell  vinga device bind
+vinga-server/README.md:1292  respell  vinga list
+vinga-server/README.md:1307  respell  config device pending list
+vinga-server/README.md:1307  respell  config device pending claim
+vinga-server/README.md:1325  respell  vinga-server config reference
+vinga-server/README.md:1326  respell  vinga-server config schema
+vinga-server/README.md:1333  respell  config list
+vinga-server/README.md:1333  respell  config show
+vinga-server/README.md:1334  respell  config export
+vinga-server/README.md:1335  respell  config apply
+vinga-server/README.md:1357  respell  vinga-server config reload
+vinga-server/README.md:1450  respell  vinga-server config openapi
+vinga-server/README.md:1510  respell  vinga-server config agent preview
+vinga-server/README.md:1520  respell  config status
+vinga-server/README.md:1523  respell  vinga-server config reload
+vinga-server/README.md:1555  respell  config show
+vinga-server/README.md:1647  respell  config export
+vinga-server/README.md:1667  respell  vinga-server config provider secret set llm claude
+vinga-server/README.md:1678  respell  config show
+vinga-server/README.md:1815  respell  vinga-server config provider set llm local
+vinga-server/README.md:1883  respell  vinga-server config agent-defaults set
+vinga-server/README.md:2080  respell  vinga-server config status
+vinga-server/README.md:2489  respell  vinga provider set llm claude
+vinga-server/README.md:2490  respell  vinga reload
+vinga-server/README.md:2739  respell  config apply
+vinga-server/README.md:2741  respell  config provider secret set
+vinga-server/README.md:2761  respell  vinga-server config export
+vinga-server/README.md:2785  respell  config export
+vinga-server/README.md:2790  respell  config apply
+vinga-server/README.md:2792  respell  config provider secret set
+vinga-server/README.md:2881  respell  vinga-server config ota-url
+vinga-server/README.md:2902  respell  config ota-url
+vinga-server/README.md:2960  respell  vinga-server config device pending list
+vinga-server/README.md:2967  respell  vinga-server config device pending claim
+vinga-server/README.md:2988  respell  vinga-server config reload
 vinga-server/config.deploy.example.sh:42  respell  vinga-server config reload
 vinga-server/config.deploy.example.sh:47  respell  vinga-server config apply
 vinga-server/config.deploy.example.yaml:63  respell  vinga-server config ota-url

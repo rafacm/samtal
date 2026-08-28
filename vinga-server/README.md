@@ -761,7 +761,11 @@ strand a conversation on whichever agent has no way back, which is the
 receptionist handoff the tool was written for. `remember`'s is the
 deployment's: memory is configured or it is not, and where it is, the
 injection into the system prompt is unconditional, so an agent with the
-tool withheld would recall for ever and never learn. Tools with sound
+tool withheld would recall for ever and never learn. The two
+conversation tools have no condition at all, which is the same kind of
+answer: a tool that is simply absent is a tool a model invents, so they
+are offered wherever a conversation is and a server that cannot resume
+anything says so in a sentence the agent reads out. Tools with sound
 structural rules do not need a grant model on top of them; the day a
 builtin arrives whose availability is genuinely per-agent policy, the
 grant edge the `mcp` list already carries is where it lands.
