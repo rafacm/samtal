@@ -21,8 +21,20 @@ Three rules carry everything below.
 **The unit is a whole stored turn.** A turn's user half, its assistant
 half and the note about the tools it ran are budgeted and truncated
 together, never separately, so a reply can never be rebuilt without the
-utterance it answered and what comes out alternates roles by
-construction.
+utterance it answered.
+
+**What comes out alternates, and it opens with the user.** That is a
+property of the output rather than of the input, because the input has
+two shapes that do not carry it. A turn that was heard and never
+answered (a reply provider that failed after the utterance was
+recorded) has a user half and no assistant half, and rendering it would
+put two user messages in a row; a turn seeded by a move onto this
+thread has an answer and nothing heard, because what the user said was
+said on the thread they were moved off. The first is a hole, on the
+rule below. The second is joined onto the answer before it, which is
+what it was: two things the assistant said with nothing from the user
+in between. A history that would still open on an answer opens after
+it instead, since the first message a provider is handed is the user's.
 
 **The budget is an estimate and says so.** `ESTIMATED_CHARS_PER_TOKEN`
 is the whole of the arithmetic. A tokenizer per provider would be exact
@@ -82,12 +94,25 @@ def hydrated(stored: Sequence[StoredTurn], budget_tokens: int) -> Hydrated:
     gone; nothing inside a unit is ever cut, so the result never holds a
     reply whose question was truncated away.
 
-    A turn that stored no text at all is a hole rather than a unit: it
-    costs nothing, stops nothing, and is counted in `skipped` so the
-    caller can say the record is partial. The walk does not stop at one,
-    which is what lets a thread recorded under text-off report every one
-    of its turns as unreadable rather than reporting the newest one and
-    giving up.
+    A turn with no answer on it is a hole rather than a unit, whether it
+    stored nothing at all (text-off) or stored the utterance and never
+    the reply (a provider that failed after the `heard` was recorded).
+    A hole costs nothing and stops nothing, and rendering half of one
+    would put two user messages in a row.
+
+    Holes are counted over the whole thread, not over the window the
+    budget kept. What the count answers is whether the record has gaps
+    in it, and a thread whose losses are all older than the cutoff has
+    them just the same; counting only what the walk reached would report
+    fewer the longer the conversation got.
+
+    A turn with an answer and nothing heard is the first turn of a
+    thread this session moved onto, and it is joined onto the answer
+    before it, in that order: the two were said one after the other with
+    nothing from the user in between. One with nothing before it is
+    dropped rather than led with, because the first message a provider
+    is handed is the user's. Neither is a hole: nothing about that turn
+    was lost.
 
     The single newest unit is included even when it alone exceeds the
     budget. An empty resume would be a worse answer than an over-budget
@@ -96,14 +121,23 @@ def hydrated(stored: Sequence[StoredTurn], budget_tokens: int) -> Hydrated:
     """
     kept: list[Turn] = []
     rendered = 0
-    skipped = 0
     spent = 0
     over_budget = False
+    # Answers with no utterance of their own, oldest first, waiting for
+    # the turn they follow. Cleared onto it, and dropped where the walk
+    # ends before one arrives.
+    trailing: list[str] = []
     for turn in reversed(stored):
-        messages = _messages(turn)
-        if not messages:
-            skipped += 1
+        said = _assistant(turn)
+        if not said:
             continue
+        if not turn.heard:
+            trailing.insert(0, said)
+            continue
+        messages = [
+            Turn("user", turn.heard),
+            Turn("assistant", "\n".join([said, *trailing])),
+        ]
         cost = _tokens(messages)
         if kept and spent + cost > budget_tokens:
             over_budget = True
@@ -113,30 +147,14 @@ def hydrated(stored: Sequence[StoredTurn], budget_tokens: int) -> Hydrated:
             over_budget = True
         kept = [*messages, *kept]
         spent += cost
-        rendered += 1
+        rendered += 1 + len(trailing)
+        trailing = []
     return Hydrated(
         turns=tuple(kept),
         rendered=rendered,
-        skipped=skipped,
+        skipped=sum(1 for turn in stored if not _assistant(turn)),
         over_budget=over_budget,
     )
-
-
-def _messages(turn: StoredTurn) -> list[Turn]:
-    """One stored turn as the messages it becomes, which is at most two
-    and may be none.
-
-    The assistant half exists when there is something to attribute to
-    it, which is what was said or, for a turn that only ran tools, the
-    note that they ran.
-    """
-    messages: list[Turn] = []
-    if turn.heard:
-        messages.append(Turn("user", turn.heard))
-    said = _assistant(turn)
-    if said:
-        messages.append(Turn("assistant", said))
-    return messages
 
 
 def _assistant(turn: StoredTurn) -> str:
