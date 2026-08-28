@@ -13,6 +13,7 @@ fixed contract version and the double-render check are both pinned.
 """
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -178,6 +179,35 @@ def test_the_document_describes_every_route_the_api_serves() -> None:
         "/sessions/{session}": ["get"],
         "/sessions/{session}/turns": ["get"],
     }
+
+
+def test_the_description_names_only_namespaces_the_routes_serve() -> None:
+    """The document's prose is contract too, and it is the half nothing
+    generates: the reads moved to `/sessions` while the description went
+    on calling their namespace `/conversations`, and the committed
+    document shipped that sentence to every reader of the contract.
+
+    So every path the prose spells in backticks has to be one this
+    document serves. Derived from the paths rather than listed here, so
+    a namespace that arrives later is described or caught rather than
+    pinned twice.
+    """
+    document = json.loads(docgen.openapi())
+    served = {path.split("/")[1] for path in document["paths"]}
+    # The first segment is the namespace; a method may share the
+    # backticks with the path it names, as `GET /runtime/config/diff`.
+    described = {
+        token.split("/")[1]
+        for token in re.findall(
+            r"`[A-Z ]*(/[A-Za-z0-9/{}_-]*)`", document["info"]["description"]
+        )
+    }
+
+    assert described, "the description names no namespace at all"
+    assert described <= served, sorted(described - served)
+    # And the store's reads are described, so the paragraph cannot go
+    # missing and leave this green.
+    assert "sessions" in described
 
 
 def test_the_pending_listing_is_described_before_the_mac_route() -> None:
