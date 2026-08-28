@@ -1242,3 +1242,10 @@ playback, and the context it installs goes in at step 4 as
 turn like any other. What milestone 5 must not do is hold a record
 across step 4: the two sides of a move are two turns, and each one is
 the store's before the other exists.
+
+#### Re-review of the fixes
+
+A confirmation pass over the round's seven fixes (codex CLI 0.149.1,
+model gpt-5.6-terra, read-only, 2026-08-28, scoped to the resolutions
+with particular attention on the record boundary). Verdict as
+received: mergeable as is, no findings.
