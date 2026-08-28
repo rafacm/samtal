@@ -18,9 +18,14 @@ from typing import Any
 from sqlalchemy import text
 from xiaozhi_sdk import XiaoZhiWebsocket
 
-from tests.integration.conftest import FRAME_BYTES, SAMPLE_RATE, speech_pcm
+from tests.integration.conftest import (
+    FRAME_BYTES,
+    SAMPLE_RATE,
+    converse,
+    speech_pcm,
+)
 from vinga_server.config import Config
-from vinga_server.config.models import DatabaseConfig
+from vinga_server.config.models import DatabaseConfig, ProviderConfig
 from vinga_server.db import read_engine
 
 DEVICE_MAC = "aa:bb:cc:dd:ee:31"
@@ -176,3 +181,73 @@ async def test_a_deployment_that_was_not_asked_records_nothing(serve) -> None:
 
     assert events, "the conversation did not run"
     assert read("select * from conversations.sessions") == []
+
+
+# Moving a session between conversations, over a real socket
+#
+# What only this lane can say about resumption: the switch reaches a
+# booted server, the tools it enables are offered to a model that is
+# really there, the search runs against Postgres rather than a double,
+# and the thread a move lands on is the thread the store then records
+# the next turn against.
+#
+# What it deliberately does not drive is the second beat of the search
+# flow, the call naming the conversation the user picked. That argument
+# is an id the model can only have read out of the previous tool result,
+# and the mock LLM asks for a tool it was configured with rather than
+# one it composed; teaching a test double to lift a value out of a
+# result would be more machinery than the claim is worth. The
+# interception that beat goes through is driven end to end below by
+# `new_conversation`, and by the whole of
+# `tests/unit/test_session_conversations.py` against a store double.
+
+
+def moving_config(tool_name: str, **arguments: object) -> Config:
+    """One agent that reaches for one conversation tool per turn, on a
+    server with resumption switched on."""
+    config = recording_config()
+    assert config.server.conversations is not None
+    config.server.conversations.resumption = True
+    config.providers.llm["mock"] = ProviderConfig(
+        type="mock",
+        reply="It says {tool_result}.",
+        tool_when="battery",
+        tool_name=tool_name,
+        tool_arguments=dict(arguments),
+    )
+    return config
+
+
+async def test_a_later_session_finds_the_thread_an_earlier_one_left(serve) -> None:
+    async with serve(recording_config()) as port:
+        await two_turns(port, DEVICE_MAC)
+    (thread,) = read("select * from conversations.conversations")
+
+    async with serve(moving_config("resume_conversation", description="battery")) as port:
+        await converse(port, DEVICE_MAC)
+
+    # The search answered out of the database the first server wrote,
+    # and what the agent said carries what it found. The reply is
+    # content and is read where content lives.
+    said = read("select reply from conversations.turns order by id")[-1]["reply"]
+    assert thread["conversation"] in said
+    assert thread["title"] == "how is the battery"
+    assert thread["title"] in said
+
+
+async def test_a_fresh_conversation_moves_the_session_onto_it(serve) -> None:
+    """The interception, end to end: the turn that asked is recorded on
+    the thread it started on, and the turn after it on the one the move
+    landed on."""
+    async with serve(moving_config("new_conversation")) as port:
+        await two_turns(port, DEVICE_MAC)
+
+    turns = read("select * from conversations.turns order by id")
+    threads = read("select * from conversations.conversations order by id")
+    sessions = read("select * from conversations.sessions")
+
+    assert len(sessions) == 1
+    assert [turn["conversation"] for turn in turns] == [
+        thread["conversation"] for thread in threads
+    ]
+    assert len({turn["conversation"] for turn in turns}) == 2
