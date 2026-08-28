@@ -247,3 +247,149 @@ resolution:
    rule that it repeats no column name is kept: the entities are
    described, and the generated reference stays the place the columns
    live.
+
+## M2: durable turns and session erasure
+
+PR TBD.
+
+### What landed
+
+Three changes, in the order the commits tell it: the writer's durable
+path, the erasure surface with the CLI noun in front of it, and the
+documents.
+
+- **The durability split.** A marker commits twice instead of once:
+  the durable half (the session row, the turns, their invocations and
+  the threads they land on) and then the events, with independent
+  fates. `_durable` retries in place up to `TURN_WRITE_ATTEMPTS` (3)
+  and only for `db.is_busy`'s closed set, with no sleep; `_events` is a
+  transaction of its own whose failure counts what it dropped in
+  `sessions.dropped` and touches no turn. A dropped durable batch
+  latches its threads in `ConversationStore._incomplete`, which
+  `threads.flag_incomplete` writes as its own transaction at the next
+  marker and at session close, and which `threads.Landing.incomplete`
+  carries into the insert when the thread's row materializes later.
+- **Acknowledgements.** `records.Acknowledgement` with `wait(timeout)`
+  and `settle(landed)`, returned by `ConversationStore.record_turn`,
+  `TurnStore` and `SessionTurns`. Settled true on the durable commit
+  and false on a tombstone, an exhausted budget, a non-transient
+  failure, a session the writer never opened, a store that has already
+  stopped, and anything left behind the stop sentinel. Nothing consumes
+  it yet: the pipeline's call site ignores the return value, and the
+  store suite is what proves its semantics.
+- **Semantic deletion in `threads.py`.** `selected` resolves the three
+  settled selectors, and `erase_sessions` does the rest inside the
+  caller's transaction: milestones whose coverage holds an erased turn
+  plus their `parent` descendants, the invocations, the turns, the
+  events, the session rows, then `_rederive` for the titles and the
+  activity stamps, then the threads left with nothing. `Erased` carries
+  the six counts.
+- **The two endpoints.** `DELETE /api/sessions/{session}` and `DELETE
+  /api/sessions?session=&device=&before=`, both through `_erased` and
+  therefore through one helper. They run on a write engine opened per
+  request (`api.erasing`, reached through a new
+  `ApiRuntime.erasures`), because erasure has to work with recording
+  off, where no `ConversationStore` exists.
+- **The `session` CLI noun**: `list`, `show`, `delete` and `purge`, all
+  API-client acts, the last two registered destructive. `Act` gains a
+  `query` callable and `Address.endpoint` takes the request's own query
+  beside the operator's.
+- **The documents**: `docs/reference/api-openapi.json`,
+  `docs/reference/cli.md` (generated half),
+  `docs/reference/conversations-schema.md` (through its generator's
+  prose), `docs/architecture/cli-guide.md`,
+  `docs/architecture/observability-surfaces.md`, `CHANGELOG.md` and the
+  command-spellings manifest.
+
+### Deviations from the plan
+
+Five, each with its reason.
+
+1. **The session read shapes moved to `config/responses.py`.** The plan
+   has the CLI reading `session list` and `session show` answers
+   through the shape the API declares, and every act's `answers` is one
+   of that module's models. `SessionSummary`, `SessionList` and
+   `SessionDetail` were declared in `conversations/api.py`, which
+   imports FastAPI, SQLAlchemy and the store, and
+   `test_cli_import_weight.py` pins that the CLI reaches none of them.
+   So the three shapes moved to the one module a generated client would
+   replace outright, and `conversations/api.py` imports them back.
+   `CLOSE_REASONS` is written out there rather than read off
+   `conversations/schema.py`, which is the trade that module's own
+   docstring already makes for `secrets.MASK`; the pin in
+   `test_api_openapi.py` holds the two spellings equal through the
+   rendered document. `ToolInvocation`, `TurnLeg`, `SessionTurn` and
+   `SessionTurns` stayed where they are, because no command reads a
+   turn timeline.
+
+2. **The endpoints and the CLI noun land in one commit.** The plan
+   describes them as separable. They are not separable into green
+   commits: `test_api_contract.py` asserts that every operation in the
+   committed document is either addressed by a command or excluded with
+   a reason, so a commit that added the two DELETEs without the verbs
+   would have had to write exclusions the next commit deletes, and a
+   commit that added the verbs first would point them at operations the
+   document does not have.
+
+3. **The bare-purge refusal is the endpoint's sentence, not a second
+   one in the CLI.** The plan puts "refused with a fixed sentence" on
+   the CLI verb. It is refused with a fixed sentence, built in the
+   handler and raised after it, and the CLI prints what the API
+   answered, which is the rule this client already follows for every
+   other refusal ("one vocabulary whichever way an operator reached the
+   command"). A second copy in the grammar would be a second sentence
+   for one decision. The cost is that the confirmation is asked before
+   the refusal arrives, which is stated here rather than smoothed over.
+
+4. **`last_active_at` is recomputed only when the turn that wrote it is
+   erased, and then to a lower bound.** The plan says it is recomputed
+   from the survivors. A turn carries its offset from its session's
+   open and no wall clock of its own, so the instant a surviving turn
+   landed is not a stored fact and an exact recomputation is not
+   available. While the thread's newest turn survives, the stamp it
+   wrote is still true and is left alone; once it is gone, the stamp
+   falls back to the latest `sessions.started_at` among the survivors'
+   sessions, floored at the thread's own `created_at`. The result is
+   never later than the truth, so a trimmed thread is retired by
+   retention no later than it would have been. The generated reference
+   states it.
+
+5. **The title is recomputed unconditionally rather than only when its
+   source died.** The plan makes it conditional. A title IS the first
+   turn's utterance bounded, so recomputing from the earliest surviving
+   turn reproduces the name a thread whose first turn survived already
+   had; the conditional would be a second way to reach one answer.
+
+### Discoveries
+
+- **`Act` had no way to send a query string.** Every merged act
+  addresses a path and sends a body, and `Address.endpoint` appended
+  the operator's own query unconditionally, so an act that built
+  `/sessions?device=...` would have produced two `?`. The seam gained a
+  `query` callable held apart from `path`, which is also what keeps
+  `test_api_contract.py` able to identify an operation: what names an
+  operation is its path, and a filter or a selector is not part of that
+  identity.
+
+- **The pending listing and the session listing are one table.** The
+  borderless renderer was inline in `_pending_listing`; it is now
+  `_columns`, with the gutter and the widths in one place. The pending
+  listing's cells are deliberately left as they were: bounding them is
+  a change to a merged surface that this milestone has no reason to
+  make.
+
+- **A test recorder cannot move a writer's clock by assignment.** The
+  writer is a thread, so a clock changed while records are still queued
+  stamps some of them with the new reading and some with the old, and
+  which is which is a race that only shows up under load. The erasure
+  suite's recorder stops and rebuilds its store instead, which drains
+  by construction; the same shape is why the milestone-1 retention
+  tests grew a second clock.
+
+- **The vendored `httpx2` logs the URL the CLI asked for.** Starlette's
+  TestClient is built on it and the CLI's request quieting names
+  `httpx` and `httpcore`, so a sentinel planted in a path segment or a
+  selector appears in `caplog` from a logger this code does not own.
+  The no-leak assertions filter to this project's own channels, with
+  the reason on them, which is what `test_conversations_api.py` already
+  does for the same records.
