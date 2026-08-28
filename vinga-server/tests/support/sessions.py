@@ -45,6 +45,7 @@ from tests.support.events import only
 from tests.support.providers import ScriptedLlm, Unreachable, built_world
 from tests.support.sockets import LoopingSocket, RecordingSocket
 from vinga_server.config import Config
+from vinga_server.conversations.store import Half
 from vinga_server.device.session import DeviceSession
 from vinga_server.events import SessionEvents
 from vinga_server.filler import build_agent_fillers
@@ -626,18 +627,27 @@ WRITER_TIMEOUT_S = 30.0
 class Gate:
     """The writer's parking seam, driven from the test's thread.
 
-    Called once before each marker transaction. `wait()` returns when
-    the writer has arrived and is stopped; `let_through()` releases it
-    for exactly one more transaction; `open_forever()` stops gating.
+    Called in front of each of a marker's two transactions, with the
+    half it is about to open. `wait()` returns when the writer has
+    arrived and is stopped; `let_through()` releases it for exactly one
+    more transaction; `open_forever()` stops gating.
+
+    One half at a time, and the durable one by default, which is what
+    every marker test means by "the writer is stopped in front of this
+    marker": those tests were written when a marker was one transaction,
+    and a stop they did not ask for would silently change what their
+    releases count. A test about the interval between the two halves
+    builds a gate for `Half.EVENTS` instead.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, half: Half = Half.DURABLE) -> None:
+        self._half = half
         self._arrived = threading.Semaphore(0)
         self._release = threading.Semaphore(0)
         self._passthrough = False
 
-    def __call__(self) -> None:
-        if self._passthrough:
+    def __call__(self, half: Half = Half.DURABLE) -> None:
+        if self._passthrough or half is not self._half:
             return
         self._arrived.release()
         assert self._release.acquire(timeout=WRITER_TIMEOUT_S), "the writer was never released"

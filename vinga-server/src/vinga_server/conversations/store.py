@@ -263,6 +263,22 @@ class Close:
     dropped: int
 
 
+class Half(enum.Enum):
+    """Which of a marker's two transactions the writer is about to open.
+
+    Public, and a name rather than a comment, for one reason: it is what
+    the injected gate is told. A marker used to open one transaction and
+    "the writer is parked at this marker" said everything there was to
+    say; it opens two now, and the interval between them is where a
+    deletion lands in the one scenario that can produce an orphan event
+    row. A test that arranges that interleaving has to be able to say
+    which of the two halves it means to stop in front of.
+    """
+
+    DURABLE = enum.auto()
+    EVENTS = enum.auto()
+
+
 class _Durable(enum.Enum):
     """What became of a marker's durable transaction.
 
@@ -310,6 +326,9 @@ class ConversationStore:
     how "no producer path can wait" is proved, a wall clock is how
     retention is driven without sleeping, and the gate is where the
     writer parks so a wedged database can be exercised deterministically.
+    The gate is told which half of a marker it stands in front of: the
+    two halves are separate transactions, and what can happen in the
+    interval between them is a scenario of its own.
     """
 
     def __init__(
@@ -320,7 +339,7 @@ class ConversationStore:
         retention_days: int = RETENTION_DAYS_DEFAULT,
         queue: "queuing.SimpleQueue[Any] | None" = None,
         now: Callable[[], dt.datetime] | None = None,
-        gate: Callable[[], None] | None = None,
+        gate: Callable[[Half], None] | None = None,
         stop_timeout_s: float = STOP_TIMEOUT_S,
     ) -> None:
         self.settings = settings
@@ -633,7 +652,7 @@ class ConversationStore:
             # about.
             return
         if self._gate is not None:
-            self._gate()
+            self._gate(Half.DURABLE)
         outcome = self._durable(session_id, batch, opening, closing)
         if outcome is _Durable.TOMBSTONED:
             # Deleted out from under a live session. The tombstone is the
@@ -716,6 +735,11 @@ class ConversationStore:
         """
         if not batch.events or not self._stores_events():
             return
+        # In front of the transaction rather than in front of the
+        # method, so a marker with nothing to write here is not a stop
+        # for a transaction that never opens.
+        if self._gate is not None:
+            self._gate(Half.EVENTS)
         try:
             with self._engine.begin() as connection:
                 connection.execute(
@@ -1050,6 +1074,7 @@ __all__ = [
     "Close",
     "ConversationStore",
     "Event",
+    "Half",
     "Open",
     "SessionSink",
     "Turn",
