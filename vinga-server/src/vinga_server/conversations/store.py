@@ -22,10 +22,19 @@ arbitrary:
   store unable to record its own incompleteness.
 - **The writer commits at markers, into per-session batches.** One queue
   carries every session, so a marker commits exactly its own session's
-  accumulated batch inside one short transaction, and the chain's
+  accumulated batch inside two short transactions, and the chain's
   advisory lock is not held across the interval between two turns. A
   page opened mid conversation reads everything up to the last completed
   turn.
+- **Product state and telemetry never share a fate.** The two
+  transactions are the durable half (the session row, the threads, the
+  turns and their invocations) and the lossy half (the event rows), in
+  that order and with independent outcomes. A durable transaction that
+  fails on the transient class the db classifier names is retried in
+  place up to `TURN_WRITE_ATTEMPTS`; when it is finally dropped, the
+  hole is latched on the thread as `conversations.incomplete` rather
+  than counted and forgotten. An events transaction that fails drops and
+  counts its events exactly as it always did, and touches no turn.
 - **Absence of the session row is a tombstone.** Retention deletes whole
   sessions on `started_at` and asks nothing about whether the
   conversation ended, so a session long enough to fall outside the
@@ -63,6 +72,7 @@ text switch rather than in two tables under two different rules.
 """
 
 import datetime as dt
+import enum
 import logging
 import queue as queuing
 import threading
@@ -75,10 +85,15 @@ from sqlalchemy import Engine, select
 
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations import schema, threads
-from vinga_server.conversations.records import ToolInvocation, TurnLeg, TurnRecord
+from vinga_server.conversations.records import (
+    Acknowledgement,
+    ToolInvocation,
+    TurnLeg,
+    TurnRecord,
+)
 from vinga_server.conversations.schema import events as events_table
 from vinga_server.conversations.schema import sessions, tool_invocations, turns
-from vinga_server.db import LOCK_TIMEOUT_MS, StoreChain, advisory_key, open_at
+from vinga_server.db import LOCK_TIMEOUT_MS, StoreChain, advisory_key, is_busy, open_at
 from vinga_server.events import Emission, ServerEvents
 from vinga_server.events.catalog import (
     ConversationsDropped,
@@ -119,6 +134,17 @@ CONVERSATIONS_CHAIN = StoreChain(
 # is minutes of backlog: a queue this deep means the database is wedged,
 # and dropping is then the contract rather than a failure of it.
 MAX_EVENTS_IN_FLIGHT = 1024
+
+# How many times a durable transaction is tried before its batch is
+# dropped. Three rather than one, and three rather than many: the only
+# failures retried are the db classifier's transient class (a lock
+# timeout on the chain's advisory gate, a deadlock, a serialization
+# failure), which either clears on the next attempt or is not transient
+# at all. The retries run on the writer thread with no sleep between
+# them, because a writer that waits is a writer every other session's
+# records are queued behind, and a wait long enough to outlast a real
+# contention would be long enough to matter to them.
+TURN_WRITE_ATTEMPTS = 3
 
 # How long the store is kept before retention deletes it. Stated rather
 # than infinite, because a store with no policy retains forever by
@@ -220,6 +246,11 @@ class Turn:
     session: str
     record: TurnRecord
     t_ms: int
+    # The handle the producer kept, settled by the writer when this
+    # turn's durable transaction commits or when the turn is dropped.
+    # Carried on the queue item rather than looked up later, because
+    # what it speaks for is this turn and a batch is not one.
+    acknowledgement: Acknowledgement
 
 
 @dataclass(frozen=True)
@@ -230,6 +261,20 @@ class Close:
     duration_s: float | None
     reason: str | None
     dropped: int
+
+
+class _Durable(enum.Enum):
+    """What became of a marker's durable transaction.
+
+    Three answers rather than a boolean, because the third one is not a
+    failure: a session deleted out from under a live conversation wrote
+    nothing and is not going to, and the writer's response to it is to
+    forget the session rather than to count a loss and try again.
+    """
+
+    COMMITTED = enum.auto()
+    TOMBSTONED = enum.auto()
+    FAILED = enum.auto()
 
 
 @dataclass(frozen=True)
@@ -313,6 +358,14 @@ class ConversationStore:
         # folded into the session row's count at close. Writer-side, so
         # unlike the producer's counter it needs no lock.
         self._lost: dict[str, int] = {}
+        # Threads a dropped durable batch left a hole in, waiting for
+        # their `incomplete` flag to land. In memory rather than in the
+        # database because the database is the thing that just refused a
+        # write; the flag is retried at every later marker and at every
+        # session close until it lands, and a thread whose every write
+        # failed leaves no row and therefore nothing to flag, which is
+        # the honest record.
+        self._incomplete: set[str] = set()
 
     # --- lifecycle ----------------------------------------------------
 
@@ -392,23 +445,33 @@ class ConversationStore:
             return
         self._queue.put_nowait(Event(session_id, t_ms, name, level, dict(fields)))
 
-    def record_turn(self, session_id: str, record: TurnRecord) -> None:
+    def record_turn(self, session_id: str, record: TurnRecord) -> Acknowledgement:
         """One completed turn. A control record and a marker: reaching it
         commits everything this session has accumulated.
 
         The offset is taken here, off the reading the record carries, for
         the reason the queue item states: the runtime is built before the
         session opens and never learns the reading its offsets are
-        measured from."""
+        measured from.
+
+        The handle that comes back is the durable path's answer about
+        this turn and no other. Creating one costs an event object and
+        nothing else, and the audio path drops it unwaited, which is why
+        there is no second entry point for callers that do not care.
+        A store that has already stopped answers a settled refusal
+        rather than a handle nothing will ever settle."""
+        acknowledgement = Acknowledgement()
         if self._stopped:
-            return
+            acknowledgement.settle(False)
+            return acknowledgement
         with self._lock:
             # A turn for a session this store never opened is refused by
             # the writer, which says so once. Stamping a zero rather than
             # asking for an offset there keeps that the writer's decision
             # instead of an exception raised on the session loop.
             t_ms = self._offset(session_id, record.at) if session_id in self._opened_at else 0
-        self._queue.put_nowait(Turn(session_id, record, t_ms))
+        self._queue.put_nowait(Turn(session_id, record, t_ms, acknowledgement))
+        return acknowledgement
 
     def close_session(
         self, session_id: str, duration_s: float | None = None, reason: str | None = None
@@ -445,6 +508,7 @@ class ConversationStore:
             item = self._queue.get()
             if isinstance(item, _Stop):
                 self._flush_remaining()
+                self._abandon_the_rest()
                 return
             self._accept(item)
 
@@ -470,6 +534,7 @@ class ConversationStore:
         if isinstance(item, Turn):
             batch = self._batches.get(item.session)
             if batch is None:
+                item.acknowledgement.settle(False)
                 self._refuse(item.session)
                 return
             batch.turns.append(item)
@@ -522,17 +587,42 @@ class ConversationStore:
             self._commit(session_id)
             self._batches.pop(session_id, None)
 
+    def _abandon_the_rest(self) -> None:
+        """Whatever arrived behind the stop sentinel, answered rather
+        than left hanging.
+
+        `stop()` refuses new records before it queues the sentinel, so
+        this is a narrow race and not an ordinary path: a producer that
+        had already passed the check when the flag was set. Its turn is
+        not going to be written, and an acknowledgement nothing ever
+        settles is a caller waiting out its own bound for an answer that
+        exists."""
+        while True:
+            try:
+                item = self._queue.get_nowait()
+            except queuing.Empty:
+                return
+            if isinstance(item, Turn):
+                item.acknowledgement.settle(False)
+
     def _commit(
         self, session_id: str, opening: Open | None = None, closing: Close | None = None
     ) -> None:
-        """One marker: one short transaction holding exactly this
+        """One marker: two short transactions holding exactly this
         session's batch.
 
+        The durable half first (the session row, the turns, their
+        invocations and the threads they land on), then the events. The
+        split is what keeps product state and telemetry from sharing a
+        fate: neither failure decides the other's, and only the first is
+        retried or latched.
+
         The chain's advisory lock is taken before anything is read (the
-        engine's begin listener takes it), so the existence check below
-        and the inserts that follow it cannot straddle a deletion. A
-        failure rolls the whole batch back, and the report that leaves
-        carries the exception's class name and nothing else."""
+        engine's begin listener takes it), so the existence check inside
+        the durable half and the inserts that follow it cannot straddle a
+        deletion. A failure rolls that half back whole, and the report
+        that leaves carries the exception's class name and nothing else.
+        """
         batch = self._batches.get(session_id)
         if batch is None:
             return
@@ -544,30 +634,28 @@ class ConversationStore:
             return
         if self._gate is not None:
             self._gate()
-        try:
-            with self._engine.begin() as connection:
-                if opening is not None:
-                    connection.execute(
-                        sessions.insert().values(self._session_row(opening))
-                    )
-                elif not self._alive(connection, session_id):
-                    # Deleted out from under a live session. The
-                    # tombstone is the absence: this session is forgotten
-                    # so nothing in flight can resurrect it as orphan
-                    # rows.
-                    self._batches.pop(session_id, None)
-                    self._devices.pop(session_id, None)
-                    self._release(len(batch.events))
-                    return
-                self._write(connection, session_id, batch)
-                if closing is not None:
-                    connection.execute(
-                        sessions.update()
-                        .where(sessions.c.session == session_id)
-                        .values(self._close_row(closing))
-                    )
-        except Exception as exc:  # noqa: BLE001 - a write never breaks a session
-            self._failed(session_id, batch, exc)
+        outcome = self._durable(session_id, batch, opening, closing)
+        if outcome is _Durable.TOMBSTONED:
+            # Deleted out from under a live session. The tombstone is the
+            # absence: this session is forgotten so nothing in flight can
+            # resurrect it as orphan rows, and the turns it was holding
+            # are answered as the dropped records they are.
+            self._batches.pop(session_id, None)
+            self._devices.pop(session_id, None)
+            self._settle(batch, landed=False)
+            self._release(len(batch.events))
+            return
+        if outcome is _Durable.COMMITTED:
+            self._settle(batch, landed=True)
+            # After the commit rather than inside it: a thread the last
+            # transaction just materialized is flagged here, and one this
+            # transaction wrote nothing for is retried at the next
+            # marker. Its own transaction, because a flag that rolled
+            # back with a turn would be lost exactly when it is true.
+            self._latch()
+        else:
+            self._settle(batch, landed=False)
+        self._events(session_id, batch)
         # Committed or rolled back, this batch is written off either way.
         self._release(len(batch.events))
         # Never for a session the tombstone just removed: recreating its
@@ -575,6 +663,104 @@ class ConversationStore:
         # to prevent.
         if session_id in self._batches:
             self._batches[session_id] = _Batch()
+
+    def _durable(
+        self,
+        session_id: str,
+        batch: _Batch,
+        opening: Open | None,
+        closing: Close | None,
+    ) -> "_Durable":
+        """The half a conversation is made of, committed or dropped.
+
+        Retried in place, and only for the db classifier's transient
+        class: a lock that did not arrive is a transaction that would
+        very likely commit if it were simply made again, and everything
+        else is a database saying no for a reason a fourth attempt does
+        not change. No sleep between attempts, because this thread is
+        every other session's writer too.
+        """
+        for attempt in range(TURN_WRITE_ATTEMPTS):
+            try:
+                with self._engine.begin() as connection:
+                    if opening is not None:
+                        connection.execute(
+                            sessions.insert().values(self._session_row(opening))
+                        )
+                    elif not self._alive(connection, session_id):
+                        return _Durable.TOMBSTONED
+                    self._write(connection, session_id, batch)
+                    if closing is not None:
+                        connection.execute(
+                            sessions.update()
+                            .where(sessions.c.session == session_id)
+                            .values(self._close_row(closing))
+                        )
+                return _Durable.COMMITTED
+            except Exception as exc:  # noqa: BLE001 - a write never breaks a session
+                if attempt + 1 < TURN_WRITE_ATTEMPTS and is_busy(exc):
+                    continue
+                self._failed(session_id, batch, exc)
+                return _Durable.FAILED
+        # Unreachable: the loop either returns or exhausts its budget in
+        # the arm above. Stated so the function has one exit type.
+        return _Durable.FAILED
+
+    def _events(self, session_id: str, batch: _Batch) -> None:
+        """The lossy half, in a transaction of its own.
+
+        No events rows at all under metrics-off, rather than rows with
+        their payload emptied: the events table is the structured
+        telemetry the switch turns off. A failure here drops and counts
+        exactly what it dropped, and never touches a turn.
+        """
+        if not batch.events or not self._stores_events():
+            return
+        try:
+            with self._engine.begin() as connection:
+                connection.execute(
+                    events_table.insert(),
+                    [self._event_row(record) for record in batch.events],
+                )
+        except Exception as exc:  # noqa: BLE001 - a write never breaks a session
+            # Bound to an ordinary local before the thunk closes over it,
+            # the rule `_prune` states: `except ... as` unbinds its own
+            # name when the block ends.
+            failed: BaseException = exc
+            self._lost[session_id] = self._lost.get(session_id, 0) + len(batch.events)
+            events.emit(lambda: WriteFailed(failure=ClassName.of(failed)))
+
+    def _settle(self, batch: _Batch, landed: bool) -> None:
+        """What became of every turn of this batch, said once each."""
+        for item in batch.turns:
+            item.acknowledgement.settle(landed)
+
+    def _latch(self) -> None:
+        """The `incomplete` flags still owed, written in a transaction of
+        their own.
+
+        Only for threads that have a row: one whose first turn was the
+        dropped batch has nothing to update, and inserting an empty
+        thread to hold a flag would be worse than the flag waiting. That
+        id stays here until a later turn of the same thread materializes
+        the row, which it does with the flag already true.
+
+        A failure leaves the set as it is, and the next marker tries
+        again. If the database never recovers before the process ends,
+        neither the tail turns nor the flag persist and the stored
+        thread simply ends earlier, which is the residual window the
+        reference documentation states.
+        """
+        if not self._incomplete:
+            return
+        try:
+            with self._engine.begin() as connection:
+                flagged = threads.flag_incomplete(connection, self._incomplete)
+        except Exception as exc:  # noqa: BLE001 - a write never breaks a session
+            failed: BaseException = exc
+            events.emit(lambda: WriteFailed(failure=ClassName.of(failed)))
+            return
+        self._incomplete -= flagged
 
     def _alive(self, connection: Any, session_id: str) -> bool:
         found = connection.execute(
@@ -614,26 +800,26 @@ class ConversationStore:
                     device=self._devices.get(session_id),
                     heard=item.record.heard if self.text else None,
                     at=at,
+                    # A thread with a hole in it, materializing at last.
+                    # The flag rides the insert rather than following it,
+                    # so there is no instant at which the row exists and
+                    # claims to be whole.
+                    incomplete=item.record.conversation in self._incomplete,
                 ),
-            )
-        # No events rows at all under metrics-off, rather than rows with
-        # their payload emptied: the events table is the structured
-        # telemetry the switch turns off.
-        if batch.events and self._stores_events():
-            connection.execute(
-                events_table.insert(),
-                [self._event_row(record) for record in batch.events],
             )
 
     def _failed(self, session_id: str, batch: _Batch, exc: BaseException) -> None:
-        """A marker transaction that did not commit. The batch is gone
-        and counted; the writer keeps consuming. When the marker was the
-        close, the session row stays open-shaped, which is the store's
-        documented incomplete state: readable, listed with its null
-        close, and pruned on `started_at` like any other."""
-        self._lost[session_id] = self._lost.get(session_id, 0) + len(batch.turns) + len(
-            batch.events
-        )
+        """A durable transaction that did not commit. The batch is gone
+        and counted, the threads it fed are latched as incomplete, and
+        the writer keeps consuming. When the marker was the close, the
+        session row stays open-shaped, which is the store's documented
+        incomplete state: readable, listed with its null close, and
+        pruned on `started_at` like any other."""
+        self._lost[session_id] = self._lost.get(session_id, 0) + len(batch.turns)
+        # Product state, and deliberately not under the metrics switch:
+        # `sessions.dropped` above is zeroed under metrics-off and a
+        # thread with a hole in it is true either way.
+        self._incomplete.update(item.record.conversation for item in batch.turns)
         events.emit(lambda: WriteFailed(failure=ClassName.of(exc)))
 
     # --- rows, with both switches applied ------------------------------
@@ -860,6 +1046,7 @@ __all__ = [
     "MAX_EVENTS_IN_FLIGHT",
     "RETENTION_DAYS_DEFAULT",
     "STOP_TIMEOUT_S",
+    "TURN_WRITE_ATTEMPTS",
     "Close",
     "ConversationStore",
     "Event",

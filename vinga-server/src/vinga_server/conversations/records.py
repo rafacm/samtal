@@ -17,6 +17,7 @@ therefore "not measured", never "zero", which is the distinction a
 latency query has to be able to make.
 """
 
+import threading
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -122,6 +123,50 @@ class TurnRecord:
     tools: tuple[ToolInvocation, ...] = ()
 
 
+class Acknowledgement:
+    """Whether one turn's durable transaction committed, waitable.
+
+    A handle rather than a callback: the writer settles it on the thread
+    that did the work, and whoever wants the answer waits for it with a
+    bound of its own. Nothing on the audio path ever waits, which is why
+    the pipeline creates one and drops it; the consumers are the paths
+    that must not read past their own writes.
+
+    It speaks for its own turn and for nothing else. A later turn
+    landing says nothing about an earlier one, which is why a resume
+    reads the thread's `incomplete` flag as well: a gap in the middle of
+    a thread is exactly the state a per-turn answer cannot describe.
+
+    `wait` answers false three ways, and deliberately does not tell them
+    apart: the turn was dropped, the writer is gone, or the bound
+    expired before an answer arrived. All three mean the same thing to a
+    caller, which is that it may not assume the write landed.
+    """
+
+    __slots__ = ("_done", "_landed")
+
+    def __init__(self) -> None:
+        self._done = threading.Event()
+        self._landed = False
+
+    def wait(self, timeout: float | None = None) -> bool:
+        """Whether the turn's durable transaction committed, waiting up
+        to `timeout` seconds for an answer. False on a timeout, which is
+        not an answer and is treated as one."""
+        if not self._done.wait(timeout):
+            return False
+        return self._landed
+
+    def settle(self, landed: bool) -> None:
+        """The writer's half: say what became of the turn, once. A
+        second call is ignored, so a batch settled by a tombstone and
+        then met again by a drain does not change its own answer."""
+        if self._done.is_set():
+            return
+        self._landed = landed
+        self._done.set()
+
+
 class TurnRecorder(Protocol):
     """One session's content channel, as the runtime sees it.
 
@@ -141,9 +186,14 @@ class TurnRecorder(Protocol):
 
 class TurnStore(Protocol):
     """The same channel from the composition root's side, where one
-    object serves every session and the records are keyed by one."""
+    object serves every session and the records are keyed by one.
 
-    def record_turn(self, session_id: str, record: TurnRecord) -> None: ...
+    The acknowledgement comes back here rather than at `TurnRecorder`
+    above, which stays a `None` return on purpose: the runtime hands a
+    record over and carries on, and a protocol that promised the handle
+    would make every double that stands in for a store owe one."""
+
+    def record_turn(self, session_id: str, record: TurnRecord) -> Acknowledgement: ...
 
 
 @dataclass(frozen=True)
@@ -156,11 +206,12 @@ class SessionTurns:
     store: TurnStore
     session_id: str
 
-    def record_turn(self, record: TurnRecord) -> None:
-        self.store.record_turn(self.session_id, record)
+    def record_turn(self, record: TurnRecord) -> Acknowledgement:
+        return self.store.record_turn(self.session_id, record)
 
 
 __all__ = [
+    "Acknowledgement",
     "SessionTurns",
     "ToolInvocation",
     "TurnLeg",
