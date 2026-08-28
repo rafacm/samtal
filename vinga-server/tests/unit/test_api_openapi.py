@@ -170,13 +170,17 @@ def test_the_document_describes_every_route_the_api_serves() -> None:
         # read and its apply sit beside each other.
         "/runtime/config/diff": ["get"],
         "/runtime/config/reload": ["post"],
-        # The conversation store's reads. Their route functions live in
-        # vinga_server/conversations/api.py and are registered on the
-        # same application, which is what puts them here: a route
-        # registered by `build_api` instead would be served without ever
-        # reaching this document.
-        "/sessions": ["get"],
-        "/sessions/{session}": ["get"],
+        # The conversation store's reads and its two erasures. Their
+        # route functions live in vinga_server/conversations/api.py and
+        # are registered on the same application, which is what puts
+        # them here: a route registered by `build_api` instead would be
+        # served without ever reaching this document.
+        #
+        # The two DELETEs overlap deliberately: the addressed form is
+        # what the noun grammar wants and the selector form is the purge
+        # #282 settled, and both go through one helper.
+        "/sessions": ["delete", "get"],
+        "/sessions/{session}": ["delete", "get"],
         "/sessions/{session}/turns": ["get"],
     }
 

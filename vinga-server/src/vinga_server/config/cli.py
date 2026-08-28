@@ -56,7 +56,7 @@ from enum import Enum
 from importlib import metadata
 from pathlib import Path
 from typing import Annotated, Any, get_args, get_origin
-from urllib.parse import quote, urlunsplit
+from urllib.parse import quote, urlencode, urlunsplit
 
 import httpx
 import typer
@@ -116,9 +116,12 @@ from vinga_server.config.responses import (
     DefaultAgentName,
     DeviceBinding,
     Envelope,
+    Erasure,
     McpServerStatus,
     PendingDevice,
     SecretValue,
+    SessionDetail,
+    SessionList,
 )
 from vinga_server.config.transport import APPLY_LOCATION, check_transportable
 from vinga_server.logs import quieted
@@ -282,6 +285,45 @@ NOTHING_PENDING = (
     "no device is waiting to be claimed. A board shows its code within a couple of "
     "minutes of being pointed at this server, and codes are forgotten when the server "
     "restarts, so a board that has been waiting a while shows a fresh one"
+)
+
+# The session listing's columns. Upper case, because these are field
+# names an operator matches against the API and the store rather than
+# words about a board, and because a session id is a uuid hex whose
+# column would otherwise be hard to find in a wall of them.
+SESSION_COLUMNS = ("SESSION", "DEVICE", "AGENT", "STARTED", "CLOSED", "REASON", "TURNS")
+
+# What a listing shows where the row has nothing. One character, fixed,
+# and never derived from the answer: a null device, agent or close is an
+# ordinary state of a session, and an empty cell would read as a column
+# that failed to render.
+NOTHING_THERE = "-"
+
+NO_SESSIONS = (
+    "this server has recorded no sessions matching that. Recording is off unless "
+    "server.conversations.enabled says otherwise, and a session older than "
+    "server.conversations.retention_days has been pruned"
+)
+
+# How much of any one value reaches a cell or a block line. Narrower
+# than the glimpse the URLs are bounded to, because these land in a
+# table: what a column is for is comparing one row against the next, and
+# a cell as wide as a title makes a table with one row in it. A session
+# id is 32 characters and a stamp is 32, so nothing this server minted
+# is truncated by it.
+CELL_LENGTH = 64
+
+# What a deletion reports, in the order the rows go. Written out here so
+# that the block below prints what the API answers rather than whatever
+# a dictionary happened to iterate as, and so that a count added to the
+# contract is a line added here rather than a line that quietly appears.
+ERASED_COUNTS = (
+    "sessions",
+    "turns",
+    "tool_invocations",
+    "events",
+    "conversations",
+    "milestones",
 )
 
 # What to do with the URL `ota-url` prints, said beside it on stderr so
@@ -523,6 +565,20 @@ class Invocation:
     # `stage` above: the two together name one type's options, since the
     # registry holds one type name in more than one stage.
     type_name: str = ""
+
+    # The conversation store's session, and the two things a listing and
+    # a purge are narrowed by that are not a device. `mac` carries the
+    # device for both of them, reused from the verbs that already take
+    # one rather than given a second name: what `--device` names is the
+    # same board `device show` addresses.
+    #
+    # `limit` and `before` are text and are not read here. What each has
+    # to be is the API's rule, said in the API's own fixed sentence, and
+    # a second parser in front of it would be a second vocabulary for
+    # one refusal.
+    session: str = ""
+    limit: str = ""
+    before: str = ""
 
     # The address a simulated board checks in to. Its own field rather
     # than `name` or `file`, because it is neither an identity nor a
@@ -923,15 +979,20 @@ class Address:
     query: str
     shown: str
 
-    def endpoint(self, path: str) -> str:
-        """One endpoint's path under this address, with the query put
-        back after it.
+    def endpoint(self, path: str, query: str = "") -> str:
+        """One endpoint's path under this address, with the arguments
+        this request carries and then the query the operator's address
+        did.
 
-        Reattached as it was written rather than re-encoded, since what
-        it holds can be a credential a gateway compares literally, and
-        `%20` and `+` are the same space to a reader and two different
-        strings to a comparison."""
-        return f"{path}?{self.query}" if self.query else path
+        The operator's half is reattached as it was written rather than
+        re-encoded, since what it holds can be a credential a gateway
+        compares literally, and `%20` and `+` are the same space to a
+        reader and two different strings to a comparison. The request's
+        own half is encoded here, because it is built from what was
+        typed at the command rather than parsed out of a URL.
+        """
+        parts = [part for part in (query, self.query) if part]
+        return f"{path}?{'&'.join(parts)}" if parts else path
 
 
 def _call(
@@ -940,6 +1001,7 @@ def _call(
     path: str,
     body: object = _NOTHING,
     read_timeout_s: float | None = READ_TIMEOUT_S,
+    query: Mapping[str, str] | None = None,
 ) -> object:
     """One request, and its answer as this client understands it.
 
@@ -966,7 +1028,9 @@ def _call(
     address = _address(args, file_config)
     token = _token(file_config)
     with quieted(REQUEST_LOGGERS, QUIET_LEVEL):
-        response = _sent(method, path, body, address, token, read_timeout_s)
+        response = _sent(
+            method, path, body, address, token, read_timeout_s, urlencode(query or {})
+        )
     return _answer(response, address)
 
 
@@ -977,6 +1041,7 @@ def _sent(
     address: Address,
     token: str,
     read_timeout_s: float | None,
+    query: str = "",
 ) -> httpx.Response:
     """The request, with everything that can go wrong making it turned
     into a sentence.
@@ -1009,7 +1074,7 @@ def _sent(
         try:
             client = build_client(address.base, token)
             client.timeout = httpx.Timeout(read_timeout_s, connect=CONNECT_TIMEOUT_S)
-            endpoint = address.endpoint(path)
+            endpoint = address.endpoint(path, query)
             answered = (
                 client.request(method, endpoint)
                 if body is _NOTHING
@@ -1557,11 +1622,119 @@ def _pending_listing(entries: Mapping[str, Mapping[str, str]]) -> str:
     """
     if not entries:
         return f"{NOTHING_PENDING}\n"
-    rows = [PENDING_COLUMNS] + [
-        (code, entry["mac"], entry["board"], entry["firmware"], entry["expires_at"])
-        for code, entry in entries.items()
+    return _columns(
+        [PENDING_COLUMNS]
+        + [
+            (code, entry["mac"], entry["board"], entry["firmware"], entry["expires_at"])
+            for code, entry in entries.items()
+        ]
+    )
+
+
+def _session_listing(page: Mapping[str, Any]) -> str:
+    """The sessions this deployment recorded, one line each.
+
+    Columns, because every field of a session is short and the question
+    this answers is which of several sessions is the one wanted: the id
+    to address, the board it was held on, the agent it opened with, when
+    it ran and how much was said.
+
+    Every cell goes through `printable`, including the ones this server
+    minted itself. What a cell can hold is not decided here: the agent
+    name is an operator's, the device is a board's self-description, and
+    a column that wrapped, moved the cursor or recolored the terminal
+    would stop being a column. The cells are bounded to the column's own
+    width rather than to the shared glimpse, because a title-length
+    cell in a table is a table with one row in it.
+    """
+    items = page["items"]
+    if not items:
+        return f"{NO_SESSIONS}\n"
+    rows = [SESSION_COLUMNS] + [
+        (
+            _cell(item["session"]),
+            _cell(item["device"]),
+            _cell(item["agent"]),
+            _cell(item["started_at"]),
+            _cell(item["closed_at"]),
+            _cell(item["close_reason"]),
+            _cell(item["turns"]),
+        )
+        for item in items
     ]
-    widths = [max(len(row[column]) for row in rows) for column in range(len(PENDING_COLUMNS))]
+    return _columns(rows)
+
+
+def _session_block(session: Mapping[str, Any]) -> str:
+    """One session, whole, as lines rather than as columns.
+
+    A block because half of what a session row carries is a list or a
+    nested object, and a column holding one is a column that wraps. The
+    order is the reading order: what it was, where it ran, how it ended,
+    what it recorded, and which build recorded it.
+    """
+    lines = [
+        f"session: {_cell(session['session'])}",
+        f"  device: {_cell(session['device'])}",
+        f"  client: {_cell(session['client'])}",
+        f"  agent: {_cell(session['agent'])}",
+        f"  agents: {_names(session['agents'] or ()) or NOTHING_THERE}",
+        f"  protocol: {_cell(session['protocol'])}",
+        f"  started: {_cell(session['started_at'])}",
+        f"  closed: {_cell(session['closed_at'])}",
+        f"  duration_s: {_cell(session['duration_s'])}",
+        f"  close_reason: {_cell(session['close_reason'])}",
+        f"  turns: {_cell(session['turns'])}",
+        f"  events: {_cell(session['events'])}",
+        f"  dropped: {_cell(session['dropped'])}",
+        f"  metrics: {_yes(session['metrics'])}",
+        f"  text: {_yes(session['text'])}",
+        f"  server_version: {_cell(session['server_version'])}",
+        f"  revision: {_cell(session['revision'])}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _erasure_block(taken: Mapping[str, Any]) -> str:
+    """What a deletion took, one line per table.
+
+    Counts rather than a sentence, because the caller of a purge named a
+    set by selector and cannot know what was in it. Rendered in the
+    order the rows go: the sessions named, the dialogue they held, and
+    the threads and checkpoints left with nothing.
+    """
+    return "\n".join(f"{name}: {taken[name]}" for name in ERASED_COUNTS) + "\n"
+
+
+def _cell(value: object) -> str:
+    """One value in a cell or on a block line, bounded.
+
+    Null becomes the fixed placeholder rather than an empty cell, and
+    everything else is truncated and made printable before it is
+    written: a tab or a newline inside a cell is an unprintable here,
+    because a cell that wraps stops being a cell and a block whose line
+    structure came from an answer is a block an utterance can write.
+    """
+    if value is None:
+        return NOTHING_THERE
+    return printable(str(value), CELL_LENGTH) or NOTHING_THERE
+
+
+def _yes(value: object) -> str:
+    """A boolean the API answered, as a word. Not through `_cell`: what
+    a switch says is this client's own vocabulary, and a body that put
+    something else there meets strict validation long before this."""
+    return "yes" if value else "no"
+
+
+def _columns(rows: Sequence[Sequence[str]]) -> str:
+    """A borderless table: two spaces between columns, every column as
+    wide as its widest cell, and no trailing whitespace on a line.
+
+    The one renderer for it, because the pending listing and the session
+    listing are the same shape and a second copy would be a second place
+    for the gutter to change."""
+    widths = [max(len(row[column]) for row in rows) for column in range(len(rows[0]))]
     return "".join(
         "  ".join(
             cell.ljust(width) for cell, width in zip(row, widths, strict=True)
@@ -2616,6 +2789,13 @@ class Act:
     # and the body it carries, where it carries one.
     method: str
     path: Callable[[Invocation], str]
+    # The query arguments this request carries, where it carries any.
+    # Apart from `path` on purpose: what identifies an operation is the
+    # path the document is written in, and a filter or a selector is not
+    # part of that identity. It is also what keeps the operator's own
+    # query string, which can be a credential, from being re-encoded
+    # alongside arguments this command built itself.
+    query: Callable[[Invocation], dict[str, str]] | None = None
     body: Callable[[Invocation], object] | None = None
 
     # How long this one endpoint may take to answer. Every act but the
@@ -2667,6 +2847,7 @@ def _act(args: Invocation, act: Act) -> None:
         act.path(args),
         act.body(args) if act.body is not None else _NOTHING,
         read_timeout_s=act.read_timeout_s,
+        query=act.query(args) if act.query is not None else {},
     )
     act.render(act.read(answer))
 
@@ -2939,6 +3120,82 @@ PENDING = Act(
     path=_waiting_path,
     answers=dict[str, PendingDevice],
     render=_printed(_pending_listing),
+)
+
+
+# The conversation store's sessions: three acts on the two resources the
+# store serves, and the one place in this grammar that reaches a schema
+# the domain configuration knows nothing about. They are here for the
+# reason the amendment to #190 gives: a command that touches the record
+# is a request like every other, and there is no second way in.
+
+
+def _sessions_path(args: Invocation) -> str:
+    return _path("sessions")
+
+
+def _session_path(args: Invocation) -> str:
+    return _path("sessions", args.session)
+
+
+def _session_filters(args: Invocation) -> dict[str, str]:
+    """What narrows a listing. Only what was written: an absent flag is
+    an argument the request does not carry, so the API's own defaults
+    are the defaults, said once."""
+    return {
+        name: value
+        for name, value in (("device", args.mac), ("limit", args.limit))
+        if value
+    }
+
+
+def _purge_selectors(args: Invocation) -> dict[str, str]:
+    """What a purge names. The same rule as the filters above, and the
+    refusal for naming none of them is the API's: a purge that erased
+    everything because its arguments were lost on the way is exactly
+    what the endpoint refuses, and a second copy of that rule here would
+    be a second sentence for one decision."""
+    return {
+        name: value
+        for name, value in (
+            ("session", args.session),
+            ("device", args.mac),
+            ("before", args.before),
+        )
+        if value
+    }
+
+
+LIST_SESSIONS = Act(
+    method="GET",
+    path=_sessions_path,
+    query=_session_filters,
+    answers=SessionList,
+    render=_printed(_session_listing),
+)
+
+SHOW_SESSION = Act(
+    method="GET",
+    path=_session_path,
+    answers=SessionDetail,
+    render=_printed(_session_block),
+)
+
+DELETE_SESSION = Act(
+    method="DELETE",
+    path=_session_path,
+    answers=Erasure,
+    refusal=UNREADABLE_WRITE,
+    render=_printed(_erasure_block),
+)
+
+PURGE_SESSIONS = Act(
+    method="DELETE",
+    path=_sessions_path,
+    query=_purge_selectors,
+    answers=Erasure,
+    refusal=UNREADABLE_WRITE,
+    render=_printed(_erasure_block),
 )
 
 # A read of the running server rather than of the database: what a
@@ -3430,6 +3687,22 @@ STAGE_HELP = ", ".join(PROVIDER_STAGES)
 PROVIDER_SLOT_HELP = "the option it fills, such as api_key"
 
 MCP_SLOT_HELP = "env.<KEY> or headers.<KEY>"
+
+SESSION_HELP = "the session's uuid hex, as a listing prints it"
+
+DEVICE_FILTER_HELP = "only the sessions of this board, by MAC (default: every board)"
+
+LIMIT_HELP = "how many rows this page may hold (default: the API's own, 50)"
+
+BEFORE_HELP = (
+    "only the sessions that began before this UTC day, as YYYY-MM-DD (default: "
+    "however far back the store goes)"
+)
+
+SELECTED_SESSION_HELP = (
+    "only this session, by its uuid hex (default: every session the other selectors "
+    "leave)"
+)
 
 # The two that follow `schema provider`. A provider type is addressed by
 # its stage and its name together everywhere else in this command group,
@@ -3944,6 +4217,105 @@ def _given(pairs: list[str] | None) -> tuple[str, ...]:
     return tuple(pairs or ())
 
 
+def _by_session(row: Command) -> Callable[..., None]:
+    """A command addressing one recorded session by its id."""
+
+    def run(
+        context: typer.Context,
+        session: Annotated[str, typer.Argument(metavar="SESSION", help=SESSION_HELP)],
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        force: ForceOption = None,
+        no_input: NoInputOption = None,
+    ) -> None:
+        row.perform(
+            _invocation(row, context, config, api_url, force, no_input, session=session)
+        )
+
+    return run
+
+
+def _filtered_sessions(row: Command) -> Callable[..., None]:
+    """The session listing, narrowed by a board and bounded by a count.
+
+    Both are flags rather than positionals, because neither addresses a
+    session: one says which board's sessions to show and the other how
+    many. No cursor flag, deliberately: one invocation prints one page,
+    and walking the whole record backwards is what the API is for.
+    """
+
+    def run(
+        context: typer.Context,
+        device: Annotated[
+            str | None, typer.Option("--device", metavar="MAC", help=DEVICE_FILTER_HELP)
+        ] = None,
+        limit: Annotated[
+            str | None, typer.Option("--limit", metavar="N", help=LIMIT_HELP)
+        ] = None,
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        force: ForceOption = None,
+        no_input: NoInputOption = None,
+    ) -> None:
+        row.perform(
+            _invocation(
+                row,
+                context,
+                config,
+                api_url,
+                force,
+                no_input,
+                mac=device or "",
+                limit=limit or "",
+            )
+        )
+
+    return run
+
+
+def _selected_sessions(row: Command) -> Callable[..., None]:
+    """The purge's three selectors, every one of them a flag.
+
+    A selector is not an address: a purge names a set, and the set is
+    narrowed by every selector that was written. All three are optional
+    here and at least one is required, which is the API's rule and its
+    sentence rather than a second copy of it in the grammar.
+    """
+
+    def run(
+        context: typer.Context,
+        session: Annotated[
+            str | None,
+            typer.Option("--session", metavar="ID", help=SELECTED_SESSION_HELP),
+        ] = None,
+        device: Annotated[
+            str | None, typer.Option("--device", metavar="MAC", help=DEVICE_FILTER_HELP)
+        ] = None,
+        before: Annotated[
+            str | None, typer.Option("--before", metavar="YYYY-MM-DD", help=BEFORE_HELP)
+        ] = None,
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        force: ForceOption = None,
+        no_input: NoInputOption = None,
+    ) -> None:
+        row.perform(
+            _invocation(
+                row,
+                context,
+                config,
+                api_url,
+                force,
+                no_input,
+                session=session or "",
+                mac=device or "",
+                before=before or "",
+            )
+        )
+
+    return run
+
+
 def _provider_secret(row: Command) -> Callable[..., None]:
     """Storing a credential on one provider. The value is never here: it
     is read from stdin or from the variable `--from-env` names."""
@@ -4254,6 +4626,12 @@ GROUPS: dict[tuple[str, ...], str] = {
     # `check-in` side by side at the top level would be exactly the list
     # of things-and-actions that noun first exists to remove.
     ("simulator",): "a simulated board, checking in the way one with a screen would",
+    # The conversation store's own noun, and singular for the reason the
+    # cli-guide's naming rule gives: `show` and `delete` address one
+    # entry. The guide is amended by the change that lands this
+    # (docs/plans/2026-08-28-first-class-conversations.md), because its
+    # examples spelled the noun plural before there was one.
+    ("session",): "the sessions this server recorded, and erasing them",
 }
 
 
@@ -4465,6 +4843,48 @@ COMMANDS: tuple[Command, ...] = (
             "what the stored configuration would change on the running server, kind by "
             "kind, with the boundary each kind's changes reach a conversation at"
         ),
+    ),
+    # The conversation store's sessions. Reads of a different schema
+    # from everything above, and two erasures of it, all of them
+    # requests: there is no local-database path here and there is not
+    # going to be one (#281, #282).
+    Command(
+        words=("session", "list"),
+        does=LIST_SESSIONS,
+        declare=_filtered_sessions,
+        help=(
+            "the sessions this server recorded, newest first, one page of them; "
+            "narrow it with --device and size the page with --limit"
+        ),
+    ),
+    Command(
+        words=("session", "show"),
+        does=SHOW_SESSION,
+        declare=_by_session,
+        help=(
+            "print one recorded session: the board and agent it ran with, how it "
+            "ended, and what it stored"
+        ),
+    ),
+    Command(
+        words=("session", "delete"),
+        does=DELETE_SESSION,
+        declare=_by_session,
+        help=(
+            "erase one recorded session and everything it holds: its turns wherever "
+            "their conversations are, the calls they made, and its events"
+        ),
+        destroys=True,
+    ),
+    Command(
+        words=("session", "purge"),
+        does=PURGE_SESSIONS,
+        declare=_selected_sessions,
+        help=(
+            "erase every session the selectors name, in one transaction; at least one "
+            "of --session, --device and --before is required and several are combined"
+        ),
+        destroys=True,
     ),
     # A read of the running server rather than of the database: there is
     # no state to report when there is no server to ask.

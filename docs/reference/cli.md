@@ -636,6 +636,7 @@ Commands:
   diff             what the stored configuration would change on the running
                    server, kind by kind, with the boundary each kind's changes
                    reach a conversation at
+  session          the sessions this server recorded, and erasing them
   status           what each configured MCP server is doing on the running
                    server: connected, down, or unused because no agent
                    references it, since when, and which tools it published
@@ -1906,6 +1907,126 @@ Options:
                  and a secret is read from stdin or --from-env (default: prompt
                  at a terminal)
   -h, --help     Show this message and exit.
+```
+
+### `vinga session`
+
+```
+Usage: vinga session [OPTIONS] COMMAND [ARGS]...
+
+  the sessions this server recorded, and erasing them
+
+Options:
+  -h, --help  Show this message and exit.
+
+Commands:
+  list    the sessions this server recorded, newest first, one page of them;
+          narrow it with --device and size the page with --limit
+  show    print one recorded session: the board and agent it ran with, how it
+          ended, and what it stored
+  delete  erase one recorded session and everything it holds: its turns wherever
+          their conversations are, the calls they made, and its events
+  purge   erase every session the selectors name, in one transaction; at least
+          one of --session, --device and --before is required and several are
+          combined
+```
+
+### `vinga session list`
+
+```
+Usage: vinga session list [OPTIONS]
+
+  the sessions this server recorded, newest first, one page of them; narrow it
+  with --device and size the page with --limit
+
+Options:
+  --device MAC   only the sessions of this board, by MAC (default: every board)
+  --limit N      how many rows this page may hold (default: the API's own, 50)
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
+  -h, --help     Show this message and exit.
+```
+
+### `vinga session show`
+
+```
+Usage: vinga session show [OPTIONS] {SESSION}
+
+  print one recorded session: the board and agent it ran with, how it ended, and
+  what it stored
+
+Arguments:
+  SESSION  the session's uuid hex, as a listing prints it  [required]
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
+  -h, --help     Show this message and exit.
+```
+
+### `vinga session delete`
+
+```
+Usage: vinga session delete [OPTIONS] {SESSION}
+
+  erase one recorded session and everything it holds: its turns wherever their
+  conversations are, the calls they made, and its events
+
+Arguments:
+  SESSION  the session's uuid hex, as a listing prints it  [required]
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
+  -h, --help     Show this message and exit.
+```
+
+### `vinga session purge`
+
+```
+Usage: vinga session purge [OPTIONS]
+
+  erase every session the selectors name, in one transaction; at least one of
+  --session, --device and --before is required and several are combined
+
+Options:
+  --session ID         only this session, by its uuid hex (default: every
+                       session the other selectors leave)
+  --device MAC         only the sessions of this board, by MAC (default: every
+                       board)
+  --before YYYY-MM-DD  only the sessions that began before this UTC day, as
+                       YYYY-MM-DD (default: however far back the store goes)
+  --config PATH        path to the YAML config file naming server.port and
+                       server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL        base URL of the configuration API (default:
+                       $VINGA_API_URL, then http://127.0.0.1:<server.port>/api)
+  --force              answer the confirmation a destructive command asks at a
+                       terminal, so it does not ask (default: it asks)
+  --no-input           never prompt: a destructive command refuses rather than
+                       asking, and a secret is read from stdin or --from-env
+                       (default: prompt at a terminal)
+  -h, --help           Show this message and exit.
 ```
 
 ### `vinga status`

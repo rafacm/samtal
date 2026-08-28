@@ -1,4 +1,4 @@
-"""The conversation store's reads: three GETs on the gated /api.
+"""The conversation store on the gated /api: three reads, two erasures.
 
 The route functions live here and are registered by `config/api.py`'s
 `_application()`, which is the application `document()` renders and the
@@ -21,11 +21,16 @@ Three transport rules the routes hold to:
   inside them, no opaque encoding to version. The list pages backwards
   (`id` strictly below the cursor, newest first) and the timeline pages
   forwards (`id` strictly after it), which is the reconcile direction.
-- **A refused argument is never quoted back.** A limit, a cursor or a
-  device that cannot be read answers with a fixed sentence describing
-  what the argument has to be. What arrived is the caller's, and a
-  refusal that echoed it would be the one place this API prints
-  something it was handed.
+- **A refused argument is never quoted back.** A limit, a cursor, a
+  device or a day that cannot be read answers with a fixed sentence
+  describing what the argument has to be, and so does a purge that
+  named no selector at all. What arrived is the caller's, and a refusal
+  that echoed it would be the one place this API prints something it
+  was handed. The rule is not weaker on the erasures: a driver
+  exception carries the statement it failed on and the connection
+  string it failed over, so which sentence a failed deletion answers is
+  decided by the db classifier's closed set and the exception is
+  dropped rather than read.
 - **A store with no rows answers its ordinary empty shapes.** There is
   no 404 for "this deployment never recorded" any more, and that is a
   deliberate contract change (#283): the distinction it drew was
@@ -37,27 +42,46 @@ Three transport rules the routes hold to:
 
 Every read opens a connection for the length of one request through
 `db.read_engine`: no migration, no advisory lock, and a repeatable-read
-snapshot that cannot write.
+snapshot that cannot write. Every erasure opens a write engine for the
+length of one transaction through `db.write_engine`, which takes the
+chain's advisory lock at BEGIN and migrates nothing. Neither holds an
+engine between requests, and both work with recording off, where there
+is no `ConversationStore` and no engine to borrow.
 """
 
+import datetime as dt
 from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import ColumnElement, Connection, Table, func, select
 
-from vinga_server.config.loader import ConfigError, UnknownEntityError
+from vinga_server.config.loader import (
+    ConfigError,
+    DatabaseBusyError,
+    StorageError,
+    UnknownEntityError,
+)
 from vinga_server.config.models import DatabaseConfig, normalize_mac
+from vinga_server.config.responses import (
+    CloseReason,
+    Erasure,
+    SessionDetail,
+    SessionList,
+    SessionSummary,
+)
+from vinga_server.conversations import threads
 from vinga_server.conversations.schema import (
-    CLOSE_REASONS,
     TOOL_SOURCES,
     events,
     sessions,
     tool_invocations,
     turns,
 )
-from vinga_server.db import read_engine
+from vinga_server.conversations.store import CONVERSATIONS_CHAIN
+from vinga_server.db import is_busy, read_engine, write_engine
 
 if TYPE_CHECKING:
     # The name only, for the annotation in `_reader`: the configuration
@@ -66,13 +90,19 @@ if TYPE_CHECKING:
     # runtime.
     from vinga_server.config.api import ApiRuntime
 
-# The two closed sets, in the document, built from the tuples the schema
-# already declares rather than written out again here. A token added to
-# either one reaches the contract by being added once; a document that
-# spelled them out could disagree with the rows it describes, which is
-# the whole failure mode a closed set exists to prevent.
+# The tool-source closed set, in the document, built from the tuple the
+# schema already declares rather than written out again here. A token
+# added to it reaches the contract by being added once; a document that
+# spelled it out could disagree with the rows it describes, which is the
+# whole failure mode a closed set exists to prevent.
+#
+# The close reasons cannot be derived the same way any more and are
+# written out in `config/responses.py` instead, with the reason beside
+# them: the shapes that carry them are read by the CLI as well, and this
+# module imports FastAPI, SQLAlchemy and the store. The pin in
+# `test_api_openapi.py` holds the two spellings equal through the
+# rendered document.
 ToolSource = Literal[*TOOL_SOURCES]
-CloseReason = Literal[*CLOSE_REASONS]
 
 # How many rows a page holds when the caller says nothing, and the most
 # it may ask for. The maximum is the contract rather than a courtesy: a
@@ -107,6 +137,35 @@ _DEVICE_REFUSED = (
     "pairs, for example aa:bb:cc:dd:ee:ff. What was sent is not quoted back"
 )
 
+_BEFORE_REFUSED = (
+    "before has to be a calendar day in UTC, written as YYYY-MM-DD, and it selects "
+    "the sessions that began strictly before it. What was sent is not quoted back"
+)
+
+# What a purge with no selector is told. A refusal rather than a
+# deletion of everything, because a query string that lost its arguments
+# to a shell, a proxy or a typo would otherwise erase the whole store,
+# and there is no undo behind it.
+_NO_SELECTOR = (
+    "a purge names what it erases: give at least one of session, device or before, "
+    "and several are combined so that every one of them has to match. Erasing "
+    "everything is deliberately not something this endpoint can be asked for"
+)
+
+# What a deletion answers when the database refuses it. Two sentences,
+# chosen by the db classifier's closed set and not by anything the
+# exception says, because a driver's own words carry the statement it
+# failed on and the connection string it failed over.
+_ERASURE_BUSY = (
+    "the conversation store's write lock is held by another writer, and nothing was "
+    "deleted. The same request may be made again"
+)
+
+_ERASURE_FAILED = (
+    "the conversation store could not be written, and nothing was deleted. The "
+    "details are in the server's log"
+)
+
 # The one 404, which does not name what the request asked for: a session
 # id arrives in the path, and what is worth saying about it is where to
 # look instead.
@@ -125,17 +184,24 @@ _UNKNOWN_SESSION = (
 # What each refusal means here, where the shared sentence would not be
 # true. 404 is two cases and the status alone cannot tell them apart;
 # 422 is never about addressing, since the only things these routes
-# parse are a limit, a cursor and a device; and 500 is about the
-# conversation store rather than the stored configuration.
+# parse are a limit, a cursor, a device, a day and the selector rule;
+# 409 is the conversation store's write lock rather than the
+# configuration database's; and 500 is about the conversation store
+# rather than the stored configuration.
 PROBLEMS_INSTEAD: dict[int, str] = {
     404: "No session of that id is in the conversation store.",
+    409: (
+        "The conversation store's write lock is held by another writer. Nothing was "
+        "deleted, and the same request may be made again."
+    ),
     422: (
-        "One of the query arguments could not be read: the limit, the cursor or the "
-        "device filter. Nothing sent is quoted back."
+        "One of the query arguments could not be read: the limit, the cursor, the "
+        "device filter or the day, or a purge named no selector at all. Nothing sent "
+        "is quoted back."
     ),
     500: (
-        "The conversation store cannot be read, or the request failed for a reason "
-        "that is not the caller's. The details are in the server's log."
+        "The conversation store cannot be read or written, or the request failed for "
+        "a reason that is not the caller's. The details are in the server's log."
     ),
 }
 
@@ -387,149 +453,6 @@ class SessionTurn(BaseModel):
     )
 
 
-class SessionSummary(BaseModel):
-    """One session as the listing shows it."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: int = Field(
-        description=(
-            "The session's monotonic row id, never reused. It is this listing's "
-            "cursor: a page asked for with it holds the sessions before it."
-        )
-    )
-    session: str = Field(
-        description=(
-            "The session's uuid hex, which addresses the two reads below and names the "
-            "capture triplet of the same conversation."
-        )
-    )
-    device: str | None = Field(
-        description=(
-            "The device's MAC in canonical form, and null when the session was "
-            "rejected before one was understood."
-        )
-    )
-    agent: str | None = Field(
-        description="The agent the session opened with, before any handover."
-    )
-    started_at: str = Field(description="When the session opened, as an ISO-8601 instant in UTC.")
-    closed_at: str | None = Field(
-        description=(
-            "When it closed, in the same form. Null in a session that is still running "
-            "and in one whose close was never persisted, which a crash leaves behind."
-        )
-    )
-    duration_s: float | None = Field(
-        description="How long it lasted, in seconds. A measured number: null under metrics-off."
-    )
-    close_reason: CloseReason | str | None = Field(
-        description=(
-            "What ended it, one of `limit`, `idle`, `drain`, `client` or `error`, the "
-            "first cause to fire winning. Null until it closes. The five tokens are "
-            "the set a server latches, and the column that holds them is deliberately "
-            "unconstrained, so a token a later release adds is served as it was "
-            "stored: a read that refused one would drop a whole page over one row, "
-            "the same reason the database refuses none."
-        )
-    )
-    turns: int = Field(description="How many turns this session holds.")
-
-
-class SessionList(BaseModel):
-    """One page of the session listing, newest first."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    items: list[SessionSummary] = Field(
-        description="The sessions on this page, newest first."
-    )
-    next_cursor: int | None = Field(
-        description=(
-            "What to send as `cursor` for the page after this one, and null when this "
-            "was the last: it is the id of the last item here, and the next page holds "
-            "the sessions below it. Null means there is nothing further right now, not "
-            "that there never will be; a listing re-read later starts from the top."
-        )
-    )
-
-
-class SessionDetail(BaseModel):
-    """One session, whole: its row and what hangs off it."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: int = Field(description="The session's monotonic row id, the listing's cursor.")
-    session: str = Field(description="The session's uuid hex.")
-    device: str | None = Field(
-        description="The device's MAC in canonical form, or null when none was understood."
-    )
-    client: str | None = Field(
-        description="The client identifier the device announced, when it announced one."
-    )
-    agent: str | None = Field(
-        description="The agent the session opened with, before any handover."
-    )
-    agents: list[str] | None = Field(
-        description=(
-            "Every agent the device is bound to, by name, as the binding resolved at "
-            "open. The first is the agent the session started on."
-        )
-    )
-    protocol: str | None = Field(
-        description="The device protocol version this session negotiated."
-    )
-    started_at: str = Field(description="When the session opened, as an ISO-8601 instant in UTC.")
-    closed_at: str | None = Field(description="When it closed, in the same form, or null.")
-    duration_s: float | None = Field(
-        description="How long it lasted, in seconds. Null under metrics-off."
-    )
-    close_reason: CloseReason | str | None = Field(
-        description=(
-            "What ended it, one of the five tokens the listing describes, or null "
-            "until it closes."
-        )
-    )
-    server_version: str | None = Field(
-        description="The server version that recorded this session."
-    )
-    revision: str | None = Field(description="The build revision that recorded it.")
-    providers: dict[str, Any] | None = Field(
-        description=(
-            "The resolved provider entry per pipeline stage, the same structure the "
-            "capture manifest carries. It holds environment variable names, never "
-            "credentials."
-        )
-    )
-    metrics: bool = Field(
-        description=(
-            "Whether metrics storage was on for this session, so a null number is "
-            "distinguishable from a number that was never stored."
-        )
-    )
-    text: bool = Field(
-        description=(
-            "Whether text storage was on for this session, so a null utterance is "
-            "distinguishable from an utterance that was never stored."
-        )
-    )
-    dropped: int = Field(
-        description=(
-            "Records this session lost: events refused at the writer's in-flight bound, "
-            "and anything a failed transaction rolled back. The store recording its own "
-            "incompleteness, the way the capture manifest records `complete`."
-        )
-    )
-    turns: int = Field(description="How many turns this session holds.")
-    events: int = Field(
-        description=(
-            "How many events rows it holds: the decision track, `session_open` through "
-            "`session_closed`. Zero under metrics-off, where no events row lands. They "
-            "are deliberately not served over REST; the database is that surface."
-        )
-    )
-
-
 class SessionTurns(BaseModel):
     """One page of a session's timeline, oldest first."""
 
@@ -587,6 +510,29 @@ CursorQuery = Annotated[
     ),
 ]
 
+SessionQuery = Annotated[
+    str | None,
+    Query(
+        description=(
+            "Only this session, by its uuid hex. The same erasure the addressed form "
+            "of this resource performs, offered here so that one selector grammar "
+            "covers every purge."
+        )
+    ),
+]
+
+BeforeQuery = Annotated[
+    str | None,
+    Query(
+        description=(
+            "Only the sessions that began strictly before this UTC day, written as "
+            "YYYY-MM-DD. A session that began at any moment of the named day is not "
+            "selected, which is what 'before the fifteenth' means. Anything else is "
+            "refused."
+        )
+    ),
+]
+
 
 def reader(database: DatabaseConfig) -> Callable[[], Iterator[Connection]]:
     """Per-request access to the store: open a connection, yield it,
@@ -617,6 +563,53 @@ def reader(database: DatabaseConfig) -> Callable[[], Iterator[Connection]]:
     return open_reader
 
 
+@contextmanager
+def erasing(database: DatabaseConfig) -> Iterator[Connection]:
+    """One deletion's transaction, on a write engine opened for it and
+    disposed after it.
+
+    Opened per request for the reason a read is, and for one more that
+    is this endpoint's own: erasure has to work with recording off,
+    where no `ConversationStore` exists and there is no long-lived
+    engine to borrow. `write_engine` rather than `open_conversations`,
+    because a deletion migrates nothing: boot owns the schema, and a
+    request that ran Alembic would be a request that could change the
+    shape of the store it was asked to delete a row from.
+
+    The chain's advisory lock is taken at BEGIN, so this transaction and
+    the writer's markers are ordered rather than interleaved: a session
+    the writer is still talking on is deleted whole or not at all, and
+    the writer meets the absence at its next marker, which is the
+    tombstone rule it already has.
+    """
+    engine = write_engine(database, CONVERSATIONS_CHAIN)
+    try:
+        with engine.begin() as connection:
+            yield connection
+    finally:
+        engine.dispose()
+
+
+def _eraser(request: Request) -> Callable[[], AbstractContextManager[Connection]]:
+    """How to open one deletion's transaction, taken off the
+    application's runtime like the reader beside it.
+
+    The factory rather than the transaction, deliberately. A dependency
+    that yielded an open transaction would put its commit and its
+    rollback in the framework's hands, and what a refusal must not do
+    here is leave half a deletion behind; entered inside the handler,
+    the `with` and the arm that classifies its failure are the same
+    piece of code.
+    """
+    runtime: ApiRuntime = request.app.state.api_runtime
+    return runtime.erasures
+
+
+EraserDep = Annotated[
+    Callable[[], AbstractContextManager[Connection]], Depends(_eraser)
+]
+
+
 def _reader(request: Request) -> Iterator[Connection]:
     """The store, for the length of one request.
 
@@ -633,8 +626,8 @@ ReaderDep = Annotated[Connection, Depends(_reader)]
 
 
 def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]]) -> None:
-    """The three reads, registered on the application that is both
-    mounted and rendered.
+    """The three reads and the two erasures, registered on the
+    application that is both mounted and rendered.
 
     `problems` is `config/api.py`'s own describer, passed in rather than
     imported: that module imports this one to register these routes, and
@@ -644,6 +637,13 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
     The handlers are plain `def`, so FastAPI runs them on the threadpool
     and the synchronous database work never blocks the event loop, which
     is what the repository's reads already do.
+
+    The two erasures overlap deliberately. The addressed form is what
+    the noun grammar and a user interface want, and the selector form is
+    the purge whose three selectors were settled by the command it
+    replaces (#282); both do exactly the same thing through the same
+    helper in `threads.py`, which is what keeps them one bookkeeping
+    path rather than two.
     """
 
     @api.get(
@@ -745,6 +745,99 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
         _nest_invocations(reader, page["items"])
         return page
 
+    @api.delete(
+        "/sessions/{session}",
+        response_model=Erasure,
+        responses=problems(401, 404, 409, 422, 500, instead=PROBLEMS_INSTEAD),
+    )
+    def erase_session(session: str, erase: EraserDep) -> dict[str, int]:
+        """Erase one named session: its row, its turns wherever their
+        threads are, the calls those turns made, and its events.
+
+        Erasure outranks every copy the store derived from what is going
+        (`threads.erase_sessions` says exactly which), and it is one
+        transaction, so a session's rows go together or none of them
+        does. A session that is still running when its row goes stops
+        being recorded at the writer's next marker; what it says after
+        that is not kept.
+        """
+        return _erased(erase, session=session, addressed=True)
+
+    @api.delete(
+        "/sessions",
+        response_model=Erasure,
+        responses=problems(401, 409, 422, 500, instead=PROBLEMS_INSTEAD),
+    )
+    def purge_sessions(
+        erase: EraserDep,
+        session: SessionQuery = None,
+        device: DeviceQuery = None,
+        before: BeforeQuery = None,
+    ) -> dict[str, int]:
+        """Erase every session the selectors name, in one transaction.
+
+        At least one selector is required and several are combined with
+        AND, so a purge always names less than everything. The semantics
+        are the retired `conversations purge` command's, carried over
+        rather than reopened: this is that command, as an act of the API
+        with the CLI in front of it.
+        """
+        if session is None and device is None and before is None:
+            raise ConfigError(_NO_SELECTOR)
+        return _erased(
+            erase, session=session, device=_device(device), before=_before(before)
+        )
+
+
+def _erased(
+    erase: Callable[[], AbstractContextManager[Connection]],
+    session: str | None = None,
+    device: str | None = None,
+    before: str | None = None,
+    addressed: bool = False,
+) -> dict[str, int]:
+    """One deletion, whatever addressed it.
+
+    Both endpoints land here, which is what makes the overlap between
+    them an overlap rather than a second bookkeeping path: the selectors
+    are resolved to a list of sessions and the same helper erases them.
+
+    The failure arms are the whole no-leak surface of a write. A driver
+    exception carries the statement it failed on and the connection
+    string it failed over, so which sentence is answered is decided by
+    the db classifier's closed set and the exception itself is dropped:
+    built inside the arm, raised outside it, so nothing walking the
+    chain finds it either.
+    """
+    problem: ConfigError | None = None
+    try:
+        with erase() as connection:
+            named = threads.selected(
+                connection, session=session, device=device, before=before
+            )
+            if addressed and not named:
+                # Addressed and not there, which is a 404 rather than an
+                # erasure of nothing: a caller that named one session
+                # meant that session.
+                raise UnknownEntityError(_UNKNOWN_SESSION)
+            taken = threads.erase_sessions(connection, named)
+    except ConfigError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - the driver's own words never travel
+        problem = DatabaseBusyError(_ERASURE_BUSY) if is_busy(exc) else StorageError(
+            _ERASURE_FAILED
+        )
+    if problem is not None:
+        raise problem
+    return {
+        "sessions": taken.sessions,
+        "turns": taken.turns,
+        "tool_invocations": taken.tool_invocations,
+        "events": taken.events,
+        "conversations": taken.conversations,
+        "milestones": taken.milestones,
+    }
+
 
 def _rows(reader: Connection, query: Any) -> list[dict[str, Any]]:
     return [dict(row) for row in reader.execute(query).mappings()]
@@ -833,6 +926,39 @@ def _whole(value: str | None) -> int | None:
     return int(value)
 
 
+def _before(value: str | None) -> str | None:
+    """The day selector, as the instant the store's timestamps compare
+    against.
+
+    A calendar day in, midnight UTC out, and the comparison is strict,
+    so a session that began at any moment of the named day survives.
+    Rendered with `isoformat` because that is what wrote every
+    `started_at` in the table, and the comparison is lexicographic on
+    text: two strings written the same way by the same function compare
+    chronologically, which is the property the retention pass already
+    leans on.
+    """
+    if value is None:
+        return None
+    problem: ConfigError | None = None
+    day = dt.date.min
+    # `fromisoformat` also takes `20260815` and `2026-W33-1`, which are
+    # days nobody means to type here and which would make the accepted
+    # spelling wider than the one documented. Held to the extended form
+    # before it is parsed.
+    if len(value) != 10 or value[4] != "-" or value[7] != "-":
+        problem = ConfigError(_BEFORE_REFUSED)
+    try:
+        day = dt.date.fromisoformat(value) if problem is None else day
+    except ValueError:
+        # Built here and raised outside the arm: `fromisoformat` puts
+        # the string it could not read into its own message.
+        problem = ConfigError(_BEFORE_REFUSED)
+    if problem is not None:
+        raise problem
+    return dt.datetime.combine(day, dt.time.min, tzinfo=dt.UTC).isoformat()
+
+
 def _device(value: str | None) -> str | None:
     """The device filter, normalized the way every other MAC in this
     project is, so `AA-BB-...` and `aa:bb:...` reach the same sessions.
@@ -861,6 +987,7 @@ __all__ = [
     "LIMIT_DEFAULT",
     "LIMIT_MAX",
     "CloseReason",
+    "Erasure",
     "SessionDetail",
     "SessionList",
     "SessionSummary",
@@ -869,6 +996,7 @@ __all__ = [
     "ToolInvocation",
     "ToolSource",
     "TurnLeg",
+    "erasing",
     "reader",
     "routes",
 ]

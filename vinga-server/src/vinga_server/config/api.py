@@ -723,15 +723,18 @@ class ApiRuntime:
     (#142).
 
     `store` is the configuration database's one engine, installed by
-    whichever lifespan owns it and None until then; `conversations` is
-    still a per-request open, which is a property that store documents
-    for itself. The other six are the live objects the server shares
-    with this application, or the honest empties an application built
-    without a server around it gets.
+    whichever lifespan owns it and None until then; `conversations` and
+    `erasures` are still per-request opens, which is a property that
+    store documents for itself, and the second of them is how a deletion
+    reaches a store no `ConversationStore` is holding open, which is
+    every deployment with recording off. The other six are the live
+    objects the server shares with this application, or the honest
+    empties an application built without a server around it gets.
     """
 
     store: StoreHandle | None
     conversations: Callable[[], Iterator[Connection]]
+    erasures: Callable[[], contextlib.AbstractContextManager[Connection]]
     loaded_agents: ServableAgents
     pending: PendingDevices
     mcp_servers: McpStatusSource | None
@@ -878,6 +881,11 @@ def build_api_runtime(
         # migrates it either way, and a deployment that has switched
         # recording off still serves what it recorded.
         conversations=conversations.reader(database),
+        # And the write half, opened for the length of one deletion. The
+        # same argument as the read: nothing is held between requests,
+        # and a deletion has to work in a deployment that records
+        # nothing and therefore holds no writer.
+        erasures=lambda: conversations.erasing(database),
         loaded_agents=_nothing_servable if loaded_agents is None else loaded_agents,
         pending=pending if pending is not None else _empty_pending(),
         mcp_servers=mcp_servers,

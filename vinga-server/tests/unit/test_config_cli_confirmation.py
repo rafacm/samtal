@@ -64,7 +64,7 @@ def through_a_pipe(monkeypatch: pytest.MonkeyPatch, piped: str = "") -> None:
 
 # The destructive set, as a closed semantic list
 #
-# Stated as a rule plus four names rather than as eight literals, so a
+# Stated as a rule plus six names rather than as ten literals, so a
 # fifth deletable kind does not silently shrink the expectation. The
 # count is part of the assertion because the list is the oracle: a set
 # that grew without this file noticing is exactly what the comparison
@@ -80,6 +80,11 @@ def intended() -> set[tuple[str, ...]]:
         ("provider", "secret", "clear"),
         ("mcp-server", "secret", "clear"),
         ("default-agent", "clear"),
+        # The conversation store's two erasures. Neither is undoable by
+        # any command in this grammar and neither is undoable at all:
+        # what they take is dialogue, which nothing here can write back.
+        ("session", "delete"),
+        ("session", "purge"),
     }
 
 
@@ -91,7 +96,7 @@ def test_the_table_marks_exactly_the_destructive_commands() -> None:
     marked = {row.words for row in cli.COMMANDS if row.destroys}
 
     assert marked == intended()
-    assert len(marked) == 8
+    assert len(marked) == 10
 
 
 def test_a_replacement_write_is_not_destructive() -> None:
