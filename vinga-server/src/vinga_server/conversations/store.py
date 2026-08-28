@@ -383,7 +383,10 @@ class ConversationStore:
         self._unknown: set[str] = set()
         # Records this writer lost to a failed transaction, per session,
         # folded into the session row's count at close. Writer-side, so
-        # unlike the producer's counter it needs no lock.
+        # unlike the producer's counter it needs no lock. The closing
+        # marker's own events are the one loss this cannot carry, since
+        # the close row is written before them; `_count_late_loss` adds
+        # those to the row instead.
         self._lost: dict[str, int] = {}
         # Threads a dropped durable batch left a hole in, waiting for
         # their `incomplete` flag to land. In memory rather than in the
@@ -695,7 +698,12 @@ class ConversationStore:
         # next, and it may never find that row still claiming to be
         # whole. A later turn must never imply an earlier one landed.
         self._settle(batch, landed=outcome is _Durable.COMMITTED)
-        self._events(session_id, batch)
+        lost = self._events(session_id, batch)
+        if closing is not None and lost:
+            # The close row was written before this half ran, and the
+            # writer is about to forget this session, so a loss here has
+            # nowhere else to go.
+            self._count_late_loss(session_id, lost)
         # Committed or rolled back, this batch is written off either way.
         self._release(len(batch.events))
         # Never for a session the tombstone just removed: recreating its
@@ -769,13 +777,18 @@ class ConversationStore:
         # the arm above. Stated so the function has one exit type.
         return _Durable.FAILED
 
-    def _events(self, session_id: str, batch: _Batch) -> None:
-        """The lossy half, in a transaction of its own.
+    def _events(self, session_id: str, batch: _Batch) -> int:
+        """The lossy half, in a transaction of its own. Answers how many
+        records it lost, which is none unless the transaction failed.
 
         No events rows at all under metrics-off, rather than rows with
         their payload emptied: the events table is the structured
         telemetry the switch turns off. A failure here drops and counts
-        exactly what it dropped, and never touches a turn.
+        exactly what it dropped, and never touches a turn. The count is
+        answered as well as kept because the caller is the only one that
+        knows whether this session has a later marker to carry it: at
+        every marker but the close it lands on the session row later,
+        and at the close there is no later.
 
         The session is confirmed again inside this transaction, and that
         is not the durable half's check repeated for tidiness. The two
@@ -789,7 +802,7 @@ class ConversationStore:
         session row is what just went.
         """
         if not batch.events or not self._stores_events():
-            return
+            return 0
         # In front of the transaction rather than in front of the
         # method, so a marker with nothing to write here is not a stop
         # for a transaction that never opens.
@@ -798,7 +811,7 @@ class ConversationStore:
         try:
             with self._engine.begin() as connection:
                 if not self._alive(connection, session_id):
-                    return
+                    return 0
                 connection.execute(
                     events_table.insert(),
                     [self._event_row(record) for record in batch.events],
@@ -809,6 +822,38 @@ class ConversationStore:
             # name when the block ends.
             failed: BaseException = exc
             self._lost[session_id] = self._lost.get(session_id, 0) + len(batch.events)
+            events.emit(lambda: WriteFailed(failure=ClassName.of(failed)))
+            return len(batch.events)
+        return 0
+
+    def _count_late_loss(self, session_id: str, lost: int) -> None:
+        """Events the closing marker lost, added to the row that already
+        says what this session dropped.
+
+        Every other marker's loss waits in `_lost` and is folded into
+        the close row when it is written. The close row is written by
+        the durable half, which runs before this one, so a failure in
+        the closing marker's events transaction would be counted in
+        memory and then discarded with the rest of the session's state:
+        the store would have promised a count of what it lost and then
+        not kept one. One update in a transaction of its own is what
+        that costs, on a marker that happens once per session.
+
+        A session the tombstone took in the meantime matches no row, and
+        that is the answer rather than a problem to solve: erasure
+        outranks a counter about rows that are not there. A failure here
+        is reported and not retried, because the writer has nothing left
+        to retry it from.
+        """
+        try:
+            with self._engine.begin() as connection:
+                connection.execute(
+                    sessions.update()
+                    .where(sessions.c.session == session_id)
+                    .values(dropped=sessions.c.dropped + lost)
+                )
+        except Exception as exc:  # noqa: BLE001 - a write never breaks a session
+            failed: BaseException = exc
             events.emit(lambda: WriteFailed(failure=ClassName.of(failed)))
 
     def _settle(self, batch: _Batch, landed: bool) -> None:
