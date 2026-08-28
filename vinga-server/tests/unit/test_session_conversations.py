@@ -19,6 +19,7 @@ store that raises.
 
 import logging
 import threading
+import time
 from typing import Any, cast
 
 import pytest
@@ -570,6 +571,86 @@ async def test_switching_back_returns_to_the_agents_own_thread() -> None:
     # The poet's own thread, with what it said on it before the switch.
     (turns, _, _) = poet.seen[-1]
     assert turns[0].content == "the tutor please"
+
+
+# Two searches in one round
+
+
+class SlowSearches(StoredThreads):
+    """A store that takes a stated time over each description.
+
+    The delay is in the read itself, which the flow runs in a worker
+    thread, so a suite can decide which of two concurrent searches the
+    database finishes first without deciding which of them the model
+    asked for first."""
+
+    def __init__(
+        self,
+        answers: dict[str, tuple[str, ...]],
+        delays: dict[str, float],
+        **kept: Any,
+    ) -> None:
+        super().__init__(**kept)
+        self._answers = answers
+        self._delays = delays
+
+    def candidates(self, agent: str, description: str) -> Any:
+        time.sleep(self._delays.get(description, 0.0))
+        self.asked.append((agent, description))
+        return threads.Candidates(
+            matched=True,
+            found=tuple(a_candidate(one) for one in self._answers[description]),
+        )
+
+
+@pytest.mark.parametrize(
+    "delays",
+    [
+        pytest.param({"galaxy": 0.05}, id="the first search answers last"),
+        pytest.param({"recipe": 0.05}, id="the second search answers last"),
+    ],
+)
+async def test_the_last_search_of_a_round_is_the_one_a_selection_is_held_to(
+    delays: dict[str, float],
+) -> None:
+    """A round may ask twice, and the loop runs the two together.
+
+    What the model may then pick is what its LAST search offered, which
+    is the list it read out to the user; the other one is a list nobody
+    heard. Deciding it by whichever query came back first would make the
+    accepted ids a property of the database's mood, so the same round is
+    driven here with the completions in both orders and answers the same
+    way.
+    """
+    poet = ScriptedLlm(
+        [
+            [
+                call("resume_conversation", description="galaxy"),
+                call("resume_conversation", description="recipe"),
+            ],
+            "Which of those did you mean?",
+            [call("resume_conversation", conversation=GALAXY)],
+            "Not that one, then.",
+            [call("resume_conversation", conversation=RECIPE)],
+            "Carrying on.",
+        ]
+    )
+    seam = SlowSearches(
+        {"galaxy": (GALAXY,), "recipe": (RECIPE,)},
+        delays,
+        held={RECIPE: a_backlog(RECIPE)},
+    )
+    session = a_session(poet, threads=seam)
+
+    await run_reply(session, "what were we talking about")
+    await run_reply(session, "the galaxy one")
+    await run_reply(session, "the recipe one")
+
+    # The search the model issued second is the offer that stands, so
+    # the thread the first one found is refused and the second one is
+    # moved onto.
+    assert results_of(poet)[2] == builtin.NO_SUCH_CANDIDATE
+    assert talking_thread(session) == RECIPE
 
 
 # What a store that will not answer may say
