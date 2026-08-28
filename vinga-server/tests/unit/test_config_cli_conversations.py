@@ -24,6 +24,11 @@ content:
 - **`show` is one command and two reads.** The header comes from the
   detail and the dialogue from the timeline beside it, because a column
   holding an utterance is a column that wraps.
+- **Only this API's own refusal is relayed.** These verbs print what a
+  refusal said, so what answers has to be shown to be this API before
+  its words reach a terminal: the media type, the shape, the status and
+  the title all have to agree, and a body that fails any of them is the
+  fixed sentence with nothing of itself in it.
 """
 
 import contextlib
@@ -33,12 +38,15 @@ import logging
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 
 from tests.support.config_cli import runner
 from tests.support.configs import DEVICE_MAC
 from vinga_server import logs
+from vinga_server.config import cli
 from vinga_server.config.models import DatabaseConfig
+from vinga_server.config.responses import PROBLEM_MEDIA_TYPE
 from vinga_server.conversations.records import TurnRecord
 from vinga_server.conversations.store import ConversationStore
 
@@ -446,4 +454,94 @@ def test_a_planted_title_never_reaches_a_refusal_or_the_log(
     assert SENTINEL in listed[1]
     assert SENTINEL in shown[1]
     assert (listed[2], shown[2]) == ("", "")
+    assert SENTINEL not in _leaked(caplog)
+
+
+# What answered, and whether its words may be printed
+
+
+def answering(
+    monkeypatch: pytest.MonkeyPatch, status: int, body: dict[str, Any], media_type: str
+) -> None:
+    """Something in front of this API, answering every request with a
+    body of its own.
+
+    A mock transport rather than a route, because the point of these two
+    tests is a body no application in this repository would ever write:
+    a proxy, a gateway or a captive portal is what puts one on the wire,
+    and it can spell it however it likes.
+    """
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status, json=body, headers={"content-type": media_type})
+
+    def factory(base_url: str, token: str) -> httpx.Client:
+        return httpx.Client(base_url=base_url, transport=httpx.MockTransport(answer))
+
+    monkeypatch.setattr(cli, "build_client", factory)
+
+
+def test_a_json_body_with_a_detail_is_not_this_apis_refusal(
+    run, capsys, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A JSON object with a string `detail` in it is a shape anything
+    can write, and this command prints what it is given.
+
+    So the media type is what decides: this API answers a refusal as
+    `application/problem+json` and a middlebox answering
+    `application/json` is not it, however the body is shaped. The
+    planted value is a credential and terminal-steering bytes, because
+    what is being kept off the terminal is both.
+    """
+    answering(
+        monkeypatch,
+        404,
+        {"detail": f"{SENTINEL}{STEERING}"},
+        "application/json",
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        code, printed, err = out(run, capsys, "conversation", "list")
+
+    assert (code, printed) == (1, "")
+    assert "answered 404 with a body this client does not recognize" in err
+    both = printed + err
+    assert SENTINEL not in both
+    assert "\x1b[" not in both
+    assert "\x07" not in both
+    assert SENTINEL not in _leaked(caplog)
+
+
+def test_a_problem_body_that_disagrees_with_its_response_is_not_relayed(
+    run, capsys, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The media type alone is not enough: it is a header, and whatever
+    writes the body writes that too.
+
+    So the body has to be the `Problem` shape, and its `status` and
+    `title` have to be the response's own. This one is spelled exactly
+    right and answered under the wrong status, which is what a refusal
+    lifted from one response and replayed under another looks like.
+    """
+    answering(
+        monkeypatch,
+        404,
+        {
+            "title": "Internal Server Error",
+            "status": 500,
+            "detail": f"{SENTINEL}{STEERING}",
+            "errors": [],
+        },
+        PROBLEM_MEDIA_TYPE,
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        code, printed, err = out(run, capsys, "conversation", "show", FIRST)
+
+    assert (code, printed) == (1, "")
+    assert "answered 404 with a body this client does not recognize" in err
+    both = printed + err
+    assert SENTINEL not in both
+    assert "\x1b[" not in both
+    assert "\x07" not in both
     assert SENTINEL not in _leaked(caplog)

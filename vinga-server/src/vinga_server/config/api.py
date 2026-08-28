@@ -99,6 +99,8 @@ from vinga_server.config.models import (
 )
 from vinga_server.config.provider_options import component_name, declared_options
 from vinga_server.config.responses import (
+    PROBLEM_MEDIA_TYPE,
+    PROBLEM_TITLES,
     Acknowledgement,
     AppliedDocument,
     AssembledPrompt,
@@ -470,26 +472,13 @@ PROBLEM_DESCRIPTIONS: dict[int, str] = {
     ),
 }
 
-# And what each of them is called: the status's standard HTTP reason
-# phrase, which is what RFC 9457 asks a problem with no `type` to carry.
-# Beside the descriptions and keyed by the same statuses, so the two
-# things this API says about a status live in one place; a test holds
-# the key sets equal.
-PROBLEM_TITLES: dict[int, str] = {
-    401: "Unauthorized",
-    404: "Not Found",
-    405: "Method Not Allowed",
-    409: "Conflict",
-    422: "Unprocessable Content",
-    500: "Internal Server Error",
-    503: "Service Unavailable",
-}
-
-# What a refusal is served as: RFC 9457's own media type, so a client
-# can tell a refusal this API wrote from a page a proxy in front of it
-# did without reading either.
-PROBLEM_MEDIA_TYPE = "application/problem+json"
-
+# What each of them is called, and what a refusal is served as, are
+# `config/responses.py`'s: the shape of a refusal, the media type it
+# travels under and the titles it can carry are one declaration there,
+# because the CLI reads all three to tell this API's own refusal from a
+# page a proxy wrote, and it reads answers through that module alone. A
+# test holds the titles' key set equal to the descriptions' above.
+#
 # Where the document says the shape of one is.
 PROBLEM_SCHEMA = {"$ref": "#/components/schemas/Problem"}
 

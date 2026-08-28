@@ -107,6 +107,8 @@ from vinga_server.config.models import (
 )
 from vinga_server.config.printing import parsed_url, printable, shown_url
 from vinga_server.config.responses import (
+    PROBLEM_MEDIA_TYPE,
+    PROBLEM_TITLES,
     Acknowledgement,
     AppliedDocument,
     AssembledPrompt,
@@ -122,6 +124,7 @@ from vinga_server.config.responses import (
     Erasure,
     McpServerStatus,
     PendingDevice,
+    Problem,
     SecretValue,
     SessionDetail,
     SessionList,
@@ -1192,15 +1195,59 @@ def _answer(response: httpx.Response, address: Address) -> object:
     status code and a fixed sentence: a body this client did not
     recognize did not come from the API's sanitized output, and relaying
     it would put a middlebox's page where a configuration error belongs.
+
+    Which of the two an answer is is decided by `_refusal` below, and
+    the decision is narrow on purpose: a JSON object with a string
+    `detail` in it is a shape anything in front of this API can write,
+    and this command prints what it is given.
     """
     payload = _payload(response)
     if response.is_success:
         if payload is _NOTHING:
             raise ConfigError(_unreadable(response, address))
         return payload
-    if isinstance(payload, Mapping) and isinstance(payload.get("detail"), str):
-        raise ConfigError(payload["detail"])
-    raise ConfigError(_unreadable(response, address))
+    detail = _refusal(response, payload)
+    raise ConfigError(detail if detail is not None else _unreadable(response, address))
+
+
+def _refusal(response: httpx.Response, payload: object) -> str | None:
+    """The sentence this API wrote, or None when what answered is not
+    this API's refusal.
+
+    Three things have to agree before a body's own words are relayed to
+    a terminal, and they are three because a middlebox can produce any
+    one of them by itself:
+
+    - the media type is exactly `application/problem+json`, which is
+      what this API answers a refusal with and what a proxy answering
+      `application/json` is not;
+    - the body validates as the `Problem` model, which forbids extra
+      members, so a page carrying a `detail` beside anything else is
+      not one;
+    - the status in the body is the status of the response and the
+      title is the phrase this API gives that status, so a body lifted
+      from one refusal and replayed under another is not one either.
+
+    Anything short of all three is `_unreadable`'s fixed sentence, with
+    nothing of the body in it. The model is the one in
+    `config/responses.py`, which is the half a generated client would
+    substitute for; the validation error is dropped inside the arm and
+    never raised from, because pydantic puts the input it rejected into
+    its own message.
+    """
+    media_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
+    if media_type != PROBLEM_MEDIA_TYPE:
+        return None
+    title = PROBLEM_TITLES.get(response.status_code)
+    if title is None:
+        return None
+    try:
+        problem = Problem.model_validate(payload)
+    except ValidationError:
+        return None
+    if problem.status != response.status_code or problem.title != title:
+        return None
+    return problem.detail
 
 
 def _payload(response: httpx.Response) -> object:
