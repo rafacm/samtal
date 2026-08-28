@@ -102,14 +102,21 @@ unsupported, and a tested reset path.
 Where "forward" starts is a fact an operator needs, so the promise
 states it rather than leaving it to be inferred:
 
-- **In-place upgrades begin at the two Postgres baselines**,
+- **In-place upgrades begin at the two current baselines**,
   `3001_postgres_domain` for the domain configuration and
-  `1001_postgres_conversations` for the conversation record. That is
+  `1002_conversation_threads` for the conversation record. That is
   where "forward" starts today: a database stamped at or after them
   is what a later image is built to upgrade, best-effort, through the
   reviewed migration every schema change arrives as. Before a beta
   that is the floor rather than a guarantee about every future image,
   because the recorded-reset licence two bullets below still stands.
+  The conversation record's floor moved: `1001_postgres_conversations`
+  was the floor until the conversations chain was re-cut for
+  first-class conversations, and a database stamped at it is
+  unsupported rather than upgradeable. That is a recorded pre-beta
+  reset, taken under this promise's own terms and priced by the
+  [2026-08-28 addendum](../adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md#addendum-2026-08-28-issue-190-the-conversations-chain-re-cuts),
+  which names what it strands and carries the tested path back.
 - **The current build opens no SQLite file at all.** There is no
   driver in it, no code path and no configuration key that would let
   it try, so a SQLite-era database is not something this build can
@@ -131,11 +138,13 @@ states it rather than leaving it to be inferred:
   file aside before the upgrade.
 
 **Example.** The priced exit the standing record grants, exercised
-twice and both times by a recorded addendum to it: the 2026-08-23
-squash of the domain chain onto one reviewed baseline (#243), and the
-2026-08-26 re-baseline of both chains onto Postgres (#283). Each
-named the databases it stranded, showed the tested path back, and
-left the beta obligation exactly where it was.
+three times and every time by a recorded addendum to it: the
+2026-08-23 squash of the domain chain onto one reviewed baseline
+(#243), the 2026-08-26 re-baseline of both chains onto Postgres
+(#283), and the 2026-08-28 re-cut of the conversations chain for
+first-class conversations (#190). Each named the databases it
+stranded, showed the tested path back, and left the beta obligation
+exactly where it was.
 
 **Counterexample.** The same reset carried out without that record:
 an image that quietly stops reading what the last one wrote, so the
@@ -146,4 +155,4 @@ that makes the change.
 
 Decision:
 [ADR](../adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md),
-with its 2026-08-23 and 2026-08-26 addenda.
+with its 2026-08-23, 2026-08-26 and 2026-08-28 addenda.
