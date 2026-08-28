@@ -19,9 +19,9 @@ rather than a guess about a tokenizer.
 from vinga_server.conversations.hydration import (
     ESTIMATED_CHARS_PER_TOKEN,
     TOOL_NOTE,
-    StoredTurn,
     hydrated,
 )
+from vinga_server.conversations.records import StoredTurn
 
 # A budget nothing in this file reaches, for the cases that are not
 # about truncation.

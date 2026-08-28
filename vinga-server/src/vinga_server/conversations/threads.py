@@ -37,11 +37,17 @@ and the selection tools. What all three stop knowing:
   writes the mark the writer latched, and answers which threads there
   was a row to mark, because a thread whose first turn was the lost
   batch has none yet.
+- **That a database can refuse.** `Reads` is the door a reply in flight
+  comes in through, and nothing raises out of it: a failed read is a
+  fact the caller turns into a sentence, never a driver's own words on
+  their way to a model.
 
-Nothing here opens a transaction or an engine. Every function takes the
-caller's connection and runs inside the caller's transaction, which is
-what lets one marker commit a turn, its calls and its thread's row
-together or not at all.
+No function here opens a transaction or an engine. Every one of them
+takes the caller's connection and runs inside the caller's transaction,
+which is what lets one marker commit a turn, its calls and its thread's
+row together or not at all. `Reads` at the end is the deliberate
+exception, and the exception proves the rule: its caller is a reply
+being spoken, which holds no transaction and may not be given one.
 
 Nothing here decides the storage switches either. The writer applies
 them and hands over what survived, so a `heard` that arrived as None
@@ -50,13 +56,14 @@ by a second rule written here.
 """
 
 from bisect import bisect_left
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import ColumnElement, delete, func, select, tuple_, update
 
-from vinga_server.conversations import hydration
+from vinga_server.config.models import DatabaseConfig
+from vinga_server.conversations.records import StoredTurn
 from vinga_server.conversations.schema import (
     conversation_milestones,
     conversations,
@@ -65,6 +72,8 @@ from vinga_server.conversations.schema import (
     tool_invocations,
     turns,
 )
+from vinga_server.db import is_busy, read_engine
+from vinga_server.events import logger
 
 # How much of the first utterance becomes the thread's title.
 #
@@ -539,7 +548,7 @@ class Backlog:
     conversation: str
     agent: str
     incomplete: bool
-    turns: tuple[hydration.StoredTurn, ...] = ()
+    turns: tuple[StoredTurn, ...] = ()
 
 
 def backlog(connection: Any, conversation: str) -> Backlog | None:
@@ -590,12 +599,79 @@ def backlog(connection: Any, conversation: str) -> Backlog | None:
         agent=found.agent,
         incomplete=bool(found.incomplete),
         turns=tuple(
-            hydration.StoredTurn(
+            StoredTurn(
                 heard=row.heard, reply=row.reply, tools=tuple(called.get(row.id, ()))
             )
             for row in spoken
         ),
     )
+
+
+@dataclass(frozen=True)
+class Unreadable:
+    """The store could not answer, said as a fact with no words in it.
+
+    Two states rather than an exception, because the caller is a reply
+    being spoken: what a failed read means there is a sentence the agent
+    says, and an exception would mean either a reply that died or a
+    driver's own message quoted into what the model reads. `busy` is the
+    db classifier's closed question and the whole of what is
+    distinguished, because it is the whole of what a caller could do
+    differently: ask again in a moment, or not.
+    """
+
+    busy: bool = False
+
+
+class Reads:
+    """The door a live conversation reads a thread through.
+
+    The one thing in this module that opens anything, and it says so:
+    every function above runs inside a caller's transaction because its
+    caller is a writer or a request, while this one's caller is a reply
+    in flight that has no transaction and must not acquire one. A
+    connection per call, on a read engine opened and disposed around it,
+    which is the shape the API's own reads have and for the same reason:
+    nothing is held between two conversations.
+
+    It is a sanitized boundary, which is the reason it is a class rather
+    than two more functions. A tool result is model-visible and stored,
+    and a driver failure quotes the DSN it tried to connect with, so a
+    read that raised through the tool loop would put a credential in
+    front of a model and into the store. Nothing raises out of here.
+    What comes back instead is `Unreadable`, and the sentence for it is
+    the caller's to choose from its own closed set.
+
+    The failure is logged by class name and by nothing else, which is
+    the same rule the reply path applies to a provider that fails: a
+    type name says what went wrong, a message says what a stranger
+    wrote.
+    """
+
+    def __init__(self, database: DatabaseConfig) -> None:
+        self._database = database
+
+    def candidates(self, agent: str, description: str) -> "Candidates | Unreadable":
+        """The threads of one agent a description might have meant."""
+        return self._read(lambda connection: candidates(connection, agent, description))
+
+    def backlog(self, conversation: str) -> "Backlog | None | Unreadable":
+        """One thread, whole, or None where there is no such thread."""
+        return self._read(lambda connection: backlog(connection, conversation))
+
+    def _read(self, ask: Callable[[Any], Any]) -> Any:
+        engine = read_engine(self._database)
+        try:
+            with engine.connect() as connection:
+                return ask(connection)
+        except Exception as exc:  # noqa: BLE001 - the whole point of the seam
+            logger.warning(
+                "a conversation could not be read from the store: %s",
+                type(exc).__name__,
+            )
+            return Unreadable(busy=is_busy(exc))
+        finally:
+            engine.dispose()
 
 
 def _turn_count() -> Any:
@@ -1033,6 +1109,8 @@ __all__ = [
     "Landing",
     "MisattributedTurn",
     "Pruned",
+    "Reads",
+    "Unreadable",
     "backlog",
     "candidates",
     "detail",
