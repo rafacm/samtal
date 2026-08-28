@@ -795,16 +795,29 @@ def _erasure(
     set and the exception itself is dropped: built inside the arm,
     raised outside it, so nothing walking the chain finds it either.
 
-    Telling the writer happens in here, inside the transaction, which is
-    where the ordering is decided rather than hoped for: this
-    transaction holds the chain's advisory lock and a writer takes the
-    same lock at every marker, so no writer is inside one while this
-    runs. The trade that comes with it is stated on `store.erased`.
+    Telling the writer happens in here, and where it happens is the
+    ordering the dead-id rule needs, stated in three lines because three
+    reviews have now circled this seam:
+
+    - after the commit, never inside the transaction. A deletion that
+      published and then rolled back would leave a thread that still
+      exists marked dead for the rest of the process, so its later turns
+      would be discarded with false acknowledgements while its rows sat
+      there. A refusal has to leave the thread exactly as it was.
+    - inside `store.erasure_order()`, which is entered before the
+      transaction is opened and left after the publication. The commit
+      releases the chain's advisory lock, and without this a writer could
+      take that lock in the instant before the ids were published, find
+      nothing, and write a turn onto the thread just deleted.
+    - and the writer keeps the other side of the same order: it reads
+      what was published inside its own durable transaction, on every
+      attempt (`store._discard_dead`).
     """
     problem: ConfigError | None = None
     try:
-        with erase() as connection:
-            taken = deleting(connection)
+        with store.erasure_order():
+            with erase() as connection:
+                taken = deleting(connection)
             store.erased(taken.threads)
     except ConfigError:
         raise
