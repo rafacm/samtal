@@ -4,7 +4,7 @@ The `record` schema sits beside the `domain` one in the database
 `server.database` names, and holds six tables: the session spine, the
 conversation a turn belongs to, the turn timeline, the tool invocations
 a turn issued, the decision track underneath them (#120), and the
-dormant place for the recap checkpoints of a resumed thread (#190).
+recap checkpoints a resumed thread accrues by consent (#190).
 Audio never enters it; the capture triplet is the recording and this is
 the queryable record. A read-only role scoped to this schema alone is
 how an analyst queries it (#283).
