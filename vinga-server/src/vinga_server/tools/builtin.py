@@ -113,6 +113,14 @@ def new_conversation_tool() -> ToolDef:
     )
 
 
+# The two things a user may answer when a long conversation is offered:
+# the two shapes it can be picked up in. A closed set, spelled once,
+# because the schema's enum and the interception that honours it read
+# the same two names, so a third could not be added in one place alone.
+RECAP = "recap"
+RECENT = "recent"
+
+
 def resume_conversation_tool() -> ToolDef:
     """Find an earlier thread of this agent's and carry on with it.
 
@@ -120,7 +128,13 @@ def resume_conversation_tool() -> ToolDef:
     beat converge: the first call describes, the answer is a list, and
     the follow-up names one of the conversations in that list. There is
     no second free-text search to disambiguate a first one, because
-    picking from what was offered is not a search."""
+    picking from what was offered is not a search.
+
+    `start_from` is the third beat, and it exists only where the tool
+    has asked for it: a conversation too long to be given whole answers
+    with the offer below, and the answer to that offer comes back here.
+    A closed set of two, so the choice the user was actually given is
+    the choice the tool can be told about."""
     return ToolDef(
         name=names.RESUME_CONVERSATION,
         description=(
@@ -129,7 +143,10 @@ def resume_conversation_tool() -> ToolDef:
             "the conversation they mean; it answers with a short list, which you "
             "read out so they can choose. Then call it again with `conversation` "
             "set to the one they picked. Only a conversation this tool has listed "
-            "can be resumed, so never invent one."
+            "can be resumed, so never invent one. If it answers that the "
+            "conversation is too long to pick up whole, ask the user which they "
+            "want and call it once more with the same `conversation` and "
+            "`start_from`."
         ),
         input_schema={
             "type": "object",
@@ -148,9 +165,21 @@ def resume_conversation_tool() -> ToolDef:
                         "listed it."
                     ),
                 },
+                "start_from": {
+                    "type": "string",
+                    "enum": [RECAP, RECENT],
+                    "description": (
+                        "What the user answered when this tool offered a choice "
+                        'about a long conversation: "recap" to hear a short '
+                        'summary of the whole of it first, "recent" to carry on '
+                        "from the most recent part. Only after this tool has "
+                        "offered that choice for this conversation."
+                    ),
+                },
             },
         },
     )
+
 
 
 # What a selection answers with, as fixed sentences. No value from a
@@ -183,6 +212,31 @@ NO_SUCH_CANDIDATE = (
 CONVERSATION_GONE = (
     "that conversation is no longer stored; tell the user it is gone and carry on "
     "with the conversation you are in"
+)
+
+# The thread holds more than can be given to a model at once, so the
+# user is offered the two ways of picking it up. Not a refusal: this is
+# the one answer of the set that asks a question, and the answer to it
+# comes back as `start_from` on the same conversation.
+TOO_LONG_TO_RESUME_WHOLE = (
+    "that conversation is longer than you can be given at once; ask the user "
+    "whether they would like a short recap of the whole of it first, or would "
+    "rather just carry on from the most recent part, then call "
+    'resume_conversation again with the same conversation and start_from set to '
+    '"recap" or "recent"'
+)
+
+# A `start_from` for a conversation that was never offered the choice.
+# The model cannot invoke a recap nobody was asked about.
+NO_CHOICE_OFFERED = (
+    "you have not offered the user a choice about that conversation, so there is "
+    "nothing to answer yet; call resume_conversation with the conversation alone"
+)
+
+# A `start_from` outside the two the offer named.
+UNKNOWN_START = (
+    'start_from has to be either "recap" or "recent", which are the two things '
+    "the user was offered; ask them which they meant and call it again"
 )
 
 # A second selection in one reply. The first one won.

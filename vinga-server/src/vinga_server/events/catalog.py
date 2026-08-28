@@ -1291,6 +1291,25 @@ class ConversationResumed(Variant):
 
 
 @dataclass(frozen=True)
+class MilestoneRecorded(Variant):
+    """A consented recap is stored as a checkpoint on its thread."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "session %s: recorded a recap milestone on conversation %s"
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "conversation")
+
+    conversation: ConversationId = value(
+        note=(
+            "The thread the checkpoint was recorded on. The identity and "
+            "nothing else: a recap is a summary of what a room said, so "
+            "it is conversation content and lives in the store under the "
+            "text switch, never on a decision track."
+        )
+    )
+
+
+@dataclass(frozen=True)
 class PromptAssembled(Variant):
     """The know-how half of a prompt is assembled and cached."""
 
@@ -1776,6 +1795,17 @@ CONVERSATION_RESUMED = declare(
         "whether there was more of it than the budget had room for."
     ),
     variants=(ConversationResumed,),
+)
+
+MILESTONE_RECORDED = declare(
+    "milestone_recorded",
+    note=(
+        "A consented recap is stored as a checkpoint on its thread, "
+        "after the user has heard it. The thread's identity and nothing "
+        "else: what the recap says is what a room said, so it is "
+        "conversation content and belongs to the store."
+    ),
+    variants=(MilestoneRecorded,),
 )
 
 PROMPT_ASSEMBLED = declare(
@@ -3140,6 +3170,7 @@ __all__ = [
     "MCP_TOOL_SHADOWED",
     "MEMORY_CHANNEL",
     "MEMORY_UNREADABLE",
+    "MILESTONE_RECORDED",
     "McpCallDropped",
     "McpConnectFailed",
     "McpConnected",
@@ -3150,6 +3181,7 @@ __all__ = [
     "McpToolCall",
     "McpToolShadowed",
     "MemoryUnreadable",
+    "MilestoneRecorded",
     "ONBOARDING_BANNER",
     "ONBOARDING_CHANNEL",
     "ONBOARDING_KEY_MISMATCH",

@@ -46,6 +46,7 @@ from typing import Any
 from vinga_server.audio.resample import Resampler
 from vinga_server.conversations.records import (
     Acknowledgement,
+    MilestoneRecord,
     SessionTurns,
     ToolInvocation,
     TurnRecorder,
@@ -65,6 +66,7 @@ from vinga_server.events.catalog import (
     ConversationResumed,
     Handover,
     Heard,
+    MilestoneRecorded,
     PromptAssembled,
     Replied,
     Variant,
@@ -162,6 +164,58 @@ RESUMED_WITH_GAPS = (
     "what you can see; say so plainly if the user asks about something "
     "that is missing."
 )
+RECAP_UNAVAILABLE = (
+    " The recap the user asked for could not be made just now, so what is "
+    "above is only the recent part; tell them that rather than summarizing "
+    "what you cannot see."
+)
+
+# What the round after a consented recap is told, in place of the
+# ordinary resumed greeting. The recap has already been spoken, by this
+# runtime and in the agent's own voice, so the one thing this seed has
+# to prevent is the model saying it again.
+RECAPPED_GREETING = (
+    "You have just resumed an earlier conversation with this user and read "
+    "them the recap above, which is your own summary of the whole of it. "
+    "They have heard it: do not repeat it. Ask them briefly what they would "
+    "like to pick up from it, in the language they have been speaking."
+)
+
+# The summarization round, which is one round against the active agent's
+# own provider and produces the words the user then hears.
+#
+# The instruction is fixed and carries nothing a room said. What it asks
+# for is a recap that can be spoken: a paragraph, in the language the
+# conversation was held in, because the text that comes back is fed to
+# synthesis verbatim and stored byte for byte as it was heard.
+RECAP_INSTRUCTION = (
+    "You are summarizing an earlier conversation between an assistant and a "
+    "user so that the assistant can pick it up again. Write the summary as "
+    "the assistant would say it out loud to the user: one short paragraph, "
+    "plain sentences, no headings, no lists and no markup of any kind. Say "
+    "what the two of you talked about and where it was left. Write it in the "
+    "language the conversation was held in. Answer with the summary and "
+    "nothing else."
+)
+RECAP_REQUEST = "Recap the conversation above for me, out loud, in a few sentences."
+
+# How long that round may take before the recap is given up on and the
+# thread is resumed from its recent tail instead.
+#
+# Its own bound rather than the reply's: the user has asked for a
+# summary and is waiting through silence for it, and the whole of what
+# a slow one costs is that they hear the fallback sentence instead.
+RECAP_ROUND_TIMEOUT_S = 30.0
+
+# How long the recap's own write is waited on before the runtime stops
+# waiting, having already spoken it.
+#
+# The wait exists only to decide whether to say the checkpoint landed.
+# It is bounded because the user is at the far end of a conversation
+# that has to continue; a write that commits after this is late rather
+# than lost, and it can never be a summary nobody heard, because nothing
+# is enqueued until the playback finished.
+MILESTONE_ACKNOWLEDGEMENT_S = 2.0
 
 # How long a resume waits for the turn it has just recorded on the
 # target thread to be durably written, before rebuilding that thread's
@@ -285,6 +339,24 @@ def _not_allowed(name: str, agents: Sequence[str]) -> AgentNotAllowed:
 
 
 @dataclass(frozen=True)
+class _Recapped:
+    """A recap that has been made and not yet spoken.
+
+    Carried on the transition rather than acted on where it was made,
+    because the two things still owed to it happen at the boundary: the
+    text is spoken on the thread the reply began on, and the checkpoint
+    is stored only once it has been. Holding the summarizer's answer
+    beside the range it was made from is what keeps the row and the
+    speech one decision: `text` is fed to synthesis verbatim and written
+    to the column verbatim, and `made_from` is the coverage it is
+    allowed to claim.
+    """
+
+    text: str
+    made_from: resumption.Recap
+
+
+@dataclass(frozen=True)
 class _Transition:
     """What a tool loop ended for, and what happens at the boundary.
 
@@ -308,6 +380,11 @@ class _Transition:
     # for a handover and for a fresh conversation, neither of which read
     # anything back.
     resumed: resumption.Resumed | None = None
+    # The recap this move owes the user, for the one move that has one.
+    # Spoken at the boundary and stored after it has been heard, both by
+    # the reply path, which is the only place that can know playback
+    # finished.
+    recap: _Recapped | None = None
 
 
 class PipelineRuntime:
@@ -1220,6 +1297,18 @@ class PipelineRuntime:
             transition = await self._tool_loop(spoken, switches_left)
             if transition is None:
                 return
+            if transition.recap is not None:
+                # Before the leg closes and before anything moves: the
+                # recap is spoken on the thread this reply began on, by
+                # this runtime and not by another model round, and it
+                # becomes part of the turn being recorded like any other
+                # words the user heard. Anything that goes wrong here
+                # raises out of this reply, which is the guarantee: a
+                # barge-in, a synthesis failure and a disconnect all
+                # leave the move unmade and the checkpoint unwritten,
+                # and the next resume simply offers the choice again.
+                await self._speak_text(transition.recap.text, spoken)
+                await self._store_recap(transition.recap)
             said = " ".join(spoken) if spoken else None
             if said is not None:
                 self._turns.append(Turn("assistant", said))
@@ -1554,6 +1643,14 @@ class PipelineRuntime:
         The latch is the one a handover shares, and the same one it has
         always been: the first move of a reply wins, whichever kind it
         was, and `moved` is that fact from earlier in this round.
+
+        A resume has three shapes and they are three arms below, in the
+        order the flow reaches them: pick a thread up, which offers a
+        choice where the thread is too long to hand over whole; answer
+        that choice with the recent part; or answer it with a recap.
+        The last two are honoured only against the question this agent
+        actually asked, which is what stops a model consenting on the
+        user's behalf to a recap nobody was offered.
         """
         if switches_left <= 0 or moved:
             return builtin.ALREADY_MOVED
@@ -1565,16 +1662,51 @@ class PipelineRuntime:
             # id has to exist before the first turn it stamps.
             return _Transition(FRESH_GREETING, conversation=uuid.uuid4().hex)
         assert self._agent is not None
+        agent = self._agent
         chosen = str(call.arguments["conversation"]).strip()
         # Before the read and not after it: a thread the agent was not
         # offered is refused without the store being asked about it, so
         # an id a model invented cannot even be a query.
-        if not self._resumption.offers(self._agent, chosen):
+        if not self._resumption.offers(agent, chosen):
             return builtin.NO_SUCH_CANDIDATE
-        await self._settled(chosen)
-        found = await self._resumption.resumed(self._agent, chosen)
+        answer = call.arguments.get("start_from")
+        flow = self._resumption
+        if answer is None:
+            return await self._picked_up(flow, agent, chosen)
+        if not flow.awaits(agent, chosen):
+            return builtin.NO_CHOICE_OFFERED
+        if answer == builtin.RECENT:
+            return await self._picked_up(flow, agent, chosen, offering=False)
+        if answer != builtin.RECAP:
+            return builtin.UNKNOWN_START
+        return await self._recapped(flow, agent, chosen)
+
+    async def _picked_up(
+        self,
+        flow: "resumption.Resumption",
+        agent: str,
+        conversation: str,
+        offering: bool = True,
+    ) -> "_Transition | str":
+        """A thread resumed as it stands, or the choice offered about
+        one that will not fit.
+
+        `offering` is false for the half of that choice that answers
+        "the recent part", which is the same resume with the question
+        already asked and answered: the tail is installed and the seed
+        says it is a tail.
+        """
+        await self._settled(conversation)
+        found = await flow.resumed(agent, conversation)
         if isinstance(found, str):
             return found
+        if offering and found.over_budget:
+            # Nothing is swapped and nothing is stored: the thread is
+            # longer than the budget, so the user is asked which of the
+            # two ways they want it, and the answer arrives as a
+            # `start_from` on the next utterance.
+            flow.offer_choice(agent, conversation)
+            return builtin.TOO_LONG_TO_RESUME_WHOLE
         return _Transition(
             self._resumed_seed(found),
             conversation=found.conversation,
@@ -1582,13 +1714,176 @@ class PipelineRuntime:
             resumed=found,
         )
 
+    async def _recapped(
+        self, flow: "resumption.Resumption", agent: str, conversation: str
+    ) -> "_Transition | str":
+        """The consented recap: read the thread, summarize it once, and
+        carry the answer to the boundary where it will be spoken.
+
+        Everything after the consent is this runtime's, which is what
+        makes what the user hears and what the store keeps the same
+        bytes: the summarizer's text is not handed back to another
+        model round to rephrase, it is carried on the transition and
+        fed to synthesis exactly as it arrived.
+
+        A summarization that fails or times out is not a failed resume.
+        The thread is picked up from its recent tail instead and the
+        seeded round is told the recap could not be made, which is a
+        fixed sentence like every other caveat; nothing is stored, so
+        the next resume offers the choice again.
+        """
+        await self._settled(conversation)
+        made = await flow.recap(agent, conversation)
+        if isinstance(made, str):
+            return made
+        text = await self._summarized(made)
+        if text is None:
+            fallback = await flow.resumed(agent, conversation)
+            if isinstance(fallback, str):
+                return fallback
+            return _Transition(
+                self._resumed_seed(fallback) + RECAP_UNAVAILABLE,
+                conversation=fallback.conversation,
+                history=fallback.turns,
+                resumed=fallback,
+            )
+        found = flow.after_recap(made, text)
+        return _Transition(
+            self._recapped_seed(found),
+            conversation=found.conversation,
+            history=found.turns,
+            resumed=found,
+            recap=_Recapped(text=text, made_from=made),
+        )
+
+    async def _summarized(self, made: "resumption.Recap") -> str | None:
+        """One round against the active agent's own provider, or None
+        where it could not be had.
+
+        The agent's own provider rather than a summarizer of its own, so
+        a recap adds no egress surface a deployment did not already
+        configure, and a fixed instruction with the thread as its turns,
+        so nothing a room said decides what is asked. Bounded by its own
+        timeout, because the user is waiting through silence for it.
+
+        Every failure is one answer, which is None: a provider that
+        refused, a stream that broke and a round that ran long all mean
+        the same thing to the caller, which is that there is no recap to
+        speak. A cancellation is not one of them and passes through,
+        because a barge-in ends the reply rather than the recap.
+        """
+        assert self._providers is not None
+        providers = self._providers
+        said: list[str] = []
+        turns = [*made.input, Turn("user", RECAP_REQUEST)]
+        try:
+            async with asyncio.timeout(RECAP_ROUND_TIMEOUT_S):
+                async for event in self._watched_stream(
+                    providers.llm,
+                    providers.llm.stream(RECAP_INSTRUCTION, turns, (), "none"),
+                ):
+                    if isinstance(event, TextDelta):
+                        said.append(event.text)
+        except Exception as exc:  # noqa: BLE001 - a failed recap is a fallback
+            # The class name and nothing else, the rule the reply path
+            # applies to every provider failure: a message from the wire
+            # is a stranger's words.
+            logger.warning(
+                "session %s: the recap could not be made: %s",
+                self.session_id,
+                type(exc).__name__,
+            )
+            return None
+        text = "".join(said).strip()
+        return text or None
+
+    async def _speak_text(self, text: str, spoken: list[str]) -> None:
+        """Say something this runtime wrote, through the path a reply's
+        own sentences go out on.
+
+        One synthesis for the whole of it rather than a sentence split,
+        and that is what makes the recap's promise keepable: what is fed
+        to the provider is the summarizer's text byte for byte, so the
+        text stored afterwards is the text that was spoken. A splitter
+        normalizes whitespace, and a stored recap that differed from the
+        heard one by a newline would be a promise kept only loosely.
+
+        It returns when the audio has been paced out to the device,
+        which is what "the user heard it" means on this side of the
+        edge. A barge-in cancels here, a dead socket raises here, and a
+        provider that failed raises here, which is why the caller can
+        treat returning as the fact it stores on.
+        """
+        assert self._providers is not None
+        providers = self._providers
+        resampler = Resampler(providers.tts.sample_rate, self._output.output_sample_rate)
+        speaking: asyncio.Task[None] | None = None
+        try:
+            speaking = await self._speak_after(
+                None, text, providers.tts, resampler, [], spoken
+            )
+            await speaking
+            speaking = None
+        finally:
+            # The same rule the tool loop keeps: a sentence being spoken
+            # must not outlive the reply it belonged to.
+            if speaking is not None:
+                speaking.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await speaking
+        batch = self._output.encode_audio(resampler.flush()) + self._output.flush_encoder()
+        await self._send_reply_audio(batch)
+
+    async def _store_recap(self, made: "_Recapped") -> None:
+        """Record the checkpoint, now that the user has heard it.
+
+        Called after playback and nowhere else, which is the ordering
+        the whole flow rests on: before it, nothing is stored, so a
+        barge-in, a synthesis failure, a disconnect or a crash leaves
+        the thread exactly as it was and the next resume offers the
+        choice again. After it, a write that is late is still a write of
+        something that was heard.
+
+        The wait is bounded and its only consumer is the event: a
+        checkpoint that lands after this line is stored all the same,
+        and this session simply does not say so. A store that refused
+        stores nothing durable, which is the same answer the next resume
+        reads, so the choice is offered again.
+        """
+        if self._recorder is None:
+            return
+        record = MilestoneRecord(
+            conversation=made.made_from.conversation,
+            from_turn=made.made_from.from_turn,
+            after_turn=made.made_from.after_turn,
+            parent=made.made_from.parent,
+            text=made.text,
+        )
+        try:
+            landed = self._recorder.record_milestone(record)
+        except Exception as exc:  # noqa: BLE001 - a consumer never breaks a reply
+            logger.warning(
+                "session %s: the turn recorder failed and was skipped: %s",
+                self.session_id,
+                type(exc).__name__,
+            )
+            return
+        if landed is None:
+            return
+        if await asyncio.to_thread(landed.wait, MILESTONE_ACKNOWLEDGEMENT_S):
+            self._events.emit(
+                lambda: MilestoneRecorded(
+                    conversation=ConversationId(record.conversation)
+                )
+            )
+
     def _resumed_seed(self, found: "resumption.Resumed") -> str:
         """What the round on the other side of a resume is told.
 
         The base sentence, plus whichever of the two caveats are true.
-        This is where the milestone-4 answer to an over-budget backlog
-        lives: the tail is installed and the agent is told it is a tail,
-        rather than being offered a recap it cannot make yet.
+        The tail caveat is said where the user chose the recent part, or
+        where a recap was wanted and could not be made: either way the
+        agent is told it is holding a tail rather than a conversation.
         """
         return "".join(
             [
@@ -1596,6 +1891,19 @@ class PipelineRuntime:
                 RESUMED_FROM_RECENT if found.over_budget else "",
                 RESUMED_WITH_GAPS if found.skipped or found.incomplete else "",
             ]
+        )
+
+    def _recapped_seed(self, found: "resumption.Resumed") -> str:
+        """What the round after a consented recap is told.
+
+        Its own base sentence, because the situation is its own: the
+        recap has already been spoken in this agent's voice, and the one
+        thing the round must not do is say it twice. No tail caveat: the
+        checkpoint is what stands for everything the context does not
+        hold, which is the whole point of having made one.
+        """
+        return RECAPPED_GREETING + (
+            RESUMED_WITH_GAPS if found.skipped or found.incomplete else ""
         )
 
     async def _settled(self, conversation: str) -> None:

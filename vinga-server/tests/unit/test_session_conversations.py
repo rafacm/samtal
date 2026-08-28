@@ -393,9 +393,13 @@ async def test_a_thread_that_is_gone_is_refused_in_its_own_words() -> None:
 # What a resumed round is told about the record it got
 
 
-async def test_a_thread_longer_than_the_budget_resumes_from_its_tail() -> None:
+async def test_a_thread_longer_than_the_budget_offers_a_choice_instead() -> None:
+    """The over-budget arm is the recap offer's, and nothing moves until
+    the user has answered it. What the two answers then do is the recap
+    suite's next door; what this file keeps is that the reply stayed
+    where it was."""
     poet = ScriptedLlm(
-        [[call("resume_conversation", conversation=GALAXY)], "Carrying on."]
+        [[call("resume_conversation", conversation=GALAXY)], "Which would you like?"]
     )
     store = StoredThreads(
         held={
@@ -407,13 +411,13 @@ async def test_a_thread_longer_than_the_budget_resumes_from_its_tail() -> None:
     )
     session = a_session(poet, threads=store, config=resuming_with(budget=512))
     _offer(session, "poet", GALAXY)
+    thread = talking_thread(session)
 
     await run_reply(session, "that one")
 
-    (turns, _, _) = poet.seen[-1]
-    assert turns[-1].content.endswith(pipeline_module.RESUMED_FROM_RECENT)
-    # The tail, not the whole of it.
-    assert len([turn for turn in turns if turn.role == "user"]) < 6
+    assert results_of(poet) == [builtin.TOO_LONG_TO_RESUME_WHOLE]
+    assert errors_of(poet) == [False]
+    assert talking_thread(session) == thread
 
 
 async def test_a_record_with_holes_in_it_is_a_caveat_and_not_a_refusal() -> None:
