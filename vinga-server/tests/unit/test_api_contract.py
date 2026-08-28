@@ -110,23 +110,28 @@ def _addressed(kind: str) -> cli.Invocation:
         code="{code}",
         slot="{slot}",
         session="{session}",
+        conversation="{conversation}",
     )
 
 
-def covered() -> dict[tuple[str, str], list[cli.Command]]:
-    """Which operation each row of the grammar addresses.
+def covered() -> dict[tuple[str, str], list[tuple[cli.Command, cli.Act]]]:
+    """Which operation each act of the grammar addresses, with the row
+    that performs it.
 
     A list per operation, because more than one command can address one:
     `show` and `export` are two renderings of one read, and `list`, the
     whole-deployment `show` and the whole-deployment `export` are three
-    of another.
+    of another. The act rather than the row, because the reverse is no
+    longer one to one either: `conversation show` performs two.
     """
-    found: dict[tuple[str, str], list[cli.Command]] = {}
+    found: dict[tuple[str, str], list[tuple[cli.Command, cli.Act]]] = {}
     for row in cli.COMMANDS:
-        if not isinstance(row.does, cli.Act):
-            continue
-        where = (row.does.method.upper(), unquote(row.does.path(_addressed(row.kind))))
-        found.setdefault(where, []).append(row)
+        # Every request the row makes, read off the row: a command whose
+        # one output is assembled from two reads addresses two
+        # operations, and asking it is what keeps both of them compared.
+        for act in row.acts():
+            where = (act.method.upper(), unquote(act.path(_addressed(row.kind))))
+            found.setdefault(where, []).append((row, act))
     return found
 
 
@@ -272,8 +277,8 @@ def test_the_request_body_is_the_shape_the_document_declares(where: tuple[str, s
     and the four bodies with adapters in front of them are exactly the
     ones it leaves free.
     """
-    declared = {_named(row.does.sends) for row in COVERED[where]}  # type: ignore[union-attr]
-    sent = {row.does.sends for row in COVERED[where]}  # type: ignore[union-attr]
+    declared = {_named(act.sends) for _, act in COVERED[where]}
+    sent = {act.sends for _, act in COVERED[where]}
 
     assert len(sent) == 1, f"{where} is addressed by rows that disagree about the body"
     assert declared == {_request(where)}
@@ -283,7 +288,7 @@ def test_the_request_body_is_the_shape_the_document_declares(where: tuple[str, s
 def test_the_success_answer_is_the_shape_the_document_declares(where: tuple[str, str]) -> None:
     """The same for what comes back, which is the half a renderer used
     to know on its own."""
-    declared = {_declared_shape(row.does.answers) for row in COVERED[where]}  # type: ignore[union-attr]
+    declared = {_declared_shape(act.answers) for _, act in COVERED[where]}
 
     assert declared == {_success(where)}
 
@@ -297,9 +302,7 @@ def test_every_shape_an_act_names_is_a_component_of_the_document(where: tuple[st
     miss if both sides happened to be wrong in the same way.
     """
     schemas = DOCUMENT["components"]["schemas"]
-    for row in COVERED[where]:
-        act = row.does
-        assert isinstance(act, cli.Act)
+    for row, act in COVERED[where]:
         for shape in (act.sends, act.answers):
             named = _named(shape)
             if isinstance(named, _Absent):
@@ -325,7 +328,7 @@ def test_the_simulator_reaches_this_api_through_an_act_it_already_had() -> None:
     """
     simulated = [row for row in cli.COMMANDS if row.words[0] == "simulator"]
     assert simulated
-    assert all(not isinstance(row.does, cli.Act) for row in simulated)
+    assert all(not row.acts() for row in simulated)
 
     [claim] = [row for row in cli.COMMANDS if row.words == ("device", "pending", "claim")]
     assert claim.does is cli.ADD_DEVICE

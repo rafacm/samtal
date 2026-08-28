@@ -1,4 +1,12 @@
-"""The conversation store on the gated /api: three reads, two erasures.
+"""The conversation store on the gated /api: two namespaces over one set
+of rows.
+
+`/sessions` answers connection episodes and `/conversations` answers
+durable threads, and they are two readings of the same turns rather than
+two stores: a turn names both, so one session's turns can belong to
+several threads and one thread's turns can come from several sessions.
+Three reads and two erasures each, with the erasures asymmetric on
+purpose (see `threads.erase_conversations`).
 
 The route functions live here and are registered by `config/api.py`'s
 `_application()`, which is the application `document()` renders and the
@@ -17,10 +25,17 @@ flag beside it saying which reading the null deserves.
 
 Three transport rules the routes hold to:
 
-- **Cursors are the monotonic row ids and nothing else.** No timestamps
-  inside them, no opaque encoding to version. The list pages backwards
-  (`id` strictly below the cursor, newest first) and the timeline pages
-  forwards (`id` strictly after it), which is the reconcile direction.
+- **A cursor is plain values a caller can read, never an encoding to
+  version.** Three of the four listings page on the monotonic row ids
+  alone: the session list backwards (`id` strictly below the cursor,
+  newest first) and both timelines forwards (`id` strictly after it),
+  which is the reconcile direction. The thread listing cannot, because
+  it orders on activity and activity moves, so it pages on the pair
+  (`last_active_at`, `id`) spelled out as two named parameters,
+  `cursor_active` and `cursor_id`. Two values rather than one opaque
+  blob is what keeps the rule: what a caller sends back is what it was
+  answered with, and there is nothing here a later release has to go on
+  decoding.
 - **A refused argument is never quoted back.** A limit, a cursor, a
   device or a day that cannot be read answers with a fixed sentence
   describing what the argument has to be, and so does a purge that
@@ -37,8 +52,8 @@ Three transport rules the routes hold to:
   between a file that existed and one that did not, and there is no
   file. Boot migrates the schema whether or not recording is on, so
   what a deployment that never recorded has is empty tables, and an
-  empty list is the honest answer to a question about them. The 404
-  that remains is the one about a session id.
+  empty list is the honest answer to a question about them. The 404s
+  that remain are the two about an id that was addressed.
 
 Every read opens a connection for the length of one request through
 `db.read_engine`: no migration, no advisory lock, and a repeatable-read
@@ -52,10 +67,9 @@ is no `ConversationStore` and no engine to borrow.
 import datetime as dt
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import Depends, FastAPI, Query, Request
-from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import ColumnElement, Connection, Table, func, select
 
 from vinga_server.config.loader import (
@@ -67,14 +81,24 @@ from vinga_server.config.loader import (
 from vinga_server.config.models import DatabaseConfig, normalize_mac
 from vinga_server.config.responses import (
     CloseReason,
+    ConversationDetail,
+    ConversationList,
+    ConversationSummary,
+    ConversationTurn,
+    ConversationTurns,
     Erasure,
     SessionDetail,
     SessionList,
     SessionSummary,
+    SessionTurn,
+    SessionTurns,
+    ThreadErasure,
+    ToolInvocation,
+    ToolSource,
+    TurnLeg,
 )
 from vinga_server.conversations import store, threads
 from vinga_server.conversations.schema import (
-    TOOL_SOURCES,
     events,
     sessions,
     tool_invocations,
@@ -90,19 +114,15 @@ if TYPE_CHECKING:
     # runtime.
     from vinga_server.config.api import ApiRuntime
 
-# The tool-source closed set, in the document, built from the tuple the
-# schema already declares rather than written out again here. A token
-# added to it reaches the contract by being added once; a document that
-# spelled it out could disagree with the rows it describes, which is the
-# whole failure mode a closed set exists to prevent.
-#
-# The close reasons cannot be derived the same way any more and are
-# written out in `config/responses.py` instead, with the reason beside
-# them: the shapes that carry them are read by the CLI as well, and this
-# module imports FastAPI, SQLAlchemy and the store. The pin in
-# `test_api_openapi.py` holds the two spellings equal through the
-# rendered document.
-ToolSource = Literal[*TOOL_SOURCES]
+# Every transport shape these routes answer is declared in
+# `config/responses.py` and imported back here. Two surfaces know them
+# and only one may pay for FastAPI: `vinga session show` and
+# `vinga conversation show` read an answer by validating it against the
+# shape the API said it would send, and a CLI that imported this module
+# to find out would import FastAPI, SQLAlchemy and the whole store with
+# it. The closed sets those shapes carry (the close reasons, the tool
+# sources) are written out there for the same reason, and held equal to
+# the schema's own tuples by the pin in `test_api_openapi.py`.
 
 # How many rows a page holds when the caller says nothing, and the most
 # it may ask for. The maximum is the contract rather than a courtesy: a
@@ -131,6 +151,24 @@ _CURSOR_REFUSED = (
     "cursor has to be one of the row ids this API answers with, as a whole number, "
     "or absent for the first page. What was sent is not quoted back"
 )
+
+# The keyset cursor's refusal, which names both parameters because the
+# rule is about the pair rather than about either one. Half a pair is a
+# caller that dropped an argument, and answering it with the first page
+# would be answering a question it did not ask.
+_CURSOR_PAIR_REFUSED = (
+    "cursor_active and cursor_id come together or not at all, and both have to be "
+    "values this API answered with: cursor_active is a last_active_at, written as an "
+    "ISO-8601 instant, and cursor_id is the row id beside it. Absent means the first "
+    "page. What was sent is not quoted back"
+)
+
+# How long the activity half of a cursor may be before it is refused
+# without being parsed. An ISO-8601 instant with microseconds and an
+# offset is 32 characters; the margin is for the spellings a caller may
+# legally write it in, and the bound is here so that parsing is never
+# work an unbounded string can ask for.
+_INSTANT_LENGTH = 40
 
 _DEVICE_REFUSED = (
     "device has to be a MAC address: six colon-separated or dash-separated hex "
@@ -181,6 +219,16 @@ _UNKNOWN_SESSION = (
     "session is gone with its turns and its events."
 )
 
+# And the other one, which says the same thing about the other
+# projection: what the id is, and the two ways a thread stops being
+# there. Neither names what was asked for.
+_UNKNOWN_CONVERSATION = (
+    "no conversation of that id is in the conversation store. The id is the thread's "
+    "uuid hex, which every turn of it carries; a thread whose last activity is older "
+    "than server.conversations.retention_days has been pruned, and a thread that lost "
+    "every turn to an erasure was deleted with them."
+)
+
 # What each refusal means here, where the shared sentence would not be
 # true. 404 is two cases and the status alone cannot tell them apart;
 # 422 is never about addressing, since the only things these routes
@@ -198,6 +246,28 @@ PROBLEMS_INSTEAD: dict[int, str] = {
         "One of the query arguments could not be read: the limit, the cursor, the "
         "device filter or the day, or a purge named no selector at all. Nothing sent "
         "is quoted back."
+    ),
+    500: (
+        "The conversation store cannot be read or written, or the request failed for "
+        "a reason that is not the caller's. The details are in the server's log."
+    ),
+}
+
+# The same, for the thread namespace. A second table rather than one
+# with both sentences in it: what a status means here is about a
+# conversation, and a shared 404 saying "a session or a conversation"
+# would be less true on both resources than either sentence is on its
+# own.
+THREAD_PROBLEMS_INSTEAD: dict[int, str] = {
+    404: "No conversation of that id is in the conversation store.",
+    409: (
+        "The conversation store's write lock is held by another writer. Nothing was "
+        "deleted, and the same request may be made again."
+    ),
+    422: (
+        "One of the query arguments could not be read: the limit, the agent filter, "
+        "or the two halves of the listing's cursor, which come together or not at "
+        "all. Nothing sent is quoted back."
     ),
     500: (
         "The conversation store cannot be read or written, or the request failed for "
@@ -231,243 +301,6 @@ TURN_COLUMNS: tuple[ColumnElement[Any], ...] = tuple(
 INVOCATION_COLUMNS: tuple[ColumnElement[Any], ...] = tuple(
     column for column in tool_invocations.c if column.name not in {"id", "turn", "session"}
 )
-
-
-# The transport shapes
-#
-# Declared as response models so the committed document carries real
-# schemas rather than the empty objects an untyped dictionary return
-# would produce. They are shapes and not a second policy layer: what the
-# writer stored is what these carry, nulls included.
-
-
-class ToolInvocation(BaseModel):
-    """One call a turn issued, as the timeline nests it.
-
-    The transport shape of a `tool_invocations` row, not the record the
-    pipeline hands the writer, which is the dataclass of the same name
-    in `records.py`.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    position: int = Field(
-        description=(
-            "Where this call sat in the round's call list, as the model issued it, "
-            "counted from zero and with handovers included. The rows are nested in "
-            "this order; it is the model's order and not the order they finished in."
-        )
-    )
-    source: ToolSource = Field(
-        description=(
-            "Where the call was routed: `builtin` for one this application authors, "
-            "`device` for one the device published, `mcp` for one an MCP entry owns, "
-            "`unknown` for a name nothing answered to. Classified before the call ran. "
-            "A closed set here because it is a closed set in the database, which holds "
-            "the same four tokens under a check constraint."
-        )
-    )
-    entry: str | None = Field(
-        description=(
-            "The owning MCP entry's configured name for an `mcp` call, and null "
-            "otherwise. A name this deployment chose, so it survives text-off."
-        )
-    )
-    name: str | None = Field(
-        description=(
-            "The called tool's name, and null when text storage was off for the "
-            "session: a tool's name originates off this server, a device's "
-            "self-description or an MCP far side, exactly as its result does."
-        )
-    )
-    malformed: bool = Field(
-        description="Whether the model's arguments were not a JSON object."
-    )
-    arguments: dict[str, Any] | None = Field(
-        description=(
-            "What the model passed, null under text-off and null when the call was "
-            "malformed, which is what `malformed` above tells them apart by."
-        )
-    )
-    result: str | None = Field(
-        description="What the call answered, a refusal included. Null under text-off."
-    )
-    is_error: bool = Field(description="Whether the call answered as an error.")
-    duration_ms: int | None = Field(
-        description=(
-            "How long the call took, in milliseconds. Null where nothing ran, as for a "
-            "refused or a successful handover, and null under metrics-off."
-        )
-    )
-
-
-class TurnLeg(BaseModel):
-    """One agent's share of a turn a handover split.
-
-    The transport shape of one entry of `turns.legs`, whose halves
-    follow different storage switches: the text is content and the token
-    counts are measurements, which is why a leg exists at all rather
-    than the turn's totals being the whole story. The totals blend
-    agents that may use different models; this is where they come apart
-    again.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    agent: str | None = Field(
-        description=(
-            "The agent whose leg this is, and null for a session that never activated "
-            "one."
-        )
-    )
-    text: str | None = Field(
-        description=(
-            "What this agent said, null under text-off, and null for an agent that "
-            "took part without speaking: one that asked for the handover said nothing "
-            "and spent tokens all the same."
-        )
-    )
-    input_tokens: int | None = Field(
-        description=(
-            "Input tokens this agent spent on the turn. Null when the provider "
-            "reported no usage, and under metrics-off."
-        )
-    )
-    output_tokens: int | None = Field(
-        description=(
-            "Output tokens this agent spent on the turn. Null when the provider "
-            "reported no usage, and under metrics-off."
-        )
-    )
-
-
-class SessionTurn(BaseModel):
-    """One utterance and the reply it got, with the calls the reply made."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: int = Field(
-        description=(
-            "The turn's monotonic row id, never reused. It is this timeline's cursor: "
-            "a page asked for with it holds the turns after it."
-        )
-    )
-    conversation: str = Field(
-        description=(
-            "The thread this turn belongs to, by its uuid hex. A turn names both "
-            "its session and its conversation, which is what makes the session "
-            "timeline and the thread two readings of one set of rows: the turns of "
-            "one session can belong to several threads, and one thread's turns can "
-            "come from several sessions."
-        )
-    )
-    t_ms: int = Field(
-        description=(
-            "The utterance's offset from session open, in milliseconds, aligned with "
-            "its `heard` event and with the capture's audio for the same session."
-        )
-    )
-    agent: str | None = Field(
-        description=(
-            "The agent that owns this turn, which is the one it started with and "
-            "therefore the one whose thread it is on. A handover makes it different "
-            "from the session's and from the agent that finished the reply; the legs "
-            "below are where a split reply comes apart."
-        )
-    )
-    heard: str | None = Field(
-        description="What was said to the device, as transcribed. Null under text-off."
-    )
-    heard_duration_s: float | None = Field(
-        description="How long the utterance lasted, in seconds. Null under metrics-off."
-    )
-    language: str | None = Field(
-        description=(
-            "The language the transcript was recognized as. Neither a measured number "
-            "nor conversation text, so it survives both switches."
-        )
-    )
-    language_confidence: float | None = Field(
-        description="How sure the recognizer was of that language. Null under metrics-off."
-    )
-    reply: str | None = Field(
-        description=(
-            "What the assistant said, the legs joined. Null under text-off, and null "
-            "when the reply spoke nothing."
-        )
-    )
-    legs: list[TurnLeg] | None = Field(
-        description=(
-            "One entry per agent that took part, and present only when a handover "
-            "split the reply. Null is a turn one agent answered whole, which is not "
-            "the same as an empty list and never becomes one."
-        )
-    )
-    asr_ms: int | None = Field(
-        description=(
-            "Transcription elapsed, in milliseconds. Null where none was measured this "
-            "turn, and under metrics-off."
-        )
-    )
-    first_token_ms: int | None = Field(
-        description="Request to the reply's first token, in milliseconds. Null under metrics-off."
-    )
-    llm_ms: int | None = Field(
-        description=(
-            "The reply's LLM round durations summed, in milliseconds. Null under "
-            "metrics-off."
-        )
-    )
-    tts_first_audio_ms: int | None = Field(
-        description=(
-            "The reply's first synthesis request to its first audio bytes, in "
-            "milliseconds, measured at the provider boundary and deliberately not at "
-            "the device. Null when the reply spoke nothing, and under metrics-off."
-        )
-    )
-    rounds: int | None = Field(
-        description="How many LLM rounds the reply took. Null under metrics-off."
-    )
-    input_tokens: int | None = Field(
-        description=(
-            "Input tokens summed across the turn's rounds; OTel's "
-            "`gen_ai.usage.input_tokens`. Null when the provider reported no usage, "
-            "and under metrics-off."
-        )
-    )
-    output_tokens: int | None = Field(
-        description=(
-            "Output tokens summed across the turn's rounds; OTel's "
-            "`gen_ai.usage.output_tokens`. Null when the provider reported no usage, "
-            "and under metrics-off."
-        )
-    )
-    tool_calls: int = Field(
-        description=(
-            "How many calls this turn issued, which is how many entries the list below "
-            "holds. Structural rather than telemetry: it survives both switches."
-        )
-    )
-    tool_invocations: list[ToolInvocation] = Field(
-        description="The calls the reply made, in the order the model issued them."
-    )
-
-
-class SessionTurns(BaseModel):
-    """One page of a session's timeline, oldest first."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    items: list[SessionTurn] = Field(
-        description="The turns on this page, ascending by id, which is chronological."
-    )
-    next_cursor: int | None = Field(
-        description=(
-            "What to send as `cursor` for the page after this one, and null when this "
-            "was the last. The next page holds the turns after it, which is also how a "
-            "client that read up to a turn asks for what has happened since."
-        )
-    )
 
 
 # The query arguments
@@ -517,6 +350,40 @@ SessionQuery = Annotated[
             "Only this session, by its uuid hex. The same erasure the addressed form "
             "of this resource performs, offered here so that one selector grammar "
             "covers every purge."
+        )
+    ),
+]
+
+AgentQuery = Annotated[
+    str | None,
+    Query(
+        description=(
+            "Only the threads of this agent, by the name the configuration gives it. "
+            "Matched exactly and not refused for shape: an agent name is a word this "
+            "deployment chose, and a name nothing answers to is an empty page rather "
+            "than a mistake this API can recognize."
+        )
+    ),
+]
+
+CursorActiveQuery = Annotated[
+    str | None,
+    Query(
+        description=(
+            "The activity half of where to carry on from: the `last_active_at` of the "
+            "last thread on the previous page, as an ISO-8601 instant. Sent together "
+            "with `cursor_id` or not at all; absent means the first page."
+        )
+    ),
+]
+
+CursorIdQuery = Annotated[
+    str | None,
+    Query(
+        description=(
+            "The id half of the same cursor: the `id` of that thread, as a whole "
+            "number. The page holds the threads strictly below the pair, which is "
+            "what makes the order total where two threads share an activity stamp."
         )
     ),
 ]
@@ -788,6 +655,105 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
             erase, session=session, device=_device(device), before=_before(before)
         )
 
+    @api.get(
+        "/conversations",
+        response_model=ConversationList,
+        responses=problems(401, 422, 500, instead=THREAD_PROBLEMS_INSTEAD),
+    )
+    def read_conversations(
+        reader: ReaderDep,
+        agent: AgentQuery = None,
+        limit: LimitQuery = None,
+        cursor_active: CursorActiveQuery = None,
+        cursor_id: CursorIdQuery = None,
+    ) -> dict[str, Any]:
+        """The threads this deployment recorded, most recently active
+        first.
+
+        Filtered by `agent` when given, and paginated with the pair
+        `cursor_active` and `cursor_id`, which holds the threads below
+        it. Activity moves, so the semantics under concurrent recording
+        are stated rather than implied: a thread spoken to between two
+        pages moves ahead of the cursor and is missed by that pass,
+        appearing at the head of a fresh one, and a page boundary never
+        duplicates or skips a thread whose pair did not move.
+        """
+        size = _limit(limit)
+        found = threads.listed(
+            reader,
+            agent=agent,
+            limit=size + 1,
+            cursor=_keyset(cursor_active, cursor_id),
+        )
+        return _keyset_page(found, size)
+
+    @api.get(
+        "/conversations/{conversation}",
+        response_model=ConversationDetail,
+        responses=problems(401, 404, 422, 500, instead=THREAD_PROBLEMS_INSTEAD),
+    )
+    def read_conversation(conversation: str, reader: ReaderDep) -> dict[str, Any]:
+        """One thread, whole: its row, how many turns it holds across
+        every session, and how many recap checkpoints hang off it.
+
+        The counts are read in the same transaction as the row, so they
+        describe one snapshot rather than three moments of a thread that
+        may still be being spoken to.
+        """
+        return _thread(reader, conversation)
+
+    @api.get(
+        "/conversations/{conversation}/turns",
+        response_model=ConversationTurns,
+        responses=problems(401, 404, 422, 500, instead=THREAD_PROBLEMS_INSTEAD),
+    )
+    def read_conversation_turns(
+        conversation: str,
+        reader: ReaderDep,
+        limit: LimitQuery = None,
+        cursor: CursorQuery = None,
+    ) -> dict[str, Any]:
+        """One thread's dialogue, oldest first, each turn carrying the
+        calls it made and the session it was spoken in.
+
+        The row id cursor, not the pair the listing takes: a turn's id
+        never moves, so `cursor` holds the turns strictly after it and
+        the direction is the one a client reconciling what it has
+        already read asks in.
+        """
+        size = _limit(limit)
+        after = _cursor(cursor)
+        # Before the page, so an unknown thread is a 404 rather than an
+        # empty dialogue that reads like a thread with nothing in it.
+        _thread(reader, conversation)
+        page = _page(threads.dialogue(reader, conversation, after=after, limit=size + 1), size)
+        _nest_invocations(reader, page["items"])
+        return page
+
+    @api.delete(
+        "/conversations/{conversation}",
+        response_model=ThreadErasure,
+        responses=problems(401, 404, 409, 422, 500, instead=THREAD_PROBLEMS_INSTEAD),
+    )
+    def erase_conversation(conversation: str, erase: EraserDep) -> dict[str, int]:
+        """Erase one named thread: its row, its turns out of whatever
+        sessions they were spoken in, the calls those turns made, and
+        its recap checkpoints.
+
+        The sessions themselves are untouched, and so is their
+        telemetry: a session is a connection episode and it still
+        happened, with a gap in it now. A thread that is still being
+        spoken to when its row goes stops being recorded at the writer's
+        next marker, and the conversation in the room carries on.
+        """
+        taken = _erasure(erase, lambda connection: _thread_erasure(connection, conversation))
+        return {
+            "conversations": len(taken.threads),
+            "turns": taken.turns,
+            "tool_invocations": taken.tool_invocations,
+            "milestones": taken.milestones,
+        }
+
 
 def _erased(
     erase: Callable[[], AbstractContextManager[Connection]],
@@ -796,36 +762,49 @@ def _erased(
     before: str | None = None,
     addressed: bool = False,
 ) -> dict[str, int]:
-    """One deletion, whatever addressed it.
+    """One session deletion, whatever addressed it.
 
-    Both endpoints land here, which is what makes the overlap between
-    them an overlap rather than a second bookkeeping path: the selectors
-    are resolved to a list of sessions and the same helper erases them.
+    Both session endpoints land here, which is what makes the overlap
+    between them an overlap rather than a second bookkeeping path: the
+    selectors are resolved to a list of sessions and the same helper
+    erases them.
+    """
+    taken = _erasure(
+        erase, lambda connection: _session_erasure(connection, session, device, before, addressed)
+    )
+    return {
+        "sessions": taken.sessions,
+        "turns": taken.turns,
+        "tool_invocations": taken.tool_invocations,
+        "events": taken.events,
+        "conversations": len(taken.threads),
+        "milestones": taken.milestones,
+    }
 
-    The failure arms are the whole no-leak surface of a write. A driver
-    exception carries the statement it failed on and the connection
-    string it failed over, so which sentence is answered is decided by
-    the db classifier's closed set and the exception itself is dropped:
-    built inside the arm, raised outside it, so nothing walking the
-    chain finds it either.
+
+def _erasure(
+    erase: Callable[[], AbstractContextManager[Connection]],
+    deleting: Callable[[Connection], threads.Erased],
+) -> threads.Erased:
+    """One deletion's transaction, whatever it deletes.
+
+    The failure arms are the whole no-leak surface of a write, and they
+    are here once for both namespaces. A driver exception carries the
+    statement it failed on and the connection string it failed over, so
+    which sentence is answered is decided by the db classifier's closed
+    set and the exception itself is dropped: built inside the arm,
+    raised outside it, so nothing walking the chain finds it either.
+
+    Telling the writer happens in here, inside the transaction, which is
+    where the ordering is decided rather than hoped for: this
+    transaction holds the chain's advisory lock and a writer takes the
+    same lock at every marker, so no writer is inside one while this
+    runs. The trade that comes with it is stated on `store.erased`.
     """
     problem: ConfigError | None = None
     try:
         with erase() as connection:
-            named = threads.selected(
-                connection, session=session, device=device, before=before
-            )
-            if addressed and not named:
-                # Addressed and not there, which is a 404 rather than an
-                # erasure of nothing: a caller that named one session
-                # meant that session.
-                raise UnknownEntityError(_UNKNOWN_SESSION)
-            taken = threads.erase_sessions(connection, named)
-            # Inside the transaction, which is where the ordering is
-            # decided rather than hoped for: this transaction holds the
-            # chain's advisory lock and a writer takes the same lock at
-            # every marker, so no writer is inside one while this runs.
-            # The trade that comes with it is stated on `store.erased`.
+            taken = deleting(connection)
             store.erased(taken.threads)
     except ConfigError:
         raise
@@ -835,14 +814,29 @@ def _erased(
         )
     if problem is not None:
         raise problem
-    return {
-        "sessions": taken.sessions,
-        "turns": taken.turns,
-        "tool_invocations": taken.tool_invocations,
-        "events": taken.events,
-        "conversations": len(taken.threads),
-        "milestones": taken.milestones,
-    }
+    return taken
+
+
+def _session_erasure(
+    connection: Connection,
+    session: str | None,
+    device: str | None,
+    before: str | None,
+    addressed: bool,
+) -> threads.Erased:
+    named = threads.selected(connection, session=session, device=device, before=before)
+    if addressed and not named:
+        # Addressed and not there, which is a 404 rather than an erasure
+        # of nothing: a caller that named one session meant that session.
+        raise UnknownEntityError(_UNKNOWN_SESSION)
+    return threads.erase_sessions(connection, named)
+
+
+def _thread_erasure(connection: Connection, conversation: str) -> threads.Erased:
+    taken = threads.erase_conversations(connection, [conversation])
+    if not taken.threads:
+        raise UnknownEntityError(_UNKNOWN_CONVERSATION)
+    return taken
 
 
 def _rows(reader: Connection, query: Any) -> list[dict[str, Any]]:
@@ -885,6 +879,33 @@ def _nest_invocations(reader: Connection, items: list[dict[str, Any]]) -> None:
         turn["tool_invocations"] = grouped[turn["id"]]
 
 
+def _keyset_page(found: list[dict[str, Any]], size: int) -> dict[str, Any]:
+    """One page of the thread listing and the pair after it.
+
+    The same one-row-more trick the row-id pages use, answering two
+    values instead of one: they are null together exactly when there was
+    nothing beyond this page at the moment it was read, and a caller
+    sends both back or neither, which is the rule the request side
+    holds to as well.
+    """
+    items = found[:size]
+    more = len(found) > size
+    return {
+        "items": items,
+        "next_cursor_active": items[-1]["last_active_at"] if more else None,
+        "next_cursor_id": items[-1]["id"] if more else None,
+    }
+
+
+def _thread(reader: Connection, conversation: str) -> dict[str, Any]:
+    """One thread's row with its counts, or the refusal that says where
+    to look instead. The id arrived in the path and is not repeated."""
+    found = threads.detail(reader, conversation)
+    if found is None:
+        raise UnknownEntityError(_UNKNOWN_CONVERSATION)
+    return found
+
+
 def _session(reader: Connection, session: str) -> dict[str, Any]:
     """One session row, or the refusal that says where to look instead.
 
@@ -915,6 +936,52 @@ def _cursor(value: str | None) -> int | None:
     if value is not None and (number is None or number > MAX_ROW_ID):
         raise ConfigError(_CURSOR_REFUSED)
     return number
+
+
+def _keyset(active: str | None, row: str | None) -> tuple[str, int] | None:
+    """The thread listing's cursor, as the pair the ordering is over, or
+    None for the first page.
+
+    The two parameters come together or not at all, and half a pair is
+    refused rather than half-honored: a caller that meant the first page
+    sends neither, so one argument on its own is an argument that went
+    missing, and answering it with the top of the listing would silently
+    replay a page it had already read.
+    """
+    if active is None and row is None:
+        return None
+    number = _whole(row)
+    moment = _instant(active) if active is not None else None
+    if moment is None or number is None or number > MAX_ROW_ID:
+        raise ConfigError(_CURSOR_PAIR_REFUSED)
+    return (moment, number)
+
+
+def _instant(value: str) -> str | None:
+    """The activity half of a cursor, canonicalized, or None for
+    anything that is not an instant.
+
+    Canonicalized rather than compared as written, because the
+    comparison is lexicographic on text and only agrees with time when
+    both sides are spelled the way the writer spells them. A value this
+    API answered round-trips to itself; one written with `Z` or at
+    another offset is brought to the spelling the rows carry instead of
+    quietly paging from the wrong place.
+
+    Bounded before it is parsed, because parsing is work no caller
+    should be able to ask an unbounded amount of.
+    """
+    if len(value) > _INSTANT_LENGTH:
+        return None
+    try:
+        moment = dt.datetime.fromisoformat(value)
+    except ValueError:
+        # Answered rather than raised from inside the arm: `fromisoformat`
+        # puts the string it could not read into its own message.
+        return None
+    if moment.tzinfo is not None:
+        moment = moment.astimezone(dt.UTC)
+    return moment.isoformat()
 
 
 def _whole(value: str | None) -> int | None:
@@ -993,12 +1060,18 @@ __all__ = [
     "LIMIT_DEFAULT",
     "LIMIT_MAX",
     "CloseReason",
+    "ConversationDetail",
+    "ConversationList",
+    "ConversationSummary",
+    "ConversationTurn",
+    "ConversationTurns",
     "Erasure",
     "SessionDetail",
     "SessionList",
     "SessionSummary",
     "SessionTurn",
     "SessionTurns",
+    "ThreadErasure",
     "ToolInvocation",
     "ToolSource",
     "TurnLeg",

@@ -182,6 +182,14 @@ def test_the_document_describes_every_route_the_api_serves() -> None:
         "/sessions": ["delete", "get"],
         "/sessions/{session}": ["delete", "get"],
         "/sessions/{session}/turns": ["get"],
+        # The store's other projection. Three reads and one erasure
+        # rather than two: a thread is addressed by its id and there is
+        # no selector grammar to carry over here, because the purge the
+        # session half kept is the retired command's and that command
+        # named sessions.
+        "/conversations": ["get"],
+        "/conversations/{conversation}": ["delete", "get"],
+        "/conversations/{conversation}/turns": ["get"],
     }
 
 

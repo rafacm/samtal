@@ -80,11 +80,13 @@ def intended() -> set[tuple[str, ...]]:
         ("provider", "secret", "clear"),
         ("mcp-server", "secret", "clear"),
         ("default-agent", "clear"),
-        # The conversation store's two erasures. Neither is undoable by
-        # any command in this grammar and neither is undoable at all:
-        # what they take is dialogue, which nothing here can write back.
+        # The conversation store's three erasures, one per projection
+        # plus the purge. None is undoable by any command in this
+        # grammar and none is undoable at all: what they take is
+        # dialogue, which nothing here can write back.
         ("session", "delete"),
         ("session", "purge"),
+        ("conversation", "delete"),
     }
 
 
@@ -96,7 +98,7 @@ def test_the_table_marks_exactly_the_destructive_commands() -> None:
     marked = {row.words for row in cli.COMMANDS if row.destroys}
 
     assert marked == intended()
-    assert len(marked) == 10
+    assert len(marked) == 11
 
 
 def test_a_replacement_write_is_not_destructive() -> None:

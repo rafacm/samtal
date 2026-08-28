@@ -709,6 +709,69 @@ def test_the_session_verbs_reach_the_record_from_the_installed_wheel(
     assert "wheel-" not in answered(run("session", "list"), "session list")
 
 
+def test_the_conversation_verbs_reach_the_record_from_the_installed_wheel(
+    run, module_database: str
+) -> None:
+    """The `conversation` noun from the same bare install, and the same
+    claim: three verbs over the store's other projection, carrying none
+    of the store half with them.
+
+    The thread spans both sessions here, which is what makes the read
+    worth doing from a wheel: what comes back is assembled across two
+    connection episodes, and `show` is one command making two requests.
+    """
+    seeded = ConversationStore(
+        DatabaseConfig(name=module_database), retention_days=0
+    )
+    seeded.start()
+    try:
+        for name, device, heard in (
+            ("thread-one", SESSION_MAC, "what is the weather like"),
+            ("thread-two", SESSION_OTHER_MAC, "and what about tomorrow"),
+        ):
+            seeded.open_session(name, 100.0, session_manifest(device))
+            seeded.record_turn(
+                name,
+                TurnRecord(
+                    at=101.2,
+                    conversation=WHEEL_CONVERSATION,
+                    agent="sam",
+                    heard=heard,
+                    reply="Sunny.",
+                ),
+            )
+            seeded.close_session(name, duration_s=2.0, reason="client")
+    finally:
+        seeded.stop()
+
+    listed = answered(run("conversation", "list"), "conversation list")
+    assert listed.splitlines()[0].split()[0] == "CONVERSATION"
+    assert WHEEL_CONVERSATION in listed
+
+    shown = answered(
+        run("conversation", "show", WHEEL_CONVERSATION), "conversation show"
+    )
+    assert shown.startswith(f"conversation: {WHEEL_CONVERSATION}\n")
+    # Both sessions' turns, in one thread, oldest first.
+    assert "you: what is the weather like\n" in shown
+    assert "you: and what about tomorrow\n" in shown
+
+    # No --force anywhere, for the reason the destructive block above
+    # gives: a subprocess has no terminal, and a command that asked
+    # would hang a pipeline rather than answer one.
+    erased = answered(
+        run("conversation", "delete", WHEEL_CONVERSATION), "conversation delete"
+    )
+    assert erased.startswith("turns: 2\n")
+
+    assert WHEEL_CONVERSATION not in answered(
+        run("conversation", "list"), "conversation list"
+    )
+    # And the sessions those turns were spoken in are still here, which
+    # is the asymmetry between the two erasures.
+    assert "thread-one" in answered(run("session", "list"), "session list")
+
+
 # The commands that reach no server at all
 
 
