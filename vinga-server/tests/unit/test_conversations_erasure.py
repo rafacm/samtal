@@ -42,7 +42,11 @@ from vinga_server.config.api import build_api
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations.records import TurnRecord
 from vinga_server.conversations.schema import conversation_milestones
-from vinga_server.conversations.store import ConversationStore, open_conversations
+from vinga_server.conversations.store import (
+    ConversationStore,
+    Half,
+    open_conversations,
+)
 from vinga_server.db import read_engine
 
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
@@ -518,6 +522,48 @@ def test_a_session_deleted_while_it_is_talking_stops_being_recorded(client) -> N
         store.stop()
 
     assert after.wait(TIMEOUT_S) is False
+    for table in TABLES:
+        assert stored(table) == [], table
+
+
+def test_a_deletion_between_the_two_halves_leaves_no_orphan_events(client) -> None:
+    """The other interval a deletion can land in, and the only one that
+    can produce a row nothing will ever prune.
+
+    A marker commits twice, and the writer holds no lock between the
+    two. So a deletion can arrive after the turns are durable and before
+    the events are, and an events row has no foreign key to refuse it:
+    retention reaches events through the session rows that still exist,
+    which is exactly what this deletion took. The batch has to meet the
+    tombstone inside its own transaction, and be dropped.
+
+    The gate is on the events half here rather than on the durable one,
+    because the interval under test is the one between them.
+    """
+    gate = Gate(Half.EVENTS)
+    store = ConversationStore(
+        DatabaseConfig(),
+        now=lambda: dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC),
+        retention_days=0,
+        gate=gate,
+    )
+    store.start()
+    try:
+        store.open_session("alpha", 100.0, manifest())
+        store.record_event("alpha", "heard", logging.INFO, {"duration_s": 1.0}, 101.0)
+        store.record_turn("alpha", a_turn(FIRST, "before the deletion"))
+        # The durable half of that marker is committed and the events
+        # half has not begun, which is the whole of the arrangement.
+        gate.wait()
+
+        taken = erase(client, "alpha")
+        assert (taken["sessions"], taken["turns"], taken["events"]) == (1, 1, 0)
+
+        gate.open_forever()
+        store.close_session("alpha", duration_s=8.0, reason="client")
+    finally:
+        store.stop()
+
     for table in TABLES:
         assert stored(table) == [], table
 

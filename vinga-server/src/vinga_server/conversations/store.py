@@ -39,10 +39,12 @@ arbitrary:
   sessions on `started_at` and asks nothing about whether the
   conversation ended, so a session long enough to fall outside the
   window can be taken while it is still talking. Every marker
-  transaction therefore begins by confirming its session still exists.
-  If it does not, the batch and the session's state are discarded and
-  nothing further is written for it, which is what makes the deletion of
-  a running session final rather than a race the next turn undoes.
+  transaction therefore begins by confirming its session still exists,
+  both halves separately, because they are separate transactions and a
+  deletion fits between them. If it does not, the batch and the
+  session's state are discarded and nothing further is written for it,
+  which is what makes the deletion of a running session final rather
+  than a race the next turn undoes.
 
 Storage policy lives here rather than in the pipeline: the runtime hands
 over the full record and the writer nulls the content columns when text
@@ -732,6 +734,17 @@ class ConversationStore:
         their payload emptied: the events table is the structured
         telemetry the switch turns off. A failure here drops and counts
         exactly what it dropped, and never touches a turn.
+
+        The session is confirmed again inside this transaction, and that
+        is not the durable half's check repeated for tidiness. The two
+        halves are separate transactions, so a deletion can commit in
+        the interval between them, and an events row has no foreign key
+        to refuse it afterwards: retention reaches events only through
+        the session rows that still exist, so a batch inserted behind a
+        tombstone would be a row nothing can ever prune. Dropped
+        silently, as everything else a tombstone overtakes is, and not
+        counted either: the count's home is the session row, and the
+        session row is what just went.
         """
         if not batch.events or not self._stores_events():
             return
@@ -742,6 +755,8 @@ class ConversationStore:
             self._gate(Half.EVENTS)
         try:
             with self._engine.begin() as connection:
+                if not self._alive(connection, session_id):
+                    return
                 connection.execute(
                     events_table.insert(),
                     [self._event_row(record) for record in batch.events],
