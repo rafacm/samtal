@@ -1,6 +1,6 @@
 """The conversation store: what was said, kept where it can be queried.
 
-The `conversations` schema sits beside the `domain` one in the database
+The `record` schema sits beside the `domain` one in the database
 `server.database` names, and holds six tables: the session spine, the
 conversation a turn belongs to, the turn timeline, the tool invocations
 a turn issued, the decision track underneath them (#120), and the

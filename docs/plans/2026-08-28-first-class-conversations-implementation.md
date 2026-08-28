@@ -1311,7 +1311,7 @@ have heard it.**
 
 ### Deviations from the plan
 
-Eleven, each with its reason.
+Twelve, each with its reason.
 
 1. **The recap is synthesized as one unit rather than sentence by
    sentence.** The plan says the summarizer's text is fed to the
@@ -1393,6 +1393,42 @@ Eleven, each with its reason.
     are claims this plan owns and this milestone falsifies, so they are
     fixed here and recorded rather than left for a reader to trip
     over.
+
+12. **The store's Postgres schema is renamed `conversations` to
+    `record`, against the plan's own "what keeps the name" list.**
+    Maintainer decision, 2026-08-28, taken live and riding this PR
+    because it belongs inside the reset window this plan already
+    opened rather than after it. The plan kept the schema name on the
+    reasoning that the store honestly stores conversations now; what
+    that reasoning did not price is the qualified name it leaves
+    behind, `conversations.conversations`, which the schema module,
+    the concepts page and the generated reference each had to spend a
+    paragraph excusing. `record` costs none of them: SQL reads
+    `record.sessions`, `record.turns` and `record.conversations`, and
+    the schema name says what the whole of it is while the table name
+    says what one entity is. `history` was considered and rejected
+    twice over: it collides with the runtime's own in-memory history,
+    which is a different thing with a different lifetime, and it
+    undersells the half of this store that is telemetry rather than
+    dialogue. `record` is the documentation's own word already, in
+    "conversation record" and "system of record". Nothing else moves:
+    the thread table, the package, `server.conversations.*`, the
+    `conversations_*` events, `vinga-server conversations schema`, the
+    reference filename and the API namespaces all keep their names,
+    because they address the store from outside, where the entity is
+    what a reader is after. No migration comes with it and none is
+    owed, under the reset licence this plan spent at milestone 1: a
+    database whose store still sits in the old schema is one whose
+    `record` schema does not exist yet, so boot creates and migrates
+    it exactly as on a blank database, and the old schema is abandoned
+    in place. One consequence is worth writing down, because it is
+    invisible from the code: the milestone-1 stranding refusal for
+    databases stamped `1001_postgres_conversations` is now unreachable
+    from a real deployment, since such a stamp lives in the schema the
+    server no longer reads. The machinery and its test stay as they
+    are, both exercised against a `record` schema stamped at the
+    deleted revision; what changed is that the reset an operator meets
+    is the quiet one rather than the loud one.
 
 ### Discoveries
 

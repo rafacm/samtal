@@ -135,11 +135,27 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   `SessionTurn`, `SessionTurns`; `ToolInvocation` and `TurnLeg` keep
   their names). What these answer is one connection episode and the
   turns inside it, which is a session; the thread that spans several of
-  them is a different entity and gets a namespace of its own. The
-  Postgres schema, the config section `server.conversations.*`, the four
-  `conversations_*` events and `vinga-server conversations schema` all
-  keep their names, because those name the store and the store honestly
-  stores conversations now.
+  them is a different entity and gets a namespace of its own. The config
+  section `server.conversations.*`, the four `conversations_*` events,
+  `vinga-server conversations schema` and the reference it prints all
+  keep their names, because those address the store from outside, where
+  what a reader is after is the conversations in it. The Postgres schema
+  itself is renamed, below.
+- **BREAKING: the store's Postgres schema is renamed from
+  `conversations` to `record`**. A qualified name now reads
+  `record.sessions`, `record.turns` and `record.conversations`, so the
+  double word is gone: the schema name says what the whole of it is, the
+  durable record of what was said and what it cost to say it, and the
+  table name is left saying what one entity is.
+  `deploy/postgres-init.sql` creates `record` and grants `vinga_ro` on
+  it, and every `psql` recipe in the documentation moves with it. There
+  is no migration and none is coming: a database whose store still sits
+  in the old schema is one whose `record` schema does not exist yet, so
+  the server creates it and records into an empty store, and the old
+  `conversations` schema stays where it is for an operator to read
+  beside the new one or to drop. That is the same pre-release reset this
+  release already prices, recorded in
+  `docs/adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md`.
 - **BREAKING: retention prunes conversations rather than sessions**
   (#190). `server.conversations.retention_days` is unchanged (90 by
   default, `0` keeps everything); what it is measured against is now a
@@ -180,11 +196,13 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   backfill, because `turns.conversation` is not null and a turn
   recorded before threads existed names no thread. A server that meets
   such a database refuses to start with a sentence naming the reset:
-  drop and recreate the database (or the `conversations` schema on its
-  own), rerun `deploy/postgres-init.sql`, and start again, which
-  migrates a blank schema to current in one step. **Conversation
-  history is not carried across**; take a `pg_dump` of the
-  `conversations` schema first if it is wanted. The compatibility
+  drop and recreate the database (or the `record` schema on its own),
+  rerun `deploy/postgres-init.sql`, and start again, which migrates a
+  blank schema to current in one step. **The conversation record is not
+  carried across**; take a `pg_dump` of the schema first if it is
+  wanted. The schema rename above means a store recorded by an earlier
+  build meets neither the refusal nor an upgrade, because the schema it
+  lives in is no longer the one the server migrates. The compatibility
   decision and the tested path back are recorded in
   `docs/adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md`.
 

@@ -44,7 +44,7 @@ request to `/api` carries a bearer token.
 - Python, and one Postgres database holding everything this server
   stores: the domain half of the configuration in a `domain` schema,
   and the conversation record, when it is turned on, in a
-  `conversations` schema beside it. Both are migrated at every boot,
+  `record` schema beside it. Both are migrated at every boot,
   so a blank database is a valid state to start on and there is no
   init command to forget
 - Configurable providers:
@@ -2229,7 +2229,7 @@ server:
     resumption_budget_tokens: 6000
 ```
 
-What lands is the `conversations` schema of the same database the
+What lands is the `record` schema of the same database the
 domain half's `domain` schema is in, which means the same instance, the
 same credentials and the same backup: one row per session (device,
 agents, protocol, the resolved providers, when it opened, when and why
@@ -2380,13 +2380,13 @@ take with it, and copies that have already left the database (a
 nothing to copy safely: the store is SQL, and the way in is a
 read-only session as the role
 [`../deploy/postgres-init.sql`](../deploy/postgres-init.sql)
-provisions. It has `SELECT` on every table in the `conversations`
+provisions. It has `SELECT` on every table in the `record`
 schema, now and after the next migration, and nothing at all on the
 `domain` schema next door, where the stored secrets' ciphertexts live:
 
 ```bash
 psql "postgresql://vinga_ro@127.0.0.1:5432/vinga" \
-  -c 'select * from conversations.turns order by id desc limit 20'
+  -c 'select * from record.turns order by id desc limit 20'
 ```
 
 Its password under compose is `vinga_ro`, which is a loopback-only
@@ -2564,7 +2564,7 @@ runs on it.
 `CREATEDB`: the server migrates schemas, never databases, so the
 database exists before it starts. Run
 [`../deploy/postgres-init.sql`](../deploy/postgres-init.sql) against it
-once, which creates the `domain` and `conversations` schemas
+once, which creates the `domain` and `record` schemas
 `WITH AUTHORIZATION` to the server role and provisions the read-only
 `vinga_ro` role beside them:
 
@@ -2653,7 +2653,7 @@ or a one-shot `psql` beside the database on its own host:
 
 ```bash
 psql "postgresql://vinga_ro@127.0.0.1:5432/vinga" \
-  -c 'select * from conversations.turns order by id desc limit 20'
+  -c 'select * from record.turns order by id desc limit 20'
 ```
 
 Always that role, and not the one the server connects as. `vinga_ro`
@@ -2813,7 +2813,7 @@ docker exec -i vinga vinga-server \
   config provider secret set -- llm claude api_key
 ```
 
-**Conversation history does not come across, and nothing pretends
+**The conversation record does not come across, and nothing pretends
 otherwise.** There is no export format for it and no importer, and
 inventing one for a pre-release store was not worth the tool it would
 have become. A deployment that wants to keep what it recorded copies

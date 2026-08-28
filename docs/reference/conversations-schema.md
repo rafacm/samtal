@@ -6,20 +6,24 @@ difference, so an edit here is reverted by the next run. The text of a
 column description lives on the table in
 `vinga-server/src/vinga_server/conversations/schema.py`.
 
-The store is the `conversations` schema of the Postgres database the
-`VINGA_DB_*` variables name, beside the domain configuration's `domain`
-schema. It holds what was said and what it cost to say it: the session spine,
-the threads that span it, the turn timeline both of them project, the tool
-invocations a turn issued, the recap checkpoints a thread accrues, and the
-decision track underneath all of it. Audio never enters it. The per-frame
-endpointer track and the dropped-frame counts stay in the session capture,
-which is the recording; this is the queryable record.
+The store is the `record` schema of the Postgres database the `VINGA_DB_*`
+variables name, beside the domain configuration's `domain` schema. It holds
+what was said and what it cost to say it: the session spine, the threads that
+span it, the turn timeline both of them project, the tool invocations a turn
+issued, the recap checkpoints a thread accrues, and the decision track
+underneath all of it. Audio never enters it. The per-frame endpointer track
+and the dropped-frame counts stay in the session capture, which is the
+recording; this is the queryable record.
 
-The schema name and one table name are the same word, so SQL spells the thread
-table `conversations.conversations`. The schema name is the store's and the
-table name is the entity's: a conversation is a durable thread between a user
-and exactly one agent, spanning sessions, and a session is one connection
-episode from one device.
+The schema is `record` and one table inside it is `conversations`, so SQL
+spells the thread table `record.conversations`. The schema name says what the
+whole of it is; the table name says what one entity is: a conversation is a
+durable thread between a user and exactly one agent, spanning sessions, and a
+session is one connection episode from one device. This page keeps the name
+`conversations-schema.md`, and so do the command that prints it, the config
+section that switches the store on and the events it emits, because those
+address the store from outside, where what a reader is after is the
+conversations in it.
 
 A `turns` row names both, which is what makes the session view and the thread
 view two readings of one set of rows rather than two stores: the turns of one
@@ -174,7 +178,7 @@ safely.
 
 ```bash
 psql "postgresql://vinga_ro@127.0.0.1:5432/vinga" \
-  -c 'select * from conversations.turns order by id desc limit 20'
+  -c 'select * from record.turns order by id desc limit 20'
 ```
 
 The role carries a `statement_timeout` and an

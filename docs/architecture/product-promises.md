@@ -132,7 +132,7 @@ states it rather than leaving it to be inferred:
   procedure is in the server README, under
   [When the server will not start](../../vinga-server/README.md#when-the-server-will-not-start),
   and is not restated here.
-- **Conversation history crossed the Postgres cutover only by manual
+- **The conversation record crossed the Postgres cutover only by manual
   archiving.** There was no export format for it and no importer; a
   deployment that wanted to keep what it recorded copied the SQLite
   file aside before the upgrade.

@@ -294,7 +294,7 @@ holds. The milestone that landed this ran the three steps above
 against a live development database stamped at the deleted revision
 and booted on the result.
 
-**What does not come across, stated plainly.** Conversation history is
+**What does not come across, stated plainly.** The conversation record is
 not migrated, exactly as it was not at the Postgres cutover. There is
 no export format for it and no importer, and inventing one for a
 pre-release store would be the migration tool the issue explicitly
@@ -314,3 +314,11 @@ without a further record.
 assertions move once, with this re-cut: the chain head becomes exactly
 `['1002_conversation_threads']` and the expected-tables list gains
 `conversations` and `conversation_milestones`.
+
+**The schema name moved inside this same reset window** (maintainer
+decision, 2026-08-28): the store's Postgres schema is renamed from
+`conversations` to `record`, so step 1 above names the `record` schema,
+and a database whose store still sits under the old name is not
+stranded at all but simply one whose `record` schema does not exist
+yet, which boot creates and migrates as it would on a blank database,
+leaving the old schema abandoned in place until an operator drops it.
