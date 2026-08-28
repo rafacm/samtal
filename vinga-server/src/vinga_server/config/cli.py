@@ -1197,9 +1197,11 @@ def _answer(response: httpx.Response, address: Address) -> object:
     it would put a middlebox's page where a configuration error belongs.
 
     Which of the two an answer is is decided by `_refusal` below, and
-    the decision is narrow on purpose: a JSON object with a string
-    `detail` in it is a shape anything in front of this API can write,
-    and this command prints what it is given.
+    the decision is narrow on purpose: only a validated
+    `application/problem+json` body whose status and title match the
+    response is relayed, because a JSON object with a string `detail`
+    in it is a shape anything in front of this API can write, and
+    every other body is suppressed for the fixed sentence.
     """
     payload = _payload(response)
     if response.is_success:

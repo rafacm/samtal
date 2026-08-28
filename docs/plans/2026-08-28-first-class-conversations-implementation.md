@@ -808,3 +808,13 @@ The command-spellings manifest moved with the round (`3989f347`), for
 line numbers alone: nothing about which commands exist changed.
 `CHANGELOG.md` is unchanged, because none of these findings changes what
 the milestone offers, only whether it is honest under contention.
+
+#### Re-review of the fixes
+
+A confirmation pass over the round's fixes (codex CLI 0.149.1, model
+gpt-5.6-terra, read-only, 2026-08-28, scoped to the five resolutions
+and the lock ordering). Verdict as received: mergeable after one P3,
+two docstrings still describing the pre-fix relay rule (`cli.py`'s
+answer narrative and the new test's opening sentence), both corrected
+in the change that records this pass. No defect in the fixes
+themselves was found.
