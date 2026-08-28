@@ -1112,7 +1112,7 @@ implementation-doc section when written.
   `docs/architecture/observability-surfaces.md` (the store row's
   erasure sentence and the open-items row), `CHANGELOG.md`.
 - [x] [**Threads readable**](2026-08-28-first-class-conversations-implementation.md#m3-threads-readable)
-  (PR TBD, branch `feature/conversations-m3`): the
+  (PR #335, branch `feature/conversations-m3`): the
   conversations API namespace (list, detail, dialogue turns, delete);
   the `conversation` CLI noun (`list`, `show`, `delete`); thread
   listing, detail and deletion in `threads.py`. Design footprint:
