@@ -1249,3 +1249,170 @@ A confirmation pass over the round's seven fixes (codex CLI 0.149.1,
 model gpt-5.6-terra, read-only, 2026-08-28, scoped to the resolutions
 with particular attention on the record boundary). Verdict as
 received: mergeable as is, no findings.
+
+## M5: recap milestones
+
+PR TBD.
+
+### What landed
+
+One ordering, and everything else follows from it: **what the user
+hears is what the store keeps, and the store keeps it only after they
+have heard it.**
+
+- **The offer.** `resume_conversation(conversation=X)` over the budget
+  stops installing the tail. It answers a fixed sentence putting the
+  two ways of picking a long thread up to the user, and `Resumption`
+  remembers the one conversation each agent has asked that question
+  about, beside the ids it offered and cleared by the same `forget()`
+  at every transition and by any newer search.
+- **`start_from`.** The two-value closed argument, on the tool's schema
+  and validated at the interception site. Honoured only against the
+  question this agent actually asked: anything else is one of two fixed
+  sentences, and neither of them moves anything.
+- **`recent`** hydrates the tail under the ordinary budget and stores
+  nothing, which is the milestone-4 resume with the question asked and
+  answered.
+- **`recap`** is the runtime's from the consent onward.
+  `Resumption.recap` reads the thread under `RECAP_INPUT_BUDGET_TOKENS`
+  and answers what was really read: the messages, the first and last
+  turn ids, and the checkpoint whose text was in the input.
+  `PipelineRuntime._summarized` runs one round against the active
+  agent's own provider with a fixed instruction under
+  `RECAP_ROUND_TIMEOUT_S`. The answer rides the transition to the
+  boundary, where `_speak_text` feeds it to the reply's own synthesis
+  path as one unit and returns when the audio has been paced out; only
+  then does `_store_recap` enqueue the checkpoint, on the durable path,
+  and wait `MILESTONE_ACKNOWLEDGEMENT_S` for the one thing that wait
+  decides, which is whether to say the row landed.
+- **Milestone-aware reading.** `threads.backlog` answers the latest
+  checkpoint and the turns after its coverage as one shape, and
+  `hydration.hydrated` pins the checkpoint's text as a head that
+  truncation may not reach. So the context installed the moment a recap
+  is made and the context rebuilt from the stored row a week later are
+  produced by the same function from the same inputs.
+- **The durable path.** `MilestoneRecord` beside `TurnRecord`, a
+  `Milestone` marker beside a `Turn` one, and `threads.checkpointed`
+  writing the row inside the marker's own transaction: the
+  acknowledgement, the dead-id rule, the incomplete latch and the text
+  switch all reach it because it is on the same path rather than beside
+  it.
+- **The API.** `GET /api/conversations/{conversation}` gains
+  `checkpoints`, and the `milestones` count it already answered is now
+  the length of that list rather than a second read.
+- **`milestone_recorded`,** emitted when the row lands: the thread's
+  identity and nothing else.
+- **The documents**: `docs/reference/conversations-schema.md` and
+  `docs/reference/events.md` and `docs/reference/api-openapi.json` (all
+  generated), `docs/concepts.md`, `docs/glossary.md`,
+  `vinga-server/README.md`, `CHANGELOG.md` and the command-spellings
+  manifest.
+
+### Deviations from the plan
+
+Eleven, each with its reason.
+
+1. **The recap is synthesized as one unit rather than sentence by
+   sentence.** The plan says the summarizer's text is fed to the
+   synthesis path verbatim, and this is what verbatim costs: the
+   sentence splitter normalizes whitespace, so a recap that went
+   through it would be stored as text the provider was never handed and
+   the byte-for-byte promise would hold only loosely. One synthesis
+   makes the equality true by construction, and a recap is a paragraph
+   rather than a reply.
+
+2. **`threads.Reads` gained no separate latest-milestone read.** The
+   plan asks for one. `backlog` has to read the checkpoint anyway,
+   because the checkpoint's `after_turn` is what bounds the turns it
+   selects, so a second door would be a second round trip for a value
+   the first one already has and a second place for the pair to be
+   right. The read is `threads.latest_milestone`, and it reaches the
+   resume path on `Backlog.milestone`.
+
+3. **The API detail gained `checkpoints` beside `milestones` rather
+   than replacing it.** Additive was the instruction, and the count was
+   documented as always zero, so replacing it was available and
+   declined: a client reading the count today keeps reading it. The
+   design rule the pair would otherwise break is kept by deriving one
+   from the other in the handler, so the two cannot disagree.
+
+4. **The failed-recap caveat rides the seed rather than a tool
+   result.** Milestone 4's own deviation 4, applied again for the same
+   reason: a successful move answers the model nothing, so the seeded
+   round is the only thing that can carry a caveat.
+
+5. **A consented recap gets its own seed, `RECAPPED_GREETING`.** The
+   plan does not say what the round after a recap is told. The resumed
+   greeting asks the agent to say in one sentence what the two of you
+   were talking about, which is precisely what has just been said out
+   loud; the one thing this round must not do is say it twice.
+
+6. **Two refusal sentences rather than one.** The plan names "the fixed
+   no-offer refusal". A `start_from` for a conversation nobody was
+   asked about and a `start_from` outside the two values are different
+   claims, and a sentence that covered both would tell the model
+   something untrue about one of them.
+
+7. **The coverage range is the hydrator's answer, not the recap
+   flow's.** The plan records `from_turn` and `after_turn` where the
+   recap is assembled. They are decided by the truncation, which is the
+   hydrator's, so `Hydrated` carries the ids of the oldest and newest
+   turn it actually rendered and `StoredTurn` carries its row id. The
+   recap flow copies them; nothing computes them twice.
+
+8. **`Recap` and `after_recap` live in `runtime/resumption.py`.** The
+   plan puts the recap flow in the runtime. What is in the runtime is
+   everything that needs a turn boundary: the round, the speaking and
+   the write. What a thread becomes under a budget was already this
+   module's in milestone 4, and the recap's input is that question
+   asked with a different budget.
+
+9. **`over_budget` means a turn was left out, never that the head was
+   large.** The flag is the recap-offer trigger, so a pinned checkpoint
+   that fills the budget on its own with no turns behind it must not
+   set it: offering a recap of nothing new is a question with no
+   answer.
+
+10. **The erasure and retention suites stopped planting checkpoint
+    rows.** Their helper said in as many words that it wrote rows "the
+    way milestone 5's flow will". The flow exists, so every checkpoint
+    in those suites is now written through the store, and the helper is
+    gone.
+
+11. **Two stale sentences from milestone 4 were corrected here.** The
+    glossary's handover entry still said the session transcript carries
+    across a switch, which the clean switch falsified; and the
+    poisoned-driver sentinel attached `list.append` as an event tap,
+    which is dropped with a warning because a tap is asked for `emit`,
+    so its hunt through the events asserted nothing. Both belong to
+    milestone 4's footprint and both are about claims this plan owns,
+    so they are fixed here and recorded rather than left.
+
+### Discoveries
+
+- **A `ScriptedLlm` serves the summarization round too.** The
+  summarizer is the active agent's own provider, so a consent reply is
+  one script of exactly three rounds: the tool call, the summary, and
+  the round seeded on the other side of the move. That makes the whole
+  flow drivable without a second double, and it makes the instruction
+  and the input the summarizer was shown assertable off `seen[1]`.
+
+- **"Stored after playback" is assertable at the voice.** `_speak`
+  appends a sentence to the reply only once every chunk has been paced
+  out, so a text the TTS double has finished yielding is a text the
+  user heard. The store double snapshots that list at the moment it is
+  handed a checkpoint, which turns the ordering from a promise into a
+  comparison.
+
+- **An event tap is asked for `emit`, and a callable is dropped with a
+  warning.** Two no-leak hunts in this plan attached `seen.append` and
+  then searched an empty list. Worth knowing before writing the next
+  one: the tap has to be an object, and the hunt should assert it
+  caught something before asserting what it did not catch.
+
+- **A recap of a recap has no textual trace of what it stands for.**
+  The transitive sentinel is the one erasure case where absence of the
+  string proves nothing: the descendant never quoted the turn, it
+  consumed the checkpoint that did. The lineage is the only thing that
+  can find it, which is why `parent` is written at recap time rather
+  than derived later.

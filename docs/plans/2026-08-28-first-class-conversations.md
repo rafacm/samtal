@@ -1138,7 +1138,8 @@ implementation-doc section when written.
   by `rg -in "conversation|resum" README.md vinga-server/README.md`
   with dispositions recorded), `CHANGELOG.md` (behavior change: the
   clean switch).
-- [ ] **Recap milestones** (branch `feature/conversations-m5`):
+- [x] [**Recap milestones**](2026-08-28-first-class-conversations-implementation.md#m5-recap-milestones)
+  (PR TBD, branch `feature/conversations-m5`):
   the recap offer, consent and decline flow; the
   summarization round with its bounds and fallback; milestone-aware
   hydration; milestones on the API detail; `milestone_recorded`.
