@@ -23,6 +23,11 @@ and the selection tools. What all three stop knowing:
 - **What a thread is called.** The earliest utterance stored on it,
   bounded. Content, and therefore under the text switch like the
   utterance it came from.
+- **What a checkpoint replaces.** A recap is recorded with the range of
+  turns it really read, and a thread that has one is read back as that
+  checkpoint plus what was said after it. Both halves of that rule live
+  here, so no caller can record a coverage the reads do not honour or
+  read a thread as though its recap covered more than it did.
 - **The retention ruleset**, whose unit is the thread rather than the
   session, and whose ordering between the three rules is the whole of
   why a live thread never loses its turns to an old session.
@@ -93,6 +98,7 @@ TITLE_CHARACTERS = 80
 # agent would be one edit away from naming it on a retained surface.
 NO_DEVICE = "the session this turn was spoken in understood no device"
 ANOTHER_AGENT = "this thread belongs to a different agent"
+NO_SUCH_THREAD = "there is no thread for this checkpoint to be recorded on"
 
 
 class MisattributedTurn(Exception):
@@ -278,6 +284,64 @@ def landed(connection: Any, landing: Landing) -> None:
     )
 
 
+@dataclass(frozen=True)
+class Checkpoint:
+    """One consented recap on its way into the store.
+
+    The range is `from_turn` through `after_turn` and both are required,
+    because what they are for is bounding a claim: a checkpoint that did
+    not say where its reading began would let hydration skip turns
+    nothing ever summarized. `parent` is the checkpoint whose text was
+    part of this recap's input, and null when none was.
+
+    `text` is nullable for the uniform reason every content column is,
+    and the flow that produces one cannot run with text off; the writer
+    applies the switch before it gets here, exactly as it does for a
+    turn's title.
+    """
+
+    conversation: str
+    from_turn: int
+    after_turn: int
+    parent: int | None
+    at: str
+    text: str | None
+
+
+def checkpointed(connection: Any, checkpoint: Checkpoint) -> None:
+    """Record one recap checkpoint on its thread, inside the caller's
+    transaction.
+
+    Refused for a thread with no row, and refused the way a
+    misattributed turn is: a checkpoint outside `conversations` is a row
+    retention can never reach, since every rule that deletes one reaches
+    it through the thread. The flow that calls this has just read the
+    thread out of this same store, so the refusal is a defect report
+    rather than a condition an operator configures around.
+
+    Nothing here moves `last_active_at`. A recap is not something the
+    user said, and the consent turn that produced it lands as a turn of
+    its own in this same transaction, which is what moves the stamp.
+    """
+    found = connection.execute(
+        select(conversations.c.id).where(
+            conversations.c.conversation == checkpoint.conversation
+        )
+    ).first()
+    if found is None:
+        raise MisattributedTurn(NO_SUCH_THREAD)
+    connection.execute(
+        conversation_milestones.insert().values(
+            conversation=checkpoint.conversation,
+            from_turn=checkpoint.from_turn,
+            after_turn=checkpoint.after_turn,
+            parent=checkpoint.parent,
+            created_at=checkpoint.at,
+            text=checkpoint.text,
+        )
+    )
+
+
 def flag_incomplete(connection: Any, threads: Iterable[str]) -> set[str]:
     """Say of every one of these threads that a write it needed was
     lost, and answer which of them there was a row to say it of.
@@ -424,22 +488,34 @@ def listed(
 def detail(connection: Any, conversation: str) -> dict[str, Any] | None:
     """One thread, whole, or None when no row of that id is here.
 
-    The counts are read in the caller's transaction with the row, so
-    they describe one snapshot rather than three moments of a thread
-    that may still be being spoken to.
+    The turn count and the checkpoints are read in the caller's
+    transaction with the row, so they describe one snapshot rather than
+    three moments of a thread that may still be being spoken to.
+
+    The checkpoints come back as rows rather than as a count, and the
+    caller derives the count from them: a thread accrues one per recap
+    somebody consented to, so the list is short by construction, and a
+    count read separately would be a second structure that has to agree
+    with the first.
     """
     found = connection.execute(
-        select(
-            *SUMMARY_COLUMNS,
-            _turn_count().label("turns"),
-            select(func.count())
-            .select_from(conversation_milestones)
-            .where(conversation_milestones.c.conversation == conversations.c.conversation)
-            .scalar_subquery()
-            .label("milestones"),
-        ).where(conversations.c.conversation == conversation)
+        select(*SUMMARY_COLUMNS, _turn_count().label("turns")).where(
+            conversations.c.conversation == conversation
+        )
     ).mappings().first()
-    return dict(found) if found is not None else None
+    if found is None:
+        return None
+    return {
+        **dict(found),
+        "checkpoints": [
+            dict(row)
+            for row in connection.execute(
+                select(conversation_milestones)
+                .where(conversation_milestones.c.conversation == conversation)
+                .order_by(conversation_milestones.c.id)
+            ).mappings()
+        ],
+    }
 
 
 def dialogue(
@@ -542,9 +618,30 @@ def candidates(connection: Any, agent: str, description: str) -> Candidates:
 
 
 @dataclass(frozen=True)
+class Milestone:
+    """One recap checkpoint, as a row.
+
+    Everything a reader of one needs: what it says, the range of turns
+    it may claim to have summarized, and the checkpoint whose text was
+    folded into it. The lineage is not navigation, it is provenance:
+    content that reached this row only through an earlier recap is still
+    this row's content, and erasure walks it for exactly that reason.
+    """
+
+    id: int
+    conversation: str
+    from_turn: int
+    after_turn: int
+    parent: int | None
+    created_at: str
+    text: str | None
+
+
+@dataclass(frozen=True)
 class Backlog:
     """One thread as the resume path needs it: who it belongs to,
-    whether its record is whole, and everything said on it oldest first.
+    whether its record is whole, the checkpoint standing in for its
+    older half, and everything said since, oldest first.
 
     The turns are already the hydrator's own type, because turning rows
     into them is reading the store and reading the store is this
@@ -557,28 +654,64 @@ class Backlog:
     a lost write left, which a resume conveys as a caveat: an
     acknowledgement speaks for one turn, and a hole in the middle of a
     thread is exactly what no per-turn answer can describe.
+
+    `milestone` and `turns` are one answer rather than two: where a
+    checkpoint stands, the turns are the ones after its coverage, and
+    the reader never has to know that the pair has to agree.
     """
 
     conversation: str
     agent: str
     incomplete: bool
+    milestone: Milestone | None = None
     turns: tuple[StoredTurn, ...] = ()
 
 
+def latest_milestone(connection: Any, conversation: str) -> Milestone | None:
+    """The newest recap checkpoint on this thread, or None.
+
+    Newest by row id, which is the order they were consented to in and
+    the order `ix_conversation_milestones_conversation` answers. Only
+    one is ever read: each recap folds the one before it into itself, so
+    the newest is the whole lineage said once.
+    """
+    found = connection.execute(
+        select(conversation_milestones)
+        .where(conversation_milestones.c.conversation == conversation)
+        .order_by(conversation_milestones.c.id.desc())
+        .limit(1)
+    ).mappings().first()
+    return None if found is None else Milestone(**found)
+
+
 def backlog(connection: Any, conversation: str) -> Backlog | None:
-    """Everything one thread holds, or None when no row of that id is
-    here.
+    """Everything one thread holds that a resume can use, or None when
+    no row of that id is here.
 
     None is the whole of what a deleted thread looks like from here, and
     it is also what an id nobody ever wrote looks like. The two are one
     answer on purpose: there is nothing to resume either way, and the
     caller says so in one sentence rather than guessing which happened.
 
-    Three statements rather than a join. A thread's turns are read in
-    one order and its calls in another, and a join would answer one row
-    per call with the turn's text repeated on each of them, which for a
-    long thread is the dialogue several times over on the wire for a
-    handful of names.
+    Where the thread has a checkpoint, the turns read are the ones after
+    its `after_turn` and the checkpoint stands for the rest. Turns at or
+    before its `from_turn` are outside its recorded coverage, and they
+    are gone from here exactly as oldest-first truncation would have
+    dropped them: the boundary is stated in the schema reference rather
+    than hidden.
+
+    A checkpoint whose text was never stored replaces nothing, so it is
+    not read as one and the whole thread comes back instead. That is the
+    uniform text-switch rule reaching the one row it can reach: the flow
+    that writes a checkpoint cannot run with text off, and a row written
+    before the switch moved would otherwise silently delete the turns it
+    can no longer describe.
+
+    Four statements rather than a join. A thread's turns are read in one
+    order and its calls in another, and a join would answer one row per
+    call with the turn's text repeated on each of them, which for a long
+    thread is the dialogue several times over on the wire for a handful
+    of names.
     """
     found = connection.execute(
         select(conversations.c.agent, conversations.c.incomplete).where(
@@ -587,18 +720,22 @@ def backlog(connection: Any, conversation: str) -> Backlog | None:
     ).first()
     if found is None:
         return None
+    milestone = latest_milestone(connection, conversation)
+    if milestone is not None and milestone.text is None:
+        milestone = None
+    criteria: list[ColumnElement[bool]] = [turns.c.conversation == conversation]
+    if milestone is not None:
+        criteria.append(turns.c.id > milestone.after_turn)
     spoken = connection.execute(
         select(turns.c.id, turns.c.heard, turns.c.reply)
-        .where(turns.c.conversation == conversation)
+        .where(*criteria)
         .order_by(turns.c.id)
     ).all()
     called: dict[int, list[str]] = {}
     for turn_id, name in connection.execute(
         select(tool_invocations.c.turn, tool_invocations.c.name)
         .where(
-            tool_invocations.c.turn.in_(
-                select(turns.c.id).where(turns.c.conversation == conversation)
-            ),
+            tool_invocations.c.turn.in_(select(turns.c.id).where(*criteria)),
             # A call the store could not name is left out rather than
             # rendered as a blank: the name is null under text-off and
             # for a call whose own name never parsed, and neither is
@@ -612,9 +749,13 @@ def backlog(connection: Any, conversation: str) -> Backlog | None:
         conversation=conversation,
         agent=found.agent,
         incomplete=bool(found.incomplete),
+        milestone=milestone,
         turns=tuple(
             StoredTurn(
-                heard=row.heard, reply=row.reply, tools=tuple(called.get(row.id, ()))
+                id=row.id,
+                heard=row.heard,
+                reply=row.reply,
+                tools=tuple(called.get(row.id, ())),
             )
             for row in spoken
         ),
@@ -1163,26 +1304,31 @@ __all__ = [
     "ANOTHER_AGENT",
     "EXCERPT_CHARACTERS",
     "NO_DEVICE",
+    "NO_SUCH_THREAD",
     "RESUME_CANDIDATES",
     "SUMMARY_COLUMNS",
     "TITLE_CHARACTERS",
     "Backlog",
     "Candidate",
     "Candidates",
+    "Checkpoint",
     "Erased",
     "Landing",
+    "Milestone",
     "MisattributedTurn",
     "Pruned",
     "Reads",
     "Unreadable",
     "backlog",
     "candidates",
+    "checkpointed",
     "detail",
     "dialogue",
     "erase_conversations",
     "erase_sessions",
     "flag_incomplete",
     "landed",
+    "latest_milestone",
     "listed",
     "prune",
     "selected",

@@ -1661,20 +1661,76 @@ class ConversationList(BaseModel):
     )
 
 
+class ConversationMilestone(BaseModel):
+    """One recap checkpoint on a thread.
+
+    What the agent said out loud when the user consented to a recap,
+    with the range of turns it summarized and the checkpoint it folded
+    into itself. The range is what keeps the claim honest: a recap
+    bounded by its own input budget records where its reading began, so
+    nothing here says it covers turns it never read.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: int = Field(
+        description=(
+            "The checkpoint's row id, and what a later checkpoint names as its "
+            "`parent` when it consumed this one."
+        )
+    )
+    from_turn: int = Field(
+        description=(
+            "The id of the first turn this recap actually read. Turns at or before "
+            "it are outside its coverage: they were dropped by the recap's own "
+            "input budget, exactly as truncation would have dropped them."
+        )
+    )
+    after_turn: int = Field(
+        description=(
+            "The id of the last turn it read. Rebuilding this thread's context "
+            "reads this checkpoint plus the turns with a greater id."
+        )
+    )
+    parent: int | None = Field(
+        description=(
+            "The checkpoint whose text was part of this recap's input, and null "
+            "when none was. Content that reached this row only through an earlier "
+            "recap is still this row's content, which is what makes erasure of it "
+            "transitive."
+        )
+    )
+    created_at: str = Field(
+        description="When the checkpoint was stored, as an ISO-8601 instant in UTC."
+    )
+    text: str | None = Field(
+        description=(
+            "The recap, byte for byte as it was spoken to the user. Conversation "
+            "content, so null where text storage was off, although the flow that "
+            "writes one cannot run with text off."
+        )
+    )
+
+
 class ConversationDetail(ConversationSummary):
     """One thread, whole: the summary's fields and what hangs off it.
 
-    The summary plus one count rather than a shape of its own, because
-    that is what it is: a thread carries no nested structure, so there
-    is nothing a listing leaves out except the checkpoints, which cost a
-    second count.
+    The summary plus its checkpoints, which is the one thing a listing
+    leaves out: a thread carries no other nested structure.
     """
 
     milestones: int = Field(
         description=(
-            "How many recap checkpoints this thread holds. Zero in this release "
-            "everywhere: the table exists and the flow that writes a row does not "
-            "ship yet."
+            "How many recap checkpoints this thread holds, which is the length of "
+            "`checkpoints` below and is answered beside it so a caller counting "
+            "them does not have to."
+        )
+    )
+    checkpoints: list[ConversationMilestone] = Field(
+        description=(
+            "The recap checkpoints themselves, oldest first. Short by construction: "
+            "one lands per recap the user consented to, and they are deleted with "
+            "the thread and with the content they summarized."
         )
     )
 
