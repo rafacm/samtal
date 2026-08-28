@@ -964,7 +964,7 @@ vinga-server/src/vinga_server/config/api.py:413  respell  vinga-server config de
 vinga-server/src/vinga_server/config/api.py:432  respell  vinga-server config list
 vinga-server/src/vinga_server/config/api.py:532  respell  vinga-server config reload
 vinga-server/src/vinga_server/config/api.py:533  respell  vinga-server config list
-vinga-server/src/vinga_server/config/cli.py:2205  respell  config list
+vinga-server/src/vinga_server/config/cli.py:2207  respell  config list
 vinga-server/src/vinga_server/config/docgen.py:198  respell  config schema
 vinga-server/src/vinga_server/config/docgen.py:587  respell  config schema
 vinga-server/src/vinga_server/config/loader.py:76  respell  vinga simulator run
