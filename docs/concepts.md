@@ -79,8 +79,8 @@ exists: a stored turn names both the session it was spoken in and the
 conversation it belongs to, threads can be listed, read and deleted
 over the API and from the command line, and an agent can find one of
 its own past threads by description and carry on with it where the
-deployment has switched resumption on. What is still **decided
-direction** (issue #190) is the recap. **Users** arrive in a
+deployment has switched resumption on, with a recap of it if the thread
+is too long to pick up whole and they say yes. **Users** arrive in a
 later stage, and the model leaves their slot open on purpose, which is
 **decided direction** (recorded on this page, 2026-08-21; no owning
 issue or decision record yet).
@@ -203,9 +203,10 @@ default by voice ("make Nadia the default agent on this device") is
 
 **Implemented today**: the session, the Conversation as a durable,
 agent-scoped thread, the stored record of all three, reading and
-deleting either entity, and resuming a thread by describing it (issues
-#120 and #190). **Decided direction** (issue #190): the recap, which is
-the one semantic below that says so.
+deleting either entity, resuming a thread by describing it, and the
+consented recap of one too long to resume whole (issues #120 and
+#190). What issue #190 leaves out of its own scope stays direction and
+says so where it appears below.
 
 The load-bearing distinction in the model is that a conversation and a
 session are different things.
@@ -310,9 +311,14 @@ The decided semantics, each with its owner:
   thread takes its turns out of whatever sessions they were spoken in
   and leaves those sessions standing with a gap, which is the opposite
   direction from deleting a session; neither ever comes back.
-- **A long thread gets a recap only by consent.** *Decided direction,
-  issue #190.* At milestones in a long thread the agent offers to
-  recap rather than silently compressing, and the user says yes. This
+- **A long thread gets a recap only by consent.** *Implemented today,
+  issue #190.* When a thread is longer than the agent can be given at
+  once, it offers a choice rather than silently compressing: a short
+  recap of the whole of it, or carrying on from the recent part. If the
+  user says yes, the agent speaks the recap itself and only then is it
+  kept, as a checkpoint the conversation is rebuilt from afterwards; a
+  recap the user did not hear to the end is never stored, and the next
+  resume offers the same choice again. Declining stores nothing. This
   replaces an earlier formulation on this page, which warned about
   length and offered to summarize and start fresh from the summary.
 - **Resumption is a deployment switch, and it needs the text.**

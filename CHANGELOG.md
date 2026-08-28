@@ -91,6 +91,31 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 - The `conversation_resumed` event: which thread was picked up, how
   many stored turns were rebuilt, how many could not be, and whether
   there was more of the thread than the budget had room for.
+- **A recap of a long conversation, only by consent** (#190). Where a
+  thread holds more than `resumption_budget_tokens` has room for,
+  `resume_conversation` no longer hands over its recent tail: it
+  answers with a choice for the agent to put to the user, and the
+  answer comes back as its new `start_from` argument. `recent` picks
+  the thread up from its recent turns and stores nothing. `recap` runs
+  one summarization round against the agent's own model, and the agent
+  speaks that summary out loud, word for word as the summarizer wrote
+  it. Only once the user has heard it to the end is it stored, as a row
+  in `conversation_milestones` recording the range of turns it really
+  read; every later resume of that thread is rebuilt from the
+  checkpoint plus what was said after it. A recap cut off by an
+  interruption, a voice that failed, a device that went away or a
+  database that refused is not stored, and the next resume offers the
+  same choice again; a summarization that failed or ran long falls back
+  to the recent turns with the agent told why. `start_from` is honoured
+  only for the conversation the tool actually offered the choice about.
+- Recap checkpoints are readable on `GET
+  /api/conversations/{conversation}`, which gains a `checkpoints` list
+  beside the `milestones` count it already answered: each carries its
+  id, the range of turns it covers, the checkpoint it consumed, when it
+  was stored, and its text.
+- The `milestone_recorded` event: a consented recap was stored as a
+  checkpoint on its thread. The thread's identity and nothing else,
+  because a recap is a summary of what a room said.
 - **The store's durable path**: a marker now commits conversation
   content and telemetry in two transactions with independent fates. A
   durable transaction that meets a transient database refusal is
