@@ -39,8 +39,15 @@ class StoredTurn:
     the words in it. `tools` carries the names of the calls that turn
     made, in the order the model issued them, with the ones the store
     could not name already left out.
+
+    `id` is the row's own, and it travels because a recap has to say
+    which turns it actually read: a checkpoint records the first and the
+    last, so a summary bounded by its input budget cannot claim coverage
+    of what it left out. Zero where a caller had no row to read one off,
+    which the identity column never produces.
     """
 
+    id: int = 0
     heard: str | None = None
     reply: str | None = None
     tools: tuple[str, ...] = ()
