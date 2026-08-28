@@ -646,6 +646,14 @@ class Reads:
     the same rule the reply path applies to a provider that fails: a
     type name says what went wrong, a message says what a stranger
     wrote.
+
+    The boundary is the whole call, opening and closing included.
+    Building an engine resolves the URL the settings name, and disposing
+    one closes the pool underneath it, so both of them are places a
+    driver speaks its own words; either outside the catch would be a
+    credential raised past a seam whose only reason to exist is that
+    nothing gets past it. So the engine is made inside the try, and its
+    disposal cannot replace an answer this class has already decided on.
     """
 
     def __init__(self, database: DatabaseConfig) -> None:
@@ -660,8 +668,14 @@ class Reads:
         return self._read(lambda connection: backlog(connection, conversation))
 
     def _read(self, ask: Callable[[Any], Any]) -> Any:
-        engine = read_engine(self._database)
+        # Null until there is one, so the disposal below knows whether
+        # there is anything to dispose: the engine is built inside the
+        # catch precisely because building one can fail, and a name the
+        # `finally` reached before the assignment would be the failure
+        # this arrangement exists to avoid.
+        engine: Any = None
         try:
+            engine = read_engine(self._database)
             with engine.connect() as connection:
                 return ask(connection)
         except Exception as exc:  # noqa: BLE001 - the whole point of the seam
@@ -671,7 +685,29 @@ class Reads:
             )
             return Unreadable(busy=is_busy(exc))
         finally:
+            self._dispose(engine)
+
+    def _dispose(self, engine: Any) -> None:
+        """Close the pool, and let nothing about the closing be the
+        answer.
+
+        A `finally` that raises replaces the value the block was
+        returning, so a driver failing on the way out would put its own
+        words where the fixed sentence had already been decided, and
+        would do it to a read that had otherwise succeeded. Swallowed by
+        class name here for that reason alone: what a caller is owed is
+        the answer to what it asked, and the pool it can no longer see
+        is this module's own business.
+        """
+        if engine is None:
+            return
+        try:
             engine.dispose()
+        except Exception as exc:  # noqa: BLE001 - a closing never becomes an answer
+            logger.warning(
+                "a conversation store connection could not be closed: %s",
+                type(exc).__name__,
+            )
 
 
 def _turn_count() -> Any:
