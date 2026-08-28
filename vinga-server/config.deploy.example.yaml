@@ -149,6 +149,11 @@ server:
   #   metrics: true
   #   text: true
   #   retention_days: 90
+  #   # Finding a past conversation by description and carrying on with
+  #   # it. Needs the two switches above, and is refused at boot without
+  #   # them.
+  #   resumption: false
+  #   resumption_budget_tokens: 6000
 
   # How long a shutdown waits for conversations in flight to finish
   # speaking. Set the orchestrator's grace period between SIGTERM and

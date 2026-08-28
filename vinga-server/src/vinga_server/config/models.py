@@ -407,6 +407,12 @@ class ConversationsConfig(BaseModel):
     which is the only policy layer this release has; per-user and
     per-agent controls are a stricter filter above this one when they
     arrive, never a replacement for it (#120).
+
+    `resumption` is the third switch and the only one that is not about
+    storage: it decides whether a past thread can be found and picked up
+    again by voice. It reads what the other two wrote, so it is refused
+    at boot in the two combinations where there would be nothing to read
+    (#190).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -430,6 +436,58 @@ class ConversationsConfig(BaseModel):
     # default: a store with no policy retains forever. The same number
     # the store itself defaults to, which its own tests pin.
     retention_days: int = Field(default=90, ge=0)
+
+    # Whether an agent can find one of its past threads by description
+    # and carry on with it. Off by default, so a deployment that records
+    # conversations does not thereby start reading them back: what a
+    # device says next is answered out of the session it is in unless
+    # somebody asks for more.
+    resumption: bool = False
+
+    # How much of a resumed thread is rebuilt into the model's context,
+    # in tokens. Approximate by design: what the hydrator counts is
+    # characters over a fixed estimate, and what it drops is whole stored
+    # turns, oldest first, so a reply is never rebuilt without the
+    # utterance it answered.
+    resumption_budget_tokens: int = Field(default=6000, ge=512)
+
+    @model_validator(mode="after")
+    def _check_resumption(self) -> "ConversationsConfig":
+        """Refuse the two combinations in which resumption could only
+        pretend.
+
+        Both pointers name the switch to turn on rather than the one to
+        turn off, which is the `FillerConfig` precedent applied here: the
+        sentence names both keys and both ways out, and the pointer names
+        the field a form would take an operator to. Two problems where
+        both are off, because both are true.
+        """
+        problems = [
+            FieldProblem(json_pointer((field,)), message)
+            for field, wanted, message in (
+                ("enabled", self.enabled, RESUMPTION_NEEDS_RECORDING),
+                ("text", self.text, RESUMPTION_NEEDS_TEXT),
+            )
+            if self.resumption and not wanted
+        ]
+        if problems:
+            raise FieldProblemsError(problems)
+        return self
+
+
+# What a resumption that could not work is refused with. Fixed sentences
+# naming the two keys and the two ways out, and no value: every word of
+# them is this repository's own.
+RESUMPTION_NEEDS_RECORDING = (
+    "conversations.resumption is on with conversations.enabled off; there is nothing "
+    "to resume where nothing is recorded, so switch conversations.enabled on or "
+    "conversations.resumption off"
+)
+RESUMPTION_NEEDS_TEXT = (
+    "conversations.resumption is on with conversations.text off; a thread cannot be "
+    "rebuilt from text that was never stored, so switch conversations.text on or "
+    "conversations.resumption off"
+)
 
 
 def url_problem(url: str, schemes: tuple[str, ...]) -> str | None:
