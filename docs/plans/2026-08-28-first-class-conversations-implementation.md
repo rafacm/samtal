@@ -1458,3 +1458,105 @@ Twelve, each with its reason.
   consumed the checkpoint that did. The lineage is the only thing that
   can find it, which is why `parent` is written at recap time rather
   than derived later.
+
+### PR review round
+
+External review of PR #338 (diff `main...43f44c57`), 2026-08-28.
+Backend: codex CLI 0.149.1, model `gpt-5.6-sol`, read-only sandbox,
+runtime 7m02s. Verdict as received: mergeable after the listed fixes.
+Three findings, two P1 and one P2. All valid, all accepted. Condensed
+but faithful, each with its resolution:
+
+1. **P1: a recap can restore content after its source session is
+   erased.** `Resumption.recap` reads the thread, but the checkpoint is
+   written only after the summarization round and the playback; in that
+   interval `threads.erase_sessions` can delete the covered turns and
+   their milestone lineage, and `checkpointed` verified only that the
+   conversation row existed, so a live thread accepted a recap
+   containing erased text and handed it back on every later resume.
+   Carry the summarized provenance on the transient record and verify
+   it inside `checkpointed`'s own transaction, refusing with a fixed
+   value-free sentence when it changed. Add the interleaving test.
+
+   *Resolution*: accepted, `36b61d02`, with the tests in `be5deab8`.
+   `Recap`, `MilestoneRecord` and `threads.Checkpoint` carry `covered`,
+   the ids of every turn inside the claim, and `checkpointed` asks in
+   its own transaction whether all of them are still on this thread and
+   whether the parent checkpoint still is. Either answer refuses with
+   `PROVENANCE_GONE`, which fails the marker: the batch is dropped and
+   counted, the handle answers false, and `_store_recap` already reads
+   that as nothing stored, so the next resume offers the choice again.
+   The user heard the recap, which no erasure can unspeak; none of it
+   persists.
+
+   Two deviations, both narrowing rather than widening. **The row's
+   range is derived from the ids rather than carried beside them**: the
+   prescription allowed either the covered ids or the range plus the
+   parent, and carrying both would be two structures that have to
+   agree, so `from_turn` and `after_turn` are now the ends of `covered`
+   and are computed where the row is written. **The interleaving is
+   arranged at the store's own seams rather than by holding the
+   voice.** The prescribed shape pauses playback with the `HeldTts`
+   double, which lives in a suite with no database behind it; a session
+   driven through `drive_reply` never opens a session row, so a real
+   store would drop the checkpoint for a reason that has nothing to do
+   with this finding and the case would pass green while proving
+   nothing. So the two cases live in the erasure suite, where the store
+   is real and the deletion goes through the real route: the recap is
+   read through the production door (`Resumption` over `threads.Reads`)
+   at the moment the runtime reads it, the session is erased through
+   `DELETE /sessions/{id}` while the thread keeps another session's
+   turns, and the write is attempted afterwards. That is the same
+   interval, made out of the same two facts, and it fails against the
+   pre-fix code on both arms.
+
+2. **P1: the rename's upgrade story overclaims on least-privilege
+   deployments.** The changelog and the record's addendum said boot
+   creates the `record` schema automatically. The supported server role
+   has no database-level `CREATE`, so a deployment provisioned by the
+   previous init file refuses to boot when `record` is absent, and even
+   an owner-role deployment that does auto-create gets no `vinga_ro`
+   grants on it. Make the documented order "rerun the updated
+   `deploy/postgres-init.sql`, then boot", name the boot refusal as
+   what a skipped rerun meets, and add the provisioning case; do not
+   build a privileged upgrade mechanism.
+
+   *Resolution*: accepted, `725790f4`, with the case in `2d854bb0`, in
+   the prescribed form and with nothing added to the code. The
+   changelog's rename entry, the record's 2026-08-28 addendum and the
+   README's provisioning prose each state the two steps in that order
+   and each name the refusal. The new provisioning case builds the
+   previous file's shape (`domain` and `conversations`, owned by the
+   server role, the analyst granted on the store's old home), asserts
+   that the domain half migrates and the record half refuses with
+   `db.UNREACHABLE`, reruns the committed file, and asserts the record
+   half migrates and `vinga_ro` reads every table of it. One deviation:
+   the previous shape is written in the test rather than kept as a
+   retired copy of the file, because what is upgraded from is a
+   released shape and a second committed init file would be a second
+   thing to keep honest.
+
+3. **P2: `from_turn` coverage documented exclusively and implemented
+   inclusively.** Hydration assigns `from_turn` the oldest turn it
+   rendered and erasure treats the range inclusively, while the schema
+   comment, the API description and the generated prose said everything
+   "at or before" it was outside the coverage. Define coverage as the
+   inclusive `[from_turn, after_turn]` everywhere, correct the plan's
+   contradictory sentences, and regenerate the two documents.
+
+   *Resolution*: accepted, `0fa96da6`, in the prescribed form. The
+   schema comments and the baseline's verbatim copies, both model
+   descriptions, the docgen paragraph and `threads.backlog` now say the
+   one definition: only ids strictly below `from_turn` were truncated.
+   `docs/reference/conversations-schema.md` and
+   `docs/reference/api-openapi.json` are regenerated from them.
+
+   **The plan is corrected in place**, which is the exception this
+   round takes to the rule that a plan is a record of what was decided.
+   The sentence at issue was self-contradictory rather than merely
+   overtaken: the same paragraph that defined coverage exclusively also
+   stated the erasure rule inclusively, so leaving it would leave a
+   reader with two incompatible definitions and no way to tell which
+   the code keeps. Both sites (the milestone-row paragraph and decision
+   9's resolution) carry a dated note saying what was corrected and
+   why.
