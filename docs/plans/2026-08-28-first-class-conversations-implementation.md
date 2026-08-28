@@ -85,18 +85,25 @@ Four, each with its reason.
    snapshot before, the refusal, the events, the rename and the
    documents after.
 
-2. **A landing that cannot name its agent or its device materializes no
-   thread row.** The plan makes `conversations.agent` and
-   `conversations.device` not null and says nothing about a turn that
-   has neither. `turns.agent` is nullable and `sessions.device` is
-   nullable, so the writer can be handed one. The runtime activates an
-   agent before it can produce a turn and a session knows its device
-   before it can build a runtime, so this is a defect's shape rather
-   than a configuration's; `threads.landed` therefore stores the turn
-   and leaves the thread rowless, which is exactly the state a thread
-   has before its first turn and which every reader already handles.
-   The alternative, inserting a row with an invented agent, would put a
-   lie in a column that is about to be the resume key.
+2. **A landing that cannot be attributed is refused, and its turn is
+   dropped with the marker's batch.** The plan makes
+   `conversations.agent` and `conversations.device` not null and says
+   nothing about a turn that has neither, so the milestone had to
+   decide. It decided twice. The first answer was to store the turn and
+   leave the thread rowless, on the reasoning that a rowless thread is
+   exactly the state a thread has before its first turn and that
+   inventing an agent would put a lie in the column that is about to be
+   the resume key. The PR review round below found what that reasoning
+   missed: retention reaches turns only through their conversation row
+   and keeps every session a surviving turn names, so a rowless turn
+   and the session under it are unprunable forever. The shipped answer
+   is the reverse of the first: the owning agent is required in the type
+   (`TurnRecord`, `TurnUnderway`, `Landing`), and a session that
+   understood no device or a thread that belongs to another agent
+   raises out of the writer's transaction, so the batch rolls back and
+   is counted exactly as any other failed durable write. Losing a turn
+   is recoverable and reported; storing one nothing can ever delete is
+   not.
 
 3. **The turn responses gained `conversation` with the column rather
    than with the rename.** The plan lists it under the rename. The
@@ -141,3 +148,102 @@ Four, each with its reason.
   different quantities, and an operator reading one number could not
   tell which. Both are carried; the milestone-count and the event-count
   tables in `test_event_baseline.py` move with them.
+
+### PR review round
+
+External review of PR #332 (diff `main...b0996912`), 2026-08-28.
+Backend: codex CLI 0.149.1, model `gpt-5.6-sol`, read-only sandbox,
+runtime 6m04s. Verdict as received: mergeable after the listed fixes.
+Four findings, two P1 and two P2: one defect in the write path and
+three maintained documents this milestone falsified and did not move.
+All valid, all accepted. Condensed but faithful, each with its
+resolution:
+
+1. **P1: threadless turns can become permanently unprunable.** The
+   writer inserts the turn before `threads.landed`, and `landed`
+   returned silently when the agent or the device was absent, so the
+   turn committed with no conversation row. Retention selects turns
+   only through conversation rows and keeps every session a turn still
+   references, so the malformed row and its session survive every
+   window forever. Existing conversations also accepted turns stamped
+   with a different agent, because `landed` looked the thread up by its
+   id alone. Make the owning agent required, refuse a missing initial
+   device and a mismatched agent with a fixed value-free internal
+   failure that rolls back that marker's durable work, and add refusal
+   tests proving no orphan or cross-agent turn ever commits.
+
+   *Resolution*: accepted, `5db7cfc6`, and it supersedes deviation 2
+   above, which is rewritten to record the reversal rather than left
+   claiming the storage that shipped. The agent is required in the type
+   on `TurnRecord`, `TurnUnderway` and `Landing`, which removes the
+   missing-agent case by construction and leaves two runtime shapes to
+   refuse: `threads.MisattributedTurn` is raised for a session that
+   understood no device and for a thread that already belongs to
+   another agent, out of the caller's transaction, so `_commit`'s
+   existing handler rolls the marker back and counts the batch through
+   the path every failed write already takes. Its two sentences are
+   module constants with no value in them, and what reaches an operator
+   is `WriteFailed(failure="MisattributedTurn")` and nothing else.
+   Three tests: a device-less session commits no turn and counts one
+   dropped, a thread refuses a turn stamped with another agent and is
+   left unmoved, and the refusal's report is hunted for a
+   credential-shaped sentinel planted in the agent, the transcript and
+   the reply across both log formats and both streams. Reinstating the
+   silent return reddens all three.
+
+   The `turns.agent` column stays nullable, deliberately. The record
+   boundary rules a missing agent out before a row is built, and
+   tightening the column would mean re-cutting a baseline this branch
+   has already cut once and stamped a database at, which is a
+   compatibility decision rather than a tidy-up.
+
+2. **P1: the standing compatibility promise still guarantees upgrades
+   from the deleted baseline.** `product-promises.md` names
+   `1001_postgres_conversations` as where "forward" starts for the
+   conversation record, which this branch deletes: the page promises
+   in-place upgrades from a baseline no image can read. Update the
+   floor to `1002_conversation_threads` and state that `1001` is the
+   recorded pre-beta reset the 2026-08-28 ADR addendum covers, cited
+   the way the page cites the other records.
+
+   *Resolution*: accepted, `f6b0634e`. The floor bullet names the
+   current baseline, says the conversation record's floor moved and
+   why, and links the addendum by anchor as the page links the ADR
+   itself. The worked example counts the priced exit as exercised three
+   times rather than twice, and the closing citation carries all three
+   addenda. A promise-page edit backed by a recorded decision, which is
+   the page's own rule for changing.
+
+3. **P2: the generated OpenAPI contract still advertises
+   `/conversations` for session reads.** The description source
+   describes the three reads under `/conversations`, and the stale
+   prose is in the committed `api-openapi.json`. Update the source,
+   regenerate, and add a contract assertion covering the top-level
+   namespace prose so it cannot drift silently again.
+
+   *Resolution*: accepted, `8d0171fc`. The source says `/sessions`, and
+   the paragraph now also says what a session is against the thread a
+   turn carries, with the thread's own namespace named as something
+   this build does not serve yet. The document is regenerated, and the
+   existing drift test compares it byte for byte. The new assertion is
+   derived
+   rather than listed: every path the prose spells in backticks must
+   have a first segment the document actually serves, so a namespace
+   arriving in a later milestone is described or caught rather than
+   pinned in two places. Restoring the old spelling reddens it.
+
+4. **P2: the maintained observability map still describes session-age
+   retention.** The store row in `observability-surfaces.md` predates
+   this PR. Update it for the new entities and the three-rule
+   thread-aware retention, while leaving the erasure API clearly marked
+   as landing with the next milestone.
+
+   *Resolution*: accepted, `8045313f`. The row names the conversation a
+   turn belongs to and the dormant place for recap milestones, states
+   the three rules with a thread's last activity as the measure, and
+   says that erasing a named session or thread has no command and no
+   endpoint here, with the later milestones of #190 owning those verbs.
+   No endpoint this branch does not serve is claimed. The page's own
+   rule that it repeats no column name is kept: the entities are
+   described, and the generated reference stays the place the columns
+   live.
