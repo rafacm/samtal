@@ -154,6 +154,29 @@ class TurnRecord:
     tools: tuple[ToolInvocation, ...] = ()
 
 
+@dataclass(frozen=True)
+class MilestoneRecord:
+    """One consented recap on its way to the store.
+
+    Beside `TurnRecord` rather than inside it, because it is not part of
+    a turn: the consent turn records what was said and what was replied
+    like any other, and this is the checkpoint that reply became. What
+    it carries is what the row keeps, which is the text and the claim
+    the text is allowed to make.
+
+    `text` is required and never null here, unlike the column: what
+    nulls a content column is the writer applying the storage switch,
+    and a recap with nothing in it is not a recap the runtime would have
+    spoken.
+    """
+
+    conversation: str
+    from_turn: int
+    after_turn: int
+    parent: int | None
+    text: str
+
+
 class Acknowledgement:
     """Whether one turn's durable transaction committed, waitable.
 
@@ -217,9 +240,17 @@ class TurnRecorder(Protocol):
     back, a consumer that is not a store hands back nothing, and the
     runtime keeps whichever it was given without ever waiting on it on
     the audio path. What waits is the resume, which must not read a
-    thread past its own writes."""
+    thread past its own writes.
+
+    A checkpoint goes through the same channel, because it is the same
+    kind of thing: conversation content, on the durable class, for one
+    session's thread. The one place it is different is where its handle
+    is waited on, which is the recap flow, once and after the user has
+    already heard the recap."""
 
     def record_turn(self, record: TurnRecord) -> "Acknowledgement | None": ...
+
+    def record_milestone(self, record: MilestoneRecord) -> "Acknowledgement | None": ...
 
 
 class TurnStore(Protocol):
@@ -232,6 +263,10 @@ class TurnStore(Protocol):
     invent it."""
 
     def record_turn(self, session_id: str, record: TurnRecord) -> Acknowledgement: ...
+
+    def record_milestone(
+        self, session_id: str, record: MilestoneRecord
+    ) -> Acknowledgement: ...
 
 
 @dataclass(frozen=True)
@@ -247,9 +282,13 @@ class SessionTurns:
     def record_turn(self, record: TurnRecord) -> Acknowledgement:
         return self.store.record_turn(self.session_id, record)
 
+    def record_milestone(self, record: MilestoneRecord) -> Acknowledgement:
+        return self.store.record_milestone(self.session_id, record)
+
 
 __all__ = [
     "Acknowledgement",
+    "MilestoneRecord",
     "SessionTurns",
     "StoredTurn",
     "ToolInvocation",
