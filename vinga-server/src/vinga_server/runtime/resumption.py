@@ -98,6 +98,9 @@ class Resumption:
         # transition, so an id never outlives the conversation it was
         # offered in.
         self._offered: dict[str, tuple[str, ...]] = {}
+        # One search at a time for this session, which is what makes
+        # "last" mean the last one the model asked for. See `described`.
+        self._searching = asyncio.Lock()
 
     async def described(self, agent: str, description: str) -> str:
         """Search, and answer what the model reads out.
@@ -106,18 +109,34 @@ class Resumption:
         dead end: the newest threads come back with a line saying so, so
         a user who described it badly can still recognize it, and a
         thread that scored nothing is still one they can pick.
+
+        Searches are serialized, which is what makes the state below say
+        what it claims to. A round may issue several of these and the
+        tool loop runs them together, so two of them race to replace the
+        offer; whichever database read finished first would lose, and
+        the ids a selection is then honored against would be decided by
+        how quickly two queries came back rather than by which search
+        the model asked for last. The lock is the session's rather than
+        the agent's because a session has one agent talking at a time,
+        so the two are the same lock with one fewer thing in it. What it
+        costs is one slow read delaying the next; both are still bounded
+        by the tool timeout above them, so a database thinking about it
+        is a tool that answered a sentence either way.
         """
-        answer = await self._ask(lambda: self._reads.candidates(agent, description))
-        if isinstance(answer, str):
-            return answer
-        if not answer.found:
-            self._offered.pop(agent, None)
-            return builtin.NOTHING_TO_RESUME
-        self._offered[agent] = tuple(one.conversation for one in answer.found)
-        return builtin.candidate_list(
-            builtin.CANDIDATES_FOUND if answer.matched else builtin.CANDIDATES_UNMATCHED,
-            answer.found,
-        )
+        async with self._searching:
+            answer = await self._ask(lambda: self._reads.candidates(agent, description))
+            if isinstance(answer, str):
+                return answer
+            if not answer.found:
+                self._offered.pop(agent, None)
+                return builtin.NOTHING_TO_RESUME
+            self._offered[agent] = tuple(one.conversation for one in answer.found)
+            return builtin.candidate_list(
+                builtin.CANDIDATES_FOUND
+                if answer.matched
+                else builtin.CANDIDATES_UNMATCHED,
+                answer.found,
+            )
 
     def offers(self, agent: str, conversation: str) -> bool:
         """Whether this agent may pick this conversation, which it may
