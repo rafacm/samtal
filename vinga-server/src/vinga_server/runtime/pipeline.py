@@ -356,6 +356,10 @@ class PipelineRuntime:
       into the store, absent where the deployment did not ask for
       resumption, which is what makes both conversation tools answer a
       spoken refusal instead of moving anything.
+    - `_acknowledged`: the store's handle for the last turn recorded on
+      each thread, written where a turn is handed over and read only by
+      a resume about to rebuild that thread. Never waited on anywhere
+      else, which is what keeps the recording path non-blocking.
     - `_llm_round`: reset per reply, counted up per round, read by the
       watchdog's retry line and by `llm_round`, which is what makes the
       generation after a handover a round of its own.
@@ -1432,7 +1436,9 @@ class PipelineRuntime:
 
         transition: _Transition | None = None
         for order, (slot, call) in enumerate(moves):
-            moving, refusal = await self._move(call, switches_left, order)
+            moving, refusal = await self._move(
+                call, switches_left, order, transition is not None
+            )
             if refusal is not None:
                 results.append(refusal)
                 # No duration: nothing ran, and the refusal is what the
@@ -1466,7 +1472,7 @@ class PipelineRuntime:
         return isinstance(chosen, str) and bool(chosen.strip())
 
     async def _move(
-        self, call: ToolCall, switches_left: int, order: int
+        self, call: ToolCall, switches_left: int, order: int, moved: bool
     ) -> tuple["_Transition | None", ToolResult | None]:
         """One move, as either the transition it is or the refusal it
         gets. Exactly one of the two comes back.
@@ -1478,28 +1484,35 @@ class PipelineRuntime:
         answer is a sentence a user is owed out loud (#190, decision
         11): a server that cannot resume anything, a conversation that
         is gone, an id nobody offered.
+
+        So do the two things they are told about a round that already
+        asked for something. A handover is refused for being the second
+        one the loop resolved, which is the merged rule and stays; a
+        selection is refused for arriving after a move that was actually
+        made, because "this reply has already moved" has to be true when
+        it is said.
         """
         if call.name == names.SWITCH_AGENT:
             refusal = self._refuse_handover(call, switches_left, order)
             if refusal is not None:
                 return None, refusal
             return _Transition(SWITCH_GREETING, agent=str(call.arguments["agent"])), None
-        answer = await self._select(call, switches_left, order)
+        answer = await self._select(call, switches_left, moved)
         if isinstance(answer, str):
             return None, ToolResult(call.id, answer, is_error=False)
         return answer, None
 
     async def _select(
-        self, call: ToolCall, switches_left: int, order: int
+        self, call: ToolCall, switches_left: int, moved: bool
     ) -> "_Transition | str":
         """Which thread this reply moves to, or the sentence saying why
         it does not.
 
-        The latch is the same one a handover shares, and the same one it
-        has always been: the first move of a reply wins. What a second
-        one is refused for is being second, whichever kind the first was.
+        The latch is the one a handover shares, and the same one it has
+        always been: the first move of a reply wins, whichever kind it
+        was, and `moved` is that fact from earlier in this round.
         """
-        if switches_left <= 0 or order > 0:
+        if switches_left <= 0 or moved:
             return builtin.ALREADY_MOVED
         if self._resumption is None:
             return builtin.RESUMPTION_UNAVAILABLE
