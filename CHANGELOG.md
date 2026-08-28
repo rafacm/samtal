@@ -20,6 +20,34 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 - The `conversations_pruned` event gains a `conversations` count beside
   its `sessions` count, because retention's unit is now the thread.
 - Turn responses on the API carry a `conversation` field.
+- **Erasing a recorded session on demand** (#190, #282). `DELETE
+  /api/sessions/{session}` erases one named session, and `DELETE
+  /api/sessions` with at least one of `session`, `device` and `before`
+  erases every session those selectors name, combined so that all of
+  them have to match; `before` is a UTC day and is strict, so a session
+  that began at any moment of the named day survives. Both run in one
+  transaction and answer the counts they took, per table. Erasure
+  outranks the copies the store derived: a conversation whose title
+  came from an erased turn is renamed from its earliest surviving turn
+  or loses its title, recap checkpoints whose coverage held an erased
+  turn are deleted along with everything descended from them,
+  `last_active_at` moves back when the turn that wrote it is gone, and
+  a conversation left with no turns is deleted whole. A session that is
+  still running when its row goes stops being recorded.
+- **A `session` CLI noun**: `vinga session list [--device MAC]
+  [--limit N]`, `vinga session show <session>`, `vinga session delete
+  <session>` and `vinga session purge [--session ID] [--device MAC]
+  [--before YYYY-MM-DD]`. All four are requests to the API and reach no
+  database of their own (#281, #282); the two erasures confirm at a
+  terminal and take `--force`. This replaces `vinga-server
+  conversations purge`, which was removed with the store's file.
+- **The store's durable path**: a marker now commits conversation
+  content and telemetry in two transactions with independent fates. A
+  durable transaction that meets a transient database refusal is
+  retried in place; a batch that is finally dropped marks the threads
+  it fed `conversations.incomplete`, so a resume can say the record has
+  gaps. The mark is deliberately outside the metrics switch, which
+  zeroes `sessions.dropped`.
 
 ### Changed
 
@@ -50,6 +78,13 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   one the turn started with, rather than the one that finished the
   reply. A handover makes those different, and `turns.legs` is where a
   split reply's per-agent shares live.
+- The cli-guide's noun-naming rule keeps its wording and loses its
+  example: `sessions list` was the spelling it illustrated a plural
+  noun with, and the noun it named is now `session`, singular, because
+  it takes `show` and `delete`. The two merged plural command groups
+  (`conversations`, `events`) address no entry and keep their names.
+  The reasoning is in
+  `docs/plans/2026-08-28-first-class-conversations.md`.
 
 ### Removed
 

@@ -67,10 +67,26 @@ storage on a device a household shares stores what guests say to it, which is
 the same statement the capture documentation makes about audio. Attributing a
 session on a shared device to one member needs voiceprint identification,
 which does not exist here yet, so the units deletion is expressed in are the
-conversation and the session: the first is what retention takes whole, and
-both are what the erasure API will address. Erasing either on demand is not
-enforceable in this release at all, and the section below says what a
-deployment has instead.
+conversation and the session: the first is what retention takes whole, and the
+second is what the erasure endpoints below address.
+
+What a marker writes is two transactions rather than one, and which one a row
+is in is what it is for. The durable half holds the session row, the
+conversations, the turns and their invocations; the lossy half holds the
+`events` rows. A durable transaction that fails is retried in place a few
+times when the failure is one the database says may simply be made again, and
+an events transaction that fails drops and counts its events in
+`sessions.dropped` without touching a turn.
+
+A durable batch that is finally dropped is not silent. The threads it fed are
+marked `incomplete`, in a transaction of their own, retried at every later
+marker and at the session's close, so a resume can say the record has gaps.
+Two bounds are worth stating. A thread whose very first turn was the dropped
+batch has no row to mark and none is created: an empty thread would be listed
+and offered as something to resume with no dialogue behind it, so the mark
+waits for the thread's first turn that does land. And if the database never
+recovers before the process ends, neither the tail turns nor the mark persist,
+and the stored thread simply ends earlier than the conversation did.
 
 ## Retention and deletion
 
@@ -95,20 +111,31 @@ Turns are deleted here and nowhere else. A deployment that never resumes a
 conversation sees what it saw before: a thread never spans sessions there, so
 its age and its session's coincide and the pass takes them together.
 
-Deletion on demand is not something this release has a command for.
-`vinga-server conversations purge` was one and is gone (#282), because it
-reached the store's file directly and that is not a thing a command can do
-once the store is a database elsewhere; erasing a named session or a named
-conversation returns as an act of the API, with a CLI verb in front of it
-(#190). Until then the window above is the whole of the deletion policy, and a
-deployment that has to erase something now does it in SQL, as the server role:
-`delete from conversations.turns where session = ...` and the same predicate
-against `tool_invocations` and `events`, then the `sessions` row, in one
-transaction, because a session's rows go together or the deletion leaves
-children pointing at nothing. A `conversations` row whose every turn is gone
-that way should go with them, since a thread with no turns is a title and two
-timestamps. A session that is still running when its row goes stops being
-recorded, because the writer finds the row gone at its next turn. Capture
+Deletion on demand is an act of the API. `DELETE /api/sessions/{session}`
+erases one named session, and `DELETE /api/sessions` with at least one of
+`session`, `device` and `before` erases every session those selectors name,
+combined so that all of them have to match; `before` is a UTC day and is
+strict, so a session that began at any moment of the named day survives it.
+Both answer the counts they took, per table. The CLI verbs in front of them
+are `vinga session delete` and `vinga session purge`, which are remote callers
+and reach no database of their own (#281, #282). `vinga-server conversations
+purge` was the command this replaces and is gone.
+
+One transaction, and erasure outranks every copy the store derived from what
+is going. A session's turns are deleted wherever their conversation is, so a
+thread that spans sessions honestly keeps a gap rather than keeping dialogue
+somebody asked to have removed. In the same transaction: a conversation whose
+title came from an erased turn is renamed from its earliest surviving turn or
+loses its title; every `conversation_milestones` row whose recorded coverage
+held an erased turn is deleted, and so is every row descended from it through
+`parent`, because a summary of erased content is that content however it
+arrived; `last_active_at` moves back when the turn that wrote it is gone, to
+the latest fact the store still holds about the survivors, which is when their
+sessions began; and a conversation left with no turns is deleted whole, since
+what would be left is a title and two timestamps.
+
+A session that is still running when its row goes stops being recorded,
+because the writer confirms the row at every marker and finds it gone. Capture
 files are a separate instrument and are never touched by any of it; the
 session id is the correlation key for whoever needs to remove the matching
 triplet.
