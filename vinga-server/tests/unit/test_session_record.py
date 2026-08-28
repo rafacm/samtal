@@ -169,6 +169,17 @@ def only_record(spy: SpyStore) -> TurnRecord:
     return spy.records[0][1]
 
 
+def both_records(spy: SpyStore) -> tuple[TurnRecord, TurnRecord]:
+    """The two records a reply that moved leaves behind.
+
+    The turn that asked, on the thread it was asked on, and the turn the
+    move opened on the other side. In this order because the first one
+    is finished at the boundary, before anything is rebound, and the
+    second when the reply itself ends."""
+    assert len(spy.records) == 2, f"expected two records, got {len(spy.records)}"
+    return spy.records[0][1], spy.records[1][1]
+
+
 def heard_config(text: str) -> Config:
     """The suite's configuration, with the ASR answering this
     transcript."""
@@ -357,12 +368,20 @@ async def test_the_transcription_this_turn_ran_is_timed() -> None:
     assert record.heard == "turn it on"
 
 
-# The legs a handover leaves
+# What a handover records on each side of itself
 
 
-async def test_a_handover_records_a_leg_per_agent_with_its_own_tokens() -> None:
-    """A turn's totals blend agents that may run different models, so the
-    legs are where the attribution stays honest."""
+async def test_a_handover_records_a_turn_on_each_thread_with_its_own_tokens() -> None:
+    """A reply that hands the conversation on is spoken on two threads,
+    and each of them records its own share of it.
+
+    The turn that asked is finished at the boundary, so what it holds is
+    what was heard and said before the move and what that agent spent
+    saying it. The round the incoming agent is greeted with is the first
+    turn of its own thread, with nothing heard on it: the user spoke on
+    the thread they were handed off, and what they hear next is an
+    answer.
+    """
     poet = ScriptedLlm(
         [
             [
@@ -377,22 +396,25 @@ async def test_a_handover_records_a_leg_per_agent_with_its_own_tokens() -> None:
 
     await drive_reply(session, UTTERANCE)
 
-    record = only_record(spy)
+    asked, greeted = both_records(spy)
     # The agent that OWNS the turn, which is the one it started with:
-    # the record is assembled in the reply's `finally`, long after the
-    # handover moved the active agent, and the legs below are where the
-    # per-agent truth of a split reply lives.
-    assert record.agent == "poet"
-    assert record.reply == "One moment. Tutor here."
-    assert [(leg.agent, leg.text) for leg in record.legs] == [
-        ("poet", "One moment."),
-        ("tutor", "Tutor here."),
-    ]
-    assert [(leg.input_tokens, leg.output_tokens) for leg in record.legs] == [(5, 1), (7, 2)]
-    # The totals are the legs summed, and the rounds are counted across
-    # the whole reply rather than per agent.
-    assert (record.input_tokens, record.output_tokens) == (12, 3)
-    assert record.rounds == 2
+    # the record is finished after the handover moved the active agent,
+    # and reading the pair there would file this turn under the agent
+    # the user was handed to.
+    assert asked.agent == "poet"
+    assert asked.reply == "One moment."
+    assert [(leg.agent, leg.text) for leg in asked.legs] == [("poet", "One moment.")]
+    assert [(leg.input_tokens, leg.output_tokens) for leg in asked.legs] == [(5, 1)]
+    assert (asked.input_tokens, asked.output_tokens) == (5, 1)
+    assert asked.rounds == 1
+    # And the other side, which is a turn of its own on a thread of its
+    # own: nothing was heard on it, because what the user said was said
+    # before the move.
+    assert (greeted.agent, greeted.heard, greeted.reply) == ("tutor", None, "Tutor here.")
+    assert (greeted.input_tokens, greeted.output_tokens) == (7, 2)
+    assert greeted.rounds == 1
+    assert greeted.legs == ()
+    assert greeted.conversation != asked.conversation
 
 
 async def test_a_silent_leg_is_still_a_leg() -> None:
@@ -406,12 +428,12 @@ async def test_a_silent_leg_is_still_a_leg() -> None:
 
     await drive_reply(session, UTTERANCE)
 
-    record = only_record(spy)
-    assert [(leg.agent, leg.text, leg.input_tokens) for leg in record.legs] == [
-        ("poet", None, 5),
-        ("tutor", "Tutor here.", None),
+    asked, greeted = both_records(spy)
+    assert [(leg.agent, leg.text, leg.input_tokens) for leg in asked.legs] == [
+        ("poet", None, 5)
     ]
-    assert record.reply == "Tutor here."
+    assert asked.reply is None
+    assert greeted.reply == "Tutor here."
 
 
 # Which thread a turn belongs to
@@ -442,9 +464,9 @@ async def test_a_handover_turn_belongs_to_the_thread_it_started_on(
 
     The active agent moves mid-reply, so a record that read the pair
     when the reply ended would file the handover turn under the agent
-    the user was handed TO, on a thread that turn did not begin. The
-    legs still carry both agents, which is where a split reply's truth
-    belongs.
+    the user was handed TO, on a thread that turn did not begin. What
+    that agent then says is a turn of its own, on its own thread, so
+    neither thread is left holding the other's words.
     """
     session, spy, _ = recording_session(
         mac=BOTH_MAC, scripts=a_handover_to_tutor(preamble)
@@ -452,14 +474,18 @@ async def test_a_handover_turn_belongs_to_the_thread_it_started_on(
 
     await drive_reply(session, UTTERANCE)
 
-    record = only_record(spy)
-    assert record.agent == "poet"
-    assert [leg.agent for leg in record.legs] == ["poet", "tutor"]
+    asked, greeted = both_records(spy)
+    assert (asked.agent, asked.heard) == ("poet", "hello")
+    assert [leg.agent for leg in asked.legs] == ["poet"]
     # And the thread is the one the turn opened on: the session is
     # talking as the tutor, on the tutor's own thread, by the time this
     # record landed.
     assert talking(session) == "tutor"
-    assert record.conversation != talking_thread(session)
+    assert asked.conversation != talking_thread(session)
+    # The greeting the tutor answered with is on the thread the session
+    # is talking on now, which is the tutor's.
+    assert (greeted.agent, greeted.conversation) == ("tutor", talking_thread(session))
+    assert greeted.reply == "Tutor here."
 
 
 async def test_each_agent_of_a_session_gets_a_thread_and_keeps_it() -> None:
@@ -481,10 +507,16 @@ async def test_each_agent_of_a_session_gets_a_thread_and_keeps_it() -> None:
     await drive_reply(session, UTTERANCE)
 
     assert poet != tutor
-    # Each turn is recorded on the thread it began on, and the second
-    # handover returns the session to the thread the first one left
-    # rather than minting a third.
-    assert [record.conversation for _, record in spy.records] == [poet, tutor]
+    # Each turn is recorded on the thread it was spoken on: the utterance
+    # on the thread that heard it, the greeting that answered the move on
+    # the thread it landed on. The second handover returns the session to
+    # the thread the first one left rather than minting a third.
+    assert [record.conversation for _, record in spy.records] == [
+        poet,
+        tutor,
+        tutor,
+        poet,
+    ]
     assert (talking(session), talking_thread(session)) == ("poet", poet)
 
 
@@ -603,7 +635,8 @@ async def test_a_successful_handover_is_recorded_with_no_result() -> None:
 
     await drive_reply(session, UTTERANCE)
 
-    (invocation,) = only_record(spy).tools
+    asked, _ = both_records(spy)
+    (invocation,) = asked.tools
     assert (invocation.source, invocation.name) == ("builtin", "switch_agent")
     assert (invocation.result, invocation.duration_ms) == (None, None)
     assert not invocation.is_error
@@ -620,12 +653,12 @@ async def test_two_switches_in_one_round_keep_the_models_positions() -> None:
 
     await drive_reply(session, UTTERANCE)
 
-    record = only_record(spy)
-    assert [(invocation.position, invocation.is_error) for invocation in record.tools] == [
+    asked, _ = both_records(spy)
+    assert [(invocation.position, invocation.is_error) for invocation in asked.tools] == [
         (0, False),
         (1, True),
     ]
-    assert "already been handed over" in (record.tools[1].result or "")
+    assert "already been handed over" in (asked.tools[1].result or "")
 
 
 # What the finally saw

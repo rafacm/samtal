@@ -186,6 +186,26 @@ def test_the_title_is_the_first_utterance(stores) -> None:
     assert row["title"] == "what is the weather like"
 
 
+def test_a_thread_opened_by_a_greeting_is_named_by_its_first_utterance(stores) -> None:
+    """A thread a session moved onto opens with the answer the move was
+    greeted with, and nothing was heard on that turn: the user spoke on
+    the thread they were moved off. So the name comes from the first
+    utterance the thread does hear, and a thread already holding a title
+    never takes another."""
+    store = stores()
+    store.start()
+    store.open_session("alpha", 100.0, MANIFEST)
+    store.record_turn("alpha", a_turn(thread("one"), heard=None))
+    store.record_turn("alpha", a_turn(thread("one"), heard="what is the weather like"))
+    store.record_turn("alpha", a_turn(thread("one"), heard="and tomorrow"))
+    store.close_session("alpha", duration_s=1.0, reason="client")
+    store.stop()
+
+    (row,) = rows("conversations")
+    assert row["title"] == "what is the weather like"
+    assert len(rows("turns")) == 3
+
+
 def test_a_long_first_utterance_is_truncated_to_a_title(stores) -> None:
     """A title is read aloud among candidates and printed in a table
     cell, and both of those are lines."""

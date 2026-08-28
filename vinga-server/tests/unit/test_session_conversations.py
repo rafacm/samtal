@@ -751,6 +751,86 @@ class Recorder:
         self.records.append(record)
 
 
+# What each thread is left holding
+
+
+def recording_session(script: ScriptedLlm, seam: Any) -> tuple[DeviceSession, Recorder]:
+    """A session that records, resumes through this seam, and speaks
+    into nothing."""
+    kept = Recorder()
+    session = session_for(
+        resuming(), POET_MAC, {"poet": script}, conversations=kept, threads=seam
+    )
+    with_device(session, POET_MAC)
+    session.websocket = cast(Any, _Quiet())
+    session.send_audio = _nothing  # type: ignore[method-assign]
+    session.runtime._speak = _spoken  # type: ignore[method-assign]
+    return session, kept
+
+
+async def test_a_resume_records_each_thread_with_what_was_said_on_it() -> None:
+    """The move is a boundary in the record as much as in the history.
+
+    One reply, two conversations: the utterance and the sentence that
+    answered it before the move happened on the thread the session was
+    on, and the round the move seeded happened on the thread it landed
+    on. A single record held across the boundary would file the second
+    on the first, which leaves the thread that was left holding a reply
+    nobody spoke there and the thread that was joined holding none of
+    its own.
+    """
+    poet = ScriptedLlm(
+        [
+            ["Let me look.", call("resume_conversation", conversation=GALAXY)],
+            "We were talking about galaxies.",
+        ]
+    )
+    session, kept = recording_session(
+        poet, StoredThreads(held={GALAXY: a_backlog(GALAXY)})
+    )
+    origin = talking_thread(session)
+    _offer(session, "poet", GALAXY)
+
+    await drive_reply(session, UTTERANCE)
+
+    assert talking_thread(session) == GALAXY
+    asked, seeded = kept.records
+    # The turn that asked, whole, on the thread it was asked on.
+    assert asked.conversation == origin
+    assert (asked.heard, asked.reply) == ("hello", "Let me look.")
+    assert [invocation.name for invocation in asked.tools] == ["resume_conversation"]
+    # And the resumed thread's own first turn of this session: an
+    # answer with nothing heard on it, because what the user said was
+    # said on the thread they were moved off.
+    assert seeded.conversation == GALAXY
+    assert (seeded.heard, seeded.reply) == (None, "We were talking about galaxies.")
+    assert seeded.tools == ()
+    assert seeded.at is not None and seeded.agent == "poet"
+
+
+async def test_a_fresh_conversation_records_its_greeting_on_itself() -> None:
+    """The same boundary for the other move that changes threads: the
+    turn that asked to start over stays on the conversation being left,
+    and the greeting opens the new one."""
+    poet = ScriptedLlm(
+        [[call("new_conversation")], "Starting fresh. What shall we talk about?"]
+    )
+    session, kept = recording_session(poet, StoredThreads())
+    origin = talking_thread(session)
+
+    await drive_reply(session, UTTERANCE)
+
+    fresh = talking_thread(session)
+    assert fresh is not None and fresh != origin
+    asked, seeded = kept.records
+    assert (asked.conversation, asked.heard, asked.reply) == (origin, "hello", None)
+    assert seeded.conversation == fresh
+    assert (seeded.heard, seeded.reply) == (
+        None,
+        "Starting fresh. What shall we talk about?",
+    )
+
+
 # Reading a thread the same session is still writing to
 
 
