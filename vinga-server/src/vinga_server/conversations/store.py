@@ -362,7 +362,11 @@ class ConversationStore:
         # Producer state, touched from the session loop and from the
         # writer thread (which decrements the in-flight count as it
         # consumes), so it is guarded rather than assumed single
-        # threaded.
+        # threaded. It is also what admission is decided under: every
+        # producer reads `_stopped` and puts its record on the queue
+        # holding this, and `stop()` sets the flag and queues the
+        # sentinel holding it too, so no record can enter behind a drain
+        # that has already finished.
         self._lock = threading.Lock()
         self._in_flight = 0
         self._opened_at: dict[str, float] = {}
@@ -410,13 +414,28 @@ class ConversationStore:
 
     def stop(self) -> None:
         """Accept nothing more, drain what is queued, and let go of the
-        connections. Idempotent: a second call has nothing to do."""
-        if self._stopped:
-            return
-        self._stopped = True
-        thread = self._thread
+        connections. Idempotent: a second call has nothing to do.
+
+        Refusing and queueing the sentinel happen under the producers'
+        own lock, and that is the whole of what makes the drain final. A
+        producer decides it is admitted and puts its record on the queue
+        under the same lock, so it is either in front of the sentinel and
+        answered by the drain, or after this and refused with an
+        acknowledgement that is already false. Between them there is no
+        third place for a record to land, which is where one used to:
+        behind a drain that had finished, holding a handle nothing would
+        ever settle.
+
+        The join is outside the lock, because the writer takes it every
+        time it writes a batch off."""
+        with self._lock:
+            if self._stopped:
+                return
+            self._stopped = True
+            thread = self._thread
+            if thread is not None:
+                self._queue.put(_Stop())
         if thread is not None:
-            self._queue.put(_Stop())
             thread.join(timeout=self._stop_timeout_s)
         # Disposed whether or not the thread came back. A writer still
         # wedged on a commit is a daemon thread in a process that is
@@ -433,12 +452,12 @@ class ConversationStore:
         `opened_at` is the session loop's clock reading at open, which is
         what every offset below is measured from and what aligns a row
         with the capture triplet of the same name."""
-        if self._stopped:
-            return
         with self._lock:
+            if self._stopped:
+                return
             self._opened_at[session_id] = opened_at
             self._dropped.setdefault(session_id, 0)
-        self._queue.put_nowait(Open(session_id, opened_at, dict(manifest)))
+            self._queue.put_nowait(Open(session_id, opened_at, dict(manifest)))
 
     def record_event(
         self, session_id: str, name: str, level: int, fields: dict[str, Any], at: float
@@ -446,10 +465,10 @@ class ConversationStore:
         """One structured event. The droppable class: refused beyond the
         in-flight bound, which is counted and reported once per session
         and lands on the session row at close."""
-        if self._stopped or not self._stores_events():
+        if not self._stores_events():
             return
         with self._lock:
-            if session_id not in self._opened_at:
+            if self._stopped or session_id not in self._opened_at:
                 return
             if self._in_flight >= MAX_EVENTS_IN_FLIGHT:
                 self._dropped[session_id] = self._dropped.get(session_id, 0) + 1
@@ -460,13 +479,13 @@ class ConversationStore:
                 self._in_flight += 1
                 first = False
                 t_ms = self._offset(session_id, at)
-        if t_ms is None:
-            if first:
-                events.emit(
-                    lambda: ConversationsDropped(session=SessionId(session_id))
+                self._queue.put_nowait(
+                    Event(session_id, t_ms, name, level, dict(fields))
                 )
-            return
-        self._queue.put_nowait(Event(session_id, t_ms, name, level, dict(fields)))
+        # Outside the lock, because reporting a drop is not admitting a
+        # record and the emitter is a stranger's code path.
+        if t_ms is None and first:
+            events.emit(lambda: ConversationsDropped(session=SessionId(session_id)))
 
     def record_turn(self, session_id: str, record: TurnRecord) -> Acknowledgement:
         """One completed turn. A control record and a marker: reaching it
@@ -484,16 +503,16 @@ class ConversationStore:
         A store that has already stopped answers a settled refusal
         rather than a handle nothing will ever settle."""
         acknowledgement = Acknowledgement()
-        if self._stopped:
-            acknowledgement.settle(False)
-            return acknowledgement
         with self._lock:
+            if self._stopped:
+                acknowledgement.settle(False)
+                return acknowledgement
             # A turn for a session this store never opened is refused by
             # the writer, which says so once. Stamping a zero rather than
             # asking for an offset there keeps that the writer's decision
             # instead of an exception raised on the session loop.
             t_ms = self._offset(session_id, record.at) if session_id in self._opened_at else 0
-        self._queue.put_nowait(Turn(session_id, record, t_ms, acknowledgement))
+            self._queue.put_nowait(Turn(session_id, record, t_ms, acknowledgement))
         return acknowledgement
 
     def close_session(
@@ -502,13 +521,13 @@ class ConversationStore:
         """End one session's record. A control record and the last
         marker: a dropped close would make the store unable to say what
         it lost."""
-        if self._stopped:
-            return
         with self._lock:
+            if self._stopped:
+                return
             dropped = self._dropped.pop(session_id, 0)
             self._opened_at.pop(session_id, None)
             self._warned.discard(session_id)
-        self._queue.put_nowait(Close(session_id, duration_s, reason, dropped))
+            self._queue.put_nowait(Close(session_id, duration_s, reason, dropped))
 
     def _stores_events(self) -> bool:
         """Whether an events row would land. One rule, consulted twice:
@@ -614,12 +633,14 @@ class ConversationStore:
         """Whatever arrived behind the stop sentinel, answered rather
         than left hanging.
 
-        `stop()` refuses new records before it queues the sentinel, so
-        this is a narrow race and not an ordinary path: a producer that
-        had already passed the check when the flag was set. Its turn is
-        not going to be written, and an acknowledgement nothing ever
-        settles is a caller waiting out its own bound for an answer that
-        exists."""
+        Nothing can, now that admission and the sentinel are taken under
+        one lock: a producer is either in front of the sentinel or
+        refused. This stays anyway, and the reason is the asymmetry
+        rather than a suspicion about the lock. It costs one look at an
+        empty queue, and what it answers for is a caller waiting out its
+        own bound, or forever, for an answer that exists. The queue is
+        also an injected seam, so what the writer finds behind the
+        sentinel is not a question this class alone decides."""
         while True:
             try:
                 item = self._queue.get_nowait()
