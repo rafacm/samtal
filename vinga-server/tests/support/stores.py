@@ -205,14 +205,45 @@ def a_backlog(
     agent: str = "poet",
     said: Sequence[tuple[str, str]] = (),
     incomplete: bool = False,
+    milestone: Any = None,
+    first_id: int = 1,
 ) -> Any:
+    """One thread as the store hands it back.
+
+    The turns are numbered from `first_id`, because a recap records the
+    range of ids it read and a suite about that range has to be able to
+    say which ids it means. `milestone` is the checkpoint standing in
+    front of them, and the pair is written the way the store answers it:
+    where there is a checkpoint, `said` is what came after its coverage.
+    """
     return threads.Backlog(
         conversation=conversation,
         agent=agent,
         incomplete=incomplete,
+        milestone=milestone,
         turns=tuple(
-            StoredTurn(heard=heard, reply=reply) for heard, reply in said
+            StoredTurn(id=first_id + index, heard=heard, reply=reply)
+            for index, (heard, reply) in enumerate(said)
         ),
+    )
+
+
+def a_milestone(
+    text: str = "we talked about galaxies",
+    id: int = 7,
+    from_turn: int = 1,
+    after_turn: int = 4,
+    parent: int | None = None,
+) -> Any:
+    """One recap checkpoint as a thread carries it."""
+    return threads.Milestone(
+        id=id,
+        conversation="",
+        from_turn=from_turn,
+        after_turn=after_turn,
+        parent=parent,
+        created_at="2026-08-20T10:00:00+00:00",
+        text=text,
     )
 
 

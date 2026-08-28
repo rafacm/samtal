@@ -9,7 +9,7 @@ The structured events are this server's observability surface
 ([ADR](../adr/2026-08-04-json-logs-are-the-observability-surface.md)), and
 they carry metadata and nothing else
 ([ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)).
-This document is that surface written down: 57 events in 82 variants. What was
+This document is that surface written down: 58 events in 83 variants. What was
 said in a conversation is in the conversation store instead, keyed by the same
 `session` ([its reference](conversations-schema.md)).
 
@@ -206,6 +206,7 @@ meets them, from a device's check-in to the server's own lifecycle surfaces.
 | `agent_said` | `vinga_server.session` | INFO | 1 |
 | `handover` | `vinga_server.session` | INFO | 1 |
 | `conversation_resumed` | `vinga_server.session` | INFO | 1 |
+| `milestone_recorded` | `vinga_server.session` | INFO | 1 |
 | `prompt_assembled` | `vinga_server.session` | INFO | 1 |
 | `llm_retry` | `vinga_server.session` | WARNING | 1 |
 | `llm_round` | `vinga_server.session` | INFO | 1 |
@@ -676,6 +677,30 @@ session %s: resumed conversation %s from %d stored turns
 | `turns` | `COUNT` | yes | no |  | How many stored turns were rebuilt into the model's context. A count and never the dialogue: what was said is the store's. |
 | `skipped` | `COUNT` | yes | no |  | How many stored turns could not be rebuilt because no text was kept for them, which is what a thread recorded under the stricter storage setting leaves behind. |
 | `over_budget` | `BOOL` | yes | no |  | Whether the thread held more than the hydration budget had room for, so what was rebuilt is its recent tail. |
+
+### `milestone_recorded`
+
+A consented recap is stored as a checkpoint on its thread, after the user has
+heard it. The thread's identity and nothing else: what the recap says is what
+a room said, so it is conversation content and belongs to the store.
+
+#### Variant 1: `vinga_server.session` at INFO
+
+```text
+session %s: recorded a recap milestone on conversation %s
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `session` (`ID`) | no | the `session_id` syntax |  |
+| 2 | `conversation` (`ID`) | no | the `conversation_id` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the checkpoint was recorded on. The identity and nothing else: a recap is a summary of what a room said, so it is conversation content and lives in the store under the text switch, never on a decision track. |
 
 ### `prompt_assembled`
 

@@ -87,16 +87,17 @@ def capture(
 
 def test_every_driver_names_a_path_of_its_own() -> None:
     """One driver per emit path, so a capture keyed by identity is a
-    capture of eighty-one paths rather than of however many survived a
+    capture of eighty-two paths rather than of however many survived a
     collision.
 
     Eighty since #283, when `BindingsSnapshotOnly` retired with the
-    file-existence probe that was the only thing able to emit it, and
+    file-existence probe that was the only thing able to emit it,
     eighty-one since #190 gave a reply a second kind of boundary to
-    move at."""
+    move at, and eighty-two since a consented recap became a checkpoint
+    worth announcing."""
     claimed = [driver.identity for driver in DRIVERS]
 
-    assert len(set(claimed)) == len(claimed) == 81
+    assert len(set(claimed)) == len(claimed) == 82
 
 
 def test_every_driven_path_produces_the_event_it_emits(
@@ -508,6 +509,9 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
                 "turns",
             ),
         ),
+    ),
+    "vinga_server.runtime.pipeline:PipelineRuntime._store_recap #1": (
+        ("MilestoneRecorded", ("conversation", "device", "event", "session")),
     ),
     "vinga_server.runtime.pipeline:PipelineRuntime._run_one #1": (
         (

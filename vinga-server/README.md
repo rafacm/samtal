@@ -2048,6 +2048,7 @@ This index is the other half: what exists, and when it fires.
 | `agent_said` | one agent's part of a reply |
 | `handover` | `switch_agent` succeeds |
 | `conversation_resumed` | a stored conversation is picked up again: how much of it was rebuilt, how much could not be, and whether there was more of it than the budget had room for |
+| `milestone_recorded` | a consented recap is stored as a checkpoint on its thread, after the user has heard it |
 | `prompt_assembled` | the know-how half of a prompt is assembled and cached, with each block's size by provenance |
 | `llm_retry` | the first-token watchdog cancels a stalled generation and retries the round once |
 | `llm_round` | a generation call finishes |

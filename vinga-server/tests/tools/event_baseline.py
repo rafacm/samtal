@@ -171,7 +171,7 @@ from vinga_server.config.loader import StorageError
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations import store as store_module
 from vinga_server.conversations import threads
-from vinga_server.conversations.records import ToolInvocation, TurnRecord
+from vinga_server.conversations.records import Acknowledgement, ToolInvocation, TurnRecord
 from vinga_server.conversations.store import ConversationStore
 from vinga_server.device.bindings import BoundNames, DeviceBindings
 from vinga_server.device.session import DeviceSession
@@ -750,6 +750,81 @@ def resuming() -> Any:
     )
 
 
+# A thread long enough that resuming it offers the recap choice, and the
+# session that answers it. Written down rather than migrated for the
+# reason above: what this driver is here for is the record the runtime
+# emits once the user has heard the recap.
+RECAPPED_THREAD = "4f0c1d2e3a4b5c6d7e8f90a1b2c3d4e5"
+
+
+async def drive_milestone_recorded(_: Path) -> None:
+    await run_reply(recapping(), "yes, recap it first")
+
+
+class _Checkpoints:
+    """Where the store would stand for a recap: turns are taken and
+    forgotten, and a checkpoint is answered with a handle that says it
+    landed, which is the one the runtime waits on before it says so."""
+
+    def record_turn(self, session_id: str, record: Any) -> None:
+        return None
+
+    def record_milestone(self, session_id: str, record: Any) -> Acknowledgement:
+        landed = Acknowledgement()
+        landed.settle(True)
+        return landed
+
+
+def recapping() -> Any:
+    """A session that has offered the choice about a long thread and is
+    answering it with a recap."""
+    poet = ScriptedLlm(
+        [
+            [
+                call(
+                    "resume_conversation",
+                    conversation=RECAPPED_THREAD,
+                    start_from="recap",
+                )
+            ],
+            "We talked about the galaxy and where it is going.",
+            "What would you like to pick up?",
+        ]
+    )
+    session = session_for(
+        base_config(
+            server={
+                "conversations": {
+                    "enabled": True,
+                    "resumption": True,
+                    "resumption_budget_tokens": 512,
+                }
+            }
+        ),
+        POET_MAC,
+        {"poet": poet},
+        conversations=_Checkpoints(),
+        threads=StoredThreads(
+            held={
+                RECAPPED_THREAD: a_backlog(
+                    RECAPPED_THREAD,
+                    said=[
+                        (f"utterance {index} " * 40, f"reply {index} " * 40)
+                        for index in range(8)
+                    ],
+                )
+            }
+        ),
+    )
+    # The offer and the question it asked, which the flow's own suites
+    # drive end to end; this driver is about the record at the end of
+    # it.
+    flow = session.runtime._resumption
+    flow._offered["poet"] = (RECAPPED_THREAD,)
+    flow.offer_choice("poet", RECAPPED_THREAD)
+    return session
+
+
 def handing_over() -> Any:
     scripts = {
         "poet": ScriptedLlm([["Handing you over.", call("switch_agent", agent="tutor")]]),
@@ -951,6 +1026,11 @@ SESSION_DRIVERS: tuple[Driver, ...] = (
         (PIPELINE, "PipelineRuntime._move_to", 2),
         drive_conversation_resumed,
         "conversation_resumed",
+    ),
+    Driver(
+        (PIPELINE, "PipelineRuntime._store_recap", 1),
+        drive_milestone_recorded,
+        "milestone_recorded",
     ),
     Driver((PIPELINE, "PipelineRuntime._run_one", 1), drive_tool_call, "tool_call"),
     Driver((TURNTAKING, "TurnTaking.finish_utterance", 1), drive_barge_in_manual, "barge_in"),
