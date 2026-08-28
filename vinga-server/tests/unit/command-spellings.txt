@@ -608,6 +608,7 @@ docs/plans/2026-08-26-postgres-stores-implementation.md:246  historical  set-sec
 docs/plans/2026-08-26-postgres-stores-implementation.md:321  historical  config schema and its loader
 docs/plans/2026-08-26-postgres-stores.md:28  historical  set-secret
 docs/plans/2026-08-26-postgres-stores.md:585  historical  set-secret
+docs/plans/2026-08-28-first-class-conversations-implementation.md:521  historical  vinga conversation
 docs/plans/2026-08-28-first-class-conversations.md:270  historical  vinga session list
 docs/plans/2026-08-28-first-class-conversations.md:271  historical  vinga session show
 docs/plans/2026-08-28-first-class-conversations.md:272  historical  vinga session delete

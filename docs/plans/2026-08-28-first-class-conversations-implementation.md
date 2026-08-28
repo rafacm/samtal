@@ -521,3 +521,157 @@ a marker's two transactions rather than once per marker. The
 command-spellings manifest moved with it, because the prose above the
 two spellings grew. `CHANGELOG.md` is unchanged: its durable-path entry
 describes the feature, not the ordering these fixes corrected.
+
+## M3: threads readable
+
+PR TBD.
+
+### What landed
+
+Four changes, in the order the commits tell it: the thread store's
+reads, the rule that keeps a deleted thread deleted, the namespace and
+the noun in front of it, and the documents.
+
+- **The thread store's reads.** `listed`, `detail` and `dialogue` for
+  the three shapes the namespace answers, and `candidates` for the
+  search milestone 4's resume tool will consume. They live in
+  `threads.py` for the reason the deletions do: the join topology is
+  that module's, and a caller that assembled a thread out of three
+  tables itself would be a second place for it to be right or wrong.
+  What the routes keep is the transport, which is the page, the cursor
+  and the body.
+- **Discovery matches.** `candidates` normalizes the description and
+  each thread's title and opening excerpt the same way (casefolded,
+  punctuation broken into whitespace, split), scores by how many of the
+  description's distinct tokens a thread carries, and orders by (score,
+  activity, id). The answer is a `Candidates`, which says whether
+  anything matched as well as what to offer, so nothing scoring is the
+  newest five with a caller that can say so rather than a dead end.
+- **The dead-id rule.** `store.erased()` publishes the threads a
+  deletion took to whichever writer is recording in this process; the
+  writer keeps the ids it has written a turn onto, and a turn for an id
+  in both sets is discarded at its next marker with its acknowledgement
+  resolved false. It is published from inside the deletion's
+  transaction, which holds the chain's advisory lock, so no writer is
+  inside a marker while it runs.
+- **The namespace.** `GET /conversations` with the keyset pair, `GET
+  /conversations/{conversation}`, `GET /conversations/{conversation}/turns`
+  and `DELETE /conversations/{conversation}`, registered through
+  `config/api.py`'s `_application()` like the session reads beside them.
+- **The noun.** `conversation list|show|delete` in the `GROUPS` and
+  `COMMANDS` registries, all API-client acts, the erasure registered
+  destructive. Both integration lanes gained a case for the three
+  verbs, and the live lane the refusal its family owes.
+- **The documents**: `docs/reference/api-openapi.json`,
+  `docs/reference/cli.md` (generated half), `docs/concepts.md`,
+  `docs/architecture/observability-surfaces.md`, `CHANGELOG.md`, the
+  package docstring and the command-spellings manifest.
+
+### Deviations from the plan
+
+Eight, each with its reason.
+
+1. **The endpoints, the CLI noun and the regenerated documents land in
+   one commit.** The plan describes them as separable, and they are not
+   separable into green ones, for exactly the reason milestone 2
+   recorded: `test_api_contract.py` holds every operation of the
+   committed document to being addressed by a command or excluded with
+   a reason, so routes without verbs would need exclusions the next
+   commit deletes, and verbs without routes would point at operations
+   the document does not have.
+
+2. **`Erased.conversations` becomes `Erased.threads`, the ids rather
+   than their count.** The dead-id rule needs to know which threads a
+   deletion took, not how many, and the count the API answers is the
+   length of that tuple. Carrying both would be two structures that
+   have to agree.
+
+3. **The dead-id rule applies to both deletion surfaces, not only the
+   new one.** The plan says "the deletion endpoints" and by the time it
+   said so both existed, so this is the plural read literally: a thread
+   a session erasure orphaned is as gone as one that was addressed, and
+   a turn still on its way to it would otherwise insert the row again
+   with a title derived from whatever was said next. It is reachable
+   through the session endpoint, which is where the first of the two
+   endpoint-driven tests drives it.
+
+4. **A command may perform more than one act.** `conversation show`
+   prints a header and then a dialogue, which the API answers as two
+   resources because one of them is paginated and the other is not.
+   `Command.does` therefore admits a tuple, and `Command.acts()` is the
+   one place the three arms are read: `perform` uses it and so does the
+   contract check, which would otherwise carry a second copy of the
+   rule and leave a second request uncompared.
+
+5. **The four turn shapes moved to `config/responses.py`.** Milestone 2
+   left them in `conversations/api.py` and recorded the reason: no
+   command read a turn timeline. `conversation show` reads one, so the
+   reason expired and they moved, with `TOOL_SOURCES` written out there
+   under the same trade the close reasons already make. The existing
+   pin in `test_api_openapi.py` holds both spellings equal through the
+   rendered document.
+
+6. **A thread's turn carries its session, through a subclass.** The
+   plan says to reuse the existing turn models where they fit.
+   `SessionTurn` drops the column that is in its path and keeps the
+   thread; the thread read wants the mirror image, so `ConversationTurn`
+   is `SessionTurn` with `session` added. A subclass rather than a
+   second declaration of twenty descriptions, and the session shape's
+   committed bytes do not move.
+
+7. **The thread erasure answers four counts rather than six.** The plan
+   does not name a shape for it. `Erasure` carries `sessions` and
+   `events`, which a thread erasure never touches, and answering two
+   permanent zeroes would be a shape saying something untrue about what
+   the endpoint does. `ThreadErasure` is its own model and the CLI
+   prints the counts an answer carries, in the one order `ERASED_COUNTS`
+   already fixed.
+
+8. **Two maintained sentences outside this milestone's footprint
+   moved.** The API description's `/sessions` paragraph still said a
+   deployment that never recorded answers 404, which #283 retired; it
+   is in the paragraph this milestone had to rewrite anyway, and a
+   contract document that describes a refusal the server does not make
+   is worse than one edit outside the footprint. And one sentence of
+   `docs/related-projects.md` read "every vinga conversation", which
+   the spellings census now recognizes as an invocation of a command
+   that has no `conversation` verb after it; the census's own rule is
+   that a site whose prose runs into a quoted command is fixed at the
+   site, so it was.
+
+### Discoveries
+
+- **The gate seam only expresses the interleaving if the signal is read
+  after it.** The writer's first draft consumed the erasure signal at
+  the top of `_commit`, which is before the gate, so a writer parked in
+  front of the transaction had already decided there was nothing to
+  discard and wrote the turn anyway. Reading it immediately before the
+  transaction is what "at its next marker" has to mean, and it is also
+  what makes the arrangement testable rather than raced: the deletion
+  is guaranteed to land between what is committed and what is not.
+
+- **Publishing before the commit rather than after it is a trade, and
+  it is stated where it is made.** After the commit leaves a window in
+  which a turn arriving between the two raises an erased thread from the
+  dead. Before it means an erasure whose transaction then fails leaves
+  those ids dead for the rest of the process. Erasure outranks, so the
+  loss is the one to take, and a failed deletion answers 500 and is made
+  again.
+
+- **Discovery has no stop list, and the tests found out.** A description
+  carrying an ordinary word scores one against every thread that also
+  says it, so the first draft of the older-relevant-thread case matched
+  six threads on the word "the". A stop list is a vocabulary per
+  language and this deployment's transcripts are in whatever the room
+  speaks, so the behavior stays and the docstring says so: the ordering
+  already puts the thread that matched three words ahead of the one that
+  matched a common one.
+
+- **The empty-dialogue sentence needed an honest reason.** It was
+  written for text-off, which turns out not to be that case at all: a
+  thread recorded under text-off has its turns and none of the words in
+  them, so its dialogue prints with the placeholder on both speakers.
+  The state the sentence really describes is narrower and real, and the
+  sentence now names it: a thread is created by its first turn and
+  deleted when it loses its last, so an empty answer means the store
+  moved between the two reads the one command makes.
