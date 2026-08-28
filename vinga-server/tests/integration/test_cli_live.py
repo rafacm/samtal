@@ -1101,13 +1101,13 @@ def test_the_session_verbs_read_and_erase_a_real_record_over_the_wire(
     assert run("session", "purge", "--device", SESSION_OTHER_MAC, "--force") == 0
     assert capsys.readouterr().out.startswith("sessions: 1\n")
 
-    assert run("session", "list") == 0
+    # Nothing left of either, which is the cascade running on the server
+    # rather than inside a unit test's transaction: one thread had turns
+    # in both sessions and has none now, so it went with the second of
+    # them.
+    assert run("session", "list", "--limit", "5") == 0
     assert "lane-" not in capsys.readouterr().out
 
-    # And the thread both sessions fed is gone with them, which is the
-    # cascade running on the server rather than in a unit test's
-    # transaction: it had turns in both and has none now.
-    assert run("session", "list", "--limit", "1") == 0
     assert leaked(SECRET, logs=watched.everything()) == []
 
 
@@ -1580,6 +1580,19 @@ REFUSALS: tuple[Refusal, ...] = (
         "the URL given to the simulator is not an http:// or https:// URL with a host. "
         "It is not quoted back, since an OTA URL can be the deployment's own secret.",
         False,
+    ),
+    # The conversation store's family. Its refusals are the server's, on
+    # a schema the domain configuration knows nothing about, and the one
+    # chosen here is the purge that named nothing: the sentence for it
+    # is the endpoint's rather than the grammar's, so this row is what
+    # proves that decision really does travel back over the connection.
+    Refusal(
+        ("session",),
+        ("session", "purge"),
+        "a purge names what it erases: give at least one of session, device or before, "
+        "and several are combined so that every one of them has to match. Erasing "
+        "everything is deliberately not something this endpoint can be asked for",
+        True,
     ),
     Refusal(("status",), ("status", "extra"), USAGE, False),
     Refusal(("reload",), ("reload", "extra"), USAGE, False),

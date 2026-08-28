@@ -1643,9 +1643,9 @@ def _session_listing(page: Mapping[str, Any]) -> str:
     minted itself. What a cell can hold is not decided here: the agent
     name is an operator's, the device is a board's self-description, and
     a column that wrapped, moved the cursor or recolored the terminal
-    would stop being a column. The cells are bounded to the column's own
-    width rather than to the shared glimpse, because a title-length
-    cell in a table is a table with one row in it.
+    would stop being a column. `CELL_LENGTH` rather than the wider bound
+    the URLs are printed under, because a cell as wide as a title makes
+    a table with one row in it.
     """
     items = page["items"]
     if not items:
