@@ -23,6 +23,7 @@ the only place they are provable:
 import datetime as dt
 import json
 import logging
+import queue as queuing
 import threading
 import time
 from pathlib import Path
@@ -45,6 +46,7 @@ from vinga_server.conversations.store import (
     STOP_TIMEOUT_S,
     ConversationStore,
     Half,
+    Turn,
     _Batch,
 )
 from vinga_server.db import LOCK_TIMEOUT_MS, read_engine
@@ -915,6 +917,81 @@ def test_stop_is_idempotent_and_bounded_by_a_wedged_writer(stores) -> None:
     # a file handle in a way this lane would find later and blame on
     # whichever test ran next.
     store._engine.dispose()
+
+
+class Holding:
+    """The queue, with one producer stopped inside its own put.
+
+    The window this is about is between a producer deciding it is
+    admitted and its record reaching the queue, and no public call can
+    park a producer there. The queue is already an injected seam, so
+    holding the first `Turn` inside `put_nowait` is that window held
+    open, driven from the test's thread like every other interleaving
+    here.
+    """
+
+    def __init__(self) -> None:
+        self._queue: queuing.SimpleQueue[Any] = queuing.SimpleQueue()
+        self.arrived = threading.Event()
+        self.release = threading.Event()
+
+    def put_nowait(self, item: Any) -> None:
+        if isinstance(item, Turn):
+            self.arrived.set()
+            assert self.release.wait(timeout=TIMEOUT_S), "the producer was never let go"
+        self._queue.put_nowait(item)
+
+    def put(self, item: Any) -> None:
+        self._queue.put(item)
+
+    def get(self) -> Any:
+        return self._queue.get()
+
+    def get_nowait(self) -> Any:
+        return self._queue.get_nowait()
+
+
+def test_a_producer_caught_mid_admission_cannot_land_behind_the_drain(stores) -> None:
+    """The one window a shutdown has, held open.
+
+    `stop()` stops accepting records and queues the sentinel the drain
+    ends at. A producer that had already decided it was admitted and had
+    not yet reached the queue used to land behind that sentinel, on a
+    writer that had gone, holding a handle nothing would ever settle: a
+    caller waiting on it with no bound would wait for the rest of the
+    process's life.
+
+    Admission and the sentinel are taken under one lock now, so a
+    shutdown waits for the record it caught mid-admission instead of
+    stepping over it, and that record is drained like any other.
+    """
+    queue = Holding()
+    store = stores(queue=queue, retention_days=0)
+    store.start()
+    store.open_session("alpha", 100.0, MANIFEST)
+
+    answered: list[bool] = []
+    producer = threading.Thread(
+        target=lambda: answered.append(
+            store.record_turn("alpha", a_turn()).wait(TIMEOUT_S)
+        ),
+        daemon=True,
+    )
+    producer.start()
+    assert queue.arrived.wait(timeout=TIMEOUT_S), "the producer never reached the queue"
+
+    stopped = threading.Event()
+    threading.Thread(target=lambda: (store.stop(), stopped.set()), daemon=True).start()
+    assert not stopped.wait(0.2), "the shutdown stepped over a producer mid-admission"
+
+    queue.release.set()
+    assert stopped.wait(TIMEOUT_S), "the shutdown never finished"
+    producer.join(timeout=TIMEOUT_S)
+
+    # Answered, rather than left pending, and answered with what really
+    # happened: the turn went in front of the sentinel and was written.
+    assert answered == [True]
+    assert len(rows("turns")) == 1
 
 
 def test_a_store_that_never_started_leaks_no_thread(stores) -> None:
