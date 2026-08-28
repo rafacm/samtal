@@ -1039,3 +1039,206 @@ disposition for every match that is not the ordinary English word:
   A store double that settles its handle a moment later, and a seam that
   records whether it was settled when the backlog was read, prove the
   resume waited rather than proving that a wait exists.
+
+### PR review round
+
+External review of PR #337 (diff `main...8e4d8ee1`), 2026-08-28.
+Backend: codex CLI 0.149.1, model `gpt-5.6-sol`, read-only sandbox,
+runtime 7m55s. Verdict as received: not mergeable. Seven findings, two
+P1, four P2 and one P3. All valid, all accepted. Condensed but
+faithful, each with its resolution:
+
+1. **P1: store-engine failures can leak into model-visible tool
+   results.** `threads.py` built the read engine before the sanitizing
+   try and disposed of it in an unguarded `finally`; either can raise a
+   driver's own words, `resumption.py` does not sanitize what reaches
+   it, and `pipeline.py` interpolates a raised exception into the tool
+   result the model reads and the store keeps. Put both inside the
+   boundary, the engine starting null, so a disposal failure can never
+   replace the fixed `Unreadable`. Add sentinel tests for a factory
+   failure and a disposal failure.
+
+   *Resolution*: accepted, `c8296316`, in the prescribed form. The
+   engine is built inside the try and the disposal is a method of its
+   own that swallows by class name, because a `finally` that raises
+   replaces the value the block had already decided to return. The
+   poisoned-driver hunt is now parametrized over the three places a read
+   can fail: building, connecting and closing. The closing case reads
+   through a connection that answers no rows, so what it proves is a
+   successful read whose own sentence (`NOTHING_TO_RESUME`) survives the
+   disposal failing after it; the other two answer `STORE_UNREADABLE`.
+   All three hunt the sentinel through the spoken reply, the model's
+   context, the stored invocation row, the events, an attached tap, both
+   log renderings (`caplog.text` renders a chained traceback, which is
+   where an exception chain would show) and both process streams.
+
+2. **P1: the resumption reply is recorded on the conversation being
+   left.** One `TurnUnderway` is stamped at the turn's start and the
+   transition rebinds the session without starting a new record, so the
+   seeded round on the target thread folded into the origin record: the
+   origin thread stored a reply nobody spoke there and the target
+   recorded none of its own. Finalize and enqueue the origin record at
+   the boundary, before rebinding, then begin a target-side record for
+   the seeded reply, and assert the conversation ids on both.
+
+   *Resolution*: accepted, `c7140baa`, with the fallout in `83137d86`.
+   The record now ends where the conversation does; the boundary is
+   described exactly in the section below, because milestone 5 builds
+   on it. Three consequences, each deliberate:
+
+   - **A seeded turn has nothing heard on it.** What the user said was
+     said on the thread they were moved off, so `TurnUnderway.record`
+     asks whether anything belongs to this turn rather than whether
+     something was transcribed: a reading, and either an utterance or an
+     answer. The plan's decision 3 is what makes this the right shape:
+     the initiating turn belongs wholly to the origin, so the seeded
+     round has no utterance of its own to claim.
+   - **A trailing leg is added only where there is something to
+     attribute to it.** A record taken at the move that closed the leg
+     before it has nothing left over, and an empty leg would say a share
+     of the reply happened that did not. A handover's origin record
+     therefore carries one leg and the target none. Worth naming for the
+     coordinator: with a record per context, that leg's text and token
+     counts now equal the record's own, so `legs` says nothing the
+     record does not. Collapsing it is a change to a merged column, an
+     API field and a generated document, which is not this round's to
+     make.
+   - **A thread whose first stored turn is a greeting has no utterance
+     to be named from.** A landing on a row still holding no title takes
+     one from the first landing that has an utterance; a row with a
+     title keeps it; text-off still derives none. The erasure path was
+     recomputing from the earliest surviving TURN, which would have
+     nulled such a thread's name, so it recomputes from the earliest
+     surviving utterance, and the column comment, the migration's copy
+     of it and the generated reference say the one rule.
+
+3. **P2: concurrent description searches race the offer state.** The
+   search half runs as an ordinary tool, so a round issuing two has the
+   loop run them together and each completion replaced the same
+   per-agent offer: the accepted ids were decided by database
+   completion order. Make the reads pure and apply in model-issue
+   order, or serialize per agent in issue order; test both delay
+   orders.
+
+   *Resolution*: accepted, `a9af352c`, by the second of the two
+   prescribed forms. `described` holds a lock for the whole of its
+   search, so the searches apply in the order the loop started them,
+   which is the order the model issued them. The lock is the session's
+   rather than the agent's, which is the deviation: a session has one
+   agent talking at a time, so a per-agent lock would be the same lock
+   with one more thing in it. The purity alternative was rejected
+   because the offer would have had to travel back up through the tool
+   dispatch seam, which answers a string. The case is driven through a
+   round issuing two searches, with the store made to finish them in
+   either order; the run against the unlocked code fails the first of
+   the two, which is the one where the slower search is the one issued
+   first.
+
+4. **P2: hydration can produce consecutive user roles.** A stored turn
+   with heard text and no reply, which is what a reply provider failing
+   after the `heard` was recorded leaves, rendered its user half alone.
+   Treat the partial record atomically: an explicitly empty assistant
+   half if providers accept empty content, otherwise a gap.
+
+   *Resolution*: accepted, `f363fe9e`, as the gap. Empty content is not
+   safe across vendors (Anthropic refuses an empty text block), so the
+   whole partial turn is a hole and is counted like any other. The
+   mirror shape arrives with finding 2 and is answered beside it: a turn
+   with an answer and nothing heard is not a hole, because nothing about
+   it was lost, so it is joined onto the answer before it, which is what
+   it was, and one with nothing before it is dropped rather than led
+   with, since the first message a provider is handed is the user's.
+   The suite asserts the exact role sequence for all three shapes.
+
+5. **P2: hydration under-reports gaps beyond the token cutoff.** The
+   scan stops at the first renderable over-budget turn, so older
+   unrenderable rows were never counted. Count gaps over the full
+   stored input, independently of budget selection; add the case
+   ordered old gap, oversized turn, retained newest.
+
+   *Resolution*: accepted, `f363fe9e`, in the prescribed form and with
+   the prescribed case. What the count answers is whether the record has
+   holes in it, which is a fact about the thread rather than about the
+   window, so it is taken over the whole input.
+
+6. **P2: the end-to-end resume path is not integration-tested.** The
+   lane searched and watched the id be read out but never selected and
+   resumed. Have the scripted provider consume the discovered id, issue
+   `resume_conversation(conversation=id)`, continue with another
+   utterance, and assert database attribution across both sessions
+   including the seeded resumption reply.
+
+   *Resolution*: accepted, `276e5a2c`. The M4 notes recorded this as
+   hard because the scripted LLM could not compose an argument from a
+   prior tool result; it is solved rather than re-recorded. Two options
+   on `providers/mock.py`: `then_pattern` and `then_arguments`, which
+   match the results and substitute the first capturing group into the
+   next call's arguments, and `tool_unless`, which stops the script once
+   what it was looking for is in front of the model. That last one is
+   what makes the utterance after a successful flow an ordinary turn in
+   a lane where every utterance transcribes the same. The deviation
+   worth naming: the finding suggested extending the tests' support
+   fakes rather than production, and there is no seam for that here.
+   This lane boots a real server, whose providers are built by the
+   registry from configuration, so the only injectable model is
+   `providers/mock.py`; the two options are read through the same
+   free-form `OptionsReader` the existing ones are, so no configuration
+   model, schema or generated document moves. The test reads the
+   attribution out of Postgres across two servers: the turn that asked
+   on the conversation the second session opened on with both halves of
+   the flow recorded under it, the greeting on the older thread with
+   nothing heard on it, and the utterance after it on that same thread,
+   which two sessions have now spoken on.
+
+7. **P3: the glossary's Handover entry still calls the clean switch
+   future.** It said the session transcript still carries across a
+   switch.
+
+   *Resolution*: accepted, in the change that records this round. The
+   entry describes the implemented per-conversation context switch and
+   keeps only the part that is still direction (carrying context across
+   deliberately, on phrasing that asks for it). `docs/concepts.md` moved
+   two sentences with it: the handover bullet now says where the
+   incoming agent's greeting is recorded, and the conversation paragraph
+   says a thread takes its title from the earliest utterance stored on
+   it.
+
+The command-spellings manifest moved with the round, for line numbers
+alone: nothing about which commands exist changed. `CHANGELOG.md` gains
+one line, because finding 2 changes what a deployment sees in its own
+store.
+
+#### The record boundary, for milestone 5
+
+Finding 2 changed the machinery the recap's consent turn has to align
+with, so this is what a move now does, in order, in
+`PipelineRuntime._speak_reply`:
+
+1. The tool loop returns a `_Transition`. Everything spoken so far
+   becomes an assistant turn on the ACTIVE thread's history, `AgentSaid`
+   is emitted, and `spoken` is cleared.
+2. `self._turn.leg_ended(self._agent, said)` closes the leg.
+3. `self._record_turn(spoken)` finishes the ORIGIN record and hands it
+   to the store. It carries the utterance, everything said before the
+   move, every call the model issued in those rounds and the tokens they
+   spent, stamped with the pair the turn began with. This is the last
+   line at which anything can be attributed to the conversation being
+   left.
+4. `self._move_to(transition)` rebinds: the agent for a handover, the
+   thread and its installed history for a move between conversations,
+   and the `conversation_resumed` event where there was one.
+5. The offers are dropped, and the seed is appended to the TARGET
+   thread's history as a user turn.
+6. `self._turn = self._seeded_turn()` opens the target-side record: the
+   target pair, `at` taken from the session's clock, nothing heard. Its
+   rounds, calls and tokens accumulate from here, and the reply's own
+   `finally` hands it over.
+
+So the recap flow's consent turn records on the origin thread at step 3,
+with the spoken recap as its reply, exactly as the plan says; the
+milestone row it stores is a separate write on the durable path after
+playback, and the context it installs goes in at step 4 as
+`transition.history`. The seeded round after a recap is a target-side
+turn like any other. What milestone 5 must not do is hold a record
+across step 4: the two sides of a move are two turns, and each one is
+the store's before the other exists.

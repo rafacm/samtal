@@ -198,10 +198,14 @@ Switching the active agent mid-session, requested by
 name in conversation and executed by the LLM's `switch_agent` tool.
 The tool's enum of bound agents is what maps a near-miss transcript
 ("Mark") onto the right agent (`marc`). Each agent of a session has
-its own conversation, and the turn a handover happens in belongs to
-the thread it started on. Today the session transcript still carries
-across the switch; the clean start, with context carried only on
-explicit request, is decided direction (issue #190). See
+its own conversation, and the switch is a per-conversation context
+switch: the incoming agent reads its own thread and nothing of the
+outgoing agent's, and switching back returns an agent to the thread
+it was on with what it said there. The turn the handover happens in
+belongs to the thread it started on, and the greeting the incoming
+agent answers with is the first turn of its own. Carrying context
+across deliberately, on phrasing that asks for it, remains decided
+direction (issue #190). See
 [the concepts page](concepts.md#conversation-and-session).
 
 ### Help agent

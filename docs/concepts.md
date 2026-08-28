@@ -224,7 +224,7 @@ A **conversation** is a dialogue between a user and exactly one agent:
 a thread that lives on the server, accrues a transcript, and is
 independent of any device. The entity exists: a thread takes its
 identity when an agent is activated, its row when its first turn is
-stored, and its title from that turn's utterance. The continuity is
+stored, and its title from the earliest utterance stored on it. The continuity is
 built too, behind a switch: with `server.conversations.resumption` on,
 an agent describes a past thread out loud, offers what it found, and
 carries on with the one the user picks, rebuilding the context from the
@@ -270,9 +270,10 @@ special cases:
   session; "back to Sophia" returns. The switch exists today as the
   handover tool, and so do the threads: the first activation of an
   agent in a session opens one and every later activation continues it,
-  so the record of that session names two of them and the handover turn
-  belongs to the one it started on. The incoming agent starts clean,
-  which the last bullet below states.
+  so the record of that session names two of them: the handover turn
+  belongs to the thread it started on, and the greeting the incoming
+  agent answers with is the first turn of its own thread. The incoming
+  agent starts clean, which the last bullet below states.
 - **Resuming elsewhere.** *Implemented today, issue #190.* A new
   session on another device attaches to an existing thread. Discovery
   is by spoken description ("a while ago we were talking about this

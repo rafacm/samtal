@@ -11,12 +11,16 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 - **Conversations are a first-class entity** (#190). A conversation is
   a durable thread between a user and exactly one agent, with its own
-  identity, a title derived from its first utterance, and created and
-  last-active timestamps. Every recorded turn now names both the
-  session it was spoken in and the thread it belongs to, so the session
-  timeline and the thread are two readings of one set of rows rather
-  than two stores. A session that talks to two agents touches two
-  threads, and a handover turn belongs to the thread it started on.
+  identity, a title derived from the earliest utterance stored on it,
+  and created and last-active timestamps. Every recorded turn now names
+  both the session it was spoken in and the thread it belongs to, so the
+  session timeline and the thread are two readings of one set of rows
+  rather than two stores. A session that talks to two agents touches two
+  threads, and a reply that moves between them records a turn on each:
+  the turn that asked belongs to the thread it started on, and the
+  greeting the other side answers with is the first turn of the thread
+  it landed on, with nothing heard on it, because what the user said was
+  said before the move.
 - The `conversations_pruned` event gains a `conversations` count beside
   its `sessions` count, because retention's unit is now the thread.
 - Turn responses on the API carry a `conversation` field.
@@ -28,9 +32,9 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   that began at any moment of the named day survives. Both run in one
   transaction and answer the counts they took, per table. Erasure
   outranks the copies the store derived: a conversation whose title
-  came from an erased turn is renamed from its earliest surviving turn
-  or loses its title, recap checkpoints whose coverage held an erased
-  turn are deleted along with everything descended from them,
+  came from an erased turn is renamed from its earliest surviving
+  utterance or loses its title, recap checkpoints whose coverage held
+  an erased turn are deleted along with everything descended from them,
   `last_active_at` moves back when the turn that wrote it is gone, and
   a conversation left with no turns is deleted whole. A session that is
   still running when its row goes stops being recorded.

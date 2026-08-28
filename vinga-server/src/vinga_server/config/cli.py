@@ -1796,7 +1796,7 @@ def _conversation_listing(page: Mapping[str, Any]) -> str:
     """The threads this deployment recorded, one line each.
 
     Columns for the reason the session listing has them, and one of
-    these cells is content: a title is the thread's first utterance,
+    these cells is content: a title is an utterance of the thread's,
     which came out of a room and through a transcriber, so it goes
     through the same bounding as everything else here and a null one is
     the fixed placeholder rather than an empty cell.

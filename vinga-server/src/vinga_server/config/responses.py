@@ -1599,9 +1599,9 @@ class ConversationSummary(BaseModel):
     )
     title: str | None = Field(
         description=(
-            "What the thread is called, which is its first utterance bounded. Null "
-            "where text storage was off when it began, and null for a thread whose "
-            "opening turn has since been erased with nothing text-bearing left."
+            "What the thread is called, which is the earliest utterance stored on "
+            "it, bounded. Null where text storage was off when it began, and null "
+            "for a thread that has never stored one."
         )
     )
     device: str | None = Field(

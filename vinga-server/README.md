@@ -2229,8 +2229,8 @@ domain half's `domain` schema is in, which means the same instance, the
 same credentials and the same backup: one row per session (device,
 agents, protocol, the resolved providers, when it opened, when and why
 it closed), one row per conversation (its agent, the device it began
-on, a title taken from its first utterance, and when it was last spoken
-to), one row per turn (what was heard and what was replied, the ASR,
+on, a title taken from the earliest utterance stored on it, and when it
+was last spoken to), one row per turn (what was heard and what was replied, the ASR,
 LLM and TTS timings, the rounds and the token counts), one row per tool
 call a turn made (its source, its arguments and its result), and one
 row per structured event, which is the same decision track the capture
