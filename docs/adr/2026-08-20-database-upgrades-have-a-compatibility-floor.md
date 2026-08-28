@@ -320,5 +320,15 @@ decision, 2026-08-28): the store's Postgres schema is renamed from
 `conversations` to `record`, so step 1 above names the `record` schema,
 and a database whose store still sits under the old name is not
 stranded at all but simply one whose `record` schema does not exist
-yet, which boot creates and migrates as it would on a blank database,
-leaving the old schema abandoned in place until an operator drops it.
+yet, leaving the old schema abandoned in place until an operator drops
+it. What makes that schema exist is step 2 rather than the boot:
+**rerun `deploy/postgres-init.sql`, then start the server**, which is
+the same two steps this reset already asks for and is what this
+decision's no-migration stance costs. The order is load-bearing on the
+deployment shape this repository documents, where the server role has
+no database-level `CREATE` and therefore cannot make a schema for
+itself: started first, it refuses with the fixed database refusal, and
+the rerun is what lets the next start migrate. A deployment whose
+server role owns its database does create the schema at boot and still
+needs the rerun, because the analyst role's grants on the new schema
+come from nowhere else.

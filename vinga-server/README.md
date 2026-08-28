@@ -2585,6 +2585,24 @@ takes the schemas and the database-local default privileges with it,
 while the instance-level `vinga_ro` role survives, which is why every
 statement in the file is written to be run again.
 
+**Rerun it when a release moves the file, too, before starting the new
+image.** The upgrade order is: rerun the updated
+[`../deploy/postgres-init.sql`](../deploy/postgres-init.sql), then
+boot. This release moves it, because the store's schema is renamed from
+`conversations` to `record`. On the privilege contract above, the
+server role has no `CREATE` on the database and cannot make the new
+schema for itself, so an image started before the rerun refuses to
+start with the fixed database refusal, which repeats no part of the
+connection; the rerun is what makes the next start migrate. A
+deployment whose server role owns its database creates the schema at
+boot and still needs the rerun, because nothing else grants `vinga_ro`
+`SELECT` on the new schema. The old `conversations` schema is left
+where it is, readable beside the new one until somebody drops it; what
+is in it does not come across, which
+[`CHANGELOG.md`](../CHANGELOG.md) announces and
+[the compatibility record](../docs/adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md)
+prices.
+
 **The master key is generated once and escrowed.** Set
 `VINGA_MASTER_KEY` wherever the deployment keeps its environment
 secrets, alongside `VINGA_AUTH_SECRET`:
