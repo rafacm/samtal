@@ -17,8 +17,9 @@ Three properties, and each is provable only here:
   same marker are in the database when it does.
 - **A dropped batch leaves a mark on the thread rather than only in a
   counter.** `conversations.incomplete` is product state, outside the
-  metrics switch, latched in memory until a transaction lands it, and
-  set from the first byte of a row that materializes after the loss.
+  metrics switch, latched in memory until a transaction lands it, set
+  from the first byte of a row that materializes after the loss, and
+  true by the time the next turn of that thread is acknowledged.
 """
 
 import datetime as dt
@@ -348,6 +349,38 @@ def test_a_dropped_batch_flags_its_thread_at_the_next_marker(stores) -> None:
     # And the title is still the first utterance, which is the one thing
     # a later turn may never rewrite.
     assert thread["title"] == "turn the light on"
+
+
+def test_the_mark_is_true_the_moment_the_next_turn_is_acknowledged(stores) -> None:
+    """What an acknowledgement may never let a caller believe.
+
+    A waiter woken by one reads the thread's row next, and if that row
+    still said the record was whole it would have learned the opposite
+    of what the writer already knew: that a turn in the middle of this
+    thread was lost. So the mark is written in the same transaction as
+    the turn that carries it, and becomes true at the same instant the
+    handle does.
+
+    Every transaction after that one is refused here, which is what
+    makes the claim testable rather than merely likely: a mark that
+    needed a write of its own would never arrive at all.
+    """
+    store, engine = recording(
+        stores, lambda count: RuntimeError("no") if count == 2 or count > 3 else None
+    )
+
+    store.record_turn("alpha", a_turn(heard="the first"))
+    lost = store.record_turn("alpha", a_turn(heard="the lost one"))
+    kept = store.record_turn("alpha", a_turn(heard="the third"))
+
+    assert lost.wait(TIMEOUT_S) is False
+    assert kept.wait(TIMEOUT_S) is True
+    (thread,) = rows("conversations")
+    assert thread["incomplete"] is True
+
+    store.stop()
+    # And no fourth transaction was attempted, let alone needed.
+    assert engine.begins == 3
 
 
 @pytest.mark.parametrize("metrics", [True, False])

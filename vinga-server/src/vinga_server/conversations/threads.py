@@ -126,9 +126,9 @@ class Landing:
     # Whether a write this thread needed has already been lost, so a row
     # materializing now must say so from its first byte. Only the insert
     # reads it: a thread whose row already exists is flagged by
-    # `flag_incomplete` in a transaction of its own, and a landing never
-    # clears a flag, because a later turn arriving does not fill an
-    # earlier gap.
+    # `flag_incomplete`, which the writer calls beside this one in the
+    # same transaction, and a landing never clears a flag, because a
+    # later turn arriving does not fill an earlier gap.
     incomplete: bool = False
 
 
@@ -199,10 +199,10 @@ def landed(connection: Any, landing: Landing) -> None:
 
     A materializing landing carries the writer's pending mark into the
     insert, so a thread whose earlier turns were lost says so from its
-    first byte rather than for as long as it takes a second transaction
-    to land. A landing on a thread that already has a row never touches
-    the mark in either direction: a later turn arriving does not fill an
-    earlier gap, and the standalone flag write is what sets it.
+    first byte. A landing on a thread that already has a row never
+    touches the mark in either direction: a later turn arriving does not
+    fill an earlier gap, and `flag_incomplete`, which the writer calls
+    beside this one in the same transaction, is what sets it.
 
     A landing this module cannot attribute is refused rather than
     stored, and the refusal takes the marker's whole batch with it. Two

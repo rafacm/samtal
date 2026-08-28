@@ -33,8 +33,10 @@ arbitrary:
   fails on the transient class the db classifier names is retried in
   place up to `TURN_WRITE_ATTEMPTS`; when it is finally dropped, the
   hole is latched on the thread as `conversations.incomplete` rather
-  than counted and forgotten. An events transaction that fails drops and
-  counts its events exactly as it always did, and touches no turn.
+  than counted and forgotten, and the mark rides the next durable
+  transaction rather than one of its own, so no later acknowledgement
+  can become true in front of it. An events transaction that fails drops
+  and counts its events exactly as it always did, and touches no turn.
 - **Absence of the session row is a tombstone.** Retention deletes whole
   sessions on `started_at` and asks nothing about whether the
   conversation ended, so a session long enough to fall outside the
@@ -382,10 +384,10 @@ class ConversationStore:
         # Threads a dropped durable batch left a hole in, waiting for
         # their `incomplete` flag to land. In memory rather than in the
         # database because the database is the thing that just refused a
-        # write; the flag is retried at every later marker and at every
-        # session close until it lands, and a thread whose every write
-        # failed leaves no row and therefore nothing to flag, which is
-        # the honest record.
+        # write; the flag rides the next durable transaction of any
+        # session and is offered again at every marker after that until
+        # it lands, and a thread whose every write failed leaves no row
+        # and therefore nothing to flag, which is the honest record.
         self._incomplete: set[str] = set()
 
     # --- lifecycle ----------------------------------------------------
@@ -633,10 +635,10 @@ class ConversationStore:
         session's batch.
 
         The durable half first (the session row, the turns, their
-        invocations and the threads they land on), then the events. The
-        split is what keeps product state and telemetry from sharing a
-        fate: neither failure decides the other's, and only the first is
-        retried or latched.
+        invocations, the threads they land on and the marks a previous
+        loss owes those threads), then the events. The split is what
+        keeps product state and telemetry from sharing a fate: neither
+        failure decides the other's, and only the first is retried.
 
         The chain's advisory lock is taken before anything is read (the
         engine's begin listener takes it), so the existence check inside
@@ -666,16 +668,12 @@ class ConversationStore:
             self._settle(batch, landed=False)
             self._release(len(batch.events))
             return
-        if outcome is _Durable.COMMITTED:
-            self._settle(batch, landed=True)
-            # After the commit rather than inside it: a thread the last
-            # transaction just materialized is flagged here, and one this
-            # transaction wrote nothing for is retried at the next
-            # marker. Its own transaction, because a flag that rolled
-            # back with a turn would be lost exactly when it is true.
-            self._latch()
-        else:
-            self._settle(batch, landed=False)
+        # Nothing is answered before the transaction that decides it has
+        # committed, and that is why the incomplete marks are inside it:
+        # a waiter woken by an acknowledgement reads the thread's row
+        # next, and it may never find that row still claiming to be
+        # whole. A later turn must never imply an earlier one landed.
+        self._settle(batch, landed=outcome is _Durable.COMMITTED)
         self._events(session_id, batch)
         # Committed or rolled back, this batch is written off either way.
         self._release(len(batch.events))
@@ -700,6 +698,21 @@ class ConversationStore:
         else is a database saying no for a reason a fourth attempt does
         not change. No sleep between attempts, because this thread is
         every other session's writer too.
+
+        The marks a previous loss owes are written here too, after the
+        turns and before the commit, which is what makes an
+        acknowledgement safe to believe: the caller that wakes on one
+        cannot find a thread with a known hole still claiming to be
+        whole, because the mark and the turn became true at the same
+        instant. It costs nothing when nothing is owed, and when the
+        transaction is rolled back the ids stay owed and the turns stay
+        lost together, which is the honest pair.
+
+        A thread with no row yet is not marked and no row is made for
+        it: an empty thread would be listed and offered as something to
+        resume with no dialogue behind it. Its id waits here until a
+        later turn of the same thread materializes the row, which it
+        does with the mark already true (`threads.Landing.incomplete`).
         """
         for attempt in range(TURN_WRITE_ATTEMPTS):
             try:
@@ -711,12 +724,20 @@ class ConversationStore:
                     elif not self._alive(connection, session_id):
                         return _Durable.TOMBSTONED
                     self._write(connection, session_id, batch)
+                    # After the turns rather than before them, so a
+                    # thread this transaction has just materialized is
+                    # one of the rows this finds and stops owing.
+                    marked = threads.flag_incomplete(connection, self._incomplete)
                     if closing is not None:
                         connection.execute(
                             sessions.update()
                             .where(sessions.c.session == session_id)
                             .values(self._close_row(closing))
                         )
+                # Discharged only once the transaction that wrote them
+                # has committed, which is what the placement below the
+                # block says.
+                self._incomplete -= marked
                 return _Durable.COMMITTED
             except Exception as exc:  # noqa: BLE001 - a write never breaks a session
                 if attempt + 1 < TURN_WRITE_ATTEMPTS and is_busy(exc):
@@ -773,33 +794,6 @@ class ConversationStore:
         """What became of every turn of this batch, said once each."""
         for item in batch.turns:
             item.acknowledgement.settle(landed)
-
-    def _latch(self) -> None:
-        """The `incomplete` flags still owed, written in a transaction of
-        their own.
-
-        Only for threads that have a row: one whose first turn was the
-        dropped batch has nothing to update, and inserting an empty
-        thread to hold a flag would be worse than the flag waiting. That
-        id stays here until a later turn of the same thread materializes
-        the row, which it does with the flag already true.
-
-        A failure leaves the set as it is, and the next marker tries
-        again. If the database never recovers before the process ends,
-        neither the tail turns nor the flag persist and the stored
-        thread simply ends earlier, which is the residual window the
-        reference documentation states.
-        """
-        if not self._incomplete:
-            return
-        try:
-            with self._engine.begin() as connection:
-                flagged = threads.flag_incomplete(connection, self._incomplete)
-        except Exception as exc:  # noqa: BLE001 - a write never breaks a session
-            failed: BaseException = exc
-            events.emit(lambda: WriteFailed(failure=ClassName.of(failed)))
-            return
-        self._incomplete -= flagged
 
     def _alive(self, connection: Any, session_id: str) -> bool:
         found = connection.execute(
