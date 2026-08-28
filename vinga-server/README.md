@@ -738,7 +738,11 @@ be picked up again, which the agent reads out, and nothing moves.
 for and answers a short list of the agent's own past conversations to
 read out, then takes the one the user picked; only a conversation the
 tool has just offered can be resumed, so a model cannot reach a thread
-by guessing an id, and never one belonging to another agent.
+by guessing an id, and never one belonging to another agent. A thread
+too long to hand over whole answers with a choice rather than with the
+thread, and the third argument, `start_from`, is the user's answer to
+it; it is honoured only for the conversation the tool actually asked
+about, so a model cannot consent to a recap on the user's behalf.
 
 `remember` appends one fact to the agent's memory file:
 
@@ -2284,6 +2288,22 @@ turns oldest first, and a thread rebuilt from its tail is told so, as
 is one whose record has holes in it. Arguments and results of the tools
 a turn ran stay in the store: what a rebuilt conversation carries is
 what was said, and the names of the tools that ran.
+
+A thread longer than that budget is not silently trimmed. The tool
+answers with the choice instead, for the agent to put to the user: a
+short recap of the whole of it, or carrying on from the recent part.
+Carrying on from the recent part is the paragraph above and stores
+nothing. A recap is the agent summarizing the thread once, against its
+own model, and speaking that summary out loud; only when the user has
+heard it to the end is it stored, as a checkpoint on the conversation,
+and every later resume is rebuilt from that checkpoint plus what was
+said after it. A recap cut off by an interruption, a voice that failed
+or a device that went away is not stored at all, and the next resume
+offers the same choice again; so is one the model could not produce,
+and the thread is picked up from its recent part with the agent told
+why. Recap text is conversation content like the dialogue it
+summarizes: it lives under the `text` switch, is served by the API, and
+is retained and deleted with its thread.
 
 Off, nothing about a conversation's behaviour changes at all: an
 agent's working context is assembled inside one session and ends when

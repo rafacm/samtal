@@ -27,10 +27,15 @@ session can belong to several threads, and one thread's turns can come from
 several sessions. No dialogue is stored twice. [The domain concepts
 page](../concepts.md) says what each means to a user.
 
-`conversation_milestones` is created by the baseline and written by nothing
-yet. It is the shape a consented recap checkpoint takes, landing with the
-schema rather than as a migration of its own later; until the flow that writes
-one exists, the table is empty in every deployment.
+`conversation_milestones` holds the recap checkpoints a conversation accrues.
+One row lands when a user is offered a recap of a thread too long to be picked
+up whole and says yes: the agent speaks the summary, and the row is written
+afterwards, so what the column holds is byte for byte what was heard. A thread
+that has one is rebuilt from that checkpoint plus the turns after its
+`after_turn`; the turns at or before its `from_turn` were never read by the
+summarizer and are outside its coverage, which is the boundary that stops a
+bounded recap claiming turns it omitted. A deployment where nobody has
+consented to a recap has an empty table.
 
 ## The compatibility promise
 
