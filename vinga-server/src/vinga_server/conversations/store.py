@@ -47,6 +47,14 @@ arbitrary:
   session's state are discarded and nothing further is written for it,
   which is what makes the deletion of a running session final rather
   than a race the next turn undoes.
+- **A deleted thread has to be said out loud, because absence cannot say
+  it.** A missing conversation row is two different things: a thread
+  before its first turn, and a thread that has been erased. So the
+  writer keeps the ids it has written a turn onto, a deletion publishes
+  what it took through `erased()` below, and a turn for an id in both
+  sets is discarded with its acknowledgement resolved false rather than
+  materializing the row again. The conversation in the room carries on;
+  its record stops, which is what erasure means.
 
 Storage policy lives here rather than in the pipeline: the runtime hands
 over the full record and the writer nulls the content columns when text
@@ -80,7 +88,7 @@ import enum
 import logging
 import queue as queuing
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -200,6 +208,60 @@ EVENT_CONTENT: dict[str, tuple[str, ...]] = {
 # rule. Bounded so that a defect cannot grow the set without limit; when
 # it fills it is emptied, and the warnings begin again.
 _UNKNOWN_WARNED_MAX = 64
+
+# Which writers are running in this process, so that a deletion can tell
+# them what is gone.
+#
+# A module-level register rather than a field on anything, because the
+# two sides deliberately never meet. A deletion runs on a request thread
+# against an engine it opened for itself, precisely so that erasure
+# works in a deployment with recording off where no store object exists
+# at all; the writer is a thread inside whichever store is recording.
+# What they share is the process, and this is that.
+#
+# Empty is the ordinary state and costs nothing: a deployment that
+# records nothing has no writer to tell, and a deletion there publishes
+# into an empty list rather than accumulating a backlog nobody will ever
+# read.
+_writers: "list[ConversationStore]" = []
+_writers_lock = threading.Lock()
+
+
+def erased(threads_gone: "Iterable[str]") -> None:
+    """Tell whatever writer is recording in this process that these
+    threads are gone.
+
+    The half of the dead-id rule that lives outside the writer. Absence
+    of a row cannot be the tombstone, because absence is also the
+    ordinary state of a thread before its first turn; so a deletion says
+    so out loud, and the writer decides what that means for a turn
+    already on its way.
+
+    Called from inside the deletion's own transaction, which is where
+    the ordering is decided rather than hoped for: that transaction
+    holds the chain's advisory lock, and the writer takes the same lock
+    at every marker, so a writer is never inside a marker while this
+    runs. It either committed before the deletion, in which case its
+    rows are what was deleted, or it begins afterwards and meets this
+    at the marker.
+
+    Said before the commit rather than after it, which is a trade rather
+    than an oversight: an erasure whose transaction then fails leaves
+    these ids marked dead for the rest of the process, and later turns of
+    those threads are discarded although the rows survived. The other
+    ordering leaves a window in which a turn arriving between the commit
+    and this call raises an erased thread from the dead. Erasure
+    outranks, so the loss is the one to take, and a failed deletion
+    answers 500 and is made again.
+    """
+    named = set(threads_gone)
+    if not named:
+        return
+    with _writers_lock:
+        live = list(_writers)
+    for writer in live:
+        writer.forget(named)
+
 
 def open_conversations(settings: DatabaseConfig) -> Engine:
     """Open and migrate the conversation record's schema.
@@ -396,6 +458,24 @@ class ConversationStore:
         # it lands, and a thread whose every write failed leaves no row
         # and therefore nothing to flag, which is the honest record.
         self._incomplete: set[str] = set()
+        # Threads a deletion has said are gone, published from a request
+        # thread and drained by the writer at its next marker. Guarded,
+        # because the two sides are different threads; drained rather
+        # than kept, because what it is for is the intersection below and
+        # a set that only grew would be a backlog nothing ever reads.
+        self._published: set[str] = set()
+        # Threads this writer has written a turn onto, and threads it now
+        # refuses. The distinction is the whole of the dead-id rule: a
+        # deletion of an id this process wrote makes it dead forever
+        # after, while a turn for an id this writer has never seen is a
+        # first turn and materializes as designed, because an id is minted
+        # per session and agent and never travels between processes.
+        #
+        # Both grow with the threads one process handles, which is what
+        # bounds them: a thread is a conversation somebody had, not a
+        # record the store loops over.
+        self._written: set[str] = set()
+        self._dead: set[str] = set()
 
     # --- lifecycle ----------------------------------------------------
 
@@ -413,6 +493,11 @@ class ConversationStore:
         # recording when it is not.
         thread.start()
         self._thread = thread
+        # Reachable by a deletion from this moment: a thread cannot be
+        # deleted before a writer has written it, and this writer starts
+        # writing here.
+        with _writers_lock:
+            _writers.append(self)
         events.emit(ConversationsEnabled)
 
     def stop(self) -> None:
@@ -440,6 +525,12 @@ class ConversationStore:
                 self._queue.put(_Stop())
         if thread is not None:
             thread.join(timeout=self._stop_timeout_s)
+        # Unregistered after the drain rather than before it: what is
+        # queued still gets written, so a deletion landing while this is
+        # draining still has to be able to stop it.
+        with _writers_lock:
+            if self in _writers:
+                _writers.remove(self)
         # Disposed whether or not the thread came back. A writer still
         # wedged on a commit is a daemon thread in a process that is
         # ending, and holding the pool open would not unwedge it.
@@ -531,6 +622,19 @@ class ConversationStore:
             self._opened_at.pop(session_id, None)
             self._warned.discard(session_id)
             self._queue.put_nowait(Close(session_id, duration_s, reason, dropped))
+
+    def forget(self, threads_gone: Iterable[str]) -> None:
+        """These threads have been deleted; stop writing to them.
+
+        Called from the deletion's transaction on a request thread, so
+        it does the least it can: it records what was said and leaves
+        every decision to the writer, which reads it at its next marker
+        where nothing else is in flight. A store that has stopped keeps
+        taking these, because what is queued behind the sentinel is still
+        going to be written.
+        """
+        with self._lock:
+            self._published.update(threads_gone)
 
     def _stores_events(self) -> bool:
         """Whether an events row would land. One rule, consulted twice:
@@ -681,6 +785,16 @@ class ConversationStore:
             return
         if self._gate is not None:
             self._gate(Half.DURABLE)
+        # After the gate and immediately before the transaction, which is
+        # what "at its next marker" has to mean: a deletion that lands
+        # while this writer is holding a batch has to be read after it
+        # landed, and the last moment before the lock is taken is the
+        # latest this writer can ask.
+        self._discard_dead(batch)
+        if opening is None and closing is None and not batch.turns and not batch.events:
+            # Everything this marker was holding belonged to a thread
+            # that has been erased, so there is nothing left to write.
+            return
         outcome = self._durable(session_id, batch, opening, closing)
         if outcome is _Durable.TOMBSTONED:
             # Deleted out from under a live session. The tombstone is the
@@ -692,6 +806,11 @@ class ConversationStore:
             self._settle(batch, landed=False)
             self._release(len(batch.events))
             return
+        if outcome is _Durable.COMMITTED:
+            # Written, and therefore deletable: from here on, a deletion
+            # naming one of these threads makes its id dead rather than
+            # leaving it to materialize again.
+            self._written.update(item.record.conversation for item in batch.turns)
         # Nothing is answered before the transaction that decides it has
         # committed, and that is why the incomplete marks are inside it:
         # a waiter woken by an acknowledgement reads the thread's row
@@ -855,6 +974,50 @@ class ConversationStore:
         except Exception as exc:  # noqa: BLE001 - a write never breaks a session
             failed: BaseException = exc
             events.emit(lambda: WriteFailed(failure=ClassName.of(failed)))
+
+    def _discard_dead(self, batch: _Batch) -> None:
+        """The dead-id rule, applied at the marker: what a deletion said
+        is gone, taken off this batch before anything is written.
+
+        Two states, and keeping them apart is the whole of it. A thread
+        whose row is simply absent is one before its first turn, and a
+        turn for it materializes it as designed. A thread this writer
+        wrote and a deletion has since named is dead: its turns are
+        discarded, their acknowledgements resolve false, and the id is
+        never materialized again, because a deleted conversation coming
+        back as a new row with a new title derived from whatever was said
+        next is the erasure undone.
+
+        Discarded rather than counted as lost, which follows the
+        tombstone above: a session deleted out from under a live
+        conversation counts nothing either. What was deleted is not a
+        write that failed, and `sessions.dropped` is where the store
+        reports its own failures.
+
+        The in-memory conversation carries on speaking; the runtime and
+        the device edge know nothing about a deletion, and the user's
+        experience is not the eraser's to interrupt. What stops is the
+        record of it, which is what erasure means.
+        """
+        with self._lock:
+            arrived, self._published = self._published, set()
+        # Only what this writer wrote: an id it has never seen belongs to
+        # no thread of this process, and a turn for one is a first turn.
+        newly = arrived & self._written
+        if newly:
+            self._dead |= newly
+            # A hole in a thread that no longer exists is not a fact
+            # about anything, and its flag would never land.
+            self._incomplete -= newly
+        if not self._dead or not batch.turns:
+            return
+        kept = []
+        for item in batch.turns:
+            if item.record.conversation in self._dead:
+                item.acknowledgement.settle(False)
+            else:
+                kept.append(item)
+        batch.turns[:] = kept
 
     def _settle(self, batch: _Batch, landed: bool) -> None:
         """What became of every turn of this batch, said once each."""
@@ -1153,5 +1316,6 @@ __all__ = [
     "Open",
     "SessionSink",
     "Turn",
+    "erased",
     "open_conversations",
 ]

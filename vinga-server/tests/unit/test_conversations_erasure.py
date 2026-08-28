@@ -526,6 +526,100 @@ def test_a_session_deleted_while_it_is_talking_stops_being_recorded(client) -> N
         assert stored(table) == [], table
 
 
+def test_a_thread_a_session_erasure_took_is_never_written_to_again(client) -> None:
+    """The dead-id rule, reached through the session endpoint.
+
+    A thread whose every turn was in one session is deleted whole when
+    that session goes, and the session that is still running was not
+    the one deleted, so the tombstone does not fire and nothing else
+    would stop the next turn from inserting the row again with a title
+    derived from whatever is said next.
+
+    Absence cannot be the tombstone here, because absence is also the
+    ordinary state of a thread before its first turn. So the deletion
+    says what it took, and the writer discards the turns of an id it
+    wrote and a deletion has since named.
+    """
+    gate = Gate()
+    store = ConversationStore(
+        DatabaseConfig(),
+        now=lambda: dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC),
+        retention_days=0,
+        gate=gate,
+    )
+    store.start()
+    try:
+        # The session the thread began in, closed and left behind.
+        store.open_session("alpha", 100.0, manifest())
+        gate.wait()
+        gate.let_through()
+        store.record_turn("alpha", a_turn(FIRST, "the whole of this thread"))
+        gate.wait()
+        gate.let_through()
+        store.close_session("alpha", duration_s=2.0, reason="client")
+        gate.wait()
+        gate.let_through()
+        # And the session still talking on it.
+        store.open_session("beta", 200.0, manifest())
+        gate.wait()
+        gate.let_through()
+        until(lambda: stored("sessions"), "the sessions never landed")
+
+        # Queued while the writer is parked, so the deletion below lands
+        # between what is committed and what is not.
+        in_flight = store.record_turn("beta", a_turn(FIRST, "already on its way"))
+        gate.wait()
+
+        taken = erase(client, "alpha")
+        assert (taken["sessions"], taken["turns"], taken["conversations"]) == (1, 1, 1)
+
+        gate.open_forever()
+        assert in_flight.wait(TIMEOUT_S) is False
+
+        # And the one produced after it, which the runtime has no reason
+        # to stop producing.
+        after = store.record_turn("beta", a_turn(FIRST, "and after that"))
+        assert after.wait(TIMEOUT_S) is False
+        store.close_session("beta", duration_s=8.0, reason="client")
+    finally:
+        store.stop()
+
+    # The session that was not deleted is still here; the thread is not,
+    # and no turn of it came back.
+    assert [row["session"] for row in stored("sessions")] == ["beta"]
+    assert stored("conversations") == []
+    assert stored("turns") == []
+
+
+def test_a_thread_this_writer_never_wrote_is_a_first_turn(client) -> None:
+    """The other half of the distinction. An id nothing in this process
+    has written is a thread before its first turn, whatever some other
+    deletion said about some other id, so it materializes as designed."""
+    recording = Recorder(dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC))
+    recording.session("alpha")
+    recording.turn("alpha", FIRST, "the thread that goes")
+    recording.close("alpha")
+    recording.done()
+    erase(client, "alpha")
+
+    fresh = ConversationStore(
+        DatabaseConfig(),
+        now=lambda: dt.datetime(2026, 8, 15, 13, 0, tzinfo=dt.UTC),
+        retention_days=0,
+    )
+    fresh.start()
+    fresh.open_session("beta", 100.0, manifest())
+    landed = fresh.record_turn("beta", a_turn(SECOND, "a thread nobody deleted"))
+    assert landed.wait(TIMEOUT_S) is True
+    fresh.close_session("beta", duration_s=1.0, reason="client")
+    fresh.stop()
+
+    (thread,) = stored("conversations")
+    assert thread["conversation"] == SECOND
+    assert thread["title"] == "a thread nobody deleted"
+
+
+
 def test_a_deletion_between_the_two_halves_leaves_no_orphan_events(client) -> None:
     """The other interval a deletion can land in, and the only one that
     can produce a row nothing will ever prune.
@@ -566,6 +660,7 @@ def test_a_deletion_between_the_two_halves_leaves_no_orphan_events(client) -> No
 
     for table in TABLES:
         assert stored(table) == [], table
+
 
 
 # The purge and its three selectors
