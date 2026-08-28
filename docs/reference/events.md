@@ -9,7 +9,7 @@ The structured events are this server's observability surface
 ([ADR](../adr/2026-08-04-json-logs-are-the-observability-surface.md)), and
 they carry metadata and nothing else
 ([ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)).
-This document is that surface written down: 56 events in 81 variants. What was
+This document is that surface written down: 57 events in 82 variants. What was
 said in a conversation is in the conversation store instead, keyed by the same
 `session` ([its reference](conversations-schema.md)).
 
@@ -205,6 +205,7 @@ meets them, from a device's check-in to the server's own lifecycle surfaces.
 | `replied` | `vinga_server.session` | INFO | 1 |
 | `agent_said` | `vinga_server.session` | INFO | 1 |
 | `handover` | `vinga_server.session` | INFO | 1 |
+| `conversation_resumed` | `vinga_server.session` | INFO | 1 |
 | `prompt_assembled` | `vinga_server.session` | INFO | 1 |
 | `llm_retry` | `vinga_server.session` | WARNING | 1 |
 | `llm_round` | `vinga_server.session` | INFO | 1 |
@@ -646,6 +647,35 @@ session %s: handed over from agent %s to %s
 | `to_agent` | `IDENTIFIER` | yes | no |  |  |
 | `from_conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the outgoing agent was on, which the handover turn belongs to. |
 | `to_conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the incoming agent is on: its own, minted at its first activation in this session and continued at every later one. |
+
+### `conversation_resumed`
+
+A stored thread is picked up again, at the boundary the selection ended a
+reply on. Counts and a flag: which thread, how much of it was rebuilt, how
+much of it could not be, and whether there was more of it than the budget had
+room for.
+
+#### Variant 1: `vinga_server.session` at INFO
+
+```text
+session %s: resumed conversation %s from %d stored turns
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `session` (`ID`) | no | the `session_id` syntax |  |
+| 2 | `conversation` (`ID`) | no | the `conversation_id` syntax |  |
+| 3 | `turns` (`COUNT`) | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `conversation` | `ID` | yes | no | the `conversation_id` syntax | The thread the session moved onto, which the agent that asked for it is bound to from here. |
+| `turns` | `COUNT` | yes | no |  | How many stored turns were rebuilt into the model's context. A count and never the dialogue: what was said is the store's. |
+| `skipped` | `COUNT` | yes | no |  | How many stored turns could not be rebuilt because no text was kept for them, which is what a thread recorded under the stricter storage setting leaves behind. |
+| `over_budget` | `BOOL` | yes | no |  | Whether the thread held more than the hydration budget had room for, so what was rebuilt is its recent tail. |
 
 ### `prompt_assembled`
 

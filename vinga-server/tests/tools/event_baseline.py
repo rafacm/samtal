@@ -135,7 +135,14 @@ from tests.support.sessions import (
     with_device,
 )
 from tests.support.sockets import RecordingSocket
-from tests.support.stores import CAPTURE_MANIFEST, corrupt, tone
+from tests.support.stores import (
+    CAPTURE_MANIFEST,
+    StoredThreads,
+    a_backlog,
+    a_candidate,
+    corrupt,
+    tone,
+)
 from tests.support.stores import store as capture_store
 from tests.support.tools_mcp import Applying as McpApplying
 from tests.support.tools_mcp import config_granting as mcp_granting
@@ -163,6 +170,7 @@ from vinga_server.config.api import build_api
 from vinga_server.config.loader import StorageError
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations import store as store_module
+from vinga_server.conversations import threads
 from vinga_server.conversations.records import ToolInvocation, TurnRecord
 from vinga_server.conversations.store import ConversationStore
 from vinga_server.device.bindings import BoundNames, DeviceBindings
@@ -699,6 +707,49 @@ async def drive_handover(_: Path) -> None:
     await run_reply(handing_over(), "get me the tutor")
 
 
+# A thread this harness's own session resumes, in the shape the runtime
+# mints. The store behind it is written down rather than migrated: what
+# this driver is here for is the record the runtime emits at the
+# boundary, and the reads have their own suites.
+RESUMED_THREAD = "3f0c1d2e3a4b5c6d7e8f90a1b2c3d4e5"
+
+
+async def drive_conversation_resumed(_: Path) -> None:
+    await run_reply(resuming(), "the galaxy one")
+
+
+def resuming() -> Any:
+    """A session that searches, picks what it was offered, and carries
+    on, which is the whole flow rather than a planted offer: an id is
+    honored only where the agent was shown it."""
+    poet = ScriptedLlm(
+        [
+            [call("resume_conversation", description="the galaxy")],
+            [call("resume_conversation", conversation=RESUMED_THREAD)],
+            "Carrying on.",
+        ]
+    )
+    return session_for(
+        base_config(
+            server={"conversations": {"enabled": True, "resumption": True}}
+        ),
+        POET_MAC,
+        {"poet": poet},
+        threads=StoredThreads(
+            found={
+                "poet": threads.Candidates(
+                    matched=True, found=(a_candidate(RESUMED_THREAD),)
+                )
+            },
+            held={
+                RESUMED_THREAD: a_backlog(
+                    RESUMED_THREAD, said=[("what is out there", "Galaxies.")]
+                )
+            },
+        ),
+    )
+
+
 def handing_over() -> Any:
     scripts = {
         "poet": ScriptedLlm([["Handing you over.", call("switch_agent", agent="tutor")]]),
@@ -895,7 +946,12 @@ SESSION_DRIVERS: tuple[Driver, ...] = (
     Driver((PIPELINE, "PipelineRuntime._reply", 1), drive_heard, "heard"),
     Driver((PIPELINE, "PipelineRuntime._reply", 2), drive_replied, "replied"),
     Driver((PIPELINE, "PipelineRuntime._speak_reply", 1), drive_agent_said, "agent_said"),
-    Driver((PIPELINE, "PipelineRuntime._speak_reply", 2), drive_handover, "handover"),
+    Driver((PIPELINE, "PipelineRuntime._move_to", 1), drive_handover, "handover"),
+    Driver(
+        (PIPELINE, "PipelineRuntime._move_to", 2),
+        drive_conversation_resumed,
+        "conversation_resumed",
+    ),
     Driver((PIPELINE, "PipelineRuntime._run_one", 1), drive_tool_call, "tool_call"),
     Driver((TURNTAKING, "TurnTaking.finish_utterance", 1), drive_barge_in_manual, "barge_in"),
     Driver(

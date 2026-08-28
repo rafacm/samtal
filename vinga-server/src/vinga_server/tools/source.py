@@ -11,8 +11,10 @@ What every source has in common is stated here instead. `ToolSource`
 asks four questions: what do you offer this agent right now, is this
 call yours, run it, and how long may it take. The runtime keeps exactly
 what no source can answer: a call whose arguments never parsed as an
-object, a name no source claims, and `switch_agent`, which ends the
-tool loop rather than producing a result the model reads.
+object, a name no source claims, and the three tools that end the tool
+loop rather than producing a result the model reads, which are
+`switch_agent` and the two that move a session to another
+conversation.
 
 Routing is decided once and then carried. Every question below is asked
 about the same CLAIM, the classification the runtime reserved on the
@@ -34,7 +36,7 @@ fixed order settles nothing that was ever in doubt.
 """
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from vinga_server.device.boundary import DeviceOutput
 from vinga_server.providers import ToolDef
@@ -88,6 +90,23 @@ class ToolSource(Protocol):
         """How long the claimed call may take, in seconds."""
 
 
+class ThreadSearch(Protocol):
+    """What this source needs from the resumption flow: one question.
+
+    Searching for a past thread is a read that changes nothing, so it
+    executes here like any other tool; picking one changes which
+    conversation a session is on, so it is the runtime's. The seam is
+    this one method, and it never raises: what comes back is already the
+    sentence the model reads, refusals and store failures included.
+
+    Named on this side rather than imported, because the caller is what
+    says what it needs. `runtime/resumption.py` is what a server hands
+    in.
+    """
+
+    async def described(self, agent: str, description: str) -> str: ...
+
+
 class BuiltinTools:
     """The tools the server implements itself.
 
@@ -98,18 +117,35 @@ class BuiltinTools:
     classification says which namespace the model reached into, and
     whether the call then ran is what the result says.
 
-    `switch_agent` is offered here and executed by the runtime, because
-    a successful one ends the tool loop rather than producing a result
-    the model reads; it reaches `dispatch` only if that handling ever
-    stops catching it, and is answered as the builtin that cannot run.
+    Three of the four are offered here and executed by the runtime,
+    because what they do is end the tool loop rather than produce a
+    result the model reads: `switch_agent` moves the conversation to
+    another agent, `new_conversation` and a `resume_conversation` naming
+    a thread move it to another conversation. `switch_agent` and
+    `new_conversation` reach `dispatch` only if that handling ever stops
+    catching them, and are answered as the builtin that cannot run.
+
+    The two conversation tools are offered whether or not this server
+    can resume anything, which is the point of the refusal they answer
+    with: a tool that is simply absent is a tool a model invents, and a
+    refusal it can read out is something the user hears.
+
+    `threads` is the search half of the resumption flow, absent in every
+    deployment that has not switched resumption on and compared
+    `is not None` for that reason.
     """
 
     def __init__(
-        self, agents: Sequence[str], memory: MemoryStore | None, timeout_s: float
+        self,
+        agents: Sequence[str],
+        memory: MemoryStore | None,
+        timeout_s: float,
+        threads: ThreadSearch | None = None,
     ) -> None:
         self._agents = agents
         self._memory = memory
         self._timeout_s = timeout_s
+        self._threads = threads
 
     def snapshot(self, agent: str) -> Sequence[ToolDef]:
         tools: list[ToolDef] = []
@@ -119,6 +155,8 @@ class BuiltinTools:
             tools.append(builtin.switch_agent_tool(self._agents))
         if self._memory is not None:
             tools.append(builtin.remember_tool())
+        tools.append(builtin.new_conversation_tool())
+        tools.append(builtin.resume_conversation_tool())
         return tools
 
     def owns(self, claim: "records.ToolInvocation") -> bool:
@@ -127,7 +165,26 @@ class BuiltinTools:
     async def dispatch(self, claim: "records.ToolInvocation", agent: str) -> tuple[str, bool]:
         if claim.name == names.REMEMBER and self._memory is not None:
             return await builtin.remember(self._memory, agent, claim.arguments or {}), False
+        if claim.name == names.RESUME_CONVERSATION:
+            # The search half. A call that named a conversation never
+            # arrives here: the runtime takes those, because a selection
+            # ends the reply's loop.
+            return await self._search(agent, claim.arguments or {}), False
         return f'there is no tool called "{claim.name}"', True
+
+    async def _search(self, agent: str, arguments: dict[str, Any]) -> str:
+        """One search, or the sentence saying why there was none.
+
+        Not an error result in any of its arms, deliberately: what the
+        model does with this is speak, and a refusal it can phrase is
+        worth more than an error it apologizes for.
+        """
+        if self._threads is None:
+            return builtin.RESUMPTION_UNAVAILABLE
+        described = arguments.get("description")
+        if not isinstance(described, str) or not described.strip():
+            return builtin.RESUME_NEEDS_AN_ARGUMENT
+        return await self._threads.described(agent, described)
 
     def timeout_for(self, claim: "records.ToolInvocation") -> float:
         return self._timeout_s
@@ -209,4 +266,4 @@ class McpTools:
         return self._default_timeout_s
 
 
-__all__ = ["BuiltinTools", "DeviceTools", "McpTools", "ToolSource"]
+__all__ = ["BuiltinTools", "DeviceTools", "McpTools", "ThreadSearch", "ToolSource"]

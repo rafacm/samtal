@@ -719,10 +719,27 @@ dots replaced (`self_audio_speaker_set_volume`), because both LLM APIs
 restrict tool names to `[A-Za-z0-9_-]`.
 
 **Builtins** are `switch_agent`, offered when the device is bound to
-more than one agent, and `remember`, offered when memory is configured.
+more than one agent; `remember`, offered when memory is configured; and
+`new_conversation` and `resume_conversation`, always offered.
+
 A successful `switch_agent` ends the current agent's reply: the new
-agent greets the user in its own prompt and its own voice, with the
-conversation so far carried over.
+agent greets the user in its own prompt and its own voice, on its own
+conversation. It does not read what was said to the outgoing agent,
+because a conversation is a thread between a user and exactly one agent
+and each agent keeps its own; switching back returns an agent to what
+it was saying.
+
+`new_conversation` and `resume_conversation` move the session between
+threads of the agent that is already speaking, and both need
+`server.conversations.resumption` (below). Without it they answer a
+fixed sentence saying this server does not keep conversations that can
+be picked up again, which the agent reads out, and nothing moves.
+`resume_conversation` takes a `description` of what the user is looking
+for and answers a short list of the agent's own past conversations to
+read out, then takes the one the user picked; only a conversation the
+tool has just offered can be resumed, so a model cannot reach a thread
+by guessing an id, and never one belonging to another agent.
+
 `remember` appends one fact to the agent's memory file:
 
 ```yaml
@@ -2026,6 +2043,7 @@ This index is the other half: what exists, and when it fires.
 | `replied` | a reply finishes |
 | `agent_said` | one agent's part of a reply |
 | `handover` | `switch_agent` succeeds |
+| `conversation_resumed` | a stored conversation is picked up again: how much of it was rebuilt, how much could not be, and whether there was more of it than the budget had room for |
 | `prompt_assembled` | the know-how half of a prompt is assembled and cached, with each block's size by provenance |
 | `llm_retry` | the first-token watchdog cancels a stalled generation and retries the round once |
 | `llm_round` | a generation call finishes |
@@ -2195,6 +2213,11 @@ server:
     # prune conversations inactive for longer than this; 0 keeps
     # everything
     retention_days: 90
+    # find and resume a past conversation by describing it out loud
+    resumption: false
+    # how much of a resumed conversation is rebuilt into the model's
+    # context, in tokens
+    resumption_budget_tokens: 6000
 ```
 
 What lands is the `conversations` schema of the same database the
@@ -2239,6 +2262,27 @@ the exception and is content, because it is what somebody said: with
 `text: false` a thread has no title. Each session row also records which way the switches
 were set for it, so a null column is distinguishable from a column that
 was never stored.
+
+**`resumption` is the third switch and the only one that is not about
+storage.** It decides whether an agent can find one of its own past
+conversations and carry on with it, and it is off by default, because
+recording a conversation and reading it back to a model are separate
+decisions. It reads what the other two wrote, so a configuration that
+asks for it with `enabled` or `text` off is refused at boot in a
+sentence naming both keys and both ways out. What it changes, once on:
+the two conversation tools above stop refusing, and picking a
+conversation rebuilds the model's context from the stored dialogue,
+newest turns first, up to `resumption_budget_tokens`. That budget is
+approximate by design (the count is estimated from the stored
+characters), what it drops when a thread is longer than it are whole
+turns oldest first, and a thread rebuilt from its tail is told so, as
+is one whose record has holes in it. Arguments and results of the tools
+a turn ran stay in the store: what a rebuilt conversation carries is
+what was said, and the names of the tools that ran.
+
+Off, nothing about a conversation's behaviour changes at all: an
+agent's working context is assembled inside one session and ends when
+the session closes, which is what this server always did.
 
 **The switches are deployment-wide, and they are the only privacy
 control this release has.** Until per-user controls exist, enabling text

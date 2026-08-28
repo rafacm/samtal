@@ -36,7 +36,7 @@ from vinga_server.config.responses import (
     ConfigReloadResult,
 )
 from vinga_server.config.secrets import SecretStore
-from vinga_server.conversations import ConversationStore, open_conversations
+from vinga_server.conversations import ConversationStore, open_conversations, threads
 from vinga_server.device.bindings import DeviceBindings
 from vinga_server.events import ServerEvents
 from vinga_server.events.catalog import CaptureDisabled, CaptureEnabled
@@ -341,11 +341,19 @@ async def _build_composition(
     # is closed over for the reason the first three are: it outlives
     # every connection, and the per-session recorder is derived from it
     # here.
+    #
+    # The read seam beside the store is the other direction through the
+    # same database: what a resume reads a thread back through. Built
+    # wherever there is a record to read, because it holds nothing and
+    # opens nothing until it is asked; whether a conversation may be
+    # resumed is the runtime's own read of the section, so the switch
+    # has one home rather than a second one here.
     runtime_factory = bespoke_runtime_factory(
         generations,
         mcp_servers,
         memory,
         conversations,
+        None if conversations is None else threads.Reads(database),
     )
     # What a device says about itself at OTA check-in, kept for the
     # session that follows: a capture manifest needs the firmware
