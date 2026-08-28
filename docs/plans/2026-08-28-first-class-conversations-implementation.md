@@ -524,7 +524,7 @@ describes the feature, not the ordering these fixes corrected.
 
 ## M3: threads readable
 
-PR TBD.
+PR #335.
 
 ### What landed
 
