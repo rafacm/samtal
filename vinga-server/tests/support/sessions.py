@@ -118,6 +118,7 @@ def device_session(
     mcp_servers: McpServers | None = None,
     conversations: Any = None,
     generations: Generations | None = None,
+    threads: Any = None,
 ) -> session_module.DeviceSession:
     """A device session with a real bespoke runtime behind it, built the
     way `run` builds one: the agents resolved from the binding, then the
@@ -130,7 +131,11 @@ def device_session(
     and is what a deployment with no MCP entries has. `conversations` is
     the store a turn's record is handed to, None everywhere but in the
     suite that is about the record, which is what a deployment that has
-    not asked for one has.
+    not asked for one has. `threads` is the other direction through the
+    same store, the read a resume goes through, and None is the same
+    kind of absence; a session resumes nothing unless it is handed one
+    AND its configuration switched resumption on, which is the runtime's
+    own read of the section rather than this argument.
 
     `generations` is the holder the server would hand the factory, and
     it is a parameter for the one kind of test that needs it: a reload
@@ -155,6 +160,7 @@ def device_session(
         mcp_servers if mcp_servers is not None else McpServers({}),
         memory,
         conversations,
+        threads,
     )
     session = session_module.DeviceSession(cast(Any, websocket), generations, factory)
     # White-box, deliberately, and the only three sites in this file that
@@ -189,6 +195,7 @@ def session_for(
     conversations: Any = None,
     stages: dict[str, Any] | None = None,
     generations: Generations | None = None,
+    threads: Any = None,
 ) -> DeviceSession:
     """A device session with a real bespoke runtime behind it, built the
     way `run` builds one, with the named agents' LLMs replaced by
@@ -204,6 +211,7 @@ def session_for(
         mcp_servers,
         conversations,
         generations,
+        threads,
     )
 
 

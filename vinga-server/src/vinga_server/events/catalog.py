@@ -1254,6 +1254,43 @@ class Handover(Variant):
 
 
 @dataclass(frozen=True)
+class ConversationResumed(Variant):
+    """A stored thread is picked up again."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "session %s: resumed conversation %s from %d stored turns"
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "conversation", "turns")
+
+    conversation: ConversationId = value(
+        note=(
+            "The thread the session moved onto, which the agent that "
+            "asked for it is bound to from here."
+        )
+    )
+    turns: Count = value(
+        note=(
+            "How many stored turns were rebuilt into the model's "
+            "context. A count and never the dialogue: what was said is "
+            "the store's."
+        )
+    )
+    skipped: Count = value(
+        note=(
+            "How many stored turns could not be rebuilt because no text "
+            "was kept for them, which is what a thread recorded under "
+            "the stricter storage setting leaves behind."
+        )
+    )
+    over_budget: Flag = value(
+        note=(
+            "Whether the thread held more than the hydration budget had "
+            "room for, so what was rebuilt is its recent tail."
+        )
+    )
+
+
+@dataclass(frozen=True)
 class PromptAssembled(Variant):
     """The know-how half of a prompt is assembled and cached."""
 
@@ -1729,6 +1766,17 @@ REPLIED = declare("replied", note="A reply finishes.", variants=(Replied,))
 AGENT_SAID = declare("agent_said", note="One agent's part of a reply.", variants=(AgentSaid,))
 
 HANDOVER = declare("handover", note="`switch_agent` succeeds.", variants=(Handover,))
+
+CONVERSATION_RESUMED = declare(
+    "conversation_resumed",
+    note=(
+        "A stored thread is picked up again, at the boundary the "
+        "selection ended a reply on. Counts and a flag: which thread, "
+        "how much of it was rebuilt, how much of it could not be, and "
+        "whether there was more of it than the budget had room for."
+    ),
+    variants=(ConversationResumed,),
+)
 
 PROMPT_ASSEMBLED = declare(
     "prompt_assembled",
@@ -3036,6 +3084,7 @@ __all__ = [
     "CONVERSATIONS_ENABLED",
     "CONVERSATIONS_FAILED",
     "CONVERSATIONS_PRUNED",
+    "CONVERSATION_RESUMED",
     "CaptureBelowFloor",
     "CaptureDirectoryUnusable",
     "CaptureDisabled",
@@ -3048,6 +3097,7 @@ __all__ = [
     "CaptureStarted",
     "CatalogError",
     "CatalogState",
+    "ConversationResumed",
     "ConversationsDropped",
     "ConversationsEnabled",
     "ConversationsPruned",

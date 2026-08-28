@@ -87,15 +87,16 @@ def capture(
 
 def test_every_driver_names_a_path_of_its_own() -> None:
     """One driver per emit path, so a capture keyed by identity is a
-    capture of eighty paths rather than of however many survived a
+    capture of eighty-one paths rather than of however many survived a
     collision.
 
-    Eighty rather than eighty-one since #283: `BindingsSnapshotOnly`
-    retired with the file-existence probe that was the only thing able
-    to emit it."""
+    Eighty since #283, when `BindingsSnapshotOnly` retired with the
+    file-existence probe that was the only thing able to emit it, and
+    eighty-one since #190 gave a reply a second kind of boundary to
+    move at."""
     claimed = [driver.identity for driver in DRIVERS]
 
-    assert len(set(claimed)) == len(claimed) == 80
+    assert len(set(claimed)) == len(claimed) == 81
 
 
 def test_every_driven_path_produces_the_event_it_emits(
@@ -480,7 +481,7 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
     "vinga_server.runtime.pipeline:PipelineRuntime._speak_reply #1": (
         ("AgentSaid", ("agent", "conversation", "device", "event", "sentences", "session")),
     ),
-    "vinga_server.runtime.pipeline:PipelineRuntime._speak_reply #2": (
+    "vinga_server.runtime.pipeline:PipelineRuntime._move_to #1": (
         (
             "Handover",
             (
@@ -491,6 +492,20 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
                 "session",
                 "to_agent",
                 "to_conversation",
+            ),
+        ),
+    ),
+    "vinga_server.runtime.pipeline:PipelineRuntime._move_to #2": (
+        (
+            "ConversationResumed",
+            (
+                "conversation",
+                "device",
+                "event",
+                "over_budget",
+                "session",
+                "skipped",
+                "turns",
             ),
         ),
     ),

@@ -1,21 +1,41 @@
 """The tools the server implements itself.
 
-Two of them, both bare-named because the namespace rules in `names`
-reserve those names. `switch_agent` is defined here but executed by the
-session, since a successful switch ends the tool loop rather than
-producing a result; `remember` is executed here, against the memory
-store.
+Four of them, all bare-named because the namespace rules in `names`
+reserve those names. Two are executed here: `remember`, against the
+memory store, and the search half of `resume_conversation`, against
+whatever the runtime injected as its way of reading stored threads.
+The other two are defined here and executed by the session, because
+what they do is end the tool loop rather than produce a result the
+model reads: `switch_agent` hands the conversation to another agent,
+and `new_conversation` and the selection half of `resume_conversation`
+move it to another thread.
 
 What `remember` writes is injected by `runtime.prompt`, which is where
 the whole system prompt is assembled: this module defines and runs the
 tools, and how their output reaches the model is the runtime's.
+
+The sentences a selection answers with also live here, all of them, and
+that is deliberate rather than tidy. They are one closed vocabulary,
+half of it chosen where a tool is dispatched and half of it where the
+runtime intercepts one, and a vocabulary split across the two modules
+that speak it would be two vocabularies inside a month. Every one of
+them is a fixed sentence with nothing in it that a room said: what the
+model is told is what happened and what to do about it.
 """
 
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from vinga_server.providers import ToolDef
 from vinga_server.tools import names
 from vinga_server.tools.memory import MemoryStore
+
+if TYPE_CHECKING:
+    # Named for the annotation alone, so that saying what a candidate
+    # looks like does not make the tool layer import the conversations
+    # package at import time. The same trade `tools/source.py` makes for
+    # the classification it routes by.
+    from vinga_server.conversations import threads
 
 
 def switch_agent_tool(agents: Sequence[str]) -> ToolDef:
@@ -70,6 +90,170 @@ def remember_tool() -> ToolDef:
             },
             "required": ["text"],
         },
+    )
+
+
+def new_conversation_tool() -> ToolDef:
+    """Leave this thread and start a fresh one with the same agent.
+
+    Offered whether or not the server can resume anything, which is what
+    makes the answer a sentence the agent says rather than a tool the
+    model was told about and then denied. A refusal that can be spoken
+    is worth more than a name that is not there: a model with no such
+    tool invents one."""
+    return ToolDef(
+        name=names.NEW_CONVERSATION,
+        description=(
+            "Start a new conversation with this user and leave the current one "
+            "behind. Use it when they say they want to talk about something else "
+            "and start fresh, or ask to set the current conversation aside. What "
+            "was said so far is kept and can be resumed later."
+        ),
+        input_schema={"type": "object", "properties": {}},
+    )
+
+
+def resume_conversation_tool() -> ToolDef:
+    """Find an earlier thread of this agent's and carry on with it.
+
+    One tool for both beats of the flow, which is what makes the second
+    beat converge: the first call describes, the answer is a list, and
+    the follow-up names one of the conversations in that list. There is
+    no second free-text search to disambiguate a first one, because
+    picking from what was offered is not a search."""
+    return ToolDef(
+        name=names.RESUME_CONVERSATION,
+        description=(
+            "Find one of your earlier conversations with this user and carry on "
+            "with it. Call it with `description` set to what the user said about "
+            "the conversation they mean; it answers with a short list, which you "
+            "read out so they can choose. Then call it again with `conversation` "
+            "set to the one they picked. Only a conversation this tool has listed "
+            "can be resumed, so never invent one."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string",
+                    "description": (
+                        "What the user said about the conversation they are "
+                        "looking for, in their own words."
+                    ),
+                },
+                "conversation": {
+                    "type": "string",
+                    "description": (
+                        "The conversation the user picked, exactly as this tool "
+                        "listed it."
+                    ),
+                },
+            },
+        },
+    )
+
+
+# What a selection answers with, as fixed sentences. No value from a
+# room reaches any of them, and each says what happened and what the
+# agent should do next, because what the model does with a result is
+# speak.
+
+# Resumption is off, text is off, or nothing is recorded. One sentence
+# for both tools: the reason is the same and so is the way out.
+RESUMPTION_UNAVAILABLE = (
+    "this server does not keep conversations that can be picked up again; tell the "
+    "user that, and carry on with the conversation you are in"
+)
+
+# The tool was called with neither of its two arguments.
+RESUME_NEEDS_AN_ARGUMENT = (
+    'resume_conversation needs either a "description" of the conversation to look '
+    'for or the "conversation" the user picked from a list you have already read '
+    "out"
+)
+
+# An id this agent was not offered: invented, stale after a newer
+# search, or offered to a different agent in this session.
+NO_SUCH_CANDIDATE = (
+    "that is not one of the conversations you offered; ask the user which of the "
+    "ones you listed they meant, or search again with a description"
+)
+
+# The id was offered and the thread is not there any more.
+CONVERSATION_GONE = (
+    "that conversation is no longer stored; tell the user it is gone and carry on "
+    "with the conversation you are in"
+)
+
+# A second selection in one reply. The first one won.
+ALREADY_MOVED = (
+    "this reply has already moved to another conversation; answer as yourself "
+    "instead"
+)
+
+# The agent has no stored threads at all.
+NOTHING_TO_RESUME = (
+    "there are no earlier conversations with this user to resume; tell them that "
+    "and carry on with the conversation you are in"
+)
+
+# The store could not be read. Two sentences for one closed set of two
+# answers, and neither carries a word the database wrote.
+STORE_UNREADABLE = (
+    "the stored conversations could not be read; tell the user you cannot look "
+    "them up right now"
+)
+STORE_BUSY = (
+    "the stored conversations are busy right now; tell the user to ask again in a "
+    "moment"
+)
+
+# What a list of candidates is introduced with, one line for each of the
+# two things a search can find.
+CANDIDATES_FOUND = (
+    "These conversations may be the one. Read them out to the user, ask which they "
+    "mean, and call resume_conversation again with that conversation."
+)
+CANDIDATES_UNMATCHED = (
+    "Nothing stored matches that description. These are the most recent "
+    "conversations instead. Read them out to the user, ask whether one of them is "
+    "the one, and call resume_conversation again with that conversation."
+)
+
+# One candidate, as the model reads it aloud. The title and the excerpt
+# are what the room said, which is what a tool result is for; a thread
+# that stored neither says so rather than leaving a gap the model has to
+# guess at.
+CANDIDATE_LINE = (
+    '{ordinal}. conversation "{conversation}", last active {last_active_at}, '
+    'called "{title}", which opened: "{excerpt}"'
+)
+NOT_STORED = "(nothing was stored)"
+
+
+def candidate_list(header: str, found: "Sequence[threads.Candidate]") -> str:
+    """A discovery answer, as the model receives it: the sentence that
+    says what this list is, then one numbered line per thread.
+
+    Numbered from one because the number is what a user answers with
+    ("the second one"), and carrying the id on the same line because the
+    number is not what the follow-up call names: the ordinal is for the
+    person and the id is for the tool.
+    """
+    return "\n".join(
+        [
+            header,
+            *(
+                CANDIDATE_LINE.format(
+                    ordinal=ordinal,
+                    conversation=candidate.conversation,
+                    last_active_at=candidate.last_active_at,
+                    title=candidate.title or NOT_STORED,
+                    excerpt=candidate.excerpt or NOT_STORED,
+                )
+                for ordinal, candidate in enumerate(found, start=1)
+            ),
+        ]
     )
 
 

@@ -168,9 +168,20 @@ async def test_switch_agent_is_offered_only_where_there_is_somewhere_to_go() -> 
 
     # Both offers whole, so the conditional tool is the entire
     # difference between them: the device bound to one agent has nowhere
-    # to switch and no memory configured, and is offered nothing.
-    assert [tool.name for tool in alone.seen[0][1]] == []
-    assert [tool.name for tool in paired.seen[0][1]] == ["switch_agent"]
+    # to switch and no memory configured, and is offered only the two
+    # that are always offered. Those two are unconditional on purpose:
+    # what a server that cannot resume anything answers with is a
+    # sentence the agent reads out, and a tool that is simply absent is
+    # a tool a model invents (#190).
+    assert [tool.name for tool in alone.seen[0][1]] == [
+        "new_conversation",
+        "resume_conversation",
+    ]
+    assert [tool.name for tool in paired.seen[0][1]] == [
+        "switch_agent",
+        "new_conversation",
+        "resume_conversation",
+    ]
     # The enum carries the device's full bound list, which is what lets
     # the agent answer "who can I talk to?".
     (tool,) = [t for t in paired.seen[0][1] if t.name == "switch_agent"]
@@ -188,27 +199,33 @@ async def test_a_successful_switch_hands_over_to_the_other_agent() -> None:
     # Talking as the tutor means being sent the tutor's prompt.
     assert tutor.systems == ["TUTOR"]
 
-    # The new agent saw the conversation so far plus an ephemeral turn
-    # telling it to greet, and that turn is not in the history.
+    # The new agent saw its own thread and nothing else, which since
+    # #190 is a thread that did not exist a moment ago: the seed telling
+    # it to greet is the whole of what it was handed, and it is the
+    # first line of the history it keeps. What the poet was told is the
+    # poet's thread, and the tutor does not read it.
     (turns, _, _) = tutor.seen[0]
-    assert turns[0] == Turn("user", "get me the tutor")
-    assert turns[-1].content == pipeline_module.SWITCH_GREETING
+    assert [turn.content for turn in turns] == [pipeline_module.SWITCH_GREETING]
     kept = await history(session, tutor)
-    assert all(turn.content != pipeline_module.SWITCH_GREETING for turn in kept)
+    assert kept[0].content == pipeline_module.SWITCH_GREETING
+    assert all(turn.content != "get me the tutor" for turn in kept)
 
 
 async def test_the_old_agents_words_stay_its_own_turn() -> None:
     # A preamble the poet spoke before handing over is its own assistant
-    # turn: the switch happens between two turns, not inside one.
+    # turn: the switch happens between two turns, not inside one. Which
+    # thread each of those turns is on is what #190 decided: the
+    # preamble stays on the poet's, and the tutor's begins with the seed
+    # that opened it.
     poet = ScriptedLlm([["One moment.", call("switch_agent", agent="tutor")]])
     tutor = ScriptedLlm(["Tutor here."])
     session = session_for(base_config(), BOTH_MAC, {"poet": poet, "tutor": tutor})
     assert await run_reply(session, "the tutor please") == ["Tutor here."]
     assert [turn.content for turn in await history(session, tutor)] == [
-        "the tutor please",
-        "One moment.",
+        pipeline_module.SWITCH_GREETING,
         "Tutor here.",
     ]
+    assert [turn.content for turn in poet.seen[0][0]] == ["the tutor please"]
 
 
 async def test_a_switch_to_an_unbound_agent_is_refused_by_the_agent_talking() -> None:
@@ -289,7 +306,11 @@ async def test_remembering_is_offered_and_executed_when_memory_is_configured(
     session = session_for(base_config(), POET_MAC, {"poet": script}, memory=store)
 
     assert await run_reply(session, "remember I am vegetarian") == ["I will keep that in mind."]
-    assert [tool.name for tool in script.seen[0][1]] == ["remember"]
+    assert [tool.name for tool in script.seen[0][1]] == [
+        "remember",
+        "new_conversation",
+        "resume_conversation",
+    ]
     assert "the user is vegetarian" in store.read("poet")
 
     (result,) = [

@@ -40,10 +40,12 @@ import contextlib
 import functools
 import uuid
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from vinga_server.audio.resample import Resampler
 from vinga_server.conversations.records import (
+    Acknowledgement,
     SessionTurns,
     ToolInvocation,
     TurnRecorder,
@@ -60,6 +62,7 @@ from vinga_server.device.boundary import (
 from vinga_server.events import SessionEvents, assembly, logger
 from vinga_server.events.catalog import (
     AgentSaid,
+    ConversationResumed,
     Handover,
     Heard,
     PromptAssembled,
@@ -70,6 +73,7 @@ from vinga_server.events.values import (
     ABSENT,
     ConversationId,
     Count,
+    Flag,
     Fragment,
     Identifier,
     LanguageTag,
@@ -92,13 +96,13 @@ from vinga_server.providers import (
     Turn,
     Usage,
 )
-from vinga_server.runtime import prompt
+from vinga_server.runtime import prompt, resumption
 from vinga_server.runtime.filler_runner import FillerRunner
 from vinga_server.runtime.speech import _Synthesis, speak_after
 from vinga_server.runtime.turns import BUILTIN, MCP, TurnUnderway, tool_source
 from vinga_server.runtime.turntaking import TurnTaking
 from vinga_server.text import SentenceSplitter
-from vinga_server.tools import names
+from vinga_server.tools import builtin, names
 from vinga_server.tools.mcp import McpServers
 from vinga_server.tools.memory import MemoryStore
 from vinga_server.tools.source import BuiltinTools, DeviceTools, McpTools, ToolSource
@@ -113,15 +117,65 @@ MAX_TOOL_ROUNDS = 4
 # is why this is not generous.
 DEFAULT_TOOL_TIMEOUT_S = 15.0
 
-# The ephemeral user turn a newly switched-in agent is greeted with. It
-# is never recorded in the history: it exists because both APIs need a
-# fresh completion to end on a user turn, and writing it into `_turns`
-# would falsify the transcript with words nobody said.
+# The synthetic user turn a conversation opens on when a reply moves to
+# one, in the three shapes a move has. It exists because both APIs need
+# a fresh completion to end on a user turn, and because a thread that
+# began with an assistant greeting would read as an answer to nobody.
+#
+# Written into the target thread's history rather than kept for one
+# round, which is what changed when histories became per thread (#190):
+# it is that conversation's opening line, the model reads it on every
+# later round of the same thread, and it says nobody said it out loud.
+# The stored record is untouched by it: a turn is what a user said and
+# what was replied, and none of these three was said by anyone.
 SWITCH_GREETING = (
     "You have just taken over this conversation from another assistant. "
     "Greet the user briefly as yourself, in the language they have been "
     "speaking, and carry on from what was said above."
 )
+
+FRESH_GREETING = (
+    "The user has asked to start a new conversation. Nothing that was "
+    "said earlier is available to you here. Greet them briefly as "
+    "yourself, in the language they have been speaking, and ask what "
+    "they would like to talk about."
+)
+
+RESUMED_GREETING = (
+    "You have just resumed an earlier conversation with this user, and "
+    "what is above is what was said in it. Greet them briefly, say in "
+    "one sentence what the two of you were talking about, and carry on "
+    "from there, in the language they have been speaking."
+)
+
+# What a resumed conversation is additionally told about its own record,
+# appended to the seed above where each applies. Fixed sentences from a
+# closed set, chosen where the resume is decided: what they exist for is
+# an agent that does not claim to remember what it cannot see.
+RESUMED_FROM_RECENT = (
+    " Only the most recent part of that conversation is above; what came "
+    "before it is not available to you, so do not claim to remember the "
+    "whole of it."
+)
+RESUMED_WITH_GAPS = (
+    " Parts of that conversation were never stored, so there are gaps in "
+    "what you can see; say so plainly if the user asks about something "
+    "that is missing."
+)
+
+# How long a resume waits for the turn it has just recorded on the
+# target thread to be durably written, before rebuilding that thread's
+# context out of the store.
+#
+# The read-your-writes bound, and it exists for one scenario: switching
+# away from a conversation and back to it inside one session, where the
+# turn that ended the first leg is still in the writer's queue while the
+# resume is already reading the rows. Short, because it is a wait on the
+# device's own turnaround and the writer commits at the marker the turn
+# itself is; and bounded, because a database that is not answering must
+# cost a resumed conversation its last turn rather than cost the user
+# their reply.
+RESUME_ACKNOWLEDGEMENT_S = 2.0
 
 # The abort reasons a device may send that this side knows by name. The
 # firmware's `AbortReason` enum has exactly two members
@@ -230,6 +284,32 @@ def _not_allowed(name: str, agents: Sequence[str]) -> AgentNotAllowed:
     )
 
 
+@dataclass(frozen=True)
+class _Transition:
+    """What a tool loop ended for, and what happens at the boundary.
+
+    One type for the three moves, because they differ in what they
+    rebind and agree on everything else: each ends the loop, lets the
+    turn finish on the thread it started on, and opens a round on the
+    other side seeded with a synthetic user turn. Handing the loop back
+    a type rather than an agent name is what lets a resume travel with
+    the history it brings.
+
+    `agent` is set by a handover and by nothing else; `conversation` by
+    the two moves that change which thread the agent is on. Exactly one
+    of the two is ever set, which is the whole of the shape.
+    """
+
+    seed: str
+    agent: str | None = None
+    conversation: str | None = None
+    history: tuple[Turn, ...] = ()
+    # What the resume found, for the event emitted at the boundary. None
+    # for a handover and for a fresh conversation, neither of which read
+    # anything back.
+    resumed: resumption.Resumed | None = None
+
+
 class PipelineRuntime:
     """One conversation, for one connection, behind the device edge.
 
@@ -268,8 +348,14 @@ class PipelineRuntime:
       written by `_activate_agent` alone and read through
       `self._conversation`, which is a property over the events object
       for the reason `_agent` is.
-    - `_turns`: the conversation history, appended by the reply path and
-      by each agent leg, read wherever a round is built.
+    - `_histories`: one conversation history per thread, appended by the
+      reply path and by each agent leg, read wherever a round is built,
+      and reached through `_turns`, which answers with the history of
+      the thread the active agent is on.
+    - `_resumption`: this session's offered-candidate state and its way
+      into the store, absent where the deployment did not ask for
+      resumption, which is what makes both conversation tools answer a
+      spoken refusal instead of moving anything.
     - `_llm_round`: reset per reply, counted up per round, read by the
       watchdog's retry line and by `llm_round`, which is what makes the
       generation after a handover a round of its own.
@@ -290,6 +376,7 @@ class PipelineRuntime:
         fillers: Mapping[str, FillerClips],
         agents: Sequence[str],
         recorder: TurnRecorder | None = None,
+        threads: resumption.ThreadReads | None = None,
     ) -> None:
         self._output = output
         # The world this runtime reads its configuration out of, asked
@@ -326,6 +413,31 @@ class PipelineRuntime:
         # the store is wired, and the reply path then behaves exactly as
         # it did before the channel existed.
         self._recorder = recorder
+        # Whether this server can find a past conversation and pick it
+        # up again, and the whole of what says so: absent unless the
+        # deployment asked for it, and compared `is not None` by the two
+        # tools and by the interception alike. The switch is read here
+        # rather than by whoever built the read seam, so the answer to
+        # "can this session resume" has one home.
+        #
+        # Per session, because what it holds is what this session's
+        # agents were offered. The bound it reads the store under is the
+        # tool bound, since every read it makes happens inside a tool
+        # call the user is waiting through.
+        section = self._server.conversations
+        self._resumption = (
+            resumption.Resumption(
+                threads, section.resumption_budget_tokens, DEFAULT_TOOL_TIMEOUT_S
+            )
+            if threads is not None and section is not None and section.resumption
+            else None
+        )
+        # The handle the store gave for the last turn recorded on each
+        # thread, so a resume can wait for its own writes before reading
+        # the thread back. Nothing on the audio path ever waits on one:
+        # they are created by the recorder and kept here, and the only
+        # reader is the resume that is about to hydrate.
+        self._acknowledged: dict[str, Acknowledgement] = {}
         # This session's threads, one per agent it has activated. The
         # first activation of an agent mints a conversation id and every
         # later one continues it, which is what makes "Sophia, let me
@@ -352,7 +464,12 @@ class PipelineRuntime:
         # here for the life of it. Nothing about it is recomputed per
         # reply; what is, is the memory block appended to it.
         self._know_how: prompt.Assembled | None = None
-        self._turns: list[Turn] = []
+        # One history per thread, keyed by the conversation it belongs
+        # to and reached through `_turns` below. A session used to keep
+        # one transcript, which is what carried the whole of it across a
+        # handover; a conversation is a thread now, so what a round is
+        # written against is the thread it is on and nothing else.
+        self._histories: dict[str, list[Turn]] = {}
         # Generation calls in the reply being spoken, counted across its
         # agents rather than per leg, so the one after a handover is a
         # round of its own in the logs.
@@ -390,7 +507,9 @@ class PipelineRuntime:
         # default bound rather than reading it, so how long a builtin or
         # a device tool may take stays this module's answer.
         self._sources: tuple[ToolSource, ...] = (
-            BuiltinTools(self._agents, memory, DEFAULT_TOOL_TIMEOUT_S),
+            BuiltinTools(
+                self._agents, memory, DEFAULT_TOOL_TIMEOUT_S, self._resumption
+            ),
             DeviceTools(output, DEFAULT_TOOL_TIMEOUT_S),
             McpTools(mcp_servers, DEFAULT_TOOL_TIMEOUT_S),
         )
@@ -429,6 +548,23 @@ class PipelineRuntime:
     @_conversation.setter
     def _conversation(self, conversation: str | None) -> None:
         self._events.conversation = conversation
+
+    @property
+    def _turns(self) -> list[Turn]:
+        """The history of the thread the active agent is on.
+
+        A property over the map for the reason `_conversation` is one
+        over the events object: there is one right answer at any moment
+        and every reader should be unable to reach a stale one. The
+        three append sites and the one read site are unchanged by the
+        split; which list they reach is this line.
+
+        `setdefault` rather than a lookup, because a thread's first
+        history is empty and minting one at the activation seam would be
+        a second place that knows a thread exists.
+        """
+        assert self._conversation is not None
+        return self._histories.setdefault(self._conversation, [])
 
     def _fresh_turn(self) -> TurnUnderway:
         """A turn beginning, stamped with the pair that owns it.
@@ -750,10 +886,17 @@ class PipelineRuntime:
         fresh endpointer from its VAD, since the previous agent's endpointer
         carries the previous agent's tuning and mid-utterance state. Called
         once at connect, and again mid-reply when switch_agent hands the
-        conversation over. The history carries across the switch: it is
-        text-only, so nothing provider-specific leaks with it, and the
-        new agent seeing what was said is what makes "switch to the
-        tutor and explain what we just discussed" work.
+        conversation over.
+
+        The history does not carry across the switch, and that is the
+        behavior #190 changed here: a conversation is a thread between a
+        user and exactly one agent, so binding the incoming agent to its
+        own thread is also binding it to its own history. What it starts
+        with is the seed the transition writes; what it comes back to on
+        a second handover is what it said the first time. Agents are
+        scoped on purpose, and a switch that handed the whole session
+        over would leak around that scoping and would move words spoken
+        to a local agent to whatever provider the incoming one runs on.
 
         This is also where the know-how half of the system prompt is
         assembled, which is the whole of when it happens: at session
@@ -1002,7 +1145,14 @@ class PipelineRuntime:
         if record is None:
             return
         try:
-            self._recorder.record_turn(record)
+            # The handle is kept and never waited on here: what it is
+            # for is a resume that must not read past its own writes,
+            # and the never-block contract is why this line reads it and
+            # walks away. A recorder that answers nothing (every store
+            # double, and any future consumer) leaves nothing to keep.
+            landed = self._recorder.record_turn(record)
+            if landed is not None:
+                self._acknowledged[record.conversation] = landed
         except Exception as exc:  # noqa: BLE001 - a consumer never breaks a reply
             logger.warning(
                 "session %s: the turn recorder failed and was skipped: %s",
@@ -1011,22 +1161,30 @@ class PipelineRuntime:
             )
 
     async def _speak_reply(self, transcript: str, spoken: list[str]) -> None:
-        """One reply, which may be spoken by more than one agent.
+        """One reply, which may be spoken by more than one agent and may
+        end on a different conversation than it began on.
 
         `spoken` collects sentences as their audio goes out, so an abort
         or a barge-in leaves the history holding exactly the part of the
-        reply the user heard, sentence by sentence. A successful
-        switch_agent ends the current agent's loop: what it said so far
-        becomes its own assistant turn, the new agent is activated, and
-        a fresh loop runs as that agent, so the greeting arrives in the
-        new prompt and the new voice. At most one handover per reply, so
-        two agents cannot ping-pong."""
+        reply the user heard, sentence by sentence.
+
+        A move ends the current loop, whichever of the three it is: what
+        was said so far becomes an assistant turn on the thread it was
+        said on, the leg is closed there, the rebinding happens here at
+        that boundary, and a fresh loop runs on the other side of it. So
+        no turn is ever split across two conversations: the turn's
+        record was stamped with the pair it began with, and the words it
+        spoke before the move stay in the history of the thread it spoke
+        them on.
+
+        At most one move per reply, whichever kind, which is what the
+        latch counts: two agents cannot ping-pong, and a model cannot
+        resume its way through a user's history inside one answer."""
         switches_left = 1
-        greeting: Turn | None = None
         self._llm_round = 0
         while True:
-            target = await self._tool_loop(spoken, greeting, switches_left)
-            if target is None:
+            transition = await self._tool_loop(spoken, switches_left)
+            if transition is None:
                 return
             said = " ".join(spoken) if spoken else None
             if said is not None:
@@ -1043,49 +1201,92 @@ class PipelineRuntime:
                     )
                 )
                 spoken.clear()
-            previous = self._agent
-            # Held before the activation replaces it, so the event can
-            # say which thread was left as well as which one was joined.
-            leaving = self._conversation
             # Closed whether or not this agent spoke: a leg that only
-            # asked for the handover still spent tokens, and the leg is
-            # the only place they can be attributed to the agent that
-            # spent them.
-            self._turn.leg_ended(previous, said)
-            self._activate_agent(target)
+            # asked for the move still spent tokens, and the leg is the
+            # only place they can be attributed to the agent that spent
+            # them. A move to another thread closes one too, although
+            # the agent has not changed: what a leg is for is the share
+            # of a reply that belongs to one context.
+            self._turn.leg_ended(self._agent, said)
+            self._move_to(transition)
             switches_left -= 1
-            # Read by a thunk the emitter calls before this iteration
-            # ends, the way the retry above is.
+            # Every offer this session is holding goes with the move,
+            # whichever kind it was. An id offered inside the
+            # conversation that just ended is exactly the stale
+            # selection the enforcement exists to refuse.
+            if self._resumption is not None:
+                self._resumption.forget()
+            self._turns.append(Turn("user", transition.seed))
+
+    def _move_to(self, transition: _Transition) -> None:
+        """Apply one transition at the boundary the loop ended on, and
+        say on the record which one it was.
+
+        The two arms are the two things a move can rebind. A handover
+        changes the agent, and the agent's own thread comes with it,
+        minted at its first activation and continued at every later one.
+        The other two change which thread the agent is on, which is one
+        line of state and one history: nothing about the agent, its
+        providers or its prompt moves, because it is the same agent
+        answering.
+        """
+        previous = self._agent
+        # Held before the rebinding replaces it, so the event can say
+        # which thread was left as well as which one was joined.
+        leaving = self._conversation
+        if transition.agent is not None:
+            target = transition.agent
+            self._activate_agent(target)
+            # Read by a thunk the emitter calls before this method
+            # returns, the way the retry above is.
             self._events.emit(
                 lambda: Handover(
-                    from_agent=Identifier(previous),  # noqa: B023
-                    to_agent=Identifier(target),  # noqa: B023
-                    from_conversation=ConversationId(leaving),  # noqa: B023
+                    from_agent=Identifier(previous),
+                    to_agent=Identifier(target),
+                    from_conversation=ConversationId(leaving),
                     to_conversation=ConversationId(self._conversation),
                 )
             )
-            greeting = Turn("user", SWITCH_GREETING)
+            return
+        assert transition.conversation is not None and self._agent is not None
+        self._conversations[self._agent] = transition.conversation
+        self._conversation = transition.conversation
+        # Installed rather than merged: a resume brings the thread's own
+        # history and a fresh conversation brings none, and either way
+        # what the thread held in memory before this line is what the
+        # store has already been told about.
+        self._histories[transition.conversation] = list(transition.history)
+        found = transition.resumed
+        if found is not None:
+            self._events.emit(
+                lambda: ConversationResumed(
+                    conversation=ConversationId(found.conversation),
+                    turns=Count(found.rendered),
+                    skipped=Count(found.skipped),
+                    over_budget=Flag(found.over_budget),
+                )
+            )
 
     async def _tool_loop(
-        self, spoken: list[str], greeting: Turn | None, switches_left: int
-    ) -> str | None:
+        self, spoken: list[str], switches_left: int
+    ) -> "_Transition | None":
         """Stream, run whatever tools the model asked for, and stream
-        again, up to the round cap. Returns the agent to hand over to,
-        or None when the reply is finished.
+        again, up to the round cap. Returns the move that ended it, or
+        None when the reply is finished.
 
         The tool snapshot and the resampler are taken here rather than
         per round, because they belong to the agent speaking; the next
-        agent gets its own."""
+        agent gets its own. The history it works from is the active
+        thread's, which after a move is the thread the move landed on,
+        seed and all."""
         assert self._providers is not None
         providers = self._providers
         tools = self._tool_snapshot()
         working = list(self._turns)
-        if greeting is not None:
-            working.append(greeting)
         resampler = Resampler(providers.tts.sample_rate, self._output.output_sample_rate)
         self._output.restart_pacing()
 
-        switch_to: str | None = None
+        switch_to: _Transition | None = None
         for round_index in range(MAX_TOOL_ROUNDS):
             choice: ToolChoice = "none" if round_index == MAX_TOOL_ROUNDS - 1 else "auto"
             splitter = SentenceSplitter()
@@ -1200,47 +1401,168 @@ class PipelineRuntime:
 
     async def _run_tools(
         self, calls: Sequence[ToolCall], slots: Sequence[int], switches_left: int
-    ) -> tuple[list[ToolResult], str | None]:
-        """Execute one round of calls. Everything but switch_agent runs
-        concurrently, since device and server tools are independent;
-        switch_agent is resolved here instead, because a successful one
-        ends the loop rather than producing a result the model reads.
+    ) -> tuple[list[ToolResult], "_Transition | None"]:
+        """Execute one round of calls. Everything that is not a move runs
+        concurrently, since device and server tools are independent; the
+        moves are resolved here instead, because a successful one ends
+        the loop rather than producing a result the model reads.
 
         `slots` says where on the turn's record each of these calls was
         already reserved, index for index with `calls`, which is why
         both halves are split out of one enumeration rather than
-        rebuilt: a handover the model asked for third keeps the third
-        call's place, whatever order this method runs things in."""
+        rebuilt: a move the model asked for third keeps the third call's
+        place, whatever order this method runs things in.
+
+        The moves are resolved in the order the model issued them, and
+        that IS the precedence when it asks for more than one: the first
+        wins and the rest are refused, whether they were the same kind
+        of move or not. A rule about which kind outranks which would be
+        a rule nobody could predict from the outside."""
         plain = [
             (slots[index], call)
             for index, call in enumerate(calls)
-            if call.name != names.SWITCH_AGENT
+            if not self._moves(call)
         ]
-        handovers = [
-            (slots[index], call)
-            for index, call in enumerate(calls)
-            if call.name == names.SWITCH_AGENT
+        moves = [
+            (slots[index], call) for index, call in enumerate(calls) if self._moves(call)
         ]
         results = list(
             await asyncio.gather(*(self._run_one(call, slot) for slot, call in plain))
         )
 
-        switch_to: str | None = None
-        for order, (slot, call) in enumerate(handovers):
-            refusal = self._refuse_handover(call, switches_left, order)
+        transition: _Transition | None = None
+        for order, (slot, call) in enumerate(moves):
+            moving, refusal = await self._move(call, switches_left, order)
             if refusal is not None:
                 results.append(refusal)
-                # An error result and no duration: nothing ran, and the
-                # refusal is what the turn's record shows in place of it.
-                self._turn.executed(slot, refusal.content, True, None)
+                # No duration: nothing ran, and the refusal is what the
+                # turn's record shows in place of it.
+                self._turn.executed(slot, refusal.content, refusal.is_error, None)
                 continue
-            switch_to = str(call.arguments["agent"])
-            # A successful switch answers the model nothing, so the
+            transition = moving
+            # A successful move answers the model nothing, so the
             # reservation is already the whole of its record: no result
             # and no duration. It stays on the record all the same,
-            # because the handover is otherwise only implied by the legs
-            # it produced.
-        return results, switch_to
+            # because the move is otherwise only implied by the legs it
+            # produced.
+        return results, transition
+
+    def _moves(self, call: ToolCall) -> bool:
+        """Whether this call is one the loop resolves itself.
+
+        Two of the three are decided by name alone. The third is
+        `resume_conversation`, which is one tool doing two things: a
+        call that names a conversation is a move and is this method's,
+        and a call that describes one is a read that changes nothing and
+        goes to the source that owns it like any other tool. A call that
+        names neither is not a move either, so it reaches the dispatch
+        and is answered by the sentence that asks for one of the two.
+        """
+        if call.name in (names.SWITCH_AGENT, names.NEW_CONVERSATION):
+            return True
+        if call.name != names.RESUME_CONVERSATION:
+            return False
+        chosen = call.arguments.get("conversation")
+        return isinstance(chosen, str) and bool(chosen.strip())
+
+    async def _move(
+        self, call: ToolCall, switches_left: int, order: int
+    ) -> tuple["_Transition | None", ToolResult | None]:
+        """One move, as either the transition it is or the refusal it
+        gets. Exactly one of the two comes back.
+
+        The two vocabularies stay apart deliberately. A refused handover
+        is an error result, which is what it has always been: the model
+        asked for something about the agents this device is bound to and
+        got it wrong. A refused selection is not an error, because the
+        answer is a sentence a user is owed out loud (#190, decision
+        11): a server that cannot resume anything, a conversation that
+        is gone, an id nobody offered.
+        """
+        if call.name == names.SWITCH_AGENT:
+            refusal = self._refuse_handover(call, switches_left, order)
+            if refusal is not None:
+                return None, refusal
+            return _Transition(SWITCH_GREETING, agent=str(call.arguments["agent"])), None
+        answer = await self._select(call, switches_left, order)
+        if isinstance(answer, str):
+            return None, ToolResult(call.id, answer, is_error=False)
+        return answer, None
+
+    async def _select(
+        self, call: ToolCall, switches_left: int, order: int
+    ) -> "_Transition | str":
+        """Which thread this reply moves to, or the sentence saying why
+        it does not.
+
+        The latch is the same one a handover shares, and the same one it
+        has always been: the first move of a reply wins. What a second
+        one is refused for is being second, whichever kind the first was.
+        """
+        if switches_left <= 0 or order > 0:
+            return builtin.ALREADY_MOVED
+        if self._resumption is None:
+            return builtin.RESUMPTION_UNAVAILABLE
+        if call.name == names.NEW_CONVERSATION:
+            # Minted here, exactly as an agent's first thread of a
+            # session is: the boundary is decided at this seam, and the
+            # id has to exist before the first turn it stamps.
+            return _Transition(FRESH_GREETING, conversation=uuid.uuid4().hex)
+        assert self._agent is not None
+        chosen = str(call.arguments["conversation"]).strip()
+        # Before the read and not after it: a thread the agent was not
+        # offered is refused without the store being asked about it, so
+        # an id a model invented cannot even be a query.
+        if not self._resumption.offers(self._agent, chosen):
+            return builtin.NO_SUCH_CANDIDATE
+        await self._settled(chosen)
+        found = await self._resumption.resumed(self._agent, chosen)
+        if isinstance(found, str):
+            return found
+        return _Transition(
+            self._resumed_seed(found),
+            conversation=found.conversation,
+            history=found.turns,
+            resumed=found,
+        )
+
+    def _resumed_seed(self, found: "resumption.Resumed") -> str:
+        """What the round on the other side of a resume is told.
+
+        The base sentence, plus whichever of the two caveats are true.
+        This is where the milestone-4 answer to an over-budget backlog
+        lives: the tail is installed and the agent is told it is a tail,
+        rather than being offered a recap it cannot make yet.
+        """
+        return "".join(
+            [
+                RESUMED_GREETING,
+                RESUMED_FROM_RECENT if found.over_budget else "",
+                RESUMED_WITH_GAPS if found.skipped or found.incomplete else "",
+            ]
+        )
+
+    async def _settled(self, conversation: str) -> None:
+        """Wait, briefly, for what this session last wrote to that
+        thread to be durably written.
+
+        Read-your-writes for one case, and it is the case a session
+        produces by itself: leaving a conversation and coming back to it
+        without the connection closing in between. The turn that ended
+        the first leg is on the writer's queue while this line runs, and
+        hydrating without it would rebuild the thread one turn short of
+        what the user just said.
+
+        A wait that expires is not an error and is not reported: the
+        thread is rebuilt from what has landed, which is the same answer
+        a slower database would have given a moment earlier. The wait
+        itself is a blocking one on a handle the writer settles, so it
+        happens off the loop every live conversation shares.
+        """
+        landed = self._acknowledged.get(conversation)
+        if landed is None:
+            return
+        await asyncio.to_thread(landed.wait, RESUME_ACKNOWLEDGEMENT_S)
 
     def _refuse_handover(
         self, call: ToolCall, switches_left: int, order: int
@@ -1563,6 +1885,7 @@ def bespoke_runtime_factory(
     mcp_servers: McpServers,
     memory: MemoryStore | None,
     conversations: TurnStore | None = None,
+    threads: resumption.ThreadReads | None = None,
 ) -> RuntimeFactory:
     """The composition root's half of the seam: everything this runtime
     needs that outlives one connection, closed over once at startup.
@@ -1593,6 +1916,13 @@ def bespoke_runtime_factory(
     derived here from the identity the edge already hands over. None
     means no store, which is every deployment that has not asked for one.
 
+    `threads` is the other direction through the same database, and it
+    is closed over for the same reason and holds nothing per session:
+    reading a stored thread is a connection opened for the read and
+    disposed after it. Whether a conversation may actually be resumed is
+    not decided here but in the runtime, off the section it already
+    holds, so the switch and the keys it reads live in one place.
+
     Deliberately one function rather than a config-selectable registry:
     one runtime exists, and a selection mechanism with one option is
     surface without a reader. This is the seam a second runtime plugs
@@ -1615,6 +1945,7 @@ def bespoke_runtime_factory(
             generation.fillers,
             agents,
             None if conversations is None else SessionTurns(conversations, events.session_id),
+            threads,
         )
 
     return build
