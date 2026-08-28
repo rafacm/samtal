@@ -1119,7 +1119,8 @@ implementation-doc section when written.
   deepens `threads.py` and `api.py`; no new module. Documentation
   footprint: `docs/reference/api-openapi.json`,
   `docs/reference/cli.md`, the spellings manifest, `CHANGELOG.md`.
-- [ ] **Resumption** (branch `feature/conversations-m4`): the
+- [x] [**Resumption**](2026-08-28-first-class-conversations-implementation.md#m4-resumption)
+  (PR TBD, branch `feature/conversations-m4`): the
   `resumption` and `resumption_budget_tokens` keys with the boot
   refusals and example configs; `conversations/hydration.py`; the
   two selection tools with the discovery seam and runtime
