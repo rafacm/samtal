@@ -147,7 +147,7 @@ def upgrade() -> None:
             "title",
             sa.Text(),
             nullable=True,
-            comment="What the thread is called, derived from its first utterance and truncated. Conversation text, so it is null under text-off, and null in a thread whose first turn had nothing to derive one from.",
+            comment="What the thread is called, derived from the earliest utterance stored on it and truncated. The earliest utterance rather than the earliest turn, because a thread a session moved onto opens with the answer that greeted the move and nothing was heard on it. Conversation text, so it is null under text-off, and null in a thread that has never stored one.",
         ),
         sa.Column(
             "incomplete",

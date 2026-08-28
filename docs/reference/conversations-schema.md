@@ -129,14 +129,15 @@ One transaction, and erasure outranks every copy the store derived from what
 is going. A session's turns are deleted wherever their conversation is, so a
 thread that spans sessions honestly keeps a gap rather than keeping dialogue
 somebody asked to have removed. In the same transaction: a conversation whose
-title came from an erased turn is renamed from its earliest surviving turn or
-loses its title; every `conversation_milestones` row whose recorded coverage
-held an erased turn is deleted, and so is every row descended from it through
-`parent`, because a summary of erased content is that content however it
-arrived; `last_active_at` moves back when the turn that wrote it is gone, to
-the latest fact the store still holds about the survivors, which is when their
-sessions began; and a conversation left with no turns is deleted whole, since
-what would be left is a title and two timestamps.
+title came from an erased turn is renamed from its earliest surviving
+utterance or loses its title; every `conversation_milestones` row whose
+recorded coverage held an erased turn is deleted, and so is every row
+descended from it through `parent`, because a summary of erased content is
+that content however it arrived; `last_active_at` moves back when the turn
+that wrote it is gone, to the latest fact the store still holds about the
+survivors, which is when their sessions began; and a conversation left with no
+turns is deleted whole, since what would be left is a title and two
+timestamps.
 
 A session that is still running when its row goes stops being recorded,
 because the writer confirms the row inside each of a marker's two transactions
@@ -265,7 +266,7 @@ carries the per-leg counts, and the per-round, per-model truth is the
 | `conversation` | `TEXT` | no | The thread's uuid hex: the join key `turns.conversation` and `conversation_milestones.conversation` carry, and what a resume addresses. Minted by the runtime at the activation that opens the thread, the same shape and role as `sessions.session`. |
 | `agent` | `TEXT` | no | The agent this thread belongs to, and the only one it will ever have: a conversation is a dialogue with exactly one agent, so a handover starts a second thread rather than moving this one. Not null, unlike `sessions.agent` and `turns.agent`, because a thread with no agent is not a thread. |
 | `device` | `TEXT` | no | The device the thread was begun on, in canonical MAC form. Provenance rather than ownership: a thread is agent-scoped, so a resume from any device bound to that agent reaches it, and this column says where it started rather than where it may be continued. |
-| `title` | `TEXT` | yes | What the thread is called, derived from its first utterance and truncated. Conversation text, so it is null under text-off, and null in a thread whose first turn had nothing to derive one from. |
+| `title` | `TEXT` | yes | What the thread is called, derived from the earliest utterance stored on it and truncated. The earliest utterance rather than the earliest turn, because a thread a session moved onto opens with the answer that greeted the move and nothing was heard on it. Conversation text, so it is null under text-off, and null in a thread that has never stored one. |
 | `incomplete` | `BOOLEAN` | no | Whether a write this thread needed was lost, so a resume can say the record has gaps. Product state rather than telemetry, and therefore deliberately outside the metrics switch: `sessions.dropped` is zeroed under metrics-off and this is not. Written by the durable path, which arrives with the writer's acknowledgements; false in every thread until then. |
 | `created_at` | `TEXT` | no | When the thread's first turn landed, UTC ISO-8601. The row materializes with that turn rather than at activation, so a wake that produced no transcript leaves no empty thread behind. |
 | `last_active_at` | `TEXT` | no | When the thread's most recent turn landed, UTC ISO-8601, rewritten by every turn. The listing orders on it and retention prunes on it, which is what makes retention thread-aware: a thread stays whole while it is being talked to, however old the session that began it. |

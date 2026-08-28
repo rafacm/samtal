@@ -241,7 +241,7 @@ def reference() -> str:
             "is, so a thread that spans sessions honestly keeps a gap rather than "
             "keeping dialogue somebody asked to have removed. In the same "
             "transaction: a conversation whose title came from an erased turn is "
-            "renamed from its earliest surviving turn or loses its title; every "
+            "renamed from its earliest surviving utterance or loses its title; every "
             "`conversation_milestones` row whose recorded coverage held an erased "
             "turn is deleted, and so is every row descended from it through "
             "`parent`, because a summary of erased content is that content however it "

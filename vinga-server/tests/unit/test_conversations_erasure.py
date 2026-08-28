@@ -98,7 +98,7 @@ def manifest(device: str = DEVICE_MAC.lower(), started_at: str | None = None) ->
     }
 
 
-def a_turn(conversation: str = FIRST, heard: str = "turn the light on") -> TurnRecord:
+def a_turn(conversation: str = FIRST, heard: str | None = "turn the light on") -> TurnRecord:
     return TurnRecord(
         at=101.2, conversation=conversation, agent="sam", heard=heard, reply="Done."
     )
@@ -135,7 +135,9 @@ class Recorder:
     ) -> None:
         self.store.open_session(name, 100.0, manifest(device, started_at))
 
-    def turn(self, session: str, conversation: str = FIRST, heard: str = "hello") -> None:
+    def turn(
+        self, session: str, conversation: str = FIRST, heard: str | None = "hello"
+    ) -> None:
         self.store.record_turn(session, a_turn(conversation, heard))
 
     def event(self, session: str) -> None:
@@ -418,6 +420,32 @@ def test_a_thread_whose_surviving_turns_have_no_text_loses_its_title(client) -> 
     (thread,) = stored("conversations")
     assert thread["title"] is None
     assert len(stored("turns")) == 1
+
+
+def test_a_greeting_is_not_a_name_and_the_utterance_after_it_is(client) -> None:
+    """The rule a landing applies, applied again here so the two cannot
+    disagree. A thread a session moved onto opens with the answer that
+    greeted the move, and nothing was heard on that turn: the name comes
+    from the earliest utterance the thread does hold, before the erasure
+    and after it."""
+    began = dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC)
+    recording = Recorder(began)
+    recording.session("alpha")
+    recording.turn("alpha", FIRST, "the first thing said")
+    recording.close("alpha")
+    recording.move_to(began + dt.timedelta(hours=3))
+    recording.session("beta", started_at=(began + dt.timedelta(hours=3)).isoformat())
+    # The move onto this thread, then what was said on it afterwards.
+    recording.turn("beta", FIRST, None)
+    recording.turn("beta", FIRST, "and the thing said later")
+    recording.close("beta")
+    recording.done()
+    assert stored("conversations")[0]["title"] == "the first thing said"
+
+    erase(client, "alpha")
+
+    (thread,) = stored("conversations")
+    assert thread["title"] == "and the thing said later"
 
 
 def test_only_the_thread_the_deletion_touched_is_recomputed(client) -> None:

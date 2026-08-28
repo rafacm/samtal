@@ -20,8 +20,9 @@ and the selection tools. What all three stop knowing:
   module cannot attribute is refused, which fails the caller's
   transaction, because a stored turn with no thread is a row retention
   can never reach.
-- **What a thread is called.** The first utterance, bounded. Content,
-  and therefore under the text switch like the utterance it came from.
+- **What a thread is called.** The earliest utterance stored on it,
+  bounded. Content, and therefore under the text switch like the
+  utterance it came from.
 - **The retention ruleset**, whose unit is the thread rather than the
   session, and whose ordering between the three rules is the whole of
   why a live thread never loses its turns to an old session.
@@ -1089,10 +1090,14 @@ def _rederive(connection: Any, dying: Mapping[str, Sequence[int]]) -> list[str]:
     """Recompute what the erased turns fed, and answer the threads that
     have nothing left.
 
-    The title is recomputed from the earliest surviving turn whatever
-    happened, which is exact rather than approximate: a title IS the
-    first turn's utterance bounded, so a thread whose first turn
-    survived is renamed to the name it already had.
+    The title is recomputed from the earliest surviving utterance
+    whatever happened, which is exact rather than approximate: a title
+    IS the earliest stored utterance bounded, the same rule a landing
+    applies, so a thread whose earliest utterance survived is renamed to
+    the name it already had. Turns with nothing heard on them are
+    skipped rather than answering null, for the reason a landing skips
+    them: the greeting a move was answered with is a turn of the thread
+    and never a name for it.
 
     `last_active_at` cannot be exact, and this says so rather than
     pretending. A turn carries its offset from its session's open and no
@@ -1128,9 +1133,19 @@ def _rederive(connection: Any, dying: Mapping[str, Sequence[int]]) -> list[str]:
         connection.execute(
             update(conversations)
             .where(conversations.c.conversation == thread)
-            .values(title=title_of(surviving[0][1]), last_active_at=last_active_at)
+            .values(title=_named(surviving), last_active_at=last_active_at)
         )
     return orphaned
+
+
+def _named(surviving: Sequence[Any]) -> str | None:
+    """What a thread with these turns left is called: the earliest one
+    of them that was heard, bounded, or nothing where none was."""
+    for _id, heard in surviving:
+        title = title_of(heard)
+        if title is not None:
+            return title
+    return None
 
 
 def _began(connection: Any, thread: str) -> str:
