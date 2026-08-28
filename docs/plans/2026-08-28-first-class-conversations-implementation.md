@@ -1020,6 +1020,21 @@ disposition for every match that is not the ordinary English word:
   spoken reply, the model's context, the log records of both formats, an
   attached tap and the events.
 
+- **"This reply has already moved" and "you are the second one I
+  resolved" are different claims.** The handover refuses a second
+  `switch_agent` for being second, whether or not the first one
+  succeeded, and that is merged behaviour its own tests pin. A selection
+  says the reply has already moved, which has to be true when it is
+  said, so it is refused on the transition actually made rather than on
+  its place in the round. Two rules, one latch, and the sentence each
+  one says is why they are two.
+
+- **The two lanes cannot share a Postgres at once.** Running the unit
+  lane and the integration lane concurrently against the development
+  instance produced forty errors of its own making, in tests neither
+  milestone touched; each lane alone is green. Worth knowing before
+  reading a red run as a regression.
+
 - **The wait for an acknowledgement is testable without a slow test.**
   A store double that settles its handle a moment later, and a seam that
   records whether it was settled when the backlog was read, prove the
