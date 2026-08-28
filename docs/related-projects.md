@@ -53,8 +53,8 @@ project, and vinga still downloads its voices from the
 `rhasspy/piper-voices` model repository; `rhasspy/piper` was archived in
 the same month as Rhasspy itself, so vinga uses the maintained
 `piper1-gpl` successor. `pysilero-vad`, the voice activity detection in
-every vinga conversation and a core dependency rather than an optional
-one, is also published from the `rhasspy` organisation. vinga runs none
+every conversation vinga holds and a core dependency rather than an
+optional one, is also published from the `rhasspy` organisation. vinga runs none
 of Rhasspy and depends on two pieces of it.
 
 #### The successor line: Wyoming and Home Assistant Assist

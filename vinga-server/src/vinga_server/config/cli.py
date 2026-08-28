@@ -113,6 +113,9 @@ from vinga_server.config.responses import (
     ConfigDiff,
     ConfigDocument,
     ConfigReloadResult,
+    ConversationDetail,
+    ConversationList,
+    ConversationTurns,
     DefaultAgentName,
     DeviceBinding,
     Envelope,
@@ -122,6 +125,7 @@ from vinga_server.config.responses import (
     SecretValue,
     SessionDetail,
     SessionList,
+    ThreadErasure,
 )
 from vinga_server.config.transport import APPLY_LOCATION, check_transportable
 from vinga_server.logs import quieted
@@ -305,6 +309,38 @@ NO_SESSIONS = (
     "server.conversations.retention_days has been pruned"
 )
 
+# The thread listing's columns, upper case for the reason the session
+# listing's are. `LAST-ACTIVE` rather than `LAST_ACTIVE`, because these
+# are headings a person reads across a line and this one is two words.
+CONVERSATION_COLUMNS = ("CONVERSATION", "AGENT", "TITLE", "LAST-ACTIVE", "TURNS")
+
+NO_CONVERSATIONS = (
+    "this server has recorded no conversations matching that. Recording is off unless "
+    "server.conversations.enabled says otherwise, and a thread whose last activity is "
+    "older than server.conversations.retention_days has been pruned"
+)
+
+# What `conversation show` prints where a thread answers no turns.
+# Narrow and real rather than defensive: a thread is created by its
+# first turn and deleted when it loses its last, so the way to see this
+# is for an erasure to land between the two reads this one command
+# makes.
+#
+# A thread recorded under text-off is NOT this case. It has its turns
+# and none of the words in them, so its dialogue prints with the fixed
+# placeholder on both speakers, which is what says the turn happened and
+# nothing of it was stored.
+NO_DIALOGUE = (
+    "this conversation holds no turns. A thread is created by its first turn and "
+    "deleted when it loses its last, so an empty answer here means the store moved "
+    "between this command's two reads"
+)
+
+# Who said what, in front of a dialogue line. The user's label is fixed
+# and this client's own; the agent's is the turn's own agent, bounded
+# like every other value an answer carries.
+SPEAKER = "you"
+
 # How much of any one value reaches a cell or a block line. Narrower
 # than the glimpse the URLs are bounded to, because these land in a
 # table: what a column is for is comparing one row against the next, and
@@ -317,6 +353,12 @@ CELL_LENGTH = 64
 # that the block below prints what the API answers rather than whatever
 # a dictionary happened to iterate as, and so that a count added to the
 # contract is a line added here rather than a line that quietly appears.
+#
+# One order for both erasures rather than a second tuple beside it.
+# Erasing a thread answers four of these and not the two about sessions,
+# because it touches neither the sessions its turns were spoken in nor
+# their telemetry, so the block prints the counts its answer carries in
+# this order and says nothing about the ones it does not.
 ERASED_COUNTS = (
     "sessions",
     "turns",
@@ -579,6 +621,12 @@ class Invocation:
     session: str = ""
     limit: str = ""
     before: str = ""
+
+    # And the conversation store's other identity, the thread. Its own
+    # field rather than `name`, because the two are addressed at once:
+    # `conversation list --agent sam` filters threads by an agent's
+    # name, which `name` is already carrying.
+    conversation: str = ""
 
     # The address a simulated board checks in to. Its own field rather
     # than `name` or `file`, because it is neither an identity nor a
@@ -1695,6 +1743,71 @@ def _session_block(session: Mapping[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _conversation_listing(page: Mapping[str, Any]) -> str:
+    """The threads this deployment recorded, one line each.
+
+    Columns for the reason the session listing has them, and one of
+    these cells is content: a title is the thread's first utterance,
+    which came out of a room and through a transcriber, so it goes
+    through the same bounding as everything else here and a null one is
+    the fixed placeholder rather than an empty cell.
+    """
+    items = page["items"]
+    if not items:
+        return f"{NO_CONVERSATIONS}\n"
+    rows = [CONVERSATION_COLUMNS] + [
+        (
+            _cell(item["conversation"]),
+            _cell(item["agent"]),
+            _cell(item["title"]),
+            _cell(item["last_active_at"]),
+            _cell(item["turns"]),
+        )
+        for item in items
+    ]
+    return _columns(rows)
+
+
+def _conversation_block(thread: Mapping[str, Any]) -> str:
+    """One thread's header, as lines rather than as columns.
+
+    What the dialogue underneath it is a dialogue of: which thread,
+    whose it is, what it is called and the two instants that bound it.
+    `incomplete` is printed only when it is true, because a thread with
+    nothing lost is the ordinary case and a line saying so on every
+    thread would make the one that matters harder to see.
+    """
+    lines = [
+        f"conversation: {_cell(thread['conversation'])}",
+        f"  agent: {_cell(thread['agent'])}",
+        f"  title: {_cell(thread['title'])}",
+        f"  created: {_cell(thread['created_at'])}",
+        f"  last active: {_cell(thread['last_active_at'])}",
+    ]
+    if thread["incomplete"]:
+        lines.append("  incomplete: yes")
+    return "\n".join(lines) + "\n"
+
+
+def _dialogue_blocks(page: Mapping[str, Any]) -> str:
+    """What was said, oldest first, two labelled lines per turn.
+
+    Blocks rather than columns, and that is the whole reason this is not
+    a table: a column holding an utterance is a column that wraps, and a
+    wrapped column is not a column. The line structure is this
+    renderer's alone, which is what the bounding is for: a newline
+    inside an utterance is an unprintable and is substituted, so nothing
+    a room said can add a line, move the cursor or recolor a terminal.
+    """
+    items = page["items"]
+    if not items:
+        return f"{NO_DIALOGUE}\n"
+    return "\n".join(
+        f"{SPEAKER}: {_cell(turn['heard'])}\n{_cell(turn['agent'])}: {_cell(turn['reply'])}\n"
+        for turn in items
+    )
+
+
 def _erasure_block(taken: Mapping[str, Any]) -> str:
     """What a deletion took, one line per table.
 
@@ -1703,7 +1816,10 @@ def _erasure_block(taken: Mapping[str, Any]) -> str:
     order the rows go: the sessions named, the dialogue they held, and
     the threads and checkpoints left with nothing.
     """
-    return "\n".join(f"{name}: {taken[name]}" for name in ERASED_COUNTS) + "\n"
+    return (
+        "\n".join(f"{name}: {taken[name]}" for name in ERASED_COUNTS if name in taken)
+        + "\n"
+    )
 
 
 def _cell(value: object) -> str:
@@ -3198,6 +3314,67 @@ PURGE_SESSIONS = Act(
     render=_printed(_erasure_block),
 )
 
+# And the store's other projection, the thread. The same schema and a
+# different question: a session is one connection episode, a
+# conversation is a durable thread with one agent that may span several
+# of them, and a turn belongs to both.
+
+
+def _conversations_path(args: Invocation) -> str:
+    return _path("conversations")
+
+
+def _conversation_path(args: Invocation) -> str:
+    return _path("conversations", args.conversation)
+
+
+def _dialogue_path(args: Invocation) -> str:
+    return _path("conversations", args.conversation, "turns")
+
+
+def _conversation_filters(args: Invocation) -> dict[str, str]:
+    """What narrows a thread listing. The rule the session filters
+    follow: only what was written, so the API's own defaults are the
+    defaults, said once. No cursor flags, deliberately, and the reason
+    is the same as there: one invocation prints one page, and walking
+    the record is what the API is for."""
+    return {
+        name: value
+        for name, value in (("agent", args.name), ("limit", args.limit))
+        if value
+    }
+
+
+LIST_CONVERSATIONS = Act(
+    method="GET",
+    path=_conversations_path,
+    query=_conversation_filters,
+    answers=ConversationList,
+    render=_printed(_conversation_listing),
+)
+
+SHOW_CONVERSATION = Act(
+    method="GET",
+    path=_conversation_path,
+    answers=ConversationDetail,
+    render=_printed(_conversation_block),
+)
+
+READ_DIALOGUE = Act(
+    method="GET",
+    path=_dialogue_path,
+    answers=ConversationTurns,
+    render=_printed(_dialogue_blocks),
+)
+
+DELETE_CONVERSATION = Act(
+    method="DELETE",
+    path=_conversation_path,
+    answers=ThreadErasure,
+    refusal=UNREADABLE_WRITE,
+    render=_printed(_erasure_block),
+)
+
 # A read of the running server rather than of the database: what a
 # database says about an entry is what `show mcp-server` prints, and a
 # stopped server has no state to report.
@@ -3699,6 +3876,10 @@ BEFORE_HELP = (
     "however far back the store goes)"
 )
 
+CONVERSATION_HELP = "the conversation's uuid hex, as a listing prints it"
+
+AGENT_FILTER_HELP = "only the conversations of this agent, by name (default: every agent)"
+
 SELECTED_SESSION_HELP = (
     "only this session, by its uuid hex (default: every session the other selectors "
     "leave)"
@@ -3813,9 +3994,16 @@ class Command:
     # rule reads both correctly.
     kind: str = ""
 
-    # What it does. An act is a request to the configuration API; the
-    # commands that reach no API carry their own function instead.
-    does: "Act | Callable[[Invocation], None]"
+    # What it does. An act is a request to the configuration API; a
+    # tuple of them is a command whose one output is assembled from more
+    # than one read, in the order they are written; the commands that
+    # reach no API carry their own function instead.
+    #
+    # A tuple rather than a second row, because what an operator asked
+    # for is one thing: `conversation show` prints a thread's header and
+    # then its dialogue, and the API answers those as two resources
+    # because one of them is paginated and the other is not.
+    does: "Act | tuple[Act, ...] | Callable[[Invocation], None]"
 
     # How its arguments are declared, which is a function Typer reads a
     # signature off. One per argument shape rather than one per command,
@@ -3839,13 +4027,33 @@ class Command:
     # driven by the same table everything else about a command is.
     destroys: bool = False
 
+    def acts(self) -> "tuple[Act, ...]":
+        """The requests this command makes, in the order it makes them,
+        and none for a command that reaches no API.
+
+        Read off the row rather than reconstructed by whoever asks: the
+        contract check holds every act against the committed document
+        and would otherwise carry a second copy of the rule below, which
+        is exactly how a command that grew a second request comes to be
+        a request nobody compared.
+        """
+        if isinstance(self.does, Act):
+            return (self.does,)
+        if isinstance(self.does, tuple):
+            return self.does
+        return ()
+
     def perform(self, args: Invocation) -> None:
         """What this command does, once its arguments are in hand."""
         if self.destroys:
             _permitted_to_destroy(args)
-        if isinstance(self.does, Act):
-            _act(args, self.does)
+        performed = self.acts()
+        if performed:
+            for act in performed:
+                _act(args, act)
             return
+        # No acts is the third arm of `does`: a command that reaches no
+        # API, carrying its own function.
         self.does(args)
 
 
@@ -4316,6 +4524,65 @@ def _selected_sessions(row: Command) -> Callable[..., None]:
     return run
 
 
+def _by_conversation(row: Command) -> Callable[..., None]:
+    """A command addressing one recorded thread by its id."""
+
+    def run(
+        context: typer.Context,
+        conversation: Annotated[
+            str, typer.Argument(metavar="CONVERSATION", help=CONVERSATION_HELP)
+        ],
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        force: ForceOption = None,
+        no_input: NoInputOption = None,
+    ) -> None:
+        row.perform(
+            _invocation(
+                row, context, config, api_url, force, no_input, conversation=conversation
+            )
+        )
+
+    return run
+
+
+def _filtered_conversations(row: Command) -> Callable[..., None]:
+    """The thread listing, narrowed by an agent and bounded by a count.
+
+    `--agent` is a flag and not an address for the reason `--device` is
+    one next door: it says whose threads to show rather than naming one
+    thread, which is how story 14 of #190 is supplied.
+    """
+
+    def run(
+        context: typer.Context,
+        agent: Annotated[
+            str | None, typer.Option("--agent", metavar="NAME", help=AGENT_FILTER_HELP)
+        ] = None,
+        limit: Annotated[
+            str | None, typer.Option("--limit", metavar="N", help=LIMIT_HELP)
+        ] = None,
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        force: ForceOption = None,
+        no_input: NoInputOption = None,
+    ) -> None:
+        row.perform(
+            _invocation(
+                row,
+                context,
+                config,
+                api_url,
+                force,
+                no_input,
+                name=agent or "",
+                limit=limit or "",
+            )
+        )
+
+    return run
+
+
 def _provider_secret(row: Command) -> Callable[..., None]:
     """Storing a credential on one provider. The value is never here: it
     is read from stdin or from the variable `--from-env` names."""
@@ -4632,6 +4899,9 @@ GROUPS: dict[tuple[str, ...], str] = {
     # (docs/plans/2026-08-28-first-class-conversations.md), because its
     # examples spelled the noun plural before there was one.
     ("session",): "the sessions this server recorded, and erasing them",
+    # And the store's other entity, singular under the same rule: `show`
+    # and `delete` address one thread.
+    ("conversation",): "the conversations this server recorded, and erasing them",
 }
 
 
@@ -4883,6 +5153,38 @@ COMMANDS: tuple[Command, ...] = (
         help=(
             "erase every session the selectors name, in one transaction; at least one "
             "of --session, --device and --before is required and several are combined"
+        ),
+        destroys=True,
+    ),
+    # The conversation store's other entity: the durable thread the same
+    # turns project as. Reads and one erasure, requests like the four
+    # above them and for the same reason.
+    Command(
+        words=("conversation", "list"),
+        does=LIST_CONVERSATIONS,
+        declare=_filtered_conversations,
+        help=(
+            "the conversations this server recorded, most recently active first, one "
+            "page of them; narrow it with --agent and size the page with --limit"
+        ),
+    ),
+    Command(
+        words=("conversation", "show"),
+        does=(SHOW_CONVERSATION, READ_DIALOGUE),
+        declare=_by_conversation,
+        help=(
+            "print one recorded conversation: whose thread it is, what it is called "
+            "and when it ran, and then a page of what was said in it, oldest first"
+        ),
+    ),
+    Command(
+        words=("conversation", "delete"),
+        does=DELETE_CONVERSATION,
+        declare=_by_conversation,
+        help=(
+            "erase one recorded conversation: its turns out of whatever sessions they "
+            "were spoken in, the calls they made, and its recap checkpoints; the "
+            "sessions themselves are left with a gap rather than deleted"
         ),
         destroys=True,
     ),

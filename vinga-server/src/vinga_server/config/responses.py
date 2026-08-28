@@ -1282,3 +1282,435 @@ class Erasure(BaseModel):
             "`parent` lineage, and those belonging to a thread that went whole."
         )
     )
+
+
+# The conversation store's turn shapes
+#
+# Here rather than beside the routes for the reason the session shapes
+# above are, and they arrived later for a reason worth recording: while
+# no command read a turn timeline they could stay in
+# `conversations/api.py`, and `vinga conversation show` reads one. So
+# they moved when the reason to leave them expired.
+#
+# `TOOL_SOURCES` is written out here rather than read off
+# `conversations/schema.py`, the trade this module's own docstring makes
+# for the mask and the close reasons and for the same reason: it imports
+# nothing of this server. The pin in `test_api_openapi.py` holds this
+# spelling and the schema's own tuple equal through the rendered
+# document, which is the byte a client reads.
+
+TOOL_SOURCES = ("builtin", "device", "mcp", "unknown")
+
+ToolSource = Literal[*TOOL_SOURCES]
+
+
+class ToolInvocation(BaseModel):
+    """One call a turn issued, as the timeline nests it.
+
+    The transport shape of a `tool_invocations` row, not the record the
+    pipeline hands the writer, which is the dataclass of the same name
+    in `records.py`.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    position: int = Field(
+        description=(
+            "Where this call sat in the round's call list, as the model issued it, "
+            "counted from zero and with handovers included. The rows are nested in "
+            "this order; it is the model's order and not the order they finished in."
+        )
+    )
+    source: ToolSource = Field(
+        description=(
+            "Where the call was routed: `builtin` for one this application authors, "
+            "`device` for one the device published, `mcp` for one an MCP entry owns, "
+            "`unknown` for a name nothing answered to. Classified before the call ran. "
+            "A closed set here because it is a closed set in the database, which holds "
+            "the same four tokens under a check constraint."
+        )
+    )
+    entry: str | None = Field(
+        description=(
+            "The owning MCP entry's configured name for an `mcp` call, and null "
+            "otherwise. A name this deployment chose, so it survives text-off."
+        )
+    )
+    name: str | None = Field(
+        description=(
+            "The called tool's name, and null when text storage was off for the "
+            "session: a tool's name originates off this server, a device's "
+            "self-description or an MCP far side, exactly as its result does."
+        )
+    )
+    malformed: bool = Field(
+        description="Whether the model's arguments were not a JSON object."
+    )
+    arguments: dict[str, Any] | None = Field(
+        description=(
+            "What the model passed, null under text-off and null when the call was "
+            "malformed, which is what `malformed` above tells them apart by."
+        )
+    )
+    result: str | None = Field(
+        description="What the call answered, a refusal included. Null under text-off."
+    )
+    is_error: bool = Field(description="Whether the call answered as an error.")
+    duration_ms: int | None = Field(
+        description=(
+            "How long the call took, in milliseconds. Null where nothing ran, as for a "
+            "refused or a successful handover, and null under metrics-off."
+        )
+    )
+
+
+class TurnLeg(BaseModel):
+    """One agent's share of a turn a handover split.
+
+    The transport shape of one entry of `turns.legs`, whose halves
+    follow different storage switches: the text is content and the token
+    counts are measurements, which is why a leg exists at all rather
+    than the turn's totals being the whole story. The totals blend
+    agents that may use different models; this is where they come apart
+    again.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    agent: str | None = Field(
+        description=(
+            "The agent whose leg this is, and null for a session that never activated "
+            "one."
+        )
+    )
+    text: str | None = Field(
+        description=(
+            "What this agent said, null under text-off, and null for an agent that "
+            "took part without speaking: one that asked for the handover said nothing "
+            "and spent tokens all the same."
+        )
+    )
+    input_tokens: int | None = Field(
+        description=(
+            "Input tokens this agent spent on the turn. Null when the provider "
+            "reported no usage, and under metrics-off."
+        )
+    )
+    output_tokens: int | None = Field(
+        description=(
+            "Output tokens this agent spent on the turn. Null when the provider "
+            "reported no usage, and under metrics-off."
+        )
+    )
+
+
+class SessionTurn(BaseModel):
+    """One utterance and the reply it got, with the calls the reply made."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: int = Field(
+        description=(
+            "The turn's monotonic row id, never reused. It is this timeline's cursor: "
+            "a page asked for with it holds the turns after it."
+        )
+    )
+    conversation: str = Field(
+        description=(
+            "The thread this turn belongs to, by its uuid hex. A turn names both "
+            "its session and its conversation, which is what makes the session "
+            "timeline and the thread two readings of one set of rows: the turns of "
+            "one session can belong to several threads, and one thread's turns can "
+            "come from several sessions."
+        )
+    )
+    t_ms: int = Field(
+        description=(
+            "The utterance's offset from session open, in milliseconds, aligned with "
+            "its `heard` event and with the capture's audio for the same session."
+        )
+    )
+    agent: str | None = Field(
+        description=(
+            "The agent that owns this turn, which is the one it started with and "
+            "therefore the one whose thread it is on. A handover makes it different "
+            "from the session's and from the agent that finished the reply; the legs "
+            "below are where a split reply comes apart."
+        )
+    )
+    heard: str | None = Field(
+        description="What was said to the device, as transcribed. Null under text-off."
+    )
+    heard_duration_s: float | None = Field(
+        description="How long the utterance lasted, in seconds. Null under metrics-off."
+    )
+    language: str | None = Field(
+        description=(
+            "The language the transcript was recognized as. Neither a measured number "
+            "nor conversation text, so it survives both switches."
+        )
+    )
+    language_confidence: float | None = Field(
+        description="How sure the recognizer was of that language. Null under metrics-off."
+    )
+    reply: str | None = Field(
+        description=(
+            "What the assistant said, the legs joined. Null under text-off, and null "
+            "when the reply spoke nothing."
+        )
+    )
+    legs: list[TurnLeg] | None = Field(
+        description=(
+            "One entry per agent that took part, and present only when a handover "
+            "split the reply. Null is a turn one agent answered whole, which is not "
+            "the same as an empty list and never becomes one."
+        )
+    )
+    asr_ms: int | None = Field(
+        description=(
+            "Transcription elapsed, in milliseconds. Null where none was measured this "
+            "turn, and under metrics-off."
+        )
+    )
+    first_token_ms: int | None = Field(
+        description="Request to the reply's first token, in milliseconds. Null under metrics-off."
+    )
+    llm_ms: int | None = Field(
+        description=(
+            "The reply's LLM round durations summed, in milliseconds. Null under "
+            "metrics-off."
+        )
+    )
+    tts_first_audio_ms: int | None = Field(
+        description=(
+            "The reply's first synthesis request to its first audio bytes, in "
+            "milliseconds, measured at the provider boundary and deliberately not at "
+            "the device. Null when the reply spoke nothing, and under metrics-off."
+        )
+    )
+    rounds: int | None = Field(
+        description="How many LLM rounds the reply took. Null under metrics-off."
+    )
+    input_tokens: int | None = Field(
+        description=(
+            "Input tokens summed across the turn's rounds; OTel's "
+            "`gen_ai.usage.input_tokens`. Null when the provider reported no usage, "
+            "and under metrics-off."
+        )
+    )
+    output_tokens: int | None = Field(
+        description=(
+            "Output tokens summed across the turn's rounds; OTel's "
+            "`gen_ai.usage.output_tokens`. Null when the provider reported no usage, "
+            "and under metrics-off."
+        )
+    )
+    tool_calls: int = Field(
+        description=(
+            "How many calls this turn issued, which is how many entries the list below "
+            "holds. Structural rather than telemetry: it survives both switches."
+        )
+    )
+    tool_invocations: list[ToolInvocation] = Field(
+        description="The calls the reply made, in the order the model issued them."
+    )
+
+
+class SessionTurns(BaseModel):
+    """One page of a session's timeline, oldest first."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[SessionTurn] = Field(
+        description="The turns on this page, ascending by id, which is chronological."
+    )
+    next_cursor: int | None = Field(
+        description=(
+            "What to send as `cursor` for the page after this one, and null when this "
+            "was the last. The next page holds the turns after it, which is also how a "
+            "client that read up to a turn asks for what has happened since."
+        )
+    )
+
+
+# The conversation store's thread shapes
+#
+# A thread is the other projection of the same rows: the session read
+# answers one connection episode, and these answer one durable
+# conversation, which may span several of them. The turn shape below is
+# the session's with the session added rather than a second copy of
+# twenty descriptions, because two structures that must agree are one
+# structure with a bug pending.
+
+
+class ConversationSummary(BaseModel):
+    """One thread as the listing shows it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: int = Field(
+        description=(
+            "The thread's monotonic row id, never reused. It is the second half of "
+            "this listing's cursor: activity moves, so a page is asked for by the "
+            "pair (`last_active_at`, `id`) rather than by a row id alone."
+        )
+    )
+    conversation: str = Field(
+        description=(
+            "The thread's uuid hex, which addresses the reads and the deletion below "
+            "and which every turn of it carries."
+        )
+    )
+    agent: str = Field(
+        description=(
+            "The agent this thread belongs to. A conversation has exactly one, for "
+            "its whole life: a handover starts a thread of the incoming agent's "
+            "rather than moving this one."
+        )
+    )
+    title: str | None = Field(
+        description=(
+            "What the thread is called, which is its first utterance bounded. Null "
+            "where text storage was off when it began, and null for a thread whose "
+            "opening turn has since been erased with nothing text-bearing left."
+        )
+    )
+    device: str | None = Field(
+        description=(
+            "The device the thread was begun on, by MAC. A record of where it "
+            "started rather than a binding: a thread is reachable from any device "
+            "bound to its agent."
+        )
+    )
+    incomplete: bool = Field(
+        description=(
+            "Whether a write this thread needed was lost. Product state rather than "
+            "telemetry, and deliberately outside the metrics switch that zeroes "
+            "`dropped` on a session: a thread with a hole in it is a thread with a "
+            "hole in it however the switches are set."
+        )
+    )
+    created_at: str = Field(
+        description="When the thread's first turn landed, as an ISO-8601 instant in UTC."
+    )
+    last_active_at: str = Field(
+        description=(
+            "When its newest turn landed, in the same form. This is what the listing "
+            "orders on and what retention measures, so it moves with every turn. "
+            "Where the turn that wrote it has been erased it falls back to a lower "
+            "bound, which the store's reference states exactly."
+        )
+    )
+    turns: int = Field(description="How many turns this thread holds, across every session.")
+
+
+class ConversationList(BaseModel):
+    """One page of the thread listing, most recently active first."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[ConversationSummary] = Field(
+        description=(
+            "The threads on this page, ordered by `last_active_at` descending with "
+            "`id` descending as the tie-break."
+        )
+    )
+    next_cursor_active: str | None = Field(
+        description=(
+            "What to send as `cursor_active` for the page after this one: the "
+            "`last_active_at` of the last item here. Null when this was the last "
+            "page, and null together with `next_cursor_id`, which the two request "
+            "parameters are also sent together or not at all."
+        )
+    )
+    next_cursor_id: int | None = Field(
+        description=(
+            "What to send as `cursor_id` beside it: the `id` of the last item here. "
+            "Two plain values rather than one opaque cursor, so nothing here is an "
+            "encoding a later release has to keep reading."
+        )
+    )
+
+
+class ConversationDetail(ConversationSummary):
+    """One thread, whole: the summary's fields and what hangs off it.
+
+    The summary plus one count rather than a shape of its own, because
+    that is what it is: a thread carries no nested structure, so there
+    is nothing a listing leaves out except the checkpoints, which cost a
+    second count.
+    """
+
+    milestones: int = Field(
+        description=(
+            "How many recap checkpoints this thread holds. Zero in this release "
+            "everywhere: the table exists and the flow that writes a row does not "
+            "ship yet."
+        )
+    )
+
+
+class ConversationTurn(SessionTurn):
+    """One turn as a thread's dialogue answers it.
+
+    The session timeline's turn with the session added. A turn names
+    both, which is what makes the two views two readings of one set of
+    rows: the turns of one session can belong to several threads, and
+    one thread's turns can come from several sessions.
+    """
+
+    session: str = Field(
+        description=(
+            "The session this turn was spoken in, by its uuid hex, which addresses "
+            "the session reads and names that session's capture triplet."
+        )
+    )
+
+
+class ConversationTurns(BaseModel):
+    """One page of a thread's dialogue, oldest first."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[ConversationTurn] = Field(
+        description="The turns on this page, ascending by id, which is chronological."
+    )
+    next_cursor: int | None = Field(
+        description=(
+            "What to send as `cursor` for the page after this one, and null when this "
+            "was the last. The next page holds the turns after it, which is also how "
+            "a client that read up to a turn asks for what has happened since."
+        )
+    )
+
+
+class ThreadErasure(BaseModel):
+    """What erasing a thread took, per table.
+
+    Four counts and deliberately not the six a session erasure answers:
+    erasing a thread takes its turns out of whatever sessions they were
+    spoken in and touches neither those sessions nor their telemetry. A
+    session is a connection episode and it still happened, with a gap in
+    it now.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    conversations: int = Field(
+        description="How many threads were deleted, which is one for an addressed erasure."
+    )
+    turns: int = Field(
+        description=(
+            "How many turns went with them, wherever they were spoken. Their "
+            "sessions' own rows are untouched and keep the gap."
+        )
+    )
+    tool_invocations: int = Field(
+        description="How many tool invocation rows hung off those turns."
+    )
+    milestones: int = Field(
+        description=(
+            "How many recap checkpoints went: the thread's own, and everything "
+            "descended from one along the `parent` lineage."
+        )
+    )

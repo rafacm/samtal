@@ -126,6 +126,11 @@ SESSION_OTHER_MAC = "02:00:00:00:00:22"
 
 LANE_CONVERSATION = "7b1c2d3e4f50617283a4b5c6d7e8f900"
 
+# The thread the conversation verbs' own record is written for. Its own
+# id rather than the one above, so an erasure in either case cannot
+# reach the rows the other is about.
+LANE_THREAD = "0d1e2f3a4b5c6d7e8f90a1b2c3d4e5f6"
+
 
 def session_manifest(device: str) -> dict[str, object]:
     """The manifest a session opens its row with, as the device session
@@ -1111,6 +1116,71 @@ def test_the_session_verbs_read_and_erase_a_real_record_over_the_wire(
     assert leaked(SECRET, logs=watched.everything()) == []
 
 
+def test_the_conversation_verbs_read_and_erase_a_real_thread_over_the_wire(
+    deployed: Live,
+    module_database: str,
+    capsys: pytest.CaptureFixture[str],
+    watched: Watched,
+) -> None:
+    """The three verbs of the `conversation` noun against a real
+    uvicorn: a read, a thread whole with its dialogue, and an erasure.
+
+    The thread spans both sessions, which is the shape only this
+    projection can show and the shape that makes `show` two requests
+    rather than one. What only a real server can prove is here for the
+    reason the session case gives: the same token, the same address
+    resolution, the same transport policy, and a deletion running on a
+    write engine the server opens for the request.
+    """
+    seeded = ConversationStore(
+        DatabaseConfig(name=module_database), retention_days=0
+    )
+    seeded.start()
+    try:
+        for name, device, heard in (
+            ("thread-one", SESSION_MAC, "what is the weather like"),
+            ("thread-two", SESSION_OTHER_MAC, "and what about tomorrow"),
+        ):
+            seeded.open_session(name, 100.0, session_manifest(device))
+            seeded.record_turn(
+                name,
+                TurnRecord(
+                    at=101.2,
+                    conversation=LANE_THREAD,
+                    agent="sam",
+                    heard=heard,
+                    reply="Sunny.",
+                ),
+            )
+            seeded.close_session(name, duration_s=2.0, reason="client")
+    finally:
+        seeded.stop()
+
+    assert run("conversation", "list") == 0
+    listed = capsys.readouterr().out
+    assert listed.splitlines()[0].split()[0] == "CONVERSATION"
+    assert LANE_THREAD in listed
+
+    assert run("conversation", "show", LANE_THREAD) == 0
+    shown = capsys.readouterr().out
+    assert shown.startswith(f"conversation: {LANE_THREAD}\n")
+    assert "you: what is the weather like\n" in shown
+    assert "you: and what about tomorrow\n" in shown
+
+    assert run("conversation", "delete", LANE_THREAD, "--force") == 0
+    assert capsys.readouterr().out.startswith("turns: 2\n")
+
+    assert run("conversation", "list") == 0
+    assert LANE_THREAD not in capsys.readouterr().out
+    # The sessions the turns were spoken in are untouched, which is the
+    # asymmetry between the two erasures, running on the server rather
+    # than inside a unit test's transaction.
+    assert run("session", "list") == 0
+    assert "thread-one" in capsys.readouterr().out
+
+    assert leaked(SECRET, logs=watched.everything()) == []
+
+
 def test_the_documents_that_reach_nothing_render_in_the_same_environment(
     deployed: Live, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -1592,6 +1662,18 @@ REFUSALS: tuple[Refusal, ...] = (
         "a purge names what it erases: give at least one of session, device or before, "
         "and several are combined so that every one of them has to match. Erasing "
         "everything is deliberately not something this endpoint can be asked for",
+        True,
+    ),
+    # The thread half of the same family, and the sentence chosen is the
+    # server's again: an id nothing answers to, refused by the endpoint
+    # in a sentence that names no id.
+    Refusal(
+        ("conversation",),
+        ("conversation", "show", "nothing-of-that-id"),
+        "no conversation of that id is in the conversation store. The id is the "
+        "thread's uuid hex, which every turn of it carries; a thread whose last "
+        "activity is older than server.conversations.retention_days has been pruned, "
+        "and a thread that lost every turn to an erasure was deleted with them.",
         True,
     ),
     Refusal(("status",), ("status", "extra"), USAGE, False),

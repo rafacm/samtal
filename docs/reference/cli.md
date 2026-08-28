@@ -637,6 +637,7 @@ Commands:
                    server, kind by kind, with the boundary each kind's changes
                    reach a conversation at
   session          the sessions this server recorded, and erasing them
+  conversation     the conversations this server recorded, and erasing them
   status           what each configured MCP server is doing on the running
                    server: connected, down, or unused because no agent
                    references it, since when, and which tools it published
@@ -2027,6 +2028,100 @@ Options:
                        asking, and a secret is read from stdin or --from-env
                        (default: prompt at a terminal)
   -h, --help           Show this message and exit.
+```
+
+### `vinga conversation`
+
+```
+Usage: vinga conversation [OPTIONS] COMMAND [ARGS]...
+
+  the conversations this server recorded, and erasing them
+
+Options:
+  -h, --help  Show this message and exit.
+
+Commands:
+  list    the conversations this server recorded, most recently active first,
+          one page of them; narrow it with --agent and size the page with
+          --limit
+  show    print one recorded conversation: whose thread it is, what it is called
+          and when it ran, and then a page of what was said in it, oldest first
+  delete  erase one recorded conversation: its turns out of whatever sessions
+          they were spoken in, the calls they made, and its recap checkpoints;
+          the sessions themselves are left with a gap rather than deleted
+```
+
+### `vinga conversation list`
+
+```
+Usage: vinga conversation list [OPTIONS]
+
+  the conversations this server recorded, most recently active first, one page
+  of them; narrow it with --agent and size the page with --limit
+
+Options:
+  --agent NAME   only the conversations of this agent, by name (default: every
+                 agent)
+  --limit N      how many rows this page may hold (default: the API's own, 50)
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
+  -h, --help     Show this message and exit.
+```
+
+### `vinga conversation show`
+
+```
+Usage: vinga conversation show [OPTIONS] {CONVERSATION}
+
+  print one recorded conversation: whose thread it is, what it is called and
+  when it ran, and then a page of what was said in it, oldest first
+
+Arguments:
+  CONVERSATION  the conversation's uuid hex, as a listing prints it  [required]
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
+  -h, --help     Show this message and exit.
+```
+
+### `vinga conversation delete`
+
+```
+Usage: vinga conversation delete [OPTIONS] {CONVERSATION}
+
+  erase one recorded conversation: its turns out of whatever sessions they were
+  spoken in, the calls they made, and its recap checkpoints; the sessions
+  themselves are left with a gap rather than deleted
+
+Arguments:
+  CONVERSATION  the conversation's uuid hex, as a listing prints it  [required]
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
+  -h, --help     Show this message and exit.
 ```
 
 ### `vinga status`

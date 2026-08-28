@@ -607,12 +607,15 @@ docs/plans/2026-08-28-first-class-conversations.md:270  historical  vinga sessio
 docs/plans/2026-08-28-first-class-conversations.md:271  historical  vinga session show
 docs/plans/2026-08-28-first-class-conversations.md:272  historical  vinga session delete
 docs/plans/2026-08-28-first-class-conversations.md:273  historical  vinga session purge
+docs/plans/2026-08-28-first-class-conversations.md:274  historical  vinga conversation list
+docs/plans/2026-08-28-first-class-conversations.md:275  historical  vinga conversation show
+docs/plans/2026-08-28-first-class-conversations.md:276  historical  vinga conversation delete
 docs/reference/api-openapi.json:5  generated  vinga schema provider
-docs/reference/api-openapi.json:4860  generated  vinga provider secret set
-docs/reference/api-openapi.json:4981  generated  vinga agent preview
-docs/reference/api-openapi.json:5013  generated  vinga agent preview
-docs/reference/api-openapi.json:5056  generated  vinga status
-docs/reference/api-openapi.json:5080  generated  vinga status
+docs/reference/api-openapi.json:5744  generated  vinga provider secret set
+docs/reference/api-openapi.json:5865  generated  vinga agent preview
+docs/reference/api-openapi.json:5897  generated  vinga agent preview
+docs/reference/api-openapi.json:5940  generated  vinga status
+docs/reference/api-openapi.json:5964  generated  vinga status
 docs/reference/cli.md:39  respell  vinga provider set llm local
 docs/reference/cli.md:40  respell  vinga-server config provider set llm local
 docs/reference/cli.md:61  respell  vinga config list
@@ -653,137 +656,145 @@ docs/reference/cli.md:584  generated  vinga provider secret set llm brain
 docs/reference/cli.md:585  generated  vinga provider secret set llm claude
 docs/reference/cli.md:586  generated  vinga mcp-server secret set home
 docs/reference/cli.md:587  generated  vinga mcp-server secret set weather
-docs/reference/cli.md:658  generated  vinga provider
-docs/reference/cli.md:661  generated  vinga provider
-docs/reference/cli.md:676  generated  vinga provider set
-docs/reference/cli.md:679  generated  vinga provider set
-docs/reference/cli.md:809  generated  vinga schema provider
-docs/reference/cli.md:812  generated  vinga provider show
-docs/reference/cli.md:815  generated  vinga provider show
-docs/reference/cli.md:836  generated  vinga provider export
-docs/reference/cli.md:839  generated  vinga provider export
-docs/reference/cli.md:860  generated  vinga provider delete
-docs/reference/cli.md:863  generated  vinga provider delete
-docs/reference/cli.md:884  generated  vinga provider secret
-docs/reference/cli.md:887  generated  vinga provider secret
-docs/reference/cli.md:899  generated  vinga provider secret set
-docs/reference/cli.md:902  generated  vinga provider secret set
-docs/reference/cli.md:926  generated  vinga provider secret clear
-docs/reference/cli.md:929  generated  vinga provider secret clear
-docs/reference/cli.md:951  generated  vinga mcp-server
-docs/reference/cli.md:954  generated  vinga mcp-server
-docs/reference/cli.md:969  generated  vinga mcp-server set
-docs/reference/cli.md:972  generated  vinga mcp-server set
-docs/reference/cli.md:1034  generated  vinga schema mcp-server
-docs/reference/cli.md:1037  generated  vinga mcp-server show
-docs/reference/cli.md:1040  generated  vinga mcp-server show
-docs/reference/cli.md:1060  generated  vinga mcp-server export
-docs/reference/cli.md:1063  generated  vinga mcp-server export
-docs/reference/cli.md:1083  generated  vinga mcp-server delete
-docs/reference/cli.md:1086  generated  vinga mcp-server delete
-docs/reference/cli.md:1106  generated  vinga mcp-server secret
-docs/reference/cli.md:1109  generated  vinga mcp-server secret
-docs/reference/cli.md:1121  generated  vinga mcp-server secret set
-docs/reference/cli.md:1124  generated  vinga mcp-server secret set
-docs/reference/cli.md:1147  generated  vinga mcp-server secret clear
-docs/reference/cli.md:1150  generated  vinga mcp-server secret clear
-docs/reference/cli.md:1171  generated  vinga prompt-fragment
-docs/reference/cli.md:1174  generated  vinga prompt-fragment
-docs/reference/cli.md:1188  generated  vinga prompt-fragment set
-docs/reference/cli.md:1191  generated  vinga prompt-fragment set
-docs/reference/cli.md:1229  generated  vinga schema prompt-fragment
-docs/reference/cli.md:1232  generated  vinga prompt-fragment show
-docs/reference/cli.md:1235  generated  vinga prompt-fragment show
-docs/reference/cli.md:1255  generated  vinga prompt-fragment export
-docs/reference/cli.md:1258  generated  vinga prompt-fragment export
-docs/reference/cli.md:1278  generated  vinga prompt-fragment delete
-docs/reference/cli.md:1281  generated  vinga prompt-fragment delete
-docs/reference/cli.md:1301  generated  vinga agent
-docs/reference/cli.md:1304  generated  vinga agent
-docs/reference/cli.md:1321  generated  vinga agent set
-docs/reference/cli.md:1324  generated  vinga agent set
-docs/reference/cli.md:1384  generated  vinga schema agent
-docs/reference/cli.md:1387  generated  vinga agent show
-docs/reference/cli.md:1390  generated  vinga agent show
-docs/reference/cli.md:1410  generated  vinga agent export
-docs/reference/cli.md:1413  generated  vinga agent export
-docs/reference/cli.md:1433  generated  vinga agent delete
-docs/reference/cli.md:1436  generated  vinga agent delete
-docs/reference/cli.md:1456  generated  vinga agent preview
-docs/reference/cli.md:1459  generated  vinga agent preview
-docs/reference/cli.md:1481  generated  vinga agent-defaults
-docs/reference/cli.md:1484  generated  vinga agent-defaults
-docs/reference/cli.md:1497  generated  vinga agent-defaults set
-docs/reference/cli.md:1500  generated  vinga agent-defaults set
-docs/reference/cli.md:1557  generated  vinga schema agent-defaults
-docs/reference/cli.md:1560  generated  vinga agent-defaults show
-docs/reference/cli.md:1563  generated  vinga agent-defaults show
-docs/reference/cli.md:1580  generated  vinga agent-defaults export
-docs/reference/cli.md:1583  generated  vinga agent-defaults export
-docs/reference/cli.md:1600  generated  vinga device
-docs/reference/cli.md:1603  generated  vinga device
-docs/reference/cli.md:1617  generated  vinga device bind
-docs/reference/cli.md:1620  generated  vinga device bind
-docs/reference/cli.md:1641  generated  vinga device show
-docs/reference/cli.md:1644  generated  vinga device show
-docs/reference/cli.md:1664  generated  vinga device delete
-docs/reference/cli.md:1667  generated  vinga device delete
-docs/reference/cli.md:1687  generated  vinga device pending
-docs/reference/cli.md:1690  generated  vinga device pending
-docs/reference/cli.md:1703  generated  vinga device pending list
-docs/reference/cli.md:1706  generated  vinga device pending list
-docs/reference/cli.md:1723  generated  vinga device pending claim
-docs/reference/cli.md:1726  generated  vinga device pending claim
-docs/reference/cli.md:1748  generated  vinga default-agent
-docs/reference/cli.md:1751  generated  vinga default-agent
-docs/reference/cli.md:1763  generated  vinga default-agent set
-docs/reference/cli.md:1766  generated  vinga default-agent set
-docs/reference/cli.md:1786  generated  vinga default-agent clear
-docs/reference/cli.md:1789  generated  vinga default-agent clear
-docs/reference/cli.md:1806  generated  vinga apply
-docs/reference/cli.md:1809  generated  vinga apply
-docs/reference/cli.md:1831  generated  vinga list
-docs/reference/cli.md:1834  generated  vinga list
-docs/reference/cli.md:1851  generated  vinga show
-docs/reference/cli.md:1854  generated  vinga show
-docs/reference/cli.md:1871  generated  vinga export
-docs/reference/cli.md:1874  generated  vinga export
-docs/reference/cli.md:1891  generated  vinga diff
-docs/reference/cli.md:1894  generated  vinga diff
-docs/reference/cli.md:1912  generated  vinga session
-docs/reference/cli.md:1915  generated  vinga session
-docs/reference/cli.md:1934  generated  vinga session list
-docs/reference/cli.md:1937  generated  vinga session list
-docs/reference/cli.md:1957  generated  vinga session show
-docs/reference/cli.md:1960  generated  vinga session show
-docs/reference/cli.md:1981  generated  vinga session delete
-docs/reference/cli.md:1984  generated  vinga session delete
-docs/reference/cli.md:2005  generated  vinga session purge
-docs/reference/cli.md:2008  generated  vinga session purge
-docs/reference/cli.md:2032  generated  vinga status
-docs/reference/cli.md:2035  generated  vinga status
-docs/reference/cli.md:2054  generated  vinga reload
-docs/reference/cli.md:2057  generated  vinga reload
-docs/reference/cli.md:2075  generated  vinga ota-url
-docs/reference/cli.md:2078  generated  vinga ota-url
-docs/reference/cli.md:2089  generated  vinga simulator
-docs/reference/cli.md:2092  generated  vinga simulator
-docs/reference/cli.md:2107  generated  vinga simulator check-in
-docs/reference/cli.md:2110  generated  vinga simulator check-in
-docs/reference/cli.md:2116  generated  vinga ota-url
-docs/reference/cli.md:2239  generated  vinga simulator run
-docs/reference/cli.md:2242  generated  vinga simulator run
-docs/reference/cli.md:2249  generated  vinga ota-url
-docs/reference/cli.md:2372  generated  vinga schema
-docs/reference/cli.md:2375  generated  vinga schema
-docs/reference/cli.md:2389  generated  vinga reference
-docs/reference/cli.md:2392  generated  vinga reference
-docs/reference/cli.md:2400  generated  vinga openapi
-docs/reference/cli.md:2403  generated  vinga openapi
-docs/reference/cli.md:2411  generated  vinga cli-reference
-docs/reference/cli.md:2414  generated  vinga cli-reference
-docs/reference/conversations-schema.md:124  respell  vinga session delete
-docs/reference/conversations-schema.md:124  respell  vinga session purge
+docs/reference/cli.md:659  generated  vinga provider
+docs/reference/cli.md:662  generated  vinga provider
+docs/reference/cli.md:677  generated  vinga provider set
+docs/reference/cli.md:680  generated  vinga provider set
+docs/reference/cli.md:810  generated  vinga schema provider
+docs/reference/cli.md:813  generated  vinga provider show
+docs/reference/cli.md:816  generated  vinga provider show
+docs/reference/cli.md:837  generated  vinga provider export
+docs/reference/cli.md:840  generated  vinga provider export
+docs/reference/cli.md:861  generated  vinga provider delete
+docs/reference/cli.md:864  generated  vinga provider delete
+docs/reference/cli.md:885  generated  vinga provider secret
+docs/reference/cli.md:888  generated  vinga provider secret
+docs/reference/cli.md:900  generated  vinga provider secret set
+docs/reference/cli.md:903  generated  vinga provider secret set
+docs/reference/cli.md:927  generated  vinga provider secret clear
+docs/reference/cli.md:930  generated  vinga provider secret clear
+docs/reference/cli.md:952  generated  vinga mcp-server
+docs/reference/cli.md:955  generated  vinga mcp-server
+docs/reference/cli.md:970  generated  vinga mcp-server set
+docs/reference/cli.md:973  generated  vinga mcp-server set
+docs/reference/cli.md:1035  generated  vinga schema mcp-server
+docs/reference/cli.md:1038  generated  vinga mcp-server show
+docs/reference/cli.md:1041  generated  vinga mcp-server show
+docs/reference/cli.md:1061  generated  vinga mcp-server export
+docs/reference/cli.md:1064  generated  vinga mcp-server export
+docs/reference/cli.md:1084  generated  vinga mcp-server delete
+docs/reference/cli.md:1087  generated  vinga mcp-server delete
+docs/reference/cli.md:1107  generated  vinga mcp-server secret
+docs/reference/cli.md:1110  generated  vinga mcp-server secret
+docs/reference/cli.md:1122  generated  vinga mcp-server secret set
+docs/reference/cli.md:1125  generated  vinga mcp-server secret set
+docs/reference/cli.md:1148  generated  vinga mcp-server secret clear
+docs/reference/cli.md:1151  generated  vinga mcp-server secret clear
+docs/reference/cli.md:1172  generated  vinga prompt-fragment
+docs/reference/cli.md:1175  generated  vinga prompt-fragment
+docs/reference/cli.md:1189  generated  vinga prompt-fragment set
+docs/reference/cli.md:1192  generated  vinga prompt-fragment set
+docs/reference/cli.md:1230  generated  vinga schema prompt-fragment
+docs/reference/cli.md:1233  generated  vinga prompt-fragment show
+docs/reference/cli.md:1236  generated  vinga prompt-fragment show
+docs/reference/cli.md:1256  generated  vinga prompt-fragment export
+docs/reference/cli.md:1259  generated  vinga prompt-fragment export
+docs/reference/cli.md:1279  generated  vinga prompt-fragment delete
+docs/reference/cli.md:1282  generated  vinga prompt-fragment delete
+docs/reference/cli.md:1302  generated  vinga agent
+docs/reference/cli.md:1305  generated  vinga agent
+docs/reference/cli.md:1322  generated  vinga agent set
+docs/reference/cli.md:1325  generated  vinga agent set
+docs/reference/cli.md:1385  generated  vinga schema agent
+docs/reference/cli.md:1388  generated  vinga agent show
+docs/reference/cli.md:1391  generated  vinga agent show
+docs/reference/cli.md:1411  generated  vinga agent export
+docs/reference/cli.md:1414  generated  vinga agent export
+docs/reference/cli.md:1434  generated  vinga agent delete
+docs/reference/cli.md:1437  generated  vinga agent delete
+docs/reference/cli.md:1457  generated  vinga agent preview
+docs/reference/cli.md:1460  generated  vinga agent preview
+docs/reference/cli.md:1482  generated  vinga agent-defaults
+docs/reference/cli.md:1485  generated  vinga agent-defaults
+docs/reference/cli.md:1498  generated  vinga agent-defaults set
+docs/reference/cli.md:1501  generated  vinga agent-defaults set
+docs/reference/cli.md:1558  generated  vinga schema agent-defaults
+docs/reference/cli.md:1561  generated  vinga agent-defaults show
+docs/reference/cli.md:1564  generated  vinga agent-defaults show
+docs/reference/cli.md:1581  generated  vinga agent-defaults export
+docs/reference/cli.md:1584  generated  vinga agent-defaults export
+docs/reference/cli.md:1601  generated  vinga device
+docs/reference/cli.md:1604  generated  vinga device
+docs/reference/cli.md:1618  generated  vinga device bind
+docs/reference/cli.md:1621  generated  vinga device bind
+docs/reference/cli.md:1642  generated  vinga device show
+docs/reference/cli.md:1645  generated  vinga device show
+docs/reference/cli.md:1665  generated  vinga device delete
+docs/reference/cli.md:1668  generated  vinga device delete
+docs/reference/cli.md:1688  generated  vinga device pending
+docs/reference/cli.md:1691  generated  vinga device pending
+docs/reference/cli.md:1704  generated  vinga device pending list
+docs/reference/cli.md:1707  generated  vinga device pending list
+docs/reference/cli.md:1724  generated  vinga device pending claim
+docs/reference/cli.md:1727  generated  vinga device pending claim
+docs/reference/cli.md:1749  generated  vinga default-agent
+docs/reference/cli.md:1752  generated  vinga default-agent
+docs/reference/cli.md:1764  generated  vinga default-agent set
+docs/reference/cli.md:1767  generated  vinga default-agent set
+docs/reference/cli.md:1787  generated  vinga default-agent clear
+docs/reference/cli.md:1790  generated  vinga default-agent clear
+docs/reference/cli.md:1807  generated  vinga apply
+docs/reference/cli.md:1810  generated  vinga apply
+docs/reference/cli.md:1832  generated  vinga list
+docs/reference/cli.md:1835  generated  vinga list
+docs/reference/cli.md:1852  generated  vinga show
+docs/reference/cli.md:1855  generated  vinga show
+docs/reference/cli.md:1872  generated  vinga export
+docs/reference/cli.md:1875  generated  vinga export
+docs/reference/cli.md:1892  generated  vinga diff
+docs/reference/cli.md:1895  generated  vinga diff
+docs/reference/cli.md:1913  generated  vinga session
+docs/reference/cli.md:1916  generated  vinga session
+docs/reference/cli.md:1935  generated  vinga session list
+docs/reference/cli.md:1938  generated  vinga session list
+docs/reference/cli.md:1958  generated  vinga session show
+docs/reference/cli.md:1961  generated  vinga session show
+docs/reference/cli.md:1982  generated  vinga session delete
+docs/reference/cli.md:1985  generated  vinga session delete
+docs/reference/cli.md:2006  generated  vinga session purge
+docs/reference/cli.md:2009  generated  vinga session purge
+docs/reference/cli.md:2033  generated  vinga conversation
+docs/reference/cli.md:2036  generated  vinga conversation
+docs/reference/cli.md:2054  generated  vinga conversation list
+docs/reference/cli.md:2057  generated  vinga conversation list
+docs/reference/cli.md:2078  generated  vinga conversation show
+docs/reference/cli.md:2081  generated  vinga conversation show
+docs/reference/cli.md:2102  generated  vinga conversation delete
+docs/reference/cli.md:2105  generated  vinga conversation delete
+docs/reference/cli.md:2127  generated  vinga status
+docs/reference/cli.md:2130  generated  vinga status
+docs/reference/cli.md:2149  generated  vinga reload
+docs/reference/cli.md:2152  generated  vinga reload
+docs/reference/cli.md:2170  generated  vinga ota-url
+docs/reference/cli.md:2173  generated  vinga ota-url
+docs/reference/cli.md:2184  generated  vinga simulator
+docs/reference/cli.md:2187  generated  vinga simulator
+docs/reference/cli.md:2202  generated  vinga simulator check-in
+docs/reference/cli.md:2205  generated  vinga simulator check-in
+docs/reference/cli.md:2211  generated  vinga ota-url
+docs/reference/cli.md:2334  generated  vinga simulator run
+docs/reference/cli.md:2337  generated  vinga simulator run
+docs/reference/cli.md:2344  generated  vinga ota-url
+docs/reference/cli.md:2467  generated  vinga schema
+docs/reference/cli.md:2470  generated  vinga schema
+docs/reference/cli.md:2484  generated  vinga reference
+docs/reference/cli.md:2487  generated  vinga reference
+docs/reference/cli.md:2495  generated  vinga openapi
+docs/reference/cli.md:2498  generated  vinga openapi
+docs/reference/cli.md:2506  generated  vinga cli-reference
+docs/reference/cli.md:2509  generated  vinga cli-reference
+docs/reference/conversations-schema.md:120  respell  vinga session delete
+docs/reference/conversations-schema.md:120  respell  vinga session purge
 docs/reference/domain-config.md:3  generated  vinga reference
 docs/reference/domain-config.md:22  generated  vinga export
 docs/reference/domain-config.md:79  generated  vinga reload
@@ -813,6 +824,7 @@ docs/reference/events.md:1336  generated  vinga-server config ota-url
 docs/reference/events.md:1360  generated  vinga-server config ota-url
 docs/reference/events.md:1379  generated  vinga-server config ota-url
 docs/related-projects.md:122  respell  vinga provider
+docs/system-overview.md:32  respell  vinga conversation
 docs/xiaozhi-notes.md:256  respell  config device pending claim
 docs/xiaozhi-notes.md:263  respell  vinga simulator check-in
 scripts/echo_leakage.py:1  respell  vinga session
@@ -943,7 +955,7 @@ vinga-server/src/vinga_server/config/api.py:411  respell  vinga-server config de
 vinga-server/src/vinga_server/config/api.py:430  respell  vinga-server config list
 vinga-server/src/vinga_server/config/api.py:543  respell  vinga-server config reload
 vinga-server/src/vinga_server/config/api.py:544  respell  vinga-server config list
-vinga-server/src/vinga_server/config/cli.py:2042  respell  config list
+vinga-server/src/vinga_server/config/cli.py:2158  respell  config list
 vinga-server/src/vinga_server/config/docgen.py:198  respell  config schema
 vinga-server/src/vinga_server/config/docgen.py:587  respell  config schema
 vinga-server/src/vinga_server/config/loader.py:76  respell  vinga simulator run
@@ -953,13 +965,16 @@ vinga-server/src/vinga_server/config/responses.py:9  respell  config schema
 vinga-server/src/vinga_server/config/responses.py:9  respell  config reference
 vinga-server/src/vinga_server/config/responses.py:1077  respell  vinga session list
 vinga-server/src/vinga_server/config/responses.py:1078  respell  vinga session show
+vinga-server/src/vinga_server/config/responses.py:1292  respell  vinga conversation show
 vinga-server/src/vinga_server/config/secrets.py:9  respell  vinga-server config provider secret set
 vinga-server/src/vinga_server/config/store.py:218  respell  vinga simulator check-in
 vinga-server/src/vinga_server/config/store.py:230  respell  vinga-server config device show
 vinga-server/src/vinga_server/config/views.py:29  respell  config show
 vinga-server/src/vinga_server/config/views.py:115  respell  config show
-vinga-server/src/vinga_server/conversations/docgen.py:232  respell  vinga session delete
-vinga-server/src/vinga_server/conversations/docgen.py:232  respell  vinga session
+vinga-server/src/vinga_server/conversations/api.py:119  respell  vinga session show
+vinga-server/src/vinga_server/conversations/api.py:120  respell  vinga conversation show
+vinga-server/src/vinga_server/conversations/docgen.py:227  respell  vinga session delete
+vinga-server/src/vinga_server/conversations/docgen.py:227  respell  vinga session
 vinga-server/src/vinga_server/device/session.py:731  respell  config schema
 vinga-server/src/vinga_server/device_endpoint.py:5  respell  vinga simulator
 vinga-server/src/vinga_server/doctor.py:29  respell  vinga simulator
@@ -989,9 +1004,9 @@ vinga-server/src/vinga_server/tools/publish.py:24  respell  vinga-server config 
 vinga-server/tests/integration/data/pre-cutover-export.yaml:2  respell  vinga apply
 vinga-server/tests/integration/data/pre-cutover-export.yaml:4  respell  vinga apply
 vinga-server/tests/integration/data/pre-cutover-export.yaml:59  respell  vinga provider secret set
-vinga-server/tests/integration/test_cli_live.py:473  respell  config apply
-vinga-server/tests/integration/test_cli_live.py:1364  respell  config export
-vinga-server/tests/integration/test_cli_live.py:1541  respell  vinga-server config device pending list
+vinga-server/tests/integration/test_cli_live.py:478  respell  config apply
+vinga-server/tests/integration/test_cli_live.py:1434  respell  config export
+vinga-server/tests/integration/test_cli_live.py:1611  respell  vinga-server config device pending list
 vinga-server/tests/integration/test_cli_simulator.py:1  respell  vinga simulator run
 vinga-server/tests/smoke/seed-local-engines.sh:19  respell  vinga-server config provider set llm mock
 vinga-server/tests/smoke/seed-local-engines.sh:23  respell  vinga-server config provider set asr whisper
@@ -1046,7 +1061,7 @@ vinga-server/tests/unit/data/cli-respelling.txt:302  historical  vinga-server co
 vinga-server/tests/unit/data/cli-respelling.txt:310  historical  vinga-server config reload
 vinga-server/tests/unit/data/cli-respelling.txt:316  historical  vinga-server config apply
 vinga-server/tests/unit/data/cli-respelling.txt:318  historical  vinga-server config apply
-vinga-server/tests/unit/test_api_contract.py:311  respell  vinga simulator
+vinga-server/tests/unit/test_api_contract.py:314  respell  vinga simulator
 vinga-server/tests/unit/test_api_openapi.py:38  respell  vinga-server config openapi
 vinga-server/tests/unit/test_cli_import_weight.py:52  respell  vinga simulator
 vinga-server/tests/unit/test_command_spellings.py:140  historical  bind-device
