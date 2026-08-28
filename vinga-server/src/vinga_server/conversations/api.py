@@ -72,7 +72,7 @@ from vinga_server.config.responses import (
     SessionList,
     SessionSummary,
 )
-from vinga_server.conversations import threads
+from vinga_server.conversations import store, threads
 from vinga_server.conversations.schema import (
     TOOL_SOURCES,
     events,
@@ -821,6 +821,12 @@ def _erased(
                 # meant that session.
                 raise UnknownEntityError(_UNKNOWN_SESSION)
             taken = threads.erase_sessions(connection, named)
+            # Inside the transaction, which is where the ordering is
+            # decided rather than hoped for: this transaction holds the
+            # chain's advisory lock and a writer takes the same lock at
+            # every marker, so no writer is inside one while this runs.
+            # The trade that comes with it is stated on `store.erased`.
+            store.erased(taken.threads)
     except ConfigError:
         raise
     except Exception as exc:  # noqa: BLE001 - the driver's own words never travel
