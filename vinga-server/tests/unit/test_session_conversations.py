@@ -601,7 +601,74 @@ async def test_a_busy_store_says_to_ask_again() -> None:
     assert results_of(poet) == [builtin.STORE_BUSY]
 
 
+# A read through the real seam can fail in three places, and a driver
+# says the DSN it was given in all three of them: building the engine
+# resolves the URL, connecting uses it, and disposing closes the pool
+# underneath it. The last one is the one that also has to not become the
+# answer: it runs in a `finally`, where a raise replaces whatever the
+# block had already decided to return.
+SENTINEL_DSN = "postgresql://vinga:hunter2@db.internal:5432/vinga"
+
+
+class _NoRows:
+    """A connection that answers every statement with nothing.
+
+    Enough for a search: `candidates` reads rows and scores them, and no
+    rows is a legitimate answer to give a session whose store is empty.
+    What it is for here is a read that SUCCEEDS, so that the disposal
+    failing after it has something to fail to replace."""
+
+    def __enter__(self) -> "_NoRows":
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+    def execute(self, statement: Any) -> Any:
+        return ()
+
+
+class _FailsToBuild:
+    def __init__(self, message: str) -> None:
+        raise RuntimeError(message)
+
+
+class _FailsToConnect:
+    def __init__(self, message: str) -> None:
+        self._message = message
+
+    def connect(self) -> Any:
+        raise RuntimeError(self._message)
+
+    def dispose(self) -> None:
+        return None
+
+
+class _FailsToClose:
+    def __init__(self, message: str) -> None:
+        self._message = message
+
+    def connect(self) -> Any:
+        return _NoRows()
+
+    def dispose(self) -> None:
+        raise RuntimeError(self._message)
+
+
+@pytest.mark.parametrize(
+    ("engine", "answer"),
+    [
+        pytest.param(_FailsToBuild, builtin.STORE_UNREADABLE, id="building"),
+        pytest.param(_FailsToConnect, builtin.STORE_UNREADABLE, id="connecting"),
+        # The read answered, so the answer is the read's. A disposal
+        # that could reach this line would be a `finally` overwriting a
+        # decision the seam had already made.
+        pytest.param(_FailsToClose, builtin.NOTHING_TO_RESUME, id="closing"),
+    ],
+)
 async def test_a_poisoned_driver_message_reaches_nothing(
+    engine: Any,
+    answer: str,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     capsys: pytest.CaptureFixture[str],
@@ -617,17 +684,16 @@ async def test_a_poisoned_driver_message_reaches_nothing(
     test is the catching. Driven as a whole reply, because the stored
     invocation row is one of the surfaces the message must not reach and
     a reply is what produces one.
+
+    Three cases, because the boundary is the whole call rather than the
+    statement in the middle of it: an engine that cannot be built, one
+    that cannot be connected, and one that cannot be closed. The third
+    is the one that must also leave the answer alone.
     """
-    sentinel = "postgresql://vinga:hunter2@db.internal:5432/vinga"
-
-    class Raising:
-        def connect(self) -> Any:
-            raise RuntimeError(f"connection to {sentinel} failed")
-
-        def dispose(self) -> None:
-            return None
-
-    monkeypatch.setattr(threads_module, "read_engine", lambda _settings: Raising())
+    poisoned = f"connection to {SENTINEL_DSN} failed"
+    monkeypatch.setattr(
+        threads_module, "read_engine", lambda _settings: engine(poisoned)
+    )
     poet = ScriptedLlm(
         [[call("resume_conversation", description="the galaxy")], "Not right now."]
     )
@@ -649,27 +715,27 @@ async def test_a_poisoned_driver_message_reaches_nothing(
     with caplog.at_level(logging.DEBUG):
         await drive_reply(session, UTTERANCE)
 
-    # What the model was told, which is the fixed sentence and nothing
-    # of the driver's.
-    assert results_of(poet) == [builtin.STORE_UNREADABLE]
+    # What the model was told, which is a fixed sentence and nothing of
+    # the driver's.
+    assert results_of(poet) == [answer]
     assert not any(
-        sentinel in turn.content for turns, _, _ in poet.seen for turn in turns
+        SENTINEL_DSN in turn.content for turns, _, _ in poet.seen for turn in turns
     )
     # What the store was handed, which is the same sentence in the row.
     (record,) = kept.records
     assert record.reply == "Not right now."
-    assert [invocation.result for invocation in record.tools] == [
-        builtin.STORE_UNREADABLE
-    ]
-    assert sentinel not in repr(record)
+    assert [invocation.result for invocation in record.tools] == [answer]
+    assert SENTINEL_DSN not in repr(record)
     # And every telemetry surface: the tap, the log records in both
-    # their renderings, and the streams the process writes.
-    assert not any(sentinel in repr(vars(emission)) for emission in seen)
+    # their renderings (the second of which renders a chained traceback,
+    # so a swallowed exception's cause is hunted here too), and the
+    # streams the process writes.
+    assert not any(SENTINEL_DSN in repr(vars(emission)) for emission in seen)
     for line in caplog.records:
-        assert sentinel not in line.getMessage() + repr(line.args) + repr(vars(line))
-    assert sentinel not in caplog.text
+        assert SENTINEL_DSN not in line.getMessage() + repr(line.args) + repr(vars(line))
+    assert SENTINEL_DSN not in caplog.text
     printed = capsys.readouterr()
-    assert sentinel not in printed.out + printed.err
+    assert SENTINEL_DSN not in printed.out + printed.err
     # The class name is what an operator gets, which is the rule the
     # reply path already applies to a provider that fails.
     assert any("RuntimeError" in line.getMessage() for line in caplog.records)
