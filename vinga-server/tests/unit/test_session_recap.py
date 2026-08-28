@@ -291,6 +291,27 @@ async def test_a_start_from_nobody_was_offered_is_refused() -> None:
     assert kept.milestones == []
 
 
+async def test_a_start_from_naming_no_conversation_is_not_a_selection_at_all() -> None:
+    """A call that names no thread is not a move, whatever else it
+    carries, so it reaches the dispatch like any other read and is
+    answered by the sentence that asks for one of the two arguments."""
+    poet = ScriptedLlm(
+        [
+            [call("resume_conversation", start_from="recap")],
+            "Which conversation did you mean?",
+        ]
+    )
+    kept = Kept()
+    session = speaking_session(poet, RecordingTts(), a_long_thread(), kept)
+    thread = talking_thread(session)
+
+    await drive_reply(session, UTTERANCE)
+
+    assert _results(poet) == [builtin.RESUME_NEEDS_AN_ARGUMENT]
+    assert talking_thread(session) == thread
+    assert kept.milestones == []
+
+
 async def test_a_start_from_outside_the_two_is_refused() -> None:
     poet = ScriptedLlm(
         [
