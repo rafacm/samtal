@@ -59,9 +59,11 @@ class TurnLeg:
     keeps the attribution honest without a join.
     """
 
-    # Nullable for the same reason the turn's own agent is: a session
-    # that has not activated one has none to name, and naming it with an
-    # empty string would put a lie in a row.
+    # Whoever was speaking when this leg closed, which the reply path
+    # holds as the agent it is currently on and may not have set.
+    # Nullable for that reason alone, and not for the turn's: a leg is a
+    # share of a reply, while the turn's own agent decides which thread
+    # a row belongs to and is therefore required below.
     agent: str | None
     text: str | None = None
     input_tokens: int | None = None
@@ -92,9 +94,14 @@ class TurnRecord:
     # writer derives the conversation row from these two fields alone,
     # which is why they travel together and why neither is optional.
     conversation: str
-    # The agent that owned the turn, which is the one it started with.
-    # A split reply's per-agent truth is in `legs`.
-    agent: str | None = None
+    # The agent that owns the turn, which is the one it started with. A
+    # split reply's per-agent truth is in `legs`. Required, and required
+    # in the type rather than only in the sentence above: the writer
+    # materializes the thread row from this field and the one before it,
+    # both of those columns are not null, and a record that could arrive
+    # without an agent is a turn the store would have to write outside
+    # every thread, where nothing would ever prune it.
+    agent: str
     heard: str | None = None
     heard_duration_s: float | None = None
     language: str | None = None

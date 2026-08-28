@@ -436,8 +436,14 @@ class PipelineRuntime:
         The one place that pair is read off the runtime. Everything
         after it reads the snapshot, which is what keeps a handover turn
         on the thread it started on rather than the one it ended on.
+
+        Both halves are asserted rather than defaulted: an agent is
+        activated before this runtime can be asked for anything, and the
+        thread is minted in that same activation, so a turn beginning
+        without either is a defect here and not a row for the store to
+        make sense of.
         """
-        assert self._conversation is not None
+        assert self._conversation is not None and self._agent is not None
         return TurnUnderway(self._conversation, self._agent)
 
 
