@@ -41,7 +41,7 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import insert, text
+from sqlalchemy import text
 
 from tests.support.configs import DEVICE_MAC
 from tests.support.problems import refused
@@ -51,13 +51,11 @@ from tests.support.stores import holding_the_write_lock, the_lock_held
 from vinga_server import logs
 from vinga_server.config.api import build_api
 from vinga_server.config.models import DatabaseConfig
-from vinga_server.conversations.records import TurnRecord
-from vinga_server.conversations.schema import conversation_milestones
+from vinga_server.conversations.records import MilestoneRecord, TurnRecord
 from vinga_server.conversations.store import (
     CONVERSATIONS_CHAIN,
     ConversationStore,
     Half,
-    open_conversations,
 )
 from vinga_server.db import read_engine
 
@@ -140,6 +138,32 @@ class Recorder:
     ) -> None:
         self.store.record_turn(session, a_turn(conversation, heard))
 
+    def checkpoint(
+        self,
+        session: str,
+        from_turn: int,
+        after_turn: int,
+        parent: int | None,
+        body: str,
+        conversation: str = FIRST,
+    ) -> int:
+        """One recap checkpoint, written the way the runtime writes one:
+        through the store, on the durable path, during the session that
+        consented to it. Answers its row id, which is what the next
+        recap names as its `parent`."""
+        landed = self.store.record_milestone(
+            session,
+            MilestoneRecord(
+                conversation=conversation,
+                from_turn=from_turn,
+                after_turn=after_turn,
+                parent=parent,
+                text=body,
+            ),
+        )
+        assert landed.wait(TIMEOUT_S), "the checkpoint never landed"
+        return int(stored("conversation_milestones")[-1]["id"])
+
     def event(self, session: str) -> None:
         self.store.record_event(session, "heard", logging.INFO, {"duration_s": 1.0}, 101.0)
 
@@ -177,37 +201,6 @@ def stored(table: str) -> list[dict[str, Any]]:
                     text(f"select * from conversations.{table} order by id")
                 ).mappings()
             ]
-    finally:
-        engine.dispose()
-
-
-def plant_milestone(
-    conversation: str, from_turn: int, after_turn: int, parent: int | None, body: str
-) -> int:
-    """One recap checkpoint, written the way milestone 5's flow will.
-
-    Planted rather than produced, deliberately: the table is in the
-    baseline and the flow that writes a row lands later, and the
-    provenance cascade has to be right on the day the rows appear rather
-    than the day it is first exercised in anger.
-    """
-    engine = open_conversations(DatabaseConfig())
-    try:
-        with engine.begin() as connection:
-            return int(
-                connection.execute(
-                    insert(conversation_milestones)
-                    .values(
-                        conversation=conversation,
-                        from_turn=from_turn,
-                        after_turn=after_turn,
-                        parent=parent,
-                        created_at="2026-08-15T12:00:00+00:00",
-                        text=body,
-                    )
-                    .returning(conversation_milestones.c.id)
-                ).scalar_one()
-            )
     finally:
         engine.dispose()
 
@@ -468,14 +461,23 @@ def test_only_the_thread_the_deletion_touched_is_recomputed(client) -> None:
     assert thread == untouched
 
 
-def test_a_milestone_covering_an_erased_turn_dies_with_its_lineage(client) -> None:
-    """A summary of erased content is that content, whether it arrived
-    directly or through an earlier recap the summarizer consumed. The
-    parent's coverage holds the erased turn; the child holds only the
-    parent, and both go."""
+def a_summarized_thread(sentinel: str = SENTINEL) -> tuple[int, int, int]:
+    """One thread with three turns and three real checkpoints on it,
+    written the way a session that consented to a recap writes them.
+
+    The shape is the one the lineage exists for. The parent covers the
+    turn that is about to be erased and quotes it; the child covers only
+    surviving turns and says nothing of it, but consumed the parent, so
+    what the parent held reached the child. The third covers survivors
+    and consumed nothing, which is the row that must not go.
+
+    The checkpoints are written from a third session, because that is
+    when a recap happens: somebody resumed the thread later and said
+    yes.
+    """
     recording = Recorder(dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC))
     recording.session("alpha")
-    recording.turn("alpha", FIRST, "the summarized one")
+    recording.turn("alpha", FIRST, sentinel)
     recording.close("alpha")
     recording.session("beta")
     recording.turn("beta", FIRST, "the one after it")
@@ -483,9 +485,23 @@ def test_a_milestone_covering_an_erased_turn_dies_with_its_lineage(client) -> No
     recording.close("beta")
     recording.done()
     ids = [turn["id"] for turn in stored("turns")]
-    parent = plant_milestone(FIRST, ids[0], ids[0], None, f"a recap of {SENTINEL}")
-    child = plant_milestone(FIRST, ids[1], ids[2], parent, "a recap of the recap")
-    unrelated = plant_milestone(FIRST, ids[1], ids[2], None, "covers only survivors")
+
+    later = Recorder(dt.datetime(2026, 8, 16, 12, 0, tzinfo=dt.UTC))
+    later.session("gamma")
+    parent = later.checkpoint("gamma", ids[0], ids[0], None, f"we talked about {sentinel}")
+    child = later.checkpoint("gamma", ids[1], ids[2], parent, "and then about the weather")
+    unrelated = later.checkpoint("gamma", ids[1], ids[2], None, "covers only survivors")
+    later.close("gamma")
+    later.done()
+    return parent, child, unrelated
+
+
+def test_a_milestone_covering_an_erased_turn_dies_with_its_lineage(client) -> None:
+    """A summary of erased content is that content, whether it arrived
+    directly or through an earlier recap the summarizer consumed. The
+    parent's coverage holds the erased turn; the child holds only the
+    parent, and both go."""
+    parent, child, unrelated = a_summarized_thread()
 
     taken = erase(client, "alpha")
 
@@ -493,6 +509,38 @@ def test_a_milestone_covering_an_erased_turn_dies_with_its_lineage(client) -> No
     assert [row["id"] for row in stored("conversation_milestones")] == [unrelated]
     assert parent not in {row["id"] for row in stored("conversation_milestones")}
     assert child not in {row["id"] for row in stored("conversation_milestones")}
+
+
+def test_a_recap_of_a_recap_leaves_no_trace_of_the_turn_it_stood_for(client) -> None:
+    """The transitive sentinel. A turn that survives only through a
+    checkpoint somebody later summarized again is content that reached
+    the second checkpoint without a word of it being copied there, so
+    absence of the text is not the test: the lineage is.
+
+    Hunted afterwards through every table the store owns and every read
+    surface that serves them, which is the same hunt the derived title
+    gets and for the same reason.
+    """
+    _, child, unrelated = a_summarized_thread()
+    # Where it belongs, before the deletion: the utterance, the title it
+    # became, and the recap that quoted it.
+    assert stored("conversations")[0]["title"] == SENTINEL
+    assert any(SENTINEL in (row["text"] or "") for row in stored("conversation_milestones"))
+    # And where it never was: the descendant carries no word of it.
+    (descendant,) = [row for row in stored("conversation_milestones") if row["id"] == child]
+    assert SENTINEL not in (descendant["text"] or "")
+
+    erase(client, "alpha")
+
+    assert [row["id"] for row in stored("conversation_milestones")] == [unrelated]
+    for table in TABLES:
+        for row in stored(table):
+            assert SENTINEL not in json.dumps(row, default=str), table
+    for path in ("/sessions", "/conversations", f"/conversations/{FIRST}",
+                 f"/conversations/{FIRST}/turns"):
+        response = client.get(path)
+        assert response.status_code == 200, response.text
+        assert SENTINEL not in response.text
 
 
 def test_a_thread_that_loses_every_turn_loses_its_milestones_too(client) -> None:
@@ -504,7 +552,11 @@ def test_a_thread_that_loses_every_turn_loses_its_milestones_too(client) -> None
     recording.close("alpha")
     recording.done()
     ids = [turn["id"] for turn in stored("turns")]
-    plant_milestone(FIRST, ids[0], ids[0], None, "a recap")
+    later = Recorder(dt.datetime(2026, 8, 16, 12, 0, tzinfo=dt.UTC))
+    later.session("beta")
+    later.checkpoint("beta", ids[0], ids[0], None, "a recap")
+    later.close("beta")
+    later.done()
 
     taken = erase(client, "alpha")
 

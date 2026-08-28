@@ -399,6 +399,17 @@ SUMMARY_COLUMNS: tuple[Any, ...] = (
     conversations.c.last_active_at,
 )
 
+# What a thread's detail answers per checkpoint. Everything on the row
+# but the thread's own id, which is what was addressed to ask.
+CHECKPOINT_COLUMNS: tuple[Any, ...] = (
+    conversation_milestones.c.id,
+    conversation_milestones.c.from_turn,
+    conversation_milestones.c.after_turn,
+    conversation_milestones.c.parent,
+    conversation_milestones.c.created_at,
+    conversation_milestones.c.text,
+)
+
 # How many threads a discovery answer may hold, and how much of a
 # thread's opening utterance is matched against and offered with it.
 #
@@ -510,7 +521,7 @@ def detail(connection: Any, conversation: str) -> dict[str, Any] | None:
         "checkpoints": [
             dict(row)
             for row in connection.execute(
-                select(conversation_milestones)
+                select(*CHECKPOINT_COLUMNS)
                 .where(conversation_milestones.c.conversation == conversation)
                 .order_by(conversation_milestones.c.id)
             ).mappings()
@@ -1302,6 +1313,7 @@ def _began(connection: Any, thread: str) -> str:
 
 __all__ = [
     "ANOTHER_AGENT",
+    "CHECKPOINT_COLUMNS",
     "EXCERPT_CHARACTERS",
     "NO_DEVICE",
     "NO_SUCH_THREAD",

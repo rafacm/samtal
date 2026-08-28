@@ -43,7 +43,11 @@ from tests.support.sessions import Gate, until
 from vinga_server import logs
 from vinga_server.config.api import build_api
 from vinga_server.config.models import DatabaseConfig
-from vinga_server.conversations.records import ToolInvocation, TurnRecord
+from vinga_server.conversations.records import (
+    MilestoneRecord,
+    ToolInvocation,
+    TurnRecord,
+)
 from vinga_server.conversations.store import ConversationStore
 from vinga_server.db import read_engine
 
@@ -149,6 +153,31 @@ class Recorder:
                 tools=list(tools),
             ),
         )
+
+    def checkpoint(
+        self,
+        session: str,
+        conversation: str,
+        from_turn: int,
+        after_turn: int,
+        parent: int | None = None,
+        body: str = "we talked about the weather",
+    ) -> int:
+        """One recap checkpoint on a thread, written the way the runtime
+        writes one, and answering the row id a later one would name as
+        its `parent`."""
+        landed = self.store.record_milestone(
+            session,
+            MilestoneRecord(
+                conversation=conversation,
+                from_turn=from_turn,
+                after_turn=after_turn,
+                parent=parent,
+                text=body,
+            ),
+        )
+        assert landed.wait(TIMEOUT_S), "the checkpoint never landed"
+        return int(stored("conversation_milestones")[-1]["id"])
 
     def move_to(self, at: dt.datetime) -> None:
         self.store.stop()
@@ -487,7 +516,7 @@ def test_a_refused_cursor_quotes_nothing_it_was_handed(
 # The detail
 
 
-def test_the_detail_is_the_summary_and_its_checkpoint_count(client) -> None:
+def test_the_detail_is_the_summary_and_its_checkpoints(client) -> None:
     recording = Recorder()
     recording.thread("alpha", FIRST, "one thread, whole")
     recording.done()
@@ -499,6 +528,44 @@ def test_the_detail_is_the_summary_and_its_checkpoint_count(client) -> None:
     assert detail["conversation"] == FIRST
     assert detail["turns"] == 1
     assert detail["milestones"] == 0
+    assert detail["checkpoints"] == []
+
+
+def test_the_detail_answers_the_checkpoints_a_thread_has_accrued(client) -> None:
+    """Story 28: the recaps themselves, oldest first, with the range
+    each may claim and the one it consumed. The count beside them is
+    their length rather than a second read, so a caller can never find
+    the two disagreeing."""
+    recording = Recorder()
+    recording.store.open_session("alpha", 100.0, manifest())
+    recording.turn("alpha", FIRST, "the first thing said")
+    recording.turn("alpha", FIRST, "and the second")
+    # Both turns really written, because a checkpoint records the ids of
+    # the turns it read and the writer is a thread behind this one.
+    until(lambda: len(stored("turns")) == 2, "the turns never landed")
+    ids = [row["id"] for row in stored("turns")]
+    earlier = recording.checkpoint("alpha", FIRST, ids[0], ids[0], body="the first recap")
+    recording.checkpoint(
+        "alpha", FIRST, ids[1], ids[1], parent=earlier, body="the recap of the recap"
+    )
+    recording.store.close_session("alpha", duration_s=2.0, reason="client")
+    recording.done()
+
+    detail = client.get(f"/conversations/{FIRST}").json()
+
+    assert detail["milestones"] == 2
+    assert [one["text"] for one in detail["checkpoints"]] == [
+        "the first recap",
+        "the recap of the recap",
+    ]
+    (first, second) = detail["checkpoints"]
+    assert (first["from_turn"], first["after_turn"], first["parent"]) == (
+        ids[0],
+        ids[0],
+        None,
+    )
+    assert second["parent"] == first["id"] == earlier
+    assert second["created_at"] == NOW.isoformat()
 
 
 def test_an_unknown_thread_is_a_404_naming_no_value(client) -> None:

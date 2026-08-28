@@ -14,6 +14,10 @@ old or as recent without anything sleeping.
 What a title must NOT reach is next door in `test_conversations_session.py`,
 where a real conversation is held over a websocket and the sentinel is
 hunted through every surface a record can leave on.
+
+The last section is the recap checkpoint, and it is here because both
+halves of what a checkpoint means to the store are here: the coverage a
+write records, and the reading that honours it.
 """
 
 import datetime as dt
@@ -27,7 +31,11 @@ from tests.support.stores import CONVERSATIONS_MANIFEST as MANIFEST
 from tests.support.stores import rows
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations import threads
-from vinga_server.conversations.records import ToolInvocation, TurnRecord
+from vinga_server.conversations.records import (
+    MilestoneRecord,
+    ToolInvocation,
+    TurnRecord,
+)
 from vinga_server.conversations.store import ConversationStore, open_conversations
 from vinga_server.conversations.threads import TITLE_CHARACTERS
 
@@ -514,6 +522,120 @@ def test_a_thread_with_a_lost_write_says_so(stores) -> None:
     found = read_backlog(thread("holed"))
 
     assert found is not None and found.incomplete is True
+
+
+# What a checkpoint replaces
+
+
+def test_the_backlog_is_the_checkpoint_and_the_turns_after_its_coverage(stores) -> None:
+    """The whole of milestone-aware reading, in the one place both
+    halves of it live. The turns inside the coverage are gone because
+    the checkpoint stands for them; the turns after it are there because
+    it does not.
+    """
+    store = stores(retention_days=0)
+    store.start()
+    store.open_session("a", 100.0, MANIFEST)
+    for said in ("first", "second", "third"):
+        store.record_turn("a", a_turn(thread("one"), heard=said)).wait(30.0)
+    ids = [row["id"] for row in rows("turns")]
+    store.record_milestone(
+        "a",
+        MilestoneRecord(
+            conversation=thread("one"),
+            from_turn=ids[0],
+            after_turn=ids[1],
+            parent=None,
+            text="we talked about the first two things",
+        ),
+    ).wait(30.0)
+    store.stop()
+
+    found = read_backlog(thread("one"))
+
+    assert found is not None
+    assert found.milestone is not None
+    assert found.milestone.text == "we talked about the first two things"
+    assert (found.milestone.from_turn, found.milestone.after_turn) == (ids[0], ids[1])
+    assert [one.heard for one in found.turns] == ["third"]
+
+
+def test_the_newest_checkpoint_is_the_one_a_thread_is_read_through(stores) -> None:
+    """Each recap folds the one before it into itself, so the newest is
+    the whole lineage said once."""
+    store = stores(retention_days=0)
+    store.start()
+    store.open_session("a", 100.0, MANIFEST)
+    for said in ("first", "second"):
+        store.record_turn("a", a_turn(thread("one"), heard=said)).wait(30.0)
+    ids = [row["id"] for row in rows("turns")]
+    store.record_milestone(
+        "a", _checkpoint(thread("one"), ids[0], ids[0], "the earlier one")
+    ).wait(30.0)
+    earlier = rows("conversation_milestones")[-1]["id"]
+    store.record_milestone(
+        "a", _checkpoint(thread("one"), ids[1], ids[1], "the later one", parent=earlier)
+    ).wait(30.0)
+    store.stop()
+
+    found = read_backlog(thread("one"))
+
+    assert found is not None and found.milestone is not None
+    assert found.milestone.text == "the later one"
+    assert found.milestone.parent == earlier
+    assert found.turns == ()
+
+
+def test_a_checkpoint_with_no_text_replaces_nothing(stores) -> None:
+    """The uniform text-switch rule reaching the one row where it could
+    silently delete dialogue. A checkpoint that says nothing cannot
+    stand for turns, so the thread comes back whole instead."""
+    store = stores(retention_days=0, text=False)
+    store.start()
+    store.open_session("a", 100.0, MANIFEST)
+    store.record_turn("a", a_turn(thread("one"), heard="first")).wait(30.0)
+    store.record_turn("a", a_turn(thread("one"), heard="second")).wait(30.0)
+    ids = [row["id"] for row in rows("turns")]
+    store.record_milestone(
+        "a", _checkpoint(thread("one"), ids[0], ids[0], "never stored")
+    ).wait(30.0)
+    store.stop()
+
+    found = read_backlog(thread("one"))
+
+    assert found is not None
+    assert found.milestone is None
+    assert len(found.turns) == 2
+
+
+def test_a_checkpoint_for_a_thread_with_no_row_is_refused(stores) -> None:
+    """The rule a misattributed turn is refused by, applied to the other
+    kind of row: a checkpoint outside `conversations` is a row retention
+    can never reach, because every rule that deletes one reaches it
+    through the thread."""
+    store = stores(retention_days=0)
+    store.start()
+    store.open_session("a", 100.0, MANIFEST)
+
+    landed = store.record_milestone(
+        "a", _checkpoint(thread("nobody"), 1, 1, "a recap of nothing")
+    )
+
+    assert landed.wait(30.0) is False
+    store.stop()
+    assert rows("conversation_milestones") == []
+
+
+def _checkpoint(
+    conversation: str, from_turn: int, after_turn: int, body: str, parent: int | None = None
+) -> MilestoneRecord:
+    return MilestoneRecord(
+        conversation=conversation,
+        from_turn=from_turn,
+        after_turn=after_turn,
+        parent=parent,
+        text=body,
+    )
 
 
 def read_backlog(conversation: str) -> threads.Backlog | None:

@@ -33,7 +33,11 @@ import pytest
 from sqlalchemy import text
 
 from vinga_server.config.models import DatabaseConfig
-from vinga_server.conversations.records import ToolInvocation, TurnRecord
+from vinga_server.conversations.records import (
+    MilestoneRecord,
+    ToolInvocation,
+    TurnRecord,
+)
 from vinga_server.conversations.store import (
     RETENTION_DAYS_DEFAULT,
     ConversationStore,
@@ -163,6 +167,49 @@ def counts() -> dict[str, int]:
                     "events",
                 )
             }
+    finally:
+        engine.dispose()
+
+
+def checkpointed(stores: Any, session: str, at: dt.datetime, body: str) -> None:
+    """One whole session that also consented to a recap, recorded as it
+    would have been at `at`.
+
+    Through the store's own durable path rather than an insert, because
+    what the ruleset has to be right about is the rows the runtime
+    really writes: a checkpoint on the thread, covering the turn of the
+    session that made it.
+    """
+    store = stores(at=at, retention_days=0)
+    store.start()
+    thread = thread_for(session)
+    store.open_session(session, 100.0, manifest(at))
+    assert store.record_turn(session, a_turn(conversation=thread)).wait(30.0)
+    (turn,) = [row for row in rows_of("turns") if row["conversation"] == thread]
+    assert store.record_milestone(
+        session,
+        MilestoneRecord(
+            conversation=thread,
+            from_turn=turn["id"],
+            after_turn=turn["id"],
+            parent=None,
+            text=body,
+        ),
+    ).wait(30.0)
+    store.close_session(session, duration_s=5.0, reason="client")
+    store.stop()
+
+
+def rows_of(table: str) -> list[dict[str, Any]]:
+    engine = read_engine(DatabaseConfig())
+    try:
+        with engine.connect() as connection:
+            return [
+                dict(row)
+                for row in connection.execute(
+                    text(f"select * from conversations.{table} order by id")
+                ).mappings()
+            ]
     finally:
         engine.dispose()
 
@@ -405,3 +452,26 @@ def test_a_snapshot_open_across_a_prune_keeps_seeing_what_the_prune_took() -> No
             )
     finally:
         fresh.dispose()
+
+
+def test_a_thread_past_the_cutoff_takes_its_checkpoints_with_it(stores) -> None:
+    """Recap text is conversation content: retained and deleted with its
+    thread, like the dialogue it summarizes. A checkpoint that outlived
+    the conversation it stood for would be the one row of this store
+    still talking after the window closed.
+
+    Both sides of the boundary in one pass, because the claim is about
+    the unit rather than about deletion: the live thread's checkpoint
+    stays exactly where it is.
+    """
+    checkpointed(stores, "ancient", NOW - dt.timedelta(days=91), f"a recap of {SENTINEL}")
+    checkpointed(stores, "recent", NOW - dt.timedelta(days=1), "a recap of the live one")
+
+    pruning = stores(retention_days=90)
+    pruning.start()
+    pruning.stop()
+
+    surviving = rows_of("conversation_milestones")
+    assert [row["text"] for row in surviving] == ["a recap of the live one"]
+    assert [row["conversation"] for row in surviving] == [thread_for("recent")]
+    assert not any(SENTINEL in str(row) for row in surviving)
