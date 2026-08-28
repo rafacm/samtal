@@ -321,6 +321,39 @@ def test_an_events_failure_drops_events_and_keeps_the_turns(stores) -> None:
     assert thread["incomplete"] is False
 
 
+def test_the_closing_markers_lost_events_are_counted_on_the_row(stores) -> None:
+    """The last marker's telemetry, counted like every other marker's.
+
+    The close row is written by the durable half, so the count it
+    carries was decided before the events transaction ran. A failure
+    there used to be counted in memory and then thrown away with the
+    session's state a line later, which made "a failed events
+    transaction is counted in `sessions.dropped`" untrue of exactly the
+    marker that has no later one to correct it.
+
+    The fourth transaction is the closing marker's events, which is what
+    this refuses: the first two are the turn's two halves and the third
+    is the close's durable half.
+    """
+    store, engine = recording(
+        stores, lambda count: RuntimeError("no") if count == 4 else None
+    )
+
+    store.record_event("alpha", "heard", logging.INFO, {"duration_s": 1.0}, 101.0)
+    store.record_turn("alpha", a_turn())
+    store.record_event("alpha", "replied", logging.INFO, {"duration_s": 2.0}, 102.0)
+    store.close_session("alpha", duration_s=3.0, reason="client")
+    store.stop()
+
+    (session,) = rows("sessions")
+    assert session["dropped"] == 1
+    assert session["closed_at"] is not None
+    # The turn's own events landed: the two markers have separate fates
+    # here as everywhere else.
+    assert [row["name"] for row in rows("events")] == ["heard"]
+    assert engine.begins == 5
+
+
 # The incomplete latch
 
 
