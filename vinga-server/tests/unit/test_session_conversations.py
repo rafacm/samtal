@@ -330,25 +330,20 @@ async def test_an_id_nobody_offered_is_refused_without_asking_the_store() -> Non
 
 
 async def test_an_id_offered_to_another_agent_is_refused() -> None:
-    """Threads are agent-scoped, and the offer is too: the tutor may not
-    pick up what the poet was shown, in this session or any other."""
-    poet = ScriptedLlm([[call("resume_conversation", description="the galaxy")], "Two."])
-    tutor = ScriptedLlm(
+    """Threads are agent-scoped, and the offer is too: an id the tutor
+    was shown is not one the poet may open, which is the privacy
+    boundary the scoping exists to be rather than a convenience."""
+    poet = ScriptedLlm(
         [[call("resume_conversation", conversation=GALAXY)], "Not mine to open."]
     )
-    session = a_session(
-        None,
-        threads=found(GALAXY),
-        config=resuming(),
-        mac=BOTH_MAC,
-        scripts={"poet": poet, "tutor": tutor},
-    )
-    await run_reply(session, "the galaxy one")
-    session.runtime._activate_agent("tutor")
+    store = found(GALAXY)
+    session = a_session(poet, threads=store, mac=BOTH_MAC)
+    _offer(session, "tutor", GALAXY)
 
-    await run_reply(session, "and you, open it")
+    await run_reply(session, "open the galaxy one")
 
-    assert results_of(tutor) == [builtin.NO_SUCH_CANDIDATE]
+    assert results_of(poet) == [builtin.NO_SUCH_CANDIDATE]
+    assert store.read == []
 
 
 async def test_an_id_from_before_a_newer_search_is_refused() -> None:
