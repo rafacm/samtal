@@ -3245,7 +3245,7 @@
     "/conversations/{conversation}": {
       "get": {
         "summary": "Read Conversation",
-        "description": "One thread, whole: its row, how many turns it holds across\nevery session, and how many recap checkpoints hang off it.\n\nThe counts are read in the same transaction as the row, so they\ndescribe one snapshot rather than three moments of a thread that\nmay still be being spoken to.",
+        "description": "One thread, whole: its row, how many turns it holds across\nevery session, and the recap checkpoints hanging off it.\n\nEverything is read in the same transaction as the row, so it\ndescribes one snapshot rather than three moments of a thread\nthat may still be being spoken to.",
         "operationId": "read_conversation_conversations__conversation__get",
         "parameters": [
           {
@@ -3883,7 +3883,15 @@
           "milestones": {
             "type": "integer",
             "title": "Milestones",
-            "description": "How many recap checkpoints this thread holds. Zero in this release everywhere: the table exists and the flow that writes a row does not ship yet."
+            "description": "How many recap checkpoints this thread holds, which is the length of `checkpoints` below and is answered beside it so a caller counting them does not have to."
+          },
+          "checkpoints": {
+            "items": {
+              "$ref": "#/components/schemas/ConversationMilestone"
+            },
+            "type": "array",
+            "title": "Checkpoints",
+            "description": "The recap checkpoints themselves, oldest first. Short by construction: one lands per recap the user consented to, and they are deleted with the thread and with the content they summarized."
           }
         },
         "additionalProperties": false,
@@ -3898,10 +3906,11 @@
           "created_at",
           "last_active_at",
           "turns",
-          "milestones"
+          "milestones",
+          "checkpoints"
         ],
         "title": "ConversationDetail",
-        "description": "One thread, whole: the summary's fields and what hangs off it.\n\nThe summary plus one count rather than a shape of its own, because\nthat is what it is: a thread carries no nested structure, so there\nis nothing a listing leaves out except the checkpoints, which cost a\nsecond count."
+        "description": "One thread, whole: the summary's fields and what hangs off it.\n\nThe summary plus its checkpoints, which is the one thing a listing\nleaves out: a thread carries no other nested structure."
       },
       "ConversationList": {
         "properties": {
@@ -3947,6 +3956,66 @@
         ],
         "title": "ConversationList",
         "description": "One page of the thread listing, most recently active first."
+      },
+      "ConversationMilestone": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "The checkpoint's row id, and what a later checkpoint names as its `parent` when it consumed this one."
+          },
+          "from_turn": {
+            "type": "integer",
+            "title": "From Turn",
+            "description": "The id of the first turn this recap actually read. Turns at or before it are outside its coverage: they were dropped by the recap's own input budget, exactly as truncation would have dropped them."
+          },
+          "after_turn": {
+            "type": "integer",
+            "title": "After Turn",
+            "description": "The id of the last turn it read. Rebuilding this thread's context reads this checkpoint plus the turns with a greater id."
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent",
+            "description": "The checkpoint whose text was part of this recap's input, and null when none was. Content that reached this row only through an earlier recap is still this row's content, which is what makes erasure of it transitive."
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At",
+            "description": "When the checkpoint was stored, as an ISO-8601 instant in UTC."
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text",
+            "description": "The recap, byte for byte as it was spoken to the user. Conversation content, so null where text storage was off, although the flow that writes one cannot run with text off."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "from_turn",
+          "after_turn",
+          "parent",
+          "created_at",
+          "text"
+        ],
+        "title": "ConversationMilestone",
+        "description": "One recap checkpoint on a thread.\n\nWhat the agent said out loud when the user consented to a recap,\nwith the range of turns it summarized and the checkpoint it folded\ninto itself. The range is what keeps the claim honest: a recap\nbounded by its own input budget records where its reading began, so\nnothing here says it covers turns it never read."
       },
       "ConversationSummary": {
         "properties": {

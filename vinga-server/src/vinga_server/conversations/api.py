@@ -702,11 +702,11 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
     )
     def read_conversation(conversation: str, reader: ReaderDep) -> dict[str, Any]:
         """One thread, whole: its row, how many turns it holds across
-        every session, and how many recap checkpoints hang off it.
+        every session, and the recap checkpoints hanging off it.
 
-        The counts are read in the same transaction as the row, so they
-        describe one snapshot rather than three moments of a thread that
-        may still be being spoken to.
+        Everything is read in the same transaction as the row, so it
+        describes one snapshot rather than three moments of a thread
+        that may still be being spoken to.
         """
         return _thread(reader, conversation)
 
@@ -919,12 +919,19 @@ def _keyset_page(found: list[dict[str, Any]], size: int) -> dict[str, Any]:
 
 
 def _thread(reader: Connection, conversation: str) -> dict[str, Any]:
-    """One thread's row with its counts, or the refusal that says where
-    to look instead. The id arrived in the path and is not repeated."""
+    """One thread's row with its turn count and its checkpoints, or the
+    refusal that says where to look instead. The id arrived in the path
+    and is not repeated.
+
+    The checkpoint count is the length of the list beside it rather than
+    a second read: two structures that must agree are one structure with
+    a bug pending, and a caller reading the body should never be able to
+    find them disagreeing.
+    """
     found = threads.detail(reader, conversation)
     if found is None:
         raise UnknownEntityError(_UNKNOWN_CONVERSATION)
-    return found
+    return {**found, "milestones": len(found["checkpoints"])}
 
 
 def _session(reader: Connection, session: str) -> dict[str, Any]:
