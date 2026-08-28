@@ -175,9 +175,14 @@ def reference() -> str:
         "",
         *_paragraph(
             "A durable batch that is finally dropped is not silent. The threads it "
-            "fed are marked `incomplete`, in a transaction of their own, retried at "
-            "every later marker and at the session's close, so a resume can say the "
-            "record has gaps. Two bounds are worth stating. A thread whose very first "
+            "fed are marked `incomplete` in the durable transaction of the next "
+            "marker that commits, and offered again at every marker after that and "
+            "at the session's close until the mark lands, so a resume can say the "
+            "record has gaps. Riding that transaction rather than one of its own is "
+            "what keeps the mark ahead of the writes it is about: a thread with a "
+            "known hole in it never reads as whole to somebody who has just been "
+            "told a later turn was stored. Two bounds are worth stating. A thread "
+            "whose very first "
             "turn was the dropped batch has no row to mark and none is created: an "
             "empty thread would be listed and offered as something to resume with no "
             "dialogue behind it, so the mark waits for the thread's first turn that "
@@ -249,7 +254,9 @@ def reference() -> str:
         "",
         *_paragraph(
             "A session that is still running when its row goes stops being recorded, "
-            "because the writer confirms the row at every marker and finds it gone. "
+            "because the writer confirms the row inside each of a marker's two "
+            "transactions and finds it gone, so neither half can land behind the "
+            "deletion. "
             "Capture files are a separate instrument and are never touched by any of "
             "it; the session id is the correlation key for whoever needs to remove "
             "the matching triplet."

@@ -782,8 +782,8 @@ docs/reference/cli.md:2400  generated  vinga openapi
 docs/reference/cli.md:2403  generated  vinga openapi
 docs/reference/cli.md:2411  generated  vinga cli-reference
 docs/reference/cli.md:2414  generated  vinga cli-reference
-docs/reference/conversations-schema.md:120  respell  vinga session delete
-docs/reference/conversations-schema.md:120  respell  vinga session purge
+docs/reference/conversations-schema.md:124  respell  vinga session delete
+docs/reference/conversations-schema.md:124  respell  vinga session purge
 docs/reference/domain-config.md:3  generated  vinga reference
 docs/reference/domain-config.md:22  generated  vinga export
 docs/reference/domain-config.md:79  generated  vinga reload
@@ -958,8 +958,8 @@ vinga-server/src/vinga_server/config/store.py:218  respell  vinga simulator chec
 vinga-server/src/vinga_server/config/store.py:230  respell  vinga-server config device show
 vinga-server/src/vinga_server/config/views.py:29  respell  config show
 vinga-server/src/vinga_server/config/views.py:115  respell  config show
-vinga-server/src/vinga_server/conversations/docgen.py:227  respell  vinga session delete
-vinga-server/src/vinga_server/conversations/docgen.py:227  respell  vinga session
+vinga-server/src/vinga_server/conversations/docgen.py:232  respell  vinga session delete
+vinga-server/src/vinga_server/conversations/docgen.py:232  respell  vinga session
 vinga-server/src/vinga_server/device/session.py:731  respell  config schema
 vinga-server/src/vinga_server/device_endpoint.py:5  respell  vinga simulator
 vinga-server/src/vinga_server/doctor.py:29  respell  vinga simulator
