@@ -93,6 +93,8 @@ from vinga_server.config.secrets import (
     load_keys,
 )
 from vinga_server.config.store import APPLY_LIMIT, TOO_MANY_ENTRIES, ConfigStore
+from vinga_server.conversations.records import TurnRecord
+from vinga_server.conversations.store import ConversationStore
 from vinga_server.db import open_database
 from vinga_server.device_endpoint import SUPPLIED_ENDPOINT
 from vinga_server.ota import OTA_PATH
@@ -113,6 +115,30 @@ SECRET = "sk-live-1c4e9f27-never-a-real-credential"
 # come out on. Distinct from `SECRET`, so a failure says which of the
 # two paths leaked.
 PLANTED = "sk-planted-9b3e7d41-never-a-real-credential"
+
+# The two boards the session verbs' record is written for, and the one
+# thread both of its sessions fed. Their own constants rather than the
+# lane's other MACs, so a purge by device here cannot reach a row
+# another case is about.
+SESSION_MAC = "02:00:00:00:00:21"
+
+SESSION_OTHER_MAC = "02:00:00:00:00:22"
+
+LANE_CONVERSATION = "7b1c2d3e4f50617283a4b5c6d7e8f900"
+
+
+def session_manifest(device: str) -> dict[str, object]:
+    """The manifest a session opens its row with, as the device session
+    hands it over."""
+    return {
+        "started_at": "2026-08-15T10:00:00+00:00",
+        "server": {"version": "0.1.0", "revision": "abc1234"},
+        "device": {"mac": device, "client": "lane"},
+        "protocol": "1",
+        "agent": "sam",
+        "agents": ["sam"],
+        "providers": {"llm": {"name": "mock", "type": "mock"}},
+    }
 
 
 @pytest.fixture(scope="module")
@@ -1014,6 +1040,75 @@ def test_the_device_half_needs_no_api_token_at_all(
     assert run("simulator", "check-in", url, "--mac", "02:00:00:00:00:09") == 0
 
     assert "VINGA_API_SECRET" not in capsys.readouterr().err
+
+
+def test_the_session_verbs_read_and_erase_a_real_record_over_the_wire(
+    deployed: Live,
+    module_database: str,
+    capsys: pytest.CaptureFixture[str],
+    watched: Watched,
+) -> None:
+    """The four verbs of the `session` noun against a real uvicorn: a
+    read, a detail, an addressed erasure and a selector purge.
+
+    The record is written by the store the server would have written it
+    with, into the database this lane's server is serving from, because
+    the commands are what is under test rather than the pipeline that
+    fills the store; recording is off in this deployment's boot
+    configuration, which is the default and not something to change for
+    a CLI case.
+
+    What only a real server can show is here: these verbs reach a schema
+    the domain configuration knows nothing about, through the same
+    token, the same address resolution and the same transport policy as
+    every command above, and the deletion runs on a write engine the
+    server opens for the request rather than on a writer it is holding.
+    """
+    seeded = ConversationStore(
+        DatabaseConfig(name=module_database), retention_days=0
+    )
+    seeded.start()
+    try:
+        for name, device in (("lane-one", SESSION_MAC), ("lane-two", SESSION_OTHER_MAC)):
+            seeded.open_session(name, 100.0, session_manifest(device))
+            seeded.record_turn(
+                name,
+                TurnRecord(
+                    at=101.2,
+                    conversation=LANE_CONVERSATION,
+                    agent="sam",
+                    heard="what is the weather like",
+                    reply="Sunny.",
+                ),
+            )
+            seeded.close_session(name, duration_s=2.0, reason="client")
+    finally:
+        seeded.stop()
+
+    assert run("session", "list") == 0
+    listed = capsys.readouterr().out
+    assert listed.splitlines()[0].split()[0] == "SESSION"
+    assert "lane-one" in listed and "lane-two" in listed
+
+    assert run("session", "show", "lane-one") == 0
+    detail = capsys.readouterr().out
+    assert detail.startswith("session: lane-one\n")
+    assert "  turns: 1\n" in detail
+
+    assert run("session", "delete", "lane-one", "--force") == 0
+    assert capsys.readouterr().out.startswith("sessions: 1\n")
+
+    assert run("session", "purge", "--device", SESSION_OTHER_MAC, "--force") == 0
+    assert capsys.readouterr().out.startswith("sessions: 1\n")
+
+    assert run("session", "list") == 0
+    assert "lane-" not in capsys.readouterr().out
+
+    # And the thread both sessions fed is gone with them, which is the
+    # cascade running on the server rather than in a unit test's
+    # transaction: it had turns in both and has none now.
+    assert run("session", "list", "--limit", "1") == 0
+    assert leaked(SECRET, logs=watched.everything()) == []
 
 
 def test_the_documents_that_reach_nothing_render_in_the_same_environment(

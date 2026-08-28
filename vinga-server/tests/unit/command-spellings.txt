@@ -989,9 +989,9 @@ vinga-server/src/vinga_server/tools/publish.py:24  respell  vinga-server config 
 vinga-server/tests/integration/data/pre-cutover-export.yaml:2  respell  vinga apply
 vinga-server/tests/integration/data/pre-cutover-export.yaml:4  respell  vinga apply
 vinga-server/tests/integration/data/pre-cutover-export.yaml:59  respell  vinga provider secret set
-vinga-server/tests/integration/test_cli_live.py:447  respell  config apply
-vinga-server/tests/integration/test_cli_live.py:1269  respell  config export
-vinga-server/tests/integration/test_cli_live.py:1446  respell  vinga-server config device pending list
+vinga-server/tests/integration/test_cli_live.py:473  respell  config apply
+vinga-server/tests/integration/test_cli_live.py:1364  respell  config export
+vinga-server/tests/integration/test_cli_live.py:1541  respell  vinga-server config device pending list
 vinga-server/tests/integration/test_cli_simulator.py:1  respell  vinga simulator run
 vinga-server/tests/smoke/seed-local-engines.sh:19  respell  vinga-server config provider set llm mock
 vinga-server/tests/smoke/seed-local-engines.sh:23  respell  vinga-server config provider set asr whisper

@@ -300,6 +300,11 @@ documents.
   prose), `docs/architecture/cli-guide.md`,
   `docs/architecture/observability-surfaces.md`, `CHANGELOG.md` and the
   command-spellings manifest.
+- **Both integration lanes.** The live lane and the wheel lane each
+  hold the grammar to completeness, so the four verbs have a case in
+  each: a record seeded with the real store, then a read, a detail, an
+  addressed erasure and a selector purge, over a real socket in the
+  first and from a bare install in the second.
 
 ### Deviations from the plan
 
@@ -385,6 +390,14 @@ Five, each with its reason.
   suite's recorder stops and rebuilds its store instead, which drains
   by construction; the same shape is why the milestone-1 retention
   tests grew a second clock.
+
+- **A new command owes two integration lanes, not one.** Both
+  `test_cli_live.py` and `test_cli_wheel.py` end with a test that holds
+  `cli.COMMANDS` against what actually ran and succeeded, and the live
+  one holds `cli.GROUPS` against the noun paths those commands reached.
+  A verb added with only unit coverage fails both, which is what those
+  tests are for; the plan's test list does not mention them, and the
+  next milestone's noun owes them the same.
 
 - **The vendored `httpx2` logs the URL the CLI asked for.** Starlette's
   TestClient is built on it and the CLI's request quieting names

@@ -107,6 +107,8 @@ from tests.support.tiers import SERVE_MODULES, SIM_MODULES, declared, requiremen
 from vinga_server.config import cli
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
+from vinga_server.conversations.records import TurnRecord
+from vinga_server.conversations.store import ConversationStore
 from vinga_server.ota import OTA_PATH
 from vinga_server.simulator import board, utterance
 
@@ -125,6 +127,29 @@ WAITING_MAC = "11:22:33:44:55:66"
 # And the one the simulated board presents, which is its own documented
 # default rather than a third address invented here.
 SIMULATED_MAC = board.DEFAULT_MAC
+
+# The two boards the session verbs' record is written for, and the one
+# thread both of its sessions fed. Their own addresses, so a purge by
+# device here cannot reach a row another case is about.
+SESSION_MAC = "02:00:00:00:00:31"
+
+SESSION_OTHER_MAC = "02:00:00:00:00:32"
+
+WHEEL_CONVERSATION = "5f6a7b8c9d0e1f20314253647586a9b0"
+
+
+def session_manifest(device: str) -> dict[str, object]:
+    """The manifest a session opens its row with, as the device session
+    hands it over."""
+    return {
+        "started_at": "2026-08-15T10:00:00+00:00",
+        "server": {"version": "0.1.0", "revision": "abc1234"},
+        "device": {"mac": device, "client": "wheel"},
+        "protocol": "1",
+        "agent": "sam",
+        "agents": ["sam"],
+        "providers": {"llm": {"name": "mock", "type": "mock"}},
+    }
 
 # The deployment this lane configures, every provider a mock so the
 # running server can actually build what it is asked to reload.
@@ -626,6 +651,62 @@ def test_every_destructive_verb_runs_without_a_prompt(run) -> None:
         # the wrong process.
         if stdin is not None:
             assert stdin not in finished.stdout + finished.stderr, argv
+
+
+def test_the_session_verbs_reach_the_record_from_the_installed_wheel(
+    run, module_database: str
+) -> None:
+    """The `session` noun from a BARE install, which is the claim worth
+    making about it: these four verbs read and erase a schema the store
+    half owns, and they carry none of the store half with them. A
+    command that quietly started importing SQLAlchemy to do it would
+    fail here and pass every other lane.
+
+    The record is written in this process, by the store the server would
+    have written it with, because what is under test is the artifact on
+    the other end of the socket rather than the pipeline that fills the
+    database.
+    """
+    seeded = ConversationStore(
+        DatabaseConfig(name=module_database), retention_days=0
+    )
+    seeded.start()
+    try:
+        for name, device in (("wheel-one", SESSION_MAC), ("wheel-two", SESSION_OTHER_MAC)):
+            seeded.open_session(name, 100.0, session_manifest(device))
+            seeded.record_turn(
+                name,
+                TurnRecord(
+                    at=101.2,
+                    conversation=WHEEL_CONVERSATION,
+                    agent="sam",
+                    heard="what is the weather like",
+                    reply="Sunny.",
+                ),
+            )
+            seeded.close_session(name, duration_s=2.0, reason="client")
+    finally:
+        seeded.stop()
+
+    listed = answered(run("session", "list"), "session list")
+    assert listed.splitlines()[0].split()[0] == "SESSION"
+    assert "wheel-one" in listed and "wheel-two" in listed
+
+    detail = answered(run("session", "show", "wheel-one"), "session show")
+    assert detail.startswith("session: wheel-one\n")
+
+    # No --force anywhere, for the reason the destructive block above
+    # gives: a subprocess has no terminal, and a command that asked
+    # would hang a pipeline rather than answer one.
+    erased = answered(run("session", "delete", "wheel-one"), "session delete")
+    assert erased.startswith("sessions: 1\n")
+
+    purged = answered(
+        run("session", "purge", "--device", SESSION_OTHER_MAC), "session purge"
+    )
+    assert purged.startswith("sessions: 1\n")
+
+    assert "wheel-" not in answered(run("session", "list"), "session list")
 
 
 # The commands that reach no server at all
