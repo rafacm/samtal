@@ -51,6 +51,7 @@ from tests.support.stores import holding_the_write_lock, the_lock_held
 from vinga_server import logs
 from vinga_server.config.api import build_api
 from vinga_server.config.models import DatabaseConfig
+from vinga_server.conversations import threads
 from vinga_server.conversations.records import MilestoneRecord, TurnRecord
 from vinga_server.conversations.store import (
     CONVERSATIONS_CHAIN,
@@ -58,8 +59,9 @@ from vinga_server.conversations.store import (
     Half,
 )
 from vinga_server.db import read_engine
+from vinga_server.runtime import resumption
 
-TOKEN = "test-api-token-" + "0123456789abcdef" * 2
+TOKEN ="test-api-token-" + "0123456789abcdef" * 2
 
 # Shaped like something an operator would be horrified to find surviving
 # a deletion, and so that a substring check for it cannot match by
@@ -561,6 +563,135 @@ def test_a_thread_that_loses_every_turn_loses_its_milestones_too(client) -> None
     assert taken["conversations"] == 1
     assert taken["milestones"] == 1
     assert stored("conversation_milestones") == []
+
+
+# A recap that was read before an erasure and stored after it
+
+
+def a_thread_across_two_sessions(recording: "Recorder") -> list[int]:
+    """One thread with the sentinel said in `alpha` and something else
+    said in `beta`, both committed.
+
+    Committed rather than queued, because what comes next reads the
+    thread through the store's own read door and a turn still on the
+    writer's queue is a turn that read cannot see.
+    """
+    recording.session("alpha")
+    recording.turn("alpha", FIRST, SENTINEL)
+    recording.close("alpha")
+    recording.session("beta")
+    recording.turn("beta", FIRST, "and the one after it")
+    recording.close("beta")
+    until(lambda: len(stored("turns")) == 2, "the turns never landed")
+    return [row["id"] for row in stored("turns")]
+
+
+async def _read_a_recap(agent: str = "sam", conversation: str = FIRST) -> Any:
+    """What the runtime would summarize, read through the real path.
+
+    `Resumption` over `threads.Reads`, because the interval this file is
+    about opens exactly here: this read happens, a model summarizes it,
+    the agent says the summary out loud, and only then is anything
+    written. The offer is made first because the flow refuses a
+    conversation this agent was not offered.
+    """
+    flow = resumption.Resumption(threads.Reads(DatabaseConfig()), 4096, TIMEOUT_S)
+    await flow.described(agent, "the thing we were saying")
+    return await flow.recap(agent, conversation)
+
+
+async def test_a_recap_read_before_an_erasure_stores_nothing_after_it(client) -> None:
+    """The interleaving the whole ordering rests on, run rather than
+    argued.
+
+    The recap is read while the thread is whole and stored after the
+    session it quoted has been erased, which is the one window a live
+    conversation really has: the summarization round and the paragraph
+    read out loud both happen inside it. A checkpoint written afterwards
+    would stand for turns that are gone, and hydration would hand its
+    text back on every future resume, which is the erased utterance
+    coming back through the one row that outlived it.
+
+    So the write is refused, the thread keeps what it still has, and the
+    sentinel is hunted afterwards through every table and every read
+    surface, exactly as it is for a derived title. The user heard the
+    recap, which no deletion can unspeak; nothing of it persists.
+    """
+    recording = Recorder(dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC))
+    ids = a_thread_across_two_sessions(recording)
+    made = await _read_a_recap()
+    assert not isinstance(made, str), made
+    assert made.covered == tuple(ids), "the recap did not read the whole thread"
+    # The session that consented, which is the one the write rides.
+    recording.session("gamma")
+
+    erase(client, "alpha")
+
+    landed = recording.store.record_milestone(
+        "gamma",
+        MilestoneRecord(
+            conversation=FIRST,
+            covered=made.covered,
+            parent=made.parent,
+            text=f"we talked about {SENTINEL} and then about the weather",
+        ),
+    )
+    assert landed.wait(TIMEOUT_S) is False, "a checkpoint over erased turns was stored"
+    recording.close("gamma")
+    recording.done()
+
+    assert stored("conversation_milestones") == []
+    # And the thread itself is still there, with what it still holds.
+    assert [row["heard"] for row in stored("turns")] == ["and the one after it"]
+    for table in TABLES:
+        for row in stored(table):
+            assert SENTINEL not in json.dumps(row, default=str), table
+    for path in ("/sessions", "/conversations", f"/conversations/{FIRST}",
+                 f"/conversations/{FIRST}/turns"):
+        response = client.get(path)
+        assert response.status_code == 200, response.text
+        assert SENTINEL not in response.text
+
+
+async def test_a_recap_whose_parent_an_erasure_took_stores_nothing(client) -> None:
+    """The other half of the same claim, and the one no coverage check
+    would catch on its own.
+
+    Every turn this recap read is still here; what went is the
+    checkpoint whose text was folded into its input, because the turns
+    THAT one summarized were erased and a summary of erased content is
+    that content. A row naming a parent that is gone would be a recap
+    standing for a lineage nothing can walk, so the parent is checked
+    beside the turns.
+    """
+    recording = Recorder(dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC))
+    ids = a_thread_across_two_sessions(recording)
+    recording.session("gamma")
+    parent = recording.checkpoint("gamma", [ids[0]], None, f"we talked about {SENTINEL}")
+    made = await _read_a_recap()
+    assert not isinstance(made, str), made
+    assert (made.covered, made.parent) == ((ids[1],), parent)
+
+    erase(client, "alpha")
+
+    assert stored("conversation_milestones") == [], "the parent outlived its turn"
+    landed = recording.store.record_milestone(
+        "gamma",
+        MilestoneRecord(
+            conversation=FIRST,
+            covered=made.covered,
+            parent=made.parent,
+            text=f"and before that, {SENTINEL}",
+        ),
+    )
+    assert landed.wait(TIMEOUT_S) is False, "a checkpoint named a parent that was gone"
+    recording.close("gamma")
+    recording.done()
+
+    assert stored("conversation_milestones") == []
+    for table in TABLES:
+        for row in stored(table):
+            assert SENTINEL not in json.dumps(row, default=str), table
 
 
 def test_the_planted_title_is_gone_from_every_table_and_surface(client) -> None:
