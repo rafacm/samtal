@@ -406,3 +406,118 @@ Five, each with its reason.
   The no-leak assertions filter to this project's own channels, with
   the reason on them, which is what `test_conversations_api.py` already
   does for the same records.
+
+### PR review round
+
+External review of PR #334 (diff `main...cd29a471`), 2026-08-28.
+Backend: codex CLI 0.149.1, model `gpt-5.6-sol`, read-only sandbox,
+runtime 8m00s. Verdict as received: mergeable after the listed fixes.
+Four findings, two P1 and two P2, all of them in the writer and all of
+them about an interval between two transactions or between two threads.
+All valid, all accepted. Condensed but faithful, each with its
+resolution:
+
+1. **P1: session erasure could be followed by orphan event
+   reinsertion.** `_commit` released the durable transaction before
+   `_events` opened its own, so a DELETE could commit between them, and
+   `_events` inserted without rechecking the session tombstone. Events
+   have no foreign key and retention selects them only through existing
+   session rows, so the reinserted rows would be permanently unprunable.
+   Check the session inside the events transaction and drop the batch if
+   it is gone, and add an endpoint-driven test that pauses the writer
+   between the two transactions.
+
+   *Resolution*: accepted, `207cc69c`, on the seam `bb49211f` added for
+   it. The events transaction now asks `_alive` the same question the
+   durable half asks, under the same advisory lock, and discards the
+   batch silently as everything else a tombstone overtakes is discarded.
+   It is not counted either: the count's home is the session row, and
+   the session row is what just went. The seam commit is separate
+   because it changes what every gate in the suite is called with: a
+   marker opens two transactions, so the gate is now told which half it
+   stands in front of (`store.Half`), the events call sits behind that
+   half's own early return, and the test double parks on the durable
+   half by default so no existing test's releases change meaning. The
+   test drives the deletion over the real endpoint with the writer
+   parked between the halves and asserts every table is empty
+   afterwards; removing the check reddens it with the orphan row in
+   hand.
+
+2. **P1: an acknowledgement could become true before an earlier hole was
+   durably marked.** `_commit` settled successful acknowledgements
+   before `_latch` wrote the pending `incomplete` flags in a separate
+   transaction, so a waiter could wake and read `incomplete = false` for
+   a thread with a known hole, which is exactly what the plan's
+   resolution says a later acknowledgement must never imply. Apply the
+   pending marks inside the durable transaction, before the settle.
+
+   *Resolution*: accepted, `2fd3e870`, in the reviewer's preferred form.
+   `threads.flag_incomplete` is called inside the durable transaction,
+   after the turns so that a row this transaction has just materialized
+   is one of the rows it finds and stops owing, and the ids are
+   discharged only once that transaction has committed. A rollback
+   leaves the turns lost and the marks owed together, which is the
+   honest pair. The standalone `_latch` is gone rather than kept for the
+   markers the reviewer reserved it for: the marks ride every durable
+   transaction that commits, whichever marker it belongs to, so no
+   marker is left that commits durable work without applying them, and a
+   method with no caller fails the deletion test. The test refuses every
+   transaction after the one that commits the turn, which is what makes
+   the claim testable rather than merely likely: a mark that needed a
+   write of its own could not arrive at all. That is a deviation from
+   the prescribed "gated test", and the reason is that the gate cannot
+   prove it: under the old ordering the latch ran before the writer
+   could park again, so a gated read would have found the flag already
+   set and passed.
+
+3. **P2: a producer could enqueue behind the completed shutdown drain.**
+   `stop()` set `_stopped` and queued `_Stop` without the producer lock,
+   and `record_turn` checked `_stopped` before locking and enqueued
+   after unlocking, so a record could land behind a drain that had
+   finished, holding an acknowledgement nothing would ever settle.
+   Serialize admission and sentinel insertion under one lock, and add a
+   blocked-producer test.
+
+   *Resolution*: accepted, `046a0d0a`. All four producers now decide
+   admission and enqueue under `_lock`, and `stop()` sets the flag and
+   queues the sentinel under the same one; the join stays outside it,
+   because the writer takes that lock to write a batch off. A record is
+   therefore either in front of the sentinel and answered by the drain,
+   or refused with an acknowledgement that is already false.
+   `_abandon_the_rest` is kept although the lock makes it unreachable
+   from the producers, and its docstring now says so: it costs one look
+   at an empty queue, the queue is an injected seam, and what it answers
+   for is a caller waiting forever. The test holds a producer inside its
+   own `put_nowait` through that seam and proves the shutdown waits for
+   it rather than stepping over it. Its acknowledgement therefore
+   settles true rather than false, which is the one place the outcome
+   differs from the prescription: with the fix, a producer caught
+   mid-admission is admitted in front of the sentinel, and the
+   settled-false refusal the prescription describes is the ordinary
+   post-stop path a merged test already covers.
+
+4. **P2: failure of the closing marker's event transaction was never
+   counted.** The close row commits `dropped` before `_events` runs, and
+   a failure there incremented only the in-memory `_lost`, which
+   `_accept` then discarded with the session state. Persist the extra
+   count with a small serialized update before discarding writer state,
+   treating an intervening tombstone as final.
+
+   *Resolution*: accepted, `6157b273`. `_events` answers what it lost,
+   and the closing marker adds that to the row it has already written
+   through `_count_late_loss`, one update in a transaction of its own on
+   a marker that happens once per session. A session a tombstone took in
+   the meantime matches no row and is left alone, and a failure in the
+   update is reported rather than retried, because the writer keeps
+   nothing to retry it from. The test fails the fourth transaction
+   specifically, which is the closing marker's events, and reads the
+   count back off the session row.
+
+Two sentences of the generated schema reference described the durable
+path as it behaved before this round, so the generator was changed and
+the document regenerated (`e22830a2`): the incomplete mark is no longer
+a transaction of its own, and the tombstone is confirmed inside each of
+a marker's two transactions rather than once per marker. The
+command-spellings manifest moved with it, because the prose above the
+two spellings grew. `CHANGELOG.md` is unchanged: its durable-path entry
+describes the feature, not the ordering these fixes corrected.
