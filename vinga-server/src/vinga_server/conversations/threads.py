@@ -223,6 +223,15 @@ def landed(connection: Any, landing: Landing) -> None:
     fill an earlier gap, and `flag_incomplete`, which the writer calls
     beside this one in the same transaction, is what sets it.
 
+    The title is the thread's earliest stored utterance rather than its
+    earliest turn, which are the same thing everywhere except at the
+    start of a thread a session moved onto: that thread's first turn is
+    the answer the move was greeted with, and nothing was heard on it.
+    So a row still holding no title takes one from the first landing
+    that has an utterance to give it, and a row that has one keeps it
+    whatever lands later. A deployment storing no text derives no title
+    by the same rule, since no landing it makes carries one.
+
     A landing this module cannot attribute is refused rather than
     stored, and the refusal takes the marker's whole batch with it. Two
     shapes reach it: a session that understood no device, which has no
@@ -238,7 +247,7 @@ def landed(connection: Any, landing: Landing) -> None:
     if landing.device is None:
         raise MisattributedTurn(NO_DEVICE)
     found = connection.execute(
-        select(conversations.c.agent).where(
+        select(conversations.c.agent, conversations.c.title).where(
             conversations.c.conversation == landing.conversation
         )
     ).first()
@@ -257,10 +266,14 @@ def landed(connection: Any, landing: Landing) -> None:
         return
     if found.agent != landing.agent:
         raise MisattributedTurn(ANOTHER_AGENT)
+    moved: dict[str, Any] = {"last_active_at": landing.at}
+    title = title_of(landing.heard)
+    if found.title is None and title is not None:
+        moved["title"] = title
     connection.execute(
         update(conversations)
         .where(conversations.c.conversation == landing.conversation)
-        .values(last_active_at=landing.at)
+        .values(**moved)
     )
 
 

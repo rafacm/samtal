@@ -85,14 +85,21 @@ class TurnUnderway:
     The two leading fields are the exception to "written by the reply
     path": they are the pair that owns the turn, taken where the turn
     begins and never written again. A handover changes who is speaking
-    partway through, and the record is assembled in the reply's
-    `finally`, so a turn that read the current pair there would be
-    attributed to the thread it handed over to. Held here rather than
-    passed to `record` because the reply path is where it would have to
-    be remembered, and remembering it in half a dozen places is the
-    mistake this removes. Neither of the two is optional, because the
-    store materializes a thread row out of exactly them and refuses a
-    turn it cannot attribute.
+    partway through, and a record is assembled after that has happened,
+    so a turn that read the current pair then would be attributed to the
+    thread it handed over to. Held here rather than passed to `record`
+    because the reply path is where it would have to be remembered, and
+    remembering it in half a dozen places is the mistake this removes.
+    Neither of the two is optional, because the store materializes a
+    thread row out of exactly them and refuses a turn it cannot
+    attribute.
+
+    One reply produces one of these per conversation it was spoken on,
+    which for almost every reply is one. A move ends the turn it was
+    asked in and opens the next on the other side, so what an instance
+    holds is never a blend of two threads: the pair above is fixed, and
+    the totals under it are that pair's share of the reply and nothing
+    else.
     """
 
     conversation: str
@@ -239,9 +246,14 @@ class TurnUnderway:
     def record(self, speaking: str | None, spoken: Sequence[str]) -> TurnRecord | None:
         """The finished record, or None where there is no turn to record.
 
-        No transcript means no turn, which mirrors the events: an
-        utterance nobody could transcribe produced no `heard` and
-        produces no row.
+        A turn is something that happened, which is either an utterance
+        or an answer. An utterance nobody could transcribe produced no
+        `heard` and produces no row, which mirrors the events; a round
+        seeded by a move produces no `heard` either and is a turn all
+        the same, because the thread it is on is where the user heard
+        that answer. So the question asked here is whether anything at
+        all belongs to this turn, and the reading is what says a turn
+        was ever begun.
 
         `spoken` is what the agent talking now said, the same sentences
         `replied` reports. Joined onto the legs before it, so `reply`
@@ -251,23 +263,30 @@ class TurnUnderway:
         `speaking` is that agent, and it is deliberately not what the
         record is attributed to: the last leg is whoever finished the
         reply, while the turn belongs to the pair it started with. The
-        two are the same agent in every reply no handover split.
+        two are the same agent in every reply no handover split. A
+        trailing leg is added only where there is something to attribute
+        to it: a record taken at the move that closed the leg before it
+        has nothing left over, and an empty leg would say a share of the
+        reply happened that did not.
         """
-        if self.at is None or self.heard is None:
-            return None
         tail = " ".join(spoken) if spoken else None
+        parts = [*self._said, *([tail] if tail is not None else [])]
+        reply = " ".join(parts) if parts else None
+        if self.at is None or (self.heard is None and reply is None and not self._tools):
+            return None
         legs: tuple[TurnLeg, ...] = ()
         if self._legs:
-            legs = (
-                *self._legs,
-                TurnLeg(
-                    agent=speaking,
-                    text=tail,
-                    input_tokens=self._leg_input,
-                    output_tokens=self._leg_output,
-                ),
-            )
-        parts = [*self._said, *([tail] if tail is not None else [])]
+            legs = tuple(self._legs)
+            if tail is not None or self._leg_input is not None or self._leg_output is not None:
+                legs = (
+                    *legs,
+                    TurnLeg(
+                        agent=speaking,
+                        text=tail,
+                        input_tokens=self._leg_input,
+                        output_tokens=self._leg_output,
+                    ),
+                )
         return TurnRecord(
             at=self.at,
             conversation=self.conversation,
@@ -276,7 +295,7 @@ class TurnUnderway:
             heard_duration_s=self.heard_duration_s,
             language=self.language,
             language_confidence=self.language_confidence,
-            reply=" ".join(parts) if parts else None,
+            reply=reply,
             legs=legs,
             asr_ms=self.asr_ms,
             first_token_ms=self.first_token_ms,

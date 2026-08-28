@@ -341,9 +341,10 @@ class PipelineRuntime:
       by that call and by the confirmation the gate ladder asks for, so
       the session's language lock survives an interruption.
     - `_turn`: the record being assembled, replaced at the start of each
-      reply, written from half a dozen places in the loop, and read once
-      at the end by `_record_turn`. The pair it is stamped with at
-      replacement is the pair the turn is attributed to.
+      reply and again at each move the reply makes, written from half a
+      dozen places in the loop, and read by `_record_turn` at the end of
+      whichever conversation it belongs to. The pair it is stamped with
+      at replacement is the pair the turn is attributed to.
     - `_conversations`: one thread per agent this session has activated,
       written by `_activate_agent` alone and read through
       `self._conversation`, which is a property over the events object
@@ -585,6 +586,24 @@ class PipelineRuntime:
         """
         assert self._conversation is not None and self._agent is not None
         return TurnUnderway(self._conversation, self._agent)
+
+    def _seeded_turn(self) -> TurnUnderway:
+        """The first turn of the thread a reply has just moved onto.
+
+        A turn with nothing heard on it, which is what the seeded round
+        is: the user said what they said on the thread that was left,
+        and this side's dialogue opens with an answer. So it carries a
+        reading rather than an utterance, taken here because a turn
+        needs an origin on the session's timeline and there is no
+        `heard` event on this side to take one from.
+
+        Stamped after the rebinding and never before it: the pair this
+        reads is the one the move installed, which is the whole reason
+        the record it produces lands on the other thread.
+        """
+        turn = self._fresh_turn()
+        turn.at = self._events.now()
+        return turn
 
 
     # --- SessionInput: what the device edge asks of this runtime -------
@@ -1121,8 +1140,11 @@ class PipelineRuntime:
             # Beside `replied` and for the same reason: this is where a
             # reply ends however it ended, so a cancelled or a failed one
             # records what its finally sees rather than nothing at all.
-            if self._recorder is not None:
-                self._record_turn(spoken)
+            # What is recorded here is the LAST record of the reply: one
+            # that moved to another conversation closed the record it
+            # began with at that boundary, and what this line hands over
+            # is the one the seeded round opened on the other side.
+            self._record_turn(spoken)
             # Broad on purpose, and narrow in what it covers: the one
             # statement inside is a device send, so the `RuntimeError`
             # half can only be the transport's, and this closing pair
@@ -1138,13 +1160,19 @@ class PipelineRuntime:
     def _record_turn(self, spoken: Sequence[str]) -> None:
         """Hand the finished turn to the content channel.
 
+        Called at each end of a turn, which is the end of the reply and,
+        for a reply that moved, the boundary it moved at. A deployment
+        that asked for no store leaves here at the first line, so both
+        call sites can say what they mean rather than guarding first.
+
         Under the same guard an event tap gets, and for the same reason:
         a consumer nobody has met yet must not be able to cost the device
         the closing `tts stop` that follows this line, which in auto mode
         is what re-arms its listening. The class name and nothing else,
         because a recorder may be holding whatever a far side answered
         it with."""
-        assert self._recorder is not None
+        if self._recorder is None:
+            return
         record = self._turn.record(self._agent, spoken)
         if record is None:
             return
@@ -1174,12 +1202,14 @@ class PipelineRuntime:
 
         A move ends the current loop, whichever of the three it is: what
         was said so far becomes an assistant turn on the thread it was
-        said on, the leg is closed there, the rebinding happens here at
-        that boundary, and a fresh loop runs on the other side of it. So
-        no turn is ever split across two conversations: the turn's
-        record was stamped with the pair it began with, and the words it
-        spoke before the move stay in the history of the thread it spoke
-        them on.
+        said on, the leg is closed there, the record of the turn that
+        asked is finished and handed over there, the rebinding happens
+        here at that boundary, and a fresh loop runs on the other side
+        of it against a record of its own. So no turn is ever split
+        across two conversations, in the history or in the store: what
+        the user said and what was answered before the move belong to
+        the thread they happened on, and the seeded round that follows
+        is the first turn of the thread it landed on.
 
         At most one move per reply, whichever kind, which is what the
         latch counts: two agents cannot ping-pong, and a model cannot
@@ -1212,6 +1242,14 @@ class PipelineRuntime:
             # the agent has not changed: what a leg is for is the share
             # of a reply that belongs to one context.
             self._turn.leg_ended(self._agent, said)
+            # The record ends where the conversation does. Everything
+            # this turn heard, spoke, called and spent belongs to the
+            # thread it began on, and the round after the move belongs
+            # to the thread it lands on; one record held across the
+            # boundary would file the second on the first, leaving the
+            # thread that was left holding a reply it never heard and
+            # the thread that was joined holding none of its own.
+            self._record_turn(spoken)
             self._move_to(transition)
             switches_left -= 1
             # Every offer this session is holding goes with the move,
@@ -1221,6 +1259,11 @@ class PipelineRuntime:
             if self._resumption is not None:
                 self._resumption.forget()
             self._turns.append(Turn("user", transition.seed))
+            # The other side's first turn, opened here and handed over
+            # by the reply's own `finally`, so a move that is then cut
+            # short by a barge-in still records what the user heard of
+            # it on the thread it was said on.
+            self._turn = self._seeded_turn()
 
     def _move_to(self, transition: _Transition) -> None:
         """Apply one transition at the boundary the loop ended on, and
