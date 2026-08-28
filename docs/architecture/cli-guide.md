@@ -151,7 +151,7 @@ A command names the thing before it names what to do to it.
 ```bash
 vinga provider set llm local
 vinga agent show kids
-vinga sessions list
+vinga session list
 ```
 
 This was settled on 2026-08-24 and is not reopened by a later command's
@@ -192,7 +192,7 @@ peripheral verbs exist at any moment is
 since that half is generated from the command tree; what the argument
 needs is only that the list is uneven and keeps growing. The noun set
 is growing too, and growing faster than the verb set: the conversation
-store work (#190) adds `sessions` and `conversations`, each with verbs
+store work (#190) adds `session` and `conversation`, each with verbs
 of its own.
 
 Verb first does not force a compound word for each of those; what it
@@ -332,7 +332,16 @@ other kind of apply, and there is not.
   the same thing.
 - **Singular when it addresses one entry, plural when the noun is a
   collection you only ever ask about as a whole.** `provider set llm
-  local` is one provider; `sessions list` is not one session.
+  local` is one provider; `conversations schema` renders one document
+  about a store and addresses no entry of anything. Revised on
+  2026-08-28 by
+  [the first-class conversations plan](../plans/2026-08-28-first-class-conversations.md),
+  which is where the reasoning is: this page presented `sessions list`
+  as the spelling before either noun existed, and #190's nouns take
+  `show` and `delete`, so under this rule they are `session` and
+  `conversation`. The two merged plural groups (`conversations`,
+  `events`) address no entry and keep their names under the same
+  rule.
 - **Lowercase, and kebab-case where more than one word is
   unavoidable.** No underscores in a command word, ever, even where the
   store's key has one.
