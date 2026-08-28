@@ -7,10 +7,14 @@ tools that ran and the holes left by a stricter storage setting become
 messages, and which of them a budget leaves room for.
 
 Near-pure on purpose. Nothing here opens a connection or names a table:
-the thread store hands it `StoredTurn` values, so the whole of this
-module is exercised by writing turns down and reading messages back,
-and a suite about what a resumed conversation reads like needs no
-database at all.
+the thread store hands it `records.StoredTurn` values, so the whole of
+this module is exercised by writing turns down and reading messages
+back, and a suite about what a resumed conversation reads like needs no
+database at all. The input type is declared in `records.py` rather than
+here, which is what keeps the store's read path off the provider
+vocabulary a rendered turn is written in: reading a thread must not
+load the model adapters, and the API that reads one is rendered without
+them.
 
 Three rules carry everything below.
 
@@ -34,6 +38,7 @@ same text switch as the dialogue beside it.
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from vinga_server.conversations.records import StoredTurn
 from vinga_server.providers import Turn
 
 # How many characters of stored text are counted as one token.
@@ -49,24 +54,6 @@ ESTIMATED_CHARS_PER_TOKEN = 4
 # How a turn says which tools it ran, appended to the assistant half.
 # One line whatever ran, and names only.
 TOOL_NOTE = "(tools used: {names})"
-
-
-@dataclass(frozen=True)
-class StoredTurn:
-    """One turn as the store kept it, which is all this module is told.
-
-    Both text halves are optional because both are under the text
-    switch: a deployment that stores no text stores the turn and none of
-    the words in it, and what that leaves here is a hole rather than a
-    turn to render. `tools` carries the names of the calls that turn
-    made, in the order the model issued them, with the unnamed ones
-    (a malformed call, a name nobody publishes) already left out by
-    whoever read the rows.
-    """
-
-    heard: str | None = None
-    reply: str | None = None
-    tools: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -168,10 +155,4 @@ def _tokens(messages: Sequence[Turn]) -> int:
     return -(-characters // ESTIMATED_CHARS_PER_TOKEN)
 
 
-__all__ = [
-    "ESTIMATED_CHARS_PER_TOKEN",
-    "TOOL_NOTE",
-    "Hydrated",
-    "StoredTurn",
-    "hydrated",
-]
+__all__ = ["ESTIMATED_CHARS_PER_TOKEN", "TOOL_NOTE", "Hydrated", "hydrated"]

@@ -6,8 +6,9 @@ them. What belongs here is the scaffolding around all three: the
 manifest each kind of session is opened with, a store built where a
 test can reach it, the audio a channel is filled with, a read through a
 second engine, the second writer four suites need in order to prove the
-retryable refusal, and the way a memory file is made unreadable on
-purpose.
+retryable refusal, the thread store a session resumes through written
+down as two dictionaries, and the way a memory file is made unreadable
+on purpose.
 
 Nothing here asserts and nothing here drives a session. A helper returns
 a store, a payload or a list of rows, and the suite says what it expects.
@@ -21,7 +22,7 @@ opens with. Both importing suites keep their own spelling by alias.
 
 import contextlib
 import struct
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,8 @@ from vinga_server.capture import CAPTURE_RATE, CaptureStore
 from vinga_server.config import entities
 from vinga_server.config import store as config_store
 from vinga_server.config.models import DatabaseConfig
+from vinga_server.conversations import threads
+from vinga_server.conversations.records import StoredTurn
 from vinga_server.conversations.store import open_conversations
 from vinga_server.db import DOMAIN_CHAIN, StoreChain, connection_url
 from vinga_server.tools.memory import MemoryStore
@@ -137,6 +140,80 @@ def rows(table: str, **where: Any) -> list[dict[str, Any]]:
             return [dict(row) for row in connection.execute(text(query), where).mappings()]
     finally:
         engine.dispose()
+
+
+# --- the threads a session can find and resume ------------------------
+
+
+class StoredThreads:
+    """The thread store as a test writes it down, standing in for the
+    read seam a runtime resumes through.
+
+    The seam is two questions and neither of them raises, so a double is
+    two dictionaries and a failure to answer with instead. Written here
+    rather than in each suite because three of them ask the same two
+    questions, and because what a test wants to say is what the store
+    holds, not how it is asked.
+
+    `asked` records the searches, which is how a suite proves that a
+    refusal it expected happened before the store was ever consulted.
+    """
+
+    def __init__(
+        self,
+        found: dict[str, Any] | None = None,
+        held: dict[str, Any] | None = None,
+        failure: Any = None,
+    ) -> None:
+        self.found = found or {}
+        self.held = held or {}
+        self.failure = failure
+        self.asked: list[tuple[str, str]] = []
+        self.read: list[str] = []
+
+    def candidates(self, agent: str, description: str) -> Any:
+        self.asked.append((agent, description))
+        if self.failure is not None:
+            return self.failure
+        return self.found.get(agent, threads.Candidates(matched=False))
+
+    def backlog(self, conversation: str) -> Any:
+        self.read.append(conversation)
+        if self.failure is not None:
+            return self.failure
+        return self.held.get(conversation)
+
+
+def a_candidate(
+    conversation: str,
+    title: str = "the andromeda galaxy",
+    last_active_at: str = "2026-08-20T10:00:00+00:00",
+    excerpt: str | None = None,
+    score: int = 1,
+) -> Any:
+    return threads.Candidate(
+        conversation=conversation,
+        title=title,
+        last_active_at=last_active_at,
+        excerpt=title if excerpt is None else excerpt,
+        score=score,
+    )
+
+
+def a_backlog(
+    conversation: str,
+    agent: str = "poet",
+    said: Sequence[tuple[str, str]] = (),
+    incomplete: bool = False,
+) -> Any:
+    return threads.Backlog(
+        conversation=conversation,
+        agent=agent,
+        incomplete=incomplete,
+        turns=tuple(
+            StoredTurn(heard=heard, reply=reply) for heard, reply in said
+        ),
+    )
 
 
 # --- what a database actually holds -----------------------------------

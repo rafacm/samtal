@@ -1,4 +1,5 @@
-"""What the pipeline hands the store, one record per completed turn.
+"""What the pipeline hands the store, one record per completed turn,
+and the one shape that comes back the other way.
 
 A dedicated content channel beside the event tap, rather than text read
 back off the events: tool arguments and results never rode the events at
@@ -20,6 +21,29 @@ latency query has to be able to make.
 import threading
 from dataclasses import dataclass
 from typing import Any, Protocol
+
+
+@dataclass(frozen=True)
+class StoredTurn:
+    """One turn as the store kept it, on its way back out.
+
+    The one shape here that travels the other way, and it lives here for
+    exactly the reason the rest do: the thread store reads it and the
+    hydrator renders it, and a leaf both sides import is what keeps
+    either of them from importing the other. It also keeps the store's
+    read path off the provider vocabulary, which is what a rendered
+    turn is written in.
+
+    Both text halves are optional because both are under the text
+    switch: a deployment that stores no text stores the turn and none of
+    the words in it. `tools` carries the names of the calls that turn
+    made, in the order the model issued them, with the ones the store
+    could not name already left out.
+    """
+
+    heard: str | None = None
+    reply: str | None = None
+    tools: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -179,19 +203,26 @@ class TurnRecorder(Protocol):
     Never blocking and never raising is the contract: this is called on
     the session loop at the end of a reply, and a store that made a
     reply wait would be the one thing the whole write path is built to
-    prevent."""
+    prevent.
 
-    def record_turn(self, record: TurnRecord) -> None: ...
+    The acknowledgement is optional in the answer rather than promised,
+    which is what keeps that contract from spreading: a store hands one
+    back, a consumer that is not a store hands back nothing, and the
+    runtime keeps whichever it was given without ever waiting on it on
+    the audio path. What waits is the resume, which must not read a
+    thread past its own writes."""
+
+    def record_turn(self, record: TurnRecord) -> "Acknowledgement | None": ...
 
 
 class TurnStore(Protocol):
     """The same channel from the composition root's side, where one
     object serves every session and the records are keyed by one.
 
-    The acknowledgement comes back here rather than at `TurnRecorder`
-    above, which stays a `None` return on purpose: the runtime hands a
-    record over and carries on, and a protocol that promised the handle
-    would make every double that stands in for a store owe one."""
+    The handle is required here and optional at `TurnRecorder` above,
+    which is the difference between the two sides: a store always has
+    one to give, and a consumer standing in for one does not have to
+    invent it."""
 
     def record_turn(self, session_id: str, record: TurnRecord) -> Acknowledgement: ...
 
@@ -213,6 +244,7 @@ class SessionTurns:
 __all__ = [
     "Acknowledgement",
     "SessionTurns",
+    "StoredTurn",
     "ToolInvocation",
     "TurnLeg",
     "TurnRecord",
