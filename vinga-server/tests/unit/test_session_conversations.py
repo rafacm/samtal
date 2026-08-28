@@ -607,16 +607,21 @@ async def test_a_busy_store_says_to_ask_again() -> None:
 
 
 async def test_a_poisoned_driver_message_reaches_nothing(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The seam is a boundary, not a pass-through. A driver quotes the
     DSN it could not connect with, and a tool result is both
     model-visible and stored, so a read that raised through the loop
-    would put a credential in front of a model and into the record.
+    would put a credential in front of a model, into the record and onto
+    every surface the record touches.
 
     Driven through the real `threads.Reads`, whose engine is made to
     raise: the double next door cannot prove this, because what is under
-    test is the catching.
+    test is the catching. Driven as a whole reply, because the stored
+    invocation row is one of the surfaces the message must not reach and
+    a reply is what produces one.
     """
     sentinel = "postgresql://vinga:hunter2@db.internal:5432/vinga"
 
@@ -631,27 +636,58 @@ async def test_a_poisoned_driver_message_reaches_nothing(
     poet = ScriptedLlm(
         [[call("resume_conversation", description="the galaxy")], "Not right now."]
     )
-    session = a_session(poet, threads=threads.Reads(DatabaseConfig()))
+    kept = Recorder()
+    session = session_for(
+        resuming(),
+        POET_MAC,
+        {"poet": poet},
+        conversations=kept,
+        threads=threads.Reads(DatabaseConfig()),
+    )
+    with_device(session, POET_MAC)
+    session.websocket = cast(Any, _Quiet())
+    session.send_audio = _nothing  # type: ignore[method-assign]
+    session.runtime._speak = _spoken  # type: ignore[method-assign]
     seen: list[Any] = []
     events_of(session).attach(seen.append)
 
     with caplog.at_level(logging.DEBUG):
-        spoken = await run_reply(session, "the galaxy one")
+        await drive_reply(session, UTTERANCE)
 
+    # What the model was told, which is the fixed sentence and nothing
+    # of the driver's.
     assert results_of(poet) == [builtin.STORE_UNREADABLE]
-    assert not any(sentinel in sentence for sentence in spoken)
     assert not any(
         sentinel in turn.content for turns, _, _ in poet.seen for turn in turns
     )
-    assert not any(sentinel in str(record.getMessage()) for record in caplog.records)
-    assert not any(
-        sentinel in str(getattr(record, field, "")) for record in caplog.records
-        for field in vars(record)
-    )
-    assert not any(sentinel in str(vars(emission)) for emission in seen)
+    # What the store was handed, which is the same sentence in the row.
+    (record,) = kept.records
+    assert record.reply == "Not right now."
+    assert [invocation.result for invocation in record.tools] == [
+        builtin.STORE_UNREADABLE
+    ]
+    assert sentinel not in repr(record)
+    # And every telemetry surface: the tap, the log records in both
+    # their renderings, and the streams the process writes.
+    assert not any(sentinel in repr(vars(emission)) for emission in seen)
+    for line in caplog.records:
+        assert sentinel not in line.getMessage() + repr(line.args) + repr(vars(line))
+    assert sentinel not in caplog.text
+    printed = capsys.readouterr()
+    assert sentinel not in printed.out + printed.err
     # The class name is what an operator gets, which is the rule the
     # reply path already applies to a provider that fails.
-    assert any("RuntimeError" in record.getMessage() for record in caplog.records)
+    assert any("RuntimeError" in line.getMessage() for line in caplog.records)
+
+
+class Recorder:
+    """Where the store would stand, keeping the records it is handed."""
+
+    def __init__(self) -> None:
+        self.records: list[TurnRecord] = []
+
+    def record_turn(self, session_id: str, record: TurnRecord) -> None:
+        self.records.append(record)
 
 
 # Reading a thread the same session is still writing to
