@@ -1666,9 +1666,10 @@ class ConversationMilestone(BaseModel):
 
     What the agent said out loud when the user consented to a recap,
     with the range of turns it summarized and the checkpoint it folded
-    into itself. The range is what keeps the claim honest: a recap
-    bounded by its own input budget records where its reading began, so
-    nothing here says it covers turns it never read.
+    into itself. The range is inclusive at both ends and is what keeps
+    the claim honest: a recap bounded by its own input budget records
+    where its reading began, so nothing here says it covers turns it
+    never read.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -1681,15 +1682,18 @@ class ConversationMilestone(BaseModel):
     )
     from_turn: int = Field(
         description=(
-            "The id of the first turn this recap actually read. Turns at or before "
-            "it are outside its coverage: they were dropped by the recap's own "
-            "input budget, exactly as truncation would have dropped them."
+            "The id of the first turn this recap actually read, and the first it "
+            "covers. Coverage is the inclusive range from_turn through "
+            "after_turn; turns below from_turn are outside it, dropped by the "
+            "recap's own input budget exactly as truncation would have dropped "
+            "them."
         )
     )
     after_turn: int = Field(
         description=(
-            "The id of the last turn it read. Rebuilding this thread's context "
-            "reads this checkpoint plus the turns with a greater id."
+            "The id of the last turn it read, and the last it covers. Rebuilding "
+            "this thread's context reads this checkpoint plus the turns with a "
+            "greater id."
         )
     )
     parent: int | None = Field(

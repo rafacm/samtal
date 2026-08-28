@@ -752,11 +752,12 @@ def backlog(connection: Any, conversation: str) -> Backlog | None:
     caller says so in one sentence rather than guessing which happened.
 
     Where the thread has a checkpoint, the turns read are the ones after
-    its `after_turn` and the checkpoint stands for the rest. Turns at or
-    before its `from_turn` are outside its recorded coverage, and they
-    are gone from here exactly as oldest-first truncation would have
-    dropped them: the boundary is stated in the schema reference rather
-    than hidden.
+    its `after_turn` and the checkpoint stands for the rest. What it
+    stands for is the inclusive range `from_turn` through `after_turn`;
+    turns below its `from_turn` are outside that coverage, and they are
+    gone from here exactly as oldest-first truncation would have dropped
+    them: the boundary is stated in the schema reference rather than
+    hidden.
 
     A checkpoint whose text was never stored replaces nothing, so it is
     not read as one and the whole thread comes back instead. That is the

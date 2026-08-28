@@ -80,13 +80,13 @@ def upgrade() -> None:
             "from_turn",
             sa.BigInteger(),
             nullable=False,
-            comment="The `turns.id` of the first turn the summarizer actually read. Recorded so that a recap bounded by its input budget cannot claim coverage of the turns it omitted: everything at or before this id is truncated rather than summarized, and hydration treats it so.",
+            comment="The `turns.id` of the first turn the summarizer actually read, and the first turn this checkpoint covers. Coverage is the inclusive range `from_turn` through `after_turn`, so that a recap bounded by its input budget cannot claim the turns it omitted: those are the ones below this id, truncated rather than summarized, and hydration treats them so.",
         ),
         sa.Column(
             "after_turn",
             sa.BigInteger(),
             nullable=False,
-            comment="The `turns.id` of the last turn the summarizer read. Hydration reads this milestone plus the turns with a greater id, which is the whole of what the checkpoint replaces.",
+            comment="The `turns.id` of the last turn the summarizer read, and the last turn this checkpoint covers. Hydration reads this milestone plus the turns with a greater id, which is the whole of what the checkpoint replaces.",
         ),
         sa.Column(
             "parent",
