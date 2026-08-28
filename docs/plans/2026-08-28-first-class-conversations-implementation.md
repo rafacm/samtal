@@ -1302,9 +1302,10 @@ have heard it.**
   the length of that list rather than a second read.
 - **`milestone_recorded`,** emitted when the row lands: the thread's
   identity and nothing else.
-- **The documents**: `docs/reference/conversations-schema.md` and
+- **The documents**: `docs/reference/conversations-schema.md`,
   `docs/reference/events.md` and `docs/reference/api-openapi.json` (all
   generated), `docs/concepts.md`, `docs/glossary.md`,
+  `docs/architecture/observability-surfaces.md`,
   `vinga-server/README.md`, `CHANGELOG.md` and the command-spellings
   manifest.
 
@@ -1379,14 +1380,19 @@ Eleven, each with its reason.
     in those suites is now written through the store, and the helper is
     gone.
 
-11. **Two stale sentences from milestone 4 were corrected here.** The
-    glossary's handover entry still said the session transcript carries
-    across a switch, which the clean switch falsified; and the
-    poisoned-driver sentinel attached `list.append` as an event tap,
-    which is dropped with a warning because a tap is asked for `emit`,
-    so its hunt through the events asserted nothing. Both belong to
-    milestone 4's footprint and both are about claims this plan owns,
-    so they are fixed here and recorded rather than left.
+11. **Three stale claims from earlier milestones were corrected
+    here.** The glossary's handover entry still said the session
+    transcript carries across a switch, which milestone 4's clean
+    switch falsified; milestone 4's poisoned-driver sentinel attached
+    `list.append` as an event tap, which is dropped with a warning
+    because a tap is asked for `emit`, so its hunt through the events
+    asserted nothing; and the observability map still described the
+    checkpoints as a dormant place written by nothing in this release,
+    with the open-items list carrying them as owed, which was milestone
+    1's honest statement and is this milestone's to retire. All three
+    are claims this plan owns and this milestone falsifies, so they are
+    fixed here and recorded rather than left for a reader to trip
+    over.
 
 ### Discoveries
 
