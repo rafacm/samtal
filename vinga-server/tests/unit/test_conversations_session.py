@@ -43,7 +43,7 @@ from vinga_server.capture import CaptureStore
 from vinga_server.config import Config
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations import store as store_module
-from vinga_server.conversations.store import ConversationStore, SessionSink
+from vinga_server.conversations.store import ConversationStore, Half, SessionSink
 from vinga_server.db import read_engine
 from vinga_server.device import session as session_module
 from vinga_server.device.session import DeviceSession
@@ -833,7 +833,7 @@ async def test_a_parked_writer_never_delays_a_reply(tmp_path: Path) -> None:
     released = threading.Event()
     parked = threading.Event()
 
-    def gate() -> None:
+    def gate(half: Half = Half.DURABLE) -> None:
         parked.set()
         released.wait(timeout=TIMEOUT_S)
 

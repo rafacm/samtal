@@ -44,6 +44,7 @@ from vinga_server.conversations.store import (
     RETENTION_DAYS_DEFAULT,
     STOP_TIMEOUT_S,
     ConversationStore,
+    Half,
     _Batch,
 )
 from vinga_server.db import LOCK_TIMEOUT_MS, read_engine
@@ -60,7 +61,7 @@ class Wedged:
         self.arrived = threading.Event()
         self.forever = threading.Event()
 
-    def __call__(self) -> None:
+    def __call__(self, half: Half = Half.DURABLE) -> None:
         self.arrived.set()
         self.forever.wait(timeout=TIMEOUT_S)
 
