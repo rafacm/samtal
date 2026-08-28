@@ -150,7 +150,7 @@ SUPERSEDED_REVISIONS = frozenset({"1001_postgres_conversations"})
 # connection is not repeated for the reason the sentences above give.
 #
 # The remedy is the only thing worth saying, because there is no other:
-# there is no export format for conversation history and no importer,
+# there is no export format for the conversation record and no importer,
 # so the reset is the path, and it is the one the ADR addendum records
 # and the one this repository tests.
 SUPERSEDED_REVISION = (
@@ -159,8 +159,8 @@ SUPERSEDED_REVISION = (
     "before conversations existed name no conversation, and there is nothing to "
     "derive one from. Drop and recreate the database, or the record schema "
     "on its own, rerun deploy/postgres-init.sql, and start the server again, which "
-    "migrates a blank schema to current in one step. Conversation history is not "
-    "carried across, which the changelog announces and "
+    "migrates a blank schema to current in one step. The conversation record is "
+    "not carried across, which the changelog announces and "
     "docs/adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md records "
     "with what it costs"
 )

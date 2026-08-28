@@ -377,8 +377,8 @@ is a request, and there is nobody to answer it. The way back is to
 rebuild the store rather than to operate on it.
 
 Both halves of the configuration live in one Postgres database, in two
-schemas: `domain`, which is what refuses to boot, and `conversations`,
-which is the record. Which of the two procedures below to run is decided
+schemas: `domain`, which is what refuses to boot, and `record`, which
+holds what was said. Which of the two procedures below to run is decided
 by whether the deployment is recording and wants to keep what it
 recorded.
 
@@ -465,7 +465,7 @@ vinga-server config apply -f deployment.yaml
 vinga-server config provider secret set -- llm claude api_key
 ```
 
-**Conversation history does not come across, and nothing pretends
+**The conversation record does not come across, and nothing pretends
 otherwise.** There is no export format for it and no importer, and
 inventing one for a pre-release store was not worth the tool it would
 have become. A deployment that wants to keep what it recorded copies the

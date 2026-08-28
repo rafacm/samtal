@@ -85,13 +85,13 @@ later stage, and the model leaves their slot open on purpose, which is
 **decided direction** (recorded on this page, 2026-08-21; no owning
 issue or decision record yet).
 
-One name is used twice, and clearing it up front saves confusion later.
-The database schema named `conversations` holds sessions, threads and
-the turns both of them project, so SQL spells the thread table
-`conversations.conversations`;
+The durable record of all this is one database schema, named `record`.
+It holds sessions, threads and the turns both of them project, so SQL
+spells the thread table `record.conversations`;
 [its reference](reference/conversations-schema.md) is the authority on
-what it holds. The schema name is the store's and the table name is the
-entity's. Where the two meet below, each is named explicitly.
+what it holds. The reference, the command that prints it and the config
+section that switches the store on are all called `conversations`, which
+is what a reader is after in it.
 
 ## Device
 

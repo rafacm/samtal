@@ -42,11 +42,11 @@ PROSE_WIDTH = 78
 EVENT_REFERENCE = "events.md"
 
 # The domain model, one directory up from the committed reference. The
-# schema is named `conversations` and now really stores some: the
-# sessions and turns it always held, and the threads those turns belong
-# to. What a session and a conversation each mean to a user is that
-# page's, and the reference links it rather than restating it. Relative
-# to `docs/reference/`, where the reference is committed.
+# store really holds conversations now: the sessions and turns it always
+# held, and the threads those turns belong to. What a session and a
+# conversation each mean to a user is that page's, and the reference
+# links it rather than restating it. Relative to `docs/reference/`,
+# where the reference is committed.
 CONCEPTS = "../concepts.md"
 
 # What an exporter maps onto, per the observability ADR's adoption of
@@ -78,7 +78,7 @@ def reference() -> str:
         "`vinga-server/src/vinga_server/conversations/schema.py`.",
         "",
         *_paragraph(
-            "The store is the `conversations` schema of the Postgres database the "
+            "The store is the `record` schema of the Postgres database the "
             "`VINGA_DB_*` variables name, beside the domain configuration's `domain` "
             "schema. It holds what was said and what it cost to say it: the session "
             "spine, the threads that span it, the turn timeline both of them project, "
@@ -90,11 +90,15 @@ def reference() -> str:
         ),
         "",
         *_paragraph(
-            "The schema name and one table name are the same word, so SQL spells the "
-            "thread table `conversations.conversations`. The schema name is the "
-            "store's and the table name is the entity's: a conversation is a durable "
-            "thread between a user and exactly one agent, spanning sessions, and a "
-            "session is one connection episode from one device."
+            "The schema is `record` and one table inside it is `conversations`, so "
+            "SQL spells the thread table `record.conversations`. The schema name "
+            "says what the whole of it is; the table name says what one entity is: "
+            "a conversation is a durable thread between a user and exactly one "
+            "agent, spanning sessions, and a session is one connection episode from "
+            "one device. This page keeps the name `conversations-schema.md`, and so "
+            "do the command that prints it, the config section that switches the "
+            "store on and the events it emits, because those address the store from "
+            "outside, where what a reader is after is the conversations in it."
         ),
         "",
         *_paragraph(
@@ -297,7 +301,7 @@ def reference() -> str:
         "",
         "```bash",
         "psql \"postgresql://vinga_ro@127.0.0.1:5432/vinga\" \\",
-        "  -c 'select * from conversations.turns order by id desc limit 20'",
+        "  -c 'select * from record.turns order by id desc limit 20'",
         "```",
         "",
         *_paragraph(
