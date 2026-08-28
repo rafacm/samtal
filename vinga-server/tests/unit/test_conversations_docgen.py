@@ -163,7 +163,7 @@ def test_the_deletion_section_says_what_erasure_reaches_beyond_the_rows() -> Non
 
     assert "One transaction" in flattened
     assert "erasure outranks every copy the store derived" in flattened
-    assert "renamed from its earliest surviving turn or loses its title" in flattened
+    assert "renamed from its earliest surviving utterance or loses its title" in flattened
     assert "so is every row descended from it through `parent`" in flattened
     assert "`last_active_at` moves back when the turn that wrote it is gone" in flattened
     assert "a conversation left with no turns is deleted whole" in flattened
