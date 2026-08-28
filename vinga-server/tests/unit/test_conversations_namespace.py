@@ -347,6 +347,40 @@ def test_equal_timestamps_split_across_a_boundary_lose_nothing(client) -> None:
     assert named(first) + named(second) == [THIRD, SECOND, FIRST]
 
 
+def test_a_cursor_at_another_offset_pages_from_the_same_instant(client) -> None:
+    """The canonicalization, on the boundary that would hide it.
+
+    The comparison is lexicographic on text, so a cursor spelled at
+    another offset only works if it is brought to the spelling the rows
+    carry before it is compared. Three threads sharing one instant is
+    where getting that wrong shows: the pair is the whole of what
+    separates them, and a stamp compared as written would put the page
+    boundary somewhere else entirely.
+    """
+    recording = Recorder()
+    for index, thread in enumerate((FIRST, SECOND, THIRD)):
+        recording.thread(f"s-{index}", thread)
+    recording.done()
+
+    first = listed(client, limit="2")
+    # The same instant a caller's own client might hand back after
+    # parsing it into a local zone.
+    elsewhere = (
+        dt.datetime.fromisoformat(first["next_cursor_active"])
+        .astimezone(dt.timezone(dt.timedelta(hours=5, minutes=30)))
+        .isoformat()
+    )
+    second = listed(
+        client,
+        limit="2",
+        cursor_active=elsewhere,
+        cursor_id=str(first["next_cursor_id"]),
+    )
+
+    assert elsewhere != first["next_cursor_active"]
+    assert named(first) + named(second) == [THIRD, SECOND, FIRST]
+
+
 def test_a_thread_spoken_to_between_pages_is_missed_by_that_pass(client) -> None:
     """Stated rather than implied, because activity moves and no cursor
     over a moving value can promise otherwise: a thread whose activity
@@ -400,13 +434,29 @@ def test_a_cursor_past_the_end_is_an_empty_page(client) -> None:
         {"cursor_id": "4242"},
         {"cursor_active": "the fifteenth", "cursor_id": "4242"},
         {"cursor_active": "2026-08-15T12:00:00+00:00", "cursor_id": "later"},
+        {"cursor_active": "2026-08-15T12:00:00", "cursor_id": "4242"},
+        {"cursor_active": "2026-08-15", "cursor_id": "4242"},
     ],
-    ids=["only-active", "only-id", "unreadable-active", "unreadable-id"],
+    ids=[
+        "only-active",
+        "only-id",
+        "unreadable-active",
+        "unreadable-id",
+        "naive-active",
+        "day-only-active",
+    ],
 )
 def test_half_a_pair_or_an_unreadable_one_is_refused(client, query) -> None:
     """The pair comes together or not at all. Half of it is an argument
     that went missing, and answering it with the top of the listing
-    would silently replay a page the caller had already read."""
+    would silently replay a page the caller had already read.
+
+    The last two are readable dates that name no instant. The comparison
+    behind the cursor is lexicographic on text, and a stamp written
+    without an offset is shorter than every stored `last_active_at`, so
+    honoring one would page from a place the caller did not ask for.
+    Refused rather than assumed to be UTC: this API never answered one,
+    so nothing it answered is being refused."""
     response = client.get("/conversations", params=query)
 
     assert response.status_code == 422
