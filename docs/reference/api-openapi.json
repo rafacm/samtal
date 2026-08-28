@@ -2730,7 +2730,7 @@
             }
           },
           "422": {
-            "description": "One of the query arguments could not be read: the limit, the cursor or the device filter. Nothing sent is quoted back.",
+            "description": "One of the query arguments could not be read: the limit, the cursor, the device filter or the day, or a purge named no selector at all. Nothing sent is quoted back.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2740,7 +2740,120 @@
             }
           },
           "500": {
-            "description": "The conversation store cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The conversation store cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Purge Sessions",
+        "description": "Erase every session the selectors name, in one transaction.\n\nAt least one selector is required and several are combined with\nAND, so a purge always names less than everything. The semantics\nare the retired `conversations purge` command's, carried over\nrather than reopened: this is that command, as an act of the API\nwith the CLI in front of it.",
+        "operationId": "purge_sessions_sessions_delete",
+        "parameters": [
+          {
+            "name": "session",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only this session, by its uuid hex. The same erasure the addressed form of this resource performs, offered here so that one selector grammar covers every purge.",
+              "title": "Session"
+            },
+            "description": "Only this session, by its uuid hex. The same erasure the addressed form of this resource performs, offered here so that one selector grammar covers every purge."
+          },
+          {
+            "name": "device",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the sessions of this device, by MAC. Colons or dashes, upper or lower case; it is normalized before it is matched. Anything that is not a MAC address is refused.",
+              "title": "Device"
+            },
+            "description": "Only the sessions of this device, by MAC. Colons or dashes, upper or lower case; it is normalized before it is matched. Anything that is not a MAC address is refused."
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the sessions that began strictly before this UTC day, written as YYYY-MM-DD. A session that began at any moment of the named day is not selected, which is what 'before the fifteenth' means. Anything else is refused.",
+              "title": "Before"
+            },
+            "description": "Only the sessions that began strictly before this UTC day, written as YYYY-MM-DD. A session that began at any moment of the named day is not selected, which is what 'before the fifteenth' means. Anything else is refused."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erasure"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The conversation store's write lock is held by another writer. Nothing was deleted, and the same request may be made again.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "One of the query arguments could not be read: the limit, the cursor, the device filter or the day, or a purge named no selector at all. Nothing sent is quoted back.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The conversation store cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2800,7 +2913,7 @@
             }
           },
           "422": {
-            "description": "One of the query arguments could not be read: the limit, the cursor or the device filter. Nothing sent is quoted back.",
+            "description": "One of the query arguments could not be read: the limit, the cursor, the device filter or the day, or a purge named no selector at all. Nothing sent is quoted back.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2810,7 +2923,85 @@
             }
           },
           "500": {
-            "description": "The conversation store cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The conversation store cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Erase Session",
+        "description": "Erase one named session: its row, its turns wherever their\nthreads are, the calls those turns made, and its events.\n\nErasure outranks every copy the store derived from what is going\n(`threads.erase_sessions` says exactly which), and it is one\ntransaction, so a session's rows go together or none of them\ndoes. A session that is still running when its row goes stops\nbeing recorded at the writer's next marker; what it says after\nthat is not kept.",
+        "operationId": "erase_session_sessions__session__delete",
+        "parameters": [
+          {
+            "name": "session",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erasure"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No session of that id is in the conversation store.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The conversation store's write lock is held by another writer. Nothing was deleted, and the same request may be made again.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "One of the query arguments could not be read: the limit, the cursor, the device filter or the day, or a purge named no selector at all. Nothing sent is quoted back.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The conversation store cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2906,7 +3097,7 @@
             }
           },
           "422": {
-            "description": "One of the query arguments could not be read: the limit, the cursor or the device filter. Nothing sent is quoted back.",
+            "description": "One of the query arguments could not be read: the limit, the cursor, the device filter or the day, or a purge named no selector at all. Nothing sent is quoted back.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2916,7 +3107,7 @@
             }
           },
           "500": {
-            "description": "The conversation store cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "description": "The conversation store cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3340,6 +3531,52 @@
         ],
         "title": "Envelope",
         "description": "One entity as a read returns it: the entity, and its stored-secret\nslots beside it."
+      },
+      "Erasure": {
+        "properties": {
+          "sessions": {
+            "type": "integer",
+            "title": "Sessions",
+            "description": "How many session rows were deleted, at most one per selector match."
+          },
+          "turns": {
+            "type": "integer",
+            "title": "Turns",
+            "description": "How many turns went with them, including turns of a thread that is still live: erasing a session erases its dialogue wherever it belongs, and the thread honestly keeps a gap."
+          },
+          "tool_invocations": {
+            "type": "integer",
+            "title": "Tool Invocations",
+            "description": "How many tool invocation rows hung off those turns."
+          },
+          "events": {
+            "type": "integer",
+            "title": "Events",
+            "description": "How many events rows those sessions held. Zero for a session recorded under metrics-off, which wrote none."
+          },
+          "conversations": {
+            "type": "integer",
+            "title": "Conversations",
+            "description": "How many threads were deleted whole because they lost every turn. A thread that kept turns is not counted here: it survives, renamed from its earliest surviving turn if the one its title came from is gone."
+          },
+          "milestones": {
+            "type": "integer",
+            "title": "Milestones",
+            "description": "How many recap checkpoints were deleted: those whose recorded coverage held an erased turn, every checkpoint descended from one along the `parent` lineage, and those belonging to a thread that went whole."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "sessions",
+          "turns",
+          "tool_invocations",
+          "events",
+          "conversations",
+          "milestones"
+        ],
+        "title": "Erasure",
+        "description": "What a deletion took, per table.\n\nCounts rather than an acknowledgement sentence, because the caller\nof a purge asked about a set it named by selector and cannot know\nwhat was in it. Six numbers rather than one, because the tables go\nfor different reasons: a session's own row, the turns that named it\nwherever their thread is, the invocations under those turns, the\nsession's telemetry, the recap checkpoints whose coverage held an\nerased turn, and the threads left with nothing."
       },
       "FillerDiff": {
         "properties": {

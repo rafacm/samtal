@@ -81,13 +81,11 @@ EXCLUDED: dict[tuple[str, str], str] = {
         "stored is a line of the document show prints, and a read command here would "
         "give one noun a verb no other setting has"
     ),
-    ("GET", "/sessions"): (
-        "the conversation store, which is not the domain configuration at all. Its "
-        "reader is the vinga-server conversations group and the admin UI, and it is "
-        "behind the server half"
+    ("GET", "/sessions/{session}/turns"): (
+        "the session's own timeline, which the grammar has no verb for: a turn listing "
+        "wraps and a wrapped column is not a column, so reading dialogue is the "
+        "conversation noun's (#190, milestone 3) and the admin UI's"
     ),
-    ("GET", "/sessions/{session}"): "the conversation store, as above",
-    ("GET", "/sessions/{session}/turns"): "the conversation store, as above",
 }
 
 
@@ -105,7 +103,13 @@ def _addressed(kind: str) -> cli.Invocation:
     that asking an act where it goes answers with the templated path the
     document is written in."""
     return cli.Invocation(
-        kind=kind, stage="{stage}", name="{name}", mac="{mac}", code="{code}", slot="{slot}"
+        kind=kind,
+        stage="{stage}",
+        name="{name}",
+        mac="{mac}",
+        code="{code}",
+        slot="{slot}",
+        session="{session}",
     )
 
 

@@ -1068,3 +1068,217 @@ class SecretValue(BaseModel):
             "empty."
         ),
     )
+
+
+# The conversation store's session shapes
+#
+# Here rather than beside the routes that answer them, for the reason
+# every other model on this page is here: two surfaces know these shapes
+# and only one of them may pay for FastAPI. `vinga session list` and
+# `vinga session show` read an answer by validating it against the shape
+# the API said it would send, and a CLI that imported
+# `conversations/api.py` to find out would import FastAPI, SQLAlchemy and
+# the whole store with it.
+#
+# `CLOSE_REASONS` is written out rather than read off
+# `conversations/schema.py`, which is the same trade the mask above
+# makes and for the same reason: this module imports nothing of this
+# server. The two are held equal from the outside, by the pin in
+# `test_api_openapi.py` that compares the rendered document's enum
+# against the schema's own tuple.
+
+CLOSE_REASONS = ("limit", "idle", "drain", "client", "error")
+
+CloseReason = Literal[*CLOSE_REASONS]
+
+
+class SessionSummary(BaseModel):
+    """One session as the listing shows it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: int = Field(
+        description=(
+            "The session's monotonic row id, never reused. It is this listing's "
+            "cursor: a page asked for with it holds the sessions before it."
+        )
+    )
+    session: str = Field(
+        description=(
+            "The session's uuid hex, which addresses the two reads below and names the "
+            "capture triplet of the same conversation."
+        )
+    )
+    device: str | None = Field(
+        description=(
+            "The device's MAC in canonical form, and null when the session was "
+            "rejected before one was understood."
+        )
+    )
+    agent: str | None = Field(
+        description="The agent the session opened with, before any handover."
+    )
+    started_at: str = Field(description="When the session opened, as an ISO-8601 instant in UTC.")
+    closed_at: str | None = Field(
+        description=(
+            "When it closed, in the same form. Null in a session that is still running "
+            "and in one whose close was never persisted, which a crash leaves behind."
+        )
+    )
+    duration_s: float | None = Field(
+        description="How long it lasted, in seconds. A measured number: null under metrics-off."
+    )
+    close_reason: CloseReason | str | None = Field(
+        description=(
+            "What ended it, one of `limit`, `idle`, `drain`, `client` or `error`, the "
+            "first cause to fire winning. Null until it closes. The five tokens are "
+            "the set a server latches, and the column that holds them is deliberately "
+            "unconstrained, so a token a later release adds is served as it was "
+            "stored: a read that refused one would drop a whole page over one row, "
+            "the same reason the database refuses none."
+        )
+    )
+    turns: int = Field(description="How many turns this session holds.")
+
+
+class SessionList(BaseModel):
+    """One page of the session listing, newest first."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[SessionSummary] = Field(
+        description="The sessions on this page, newest first."
+    )
+    next_cursor: int | None = Field(
+        description=(
+            "What to send as `cursor` for the page after this one, and null when this "
+            "was the last: it is the id of the last item here, and the next page holds "
+            "the sessions below it. Null means there is nothing further right now, not "
+            "that there never will be; a listing re-read later starts from the top."
+        )
+    )
+
+
+class SessionDetail(BaseModel):
+    """One session, whole: its row and what hangs off it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: int = Field(description="The session's monotonic row id, the listing's cursor.")
+    session: str = Field(description="The session's uuid hex.")
+    device: str | None = Field(
+        description="The device's MAC in canonical form, or null when none was understood."
+    )
+    client: str | None = Field(
+        description="The client identifier the device announced, when it announced one."
+    )
+    agent: str | None = Field(
+        description="The agent the session opened with, before any handover."
+    )
+    agents: list[str] | None = Field(
+        description=(
+            "Every agent the device is bound to, by name, as the binding resolved at "
+            "open. The first is the agent the session started on."
+        )
+    )
+    protocol: str | None = Field(
+        description="The device protocol version this session negotiated."
+    )
+    started_at: str = Field(description="When the session opened, as an ISO-8601 instant in UTC.")
+    closed_at: str | None = Field(description="When it closed, in the same form, or null.")
+    duration_s: float | None = Field(
+        description="How long it lasted, in seconds. Null under metrics-off."
+    )
+    close_reason: CloseReason | str | None = Field(
+        description=(
+            "What ended it, one of the five tokens the listing describes, or null "
+            "until it closes."
+        )
+    )
+    server_version: str | None = Field(
+        description="The server version that recorded this session."
+    )
+    revision: str | None = Field(description="The build revision that recorded it.")
+    providers: dict[str, Any] | None = Field(
+        description=(
+            "The resolved provider entry per pipeline stage, the same structure the "
+            "capture manifest carries. It holds environment variable names, never "
+            "credentials."
+        )
+    )
+    metrics: bool = Field(
+        description=(
+            "Whether metrics storage was on for this session, so a null number is "
+            "distinguishable from a number that was never stored."
+        )
+    )
+    text: bool = Field(
+        description=(
+            "Whether text storage was on for this session, so a null utterance is "
+            "distinguishable from an utterance that was never stored."
+        )
+    )
+    dropped: int = Field(
+        description=(
+            "Records this session lost: events refused at the writer's in-flight bound, "
+            "and anything a failed transaction rolled back. The store recording its own "
+            "incompleteness, the way the capture manifest records `complete`."
+        )
+    )
+    turns: int = Field(description="How many turns this session holds.")
+    events: int = Field(
+        description=(
+            "How many events rows it holds: the decision track, `session_open` through "
+            "`session_closed`. Zero under metrics-off, where no events row lands. They "
+            "are deliberately not served over REST; the database is that surface."
+        )
+    )
+
+
+class Erasure(BaseModel):
+    """What a deletion took, per table.
+
+    Counts rather than an acknowledgement sentence, because the caller
+    of a purge asked about a set it named by selector and cannot know
+    what was in it. Six numbers rather than one, because the tables go
+    for different reasons: a session's own row, the turns that named it
+    wherever their thread is, the invocations under those turns, the
+    session's telemetry, the recap checkpoints whose coverage held an
+    erased turn, and the threads left with nothing.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    sessions: int = Field(
+        description="How many session rows were deleted, at most one per selector match."
+    )
+    turns: int = Field(
+        description=(
+            "How many turns went with them, including turns of a thread that is still "
+            "live: erasing a session erases its dialogue wherever it belongs, and the "
+            "thread honestly keeps a gap."
+        )
+    )
+    tool_invocations: int = Field(
+        description="How many tool invocation rows hung off those turns."
+    )
+    events: int = Field(
+        description=(
+            "How many events rows those sessions held. Zero for a session recorded "
+            "under metrics-off, which wrote none."
+        )
+    )
+    conversations: int = Field(
+        description=(
+            "How many threads were deleted whole because they lost every turn. A "
+            "thread that kept turns is not counted here: it survives, renamed from "
+            "its earliest surviving turn if the one its title came from is gone."
+        )
+    )
+    milestones: int = Field(
+        description=(
+            "How many recap checkpoints were deleted: those whose recorded coverage "
+            "held an erased turn, every checkpoint descended from one along the "
+            "`parent` lineage, and those belonging to a thread that went whole."
+        )
+    )

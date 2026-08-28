@@ -25,6 +25,18 @@ and the selection tools. What all three stop knowing:
 - **The retention ruleset**, whose unit is the thread rather than the
   session, and whose ordering between the three rules is the whole of
   why a live thread never loses its turns to an old session.
+- **What erasure reaches.** Deleting a session deletes its turns
+  wherever their thread is, and in the same transaction everything
+  those turns fed: the title derived from one, the recap checkpoints
+  that summarized one and everything descended from those, the activity
+  stamp one wrote, and the thread itself once it has nothing left. The
+  automatic path and the on-demand one share these helpers rather than
+  keeping two sets of bookkeeping, which is what the amendment to #190
+  means by the purge being absorbed rather than rivaled.
+- **That a lost write is a fact about a thread.** `flag_incomplete`
+  writes the mark the writer latched, and answers which threads there
+  was a row to mark, because a thread whose first turn was the lost
+  batch has none yet.
 
 Nothing here opens a transaction or an engine. Every function takes the
 caller's connection and runs inside the caller's transaction, which is
@@ -184,6 +196,13 @@ def landed(connection: Any, landing: Landing) -> None:
     seen has its activity moved. Both are decided by asking, rather
     than by an upsert, because the two do different things and only the
     first one has a title to derive.
+
+    A materializing landing carries the writer's pending mark into the
+    insert, so a thread whose earlier turns were lost says so from its
+    first byte rather than for as long as it takes a second transaction
+    to land. A landing on a thread that already has a row never touches
+    the mark in either direction: a later turn arriving does not fill an
+    earlier gap, and the standalone flag write is what sets it.
 
     A landing this module cannot attribute is refused rather than
     stored, and the refusal takes the marker's whole batch with it. Two

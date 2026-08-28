@@ -1,0 +1,617 @@
+"""Erasing a session, and what erasure means to everything it fed.
+
+Two deletion surfaces on one helper: the addressed form a user
+interface and the noun grammar want, and the selector purge the retired
+`conversations purge` command settled the semantics of (#282). They are
+driven through the real routes here, because what is under test is a
+transaction opened per request against a store no writer is holding
+open, which is what a deployment with recording off has.
+
+What the file is about, beyond the round trip:
+
+- **Erasure outranks every copy the store derived.** A title is the
+  first turn's utterance, a milestone is a summary of turns, and
+  `last_active_at` is when the newest turn landed. Deleting the turns
+  behind any of them has to move or remove it, and the sentinel test is
+  the proof: a credential-shaped utterance that became a title is hunted
+  through every table and every read surface after its session goes.
+- **A purge names less than everything.** The three selectors combine
+  with AND, the day is strict, and a purge that named nothing is refused
+  rather than answered with the whole store.
+- **Nothing a caller sends is quoted back.** The selectors and the
+  session id are the only values these routes are handed, and the
+  refusals name the rule instead of the value.
+"""
+
+import datetime as dt
+import json
+import logging
+from typing import Any
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from sqlalchemy import insert, text
+
+from tests.support.configs import DEVICE_MAC
+from tests.support.problems import refused
+from vinga_server import logs
+from vinga_server.config.api import build_api
+from vinga_server.config.models import DatabaseConfig
+from vinga_server.conversations.records import TurnRecord
+from vinga_server.conversations.schema import conversation_milestones
+from vinga_server.conversations.store import ConversationStore, open_conversations
+from vinga_server.db import read_engine
+
+TOKEN = "test-api-token-" + "0123456789abcdef" * 2
+
+# Shaped like something an operator would be horrified to find surviving
+# a deletion, and so that a substring check for it cannot match by
+# accident.
+SENTINEL = "sk-test-1d4a90fe-never-a-real-credential"
+
+OTHER_DEVICE = "11:22:33:44:55:66"
+
+FIRST = "9f0c1d2e3a4b5c6d7e8f90a1b2c3d4e5"
+
+SECOND = "1a2b3c4d5e6f708192a3b4c5d6e7f809"
+
+# Every table the store owns, for the sentinel hunt: what a deletion
+# leaves behind is not a question about one table.
+TABLES = (
+    "sessions",
+    "conversations",
+    "turns",
+    "tool_invocations",
+    "conversation_milestones",
+    "events",
+)
+
+
+def manifest(device: str = DEVICE_MAC.lower(), started_at: str | None = None) -> dict[str, Any]:
+    return {
+        "started_at": started_at or "2026-08-15T10:00:00+00:00",
+        "server": {"version": "0.1.0", "revision": "abc1234"},
+        "device": {"mac": device, "client": "test"},
+        "protocol": "1",
+        "agent": "sam",
+        "agents": ["sam"],
+        "providers": {"llm": {"name": "claude", "type": "anthropic"}},
+    }
+
+
+def a_turn(conversation: str = FIRST, heard: str = "turn the light on") -> TurnRecord:
+    return TurnRecord(
+        at=101.2, conversation=conversation, agent="sam", heard=heard, reply="Done."
+    )
+
+
+@pytest.fixture
+def api() -> FastAPI:
+    return build_api(TOKEN, DatabaseConfig())
+
+
+@pytest.fixture
+def client(api: FastAPI) -> TestClient:
+    return TestClient(api, headers={"Authorization": f"Bearer {TOKEN}"})
+
+
+class Recorder:
+    """A store driven the way the server drives one, and let go of.
+
+    Through the real `ConversationStore` rather than through inserts, so
+    what a deletion meets is what the writer produces: titles derived,
+    activity moved, and the threads and sessions crossing each other the
+    way two real conversations do.
+    """
+
+    def __init__(self, at: dt.datetime) -> None:
+        self.at = at
+        self.store = ConversationStore(
+            DatabaseConfig(), now=lambda: self.at, retention_days=0
+        )
+        self.store.start()
+
+    def session(
+        self, name: str, device: str = DEVICE_MAC.lower(), started_at: str | None = None
+    ) -> None:
+        self.store.open_session(name, 100.0, manifest(device, started_at))
+
+    def turn(self, session: str, conversation: str = FIRST, heard: str = "hello") -> None:
+        self.store.record_turn(session, a_turn(conversation, heard))
+
+    def event(self, session: str) -> None:
+        self.store.record_event(session, "heard", logging.INFO, {"duration_s": 1.0}, 101.0)
+
+    def close(self, name: str) -> None:
+        self.store.close_session(name, duration_s=2.0, reason="client")
+
+    def move_to(self, at: dt.datetime) -> None:
+        """Wind the writer's clock forward, with everything before it
+        committed.
+
+        A fresh store rather than a mutated lambda, because the writer
+        is a thread: a clock changed while records are still queued
+        stamps some of them with the new reading and some with the old,
+        and which is which is a race. Stopping drains, so what follows
+        is stamped later than everything before it by construction.
+        """
+        self.store.stop()
+        self.at = at
+        self.store = ConversationStore(
+            DatabaseConfig(), now=lambda: self.at, retention_days=0
+        )
+        self.store.start()
+
+    def done(self) -> None:
+        self.store.stop()
+
+
+def stored(table: str) -> list[dict[str, Any]]:
+    engine = read_engine(DatabaseConfig())
+    try:
+        with engine.connect() as connection:
+            return [
+                dict(row)
+                for row in connection.execute(
+                    text(f"select * from conversations.{table} order by id")
+                ).mappings()
+            ]
+    finally:
+        engine.dispose()
+
+
+def plant_milestone(
+    conversation: str, from_turn: int, after_turn: int, parent: int | None, body: str
+) -> int:
+    """One recap checkpoint, written the way milestone 5's flow will.
+
+    Planted rather than produced, deliberately: the table is in the
+    baseline and the flow that writes a row lands later, and the
+    provenance cascade has to be right on the day the rows appear rather
+    than the day it is first exercised in anger.
+    """
+    engine = open_conversations(DatabaseConfig())
+    try:
+        with engine.begin() as connection:
+            return int(
+                connection.execute(
+                    insert(conversation_milestones)
+                    .values(
+                        conversation=conversation,
+                        from_turn=from_turn,
+                        after_turn=after_turn,
+                        parent=parent,
+                        created_at="2026-08-15T12:00:00+00:00",
+                        text=body,
+                    )
+                    .returning(conversation_milestones.c.id)
+                ).scalar_one()
+            )
+    finally:
+        engine.dispose()
+
+
+def _leaked(caplog: pytest.LogCaptureFixture) -> str:
+    """Everything this server logged, in both shipped formats.
+
+    This server's own channels, and deliberately not every record in the
+    process: the HTTP client making these requests logs the URL it asked
+    for, which is the caller's own terminal rather than anything this
+    server wrote, and it is here only because a TestClient is what
+    stands in for curl.
+    """
+    return "".join(
+        record.getMessage() + str(record.__dict__) + logs.JsonFormatter().format(record)
+        for record in caplog.records
+        if record.name.startswith("vinga_server")
+    )
+
+
+def erase(client: TestClient, session: str) -> dict[str, int]:
+    response = client.delete(f"/sessions/{session}")
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def purge(client: TestClient, **selectors: str) -> dict[str, int]:
+    response = client.request("DELETE", "/sessions", params=selectors)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+# The addressed erasure
+
+
+def test_a_deleted_session_takes_its_rows_and_its_thread_with_it(client) -> None:
+    """One session, one thread, nothing shared: the whole of it goes,
+    and the thread goes with it because a thread with no turns is a
+    title and two timestamps."""
+    recording = Recorder(dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC))
+    recording.session("alpha")
+    recording.event("alpha")
+    recording.turn("alpha", FIRST, "what is the weather like")
+    recording.close("alpha")
+    recording.done()
+
+    taken = erase(client, "alpha")
+
+    assert taken == {
+        "sessions": 1,
+        "turns": 1,
+        "tool_invocations": 0,
+        "events": 1,
+        "conversations": 1,
+        "milestones": 0,
+    }
+    for table in TABLES:
+        assert stored(table) == [], table
+
+
+def test_an_unknown_session_is_a_404_naming_no_value(client) -> None:
+    """Addressed and not there. The id arrived in the path and is not
+    repeated: what a caller needs is the reason a row it expected is
+    not there."""
+    response = client.delete("/sessions/nothing-of-that-id")
+
+    assert response.status_code == 404
+    detail = refused(response.json(), 404)
+    assert "nothing-of-that-id" not in response.text
+    assert "no session of that id" in detail.lower()
+
+
+def test_a_deletion_needs_the_token(api) -> None:
+    """The gate is in front of routing, so an erasure is behind it for
+    the same reason every read is."""
+    with TestClient(api) as anonymous:
+        assert anonymous.delete("/sessions/alpha").status_code == 401
+        assert anonymous.request("DELETE", "/sessions").status_code == 401
+
+
+# What a deletion has to move, and what it has to remove
+
+
+def test_a_live_thread_keeps_its_other_turns_and_is_renamed(client) -> None:
+    """The case the whole cascade exists for: one thread spanning two
+    sessions, the older session erased.
+
+    The thread survives with the turns it still has, and the title
+    follows, because a title IS the first utterance and the utterance it
+    was is gone. `last_active_at` is left where it is, since the turn
+    that wrote it is still there.
+    """
+    began = dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC)
+    recording = Recorder(began)
+    recording.session("alpha")
+    recording.turn("alpha", FIRST, "the first thing said")
+    recording.close("alpha")
+    recording.move_to(began + dt.timedelta(hours=3))
+    recording.session("beta", started_at=(began + dt.timedelta(hours=3)).isoformat())
+    recording.turn("beta", FIRST, "and the thing said later")
+    recording.close("beta")
+    recording.done()
+    before = stored("conversations")[0]
+
+    taken = erase(client, "alpha")
+
+    assert (taken["sessions"], taken["turns"], taken["conversations"]) == (1, 1, 0)
+    (thread,) = stored("conversations")
+    assert thread["title"] == "and the thing said later"
+    # Untouched: the newest turn is the one that wrote it and it is
+    # still here, so there is nothing to recompute.
+    assert thread["last_active_at"] == before["last_active_at"]
+    assert [turn["session"] for turn in stored("turns")] == ["beta"]
+
+
+def test_activity_moves_back_when_the_turn_that_wrote_it_is_erased(client) -> None:
+    """The other half, and the honest half. A turn carries its offset
+    from its session's open and no wall clock of its own, so once the
+    newest turn is gone the exact instant is not a stored fact: the
+    stamp falls back to when the surviving turns' sessions began, which
+    is never later than the truth."""
+    began = dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC)
+    recording = Recorder(began)
+    recording.session("alpha")
+    recording.turn("alpha", FIRST, "the first thing said")
+    recording.close("alpha")
+    later = began + dt.timedelta(hours=3)
+    recording.move_to(later)
+    recording.session("beta", started_at=later.isoformat())
+    recording.turn("beta", FIRST, "and the thing said later")
+    recording.close("beta")
+    recording.done()
+
+    erase(client, "beta")
+
+    (thread,) = stored("conversations")
+    assert thread["title"] == "the first thing said"
+    # The thread's own beginning, which is the floor: it is later than
+    # the surviving session's `started_at` and never later than the
+    # instant the surviving turn really landed.
+    assert thread["last_active_at"] == began.isoformat()
+    # And never before the thread began, which is the floor that keeps
+    # the pair ordered.
+    assert thread["created_at"] <= thread["last_active_at"]
+
+
+def test_only_the_thread_the_deletion_touched_is_recomputed(client) -> None:
+    """A session that talked to two agents holds two threads, and the
+    one whose turns are elsewhere is not renamed, not moved and not
+    counted."""
+    recording = Recorder(dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC))
+    recording.session("alpha")
+    recording.turn("alpha", FIRST, "the first thread")
+    recording.close("alpha")
+    recording.session("beta")
+    recording.turn("beta", SECOND, "the second thread")
+    recording.close("beta")
+    recording.done()
+    untouched = {row["conversation"]: dict(row) for row in stored("conversations")}[SECOND]
+
+    erase(client, "alpha")
+
+    (thread,) = stored("conversations")
+    assert thread == untouched
+
+
+def test_a_milestone_covering_an_erased_turn_dies_with_its_lineage(client) -> None:
+    """A summary of erased content is that content, whether it arrived
+    directly or through an earlier recap the summarizer consumed. The
+    parent's coverage holds the erased turn; the child holds only the
+    parent, and both go."""
+    recording = Recorder(dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC))
+    recording.session("alpha")
+    recording.turn("alpha", FIRST, "the summarized one")
+    recording.close("alpha")
+    recording.session("beta")
+    recording.turn("beta", FIRST, "the one after it")
+    recording.turn("beta", FIRST, "and one more")
+    recording.close("beta")
+    recording.done()
+    ids = [turn["id"] for turn in stored("turns")]
+    parent = plant_milestone(FIRST, ids[0], ids[0], None, f"a recap of {SENTINEL}")
+    child = plant_milestone(FIRST, ids[1], ids[2], parent, "a recap of the recap")
+    unrelated = plant_milestone(FIRST, ids[1], ids[2], None, "covers only survivors")
+
+    taken = erase(client, "alpha")
+
+    assert taken["milestones"] == 2
+    assert [row["id"] for row in stored("conversation_milestones")] == [unrelated]
+    assert parent not in {row["id"] for row in stored("conversation_milestones")}
+    assert child not in {row["id"] for row in stored("conversation_milestones")}
+
+
+def test_a_thread_that_loses_every_turn_loses_its_milestones_too(client) -> None:
+    """Deleted whole means whole. A checkpoint left behind would be a
+    summary of a conversation that is not there any more."""
+    recording = Recorder(dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC))
+    recording.session("alpha")
+    recording.turn("alpha", FIRST, "the only thing said")
+    recording.close("alpha")
+    recording.done()
+    ids = [turn["id"] for turn in stored("turns")]
+    plant_milestone(FIRST, ids[0], ids[0], None, "a recap")
+
+    taken = erase(client, "alpha")
+
+    assert taken["conversations"] == 1
+    assert taken["milestones"] == 1
+    assert stored("conversation_milestones") == []
+
+
+def test_the_planted_title_is_gone_from_every_table_and_surface(client) -> None:
+    """The reviewer's test. A credential-shaped utterance becomes the
+    thread's title, which is a copy of it in a second table, and the
+    session it was said in is then erased.
+
+    Hunted afterwards through every table the store owns and through
+    the read surfaces that serve them, because a deletion that left the
+    derived copy behind would have left exactly the thing somebody asked
+    to have removed.
+    """
+    recording = Recorder(dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC))
+    recording.session("alpha")
+    recording.turn("alpha", FIRST, SENTINEL)
+    recording.turn("alpha", FIRST, "and something ordinary")
+    recording.close("alpha")
+    recording.done()
+    # Where it belongs, before the deletion: the utterance and the title
+    # it became.
+    assert stored("conversations")[0]["title"] == SENTINEL
+
+    erase(client, "alpha")
+
+    for table in TABLES:
+        for row in stored(table):
+            assert SENTINEL not in json.dumps(row, default=str), table
+    listing = client.get("/sessions")
+    assert listing.status_code == 200
+    assert SENTINEL not in listing.text
+    assert listing.json()["items"] == []
+
+
+def test_a_session_deleted_while_it_is_talking_stops_being_recorded(client) -> None:
+    """The tombstone rule, over HTTP. The writer confirms its session
+    still exists at every marker, so a deletion that lands between two
+    turns is final rather than a race the next turn undoes.
+
+    The conversation itself carries on to its natural end, because
+    neither the runtime nor the device edge knows a deletion happened.
+    What it says afterwards is not recorded, which is what erasure
+    means.
+    """
+    recording = Recorder(dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC))
+    recording.session("alpha")
+    recording.turn("alpha", FIRST, "before the deletion")
+    # Drained rather than assumed: the deletion has to land after this
+    # turn's marker committed and before the next one.
+    recording.store.stop()
+    assert len(stored("turns")) == 1
+
+    erase(client, "alpha")
+
+    carrying_on = Recorder(dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC))
+    carrying_on.store.stop()
+    talking = ConversationStore(DatabaseConfig(), retention_days=0)
+    talking.start()
+    talking.open_session("alpha", 100.0, manifest())
+    talking.record_turn("alpha", a_turn(FIRST, "after it"))
+    talking.close_session("alpha", duration_s=1.0, reason="client")
+    talking.stop()
+    # The open re-created the session row, which is a new session with
+    # the same id and not a resurrection of the old one's rows.
+    assert [turn["heard"] for turn in stored("turns")] == ["after it"]
+
+
+# The purge and its three selectors
+
+
+def test_a_purge_by_session_is_the_addressed_deletion(client) -> None:
+    """The deliberate overlap. Both forms go through one helper, so a
+    bare `session=` purge and the addressed delete are the same act
+    reached two ways."""
+    recording = Recorder(dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC))
+    recording.session("alpha")
+    recording.turn("alpha", FIRST)
+    recording.close("alpha")
+    recording.session("beta")
+    recording.turn("beta", SECOND)
+    recording.close("beta")
+    recording.done()
+
+    taken = purge(client, session="alpha")
+
+    assert (taken["sessions"], taken["turns"], taken["conversations"]) == (1, 1, 1)
+    assert [row["session"] for row in stored("sessions")] == ["beta"]
+
+
+def test_a_purge_by_device_takes_that_boards_sessions(client) -> None:
+    recording = Recorder(dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC))
+    recording.session("alpha")
+    recording.turn("alpha", FIRST)
+    recording.close("alpha")
+    recording.session("beta", device=OTHER_DEVICE)
+    recording.turn("beta", SECOND)
+    recording.close("beta")
+    recording.done()
+
+    taken = purge(client, device=OTHER_DEVICE.upper())
+
+    assert taken["sessions"] == 1
+    assert [row["session"] for row in stored("sessions")] == ["alpha"]
+
+
+def test_the_day_selector_is_strict_about_its_own_day(client) -> None:
+    """A session that began at any moment of the named day survives,
+    which is what an operator means by "before the fifteenth"."""
+    recording = Recorder(dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC))
+    recording.session("old", started_at="2026-08-14T23:59:59+00:00")
+    recording.close("old")
+    recording.session("midnight", started_at="2026-08-15T00:00:00+00:00")
+    recording.close("midnight")
+    recording.session("later", started_at="2026-08-15T10:00:00+00:00")
+    recording.close("later")
+    recording.done()
+
+    taken = purge(client, before="2026-08-15")
+
+    assert taken["sessions"] == 1
+    assert {row["session"] for row in stored("sessions")} == {"midnight", "later"}
+
+
+def test_selectors_combine_so_every_one_of_them_has_to_match(client) -> None:
+    """AND, not OR: a purge always names less than each selector alone
+    would, which is the safe direction for something with no undo."""
+    recording = Recorder(dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC))
+    recording.session("old-here", started_at="2026-08-01T10:00:00+00:00")
+    recording.close("old-here")
+    recording.session("old-there", OTHER_DEVICE, "2026-08-01T10:00:00+00:00")
+    recording.close("old-there")
+    recording.session("new-here", started_at="2026-08-20T10:00:00+00:00")
+    recording.close("new-here")
+    recording.done()
+
+    taken = purge(client, device=DEVICE_MAC.lower(), before="2026-08-10")
+
+    assert taken["sessions"] == 1
+    assert {row["session"] for row in stored("sessions")} == {"old-there", "new-here"}
+
+
+def test_a_purge_applies_the_whole_cascade_to_the_set(client) -> None:
+    """Every per-session rule, over the set the selectors named, in one
+    transaction: the thread spanning the erased sessions is renamed from
+    what is left of it, and the one left with nothing is deleted."""
+    recording = Recorder(dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC))
+    recording.session("old-one", started_at="2026-08-01T10:00:00+00:00")
+    recording.turn("old-one", FIRST, "the first thing said")
+    recording.turn("old-one", SECOND, "a thread that ends here")
+    recording.close("old-one")
+    recording.session("old-two", started_at="2026-08-02T10:00:00+00:00")
+    recording.turn("old-two", FIRST, "still the first thread")
+    recording.close("old-two")
+    recording.session("new", started_at="2026-08-20T10:00:00+00:00")
+    recording.turn("new", FIRST, "and the newest thing")
+    recording.close("new")
+    recording.done()
+
+    taken = purge(client, before="2026-08-10")
+
+    assert (taken["sessions"], taken["turns"], taken["conversations"]) == (2, 3, 1)
+    (thread,) = stored("conversations")
+    assert thread["conversation"] == FIRST
+    assert thread["title"] == "and the newest thing"
+
+
+def test_a_purge_with_no_selector_is_refused(client) -> None:
+    """The whole store is not something this endpoint can be asked for.
+    A query string that lost its arguments to a shell, a proxy or a typo
+    would otherwise erase everything, and there is no undo behind it."""
+    recording = Recorder(dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC))
+    recording.session("alpha")
+    recording.turn("alpha", FIRST)
+    recording.close("alpha")
+    recording.done()
+
+    response = client.request("DELETE", "/sessions")
+
+    assert response.status_code == 422
+    detail = refused(response.json(), 422)
+    assert "at least one of session, device or before" in detail
+    assert len(stored("sessions")) == 1
+
+
+@pytest.mark.parametrize(
+    ("selector", "value"),
+    [("device", "not-a-mac"), ("before", "the fifteenth"), ("before", "20260815")],
+)
+def test_an_unreadable_selector_is_refused_without_being_quoted(
+    client, selector: str, value: str
+) -> None:
+    """The rule the reads already hold to, on the one surface where
+    getting it wrong destroys something: what arrived is the caller's,
+    and a refusal that echoed it would be the one place this API prints
+    what it was handed."""
+    response = client.request("DELETE", "/sessions", params={selector: value})
+
+    assert response.status_code == 422
+    detail = refused(response.json(), 422)
+    assert value not in response.text
+    assert "not quoted back" in detail
+
+
+def test_a_refused_purge_says_nothing_in_the_log_either(
+    client, caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The refusal is a fixed sentence and the value that caused it is
+    dropped rather than carried: no exception text, no chain, and
+    nothing on either stream."""
+    with caplog.at_level(logging.DEBUG):
+        response = client.request("DELETE", "/sessions", params={"before": SENTINEL})
+        assert refused(response.json(), 422)
+        assert SENTINEL not in response.text
+
+    rendered = _leaked(caplog)
+    captured = capsys.readouterr()
+    assert SENTINEL not in rendered
+    assert SENTINEL not in captured.out
+    assert SENTINEL not in captured.err
