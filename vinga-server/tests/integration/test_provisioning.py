@@ -43,10 +43,17 @@ import pytest
 
 from tests.conftest import reset_database
 from tests.support.commands import COMMAND_SECONDS
+from vinga_server.config.loader import StorageError
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations import schema as conversations_schema
 from vinga_server.conversations.store import open_conversations
-from vinga_server.db import DEFAULT_PASSWORD, PASSWORD_ENV, connection_url, open_database
+from vinga_server.db import (
+    DEFAULT_PASSWORD,
+    PASSWORD_ENV,
+    UNREACHABLE,
+    connection_url,
+    open_database,
+)
 from vinga_server.db import schema as domain_schema
 
 PROVISIONING = Path(__file__).resolve().parents[3] / "deploy" / "postgres-init.sql"
@@ -204,10 +211,10 @@ def server_role(blank_database: str) -> Iterator[str]:
         _sql("postgres", f'drop role if exists "{name}"')
 
 
-@pytest.fixture
-def provisioned(blank_database: str, server_role: str) -> str:
-    """A blank database with the committed file run against it by an
-    administrator, naming a server role that is somebody else."""
+def _require_the_file() -> None:
+    """The two prerequisites every case here has, refused rather than
+    skipped: the committed file, and the interpreter it is written
+    for."""
     if not PROVISIONING.is_file():  # pragma: no cover - a moved file
         pytest.fail(f"the provisioning file moved out from under this test: {PROVISIONING}")
     if shutil.which("psql") is None:
@@ -218,6 +225,13 @@ def provisioned(blank_database: str, server_role: str) -> str:
             "rather than a skip: the read-only role's whole contract is asserted "
             "here and nowhere else."
         )
+
+
+@pytest.fixture
+def provisioned(blank_database: str, server_role: str) -> str:
+    """A blank database with the committed file run against it by an
+    administrator, naming a server role that is somebody else."""
+    _require_the_file()
     _run_the_file(blank_database, server_role)
     return blank_database
 
@@ -427,6 +441,94 @@ def test_the_file_lands_the_same_place_run_after_the_first_migration(
     assert _as_analyst(owned_database, "select * from record.later_still") == (
         "allowed"
     )
+
+
+# The upgrade, which is this file run again
+
+
+# The schema the store lived in before it was renamed `record`. Written
+# out rather than imported, because it is the thing that went away:
+# nothing in the current tree still names it, and nothing later can
+# derive it.
+PREVIOUS_STORE_SCHEMA = "conversations"
+
+
+def _the_previous_files_shape(database: str, server_role: str) -> None:
+    """A database provisioned the way the file provisioned one before
+    the store's schema was renamed.
+
+    The old file's own statements, run as the administrator: the two
+    schemas that release named, owned by the server role, and the
+    analyst role granted on the one the store lived in. Written here
+    rather than kept as a second committed file, because what is being
+    upgraded FROM is a released shape rather than anything this
+    repository still ships, and a copy of a retired file beside the
+    current one would be a second thing to keep honest.
+
+    Only the half the upgrade turns on is reproduced: the schemas, the
+    role, and its grants. The role-level timeouts and the domain revoke
+    are the file's own contract and are asserted where the file itself
+    is run.
+    """
+    for schema in ("domain", PREVIOUS_STORE_SCHEMA):
+        _sql(database, f'create schema if not exists "{schema}" authorization "{server_role}"')
+    if _role_exists(RO_ROLE):
+        _sql("postgres", f"alter role \"{RO_ROLE}\" with login password '{RO_PASSWORD}'")
+    else:
+        _sql("postgres", f"create role \"{RO_ROLE}\" login password '{RO_PASSWORD}'")
+    _sql(database, f'grant connect on database "{database}" to "{RO_ROLE}"')
+    _sql(database, f'grant usage on schema "{PREVIOUS_STORE_SCHEMA}" to "{RO_ROLE}"')
+    _sql(
+        database,
+        f'grant select on all tables in schema "{PREVIOUS_STORE_SCHEMA}" to "{RO_ROLE}"',
+    )
+    _sql(
+        database,
+        f'alter default privileges for role "{server_role}" '
+        f'in schema "{PREVIOUS_STORE_SCHEMA}" grant select on tables to "{RO_ROLE}"',
+    )
+
+
+def test_a_deployment_on_the_previous_file_upgrades_by_rerunning_it(
+    blank_database: str, server_role: str
+) -> None:
+    """The upgrade the schema rename really asks for, run in the order
+    the documentation gives it.
+
+    The rename ships no migration, so what an operator does is rerun the
+    updated file and then boot. This case is why that order is stated
+    rather than left to be discovered: on the privilege contract this
+    lane exists to hold, the server role has no `CREATE` on the database
+    and cannot make the new schema for itself, so a server started first
+    refuses with the fixed database refusal instead of quietly recording
+    into a store nobody provisioned.
+
+    The domain half is untouched by the rename and migrates either way,
+    which is what makes the refusal specific rather than a database that
+    is simply unreachable. After the rerun the record half migrates and
+    the analyst reads it, which is the other half of what the file is
+    for: an owner-role deployment that skipped the rerun would have the
+    schema and no grants on it.
+    """
+    _require_the_file()
+    settings = _as_server_role(blank_database, server_role)
+    _the_previous_files_shape(blank_database, server_role)
+
+    open_database(settings).dispose()
+    with pytest.raises(StorageError) as refusal:
+        open_conversations(settings)
+    assert str(refusal.value) == UNREACHABLE
+
+    _run_the_file(blank_database, server_role)
+
+    open_conversations(settings).dispose()
+    for table in conversations_schema.TABLES:
+        assert _as_analyst(blank_database, f"select * from record.{table.name}") == (
+            "allowed"
+        ), table.name
+    # And the schema the store used to live in is still standing, which
+    # is what "the old one is left where it is" means.
+    assert _owner_of(blank_database, PREVIOUS_STORE_SCHEMA) == server_role
 
 
 def test_the_file_runs_again_over_what_it_already_made(
