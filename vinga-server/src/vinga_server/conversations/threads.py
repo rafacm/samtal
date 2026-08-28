@@ -56,6 +56,7 @@ from typing import Any
 
 from sqlalchemy import ColumnElement, delete, func, select, tuple_, update
 
+from vinga_server.conversations import hydration
 from vinga_server.conversations.schema import (
     conversation_milestones,
     conversations,
@@ -287,8 +288,9 @@ def flag_incomplete(connection: Any, threads: Iterable[str]) -> set[str]:
 
 # --- the reads --------------------------------------------------------
 #
-# What a thread looks like from outside it, which is three shapes and a
-# search. They live here rather than beside the routes for the reason
+# What a thread looks like from outside it, which is three shapes, a
+# search and the backlog a resume rebuilds a conversation out of. They
+# live here rather than beside the routes for the reason
 # the deletions do: the join topology is this module's, and a caller
 # that assembled a thread out of `conversations`, `turns` and
 # `conversation_milestones` itself would be a second place for it to be
@@ -514,6 +516,86 @@ def candidates(connection: Any, agent: str, description: str) -> Candidates:
     if matching:
         return Candidates(matched=True, found=matching)
     return Candidates(matched=False, found=tuple(ranked[:RESUME_CANDIDATES]))
+
+
+@dataclass(frozen=True)
+class Backlog:
+    """One thread as the resume path needs it: who it belongs to,
+    whether its record is whole, and everything said on it oldest first.
+
+    The turns are already the hydrator's own type, because turning rows
+    into them is reading the store and reading the store is this
+    module's. What the resume path is left with is a budget and a
+    decision.
+
+    `agent` is answered rather than filtered on, so a caller that asked
+    for a thread belonging to somebody else is refused in its own words
+    rather than told the thread does not exist. `incomplete` is the mark
+    a lost write left, which a resume conveys as a caveat: an
+    acknowledgement speaks for one turn, and a hole in the middle of a
+    thread is exactly what no per-turn answer can describe.
+    """
+
+    conversation: str
+    agent: str
+    incomplete: bool
+    turns: tuple[hydration.StoredTurn, ...] = ()
+
+
+def backlog(connection: Any, conversation: str) -> Backlog | None:
+    """Everything one thread holds, or None when no row of that id is
+    here.
+
+    None is the whole of what a deleted thread looks like from here, and
+    it is also what an id nobody ever wrote looks like. The two are one
+    answer on purpose: there is nothing to resume either way, and the
+    caller says so in one sentence rather than guessing which happened.
+
+    Three statements rather than a join. A thread's turns are read in
+    one order and its calls in another, and a join would answer one row
+    per call with the turn's text repeated on each of them, which for a
+    long thread is the dialogue several times over on the wire for a
+    handful of names.
+    """
+    found = connection.execute(
+        select(conversations.c.agent, conversations.c.incomplete).where(
+            conversations.c.conversation == conversation
+        )
+    ).first()
+    if found is None:
+        return None
+    spoken = connection.execute(
+        select(turns.c.id, turns.c.heard, turns.c.reply)
+        .where(turns.c.conversation == conversation)
+        .order_by(turns.c.id)
+    ).all()
+    called: dict[int, list[str]] = {}
+    for turn_id, name in connection.execute(
+        select(tool_invocations.c.turn, tool_invocations.c.name)
+        .where(
+            tool_invocations.c.turn.in_(
+                select(turns.c.id).where(turns.c.conversation == conversation)
+            ),
+            # A call the store could not name is left out rather than
+            # rendered as a blank: the name is null under text-off and
+            # for a call whose own name never parsed, and neither is
+            # something to tell a model ran.
+            tool_invocations.c.name.is_not(None),
+        )
+        .order_by(tool_invocations.c.turn, tool_invocations.c.position)
+    ):
+        called.setdefault(turn_id, []).append(name)
+    return Backlog(
+        conversation=conversation,
+        agent=found.agent,
+        incomplete=bool(found.incomplete),
+        turns=tuple(
+            hydration.StoredTurn(
+                heard=row.heard, reply=row.reply, tools=tuple(called.get(row.id, ()))
+            )
+            for row in spoken
+        ),
+    )
 
 
 def _turn_count() -> Any:
@@ -944,12 +1026,14 @@ __all__ = [
     "RESUME_CANDIDATES",
     "SUMMARY_COLUMNS",
     "TITLE_CHARACTERS",
+    "Backlog",
     "Candidate",
     "Candidates",
     "Erased",
     "Landing",
     "MisattributedTurn",
     "Pruned",
+    "backlog",
     "candidates",
     "detail",
     "dialogue",
