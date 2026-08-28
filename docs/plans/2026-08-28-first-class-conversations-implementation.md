@@ -250,7 +250,7 @@ resolution:
 
 ## M2: durable turns and session erasure
 
-PR TBD.
+PR #334.
 
 ### What landed
 

@@ -1097,7 +1097,7 @@ implementation-doc section when written.
   (all generated), `docs/concepts.md`, `docs/glossary.md`,
   `CHANGELOG.md`.
 - [x] [**Durable turns and session erasure**](2026-08-28-first-class-conversations-implementation.md#m2-durable-turns-and-session-erasure)
-  (PR TBD, branch `feature/conversations-m2`): `Acknowledgement` and the
+  (PR #334, branch `feature/conversations-m2`): `Acknowledgement` and the
   durable turn commits; session deletion and its
   provenance cascade in `threads.py`; `DELETE /api/sessions/{session}`
   and the selector purge; the `session`
