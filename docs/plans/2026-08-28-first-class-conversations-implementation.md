@@ -649,6 +649,9 @@ Eight, each with its reason.
   transaction is what "at its next marker" has to mean, and it is also
   what makes the arrangement testable rather than raced: the deletion
   is guaranteed to land between what is committed and what is not.
+  *Carried further by the review round below: immediately before the
+  transaction is still outside it, and the read is now inside, on every
+  attempt.*
 
 - **Publishing before the commit rather than after it is a trade, and
   it is stated where it is made.** After the commit leaves a window in
@@ -656,7 +659,10 @@ Eight, each with its reason.
   dead. Before it means an erasure whose transaction then fails leaves
   those ids dead for the rest of the process. Erasure outranks, so the
   loss is the one to take, and a failed deletion answers 500 and is made
-  again.
+  again. *Overturned by the review round below: the trade was a false
+  one. A process-level lock held across the commit and the publication
+  closes the window without paying for it, so both directions are right
+  and neither loss is taken.*
 
 - **Discovery has no stop list, and the tests found out.** A description
   carrying an ordinary word scores one against every thread that also
@@ -675,3 +681,130 @@ Eight, each with its reason.
   sentence now names it: a thread is created by its first turn and
   deleted when it loses its last, so an empty answer means the store
   moved between the two reads the one command makes.
+
+### PR review round
+
+External review of PR #335 (diff `main...eb941abb`), 2026-08-28.
+Backend: codex CLI 0.149.1, model `gpt-5.6-sol`, read-only sandbox,
+runtime 7m56s. Verdict as received: not mergeable. Five findings, three
+P1, one P2 and one P3. All valid, all accepted. Two of the P1s are one
+design and were fixed as one. Condensed but faithful, each with its
+resolution:
+
+1. **P1: untrusted JSON error bodies reach a terminal.** `_answer` in
+   `config/cli.py` relayed the `detail` of any JSON mapping that had
+   one, so a proxy answering `application/json` with
+   `{"detail": "<secret>"}` was printed verbatim by the new conversation
+   commands, control bytes included. Pass `detail` through only for
+   exact `application/problem+json` responses that validate as the
+   `Problem` shape with body status and title matching the response;
+   everything else is the fixed `_unreadable` sentence. Add a
+   poisoned-response test with a credential sentinel and
+   terminal-control bytes.
+
+   *Resolution*: accepted, `1181980c`, in the prescribed form. The path
+   is older than this plan: it arrived on 2026-08-11 with `de456b4b`,
+   "Turn the CLI into a client of the API" (#101), and every milestone
+   since has added callers to it, this one included. `_refusal` now
+   requires four things to agree before a body's own words are printed:
+   the media type is exactly `application/problem+json`, the body
+   validates as `Problem` (whose `extra="forbid"` rejects a page
+   carrying a `detail` beside anything else), its `status` is the
+   response's status, and its `title` is the phrase this API gives that
+   status. The validation error is dropped inside its arm, because
+   pydantic puts the input it rejected into its own message.
+   `PROBLEM_TITLES` and `PROBLEM_MEDIA_TYPE` moved from `config/api.py`
+   to `config/responses.py`, which is the deviation worth naming: the
+   CLI reads answers through that module alone
+   (`test_cli_import_weight.py` holds it), so importing the server's
+   table was not available and copying it would have been a second thing
+   to keep equal. Two tests, both driving a conversation command: one
+   answers `application/json` with the sentinel and the steering bytes,
+   the other answers a perfectly shaped problem under the wrong status.
+
+2. **P1: a deletion committing between the precheck and the writer's
+   transaction resurrects the thread.** `store.py` consumed the erasure
+   signal before `_durable` opened its serialized transaction, so a
+   deletion could take the database lock in that interval; the same race
+   exists between two retry attempts of the same batch. Consume the
+   signal inside `_durable`, after its transaction holds the advisory
+   lock, and re-check on every attempt.
+
+3. **P1: a rolled-back deletion permanently kills a live thread.**
+   `conversations/api.py` published the erased ids before the deleting
+   transaction committed, so a deletion that failed left a thread that
+   still exists marked dead for the rest of the process. Publish after
+   the commit, ordered so that publishing after the commit cannot race a
+   writer that has already re-checked.
+
+   *Resolution for 2 and 3*: accepted together, `400b780d`, because they
+   are one ordering read from two ends. The deletion side does its erase
+   under the advisory lock it already takes, commits, and then publishes;
+   the writer side consumes the signal inside its serialized region on
+   every attempt. What joins them is `store.erasure_order()`, a
+   process-level lock with one rule: it is taken outside the chain's
+   advisory lock, never inside, on both sides. A deletion holds it across
+   its transaction and its publication; the writer holds it from before
+   it opens a durable transaction until that transaction has the advisory
+   lock and has read what was published. The instant the advisory lock
+   alone cannot cover is the one between a deletion's commit, which
+   releases it, and the publication that follows; this covers exactly
+   that. Both sides say so where the signal is read and where it is
+   published, since three reviews have now circled this seam.
+
+   Two deviations. The first is the seam: the prescribed test deletes
+   after the precheck and before BEGIN, and after the fix there is no
+   such moment to stop in, because the read is inside the transaction.
+   The test that replaces it is the retry half of the same finding,
+   which the seam can express: the writer is parked in front of each
+   attempt (`Half.DURABLE` is announced per attempt now, following the
+   `Half` precedent the reviewer named), the first attempt is let into a
+   lock a second connection holds and gives up, the deletion commits and
+   publishes while the writer is parked in front of the second attempt,
+   and the second attempt discards the turn. Under the old ordering that
+   attempt writes the row back. The second deviation is smaller: a
+   marker whose whole batch was erased used to return before opening any
+   transaction, and now opens one that writes nothing, because the
+   discard it would have to consult happens inside. That costs a
+   transaction on a marker that follows a deletion, and it buys the only
+   ordering that is correct.
+
+   The commit-failure test is the reviewer's: the eraser the routes are
+   given is replaced by one that opens the real transaction, hands it
+   over and then fails before it can be saved, the request answers 500,
+   the row is still there, and the turns that follow land with true
+   acknowledgements.
+
+4. **P2: naive activity cursors break keyset pagination.**
+   `_instant` accepted datetimes with no timezone. Refuse absent
+   tzinfo or UTC offset, canonicalize aware values to UTC, and add
+   naive and date-only refusals plus an equal-timestamp pagination case
+   through the cursor.
+
+   *Resolution*: accepted, `86b555ca`. `fromisoformat` reads
+   `2026-08-15` and `2026-08-15T12:00:00` happily and both come back
+   without an offset, so written out again they are shorter than every
+   stored `last_active_at` and the lexicographic comparison puts them
+   before rows they are chronologically after. Both halves of naive are
+   checked, because a tzinfo whose `utcoffset` answers None leaves a
+   datetime as naive as no tzinfo at all. The refusal parametrization
+   gains the two readable dates that name no instant. The
+   equal-timestamp case existed already
+   (`test_equal_timestamps_split_across_a_boundary_lose_nothing`), so
+   what is new beside it is the canonicalization on that same boundary:
+   three threads sharing one instant, paged with the cursor handed back
+   at another offset. The parameter's own description and the module's
+   cursor paragraph say the rule, and the OpenAPI document is
+   regenerated with them.
+
+5. **P3: the display-only inventory omits `/conversations`.** The API
+   description's sentence naming what a read answers and no PUT takes
+   back listed `/runtime` and `/sessions` only.
+
+   *Resolution*: accepted, `b98ac0d5`. The sentence names the third
+   namespace, and `docs/reference/api-openapi.json` is regenerated.
+
+The command-spellings manifest moved with the round (`3989f347`), for
+line numbers alone: nothing about which commands exist changed.
+`CHANGELOG.md` is unchanged, because none of these findings changes what
+the milestone offers, only whether it is honest under contention.
