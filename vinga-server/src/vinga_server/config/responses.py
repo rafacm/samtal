@@ -872,6 +872,35 @@ class FieldError(BaseModel):
     )
 
 
+# What a refusal is served as: RFC 9457's own media type, so a client
+# can tell a refusal this API wrote from a page a proxy in front of it
+# did without reading either.
+PROBLEM_MEDIA_TYPE = "application/problem+json"
+
+# And what a refusal of each status is called: the status's standard HTTP
+# reason phrase, which is what RFC 9457 asks a problem with no `type` to
+# carry.
+#
+# Here rather than beside the descriptions the document renders, because
+# this is the half a client reads too: `config/cli.py` believes a
+# `detail` only from a body that is this shape, under this media type,
+# carrying this title for the status it arrived under, and a second copy
+# of the phrases would be a second thing to keep true. The phrases are
+# not taken from `http.HTTPStatus` for the same reason they are written
+# out at all: 422 is `Unprocessable Content` here and the standard
+# library of the interpreter this runs on still calls it
+# `Unprocessable Entity`.
+PROBLEM_TITLES: dict[int, str] = {
+    401: "Unauthorized",
+    404: "Not Found",
+    405: "Method Not Allowed",
+    409: "Conflict",
+    422: "Unprocessable Content",
+    500: "Internal Server Error",
+    503: "Service Unavailable",
+}
+
+
 class Problem(BaseModel):
     """A refusal, as RFC 9457 problem details.
 
