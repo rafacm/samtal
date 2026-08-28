@@ -608,7 +608,7 @@ docs/plans/2026-08-26-postgres-stores-implementation.md:246  historical  set-sec
 docs/plans/2026-08-26-postgres-stores-implementation.md:321  historical  config schema and its loader
 docs/plans/2026-08-26-postgres-stores.md:28  historical  set-secret
 docs/plans/2026-08-26-postgres-stores.md:585  historical  set-secret
-docs/plans/2026-08-28-first-class-conversations-implementation.md:521  historical  vinga conversation
+docs/plans/2026-08-28-first-class-conversations-implementation.md:636  historical  vinga conversation
 docs/plans/2026-08-28-first-class-conversations.md:270  historical  vinga session list
 docs/plans/2026-08-28-first-class-conversations.md:271  historical  vinga session show
 docs/plans/2026-08-28-first-class-conversations.md:272  historical  vinga session delete
@@ -799,8 +799,8 @@ docs/reference/cli.md:2495  generated  vinga openapi
 docs/reference/cli.md:2498  generated  vinga openapi
 docs/reference/cli.md:2506  generated  vinga cli-reference
 docs/reference/cli.md:2509  generated  vinga cli-reference
-docs/reference/conversations-schema.md:120  respell  vinga session delete
-docs/reference/conversations-schema.md:120  respell  vinga session purge
+docs/reference/conversations-schema.md:124  respell  vinga session delete
+docs/reference/conversations-schema.md:124  respell  vinga session purge
 docs/reference/domain-config.md:3  generated  vinga reference
 docs/reference/domain-config.md:22  generated  vinga export
 docs/reference/domain-config.md:79  generated  vinga reload
@@ -979,8 +979,8 @@ vinga-server/src/vinga_server/config/views.py:29  respell  config show
 vinga-server/src/vinga_server/config/views.py:115  respell  config show
 vinga-server/src/vinga_server/conversations/api.py:119  respell  vinga session show
 vinga-server/src/vinga_server/conversations/api.py:120  respell  vinga conversation show
-vinga-server/src/vinga_server/conversations/docgen.py:227  respell  vinga session delete
-vinga-server/src/vinga_server/conversations/docgen.py:227  respell  vinga session
+vinga-server/src/vinga_server/conversations/docgen.py:232  respell  vinga session delete
+vinga-server/src/vinga_server/conversations/docgen.py:232  respell  vinga session
 vinga-server/src/vinga_server/device/session.py:731  respell  config schema
 vinga-server/src/vinga_server/device_endpoint.py:5  respell  vinga simulator
 vinga-server/src/vinga_server/doctor.py:29  respell  vinga simulator
