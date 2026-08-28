@@ -76,7 +76,7 @@ from vinga_server.conversations.schema import (
 from vinga_server.db import is_busy, read_engine
 from vinga_server.events import logger
 
-# How much of the first utterance becomes the thread's title.
+# How much of the utterance a thread is named from becomes its title.
 #
 # Wide enough that a sentence usually survives whole and narrow enough
 # to be a title rather than a paragraph: it is read aloud among
@@ -193,7 +193,7 @@ class Erased:
 
 
 def title_of(heard: str | None) -> str | None:
-    """What a thread whose first utterance was this is called.
+    """What a thread named from this utterance is called.
 
     Null for an utterance that was never stored (text-off) and for one
     that is nothing but whitespace, which is the same answer for the
