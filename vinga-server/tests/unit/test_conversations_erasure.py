@@ -34,7 +34,7 @@ import contextlib
 import datetime as dt
 import json
 import logging
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import replace
 from typing import Any
 
@@ -141,8 +141,7 @@ class Recorder:
     def checkpoint(
         self,
         session: str,
-        from_turn: int,
-        after_turn: int,
+        covered: Sequence[int],
         parent: int | None,
         body: str,
         conversation: str = FIRST,
@@ -155,8 +154,7 @@ class Recorder:
             session,
             MilestoneRecord(
                 conversation=conversation,
-                from_turn=from_turn,
-                after_turn=after_turn,
+                covered=tuple(covered),
                 parent=parent,
                 text=body,
             ),
@@ -488,9 +486,9 @@ def a_summarized_thread(sentinel: str = SENTINEL) -> tuple[int, int, int]:
 
     later = Recorder(dt.datetime(2026, 8, 16, 12, 0, tzinfo=dt.UTC))
     later.session("gamma")
-    parent = later.checkpoint("gamma", ids[0], ids[0], None, f"we talked about {sentinel}")
-    child = later.checkpoint("gamma", ids[1], ids[2], parent, "and then about the weather")
-    unrelated = later.checkpoint("gamma", ids[1], ids[2], None, "covers only survivors")
+    parent = later.checkpoint("gamma", [ids[0]], None, f"we talked about {sentinel}")
+    child = later.checkpoint("gamma", ids[1:3], parent, "and then about the weather")
+    unrelated = later.checkpoint("gamma", ids[1:3], None, "covers only survivors")
     later.close("gamma")
     later.done()
     return parent, child, unrelated
@@ -554,7 +552,7 @@ def test_a_thread_that_loses_every_turn_loses_its_milestones_too(client) -> None
     ids = [turn["id"] for turn in stored("turns")]
     later = Recorder(dt.datetime(2026, 8, 16, 12, 0, tzinfo=dt.UTC))
     later.session("beta")
-    later.checkpoint("beta", ids[0], ids[0], None, "a recap")
+    later.checkpoint("beta", [ids[0]], None, "a recap")
     later.close("beta")
     later.done()
 

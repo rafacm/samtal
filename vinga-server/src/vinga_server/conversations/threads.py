@@ -23,11 +23,14 @@ and the selection tools. What all three stop knowing:
 - **What a thread is called.** The earliest utterance stored on it,
   bounded. Content, and therefore under the text switch like the
   utterance it came from.
-- **What a checkpoint replaces.** A recap is recorded with the range of
-  turns it really read, and a thread that has one is read back as that
+- **What a checkpoint replaces.** A recap is recorded with the turns it
+  really read, and a thread that has one is read back as that
   checkpoint plus what was said after it. Both halves of that rule live
   here, so no caller can record a coverage the reads do not honour or
-  read a thread as though its recap covered more than it did.
+  read a thread as though its recap covered more than it did. The
+  sources are checked in the transaction that would write the row,
+  because a recap is spoken before it is stored and an erasure can
+  commit in between.
 - **The retention ruleset**, whose unit is the thread rather than the
   session, and whose ordering between the three rules is the whole of
   why a live thread never loses its turns to an old session.
@@ -99,6 +102,11 @@ TITLE_CHARACTERS = 80
 NO_DEVICE = "the session this turn was spoken in understood no device"
 ANOTHER_AGENT = "this thread belongs to a different agent"
 NO_SUCH_THREAD = "there is no thread for this checkpoint to be recorded on"
+NO_COVERAGE = "a checkpoint has to say which turns it summarized"
+PROVENANCE_GONE = (
+    "the turns this recap summarized are no longer all on this thread, so what it "
+    "says may not be stored"
+)
 
 
 class MisattributedTurn(Exception):
@@ -288,11 +296,13 @@ def landed(connection: Any, landing: Landing) -> None:
 class Checkpoint:
     """One consented recap on its way into the store.
 
-    The range is `from_turn` through `after_turn` and both are required,
-    because what they are for is bounding a claim: a checkpoint that did
-    not say where its reading began would let hydration skip turns
-    nothing ever summarized. `parent` is the checkpoint whose text was
-    part of this recap's input, and null when none was.
+    `covered` is every `turns.id` inside the coverage this recap claims,
+    and it is both the claim and the evidence for it. The row's range is
+    its ends: a checkpoint that did not say where its reading began
+    would let hydration skip turns nothing ever summarized, and a range
+    carried beside the ids would be a second structure that has to agree
+    with them. `parent` is the checkpoint whose text was part of this
+    recap's input, and null when none was.
 
     `text` is nullable for the uniform reason every content column is,
     and the flow that produces one cannot run with text off; the writer
@@ -301,8 +311,7 @@ class Checkpoint:
     """
 
     conversation: str
-    from_turn: int
-    after_turn: int
+    covered: tuple[int, ...]
     parent: int | None
     at: str
     text: str | None
@@ -319,10 +328,28 @@ def checkpointed(connection: Any, checkpoint: Checkpoint) -> None:
     thread out of this same store, so the refusal is a defect report
     rather than a condition an operator configures around.
 
+    Refused, too, when the provenance no longer holds, and that arm is
+    not a defect report at all. A recap is read, spoken and only then
+    stored, and an erasure can commit inside that interval: the turns it
+    summarized are deleted while the thread carries on, and a row
+    written afterwards would put the erased words back into every future
+    resume of that thread. So the sources are checked here, in the
+    transaction that would write the row: every covered turn still on
+    this thread, and the parent checkpoint still on it too. Anything
+    else refuses. The recap was already heard, which no erasure can
+    unspeak; what this stops is it surviving.
+
+    Checked rather than trusted from the reader that produced it,
+    because the whole point is that the two are separated in time. A
+    caller cannot hold this transaction open across a summarization
+    round and a paragraph read out loud.
+
     Nothing here moves `last_active_at`. A recap is not something the
     user said, and the consent turn that produced it lands as a turn of
     its own in this same transaction, which is what moves the stamp.
     """
+    if not checkpoint.covered:
+        raise MisattributedTurn(NO_COVERAGE)
     found = connection.execute(
         select(conversations.c.id).where(
             conversations.c.conversation == checkpoint.conversation
@@ -330,11 +357,31 @@ def checkpointed(connection: Any, checkpoint: Checkpoint) -> None:
     ).first()
     if found is None:
         raise MisattributedTurn(NO_SUCH_THREAD)
+    covered = sorted(set(checkpoint.covered))
+    surviving = set(
+        connection.execute(
+            select(turns.c.id).where(
+                turns.c.conversation == checkpoint.conversation,
+                turns.c.id.in_(covered),
+            )
+        ).scalars()
+    )
+    if surviving != set(covered):
+        raise MisattributedTurn(PROVENANCE_GONE)
+    if checkpoint.parent is not None:
+        ancestor = connection.execute(
+            select(conversation_milestones.c.id).where(
+                conversation_milestones.c.id == checkpoint.parent,
+                conversation_milestones.c.conversation == checkpoint.conversation,
+            )
+        ).first()
+        if ancestor is None:
+            raise MisattributedTurn(PROVENANCE_GONE)
     connection.execute(
         conversation_milestones.insert().values(
             conversation=checkpoint.conversation,
-            from_turn=checkpoint.from_turn,
-            after_turn=checkpoint.after_turn,
+            from_turn=covered[0],
+            after_turn=covered[-1],
             parent=checkpoint.parent,
             created_at=checkpoint.at,
             text=checkpoint.text,
@@ -1315,8 +1362,10 @@ __all__ = [
     "ANOTHER_AGENT",
     "CHECKPOINT_COLUMNS",
     "EXCERPT_CHARACTERS",
+    "NO_COVERAGE",
     "NO_DEVICE",
     "NO_SUCH_THREAD",
+    "PROVENANCE_GONE",
     "RESUME_CANDIDATES",
     "SUMMARY_COLUMNS",
     "TITLE_CHARACTERS",

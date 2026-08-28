@@ -1849,13 +1849,20 @@ class PipelineRuntime:
         and this session simply does not say so. A store that refused
         stores nothing durable, which is the same answer the next resume
         reads, so the choice is offered again.
+
+        A store that refuses because the thread moved under the recap is
+        one case of exactly that, and the reason the provenance travels
+        on the record: a session erasure committing while this paragraph
+        was being spoken took the turns it summarized, and the store
+        declines to write a checkpoint standing for words that are gone.
+        The user heard the recap, which nothing here can unspeak; what
+        does not happen is any of it being kept.
         """
         if self._recorder is None:
             return
         record = MilestoneRecord(
             conversation=made.made_from.conversation,
-            from_turn=made.made_from.from_turn,
-            after_turn=made.made_from.after_turn,
+            covered=made.made_from.covered,
             parent=made.made_from.parent,
             text=made.text,
         )

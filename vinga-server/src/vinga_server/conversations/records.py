@@ -168,11 +168,22 @@ class MilestoneRecord:
     nulls a content column is the writer applying the storage switch,
     and a recap with nothing in it is not a recap the runtime would have
     spoken.
+
+    `covered` is the provenance and the whole of the claim: every
+    `turns.id` this recap's coverage holds, ascending, read off the
+    thread at the moment the summarizer read it. The row's `from_turn`
+    and `after_turn` are the ends of it and are derived rather than
+    carried beside it, because a range and the ids inside it are two
+    structures that would have to agree.
+
+    It travels because the recap is spoken before it is stored, and a
+    session erasure can land in between: the store checks these ids are
+    still on the thread inside the transaction that would write the row,
+    and a checkpoint whose sources went is refused rather than kept.
     """
 
     conversation: str
-    from_turn: int
-    after_turn: int
+    covered: tuple[int, ...]
     parent: int | None
     text: str
 

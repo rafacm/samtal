@@ -560,16 +560,18 @@ async def test_a_backlog_wider_than_the_recap_budget_records_its_true_first_turn
 
     (record,) = kept.milestones
     # The turns are numbered from one, so a checkpoint that began in the
-    # middle is one whose reading was truncated.
-    assert record.from_turn > 1
-    assert record.after_turn == 8
+    # middle is one whose reading was truncated. What it claims is the
+    # ids themselves, whose ends are the range the row records.
+    assert record.covered[0] > 1
+    assert record.covered[-1] == 8
+    assert record.covered == tuple(range(record.covered[0], 9))
     # And what it claims is exactly what the summarizer was shown: the
     # oldest turn it read is in that round's context and the one before
     # it is not.
     (summarizing, _, _) = poet.seen[1]
     shown = " ".join(turn.content for turn in summarizing)
-    assert f"utterance {record.from_turn - 1} " in shown
-    assert f"utterance {record.from_turn - 2} " not in shown
+    assert f"utterance {record.covered[0] - 1} " in shown
+    assert f"utterance {record.covered[0] - 2} " not in shown
 
 
 async def test_a_recap_of_a_recap_records_the_one_it_consumed() -> None:
@@ -598,7 +600,7 @@ async def test_a_recap_of_a_recap_records_the_one_it_consumed() -> None:
 
     (record,) = kept.milestones
     assert record.parent == 41
-    assert (record.from_turn, record.after_turn) == (5, 8)
+    assert record.covered == (5, 6, 7, 8)
     # And the earlier recap was part of what was summarized.
     (summarizing, _, _) = poet.seen[1]
     assert any("we had talked about galaxies" in turn.content for turn in summarizing)

@@ -22,7 +22,7 @@ write records, and the reading that honours it.
 
 import datetime as dt
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from typing import Any
 
 import pytest
@@ -543,8 +543,7 @@ def test_the_backlog_is_the_checkpoint_and_the_turns_after_its_coverage(stores) 
         "a",
         MilestoneRecord(
             conversation=thread("one"),
-            from_turn=ids[0],
-            after_turn=ids[1],
+            covered=(ids[0], ids[1]),
             parent=None,
             text="we talked about the first two things",
         ),
@@ -570,11 +569,11 @@ def test_the_newest_checkpoint_is_the_one_a_thread_is_read_through(stores) -> No
         store.record_turn("a", a_turn(thread("one"), heard=said)).wait(30.0)
     ids = [row["id"] for row in rows("turns")]
     store.record_milestone(
-        "a", _checkpoint(thread("one"), ids[0], ids[0], "the earlier one")
+        "a", _checkpoint(thread("one"), [ids[0]], "the earlier one")
     ).wait(30.0)
     earlier = rows("conversation_milestones")[-1]["id"]
     store.record_milestone(
-        "a", _checkpoint(thread("one"), ids[1], ids[1], "the later one", parent=earlier)
+        "a", _checkpoint(thread("one"), [ids[1]], "the later one", parent=earlier)
     ).wait(30.0)
     store.stop()
 
@@ -597,7 +596,7 @@ def test_a_checkpoint_with_no_text_replaces_nothing(stores) -> None:
     store.record_turn("a", a_turn(thread("one"), heard="second")).wait(30.0)
     ids = [row["id"] for row in rows("turns")]
     store.record_milestone(
-        "a", _checkpoint(thread("one"), ids[0], ids[0], "never stored")
+        "a", _checkpoint(thread("one"), [ids[0]], "never stored")
     ).wait(30.0)
     store.stop()
 
@@ -618,7 +617,7 @@ def test_a_checkpoint_for_a_thread_with_no_row_is_refused(stores) -> None:
     store.open_session("a", 100.0, MANIFEST)
 
     landed = store.record_milestone(
-        "a", _checkpoint(thread("nobody"), 1, 1, "a recap of nothing")
+        "a", _checkpoint(thread("nobody"), [1], "a recap of nothing")
     )
 
     assert landed.wait(30.0) is False
@@ -627,12 +626,11 @@ def test_a_checkpoint_for_a_thread_with_no_row_is_refused(stores) -> None:
 
 
 def _checkpoint(
-    conversation: str, from_turn: int, after_turn: int, body: str, parent: int | None = None
+    conversation: str, covered: Sequence[int], body: str, parent: int | None = None
 ) -> MilestoneRecord:
     return MilestoneRecord(
         conversation=conversation,
-        from_turn=from_turn,
-        after_turn=after_turn,
+        covered=tuple(covered),
         parent=parent,
         text=body,
     )

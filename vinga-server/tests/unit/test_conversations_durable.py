@@ -537,17 +537,30 @@ def test_a_loss_flags_only_the_threads_it_touched(stores) -> None:
 
 
 def a_checkpoint(
-    conversation: str = CONVERSATION, text: str = "we talked about galaxies", **overrides: Any
+    conversation: str = CONVERSATION,
+    text: str = "we talked about galaxies",
+    covered: Any = None,
+    **overrides: Any,
 ) -> MilestoneRecord:
+    """One checkpoint on its way to the store.
+
+    `covered` defaults to whatever turns of this thread are already
+    written, because that is what the store now checks a checkpoint
+    against: a recap claims the turns it read, and a claim over ids
+    nothing wrote is refused rather than stored.
+    """
     fields: dict[str, Any] = {
         "conversation": conversation,
-        "from_turn": 1,
-        "after_turn": 1,
+        "covered": tuple(_turn_ids(conversation)) if covered is None else tuple(covered),
         "parent": None,
         "text": text,
     }
     fields.update(overrides)
     return MilestoneRecord(**fields)
+
+
+def _turn_ids(conversation: str) -> list[int]:
+    return [row["id"] for row in rows("turns") if row["conversation"] == conversation]
 
 
 def test_a_checkpoint_lands_with_the_turn_that_consented_to_it(stores) -> None:
@@ -557,17 +570,19 @@ def test_a_checkpoint_lands_with_the_turn_that_consented_to_it(stores) -> None:
     store = stores()
     store.start()
     store.open_session("alpha", 100.0, MANIFEST)
-    store.record_turn("alpha", a_turn())
-    landed = store.record_milestone(
-        "alpha", a_checkpoint(from_turn=4, after_turn=9, parent=None)
-    )
+    store.record_turn("alpha", a_turn()).wait(TIMEOUT_S)
+    store.record_turn("alpha", a_turn(heard="and then")).wait(TIMEOUT_S)
+    covered = _turn_ids(CONVERSATION)
+    landed = store.record_milestone("alpha", a_checkpoint(covered=covered, parent=None))
 
     assert landed.wait(TIMEOUT_S) is True
     (row,) = rows("conversation_milestones")
+    # The row's range is the ends of the claim rather than a second
+    # thing to keep in step with it.
     assert (row["conversation"], row["from_turn"], row["after_turn"]) == (
         CONVERSATION,
-        4,
-        9,
+        covered[0],
+        covered[-1],
     )
     assert row["text"] == "we talked about galaxies"
     assert row["parent"] is None
@@ -580,12 +595,13 @@ def test_a_checkpoints_text_follows_the_text_switch(stores) -> None:
     store = stores(text=False)
     store.start()
     store.open_session("alpha", 100.0, MANIFEST)
-    store.record_turn("alpha", a_turn())
+    store.record_turn("alpha", a_turn()).wait(TIMEOUT_S)
+    (turn,) = _turn_ids(CONVERSATION)
     store.record_milestone("alpha", a_checkpoint()).wait(TIMEOUT_S)
 
     (row,) = rows("conversation_milestones")
     assert row["text"] is None
-    assert row["from_turn"] == 1
+    assert row["from_turn"] == turn
 
 
 def test_a_checkpoint_records_the_lineage_it_consumed(stores) -> None:
@@ -595,7 +611,7 @@ def test_a_checkpoint_records_the_lineage_it_consumed(stores) -> None:
     store = stores()
     store.start()
     store.open_session("alpha", 100.0, MANIFEST)
-    store.record_turn("alpha", a_turn())
+    store.record_turn("alpha", a_turn()).wait(TIMEOUT_S)
     store.record_milestone("alpha", a_checkpoint()).wait(TIMEOUT_S)
     (first,) = rows("conversation_milestones")
 

@@ -27,8 +27,9 @@ layer and half in the reply path:
   offered ids and cleared by the same rules. A `start_from` for
   anything else is a recap nobody was asked about.
 - **What a recap is made of.** The same rows under a budget of their
-  own, plus the range they really covered, which is what a checkpoint
-  is allowed to claim.
+  own, plus the range they really covered and the ids inside it, which
+  is what a checkpoint is allowed to claim and what the store checks
+  that claim against when it finally writes one.
 
 What is deliberately NOT here: minting an id, rebinding an agent to a
 thread, installing a history, speaking a recap and storing one. Those
@@ -55,8 +56,8 @@ from vinga_server.tools import builtin
 # Bounded all the same, because a thread has no ceiling and a request
 # does. Where a backlog is wider than this, the recap reads the newest
 # of it and records that it did: the checkpoint's `from_turn` is the
-# oldest turn it really saw, and everything before that is truncated
-# rather than summarized.
+# oldest turn it really saw and is inside its coverage, and everything
+# below that is truncated rather than summarized.
 RECAP_INPUT_BUDGET_TOKENS = 24000
 
 
@@ -103,12 +104,19 @@ class Recap:
     to claim.
 
     The input is already messages, because summarizing a thread is
-    reading it the way a model reads it. The three numbers beside it are
-    the honest half: `from_turn` and `after_turn` are the range the
-    summarizer really saw under its own budget, and `parent` is the
+    reading it the way a model reads it. What sits beside it is the
+    honest half: `from_turn` and `after_turn` are the range the
+    summarizer really saw under its own budget, `covered` is every turn
+    id inside that range as the thread held them, and `parent` is the
     checkpoint whose text was folded into that input. A recap that
     recorded anything wider would be a summary claiming turns it never
     read.
+
+    `covered` is the half that survives the wait. The recap is spoken
+    before it is stored, so the ids are what the store checks the thread
+    against at the moment it would write the row: an erasure that landed
+    in between took its sources, and a checkpoint standing for turns
+    that are gone is exactly the erased content coming back.
 
     `tail` is what the thread holds after the range, which is what the
     installed context is built from once the recap exists. Empty in the
@@ -120,6 +128,7 @@ class Recap:
     input: tuple[Turn, ...]
     from_turn: int
     after_turn: int
+    covered: tuple[int, ...]
     parent: int | None
     incomplete: bool = False
     tail: tuple[StoredTurn, ...] = ()
@@ -260,8 +269,14 @@ class Resumption:
         oldest first, and what comes back records where the reading
         really began. That is the whole of the honesty here: a recap
         that read the newest half of a long thread says so in
-        `from_turn`, and hydration afterwards treats everything at or
-        before it as truncated rather than summarized.
+        `from_turn`, and hydration afterwards treats everything below it
+        as truncated rather than summarized.
+
+        The ids inside that range come back too, because the read and
+        the write are separated by a summarization round and a paragraph
+        read out loud. What they are for is the store's own check at the
+        far end of that interval, and they are read here because here is
+        where the thread was really looked at.
         """
         found = await self._backlog(agent, conversation)
         if isinstance(found, str):
@@ -282,6 +297,11 @@ class Resumption:
             input=read.turns,
             from_turn=read.from_turn,
             after_turn=read.after_turn,
+            covered=tuple(
+                one.id
+                for one in found.turns
+                if read.from_turn <= one.id <= read.after_turn
+            ),
             parent=None if found.milestone is None else found.milestone.id,
             incomplete=found.incomplete,
             tail=tuple(one for one in found.turns if one.id > read.after_turn),
