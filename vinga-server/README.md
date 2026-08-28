@@ -1506,9 +1506,12 @@ changes what the server is doing rather than what is stored.
 [The conversation store](#the-conversation-store) describes:
 
 ```
-GET                 /api/sessions
-GET                 /api/sessions/{session}
+GET DELETE          /api/sessions
+GET DELETE          /api/sessions/{session}
 GET                 /api/sessions/{session}/turns
+GET                 /api/conversations
+GET DELETE          /api/conversations/{conversation}
+GET                 /api/conversations/{conversation}/turns
 ```
 
 The first lists the sessions, newest first, filtered by `?device=` when
@@ -1522,7 +1525,18 @@ and `?cursor=` is a row id this API answered with, meaning the sessions
 before it in the listing and the turns after it in a timeline, which is
 the direction a client that has read up to a turn asks in. A page
 answers `{"items": [...], "next_cursor": <id or null>}`, and the cursor
-is null when there was nothing beyond that page. A deployment that never
+is null when there was nothing beyond that page. The conversations
+rows are the same record read as threads: the list orders by a
+conversation's last activity, filtered by `?agent=` when given, and
+pages on the pair `?cursor_active=` and `?cursor_id=` this API
+answered with, together or not at all, because an activity ordering
+moves and a row id alone cannot page it; the detail is one thread with
+its milestone count; the turns are its dialogue oldest first, across
+every session it spanned. The three DELETE rows are the erasure verbs
+[Deleting on demand](#the-conversation-store) below describes: one
+named session, the selector purge (`?session=`, `?device=`,
+`?before=`, at least one, combined with AND), and one named thread.
+A deployment that never
 recorded answers 404 naming `server.conversations.enabled`; one that
 recorded and has since switched recording off still serves what it
 recorded. The events themselves are deliberately not served here: the
@@ -2234,8 +2248,8 @@ Attributing a session on a shared device to one member needs voiceprint
 identification, which does not exist here yet, so the units deletion is
 expressed in are the conversation and the session: the first is what
 retention takes whole, and both are what the erasure API will address.
-Erasing either on demand is not enforceable in this release at all,
-which the deletion section below says in full. The session id is surfaced everywhere regardless: on the
+Erasing either on demand is an act of the API with a CLI verb in
+front of it, which the deletion section below says in full. The session id is surfaced everywhere regardless: on the
 events, on the capture triplet's filenames, and on every row the store
 keeps.
 
@@ -2255,36 +2269,22 @@ never resumes a conversation this is the behaviour it always had: a
 thread never spans sessions there, so its age and its session's
 coincide.
 
-**Deletion on demand is not something this release has a command for.**
-🚧 Erasing one named session, and one named conversation, is coming back
-as an act of the API, with a CLI verb in front of it. The command that
-used to do it went straight to the store's file, which is not a thing a
-command can keep doing once the store is a database somewhere else.
-
-Until it lands, retention above is what deletes, and a deployment that
-has to erase something now does it in SQL, as the server role, taking
-the session's rows in one transaction:
-
-```sql
-begin;
-delete from conversations.events where session = '...';
-delete from conversations.tool_invocations where session = '...';
-delete from conversations.turns where session = '...';
-delete from conversations.sessions where session = '...';
-delete from conversations.conversations c
- where not exists (select 1 from conversations.turns t
-                    where t.conversation = c.conversation);
-commit;
-```
-
-The same predicate for the session's own four tables, because every one
-of them carries the session's uuid, and one transaction because a
-session's rows go together or the deletion leaves children pointing at
-nothing. The last statement takes the threads that lost their every
-turn to it, since a conversation with no turns is a title and two
-timestamps. It is a hand-written statement rather than a command, which
-is the honest shape of the gap; what it is not any more is the whole
-store, which is what deleting a file took.
+**Deleting on demand is an act of the API.** `DELETE
+/api/sessions/{session}` erases one named session; `DELETE
+/api/sessions` with at least one of `?session=`, `?device=` and
+`?before=` (combined with AND, the day strict) is the purge, answering
+how many of everything it took; `DELETE
+/api/conversations/{conversation}` erases one named thread out of
+every session it touched, leaving session rows and events alone. In
+front of them stand `vinga session delete`, `vinga session purge` and
+`vinga conversation delete`, each confirming at a terminal and taking
+`--force`. Erasure outranks every copy the store derived, not only the
+rows named: a thread whose title came from an erased turn is renamed
+from its earliest surviving turn or loses its title, recap checkpoints
+that summarized an erased turn go along with everything descended from
+them, the activity stamp falls back to what the survivors support, and
+a thread left with no turns is deleted whole, because a title and two
+timestamps are not a conversation.
 
 A session that is still running when its row goes stops being
 recorded: the writer finds the row gone and stops writing for that
