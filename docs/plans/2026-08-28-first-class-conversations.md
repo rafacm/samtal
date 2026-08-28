@@ -1139,7 +1139,7 @@ implementation-doc section when written.
   with dispositions recorded), `CHANGELOG.md` (behavior change: the
   clean switch).
 - [x] [**Recap milestones**](2026-08-28-first-class-conversations-implementation.md#m5-recap-milestones)
-  (PR TBD, branch `feature/conversations-m5`):
+  (PR #338, branch `feature/conversations-m5`):
   the recap offer, consent and decline flow; the
   summarization round with its bounds and fallback; milestone-aware
   hydration; milestones on the API detail; `milestone_recorded`.
