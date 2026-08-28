@@ -1206,13 +1206,17 @@ class ConversationStore:
             # After the turns of this marker, because the consent turn
             # is one of them: a checkpoint is recorded on a thread the
             # same transaction has just moved, and a thread with no row
-            # is refused here exactly as a misattributed turn is.
+            # is refused here exactly as a misattributed turn is. So is
+            # a checkpoint whose sources an erasure took while the recap
+            # was being spoken, which is the one refusal here an
+            # operator can really produce; it fails this marker, so the
+            # batch is dropped and counted and the handle answers false,
+            # which is what the recap flow reads as "nothing was stored".
             threads.checkpointed(
                 connection,
                 threads.Checkpoint(
                     conversation=checkpoint.record.conversation,
-                    from_turn=checkpoint.record.from_turn,
-                    after_turn=checkpoint.record.after_turn,
+                    covered=checkpoint.record.covered,
                     parent=checkpoint.record.parent,
                     at=at,
                     text=checkpoint.record.text if self.text else None,

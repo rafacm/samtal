@@ -190,8 +190,7 @@ def checkpointed(stores: Any, session: str, at: dt.datetime, body: str) -> None:
         session,
         MilestoneRecord(
             conversation=thread,
-            from_turn=turn["id"],
-            after_turn=turn["id"],
+            covered=(turn["id"],),
             parent=None,
             text=body,
         ),

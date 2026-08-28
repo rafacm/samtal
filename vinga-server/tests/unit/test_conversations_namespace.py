@@ -29,6 +29,7 @@ rather than the statements behind it.
 import datetime as dt
 import json
 import logging
+from collections.abc import Sequence
 from typing import Any
 
 import pytest
@@ -158,8 +159,7 @@ class Recorder:
         self,
         session: str,
         conversation: str,
-        from_turn: int,
-        after_turn: int,
+        covered: Sequence[int],
         parent: int | None = None,
         body: str = "we talked about the weather",
     ) -> int:
@@ -170,8 +170,7 @@ class Recorder:
             session,
             MilestoneRecord(
                 conversation=conversation,
-                from_turn=from_turn,
-                after_turn=after_turn,
+                covered=tuple(covered),
                 parent=parent,
                 text=body,
             ),
@@ -544,9 +543,9 @@ def test_the_detail_answers_the_checkpoints_a_thread_has_accrued(client) -> None
     # the turns it read and the writer is a thread behind this one.
     until(lambda: len(stored("turns")) == 2, "the turns never landed")
     ids = [row["id"] for row in stored("turns")]
-    earlier = recording.checkpoint("alpha", FIRST, ids[0], ids[0], body="the first recap")
+    earlier = recording.checkpoint("alpha", FIRST, [ids[0]], body="the first recap")
     recording.checkpoint(
-        "alpha", FIRST, ids[1], ids[1], parent=earlier, body="the recap of the recap"
+        "alpha", FIRST, [ids[1]], parent=earlier, body="the recap of the recap"
     )
     recording.store.close_session("alpha", duration_s=2.0, reason="client")
     recording.done()
