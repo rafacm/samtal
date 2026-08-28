@@ -27,7 +27,7 @@ from tests.support.stores import CONVERSATIONS_MANIFEST as MANIFEST
 from tests.support.stores import rows
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations import threads
-from vinga_server.conversations.records import TurnRecord
+from vinga_server.conversations.records import ToolInvocation, TurnRecord
 from vinga_server.conversations.store import ConversationStore, open_conversations
 from vinga_server.conversations.threads import TITLE_CHARACTERS
 
@@ -410,3 +410,96 @@ def test_a_thread_stored_with_no_text_scores_nothing_and_still_lists(stores) -> 
     assert answer.matched is False
     assert [one.conversation for one in answer.found] == [thread("quiet")]
     assert (answer.found[0].title, answer.found[0].excerpt) == (None, None)
+
+
+# The backlog: one thread as the resume path reads it
+#
+# The other half of what milestone 4 consumes. Discovery above answers
+# which thread; this answers what is in it, and it answers it in the
+# hydrator's own type, so the rows-to-context path has one seam and not
+# two.
+
+
+def test_the_backlog_is_the_thread_oldest_first(stores) -> None:
+    store = stores(retention_days=0)
+    store.start()
+    store.open_session("a", 100.0, MANIFEST)
+    store.record_turn("a", a_turn(thread("one"), heard="first"))
+    store.record_turn("a", a_turn(thread("one"), heard="second"))
+    store.stop()
+
+    found = read_backlog(thread("one"))
+
+    assert found is not None
+    assert found.agent == "sam"
+    assert found.incomplete is False
+    assert [(one.heard, one.reply) for one in found.turns] == [
+        ("first", "Done."),
+        ("second", "Done."),
+    ]
+
+
+def test_the_backlog_names_the_tools_a_turn_ran(stores) -> None:
+    """Names, in the order the model issued them, and nothing a call
+    could not be named by: an unnamed call is left out rather than
+    rendered as a blank."""
+    store = stores(retention_days=0)
+    store.start()
+    store.open_session("a", 100.0, MANIFEST)
+    store.record_turn(
+        "a",
+        TurnRecord(
+            at=101.0,
+            conversation=thread("tools"),
+            agent="sam",
+            heard="lights",
+            reply="Done.",
+            tools=(
+                ToolInvocation(position=0, source="builtin", name="remember"),
+                ToolInvocation(position=1, source="unknown", name=None),
+            ),
+        ),
+    )
+    store.stop()
+
+    found = read_backlog(thread("tools"))
+
+    assert found is not None
+    assert found.turns[0].tools == ("remember",)
+
+
+def test_a_thread_nobody_wrote_has_no_backlog() -> None:
+    """Which is also what a deleted thread looks like from here, and
+    deliberately the same answer: there is nothing to resume either
+    way."""
+    assert read_backlog(thread("never")) is None
+
+
+def test_a_thread_with_a_lost_write_says_so(stores) -> None:
+    """The mark a dropped durable batch left, carried to the resume path
+    because an acknowledgement speaks for one turn and a hole in the
+    middle of a thread is what no per-turn answer can describe."""
+    store = stores(retention_days=0)
+    store.start()
+    store.open_session("a", 100.0, MANIFEST)
+    store.record_turn("a", a_turn(thread("holed")))
+    store.stop()
+    engine = open_conversations(DatabaseConfig())
+    try:
+        with engine.begin() as connection:
+            threads.flag_incomplete(connection, [thread("holed")])
+    finally:
+        engine.dispose()
+
+    found = read_backlog(thread("holed"))
+
+    assert found is not None and found.incomplete is True
+
+
+def read_backlog(conversation: str) -> threads.Backlog | None:
+    engine = open_conversations(DatabaseConfig())
+    try:
+        with engine.connect() as connection:
+            return threads.backlog(connection, conversation)
+    finally:
+        engine.dispose()
