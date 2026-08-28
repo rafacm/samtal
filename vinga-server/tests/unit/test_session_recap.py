@@ -353,7 +353,12 @@ async def test_the_recap_is_spoken_verbatim_and_stored_after_it_is_heard() -> No
 
 async def test_the_consent_turn_records_the_recap_as_its_reply() -> None:
     """The turn is an ordinary turn on the thread the reply began on,
-    and what the user heard is what it says was replied."""
+    and what the user heard is what it says was replied.
+
+    Two records, which is the transition's record boundary working: the
+    consent turn finishes on its origin thread with the spoken recap as
+    its reply, and the round that follows the move is the resumed
+    thread's own first record, with nothing heard on it."""
     voice = RecordingTts()
     kept = Kept().watching(voice)
     session, _ = consenting(voice, a_long_thread(), kept)
@@ -361,9 +366,12 @@ async def test_the_consent_turn_records_the_recap_as_its_reply() -> None:
 
     await drive_reply(session, UTTERANCE)
 
-    (record,) = kept.turns
-    assert record.conversation == origin
-    assert RECAP in (record.reply or "")
+    consent, seeded = kept.turns
+    assert consent.conversation == origin
+    assert RECAP in (consent.reply or "")
+    assert seeded.conversation == talking_thread(session)
+    assert seeded.conversation != origin
+    assert not seeded.heard
 
 
 async def test_the_round_after_the_recap_is_told_not_to_say_it_again() -> None:
