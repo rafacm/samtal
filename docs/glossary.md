@@ -103,9 +103,11 @@ thread it belongs to and the session it was spoken in, so the two
 are views of the same rows. The entity exists (issue #190): a thread
 takes its identity at an agent activation, its row with its first
 stored turn, and its title from that turn's utterance, and retention
-measures the window against its last activity. What is still decided
-direction is the continuity: an agent's working context ends when its
-session closes, and nothing yet asks for an earlier thread back. See
+measures the window against its last activity. Where the deployment
+has switched resumption on, an agent finds one of its own past threads
+by description and carries on with it, rebuilding the context from the
+stored dialogue under a token budget; off, an agent's working context
+ends when its session closes. See
 [the concepts page](concepts.md#conversation-and-session).
 
 ### Conversational filler
@@ -265,8 +267,10 @@ More: [modelcontextprotocol.io](https://modelcontextprotocol.io/).
 A vinga-owned tool injected into every agent's
 tool set, so meta questions are answerable in any conversation:
 conversation cost so far, searching and resuming the asking agent's
-past conversations, switching agents. Planned rather than built;
-the handover tool is the piece that exists today. Conversation
+past conversations, switching agents. The handover tool and the two
+conversation tools (start a new thread, find and resume an old one)
+exist today; the cost question is planned rather than built.
+Conversation
 search is deliberately agent-scoped, and turns that are only meta
 requests (device control, a cost question, the switch itself) are
 recorded as session events, not conversation entries. See

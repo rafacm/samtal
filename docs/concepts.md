@@ -76,9 +76,11 @@ turns inside it. A **conversation** is a
 dialogue between a user and exactly one agent: a durable thread that
 outlives any single session and belongs to no device. The entity
 exists: a stored turn names both the session it was spoken in and the
-conversation it belongs to, and threads can be listed, read and deleted
-over the API and from the command line. What is still **decided
-direction** (issue #190) is resuming one and the recap. **Users** arrive in a
+conversation it belongs to, threads can be listed, read and deleted
+over the API and from the command line, and an agent can find one of
+its own past threads by description and carry on with it where the
+deployment has switched resumption on. What is still **decided
+direction** (issue #190) is the recap. **Users** arrive in a
 later stage, and the model leaves their slot open on purpose, which is
 **decided direction** (recorded on this page, 2026-08-21; no owning
 issue or decision record yet).
@@ -200,10 +202,10 @@ default by voice ("make Nadia the default agent on this device") is
 ## Conversation and session
 
 **Implemented today**: the session, the Conversation as a durable,
-agent-scoped thread, the stored record of all three, and reading and
-deleting either entity (issues #120 and #190). **Decided direction**
-(issue #190): resuming a thread and the recap, which are the semantics
-below that say so.
+agent-scoped thread, the stored record of all three, reading and
+deleting either entity, and resuming a thread by describing it (issues
+#120 and #190). **Decided direction** (issue #190): the recap, which is
+the one semantic below that says so.
 
 The load-bearing distinction in the model is that a conversation and a
 session are different things.
@@ -222,12 +224,15 @@ A **conversation** is a dialogue between a user and exactly one agent:
 a thread that lives on the server, accrues a transcript, and is
 independent of any device. The entity exists: a thread takes its
 identity when an agent is activated, its row when its first turn is
-stored, and its title from that turn's utterance. What is not built
-yet is the continuity, and the two halves are worth keeping apart. An
-agent's working context is still assembled inside one session and still
-ends when the session closes, so tomorrow's agent starts with none of
-it and nothing yet asks for a thread back. The rows already outlast the
-session: they are kept for as long as the retention policy in
+stored, and its title from that turn's utterance. The continuity is
+built too, behind a switch: with `server.conversations.resumption` on,
+an agent describes a past thread out loud, offers what it found, and
+carries on with the one the user picks, rebuilding the context from the
+stored dialogue under a token budget. Off, an agent's working context
+is assembled inside one session and ends when the session closes,
+which is exactly the behaviour that predates the switch. The rows
+outlast the session either way: they are kept for as long as the
+retention policy in
 [the store's reference](reference/conversations-schema.md#retention-and-deletion)
 says, which is now measured against the thread's own last activity
 rather than the session's age.
@@ -266,12 +271,13 @@ special cases:
   handover tool, and so do the threads: the first activation of an
   agent in a session opens one and every later activation continues it,
   so the record of that session names two of them and the handover turn
-  belongs to the one it started on. What is still direction is that the
-  incoming agent starts clean, which the last bullet below states.
-- **Resuming elsewhere.** A new session on another device can attach to
-  an existing thread. Discovery is by spoken description ("a while ago
-  we were talking about this topic") and is agent-scoped: an agent
-  finds its own past threads (issue #190).
+  belongs to the one it started on. The incoming agent starts clean,
+  which the last bullet below states.
+- **Resuming elsewhere.** *Implemented today, issue #190.* A new
+  session on another device attaches to an existing thread. Discovery
+  is by spoken description ("a while ago we were talking about this
+  topic") and is agent-scoped: an agent finds its own past threads and
+  no other agent's, and it can only pick up one it has just offered.
 - **Cost.** "How much has this conversation cost so far" wants cost to
   be a property of the thread. It is **decided direction** (recorded on
   this page, 2026-08-21; no owning issue or decision record yet):
@@ -285,7 +291,7 @@ The decided semantics, each with its owner:
   is resolved at connect and carries no memory of the last session, so
   the wake experience stays predictable.
 - **A new activation starts a fresh thread, and resumption is always
-  explicit.** *Decided direction, issue #190.* Waking a device does not
+  explicit.** *Implemented today, issue #190.* Waking a device does not
   silently drop the user back into whatever was being discussed
   yesterday; continuing an earlier thread is asked for, by describing
   it. This replaces an earlier formulation on this page under which
@@ -309,22 +315,24 @@ The decided semantics, each with its owner:
   replaces an earlier formulation on this page, which warned about
   length and offered to summarize and start fresh from the summary.
 - **Resumption is a deployment switch, and it needs the text.**
-  *Decided direction, issue #190.* A thread cannot be resumed from
-  rows that were never written, so resumption is available only where
+  *Implemented today, issue #190.* A thread cannot be resumed from rows
+  that were never written, so resumption is available only where
   conversation text is stored, which is one of the two switches
   [the store's reference](reference/conversations-schema.md) describes.
-- **A switch starts clean by default.** *Decided direction, issue
+  A configuration that asks for resumption with recording or text off
+  is refused at boot, in a sentence naming both keys.
+- **A switch starts clean by default.** *Implemented today, issue
   #190*, as the fresh-thread default applied to a handover. The
   incoming agent does not read what was said to the outgoing one.
   Agents are scoped on purpose, and a switch that silently handed the
   whole session to the incoming agent would leak around that scoping;
   it would also move words spoken to a local agent to whatever provider
-  the incoming agent uses. Carrying context is explicit: phrasing that
-  asks for continuation ("ask Nadia about this") carries it, and when
-  the phrasing is ambiguous the agent asks rather than guessing. What
-  is deliberately carried becomes part of the new thread. Today's
-  handover behaves differently, and this is the gap the direction
-  closes: the session's transcript currently carries across a switch.
+  the incoming agent uses. What the incoming agent starts with is a
+  fixed instruction to greet and carry on, and switching back returns
+  the agent to its own thread with what it said on it. Carrying context
+  deliberately (phrasing that asks for continuation, "ask Nadia about
+  this", with the agent asking rather than guessing when the phrasing
+  is ambiguous) is the part that remains **decided direction**.
 
 ## Configuration changes arrive as whole worlds
 
@@ -427,9 +435,10 @@ conversation where we discussed the trip and resume it here", "let me
 talk to Nadia". These are not features of any one agent; they are vinga
 capabilities, modeled as a small set of built-in tools injected into
 every agent's tool set, exactly parallel to how the device's own
-controls already reach agents as MCP tools. One of them exists today:
-the handover tool, which executes in vinga-owned code and logs its
-reason, per
+controls already reach agents as MCP tools. Three of them exist today:
+the handover tool, and the two that move a session between threads
+(start a new conversation, find and resume an earlier one). All three
+execute in vinga-owned code and log their reason, per
 [the decision-reason guideline](architecture/guidelines.md#give-every-decision-a-reason-and-know-whose-reason-it-is).
 
 Scoping decision: **conversation search is agent-scoped** (issue #190).
