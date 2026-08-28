@@ -123,10 +123,10 @@ async def test_a_deployment_records_what_was_said(serve) -> None:
     # Read after the server has gone: its lifespan drains the writer on
     # the way out, so what is on disk then is the whole record.
 
-    (session,) = read("select * from conversations.sessions")
-    turns = read("select * from conversations.turns order by id")
-    calls = read("select * from conversations.tool_invocations order by id")
-    events = read("select * from conversations.events order by id")
+    (session,) = read("select * from record.sessions")
+    turns = read("select * from record.turns order by id")
+    calls = read("select * from record.tool_invocations order by id")
+    events = read("select * from record.events order by id")
 
     assert session["device"] == DEVICE_MAC
     assert session["agent"] == "assistant"
@@ -175,7 +175,7 @@ async def test_a_deployment_that_was_not_asked_records_nothing(serve) -> None:
         events = await two_turns(port, DEVICE_MAC)
 
     assert events, "the conversation did not run"
-    assert read("select * from conversations.sessions") == []
+    assert read("select * from record.sessions") == []
 
 
 # Moving a session between conversations, over a real socket
@@ -254,18 +254,18 @@ async def test_a_later_session_resumes_the_thread_an_earlier_one_left(serve) -> 
     """
     async with serve(recording_config()) as port:
         await two_turns(port, DEVICE_MAC)
-    (earlier,) = read("select * from conversations.conversations")
+    (earlier,) = read("select * from record.conversations")
     assert earlier["title"] == "how is the battery"
-    before = {turn["id"] for turn in read("select id from conversations.turns")}
+    before = {turn["id"] for turn in read("select id from record.turns")}
 
     async with serve(resuming_config()) as port:
         await two_turns(port, DEVICE_MAC)
 
-    sessions = read("select * from conversations.sessions order by id")
-    threads = read("select * from conversations.conversations order by id")
+    sessions = read("select * from record.sessions order by id")
+    threads = read("select * from record.conversations order by id")
     turns = [
         turn
-        for turn in read("select * from conversations.turns order by id")
+        for turn in read("select * from record.turns order by id")
         if turn["id"] not in before
     ]
     assert len(sessions) == 2
@@ -288,7 +288,7 @@ async def test_a_later_session_resumes_the_thread_an_earlier_one_left(serve) -> 
     assert asked["heard"] == "how is the battery"
     assert [
         call["name"]
-        for call in read("select * from conversations.tool_invocations order by id")
+        for call in read("select * from record.tool_invocations order by id")
         if call["turn"] == asked["id"]
     ] == ["resume_conversation", "resume_conversation"]
     # The other side of the move: the greeting, on the older thread,
@@ -304,7 +304,7 @@ async def test_a_later_session_resumes_the_thread_an_earlier_one_left(serve) -> 
     # Which is a thread two sessions have now spoken on.
     assert {
         turn["session"]
-        for turn in read("select * from conversations.turns")
+        for turn in read("select * from record.turns")
         if turn["conversation"] == earlier["conversation"]
     } == {sessions[0]["session"], sessions[1]["session"]}
 
@@ -320,9 +320,9 @@ async def test_a_fresh_conversation_moves_the_session_onto_it(serve) -> None:
     async with serve(moving_config("new_conversation")) as port:
         await two_turns(port, DEVICE_MAC)
 
-    turns = read("select * from conversations.turns order by id")
-    threads = read("select * from conversations.conversations order by id")
-    sessions = read("select * from conversations.sessions")
+    turns = read("select * from record.turns order by id")
+    threads = read("select * from record.conversations order by id")
+    sessions = read("select * from record.sessions")
 
     assert len(sessions) == 1
     first, second, third = (thread["conversation"] for thread in threads)

@@ -1,4 +1,5 @@
--- Provision one vinga database: the two schemas, and the read-only role
+-- Provision one vinga database: the two schemas, `domain` for the
+-- configuration and `record` for what was said, and the read-only role
 -- an analyst queries the conversation record through.
 --
 -- One file, run in two places. The compose service mounts it into
@@ -52,7 +53,7 @@
 -- a no-op, and `AUTHORIZATION` so the server role owns them whoever
 -- executes this file.
 CREATE SCHEMA IF NOT EXISTS domain AUTHORIZATION :"server_role";
-CREATE SCHEMA IF NOT EXISTS conversations AUTHORIZATION :"server_role";
+CREATE SCHEMA IF NOT EXISTS record AUTHORIZATION :"server_role";
 
 -- The read-only role, created when it is missing and given its password
 -- either way. Two statements rather than one PL/pgSQL block, because
@@ -82,19 +83,19 @@ SELECT format(
 SELECT format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), :'ro_role')
 \gexec
 
-SELECT format('GRANT USAGE ON SCHEMA conversations TO %I', :'ro_role')
+SELECT format('GRANT USAGE ON SCHEMA record TO %I', :'ro_role')
 \gexec
 
 -- Both halves, so this file lands the same place whether it runs before
 -- the server's first migration or after it: the tables that exist now,
 -- and the ones the server role creates later.
 SELECT format(
-    'GRANT SELECT ON ALL TABLES IN SCHEMA conversations TO %I', :'ro_role'
+    'GRANT SELECT ON ALL TABLES IN SCHEMA record TO %I', :'ro_role'
 )
 \gexec
 
 SELECT format(
-    'ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA conversations '
+    'ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA record '
     'GRANT SELECT ON TABLES TO %I',
     :'server_role',
     :'ro_role'

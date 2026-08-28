@@ -169,7 +169,7 @@ server:
 
   # Which Postgres database this server keeps its state in: the domain
   # half of the configuration in a `domain` schema, and the conversation
-  # record below in a `conversations` schema beside it. Written by the
+  # record below in a `record` schema beside it. Written by the
   # server through the configuration API and read once at each start.
   #
   # The defaults below are the development instance `docker compose up
@@ -283,7 +283,7 @@ server:
   # boot; empty tables are not a recording, and migrating them is what
   # lets a deployment that recorded last month still read what it kept.
   #
-  # When it is on, the server writes into the `conversations` schema of
+  # When it is on, the server writes into the `record` schema of
   # the database above: sessions, turns, the tool calls a turn made, and
   # the structured events underneath them, as the queryable record of
   # what was said. A warning at startup says so. Audio never enters it;

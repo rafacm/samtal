@@ -196,7 +196,7 @@ def stored(table: str) -> list[dict[str, Any]]:
             return [
                 dict(row)
                 for row in connection.execute(
-                    text(f"select * from conversations.{table} order by id")
+                    text(f"select * from record.{table} order by id")
                 ).mappings()
             ]
     finally:

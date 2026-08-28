@@ -144,7 +144,7 @@ def test_a_conversation_lands_a_session_row_shaped_like_the_manifest(
             session_id = shake_hands(websocket)["session_id"]
             say_something(websocket)
 
-    (row,) = read("select * from conversations.sessions")
+    (row,) = read("select * from record.sessions")
     (manifest_file,) = (tmp_path / "captures").glob("*.json")
     manifest = json.loads(manifest_file.read_text())
 
@@ -179,7 +179,7 @@ def test_the_events_rows_are_the_decision_track_verbatim(
             shake_hands(websocket)
             say_something(websocket)
 
-    rows = read("select * from conversations.events order by id")
+    rows = read("select * from record.events order by id")
     declared = declared_fields()
 
     # One row per event this tap position was offered, in the order it
@@ -217,8 +217,8 @@ def test_the_turns_and_their_tool_calls_land_with_their_numbers(
             first_reply, _ = say_something(websocket)
             second_reply, _ = say_something(websocket)
 
-    turns = read("select * from conversations.turns order by id")
-    calls = read("select * from conversations.tool_invocations order by id")
+    turns = read("select * from record.turns order by id")
+    calls = read("select * from record.tool_invocations order by id")
 
     assert len(turns) == 2
     first, second = turns
@@ -269,8 +269,8 @@ def test_a_real_conversation_lands_a_thread_its_turns_name(tmp_path: Path) -> No
             shake_hands(websocket)
             say_something(websocket)
 
-    threads = read("select * from conversations.conversations order by id")
-    turns = read("select * from conversations.turns order by id")
+    threads = read("select * from record.conversations order by id")
+    turns = read("select * from record.turns order by id")
 
     assert len(threads) == 2
     for thread in threads:
@@ -316,9 +316,9 @@ def test_what_a_person_said_becomes_a_title_and_reaches_nothing_else(
                 shake_hands(websocket)
                 say_something(websocket)
 
-    (turn,) = read("select * from conversations.turns")
-    (thread,) = read("select * from conversations.conversations")
-    events = read("select * from conversations.events")
+    (turn,) = read("select * from record.turns")
+    (thread,) = read("select * from record.conversations")
+    events = read("select * from record.events")
 
     assert turn["heard"] == SENTINEL
     assert thread["title"] == SENTINEL
@@ -349,8 +349,8 @@ def test_the_turn_rows_and_the_event_rows_agree(tmp_path: Path) -> None:
             say_something(websocket)
             say_something(websocket)
 
-    turns = read("select * from conversations.turns")
-    events = read("select name, fields from conversations.events")
+    turns = read("select * from record.turns")
+    events = read("select name, fields from record.events")
     named = [row["name"] for row in events]
 
     assert len(turns) == named.count("heard") == 2
@@ -374,7 +374,7 @@ def test_the_session_row_is_there_from_the_open(tmp_path: Path) -> None:
         with connect(client) as websocket:
             shake_hands(websocket)
             (row,) = until(
-                lambda: read("select * from conversations.sessions"),
+                lambda: read("select * from record.sessions"),
                 "the session row never appeared while the session was open",
             )
             assert row["closed_at"] is None
@@ -397,7 +397,7 @@ def test_a_mid_session_read_stops_at_the_last_completed_turn(
             shake_hands(websocket)
             say_something(websocket)
             until(
-                lambda: read("select * from conversations.turns"),
+                lambda: read("select * from record.turns"),
                 "the first turn never committed",
             )
             websocket.send_text(
@@ -410,8 +410,8 @@ def test_a_mid_session_read_stops_at_the_last_completed_turn(
                 "the second utterance was never heard",
             )
 
-            assert len(read("select * from conversations.turns")) == 1
-            heard = read("select * from conversations.events where name = 'heard'")
+            assert len(read("select * from record.turns")) == 1
+            heard = read("select * from record.events where name = 'heard'")
             assert len(heard) == 1, "the open turn's utterance was already visible"
 
 
@@ -442,9 +442,9 @@ def test_the_switch_combinations_decide_what_a_row_keeps(
             shake_hands(websocket)
             say_something(websocket)
 
-    (session,) = read("select * from conversations.sessions")
-    (turn,) = read("select * from conversations.turns")
-    events = read("select * from conversations.events")
+    (session,) = read("select * from record.sessions")
+    (turn,) = read("select * from record.turns")
+    events = read("select * from record.events")
 
     # The spine lands in every enabled configuration: retention, purging
     # and every read key on it.
@@ -514,7 +514,7 @@ def test_a_credential_in_a_provider_url_reaches_no_record(
             with connect(client) as websocket:
                 shake_hands(websocket)
 
-    (row,) = read("select * from conversations.sessions")
+    (row,) = read("select * from record.sessions")
     (manifest_file,) = (tmp_path / "captures").glob("*.json")
     manifest = json.loads(manifest_file.read_text())
 
@@ -574,8 +574,8 @@ def test_a_rejected_tool_argument_is_kept_as_content_and_named_on_no_telemetry(
                 shake_hands(websocket)
                 say_something(websocket)
 
-    (call,) = read("select * from conversations.tool_invocations")
-    events = read("select * from conversations.events")
+    (call,) = read("select * from record.tool_invocations")
+    events = read("select * from record.events")
 
     # The call happened, was this server's own builtin, and failed.
     assert (call["source"], call["name"], call["is_error"]) == ("builtin", "remember", 1)
@@ -618,7 +618,7 @@ def _stored_anywhere(sentinel: str) -> bool:
     ask, and it is what the reference and the README now promise.
     """
     for table in ("sessions", "turns", "tool_invocations", "events"):
-        for row in read(f"select * from conversations.{table}"):
+        for row in read(f"select * from record.{table}"):
             if sentinel in json.dumps(row, default=str):
                 return True
     return False
@@ -671,7 +671,7 @@ async def test_a_device_that_vanishes_at_the_hello_opens_no_record(
     finally:
         store.stop()
 
-    assert read("select * from conversations.sessions") == []
+    assert read("select * from record.sessions") == []
     assert _capture_manifest(tmp_path) is None
     assert attached_taps(session) == [], "a consumer was left attached"
 
@@ -712,7 +712,7 @@ async def test_a_failure_after_the_open_still_finishes_the_record(
 
     (closed,) = [r for r in caplog.records if getattr(r, "event", None) == "session_closed"]
     assert closed.reason == "error"
-    (row,) = read("select * from conversations.sessions")
+    (row,) = read("select * from record.sessions")
     assert row["closed_at"] is not None
     assert row["close_reason"] == "error"
     # White-box for the two collaborator reads: a session gives back
@@ -774,7 +774,7 @@ async def test_a_cancelled_cleanup_step_still_finishes_the_record(
     assert task.cancelled(), "the cancellation did not reach the caller"
     (closed,) = [r for r in caplog.records if getattr(r, "event", None) == "session_closed"]
     assert closed.reason == "client"
-    (row,) = read("select * from conversations.sessions")
+    (row,) = read("select * from record.sessions")
     assert row["closed_at"] is not None
     # White-box, per the note at the same pair above.
     assert session._record is None
@@ -890,11 +890,11 @@ async def test_events_beyond_the_bound_go_and_the_conversation_does_not(
         finally:
             store.stop()
 
-    (row,) = read("select * from conversations.sessions")
+    (row,) = read("select * from record.sessions")
     assert row["dropped"] > 0
     assert row["close_reason"] == "client"
-    assert len(read("select * from conversations.turns")) == 1
-    assert read("select * from conversations.events") == []
+    assert len(read("select * from record.turns")) == 1
+    assert read("select * from record.events") == []
     dropped = [
         r for r in caplog.records if getattr(r, "event", None) == "conversations_dropped"
     ]
@@ -954,6 +954,6 @@ async def test_a_failed_write_costs_the_batch_and_not_the_conversation(
     assert POISON not in caplog.text
     # The session row is what survived, open-shaped, which is the
     # documented incomplete state and the same shape a crash leaves.
-    (row,) = read("select * from conversations.sessions")
+    (row,) = read("select * from record.sessions")
     assert row["session"] == session.session_id
     assert row["closed_at"] is None

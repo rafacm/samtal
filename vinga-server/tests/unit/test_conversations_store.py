@@ -714,7 +714,7 @@ def _absent_from_every_column(sentinel: str) -> bool:
         with engine.connect() as connection:
             for table in ("sessions", "turns", "tool_invocations", "events"):
                 for row in connection.execute(
-                    text(f"select * from conversations.{table}")
+                    text(f"select * from record.{table}")
                 ).mappings():
                     if sentinel in json.dumps(dict(row), default=str):
                         return False
@@ -1040,7 +1040,7 @@ def test_a_reader_sees_committed_rows_while_the_writer_is_still_going(stores) ->
             found = [
                 dict(row)
                 for row in connection.execute(
-                    text("select * from conversations.turns")
+                    text("select * from record.turns")
                 ).mappings()
             ]
     finally:

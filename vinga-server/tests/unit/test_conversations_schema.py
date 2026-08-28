@@ -193,11 +193,11 @@ def test_a_deleted_maximum_id_is_never_issued_again() -> None:
         with engine.connect() as connection:
             issued = [
                 row[0]
-                for row in connection.execute(text("select id from conversations.sessions"))
+                for row in connection.execute(text("select id from record.sessions"))
             ]
         with engine.begin() as connection:
             connection.execute(
-                text("delete from conversations.sessions where id = :id"),
+                text("delete from record.sessions where id = :id"),
                 {"id": max(issued)},
             )
     finally:
