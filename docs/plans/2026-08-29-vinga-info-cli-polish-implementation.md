@@ -362,3 +362,149 @@ commit that carries it.
    *Resolution*: adopted, in this commit, with the census manifest
    regenerated beside it because these are the milestone's last
    documentation edits.
+
+## M3: `apply` reloads by default
+
+PR TBD.
+
+### What landed
+
+Five commits: the mechanism, the migration, the new pins, the lanes
+that drive a real server, and the pages this falsified.
+
+- **`apply` writes the document and installs it.** Two acts on one row,
+  and which of them an invocation runs is a hook on the row
+  (`Command.selects`, a callable from the invocation to the acts) rather
+  than a tuple cut down after the fact. `Command.acts()` still answers
+  the full static set, so the API contract check enumerates coverage
+  from what the row can reach rather than from what one invocation ran.
+- **Two renderings, and they are two rows.** `APPLY_QUIETLY` and
+  `APPLY_RELOAD` are `dataclasses.replace` of `APPLY` and `RELOAD`, so
+  the request half (method, path, body, shapes, both timeouts) cannot
+  drift from the rows the contract check holds. What differs is the
+  rendering: `_applied` keeps the per-entity boundary notices, which is
+  `--no-reload`'s answer, and `_applied_quietly` drops them, because the
+  reload's listing on the next line is the boundary being crossed.
+- **`_performed`**, which runs one invocation's acts and stops at the
+  first refusal, so a refused document never reaches the reload. An act
+  that failed behind an act that already changed something adds what its
+  row says is now unknown (`Act.unanswered`), and the composed sentence
+  is built inside the handler and raised outside it, so nothing walks
+  from it to what the failure was carrying.
+- **`COMMITTED_UNANSWERED`**, the sentence itself: the write committed,
+  no completed reload answer arrived, run `vinga diff` and then
+  `vinga reload`. It claims nothing about the running server, for the
+  two reasons the plan gives, and both are pinned (a held reload's 409
+  in the rendering suite, an ambiguous transport failure in the
+  transport suite).
+- **The export header is three steps now**: stage, enter the
+  credentials, reload. A reload builds the engines a document names and
+  a document never carries their credentials, so a rebuild that
+  installed on its way past would refuse in the middle of a recovery.
+
+### Deviations from the plan
+
+Four, three of them the same shape: the plan named the behavior and the
+milestone had to decide where the seam goes.
+
+1. **`Act` gained a field, but not the one the plan implied.** The plan
+   says the change is a small `Command`/`Act` interface change, and M1's
+   note anticipated M3 giving an act the invocation. It did not, and did
+   not need to: two rows differing only in `render` say "which rendering
+   this invocation gets" without handing a renderer anything but the
+   answer, which is the property that keeps a rendering a function of
+   what came back. What `Act` did gain is `unanswered`, which is a fact
+   about what an act follows rather than about its answer, and which the
+   plan's committed-but-unanswered sentence needs a home for.
+
+2. **The export header, and two committed artifacts with it.** The plan
+   names the READMEs and the cli-guide; the header `export` prints is
+   the same promise in code, and it told an operator to apply a document
+   whose credentials arrive afterwards. Changing it moved
+   `tests/integration/data/pre-cutover-export.yaml`, which is compared
+   byte for byte against a fresh export and therefore carries whatever
+   header this build prints, and it needed a new entry in the
+   respelling differential's substitution table. That table is the
+   rename's, so the entry is labelled as not the rename's and the
+   docstring says an entry with no reason named is what the table must
+   never grow.
+
+3. **Three lanes depart from verbatim, and each says so where it does.**
+   The plan asks for the preset test to be renamed; the published-recipe
+   runner needed the same treatment for the same reason (installing a
+   preset builds what it names, which here is a model download and an
+   Ollama nobody is running), and `config.deploy.example.sh` is run
+   verbatim by the integration lane and could not be staged from
+   outside, so it stages in its own text. The last one is not only a
+   test convenience: a seeding script should not choose the minutes a
+   deployment spends downloading ASR weights.
+
+4. **The row's help sentence is one sentence.** The first draft ended
+   with a second (`. --no-reload stages the write instead`), which
+   `test_every_description_is_one_lowercase_sentence` refuses. It reads
+   `; or write it without applying, with --no-reload`, and the flag at
+   the end rather than mid-clause is also what keeps Click from wrapping
+   it as `--no-` / `reload` in the rendered listing.
+
+### The apply-test migration
+
+Inventoried by grep (`grep -rn '"apply"' tests/`): 36 matches across
+eight files, of which 32 are command lines and four are not (the
+retired-word list in the spelling census, the never-destroys row in the
+confirmation suite, a temporary directory named `apply`, and a refusal
+family key).
+
+Twenty-three command lines took `--no-reload`, by what they are about:
+storage semantics and idempotence (the acceptance spine's apply
+section), the round trip in both directions, the transportability guard,
+the transport suite's request-shape and no-narration cases, the apply
+bound, both recovery rebuilds and the cutover, the export round trip
+over the wire, and both lanes' bootstraps. Eight kept the default
+spelling deliberately: every one of them is a refusal, and a refused
+document never reaches the second act, which is worth having driven.
+
+Two lanes stage programmatically rather than by editing what they run:
+the published-recipe runner inserts the flag (`_staged`), and the
+preset test is renamed `test_a_preset_stages_onto_an_empty_store` with
+the departure in its docstring.
+
+The default is driven where a reload can answer: four cases in the
+rendering suite against an injected runtime, two in the transport suite
+against mock transports, and one over the wire in the live lane, on a
+document of its own after the reload test, asserting the write's line,
+the reload's listing under it and an empty stderr.
+
+### Discoveries
+
+- **The refusal a default apply meets in a lane is the real one.** The
+  published-recipe case and the deployment-profile script both failed
+  with `the reload was refused ... the engines the stored configuration
+  names could not all be built`, which is exactly the sequence an
+  operator would meet if a rebuild installed before its credentials were
+  entered. The export header change is that failure written down.
+- **A committed artifact can carry a generated header.** The
+  pre-cutover export is documented as a record nothing in this
+  repository can produce again, and its header is nevertheless whatever
+  the current build prints, because the test compares the two byte for
+  byte with only the secret-set annotations taken off. Worth knowing
+  before changing anything an export opens with.
+- **`Reached` made the second act free.** M1's review round moved
+  address and token resolution to once per invocation, so adding a
+  second request to `apply` needed no work at all: both acts go where
+  the command said it was going.
+
+### Verification
+
+- `uv run ruff check .`: clean.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: 4421 passed,
+  19 skipped.
+- `uv run pytest tests/integration -q`: 213 passed, against the Postgres
+  on 127.0.0.1:5432.
+- `python3 scripts/check_doc_links.py .`: 164 files, 0 failures.
+- The spellings census runs inside the unit lane and is green with the
+  manifest regenerated in the documentation commit.
+- `docs/reference/api-openapi.json` is unchanged, which is the honest
+  answer rather than a step skipped: nothing about the API moved, and
+  the generator was run to check.
+- Not verified here: nothing on hardware, and nothing in the image lane,
+  which is CI's. M3 adds no board or device procedure.

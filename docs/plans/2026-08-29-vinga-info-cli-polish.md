@@ -304,7 +304,8 @@ practice). The route's response-header pin covers
   root description, `status` relocated to `mcp-server status` with the
   respell sweep and superseded-rationale rewrites, generated
   references and census regenerated.
-- [ ] M3: `apply` reloads by default. The invocation-aware act
+- [x] [M3: `apply` reloads by default](2026-08-29-vinga-info-cli-polish-implementation.md#m3-apply-reloads-by-default)
+  (PR TBD). The invocation-aware act
   selection with `--no-reload`, the quiet and staging renderers, the
   committed-but-unanswered failure rendering, the apply-test
   migration, README and server-README lines this falsifies, cli-guide
