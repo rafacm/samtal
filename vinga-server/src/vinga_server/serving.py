@@ -83,16 +83,19 @@ class DrainingServer(uvicorn.Server):
         self._drain_task: asyncio.Task[None] | None = None
 
     def handle_exit(self, sig: int, frame: FrameType | None) -> None:
-        if self._draining:
-            super().handle_exit(sig, frame)
-            return
-        if self._drain_s <= 0:
-            # A server configured not to drain calls uvicorn directly,
-            # so this is where the event tails end: immediately before
-            # that shutdown, which is the same place they end on the
-            # draining path below. `sessions.drain()` stays uncalled
-            # here, because that is the whole of what a zero drain
-            # means and closing a tail is not draining a conversation.
+        if self._draining or self._drain_s <= 0:
+            # The two ways uvicorn is called directly: a second signal,
+            # which is an operator forcing the issue while a drain is
+            # already running, and a server configured not to drain at
+            # all. Both end the event tails first, because every path
+            # out of this process ends them and an open stream is a
+            # response uvicorn's graceful shutdown would otherwise wait
+            # out; the close is idempotent, so the drain below closing
+            # them again costs nothing.
+            #
+            # Neither drains. The first is already draining and the
+            # second never does, which is the whole of what `drain_s <=
+            # 0` means: closing a tail is not draining a conversation.
             self._close_live()
             super().handle_exit(sig, frame)
             return
