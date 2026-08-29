@@ -1084,7 +1084,23 @@ class AppliedEntry(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    section: str = Field(
+    # A closed token rather than a string, because it is printed as
+    # itself: the renderer composes `<section>.<identity>` and puts it
+    # on stdout, so a section is one of the seven words this API can
+    # emit or it is a body nobody vouched for. The seven are the domain
+    # document's own top-level keys, which `ConfigDiff` above names one
+    # field at a time; the apply route validates its answer against this
+    # model, so a section added to the configuration and not to this
+    # list fails on the way out rather than reaching an operator.
+    section: Literal[
+        "providers",
+        "mcp_servers",
+        "prompt_fragments",
+        "agent_defaults",
+        "agents",
+        "devices",
+        "default_agent",
+    ] = Field(
         description=(
             "Which section of the domain configuration the entry is in: one of "
             "`providers`, `mcp_servers`, `prompt_fragments`, `agent_defaults`, "
@@ -1116,6 +1132,40 @@ class AppliedEntry(BaseModel):
             "`unchanged`, which has nothing waiting to be applied."
         )
     )
+
+    @model_validator(mode="after")
+    def _one_outcome(self) -> "AppliedEntry":
+        """The outcome and the notice are one fact, so a body may not
+        say two.
+
+        The field above states the rule as prose and nothing enforced
+        it: an entry that changed nothing arriving with a boundary to
+        wait at, or a write arriving with none, are two answers no
+        operator can act on, and the first is a sentence printed to a
+        terminal by an entry that has nothing to say.
+
+        Refused rather than reconciled, for the reason `RuntimeInfo`
+        refuses its own three-field disagreement: reconciling is picking
+        a half to believe. Nothing is quoted back, because what is wrong
+        is which fields disagree rather than what either holds.
+
+        What this cannot check here is whether a notice is one of the
+        sentences this server composes: those live in `config.entities`
+        and this module imports nothing of this server, which is what
+        lets a generated client substitute for it
+        (`tests/unit/test_cli_import_weight.py`). What stands in front
+        of an arbitrary sentence instead is the rendering: the CLI puts
+        every string an answer carries through the terminal-safe printer
+        before it reaches a stream.
+        """
+        wrote = self.outcome == "wrote"
+        if wrote != (self.notice is not None):
+            raise ValueError(
+                "outcome and notice are one fact and disagree: an entry that was "
+                "written carries the boundary its change takes effect at, and an "
+                "unchanged one carries null, having nothing waiting to be applied"
+            )
+        return self
 
 
 class AppliedDocument(BaseModel):

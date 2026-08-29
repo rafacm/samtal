@@ -667,12 +667,12 @@ docs/plans/2026-08-29-vinga-info-cli-polish.md:409  historical  vinga info
 docs/plans/2026-08-29-vinga-info-cli-polish.md:425  historical  vinga status
 docs/plans/2026-08-29-vinga-info-cli-polish.md:426  historical  vinga mcp-server status
 docs/reference/api-openapi.json:5  generated  vinga schema provider
-docs/reference/api-openapi.json:5056  generated  vinga ota-url
-docs/reference/api-openapi.json:6005  generated  vinga provider secret set
-docs/reference/api-openapi.json:6126  generated  vinga agent preview
-docs/reference/api-openapi.json:6158  generated  vinga agent preview
-docs/reference/api-openapi.json:6201  generated  vinga mcp-server status
-docs/reference/api-openapi.json:6225  generated  vinga mcp-server status
+docs/reference/api-openapi.json:5065  generated  vinga ota-url
+docs/reference/api-openapi.json:6014  generated  vinga provider secret set
+docs/reference/api-openapi.json:6135  generated  vinga agent preview
+docs/reference/api-openapi.json:6167  generated  vinga agent preview
+docs/reference/api-openapi.json:6210  generated  vinga mcp-server status
+docs/reference/api-openapi.json:6234  generated  vinga mcp-server status
 docs/reference/cli.md:41  respell  vinga provider set llm local
 docs/reference/cli.md:42  respell  vinga-server config provider set llm local
 docs/reference/cli.md:63  respell  vinga config list
@@ -1032,8 +1032,8 @@ vinga-server/src/vinga_server/config/cli.py:453  respell  vinga list
 vinga-server/src/vinga_server/config/cli.py:606  respell  vinga provider
 vinga-server/src/vinga_server/config/cli.py:2520  respell  vinga list
 vinga-server/src/vinga_server/config/cli.py:2552  respell  config list
-vinga-server/src/vinga_server/config/cli.py:6008  respell  vinga provider
-vinga-server/src/vinga_server/config/cli.py:6008  respell  vinga device pending
+vinga-server/src/vinga_server/config/cli.py:6024  respell  vinga provider
+vinga-server/src/vinga_server/config/cli.py:6024  respell  vinga device pending
 vinga-server/src/vinga_server/config/docgen.py:198  respell  config schema
 vinga-server/src/vinga_server/config/docgen.py:587  respell  config schema
 vinga-server/src/vinga_server/config/loader.py:76  respell  vinga simulator run
@@ -1042,9 +1042,9 @@ vinga-server/src/vinga_server/config/models.py:2316  respell  config schema
 vinga-server/src/vinga_server/config/responses.py:9  respell  config schema
 vinga-server/src/vinga_server/config/responses.py:9  respell  config reference
 vinga-server/src/vinga_server/config/responses.py:880  respell  vinga ota-url
-vinga-server/src/vinga_server/config/responses.py:1201  respell  vinga session list
-vinga-server/src/vinga_server/config/responses.py:1202  respell  vinga session show
-vinga-server/src/vinga_server/config/responses.py:1416  respell  vinga conversation show
+vinga-server/src/vinga_server/config/responses.py:1251  respell  vinga session list
+vinga-server/src/vinga_server/config/responses.py:1252  respell  vinga session show
+vinga-server/src/vinga_server/config/responses.py:1466  respell  vinga conversation show
 vinga-server/src/vinga_server/config/secrets.py:9  respell  vinga-server config provider secret set
 vinga-server/src/vinga_server/config/store.py:218  respell  vinga simulator check-in
 vinga-server/src/vinga_server/config/store.py:230  respell  vinga-server config device show
@@ -1204,7 +1204,7 @@ vinga-server/tests/unit/test_config_cli_info.py:1  respell  vinga info
 vinga-server/tests/unit/test_config_cli_info.py:152  respell  vinga list
 vinga-server/tests/unit/test_config_cli_onboarding.py:1  respell  config ota-url
 vinga-server/tests/unit/test_config_cli_onboarding.py:113  respell  vinga-server config ota-url
-vinga-server/tests/unit/test_config_cli_rendering.py:413  respell  config reload
+vinga-server/tests/unit/test_config_cli_rendering.py:416  respell  config reload
 vinga-server/tests/unit/test_config_cli_respelling.py:28  historical  set-secret
 vinga-server/tests/unit/test_config_cli_respelling.py:81  historical  config set agent-defaults
 vinga-server/tests/unit/test_config_cli_respelling.py:81  historical  config agent-defaults set
