@@ -55,9 +55,15 @@ inventing one is retention this surface must not have. For the same
 reason there is no `--since` in this issue: a reconnecting client
 resumes live and reads history from the conversation record when it
 was enabled. The stream sends a comment-line keepalive every 15
-seconds so idle streams survive proxies, and it ends when the server
-shuts down (the generator is cancelled inside the drain window) or
-the client disconnects.
+seconds so idle streams survive proxies (the interval is an injected
+seam so a test never waits it out), and it ends when the client
+disconnects or when the server shuts down. Shutdown is explicit
+rather than incidental: `serving.py` closes the hub after
+`sessions.drain()` and before uvicorn's own shutdown, and the close
+wakes and terminates every subscription, including on the
+`drain_s <= 0` path, so a shutdown never hangs on an open tail.
+That ordering is verified at process level against the real draining
+server, not inferred from a client disconnect.
 
 **Where the subscriber hub lives, and how session events reach it.**
 A `live.py` module inside the events package (strict-typed there by
@@ -184,6 +190,8 @@ events.md note says both things.
   the server hub, handed to the device edge and to `ApiRuntime`.
 - `device/session.py` deepens by one attach/detach pair beside the
   conversation sink's, same lifetime discipline.
+- `serving.py` deepens: the shutdown sequence closes the hub
+  between the session drain and uvicorn's shutdown.
 - `config/api.py` deepens: one streaming route in `_runtime`,
   answering 503 standalone like prompt and diff (a live view of a
   server that is not there has no honest empty).
