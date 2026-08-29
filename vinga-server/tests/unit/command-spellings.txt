@@ -1045,16 +1045,16 @@ vinga-server/pyproject.toml:84  respell  vinga simulator run
 vinga-server/pyproject.toml:165  respell  config cli-reference
 vinga-server/pyproject.toml:181  respell  vinga simulator run
 vinga-server/src/vinga_server/app.py:805  respell  vinga-server config ota-url
-vinga-server/src/vinga_server/config/api.py:425  respell  vinga-server config device pending list
-vinga-server/src/vinga_server/config/api.py:444  respell  vinga-server config list
-vinga-server/src/vinga_server/config/api.py:544  respell  vinga-server config reload
-vinga-server/src/vinga_server/config/api.py:545  respell  vinga-server config list
-vinga-server/src/vinga_server/config/cli.py:517  respell  vinga list
-vinga-server/src/vinga_server/config/cli.py:679  respell  vinga provider
-vinga-server/src/vinga_server/config/cli.py:2709  respell  vinga list
-vinga-server/src/vinga_server/config/cli.py:2741  respell  config list
-vinga-server/src/vinga_server/config/cli.py:6542  respell  vinga provider
-vinga-server/src/vinga_server/config/cli.py:6542  respell  vinga device pending
+vinga-server/src/vinga_server/config/api.py:426  respell  vinga-server config device pending list
+vinga-server/src/vinga_server/config/api.py:445  respell  vinga-server config list
+vinga-server/src/vinga_server/config/api.py:545  respell  vinga-server config reload
+vinga-server/src/vinga_server/config/api.py:546  respell  vinga-server config list
+vinga-server/src/vinga_server/config/cli.py:536  respell  vinga list
+vinga-server/src/vinga_server/config/cli.py:698  respell  vinga provider
+vinga-server/src/vinga_server/config/cli.py:2761  respell  vinga list
+vinga-server/src/vinga_server/config/cli.py:2793  respell  config list
+vinga-server/src/vinga_server/config/cli.py:6743  respell  vinga provider
+vinga-server/src/vinga_server/config/cli.py:6743  respell  vinga device pending
 vinga-server/src/vinga_server/config/docgen.py:198  respell  config schema
 vinga-server/src/vinga_server/config/docgen.py:587  respell  config schema
 vinga-server/src/vinga_server/config/loader.py:76  respell  vinga simulator run
@@ -1063,9 +1063,9 @@ vinga-server/src/vinga_server/config/models.py:2316  respell  config schema
 vinga-server/src/vinga_server/config/responses.py:9  respell  config schema
 vinga-server/src/vinga_server/config/responses.py:9  respell  config reference
 vinga-server/src/vinga_server/config/responses.py:880  respell  vinga ota-url
-vinga-server/src/vinga_server/config/responses.py:1251  respell  vinga session list
-vinga-server/src/vinga_server/config/responses.py:1252  respell  vinga session show
-vinga-server/src/vinga_server/config/responses.py:1466  respell  vinga conversation show
+vinga-server/src/vinga_server/config/responses.py:1260  respell  vinga session list
+vinga-server/src/vinga_server/config/responses.py:1261  respell  vinga session show
+vinga-server/src/vinga_server/config/responses.py:1475  respell  vinga conversation show
 vinga-server/src/vinga_server/config/secrets.py:9  respell  vinga-server config provider secret set
 vinga-server/src/vinga_server/config/store.py:218  respell  vinga simulator check-in
 vinga-server/src/vinga_server/config/store.py:230  respell  vinga-server config device show
@@ -1223,7 +1223,7 @@ vinga-server/tests/unit/test_config_api_pending.py:350  respell  config list
 vinga-server/tests/unit/test_config_api_runtime.py:681  respell  config reload
 vinga-server/tests/unit/test_config_apply.py:4  respell  config apply
 vinga-server/tests/unit/test_config_cli_events.py:1  respell  vinga events tail
-vinga-server/tests/unit/test_config_cli_events.py:451  respell  vinga events tail
+vinga-server/tests/unit/test_config_cli_events.py:448  respell  vinga events tail
 vinga-server/tests/unit/test_config_cli_info.py:1  respell  vinga info
 vinga-server/tests/unit/test_config_cli_info.py:152  respell  vinga list
 vinga-server/tests/unit/test_config_cli_onboarding.py:1  respell  config ota-url
