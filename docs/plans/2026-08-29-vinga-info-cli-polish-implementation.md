@@ -197,3 +197,96 @@ running the case it added.
    is what keeps the device side clear of the operator-side credential.
    The test counts the reads of the file half and moves the port under
    the command; the old code read three times.
+
+## M2: the polish
+
+PR TBD.
+
+### What landed
+
+Four commits, each a change and the pages it falsified: the bare
+invocation, the description, the relocation, the changelog.
+
+- **A bare invocation is answered with its own help page.** The parse
+  is still left to fail the way it always did, and `_page_instead`
+  turns that one failure into the page, off the context the mistake
+  carries, so a bare sub-noun (`vinga device pending`) gets its own page
+  rather than the root's. It leaves through `ConfigError` like every
+  other answer to an invocation that was not a completed command:
+  stderr, exit 1, chain empty. Not `no_args_is_help=True`, which is
+  wrong twice (stdout for something that is not data, and a 0 that says
+  a command completed).
+- **The root description**, in the vocabulary of the person reading it
+  rather than this repository's. The hand-written head of
+  `docs/reference/cli.md` is reordered the same way, keeping the
+  definition of the two halves for the sections that use the term
+  later.
+- **`status` under its noun**, row moved whole so `_status_block`
+  renders the same bytes, `_ORDER` dropping the word by itself because
+  it is derived from the table. No alias.
+- **The respell sweep**, in the same commit as the move, so no commit
+  ships a document naming a command the tree does not have.
+
+### Deviations from the plan
+
+Three, all small, two of them corrections to the brief rather than to
+the plan.
+
+1. **The flat-verbs section had no `status` to lose.** The plan and the
+   brief both say that section "gains `info` and loses `status`". It
+   gained `info` in M1; it never listed `status` at all, on `main` or
+   on this branch. What landed instead is a labelled historical
+   counterexample there, because the section's rule is exactly the one
+   the relocation is an instance of: a verb whose subject is one noun
+   does not belong beside the verbs whose subject is the deployment.
+   Written in the long spelling, which is the guide's own rule for a
+   quotation of what the grammar used to be (the short spelling states
+   the live standard, and the census guard enforces the split).
+
+2. **Two more spellings than the census listed, both templated.**
+   `models.py:1758` and `entities.py:534` compose their descriptions
+   with `f"{PROGRAM} status"`, and an f-string interpolation is not a
+   quoted invocation, so the sweep cannot see either. They are the same
+   fact as `models.py:1727` and regenerate into the same two documents.
+   Found by regenerating `domain-config.md` and seeing it not change
+   when it should have.
+
+3. **The `_runtime` docstring needed no extension.** The plan licenses
+   one "if it reads naturally"; M1 had already added the `info`
+   sentence to it, and its collision rationale is about an entry legally
+   named `status` shadowing a runtime route, which a CLI respell does
+   not touch. The README's copy of that rationale did gain a sentence,
+   because a reader who has just typed `vinga mcp-server status` will
+   otherwise read the next paragraph as a contradiction: there the word
+   is in the verb slot, where an entry name never is.
+
+### Discoveries
+
+- **A bare group's help page comes off the exception, not off the
+  tree.** Click's `Context.fail` attaches the failing context to the
+  `UsageError`, and for `vinga device pending` that is the innermost
+  group's context, still carrying its parent chain. So one branch at the
+  boundary answers every depth, and there is nothing to walk: no lookup
+  of "which group did they stop at", which would have been a second
+  place the tree is traversed.
+- **The refusal that moved was a deletion, not an edit.** The live
+  lane's refusal table is keyed by family, and `family_of` reads the
+  noun path off the row, so `("mcp-server", "status")` belongs to a
+  family that already had its refusal. The `("status",)` row had to go
+  rather than be re-pointed, or the table would have had two entries for
+  one family and failed the completeness pin.
+- **The census was stale again when this milestone began.** M1's last
+  commit substituted its PR number into two plan documents, which moved
+  the lines the manifest records. Regenerating it is the last
+  documentation act of a milestone for exactly this reason, and it is
+  worth expecting rather than debugging.
+
+### Verification
+
+- `uv run ruff check .`: clean.
+- `uv run pytest tests/unit -q`: 4396 passed, 19 skipped.
+- `uv run pytest tests/integration -q`: 212 passed, against the Postgres
+  this machine was already running with the compose defaults.
+- `python3 scripts/check_doc_links.py .`: 164 files, 0 failures.
+- Not verified here: nothing on hardware, and nothing in the image lane,
+  which is CI's. M2 adds no board or device procedure.

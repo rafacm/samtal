@@ -298,7 +298,8 @@ practice). The route's response-header pin covers
   `ApiRuntime`, the two-act `info` row with banner and counts render,
   OpenAPI description page, generated references, live-lane drive,
   cli-guide's flat-verbs section gains `info`.
-- [ ] M2: the polish. Bare invocations print help (boundary change,
+- [x] [M2: the polish](2026-08-29-vinga-info-cli-polish-implementation.md#m2-the-polish)
+  (PR TBD). Bare invocations print help (boundary change,
   rationale comments, cli-guide practice paragraph), the reworded
   root description, `status` relocated to `mcp-server status` with the
   respell sweep and superseded-rationale rewrites, generated
