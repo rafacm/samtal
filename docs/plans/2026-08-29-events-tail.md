@@ -321,7 +321,9 @@ events.md note says both things.
 
 ## Milestones
 
-- [ ] M1: the hub and the stream. `events/live.py`, composition and
+- [x] [M1: the hub and the
+  stream](2026-08-29-events-tail-implementation.md#m1-the-hub-and-the-stream)
+  (PR TBD). `events/live.py`, composition and
   session wiring, the `/api/runtime/events` route with filters,
   keepalive and dropped events, contract/OpenAPI bookkeeping,
   events.md live-surface note, observability page paragraph,
