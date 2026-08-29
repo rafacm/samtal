@@ -48,6 +48,7 @@ from tests.support.events import both_formats
 from vinga_server.broken_pipe import BROKEN_PIPE_STATUS
 from vinga_server.config import cli
 from vinga_server.config.loader import ConfigError
+from vinga_server.config.responses import EVENT_STREAM_MEDIA_TYPE
 
 # A value shaped like a credential in a query string, which is the form
 # the transport policy accepts and `Address.shown` takes out: userinfo
@@ -85,6 +86,17 @@ def dropped(count: int) -> bytes:
     return f'event: dropped\ndata: {{"dropped":{count}}}\n\n'.encode()
 
 
+def body(data: str) -> bytes:
+    """One unnamed frame carrying exactly this, whatever it is."""
+    return f"data: {data}\n\n".encode()
+
+
+def named(name: str, **fields: object) -> bytes:
+    """One frame under a name of the test's choosing, which is how the
+    `dropped` envelope is broken in each of the ways it can be."""
+    return f"event: {name}\n".encode() + body(json.dumps(fields, separators=(",", ":")))
+
+
 class Body(httpx.SyncByteStream):
     """A response body that arrives in pieces, and may stop arriving.
 
@@ -104,19 +116,20 @@ class Body(httpx.SyncByteStream):
             yield chunk
 
 
-def serving(*chunks: bytes | BaseException):
+def serving(*chunks: bytes | BaseException, media: str = EVENT_STREAM_MEDIA_TYPE):
     """A handler that answers one open stream of these chunks.
 
     It keeps every request it was given, so a test can read what the
-    command asked for as well as what it did with the answer.
+    command asked for as well as what it did with the answer. `media` is
+    a parameter because a 200 under some other type is a thing that
+    really answers, and what the command does with one is the point of
+    one of the cases below.
     """
     asked: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         asked.append(request)
-        return httpx.Response(
-            200, headers={"content-type": "text/event-stream"}, stream=Body(chunks)
-        )
+        return httpx.Response(200, headers={"content-type": media}, stream=Body(chunks))
 
     handler.asked = asked
     return handler
@@ -269,23 +282,6 @@ def test_a_field_name_that_is_not_a_declared_word_is_encoded_too(
     printed = capsys.readouterr().out
     assert printed.count("\n") == 1
     assert '"a b\\nc"=1' in printed
-
-
-def test_an_event_name_that_is_not_a_declared_word_is_encoded(
-    run, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """The same rule over the two words this renderer prints bare. What
-    makes printing them bare safe is that they are vocabulary from a
-    closed set, so something that is not from it is encoded like any
-    other value."""
-    answering(run, serving(event(event="ota\ncheck")))
-    capsys.readouterr()
-
-    assert run("events", "tail") == 0
-
-    printed = capsys.readouterr().out
-    assert printed.count("\n") == 1
-    assert '"ota\\ncheck"' in printed
 
 
 def test_a_stamp_that_is_not_a_stamp_does_not_break_the_line(
@@ -571,7 +567,7 @@ def test_a_frame_this_client_cannot_read_is_never_quoted_back(
     """What reaches a stream from a middlebox is not this API's
     sanitized output, and a tail that quietly skipped it would go on
     looking live while showing less than arrived."""
-    answering(run, serving(f"data: {ANSWERED}\n\n".encode()))
+    answering(run, serving(body(ANSWERED)))
     capsys.readouterr()
 
     assert run("events", "tail") == 1
@@ -580,6 +576,95 @@ def test_a_frame_this_client_cannot_read_is_never_quoted_back(
     assert printed.out == ""
     assert cli.UNRECOGNIZED_ANSWER in printed.err
     assert ANSWERED not in printed.err
+
+
+# A body that is not this stream
+#
+# Two things stand between a stranger's 200 and an operator's terminal,
+# and each is checked on its own here: the media type, before a line is
+# read, and the frame envelope, before a field is printed. The value
+# planted in every one of these bodies is what says the check is worth
+# something, since the whole failure being prevented is a body's own
+# values reaching stdout.
+
+
+def test_a_2xx_that_is_not_the_event_stream_is_not_read_at_all(
+    run, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
+) -> None:
+    """A proxy, a captive portal and a gateway all answer 200 with a
+    body of their own, and one of those bodies parses as a JSON object
+    as readily as an event does. The media type is what tells them
+    apart, and it is checked before a line is read rather than after a
+    field is printed."""
+    answering(
+        run,
+        serving(
+            frame(event="heard", level="INFO", ts=STAMP, leak=ANSWERED),
+            media="application/json",
+        ),
+    )
+    capsys.readouterr()
+
+    with caplog.at_level(0):
+        assert run("events", "tail") == 1
+
+    printed = capsys.readouterr()
+    assert printed.out == ""
+    assert printed.err.strip() == cli.NOT_THE_EVENT_STREAM
+    for surface in (printed.out, printed.err, logged(caplog), both_formats(caplog)):
+        assert ANSWERED not in surface
+
+
+# Every shape a frame can be that this stream never sends. The named
+# ones are the `dropped` envelope broken in each of the ways it can be,
+# plus a name the contract does not have at all; the unnamed ones are an
+# event missing or mis-shaping one of the three keys every event
+# carries.
+NOT_A_FRAME = [
+    pytest.param(named("dropped", dropped=3, leak=ANSWERED), id="dropped-with-more"),
+    pytest.param(named("dropped", dropped=ANSWERED), id="dropped-not-a-count"),
+    pytest.param(named("dropped", dropped=-1), id="dropped-negative"),
+    pytest.param(named("dropped", dropped=True), id="dropped-a-flag"),
+    pytest.param(named("surprise", leak=ANSWERED), id="a-name-the-contract-has-not"),
+    pytest.param(frame(event="heard", ts=STAMP, leak=ANSWERED), id="no-level"),
+    pytest.param(
+        frame(event="heard", level="SHOUTING", ts=STAMP, leak=ANSWERED),
+        id="a-level-that-is-not-one",
+    ),
+    pytest.param(frame(event="heard", level="INFO", leak=ANSWERED), id="no-stamp"),
+    pytest.param(
+        frame(event="heard", level="INFO", ts=1, leak=ANSWERED),
+        id="a-stamp-that-is-a-number",
+    ),
+    pytest.param(frame(level="INFO", ts=STAMP, leak=ANSWERED), id="no-event"),
+    pytest.param(
+        frame(event="ota\ncheck", level="INFO", ts=STAMP, leak=ANSWERED),
+        id="an-event-name-that-is-not-a-word",
+    ),
+    pytest.param(body(json.dumps([ANSWERED])), id="not-an-object"),
+]
+
+
+@pytest.mark.parametrize("body", NOT_A_FRAME)
+def test_a_frame_that_is_not_this_stream_s_is_never_printed(
+    run, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture, body: bytes
+) -> None:
+    """The envelope is what this half can check, and it checks it before
+    anything is rendered: an event's own field names are the
+    catalogue's, which the client tier may not import, but the three
+    keys every streamed event carries are published and so is the small
+    object a `dropped` frame is."""
+    answering(run, serving(body))
+    capsys.readouterr()
+
+    with caplog.at_level(0):
+        assert run("events", "tail") == 1
+
+    printed = capsys.readouterr()
+    assert printed.out == ""
+    assert cli.UNRECOGNIZED_ANSWER in printed.err
+    for surface in (printed.out, printed.err, logged(caplog), both_formats(caplog)):
+        assert ANSWERED not in surface
 
 
 def test_an_unreadable_frame_leaves_nothing_on_the_chain() -> None:

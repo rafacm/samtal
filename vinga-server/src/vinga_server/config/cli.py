@@ -116,6 +116,7 @@ from vinga_server.config.models import (
 )
 from vinga_server.config.printing import parsed_url, printable, shown_url
 from vinga_server.config.responses import (
+    EVENT_STREAM_MEDIA_TYPE,
     PROBLEM_MEDIA_TYPE,
     PROBLEM_TITLES,
     Acknowledgement,
@@ -355,6 +356,24 @@ UNREADABLE_EVENT = (
     f"the event stream carried {UNRECOGNIZED_ANSWER}, so the tail stopped rather than "
     f"printing it. It is not quoted back: what reaches a stream from a middlebox is "
     f"not the API's sanitized output."
+)
+
+# And what a 200 that is not the event stream says.
+#
+# A success is not by itself a reason to read a body. A proxy, a captive
+# portal or a gateway answers 200 with a body of its own, and this
+# command prints the fields of what it reads, so a body that merely
+# parsed as JSON would put a stranger's values on an operator's
+# terminal. The media type is the first of the two things that stand
+# between those and stdout, and the frame shape is the second. Neither
+# what answered nor what it called itself is repeated here, for the
+# reason no unreadable answer in this module is.
+NOT_THE_EVENT_STREAM = (
+    "the address answered, but not with this API's event stream: the response does "
+    "not carry the stream's media type, so none of it is read and none of it is "
+    "printed. What answered is not quoted back, because a body that is not this "
+    "API's output is not this API's to relay. Check that the address names the "
+    "configuration API and that nothing in front of it is answering in its place."
 )
 
 # How a stored secret is introduced in `show` and `list`. Comment lines
@@ -1561,6 +1580,12 @@ def _reading(
         if opened is not None and problem is None:
             if not opened.is_success:
                 _refused_stream(opened, address)
+            if _media_type(opened) != EVENT_STREAM_MEDIA_TYPE:
+                # Checked before a single line is read, because reading
+                # is what this command does with what it reads: see
+                # `NOT_THE_EVENT_STREAM`.
+                problem = NOT_THE_EVENT_STREAM
+        if opened is not None and problem is None:
             try:
                 yield from opened.iter_lines()
             except httpx.HTTPError:
@@ -1644,8 +1669,7 @@ def _refusal(response: httpx.Response, payload: object) -> str | None:
     never raised from, because pydantic puts the input it rejected into
     its own message.
     """
-    media_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
-    if media_type != PROBLEM_MEDIA_TYPE:
+    if _media_type(response) != PROBLEM_MEDIA_TYPE:
         return None
     title = PROBLEM_TITLES.get(response.status_code)
     if title is None:
@@ -1657,6 +1681,19 @@ def _refusal(response: httpx.Response, payload: object) -> str | None:
     if problem.status != response.status_code or problem.title != title:
         return None
     return problem.detail
+
+
+def _media_type(response: httpx.Response) -> str:
+    """What an answer says it is, without the parameters that follow it.
+
+    One home for the reading because two readers ask it and both decide
+    whether to read a body on the answer: a refusal is relayed only from
+    `application/problem+json`, and the event stream is read only from
+    its own type. `charset=` and whatever else a server appends are not
+    part of the comparison, and the case is not either, since neither is
+    part of the type.
+    """
+    return response.headers.get("content-type", "").split(";")[0].strip().lower()
 
 
 def _payload(response: httpx.Response) -> object:
@@ -4584,12 +4621,25 @@ def _firmware(read: board.Firmware) -> str:
 DROPPED_EVENT = "dropped"
 
 # The two fields the stream owns and the one every event carries, which
-# this renderer prints in front of the rest rather than among them.
+# this renderer prints in front of the rest rather than among them, and
+# which together are the envelope a frame has to have to be read at all.
 STREAM_TIME = "ts"
 
 STREAM_LEVEL = "level"
 
 EVENT_NAME = "event"
+
+# The four names the stream stamps a level with, which are the four
+# `--level` takes.
+#
+# Derived from the logging module rather than typed out, because that is
+# where the server's own copy comes from: `events/live.py` writes the
+# `level` field with `logging.getLevelName`, so these are the same four
+# strings arrived at the same way rather than a second spelling of them.
+LEVEL_NAMES = tuple(
+    logging.getLevelName(level)
+    for level in (logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR)
+)
 
 # The one level whose name is not printed. It is the default the stream
 # filters at, so it is what most of a tail is, and a word on every line
@@ -4615,9 +4665,13 @@ EVENTS_SESSION_HELP = (
     "only the events of this session, by its uuid hex (default: every session)"
 )
 
+# Composed from the names above rather than restating them, so the page
+# an operator reads and the set a frame is held to cannot come apart.
+# The last is joined with `or` because this is a sentence.
 EVENTS_LEVEL_HELP = (
-    "the lowest level to show, in any case: DEBUG, INFO, WARNING or ERROR "
-    "(default: INFO, which is what the retained log carries)"
+    f"the lowest level to show, in any case: {', '.join(LEVEL_NAMES[:-1])} or "
+    f"{LEVEL_NAMES[-1]} (default: {UNNAMED_LEVEL}, which is what the retained log "
+    f"carries)"
 )
 
 FOLLOW_HELP = (
@@ -4695,13 +4749,17 @@ def _frames(lines: Iterable[str]) -> Iterator[tuple[str, Mapping[str, Any]]]:
     this client has no use for is ignored, which is what the format asks
     a reader to do and what keeps a stream that grows a field from
     breaking a client that does not want it.
+
+    The name travels with the object because it is what the object is
+    held to: this stream has two kinds of frame and they have different
+    shapes, so which one arrived decides what it has to be.
     """
     name = ""
     data: list[str] = []
     for line in lines:
         if line == "":
             if data:
-                yield name, _frame_fields("\n".join(data))
+                yield name, _frame_fields(name, "\n".join(data))
             name, data = "", []
         elif not line.startswith(":"):
             field, _, value = line.partition(":")
@@ -4712,24 +4770,80 @@ def _frames(lines: Iterable[str]) -> Iterator[tuple[str, Mapping[str, Any]]]:
                 data.append(value)
 
 
-def _frame_fields(data: str) -> Mapping[str, Any]:
-    """One frame's object, or a refusal with nothing of the frame in it.
+def _frame_fields(name: str, data: str) -> Mapping[str, Any]:
+    """One frame's object, held to this stream's contract, or a refusal
+    with nothing of the frame in it.
 
     Refused rather than skipped. A tail that quietly dropped what it
     could not parse would go on looking live while showing less than
     arrived, which is the failure this whole command's end-of-stream
-    contract exists to make impossible. Recorded inside the handler and
-    raised outside it, this module's rule: a JSON decoding error carries
-    the document it was decoding.
+    contract exists to make impossible.
+
+    Both arms are recorded inside their handler and raised outside it,
+    this module's rule, and here it is not a formality: a JSON decoding
+    error carries the document it was decoding, and this document came
+    off a socket.
     """
-    parsed: object = None
+    problem: str | None = None
+    read: list[object] = []
     try:
-        parsed = json.loads(data)
+        read.append(json.loads(data))
     except ValueError:
-        parsed = None
-    if not isinstance(parsed, dict):
+        problem = UNREADABLE_EVENT
+    if problem is not None:
+        raise ConfigError(problem)
+    if not _carries(name, read[0]):
         raise ConfigError(UNREADABLE_EVENT)
-    return parsed
+    return read[0]  # type: ignore[return-value]
+
+
+def _carries(name: str, fields: object) -> bool:
+    """Whether one frame is a frame of this stream.
+
+    The second of the two things standing between a stranger's body and
+    an operator's terminal, the first being the media type. A 200 whose
+    body happens to parse as a JSON object is not this API's output, and
+    this command prints an object's values, so "it parsed" is not a
+    reason to print it.
+
+    What is checked is the envelope, which is all this half can check: an
+    event's own field names are the catalogue's, and the module that
+    declares them is precisely what the client tier may not import. So an
+    ordinary frame has to carry the three keys every streamed event
+    carries, in the shapes the route publishes them in, and a `dropped`
+    frame has to be its own small envelope and nothing else. A frame
+    under any other name is not in the contract at all. Past that the
+    event's own fields are rendered escaped, which is what keeps a
+    hostile value to one line whatever it holds.
+
+    The stamp is required to be a string rather than to be a stamp: what
+    a string means is the renderer's question, and one that will not
+    parse still prints as the value it is.
+    """
+    if not isinstance(fields, dict):
+        return False
+    if name == DROPPED_EVENT:
+        return list(fields) == [DROPPED_EVENT] and _is_count(fields[DROPPED_EVENT])
+    if name:
+        return False
+    return (
+        _is_bare(fields.get(EVENT_NAME))
+        and fields.get(STREAM_LEVEL) in LEVEL_NAMES
+        and isinstance(fields.get(STREAM_TIME), str)
+    )
+
+
+def _is_count(value: object) -> bool:
+    """Whether a value is a count: a whole number that is not a flag.
+    `True` is an `int` in this language and is not a count in any
+    other."""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _is_bare(value: object) -> bool:
+    """Whether a value is one of the declared words this prints
+    unquoted."""
+    return isinstance(value, str) and _BARE_WORD.match(value) is not None
 
 
 def _event_line(fields: Mapping[str, Any]) -> str:
@@ -4753,12 +4867,12 @@ def _event_line(fields: Mapping[str, Any]) -> str:
     vocabulary. A reader who needs the object itself reads the log, or
     the stream, which carries exactly it.
     """
-    parts = [_time_of_day(fields.get(STREAM_TIME))]
-    level = fields.get(STREAM_LEVEL)
-    if level is not None and level != UNNAMED_LEVEL:
-        parts.append(_bare(level))
-    if EVENT_NAME in fields:
-        parts.append(_bare(fields[EVENT_NAME]))
+    # The three the envelope guarantees, read directly: a frame that did
+    # not carry them never reached a renderer (`_carries`).
+    parts = [_time_of_day(fields[STREAM_TIME])]
+    if fields[STREAM_LEVEL] != UNNAMED_LEVEL:
+        parts.append(fields[STREAM_LEVEL])
+    parts.append(fields[EVENT_NAME])
     parts += [
         f"{_bare(key)}={_value(value)}"
         for key, value in fields.items()
@@ -4776,26 +4890,33 @@ def _dropped_notice(fields: Mapping[str, Any]) -> str:
     up, which is the alternative to slowing a conversation down.
     """
     return (
-        f"{_value(fields.get(DROPPED_EVENT))} events are missing above this line: this "
-        f"reader fell behind, and the server overwrote the oldest of them rather than "
-        f"holding a conversation up for it."
+        f"{fields[DROPPED_EVENT]} events are missing above this line: this reader fell "
+        f"behind, and the server overwrote the oldest of them rather than holding a "
+        f"conversation up for it."
     )
 
 
-def _time_of_day(value: object) -> str:
+def _time_of_day(stamp: str) -> str:
     """The stream's stamp as a person watching reads it: the clock time,
-    without the date a tail is already inside of. Anything that is not a
-    stamp is rendered as the value it is, which is what keeps this from
-    being the one place a line could come apart."""
-    if isinstance(value, str):
-        with contextlib.suppress(ValueError):
-            return datetime.fromisoformat(value).strftime("%H:%M:%S")
-    return _value(value)
+    without the date a tail is already inside of.
+
+    A string by the envelope's guarantee, and a stamp only by this
+    server's habit: what a string means is a rendering question, so one
+    that will not parse prints as the value it is rather than ending the
+    tail."""
+    with contextlib.suppress(ValueError):
+        return datetime.fromisoformat(stamp).strftime("%H:%M:%S")
+    return _value(stamp)
 
 
 def _bare(value: object) -> str:
-    """A declared word printed as it is, and anything else encoded."""
-    return value if isinstance(value, str) and _BARE_WORD.match(value) else _value(value)
+    """A declared word printed as it is, and anything else encoded.
+
+    What still goes through it is an event's own field NAMES, which are
+    the catalogue's and which this half cannot hold to a list it does not
+    have. The two words the envelope does check, the event's name and its
+    level's, are bare by that check and are printed directly."""
+    return value if _is_bare(value) else _value(value)
 
 
 def _value(value: object) -> str:
