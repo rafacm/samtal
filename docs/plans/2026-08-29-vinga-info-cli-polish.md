@@ -109,11 +109,19 @@ regenerated in the same commit as the last doc edit.
 two-act row (`APPLY`, then `RELOAD`), and the row grows a boolean
 option that truncates the act tuple to its first element. `_act`
 raises out of a failed first act, so a refused apply never reloads.
-A committed apply whose reload then refuses (409 held, 503 no
-runtime, snapshot-only server) renders the apply result first and the
-reload refusal after it, stating plainly that the write is stored and
-`vinga reload` applies it; that sentence is the honest outcome, not a
-rollback, because the write is durable and correct. With the default
+A committed apply whose reload act then fails renders the apply
+result first and the reload failure after it, and the sentence it
+adds claims only what the client actually knows: the write committed,
+and this command did not receive a completed reload answer. It does
+not claim the running state, because that state is unknowable from
+here: a 409 means another reload is running and may have re-read the
+store before or after this commit, and a transport failure or timeout
+is ambiguous because a reload continues in shielded tasks after its
+requester goes away. The sentence directs the operator to
+`vinga diff` (which says whether the stored and running worlds agree)
+and then `vinga reload` if they do not. Both shapes are tested: a
+concurrent 409 from a held reload, and an ambiguous transport failure
+mid-reload. With the default
 now reloading, the `RELOAD_NOTICE` lines `apply` used to print per
 written entity are suppressed when the reload act runs (the reload
 listing that follows says what applied); they still print under
@@ -271,6 +279,12 @@ condensed but faithful; resolutions appended per amendment.
    receive a completed reload answer, directing the operator to
    `vinga diff` then `vinga reload`; test the concurrent 409 and an
    ambiguous transport failure.
+
+   *Resolution*: adopted. The stored-but-not-applied sentence is
+   replaced by a claim of exactly what the client knows (committed
+   write, no completed reload answer), pointing at `vinga diff` then
+   `vinga reload`, with the 409 and transport-ambiguity cases both
+   tested.
 
 3. **P1: tuple truncation cannot implement the promised notice
    behavior.** `Act.render` receives only the answer, not the
