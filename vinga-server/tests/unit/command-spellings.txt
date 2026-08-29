@@ -877,7 +877,7 @@ spikes/2026-08-20-openapi-ts-client/openapi-typescript/generated/api.d.ts:1452  
 spikes/2026-08-20-openapi-ts-client/openapi-typescript/generated/api.d.ts:1499  generated  vinga-server config status
 spikes/2026-08-20-openapi-ts-client/openapi-typescript/generated/api.d.ts:1512  generated  vinga-server config status
 vinga-server/Dockerfile:25  respell  vinga simulator
-vinga-server/Dockerfile:157  respell  config list
+vinga-server/Dockerfile:168  respell  config list
 vinga-server/README.md:178  respell  vinga-server config provider set asr ears
 vinga-server/README.md:371  respell  vinga-server config provider set tts eleven
 vinga-server/README.md:431  respell  vinga-server config provider set tts

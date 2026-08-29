@@ -1,9 +1,15 @@
-"""Which build the server says it is.
+"""What the image says about itself.
 
-Three sources, first answer wins: the environment variable an image
-bakes in, `git describe` for a working tree, and `unknown` for a build
-that has neither. The last one is the point of the exercise as much as
-the first: a server that cannot name its build still starts.
+Which build, from three sources, first answer wins: the environment
+variable an image bakes in, `git describe` for a working tree, and
+`unknown` for a build that has neither. The last one is the point of the
+exercise as much as the first: a server that cannot name its build still
+starts.
+
+And whether this is a container at all, which is one marker the image
+sets in its own ENV, read fresh every time because what asks is a
+provider build and a test is entitled to be a container between two of
+them.
 """
 
 import subprocess
@@ -12,7 +18,13 @@ from pathlib import Path
 import pytest
 
 from vinga_server import build_info
-from vinga_server.build_info import REVISION_ENV, UNKNOWN_REVISION, revision
+from vinga_server.build_info import (
+    CONTAINER_ENV,
+    REVISION_ENV,
+    UNKNOWN_REVISION,
+    in_container,
+    revision,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -113,6 +125,26 @@ def test_a_wedged_git_does_not_hold_up_a_boot(monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setattr(build_info.subprocess, "run", times_out)
     assert revision() == UNKNOWN_REVISION
+
+
+def test_the_container_marker_is_the_image_saying_so(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(CONTAINER_ENV, raising=False)
+    assert in_container() is False
+    # Anything the image put there is a yes: the variable exists to be
+    # present, and what it holds says nothing further.
+    monkeypatch.setenv(CONTAINER_ENV, "1")
+    assert in_container() is True
+
+
+def test_a_cleared_container_marker_is_not_an_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The same rule the revision holds: a variable set to nothing is one
+    # somebody cleared, not a claim.
+    monkeypatch.setenv(CONTAINER_ENV, "   ")
+    assert in_container() is False
 
 
 def test_the_answer_is_resolved_once(

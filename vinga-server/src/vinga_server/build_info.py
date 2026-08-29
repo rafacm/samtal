@@ -1,4 +1,9 @@
-"""Which build of the server this process actually is.
+"""What the image this process runs from says about itself.
+
+Two facts, both of them the image's own, both arriving the only way an
+image can state one: a build argument or a plain `ENV` that becomes an
+environment variable, because a process cannot read its own image's
+metadata and there is no file in it that answers either question.
 
 `__version__` is the package version, hardcoded since the skeleton and
 answering a different question: what this is. The revision answers which
@@ -24,6 +29,16 @@ Resolved in three steps, first answer wins:
    uncommitted changes says so, because that is when knowing matters.
 3. `unknown`. A build with neither is a build that runs and says it does
    not know, never one that fails to start.
+
+`in_container` is the second fact, and it is a marker rather than a
+detection (#340). Whether this process is inside a container decides
+whether `localhost` in a provider's `base_url` is a warning worth
+saying, and the image is the one thing that knows for certain: it sets
+the variable in its own `ENV`, so the answer is a fact somebody stated
+rather than one inferred from `/.dockerenv` or from a cgroup path,
+which differ by runtime and cannot be set by a test. Absent, the answer
+is no, which is the honest reading for anything the image did not
+build: a checkout, a wheel, a `uv run`.
 """
 
 import functools
@@ -35,6 +50,8 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 REVISION_ENV = "VINGA_REVISION"
+
+CONTAINER_ENV = "VINGA_CONTAINER"
 
 # What a server says when it has no way to know. Deliberately a value
 # rather than None: every consumer here reports it, and a string that
@@ -97,3 +114,20 @@ def revision() -> str:
         UNKNOWN_REVISION,
     )
     return UNKNOWN_REVISION
+
+
+def in_container() -> bool:
+    """Whether this process is running inside the vinga image.
+
+    Read on every provider build rather than cached, unlike the revision
+    above: it is one environment lookup with no subprocess behind it,
+    and a value a test sets between two builds has to be the value the
+    second one sees.
+
+    Any non-blank value is yes. The variable exists to be set by the
+    image's own `ENV` and by a test that wants to be one, so what it
+    holds carries no meaning beyond being there; an empty string is a
+    variable that was cleared rather than an answer, exactly as it is
+    for the revision.
+    """
+    return bool(os.environ.get(CONTAINER_ENV, "").strip())

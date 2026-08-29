@@ -133,9 +133,20 @@ ARG VINGA_REVISION=unknown
 # named it and wrong for an image that named it on their behalf. The
 # entrypoint below names /config/config.yaml when it is mounted and says
 # nothing when it is not.
+#
+# VINGA_CONTAINER is this image telling the server where it is running.
+# Nothing in a container reliably says so from the inside (/.dockerenv
+# is Docker's alone, a cgroup path differs by runtime and by version),
+# and the one thing that knows for certain is the image itself, so it
+# states it. What it buys is one warning: a provider base_url naming
+# localhost means this container rather than the machine hosting it,
+# which is a boot that looks clean and a conversation that fails at the
+# first round, so the server says so as it builds that provider, with
+# host.docker.internal as the likely fix.
 ENV PATH=/app/.venv/bin:$PATH \
     HOME=/data \
     VINGA_SERVER__LOG_FORMAT=json \
+    VINGA_CONTAINER=1 \
     VINGA_REVISION=$VINGA_REVISION
 
 USER vinga
