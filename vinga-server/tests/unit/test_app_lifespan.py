@@ -36,7 +36,9 @@ from tests.support.checkin import NORMALIZED, check_in, unbound_config
 from tests.support.configs import config_with_agent
 from tests.support.notices import CHECK_IN, boundaries
 from tests.support.problems import refused
+from vinga_server import __version__
 from vinga_server.app import StartupFailed, create_app, startup_failure
+from vinga_server.build_info import revision
 from vinga_server.composition import Composition
 from vinga_server.config import Config
 from vinga_server.config.api import ApiRuntime
@@ -44,6 +46,7 @@ from vinga_server.config.loader import DatabaseBusyError
 from vinga_server.config.models import API_MOUNT_PATH, DatabaseConfig
 from vinga_server.db import DOMAIN_CHAIN, read_engine
 from vinga_server.device.bindings import DeviceBindings
+from vinga_server.onboarding.origin import onboarding_url
 from vinga_server.providers import ProviderError
 from vinga_server.providers import world as provider_world
 from vinga_server.providers.mock import MockTts
@@ -421,6 +424,66 @@ def test_the_api_gets_its_live_pieces_before_the_first_request() -> None:
         assert mounted.pending is composition.pending
         assert mounted.mcp_servers is composition.mcp_servers
         assert mounted.loaded_agents() == frozenset({"assistant"})
+
+
+def test_the_identity_the_api_answers_is_the_derivation_s_own(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The one fact the configuration API answers that it must not
+    derive: which deployment this is.
+
+    `config/api.py` deliberately imports only the pending half of the
+    onboarding package, and the import-weight pin holds it there, so the
+    onboarding URL reaches the API the way every other runtime fact
+    does: composed by the root and handed over. What that leaves open is
+    the thing worth pinning, and only end to end: that what is handed
+    over is the same value the derivation answers, rather than a second
+    opinion assembled on the way.
+
+    So this drives the served route and compares it against
+    `onboarding.origin` and `build_info` called directly. Equality and
+    not a shape check: a URL an operator types into a captive portal is
+    wrong if it differs by one character from the one this server
+    mounts, and the whole reason the derivation is in one place is that
+    two of them would eventually differ by one character.
+    """
+    monkeypatch.setenv(API_SECRET_ENV, TOKEN)
+    config = config_with_agent(
+        server={"public_url": "https://vinga.test.invalid", "onboarding": {"enabled": True}}
+    )
+    derived, origin = onboarding_url(config.server, "unused")
+    app = served(config)
+    with TestClient(app) as client:
+        answered = client.get(f"{API_MOUNT_PATH}/runtime/info", headers=BEARER)
+
+    assert answered.status_code == 200, answered.text
+    assert answered.json() == {
+        "version": __version__,
+        "revision": revision(),
+        "onboarding_enabled": True,
+        "onboarding_url": derived,
+        "onboarding_provenance": origin.provenance,
+    }
+
+
+def test_a_deployment_with_onboarding_off_answers_no_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other half of the same composition: onboarding off is a state
+    a deployment is legitimately in, and the read says so rather than
+    refusing or inventing a path. The path devices are configured at is
+    `server.ota_path`, which is this deployment's secret and is why
+    nothing stands in the URL's place."""
+    monkeypatch.setenv(API_SECRET_ENV, TOKEN)
+    config = config_with_agent(server={"onboarding": {"enabled": False}})
+    app = served(config)
+    with TestClient(app) as client:
+        answered = client.get(f"{API_MOUNT_PATH}/runtime/info", headers=BEARER).json()
+
+    assert answered["onboarding_enabled"] is False
+    assert answered["onboarding_url"] is None
+    assert answered["onboarding_provenance"] is None
+    assert answered["revision"] == revision()
 
 
 # --- the database this build brings into existence --------------------

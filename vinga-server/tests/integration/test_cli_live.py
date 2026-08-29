@@ -78,7 +78,9 @@ from tests.support.deployment import (
     check_in,
     serving,
 )
+from vinga_server.build_info import revision
 from vinga_server.config import ConfigError, cli, docgen, entities
+from vinga_server.config.cli import installed_version
 from vinga_server.config.models import (
     API_MOUNT_PATH,
     DOMAIN_KEYS,
@@ -880,6 +882,55 @@ def test_the_running_server_is_read_after_a_reload(
     assert "sam" in summary
     assert "household" in summary
     assert SECRET not in summary
+
+
+def test_info_names_the_deployment_it_reached(
+    deployed: Live, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The read every other one in this section is a narrowing of: which
+    deployment is answering at all.
+
+    Over the wire because that is where the answer means something. The
+    address this lane's CLI resolves comes out of the environment, the
+    version and revision come out of the process uvicorn is running, and
+    the onboarding URL is derived from the device-auth secret this
+    module put in the environment before the server booted, so the key
+    in it is a real one rather than a value a test wrote.
+    """
+    assert run("info") == 0
+
+    printed = capsys.readouterr()
+    said = printed.out
+    assert said.startswith("vinga - Conversational AI. Sweded.\n")
+    # The address this CLI actually contacted, which is the lane's own
+    # server on an ephemeral port and not a default this test could have
+    # guessed.
+    assert f"configuration API: {deployed.api_url}" in said
+    assert f"server version: {installed_version()}" in said
+    assert f"server revision: {revision()}" in said
+    # The URL a board is onboarded at, alone on its line under a label
+    # that carries the provenance whole. The lane boots with device auth
+    # on and no public_url, so what it names is a guessed origin with a
+    # derived key after it, and the provenance says both.
+    lines = said.splitlines()
+    label = next(
+        index
+        for index, line in enumerate(lines)
+        if line.startswith("the URL to type into a device's captive portal, ")
+    )
+    assert "guessed from the listen address" in lines[label]
+    # The whole sentence, not the head of one: the fix it ends with is
+    # the reason an operator reads a provenance at all.
+    assert lines[label].endswith("set server.public_url to name this deployment exactly:")
+    assert lines[label + 1].startswith("http")
+    assert lines[label + 1].rstrip("/").rsplit("/", 2)[-2] == "x"
+    # And the counts, over the deployment this module wrote.
+    assert "  providers: 5" in said
+    assert "  agents: 1" in said
+    # Nothing about the run, and nothing of the credential this lane
+    # stored, on either stream.
+    assert printed.err == ""
+    assert SECRET not in said
 
 
 # The board nobody owns, over the wire
@@ -1684,6 +1735,7 @@ REFUSALS: tuple[Refusal, ...] = (
         f"config file not found: {MISSING_CONFIG}",
         False,
     ),
+    Refusal(("info",), ("info", "extra"), USAGE, False),
     Refusal(("list",), ("list", "extra"), USAGE, False),
     Refusal(("show",), ("show", "extra"), USAGE, False),
     Refusal(("export",), ("export", "extra"), USAGE, False),

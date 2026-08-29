@@ -430,6 +430,19 @@ ONBOARDING_OFF_HERE = (
 # `info` answers is orientation, and `vinga list` is the tree.
 CONFIGURED = "configured:"
 
+# How much of the two long values an identity answer carries may be
+# printed. `GLIMPSE_LENGTH` is the bound for far-side text quoted inside
+# a sentence, and neither of these is that: a URL truncated at 120
+# characters is a URL an operator retypes wrongly, and a provenance
+# truncated mid-clause loses the fix it ends with. Bounded still, for
+# the two reasons everything an answer carries is bounded (no answer
+# chooses how long a command's output is, and nothing an answer carries
+# steers a terminal), at a length nothing this server composes reaches:
+# the longest provenance `onboarding.origin` writes is under 250
+# characters, and an origin with a derived key after it is shorter
+# again.
+IDENTITY_LENGTH = 512
+
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run one config command. Returns the process exit code.
@@ -2276,10 +2289,14 @@ def _identity_block(info: Mapping[str, object]) -> str:
     url = info["onboarding_url"]
     if url is None:
         return "\n".join([*lines, ONBOARDING_OFF_HERE]) + "\n"
-    provenance = printable(str(info["onboarding_provenance"]))
+    provenance = printable(str(info["onboarding_provenance"]), IDENTITY_LENGTH)
     return (
         "\n".join(
-            [*lines, f"{ONBOARDING_URL_LABEL}, {provenance}:", printable(str(url))]
+            [
+                *lines,
+                f"{ONBOARDING_URL_LABEL}, {provenance}:",
+                printable(str(url), IDENTITY_LENGTH),
+            ]
         )
         + "\n"
     )

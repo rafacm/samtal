@@ -549,6 +549,15 @@ def test_the_running_server_is_read_after_a_reload(run) -> None:
     assert "applies at " in answered(run("diff"), "diff")
     assert "house" in answered(run("status"), "status")
 
+    # And the read that says which deployment answered at all. From the
+    # installed binary it is also a packaging claim: the response model
+    # travels in the client tier, so a bare install renders this without
+    # the server half anywhere near it.
+    said = answered(run("info"), "info")
+    assert said.startswith("vinga - Conversational AI. Sweded.\n")
+    assert "server revision: " in said
+    assert "  default_agent: " in said
+
 
 def test_a_board_is_onboarded_by_the_code_on_its_screen(run, live: Live) -> None:
     """The onboarding ceremony, which is the one thing in this lane that
