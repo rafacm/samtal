@@ -8,7 +8,7 @@ says so explicitly.
 
 ## M1: the hub and the stream
 
-PR TBD.
+PR #349.
 
 ### What landed
 
