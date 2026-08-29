@@ -9,7 +9,7 @@ says so explicitly.
 
 ## M1: `vinga info`
 
-PR TBD.
+PR #347.
 
 ### What landed
 
