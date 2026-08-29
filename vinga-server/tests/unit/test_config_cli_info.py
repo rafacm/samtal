@@ -551,6 +551,45 @@ def test_an_identity_refusal_leaves_nothing_on_the_chain() -> None:
     assert ANSWERED not in chain(caught.value)
 
 
+def test_both_acts_are_answered_by_the_address_the_banner_named(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The line this command opens with is a claim about where its
+    answers come from, so it has to be one.
+
+    Each request used to re-read the file half and resolve the address
+    off it again, and the opener resolved a third time, so a file
+    changing under a running command could put one endpoint on the
+    banner and another behind the answers. The file half is read once
+    now, which is what this pins: the read is counted, and a
+    configuration that moves after it would send the later requests to a
+    port nothing in this test serves.
+    """
+    run.runtime["identity"] = identity(monkeypatch)
+    real = cli.load_file_config
+    reads: list[object] = []
+
+    def moving(path: str | None = None):
+        config = real(path)
+        reads.append(path)
+        if len(reads) > 1:
+            moved = config.server.model_copy(update={"port": 9999})
+            return config.model_copy(update={"server": moved})
+        return config
+
+    monkeypatch.setattr(cli, "load_file_config", moving)
+    capsys.readouterr()
+
+    assert run("info") == 0
+
+    printed = capsys.readouterr().out
+    assert len(reads) == 1, reads
+    # Both requests, and the line that named where they would go.
+    assert len(run.reached) == 2, run.reached
+    assert set(run.reached) == {run.reached[0]}
+    assert f"configuration API: {run.reached[0]}" in printed
+
+
 def test_the_address_line_never_shows_a_credential_in_the_query(
     run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

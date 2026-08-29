@@ -1111,8 +1111,48 @@ class Address:
         return f"{path}?{'&'.join(parts)}" if parts else path
 
 
+@dataclass(frozen=True, kw_only=True)
+class Reached:
+    """Where one invocation's requests go, and what they carry.
+
+    The two answers to "where to reach, in a stated order" (the flag,
+    then the environment, then a default derived from the file half),
+    resolved once for a whole command rather than once per request.
+
+    Once matters as soon as a command makes more than one request. Each
+    of them used to re-read the configuration file and re-resolve the
+    address and the token off it, so a file changing under a running
+    command could send its second request somewhere its first did not
+    go, and `info`, which prints the address it reached before it
+    reaches it, could name one endpoint and print another's answer. What
+    a command reports about where it went has to be true of where it
+    went.
+
+    Frozen and carried rather than re-derived, which is the design
+    guide's locality rule applied to a fact with three readers: the line
+    `info` opens with, every request's client, and every sentence that
+    names an address after a failure.
+    """
+
+    address: Address
+    token: str
+
+
+def _reached(args: Invocation) -> Reached:
+    """Where this invocation reaches the API, resolved.
+
+    The one read of the file half on the request path, and the one
+    resolution of the address and the token off it. A missing token is
+    still a sentence before any request is sent, and it is now one
+    sentence before the FIRST request rather than before whichever
+    request reached this next.
+    """
+    file_config = load_file_config(args.config)
+    return Reached(address=_address(args, file_config), token=_token(file_config))
+
+
 def _call(
-    args: Invocation,
+    reached: Reached,
     method: str,
     path: str,
     body: object = _NOTHING,
@@ -1120,6 +1160,9 @@ def _call(
     query: Mapping[str, str] | None = None,
 ) -> object:
     """One request, and its answer as this client understands it.
+
+    `reached` is where this whole invocation is talking to, resolved
+    once by the row that is performing rather than here: see `Reached`.
 
     `read_timeout_s` is how long this one endpoint may take to answer,
     which for all but the reload and the apply is the same bound the
@@ -1137,17 +1180,21 @@ def _call(
     client library writes a line per request naming the URL it was
     given, which for this caller is an operator's address with its query
     string whole. `REQUEST_LOGGERS` above says which loggers and why.
-    The token is resolved before the boundary opens, so a missing one is
-    still the sentence it was.
+    The token is resolved before the boundary opens, and now before the
+    command's first request, so a missing one is still the sentence it
+    was.
     """
-    file_config = load_file_config(args.config)
-    address = _address(args, file_config)
-    token = _token(file_config)
     with quieted(REQUEST_LOGGERS, QUIET_LEVEL):
         response = _sent(
-            method, path, body, address, token, read_timeout_s, urlencode(query or {})
+            method,
+            path,
+            body,
+            reached.address,
+            reached.token,
+            read_timeout_s,
+            urlencode(query or {}),
         )
-    return _answer(response, address)
+    return _answer(response, reached.address)
 
 
 def _sent(
@@ -3189,14 +3236,18 @@ class Act:
         return _understood(self.answers, answer, self.refusal)
 
 
-def _act(args: Invocation, act: Act) -> None:
+def _act(args: Invocation, act: Act, reached: Reached) -> None:
     """One act: one request, and its answer printed.
 
     The acknowledgement and the notice are the API's, read as the shape
     the act says it is answered with and handed to the act's renderer.
+
+    `reached` is handed in rather than resolved here, so that the acts
+    of one command all go to one place and a command that says where it
+    is going says it truly: see `Reached`.
     """
     answer = _call(
-        args,
+        reached,
         act.method,
         act.path(args),
         act.body(args) if act.body is not None else _NOTHING,
@@ -3206,7 +3257,7 @@ def _act(args: Invocation, act: Act) -> None:
     act.render(act.read(answer))
 
 
-def _contacted(args: Invocation) -> None:
+def _contacted(args: Invocation, reached: Reached) -> None:
     """The banner, and the address this CLI is about to contact.
 
     What `info` knows before it has asked anything, and the half of its
@@ -3221,15 +3272,15 @@ def _contacted(args: Invocation) -> None:
     the display form is the one with that taken out, bounded and made
     printable, and it is the only form anything here may name (#290).
 
-    Resolved through `_address`, which is what a request resolves it
-    through, so the line names where the requests after it actually go
-    rather than a second opinion about it. Flushed for the reason
-    `_acknowledged` flushes: stderr is unbuffered and stdout is not, so
-    a refusal from the first act would otherwise land above the lines it
-    followed.
+    The address is the one this invocation resolved, handed in rather
+    than resolved again here, so the line names where the requests after
+    it actually go rather than where a second resolution would have gone
+    (`Reached`). Flushed for the reason `_acknowledged` flushes: stderr
+    is unbuffered and stdout is not, so a refusal from the first act
+    would otherwise land above the lines it followed.
     """
     print(BANNER)
-    print(f"{CONTACTED}: {_address(args, load_file_config(args.config)).shown}")
+    print(f"{CONTACTED}: {reached.address.shown}")
     sys.stdout.flush()
 
 
@@ -3883,7 +3934,10 @@ def _claimed(
         if isinstance(state, board.Refused):
             return state
         raise ConfigError(NOTHING_TO_CLAIM)
-    _act(replace(args, code=state.code), ADD_DEVICE)
+    # The one request this command makes, and the one place it resolves
+    # the operator-side credential: inside the `--claim` arm, which is
+    # what keeps the device side clear of it.
+    _act(replace(args, code=state.code), ADD_DEVICE, _reached(args))
     waited = board.polled(endpoint, identity, state.timeout_ms)
     if isinstance(waited, board.Refused):
         return waited
@@ -4303,7 +4357,11 @@ class Command:
     # of what came back. So the fact about the invocation is printed by
     # the row that knows it, before any act runs, rather than smuggled
     # into an act that would then be two things.
-    opens: "Callable[[Invocation], None] | None" = None
+    # Given what this invocation resolved as well as its arguments,
+    # because what `info` opens with is where its requests are about to
+    # go. A row with no acts resolves nothing and therefore opens with
+    # nothing: there would be no address to name and no token to demand.
+    opens: "Callable[[Invocation, Reached], None] | None" = None
 
     # How its arguments are declared, which is a function Typer reads a
     # signature off. One per argument shape rather than one per command,
@@ -4347,12 +4405,16 @@ class Command:
         """What this command does, once its arguments are in hand."""
         if self.destroys:
             _permitted_to_destroy(args)
-        if self.opens is not None:
-            self.opens(args)
         performed = self.acts()
         if performed:
+            # Once, in front of every act and of the opener, so that
+            # what this command says about where it is reaching is true
+            # of every request it then makes (`Reached`).
+            reached = _reached(args)
+            if self.opens is not None:
+                self.opens(args, reached)
             for act in performed:
-                _act(args, act)
+                _act(args, act, reached)
             return
         # No acts is the third arm of `does`: a command that reaches no
         # API, carrying its own function.

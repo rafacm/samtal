@@ -687,9 +687,9 @@ def test_a_claim_performs_the_act_the_grammar_already_has(
     performed: list[object] = []
     dispatch = cli._act  # noqa: SLF001
 
-    def recording(args: cli.Invocation, act: cli.Act) -> None:
+    def recording(args: cli.Invocation, act: cli.Act, reached: cli.Reached) -> None:
         performed.append(act)
-        dispatch(args, act)
+        dispatch(args, act, reached)
 
     monkeypatch.setattr(cli, "_act", recording)
     reached_before = len(run.reached)
