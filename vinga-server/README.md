@@ -1334,10 +1334,11 @@ state to be in and an illegitimate one to serve from.
 
 **When the server will not start**, there is nothing to write through,
 and the way back is to rebuild the store rather than to operate on it:
-stop the server, delete the database, boot clean, apply the export taken
-while the deployment was healthy, and re-enter the credentials that
-export listed. That is [When the server will not
-start](#when-the-server-will-not-start), in the deployment notes.
+stop the server, delete the database, boot clean, stage the export taken
+while the deployment was healthy (`apply --no-reload`), re-enter the
+credentials that export listed, and reload. That is [When the server
+will not start](#when-the-server-will-not-start), in the deployment
+notes.
 
 Every field of the domain half is documented in
 [`../docs/reference/domain-config.md`](../docs/reference/domain-config.md),
@@ -1679,9 +1680,10 @@ and every command's own help page, is
 **There is no second way in.** Every command here is a request, so a
 deployment whose server will not start is recovered by rebuilding its
 store rather than by editing it: stop the server, delete the database,
-boot clean, apply a kept `config export`, and re-enter each stored
-credential through the `secret set` commands that export listed at its
-foot. The full procedure is in the deployment notes, under
+boot clean, stage a kept `config export` with `apply --no-reload`,
+re-enter each stored credential through the `secret set` commands that
+export listed at its foot, and `config reload` to install what came
+back. The full procedure is in the deployment notes, under
 [When the server will not start](#when-the-server-will-not-start).
 
 ### Secrets
@@ -2635,8 +2637,9 @@ ciphertext exists, losing the key means losing those credentials: the
 server refuses to start with a stored secret it cannot open, naming the
 entity and the slot. That refusal takes the API with it, so the way back
 is the rebuild under [When the server will not
-start](#when-the-server-will-not-start): boot on an empty database and
-apply a kept export, which leaves no unopenable envelope behind. The key
+start](#when-the-server-will-not-start): boot on an empty database,
+stage a kept export, enter the credentials again and reload, which
+leaves no unopenable envelope behind. The key
 the credentials are then entered under need not be the lost one; what
 the next boot needs is a key list that opens every envelope stored, and
 after a rebuild every one of them was written under the key in use.
@@ -2773,9 +2776,9 @@ configured key opens, an entity that cannot be loaded, a reference that
 no longer resolves) leaves nothing to write through, because every
 config command is a request to a server that is not answering. The way
 back is not a surgical edit: stop the server, delete the database, start
-it again on the empty one, apply the export taken while the deployment
-was healthy, and re-enter each stored credential through the
-`secret set` commands that export listed at its foot.
+it again on the empty one, stage the export taken while the deployment
+was healthy, re-enter each stored credential through the `secret set`
+commands that export listed at its foot, and reload.
 
 ```bash
 # Stop the container that will not serve, and take the database away.

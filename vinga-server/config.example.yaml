@@ -30,7 +30,9 @@
 # transaction over the whole document, refused whole if anything in it
 # will not resolve, so there is no creation order to get right.
 # A server that will not start is recovered by booting one on an empty
-# database and applying a kept `vinga-server config export`.
+# database, staging a kept `vinga-server config export` with
+# `vinga-server config apply --no-reload`, re-entering the credentials
+# that export listed, and then `vinga-server config reload`.
 #
 # Every field of it is documented in docs/reference/domain-config.md
 # (generated from the models, also available as `vinga-server config
