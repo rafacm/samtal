@@ -1864,12 +1864,16 @@ def _runtime(api: FastAPI) -> None:
         """What this server is saying right now, as it says it.
 
         The structured events, streamed as Server-Sent Events: one
-        `data:` line per event, carrying the JSON object the retained
-        log carries plus `ts`, the wall-clock instant it was emitted at,
-        and `level`, its level's name. Nothing else crosses this
-        surface, because there is nothing else: the events are metadata
-        by construction, and what was said in a conversation is in the
-        conversation store instead.
+        `data:` line per event, carrying the catalogued fields of that
+        event plus two the stream owns, `ts`, the wall-clock instant it
+        was emitted at, and `level`, its level's name. Those fields are
+        the ones the retained JSON log carries too, under the same
+        names; what the log has beside them is its own record-keeping,
+        the channel it was written on and the rendered sentence, which
+        this does not repeat. Nothing else crosses this surface, because
+        there is nothing else: the events are metadata by construction,
+        and what was said in a conversation is in the conversation store
+        instead.
 
         Live and nothing but. There is no buffer behind this and no
         `since`: a stream carries what happens while it is open, and a

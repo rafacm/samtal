@@ -994,10 +994,10 @@ vinga-server/pyproject.toml:84  respell  vinga simulator run
 vinga-server/pyproject.toml:165  respell  config cli-reference
 vinga-server/pyproject.toml:181  respell  vinga simulator run
 vinga-server/src/vinga_server/app.py:805  respell  vinga-server config ota-url
-vinga-server/src/vinga_server/config/api.py:426  respell  vinga-server config device pending list
-vinga-server/src/vinga_server/config/api.py:445  respell  vinga-server config list
-vinga-server/src/vinga_server/config/api.py:545  respell  vinga-server config reload
-vinga-server/src/vinga_server/config/api.py:546  respell  vinga-server config list
+vinga-server/src/vinga_server/config/api.py:425  respell  vinga-server config device pending list
+vinga-server/src/vinga_server/config/api.py:444  respell  vinga-server config list
+vinga-server/src/vinga_server/config/api.py:544  respell  vinga-server config reload
+vinga-server/src/vinga_server/config/api.py:545  respell  vinga-server config list
 vinga-server/src/vinga_server/config/cli.py:430  respell  vinga list
 vinga-server/src/vinga_server/config/cli.py:2411  respell  vinga list
 vinga-server/src/vinga_server/config/cli.py:2443  respell  config list
