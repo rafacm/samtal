@@ -132,6 +132,31 @@ def test_websocket_url_points_back_at_the_server_that_answered(server: str) -> N
         pass
 
 
+def test_the_portal_line_names_the_address_the_request_arrived_on(server: str) -> None:
+    """The trap the 2026-08-29 walkthrough hit, over real HTTP (#340).
+
+    This configuration names no origin and listens on the wildcard
+    address, so the line used to read `http://0.0.0.0:8003/...` directly
+    under a websocket URL derived from the request: one reply, two
+    answers, and the one a person is told to type worked nowhere. Both
+    lines name the address the request really arrived on now.
+
+    Worth an integration test of its own rather than only a unit one,
+    because the fact under it is a Host header a real client sent
+    through a real server rather than a scope a test client composed.
+    """
+    with urllib.request.urlopen(f"{server}{OTA_PATH}", timeout=10) as response:
+        body = response.read().decode("utf-8")
+
+    host = server.removeprefix("http://")
+    portal = next(line for line in body.splitlines() if line.startswith("Type this into"))
+    assert portal.endswith(
+        f"http://{host}{OTA_PATH} (from the address this request arrived on)"
+    )
+    assert f"ws://{host}/xiaozhi/v1/" in body
+    assert "0.0.0.0" not in body
+
+
 def test_unknown_device_is_still_configured(server: str) -> None:
     status, body = check_version(server, device_id="11:22:33:44:55:66")
     assert status == 200
