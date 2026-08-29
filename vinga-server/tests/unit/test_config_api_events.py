@@ -144,14 +144,15 @@ class Stream:
         await asyncio.wait_for(self._request, timeout=5)
 
 
-@contextlib.asynccontextmanager
-async def streaming(
-    app: FastAPI, query: str = "", token: str = TOKEN
-) -> AsyncIterator[Stream]:
-    """One GET to the stream route, driven as ASGI."""
-    incoming: asyncio.Queue[Message] = asyncio.Queue()
-    outgoing: asyncio.Queue[Message] = asyncio.Queue()
-    scope = {
+def scope_for(query: str = "", token: str = TOKEN) -> dict[str, Any]:
+    """One GET to the stream route, as ASGI describes it.
+
+    `spec_version` is the one uvicorn sends, and it is load bearing:
+    below 2.4 Starlette runs the body in a task beside a disconnect
+    listener and cancels the one when the other returns, which is the
+    lifecycle the tests here are about.
+    """
+    return {
         "type": "http",
         "asgi": {"version": "3.0", "spec_version": "2.3"},
         "http_version": "1.1",
@@ -168,6 +169,16 @@ async def streaming(
         "client": ("127.0.0.1", 4242),
         "server": ("testserver", 80),
     }
+
+
+@contextlib.asynccontextmanager
+async def streaming(
+    app: FastAPI, query: str = "", token: str = TOKEN
+) -> AsyncIterator[Stream]:
+    """One GET to the stream route, driven as ASGI."""
+    incoming: asyncio.Queue[Message] = asyncio.Queue()
+    outgoing: asyncio.Queue[Message] = asyncio.Queue()
+    scope = scope_for(query, token)
 
     async def receive() -> Message:
         return await incoming.get()
@@ -345,6 +356,39 @@ async def test_the_stream_ends_when_the_server_closes_the_hub() -> None:
         hub.close()
 
         await stream.until_ended()
+
+
+async def test_a_disconnect_while_the_response_starts_leaves_no_subscription() -> None:
+    """The cleanup path with no generator in it.
+
+    Starlette runs the body beside a disconnect listener and cancels the
+    one when the other returns, so a client that goes away while
+    `http.response.start` is still being written kills the response
+    before its body is ever iterated. A generator that never started
+    runs no `finally` when it is closed, so a subscription taken before
+    the response was built would sit on the hot path forever, fed by
+    every emission and read by nobody. Taking it inside the body is what
+    makes "subscribed" and "will be cleaned up" the same moment.
+    """
+    hub = LiveEvents()
+    sending = asyncio.Event()
+
+    async def receive() -> Message:
+        # The disconnect lands while the response start is in flight,
+        # which is the whole of the case.
+        await sending.wait()
+        return {"type": "http.disconnect"}
+
+    async def send(message: Message) -> None:
+        if message["type"] == "http.response.start":
+            sending.set()
+            # Never returns: the cancellation is what ends this await,
+            # which is what a client going away does to a real send.
+            await asyncio.Event().wait()
+
+    await asyncio.wait_for(api_with(hub)(scope_for(), receive, send), timeout=5)
+
+    assert hub.subscribers == 0
 
 
 async def test_a_reader_that_goes_away_gives_its_subscription_back() -> None:
