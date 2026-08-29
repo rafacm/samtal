@@ -43,15 +43,19 @@ that caused it, and no traceback from pydantic, PyYAML, SQLAlchemy,
 cryptography or httpx reaches the user.
 """
 
+import contextlib
 import getpass
 import ipaddress
+import json
 import logging
 import os
+import re
 import shlex
 import sys
 import textwrap
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
+from datetime import datetime
 from enum import Enum
 from importlib import metadata
 from pathlib import Path
@@ -88,6 +92,7 @@ from typer._click.exceptions import (
 from typer.core import TyperCommand, TyperGroup
 
 from vinga_server import device_endpoint
+from vinga_server.broken_pipe import reader_stopped_reading
 from vinga_server.config import docgen, entities
 from vinga_server.config.loader import (
     CONFIG_ENV_VAR,
@@ -242,6 +247,25 @@ RELOAD_READ_TIMEOUT_S = 60.0
 # or `show`.
 APPLY_READ_TIMEOUT_S: float | None = None
 
+# And what `events tail` waits, which is the same conclusion reached
+# from the opposite direction.
+#
+# A read timeout bounds how long an answer may take to arrive. The event
+# stream's answer never finishes arriving: it is the server saying what
+# it is doing, and a deployment that is doing nothing at four in the
+# morning is a stream with nothing on it, which is the reading an
+# operator opened it for. Any finite number here would be a clock that
+# ended a healthy tail and reported it as the server going away, which
+# is the one thing this command's end-of-stream sentence must be able to
+# mean.
+#
+# The keepalive is what makes that safe rather than merely intended: the
+# stream writes a comment line on its own idle interval, so a connection
+# that has genuinely died is a read that fails rather than a read that
+# waits forever. The connect timeout stays bounded for the reason it
+# always is, that a server which is not there must say so quickly.
+STREAM_READ_TIMEOUT_S: float | None = None
+
 # Said when the API answered something this client cannot read as an
 # answer. The body is deliberately not quoted: what a proxy, a gateway
 # or a captive portal returns is not this API's sanitized output, and
@@ -301,6 +325,34 @@ APPLY_UNANSWERED = (
     f"what the server is serving now is not said here: run `{PROGRAM} diff`, which "
     f"compares the stored configuration against the running one, and `{PROGRAM} "
     "reload` if they differ."
+# And what the event stream says when it stops, which is the same
+# sentence whether the body ended cleanly or the connection under it
+# died: to whoever is watching, both are the tail going quiet, and a
+# client that told them apart would be reporting on a distinction it
+# cannot actually make from this side.
+#
+# It is a failure, and it exits 1 in both modes, because the alternative
+# is worse than an error: a tail that ended on a server restart and said
+# nothing would be a quiet terminal that looks exactly like a quiet
+# deployment. Nothing reconnects on its own for the same reason. A tail
+# that rejoined across a gap would go on looking continuous while having
+# missed whatever happened in it, and there is no buffer behind the
+# stream for it to catch up from.
+STREAM_ENDED = (
+    "the event stream ended: the server closed it, or something between here and it "
+    "did. Nothing has been reconnected, because a tail that rejoined across a gap "
+    "would look continuous while missing what happened in it; run the command again "
+    "to watch from now on."
+)
+
+# And what a frame this client cannot read as an event says. Nothing of
+# the frame is in it, for the reason no other unreadable answer is
+# quoted back: what a proxy or a gateway writes into a stream is not
+# this API's own output.
+UNREADABLE_EVENT = (
+    f"the event stream carried {UNRECOGNIZED_ANSWER}, so the tail stopped rather than "
+    f"printing it. It is not quoted back: what reaches a stream from a middlebox is "
+    f"not the API's sanitized output."
 )
 
 # How a stored secret is introduced in `show` and `list`. Comment lines
@@ -531,6 +583,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             sys.argv[1:] if argv is None else argv,
             CONSOLE_SCRIPT if argv is None else DISPATCHED,
         )
+    except BrokenPipeError:
+        # A reader that stopped reading, which is not a failure and is
+        # not this grammar's sentence either: `broken_pipe.py` says what
+        # the status is and why stdout has to be redirected before this
+        # returns. Here for `events tail | head -n 1`, which is how a
+        # script waits for one event, and it is caught for every command
+        # because `export | head` is the same shape and had the same
+        # traceback waiting in it.
+        return reader_stopped_reading()
     except ConfigError as exc:
         print(exc, file=sys.stderr)
         return 1
@@ -811,6 +872,21 @@ class Invocation:
     # `conversation list --agent sam` filters threads by an agent's
     # name, which `name` is already carrying.
     conversation: str = ""
+
+    # What narrows the live event stream beyond the board and the
+    # session above, which `mac` and `session` carry for it: what
+    # `--device` names is the same board `device show` addresses, and
+    # what `--session` names is the same session `session show` does.
+    #
+    # `level` is text and is not read here, for the reason `limit` is
+    # not: what a level may be is the API's rule, said in the API's own
+    # fixed sentence, and a second parser in front of it would be a
+    # second vocabulary for one refusal.
+    level: str = ""
+
+    # And whether the tail keeps going. The one argument in this grammar
+    # that changes when a command stops rather than what it asks for.
+    follow: bool = False
 
     # The address a simulated board checks in to. Its own field rather
     # than `name` or `file`, because it is neither an identity nor a
@@ -1412,6 +1488,97 @@ def _close_failed(client: httpx.Client | None, address: Address) -> str | None:
             f"said is not repeated here."
         )
     return None
+
+
+def _streamed(
+    reached: Reached, path: str, query: Mapping[str, str] | None = None
+) -> Iterator[str]:
+    """The lines of one answer that does not finish arriving.
+
+    `_sent`'s sibling, and a sibling rather than a flag on it because
+    what the two do with a response is opposite: that one reads a body
+    and hands it back, this one hands back a body that has no end. What
+    they share is everything else, and it is not optional. A stream is
+    the one request in this grammar that can fail AFTER a response has
+    opened, which is exactly where a bare `build_client` preserves none
+    of the boundary: the request loggers are quiet for the whole length
+    of the stream and not only for its opening, a failure at any point
+    of it is a sanitized sentence naming `Address.shown` and nothing
+    else, no exception raised here carries the request URL in its chain,
+    and the client is given back however the reader leaves.
+    """
+    with quieted(REQUEST_LOGGERS, QUIET_LEVEL):
+        yield from _reading(reached, path, query)
+
+
+def _reading(
+    reached: Reached, path: str, query: Mapping[str, str] | None
+) -> Iterator[str]:
+    """One open stream, line by line, and every way it can end.
+
+    It always ends by raising, which is the shape of the thing rather
+    than a decision taken here: a stream that stopped is either a
+    failure this says a sentence about, or the stream having ended,
+    which is `STREAM_ENDED` and is also a failure. A reader that has
+    read enough leaves by closing this generator, and the `finally`
+    below gives the connection back on that path exactly as it does on
+    the others.
+
+    The three arms are `_sent`'s three, for its reasons: httpx validates
+    an address when it is handed one, so construction is inside the
+    boundary; every message is built inside a handler and raised after
+    all of them, because an exception raised while another is being
+    handled carries that one as its context and httpx's exceptions carry
+    the request; and the close answers a sentence rather than raising,
+    so whatever failed first is what is reported.
+    """
+    address = reached.address
+    problem: str | None = None
+    client: httpx.Client | None = None
+    opened: httpx.Response | None = None
+    try:
+        try:
+            client = build_client(address.base, reached.token)
+            client.timeout = httpx.Timeout(STREAM_READ_TIMEOUT_S, connect=CONNECT_TIMEOUT_S)
+            endpoint = address.endpoint(path, urlencode(query or {}))
+            opened = client.send(client.build_request("GET", endpoint), stream=True)
+        except httpx.HTTPError:
+            problem = _unreachable(address)
+        except (httpx.InvalidURL, ValueError):
+            problem = _unopenable(address)
+        if opened is not None and problem is None:
+            if not opened.is_success:
+                _refused_stream(opened, address)
+            try:
+                yield from opened.iter_lines()
+            except httpx.HTTPError:
+                # The connection died with the stream open, which from
+                # here is the stream ending: see `STREAM_ENDED`.
+                problem = STREAM_ENDED
+    finally:
+        problem = problem or _close_failed(client, address)
+    raise ConfigError(problem if problem is not None else STREAM_ENDED)
+
+
+def _refused_stream(response: httpx.Response, address: Address) -> None:
+    """A stream that never opened, said the way every other refusal is.
+
+    A refusal has a body and an end, so it is read whole and handed to
+    `_answer`, which is what keeps one vocabulary whichever way an
+    operator reached this API: a 401 here says what a 401 says anywhere
+    else in this grammar. Reading it is itself a request that can fail,
+    which is why the read is inside the boundary too.
+    """
+    problem: str | None = None
+    try:
+        response.read()
+    except httpx.HTTPError:
+        problem = _unreachable(address)
+    if problem is not None:
+        raise ConfigError(problem)
+    # Always a refusal, because the caller asked only for what is not a
+    # success, and `_answer` raises on every one of them.
+    _answer(response, address)
 
 
 def _answer(response: httpx.Response, address: Address) -> object:
@@ -4384,6 +4551,255 @@ def _firmware(read: board.Firmware) -> str:
     return FIRMWARE_UP_TO_DATE if read.announced else FIRMWARE_UNEXPECTED_VERSION
 
 
+# The live event stream
+#
+# The one read of this API whose answer does not finish, which is why it
+# is a local function like `ota-url` rather than an `Act`: an act is a
+# buffered request whose one answer is handed to one renderer, and
+# bending that shape around a body with no end would deform the grammar's
+# core for one command. What it borrows instead is the transport, which
+# is the half that matters: `_streamed` above carries the whole no-leak
+# boundary across opening, iterating and giving the connection back.
+#
+# What the wire looks like is the API's published contract rather than
+# an import. This half of the program is the client, and the module that
+# writes these frames is precisely what it may not reach
+# (`tests/unit/test_cli_import_weight.py`); a generated client would
+# carry the same words for the same reason.
+
+# The stream's own event name for a reader that fell behind, and the key
+# its object carries.
+DROPPED_EVENT = "dropped"
+
+# The two fields the stream owns and the one every event carries, which
+# this renderer prints in front of the rest rather than among them.
+STREAM_TIME = "ts"
+
+STREAM_LEVEL = "level"
+
+EVENT_NAME = "event"
+
+# The one level whose name is not printed. It is the default the stream
+# filters at, so it is what most of a tail is, and a word on every line
+# saying "ordinary" is a word that stops being read. Every other level
+# is named, DEBUG included: an event admitted below the default has to
+# say that it is one.
+UNNAMED_LEVEL = "INFO"
+
+# What may be printed as a bare word rather than as an encoded value.
+#
+# Two things go through this: an event's name and its level's name, both
+# of which are vocabulary from a closed declared set and both of which
+# would be unreadable in quotes. The pattern is what makes printing them
+# bare safe rather than trusting: a name that is not one of these
+# characters is not one this API declares, so it is encoded like any
+# other value and the line's one-line guarantee is kept whatever
+# arrived.
+_BARE_WORD = re.compile(r"\A[A-Za-z0-9_.:-]{1,64}\Z")
+
+EVENTS_DEVICE_HELP = "only the events of this board, by MAC (default: every board)"
+
+EVENTS_SESSION_HELP = (
+    "only the events of this session, by its uuid hex (default: every session)"
+)
+
+EVENTS_LEVEL_HELP = (
+    "the lowest level to show, in any case: DEBUG, INFO, WARNING or ERROR "
+    "(default: INFO, which is what the retained log carries)"
+)
+
+FOLLOW_HELP = (
+    "keep streaming until interrupted; without it the command prints the first "
+    "matching event and exits"
+)
+
+TAIL_HELP = (
+    "what this server is saying right now, one line per event, as it says it; "
+    "without --follow it waits for the first event, prints it and exits"
+)
+
+
+def _events_tail(args: Invocation) -> None:
+    """The structured events of the running server, as they happen.
+
+    Two modes and two exact contracts. Without `--follow` this waits for
+    the first event the filters admit, prints it and exits 0, which is
+    the scriptable "wait for the next X" and the only reading a tail
+    with no buffer behind it can offer. With `--follow` it prints until
+    something stops it: an interrupt, which is a reader who was told to
+    stop and is therefore exit 0, or the stream ending, which is exit 1
+    and `STREAM_ENDED`.
+
+    The events go to stdout, one line each and flushed as they arrive,
+    because that is what a caller opened this for and a block-buffered
+    pipe would deliver a live stream in four-kilobyte lumps. The dropped
+    notices go to stderr, because a reader falling behind is about this
+    invocation rather than about the deployment: `tail | grep` reads
+    only the events, and the person watching still learns that some went
+    past.
+    """
+    reached = _reached(args)
+    with contextlib.closing(
+        _streamed(reached, _path("runtime", "events"), _event_filters(args))
+    ) as lines:
+        try:
+            for name, fields in _frames(lines):
+                if name == DROPPED_EVENT:
+                    print(_dropped_notice(fields), file=sys.stderr)
+                    continue
+                print(_event_line(fields))
+                sys.stdout.flush()
+                if not args.follow:
+                    return
+        except KeyboardInterrupt:
+            # A tail that was told to stop did its job. Caught here
+            # rather than at the boundary because this is the one
+            # command in the grammar whose ordinary ending it is.
+            return
+
+
+def _event_filters(args: Invocation) -> dict[str, str]:
+    """What narrows the stream. Only what was written: an absent flag is
+    an argument the request does not carry, so the API's own defaults
+    are the defaults, said once."""
+    return {
+        name: value
+        for name, value in (
+            ("device", args.mac),
+            ("session", args.session),
+            ("level", args.level),
+        )
+        if value
+    }
+
+
+def _frames(lines: Iterable[str]) -> Iterator[tuple[str, Mapping[str, Any]]]:
+    """The stream's lines as the events they encode.
+
+    Server-Sent Events is a line vocabulary rather than a document: a
+    frame is the lines up to the next blank one, `event:` names it and
+    `data:` carries it, and a line beginning with a colon is a comment,
+    which is what the keepalive an idle stream sends is made of. A field
+    this client has no use for is ignored, which is what the format asks
+    a reader to do and what keeps a stream that grows a field from
+    breaking a client that does not want it.
+    """
+    name = ""
+    data: list[str] = []
+    for line in lines:
+        if line == "":
+            if data:
+                yield name, _frame_fields("\n".join(data))
+            name, data = "", []
+        elif not line.startswith(":"):
+            field, _, value = line.partition(":")
+            value = value.removeprefix(" ")
+            if field == EVENT_NAME:
+                name = value
+            elif field == "data":
+                data.append(value)
+
+
+def _frame_fields(data: str) -> Mapping[str, Any]:
+    """One frame's object, or a refusal with nothing of the frame in it.
+
+    Refused rather than skipped. A tail that quietly dropped what it
+    could not parse would go on looking live while showing less than
+    arrived, which is the failure this whole command's end-of-stream
+    contract exists to make impossible. Recorded inside the handler and
+    raised outside it, this module's rule: a JSON decoding error carries
+    the document it was decoding.
+    """
+    parsed: object = None
+    try:
+        parsed = json.loads(data)
+    except ValueError:
+        parsed = None
+    if not isinstance(parsed, dict):
+        raise ConfigError(UNREADABLE_EVENT)
+    return parsed
+
+
+def _event_line(fields: Mapping[str, Any]) -> str:
+    """One event as one physical line.
+
+    The clock time it happened at, its level unless that is the one a
+    tail is mostly made of, its name, and then everything else it
+    carries as `key=value` in the order the event declares them, which
+    is the order the retained record writes them in.
+
+    One line by encoding rather than by hope. An event's values are
+    identifiers, counts, durations and reason tokens, and the identifier
+    vocabulary explicitly admits bytes a terminal reads as instructions,
+    so a value is rendered as its compact JSON encoding: a newline
+    arrives as `\\n` and an escape sequence as `\\u001b` instead of
+    breaking the line in two or steering the terminal it landed in. That
+    is the output-determinism practice's second half, which has no
+    exception.
+
+    This is a rendering of the record the JSON log retains, not a second
+    vocabulary. A reader who needs the object itself reads the log, or
+    the stream, which carries exactly it.
+    """
+    parts = [_time_of_day(fields.get(STREAM_TIME))]
+    level = fields.get(STREAM_LEVEL)
+    if level is not None and level != UNNAMED_LEVEL:
+        parts.append(_bare(level))
+    if EVENT_NAME in fields:
+        parts.append(_bare(fields[EVENT_NAME]))
+    parts += [
+        f"{_bare(key)}={_value(value)}"
+        for key, value in fields.items()
+        if key not in (STREAM_TIME, STREAM_LEVEL, EVENT_NAME)
+    ]
+    return " ".join(parts)
+
+
+def _dropped_notice(fields: Mapping[str, Any]) -> str:
+    """What a reader that fell behind is told, in the count's own words.
+
+    On stderr and phrased as a gap rather than as an error, because it
+    is neither this command's failure nor the server's: the stream
+    overwrites the oldest events for a reader that has stopped keeping
+    up, which is the alternative to slowing a conversation down.
+    """
+    return (
+        f"{_value(fields.get(DROPPED_EVENT))} events are missing above this line: this "
+        f"reader fell behind, and the server overwrote the oldest of them rather than "
+        f"holding a conversation up for it."
+    )
+
+
+def _time_of_day(value: object) -> str:
+    """The stream's stamp as a person watching reads it: the clock time,
+    without the date a tail is already inside of. Anything that is not a
+    stamp is rendered as the value it is, which is what keeps this from
+    being the one place a line could come apart."""
+    if isinstance(value, str):
+        with contextlib.suppress(ValueError):
+            return datetime.fromisoformat(value).strftime("%H:%M:%S")
+    return _value(value)
+
+
+def _bare(value: object) -> str:
+    """A declared word printed as it is, and anything else encoded."""
+    return value if isinstance(value, str) and _BARE_WORD.match(value) else _value(value)
+
+
+def _value(value: object) -> str:
+    """One value as a line may carry it.
+
+    Numbers as themselves, because a count and a duration are what a
+    reader scans a tail for and quoting them would bury them. Everything
+    else as compact JSON with nothing above plain ASCII left unescaped,
+    which is the whole of the one-line guarantee. A boolean is not a
+    number here: `true` is what the record says and `1` is not.
+    """
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return json.dumps(value, separators=(",", ":"))
+    return str(value)
+
+
 # The grammar
 #
 # One row per command: where it sits in the command tree, what it does,
@@ -5157,6 +5573,55 @@ def _filtered_sessions(row: Command) -> Callable[..., None]:
     return run
 
 
+def _tailed(row: Command) -> Callable[..., None]:
+    """The event tail: three filters and the one option that says when
+    it stops.
+
+    Every one of them a flag, because none of them addresses anything: a
+    tail with no filters is the whole server's traffic, which is the
+    reading it is opened for most often, and `--follow` is about this
+    invocation rather than about what is being asked for.
+
+    The three filters are the query's own words, so what an operator
+    types and what the API parses are one vocabulary. What each may be
+    is the API's rule and its refusal, said there and not restated here.
+    """
+
+    def run(
+        context: typer.Context,
+        device: Annotated[
+            str | None, typer.Option("--device", metavar="MAC", help=EVENTS_DEVICE_HELP)
+        ] = None,
+        session: Annotated[
+            str | None, typer.Option("--session", metavar="ID", help=EVENTS_SESSION_HELP)
+        ] = None,
+        level: Annotated[
+            str | None, typer.Option("--level", metavar="LEVEL", help=EVENTS_LEVEL_HELP)
+        ] = None,
+        follow: Annotated[bool, typer.Option("--follow", help=FOLLOW_HELP)] = False,
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        force: ForceOption = None,
+        no_input: NoInputOption = None,
+    ) -> None:
+        row.perform(
+            _invocation(
+                row,
+                context,
+                config,
+                api_url,
+                force,
+                no_input,
+                mac=device or "",
+                session=session or "",
+                level=level or "",
+                follow=follow,
+            )
+        )
+
+    return run
+
+
 def _selected_sessions(row: Command) -> Callable[..., None]:
     """The purge's three selectors, every one of them a flag.
 
@@ -5578,6 +6043,18 @@ GROUPS: dict[tuple[str, ...], str] = {
     # And the store's other entity, singular under the same rule: `show`
     # and `delete` address one thread.
     ("conversation",): "the conversations this server recorded, and erasing them",
+    # The live counterpart of the two above: the same events those
+    # records are assembled from, before anything has been written down.
+    # A noun with a verb rather than a flat `tail`, because the noun is
+    # what the verb is about and because a second verb over the same
+    # subject is where this goes next.
+    #
+    # The adjacent `vinga-server events reference` is a different
+    # program's spelling of the same word and keeps its own home, which
+    # the cli-guide's two-spellings section explains: that one prints
+    # what the events ARE and needs no server, this one prints what a
+    # server is saying and reaches one.
+    ("events",): "what the running server is saying right now, as it says it",
 }
 
 
@@ -5912,6 +6389,28 @@ COMMANDS: tuple[Command, ...] = (
             "sessions themselves are left with a gap rather than deleted"
         ),
         destroys=True,
+    ),
+    # The live half of the two above, and the one row in this table that
+    # is not a request with an answer: it opens a stream and prints it
+    # until it is told to stop, which is why it carries its own function
+    # rather than an act (`_events_tail`).
+    Command(
+        words=("events", "tail"),
+        does=_events_tail,
+        declare=_tailed,
+        help=TAIL_HELP,
+    ),
+    # A read of the running server rather than of the database: there is
+    # no state to report when there is no server to ask.
+    Command(
+        words=("status",),
+        does=STATUS,
+        declare=_plain,
+        help=(
+            "what each configured MCP server is doing on the running server: connected, "
+            "down, or unused because no agent references it, since when, and which "
+            "tools it published"
+        ),
     ),
     # The one command that changes what the server is doing rather than
     # what is stored, which is why it is a verb of its own rather than a
