@@ -877,10 +877,9 @@ class RuntimeInfo(BaseModel):
         description=(
             "The URL to type into a device's captive portal, or null when onboarding "
             "is off. It is the origin this deployment names itself by and the derived "
-            "key after it, the same value `vinga-server config ota-url` prints from "
-            "the file half alone, so a deployment names itself identically wherever it "
-            "is named. It is a credential: the key stands in front of the token "
-            "issuer."
+            "key after it, the same value `vinga ota-url` prints from the file half "
+            "alone, so a deployment names itself identically wherever it is named. It "
+            "is a credential: the key stands in front of the token issuer."
         )
     )
     onboarding_provenance: str | None = Field(

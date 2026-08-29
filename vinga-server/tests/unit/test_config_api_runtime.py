@@ -3,11 +3,16 @@ stored.
 
 The status read answers from the MCP registry the serving application
 was handed, the prompt read from the assembly the composition root
-closed over, and the diff read from the comparison it closed over, so
-what is checked here is the transport around them: the gate, the shape,
-the honest answer when there is no server, and the one structural reason
-this namespace exists at all, that an entity may legally be named after
-a word a route wants.
+closed over, the diff read from the comparison it closed over, and the
+identity read from the value it composed, so what is checked here is the
+transport around them: the gate, the shape, the honest answer when there
+is no server, and the one structural reason this namespace exists at
+all, that an entity may legally be named after a word a route wants.
+
+The identity read has one thing the others do not, and it is read for it
+here: the URL it answers is a credential, so the gate in front of it and
+the `no-store` on the way back are its behavior rather than its
+surroundings.
 """
 
 import sys
@@ -53,6 +58,7 @@ from vinga_server.config.responses import (
     McpReloadResult,
     PromptDiff,
     PromptsReload,
+    RuntimeInfo,
     SingletonDiff,
 )
 from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
@@ -74,7 +80,17 @@ API_SECRET_ENV = "VINGA_API_SECRET"
 
 STATUS_PATH = "/runtime/mcp-servers"
 
+INFO_PATH = "/runtime/info"
+
 RELOAD_PATH = "/runtime/config/reload"
+
+# A key-shaped last segment, and an origin that could only have been
+# configured. Shaped so a substring check for it cannot match by
+# accident, which is what makes a no-leak assertion about it mean
+# something.
+ONBOARDING_URL = "https://vinga.test.invalid/x/4f8b2c9e-never-a-real-key/"
+
+ONBOARDING_PROVENANCE = "from server.public_url"
 
 STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
 
@@ -142,6 +158,7 @@ def serving(
     agent_prompt: object = None,
     config_diff: object = None,
     snapshot_only: bool = False,
+    identity: RuntimeInfo | None = None,
 ) -> Iterator[TestClient]:
     api = build_api(
         TOKEN,
@@ -151,6 +168,7 @@ def serving(
         agent_prompt=agent_prompt,
         config_diff=config_diff,
         snapshot_only=snapshot_only,
+        identity=identity,
     )
     with TestClient(api, headers={"Authorization": f"Bearer {TOKEN}"}) as client:
         yield client
@@ -1032,3 +1050,127 @@ def test_the_document_says_what_changed_means() -> None:
     assert "never that something was written" in changed
     for prose in (rendered["info"]["description"], changed):
         assert "plaintext may not have" in prose
+
+
+# The identity read
+#
+# What this module owns, a fourth time: the gate, the shape of the
+# answer, and the honest refusal when there is no server. What it does
+# NOT own is where the URL comes from: the composition root derives it
+# through `onboarding.origin`, and that it is the same value the
+# derivation answers is pinned end to end in
+# `tests/unit/test_app_lifespan.py`, over an application a lifespan
+# actually built.
+#
+# The extra thing this route has, and the reason it is read carefully:
+# the URL it answers is a credential. Its last segment is derived from
+# the device-auth secret and stands in front of the token issuer, which
+# is why the startup banner prints the origin without it.
+
+
+def _identity(**overrides: object) -> RuntimeInfo:
+    """One deployment's identity, as the composition root composes it."""
+    return RuntimeInfo(
+        **{
+            "version": "0.1.0",
+            "revision": "v0.1.0-3-gdeadbee",
+            "onboarding_enabled": True,
+            "onboarding_url": ONBOARDING_URL,
+            "onboarding_provenance": ONBOARDING_PROVENANCE,
+        }
+        | overrides
+    )
+
+
+def test_the_identity_read_needs_the_bearer_token(database: DatabaseConfig) -> None:
+    """The gate runs in front of routing, so this route inherits it
+    rather than declaring anything of its own. It is the whole of what
+    stands between the onboarding URL and anyone who can reach the port,
+    so the refused answer is read for the URL as well as for the status:
+    a refusal that quoted what it was refusing to serve would be the one
+    leak this design cannot afford.
+    """
+    api = build_api(TOKEN, database, identity=_identity())
+    with TestClient(api) as anonymous:
+        assert anonymous.get(INFO_PATH).status_code == 401
+        wrong = anonymous.get(INFO_PATH, headers={"Authorization": "Bearer wrong"})
+
+    assert wrong.status_code == 401
+    assert ONBOARDING_URL not in wrong.text
+    assert refused(wrong.json(), 401)
+
+
+def test_an_application_without_a_server_has_no_identity(client: TestClient) -> None:
+    """The prompt read's answer and not the status read's: an empty
+    listing is a true description of no runtime, and an invented version
+    is not."""
+    response = client.get(INFO_PATH)
+
+    assert response.status_code == 503
+    detail = refused(response.json(), 503)
+    assert "no running server around it" in detail
+
+
+def test_the_identity_read_answers_what_the_root_composed(
+    database: DatabaseConfig,
+) -> None:
+    with serving(database, None, identity=_identity()) as client:
+        response = client.get(INFO_PATH)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "version": "0.1.0",
+        "revision": "v0.1.0-3-gdeadbee",
+        "onboarding_enabled": True,
+        "onboarding_url": ONBOARDING_URL,
+        "onboarding_provenance": ONBOARDING_PROVENANCE,
+    }
+
+
+def test_the_identity_answer_is_not_to_be_stored(database: DatabaseConfig) -> None:
+    """The header half of the design that makes a credential-bearing
+    read acceptable: the gate says who may ask, and this says that
+    nothing between the two ends may keep the answer. `no-store` rather
+    than `no-cache`, which would still have written it to a disk on the
+    way."""
+    with serving(database, None, identity=_identity()) as client:
+        response = client.get(INFO_PATH)
+
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_onboarding_off_answers_nulls_and_says_which_switch(
+    database: DatabaseConfig,
+) -> None:
+    """A state a deployment is legitimately in, answered as a fact
+    rather than as a refusal. What a device is configured at then is
+    `server.ota_path`, which is that deployment's secret, so there is
+    nothing here to offer in the URL's place."""
+    off = _identity(
+        onboarding_enabled=False, onboarding_url=None, onboarding_provenance=None
+    )
+    with serving(database, None, identity=off) as client:
+        answered = client.get(INFO_PATH).json()
+
+    assert answered["onboarding_enabled"] is False
+    assert answered["onboarding_url"] is None
+    assert answered["onboarding_provenance"] is None
+    assert answered["revision"] == "v0.1.0-3-gdeadbee"
+
+
+def test_the_document_says_this_read_carries_the_url_and_what_protects_it() -> None:
+    """The prose is contract too, and this is the one route whose prose
+    a reader has to have: a client generator that treated the answer as
+    ordinary would cache it."""
+    rendered = document()
+    described = rendered["info"]["description"]
+
+    assert "/runtime/info" in described
+    assert "Cache-Control: no-store" in described
+    assert "credential" in described
+
+    responses = rendered["paths"][INFO_PATH]["get"]["responses"]
+    assert responses["503"]["description"] != PROBLEM_DESCRIPTIONS[503]
+    assert "no honest empty answer" in responses["503"]["description"]
+    schema = responses["401"]["content"][PROBLEM_MEDIA_TYPE]["schema"]
+    assert schema == {"$ref": "#/components/schemas/Problem"}
