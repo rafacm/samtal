@@ -7,6 +7,34 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ## 2026-08-29
 
+### Added
+
+- **`vinga info`** (#341). One read that says what deployment the CLI
+  is talking to: the address it actually contacted, the version and
+  revision of the build that answered, the URL to type into a device's
+  captive portal with the provenance of the origin in it, and a count
+  per configured kind with the default agent. It is two requests on one
+  row, because identity is the running server's and the counts are the
+  store's, and it opens with the address it reached because a device's
+  onboarding URL and the address an operator dials the API on can
+  legitimately differ. Getting Started reads the URL with it now, from
+  wherever the CLI runs; `vinga ota-url` keeps its place as the offline
+  derivation on the server's own host, and `vinga-server doctor` still
+  answers whether anything replies on that URL.
+- **`GET /api/runtime/info`** (#341), which is what answers it. It is a
+  credential-bearing read and is designed as one: the onboarding URL's
+  last segment is derived from the device-auth secret and stands in
+  front of the endpoint that issues device tokens, so the route sits
+  behind the same bearer gate every secret write does, the response
+  carries `Cache-Control: no-store`, and the CLI renders the value to
+  stdout alone, where it reaches no notice, no refusal, no log record
+  and no exception chain. With `server.onboarding.enabled` false the
+  URL and its provenance are null and the flag says why; an application
+  built without a server around it answers 503 rather than inventing a
+  version. Recorded in `docs/architecture/cli-guide.md` as the second
+  exception to "a credential is never an argument, and never travels in
+  a read", beside `ota-url`.
+
 ### Fixed
 
 - The `vinga` command line imports `Exit` from the vendored Click's core module, where typer 0.27.1 and 0.27.2 both define it, instead of the exceptions module 0.27.2 moved it out of. A fresh install resolving typer 0.27.2 crashed at import; installs pinned by the lockfile were unaffected.

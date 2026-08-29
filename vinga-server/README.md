@@ -2928,11 +2928,16 @@ stderr it says where the origin came from, and an origin nobody
 configured reads as the guess it is: set `server.public_url` to name the
 deployment exactly.
 
-This is the one place the URL is printed. The running server's startup
-line names the origin and points here rather than repeating the URL, and
-a GET of the endpoint repeats it only to whoever already reached it: the
-key stands in front of the endpoint that issues device tokens, and a log
-line is kept, shipped and read by everyone who can read logs.
+There are two places the URL is printed and this is the offline one.
+The other is `vinga info`, which reads it back over the configuration
+API and is what a deployment administered from somewhere other than its
+own host uses; both derive it the same way, because there is one
+derivation. The running server's startup line is deliberately neither:
+it names the origin and points here rather than repeating the URL, since
+a log line is kept, shipped and read by everyone who can read logs. A
+GET of the endpoint repeats it only to whoever already reached it. The
+key stands in front of the endpoint that issues device tokens, which is
+what all three of those sentences are about.
 
 The two inputs are the file and the secret, so it runs wherever both
 are. Inside the container they already are:
