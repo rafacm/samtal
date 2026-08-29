@@ -3273,18 +3273,27 @@ def _applied_entries(answer: Mapping[str, object]) -> tuple[str, ...]:
 
     The half both renderings share, printed here rather than returned,
     so the two of them differ in exactly the thing they are named for.
+
+    A document that named nothing has one line and no boundaries, which
+    is the same shape rather than a second one: it leaves through the
+    same flush, and an empty answer has nothing to be waiting on.
     """
     entries = answer["entries"]
-    if not entries:
-        print(NOTHING_APPLIED)
-        return ()
     for entry in entries:
         print(f"{_entry_name(entry)}: {entry['outcome']}")
+    if not entries:
+        print(NOTHING_APPLIED)
     # Flushed here rather than by the caller, so whatever follows on
     # stderr lands after the lines it is about rather than ahead of
     # them: stderr is unbuffered and stdout is not. That is a notice
     # under `--no-reload` and a refusal from the reload under the
     # default, and both have to arrive underneath what was written.
+    #
+    # On both arms, which is what the early return used to miss: a
+    # document that named nothing still printed a line, and a reload
+    # refused behind it still lands on stderr, so the one output an
+    # empty apply has would have been read after the failure it came
+    # before.
     sys.stdout.flush()
     return tuple(
         dict.fromkeys(

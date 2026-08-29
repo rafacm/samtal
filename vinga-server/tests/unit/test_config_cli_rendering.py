@@ -1005,6 +1005,38 @@ def test_an_apply_that_wrote_nothing_says_nothing_about_a_write(
     assert "was written" not in printed.err
 
 
+def test_an_empty_apply_is_read_before_the_failure_that_followed_it(run) -> None:
+    """The ordering rule, on the one arm that used to leave without it.
+
+    Two streams reach one terminal, and only one of them is buffered, so
+    what an operator reads in is flush order rather than write order. A
+    document that named nothing prints one line and used to return
+    before the flush, so the refusal from the reload behind it, written
+    to an unbuffered stderr, arrived above the output it came after: the
+    apply would read as having failed rather than as having applied
+    nothing.
+
+    Asserted over one shared buffer with two wrappers on it, a buffered
+    one for stdout and an unbuffered one for stderr, because ordering
+    between two independently captured streams is not a thing a test can
+    see: pytest's capture keeps them apart, which is exactly what hid
+    this.
+    """
+    shared = io.BytesIO()
+    buffered = io.TextIOWrapper(shared, encoding="utf-8", write_through=False)
+    unbuffered = io.TextIOWrapper(shared, encoding="utf-8", write_through=True)
+    run.runtime["mcp_servers"] = _configured({"weather": ENTRY}, {"sam": ["weather"]})
+    run.runtime["reload"] = _held()
+
+    with contextlib.redirect_stdout(buffered), contextlib.redirect_stderr(unbuffered):
+        assert run("apply", "-f", "-", stdin="{}\n") == 1
+        buffered.flush()
+        written = shared.getvalue().decode("utf-8")
+
+    assert cli.NOTHING_APPLIED in written
+    assert written.index(cli.NOTHING_APPLIED) < written.index(HELD)
+
+
 def test_a_refused_document_never_reaches_the_reload(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
