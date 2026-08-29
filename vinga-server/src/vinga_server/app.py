@@ -466,6 +466,11 @@ async def _build_composition(
         # is derived from are this root's business, and the API is the
         # one surface that must go on being renderable with none of it.
         _runtime_identity(config.server),
+        # And whoever is watching this server's events, which is the one
+        # piece of the runtime the API shares with the device edge: the
+        # same hub the sessions above emit into is what the stream route
+        # subscribes a reader to (#342).
+        live=live,
     )
     # The configuration database, opened once here rather than on every
     # request (#142), and migrated in the same call because nothing may

@@ -1,0 +1,1 @@
+This application has no running server around it, so there are no events to stream. Unlike the MCP status read beside it, there is no honest empty answer: a stream that opened and said nothing is exactly what a quiet server looks like, so a caller could not tell the two apart.

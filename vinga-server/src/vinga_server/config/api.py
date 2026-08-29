@@ -44,6 +44,8 @@ Nothing logs the token, a request body, or an Authorization header.
 
 import contextlib
 import hmac
+import json
+import logging
 import os
 import re
 from collections.abc import (
@@ -64,7 +66,7 @@ from cryptography.fernet import MultiFernet
 from fastapi import Body, Depends, FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import Connection, Engine
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -96,6 +98,7 @@ from vinga_server.config.models import (
     DatabaseConfig,
     DomainConfig,
     FieldProblem,
+    normalize_mac,
 )
 from vinga_server.config.provider_options import component_name, declared_options
 from vinga_server.config.responses import (
@@ -131,6 +134,15 @@ from vinga_server.conversations import api as conversations
 from vinga_server.db import open_database
 from vinga_server.events import ServerEvents
 from vinga_server.events.catalog import ApiError, ApiStorageError
+from vinga_server.events.live import (
+    DEFAULT_LEVEL,
+    LEVELS,
+    Dropped,
+    Filters,
+    LiveEvents,
+    Streamed,
+    Subscription,
+)
 from vinga_server.events.values import ClassName
 
 # The pending table, imported like anything else since issue #143 split
@@ -594,6 +606,72 @@ _NO_RUNTIME_INFO = (
 # rather than `no-cache`: a proxy or a browser that revalidated would
 # still have written the URL to a disk in the meantime.
 NO_STORE = "no-store"
+# The event stream's own two. Its 422 is never about addressing: it
+# addresses nothing and carries no body, and the only things it parses
+# are the three filters. Its 503 is the prompt read's case rather than
+# the status read's: an empty stream from a server that is not there
+# would look exactly like a quiet server.
+_EVENTS_FILTER_DESCRIPTION = _description("events-filter-refused")
+
+_NO_RUNTIME_EVENTS_DESCRIPTION = _description("no-runtime-events")
+
+# What the stream says when there is no server around this application
+# to have events. Fixed, and not the shared sentence, for the reason the
+# diff's is not: the shared one says the reads in this namespace answer
+# emptily, and an empty stream is the one answer this read must not
+# give, since a server that is not there and a server that is saying
+# nothing look identical on a stream.
+_NO_RUNTIME_EVENTS = (
+    "this API has no running server around it, so there are no events to stream. An "
+    "empty stream is not the honest answer here, since it is exactly what a quiet "
+    "server looks like. A deployment reaches this read on its server's own port."
+)
+
+# The three filters, and what each of them is. Fixed sentences carrying
+# the rule and never the value: a filter arrives in a query string, and
+# a refusal that quoted it back would put whatever was sent into a
+# response and into whatever keeps one.
+_EVENTS_DEVICE_REFUSED = (
+    "device has to be a MAC address: six colon-separated or dash-separated hex pairs, "
+    "for example aa:bb:cc:dd:ee:ff. What was sent is not quoted back"
+)
+
+_EVENTS_SESSION_REFUSED = (
+    "session has to be a session's uuid hex, which is thirty-two hexadecimal "
+    "characters, as the session listing answers with and as every event of that "
+    "session carries. What was sent is not quoted back"
+)
+
+_EVENTS_LEVEL_REFUSED = (
+    f"level has to be one of {', '.join(LEVELS)}, in any case, and it is a threshold "
+    f"rather than a selection: absent means {logging.getLevelName(DEFAULT_LEVEL)} and "
+    f"above, which is what the retained log carries. What was sent is not quoted back"
+)
+
+# The shape of a session id, which is what a filter is held to. The
+# minted form (`uuid4().hex`) rather than the event vocabulary's wider
+# machine form: what a reader can be given to filter on is what a
+# listing prints and what a device session mints, and a filter admitting
+# more than that would be admitting spellings nothing ever emits.
+_SESSION_HEX = re.compile(r"\A[0-9a-fA-F]{32}\Z")
+
+# How often an idle stream says it is still alive, in seconds.
+#
+# A comment line rather than an event, because a keepalive is not
+# something that happened. The interval is a field of the runtime below
+# rather than a constant read here, so a test does not wait it out and a
+# deployment behind a proxy with a shorter idle timeout has somewhere to
+# put a smaller number.
+KEEPALIVE_S = 15.0
+
+# What that line is. An SSE comment: a line beginning with a colon,
+# which every reader ignores and every proxy counts as traffic.
+_KEEPALIVE_LINE = b": keepalive\n\n"
+
+# And what a reader that fell behind is told, as its own SSE event
+# rather than as a field on the next one: a UI and the CLI render a loss
+# the same way, and a stream that went quiet never means one.
+_DROPPED_EVENT = "dropped"
 
 # And what the caller is told, which is not the shared sentence: that
 # one says the reads in this namespace answer emptily, and this read
@@ -765,6 +843,16 @@ class ApiRuntime:
     config_diff: ConfigDiffReader | None
     snapshot_only: bool = False
     identity: RuntimeInfo | None = None
+    # Everyone watching the running server's events, which the stream
+    # route subscribes on behalf of one reader at a time. None is the
+    # honest answer for an application built without a server around it,
+    # and that route refuses rather than opening a stream that would say
+    # nothing (#342).
+    live: LiveEvents | None = None
+    # How often an idle stream says it is still alive. A field rather
+    # than the constant read at the route, so a test injects a short one
+    # instead of waiting out the default.
+    keepalive_s: float = KEEPALIVE_S
 
 
 def build_api(
@@ -778,6 +866,8 @@ def build_api(
     config_diff: ConfigDiffReader | None = None,
     snapshot_only: bool = False,
     identity: RuntimeInfo | None = None,
+    live: LiveEvents | None = None,
+    keepalive_s: float = KEEPALIVE_S,
 ) -> FastAPI:
     """The sub-application the server mounts: the routes, gated.
 
@@ -862,6 +952,8 @@ def build_api(
         config_diff,
         snapshot_only,
         identity,
+        live,
+        keepalive_s,
     )
     # A lifespan of its own, which runs only when this application is the
     # top-level one: it opens the configuration database and installs the
@@ -891,6 +983,8 @@ def build_api_runtime(
     config_diff: ConfigDiffReader | None = None,
     snapshot_only: bool = False,
     identity: RuntimeInfo | None = None,
+    live: LiveEvents | None = None,
+    keepalive_s: float = KEEPALIVE_S,
 ) -> ApiRuntime:
     """What a request to this application resolves out of the server
     around it, assembled.
@@ -930,6 +1024,8 @@ def build_api_runtime(
         config_diff=config_diff,
         snapshot_only=snapshot_only,
         identity=identity,
+        live=live,
+        keepalive_s=keepalive_s,
     )
 
 
@@ -1129,6 +1225,26 @@ def _identity(request: Request) -> RuntimeInfo | None:
 
 
 IdentityDep = Annotated[RuntimeInfo | None, Depends(_identity)]
+def _live(request: Request) -> LiveEvents | None:
+    """Everyone watching the running server's events, or None for an
+    application built without one. Taken from the application for the
+    reason the store is."""
+    runtime: ApiRuntime = request.app.state.api_runtime
+    return runtime.live
+
+
+LiveDep = Annotated[LiveEvents | None, Depends(_live)]
+
+
+def _keepalive(request: Request) -> float:
+    """How often an idle stream says it is still alive. A dependency for
+    the reason the hub is one: it is a fact about the server around this
+    application rather than a constant of the route."""
+    runtime: ApiRuntime = request.app.state.api_runtime
+    return runtime.keepalive_s
+
+
+KeepaliveDep = Annotated[float, Depends(_keepalive)]
 
 
 def _pending_view(device: PendingRecord) -> dict[str, Any]:
@@ -1719,6 +1835,194 @@ def _runtime(api: FastAPI) -> None:
         if snapshot_only:
             raise SnapshotOnlyError(_NO_STORED_WORLD)
         return await diff()
+
+    @api.get(
+        "/runtime/events",
+        response_class=_EventStream,
+        # Stated rather than inferred. With no status code on the route,
+        # the document generator reads the default off the response
+        # class's `__init__` signature, and a streaming response takes
+        # its content and nothing else; 200 is what this answers with
+        # and saying so is cheaper than a parameter no caller passes.
+        status_code=200,
+        responses=_problems(
+            401,
+            422,
+            503,
+            instead={
+                422: _EVENTS_FILTER_DESCRIPTION,
+                503: _NO_RUNTIME_EVENTS_DESCRIPTION,
+            },
+        ),
+    )
+    async def read_runtime_events(
+        live: LiveDep,
+        keepalive_s: KeepaliveDep,
+        device: str | None = None,
+        session: str | None = None,
+        level: str | None = None,
+    ) -> "_EventStream":
+        """What this server is saying right now, as it says it.
+
+        The structured events, streamed as Server-Sent Events: one
+        `data:` line per event, carrying the JSON object the retained
+        log carries plus `ts`, the wall-clock instant it was emitted at,
+        and `level`, its level's name. Nothing else crosses this
+        surface, because there is nothing else: the events are metadata
+        by construction, and what was said in a conversation is in the
+        conversation store instead.
+
+        Live and nothing but. There is no buffer behind this and no
+        `since`: a stream carries what happens while it is open, and a
+        reader that reconnects rejoins the present. What happened before
+        is the conversation record's to answer, where a deployment
+        enabled one.
+
+        Three filters, applied as the events arrive. `device` takes a
+        MAC in either separator and any case; `session` takes a
+        session's uuid hex; `level` is a threshold, one of the four
+        level names in any case, and defaults to INFO, which is what the
+        retained log carries. An event that names no device or no
+        session passes such a filter only when none is set, so a
+        device-filtered tail is that board's traffic rather than the
+        whole server's.
+
+        A reader that falls behind loses its oldest events rather than
+        slowing the server down, and is told: a `dropped` event carries
+        how many went since the last delivery. An idle stream sends a
+        comment line every few seconds so a proxy does not close it, and
+        the stream ends when the client goes away or when the server
+        shuts down.
+        """
+        # This docstring is the endpoint's description in the committed
+        # document, so what belongs to the handler rather than to the
+        # contract is said here. The subscription is taken before the
+        # response is built and given back in the generator's `finally`,
+        # which is the one place that runs whether the client
+        # disconnected, the server closed the hub, or the stream failed
+        # part way: a reader left subscribed would be a queue nothing
+        # drains.
+        if live is None:
+            raise NoRuntimeError(_NO_RUNTIME_EVENTS)
+        subscription = live.subscribe(_filters(device, session, level))
+        return _EventStream(_sse_body(live, subscription, keepalive_s))
+
+
+class _EventStream(StreamingResponse):
+    """The event stream's response: the SSE media type, and the one
+    header that keeps it from being kept.
+
+    A subclass rather than arguments at the call site, because the
+    document is rendered from the route's `response_class` and a bare
+    `StreamingResponse` declares no media type at all, which would
+    publish this route as answering JSON. `no-store` because a live
+    stream is the least cacheable thing this API has and an
+    intermediary that buffered it would turn a tail into a replay.
+    """
+
+    media_type = "text/event-stream"
+
+    def __init__(self, content: AsyncIterator[bytes]) -> None:
+        super().__init__(content, headers={"Cache-Control": "no-store"})
+
+
+async def _sse_body(
+    live: LiveEvents, subscription: Subscription, keepalive_s: float
+) -> AsyncIterator[bytes]:
+    """One reader's stream, until it goes away or the server does.
+
+    The keepalive is a timeout on the wait rather than a task beside it:
+    nothing arriving for `keepalive_s` is exactly when a comment line is
+    due, and a stream with events in it needs no timer at all.
+
+    The `finally` is the whole of the cleanup contract. It runs when the
+    client disconnects (the generator is closed), when the hub closes
+    (the subscription ends and this returns), and when anything here
+    raises, so a subscription is never left on a hub with nobody
+    reading it.
+    """
+    try:
+        while True:
+            item = await subscription.next(keepalive_s)
+            if item is None:
+                if subscription.ended:
+                    return
+                yield _KEEPALIVE_LINE
+                continue
+            yield _sse_line(item)
+    finally:
+        live.unsubscribe(subscription)
+
+
+def _sse_line(item: Streamed | Dropped) -> bytes:
+    """One item as the wire carries it.
+
+    A dropped count is its own named event rather than a field on the
+    next one, so a reader renders a loss as a loss; everything else is
+    an unnamed `data:` line, which is what `EventSource` delivers as its
+    default message. The JSON is compact and cannot carry a newline, so
+    one item is one `data:` line whatever an event's values hold.
+    """
+    if isinstance(item, Dropped):
+        body = json.dumps({_DROPPED_EVENT: item.count}, separators=(",", ":"))
+        return f"event: {_DROPPED_EVENT}\ndata: {body}\n\n".encode()
+    return f"data: {json.dumps(item.fields, separators=(',', ':'))}\n\n".encode()
+
+
+def _filters(device: str | None, session: str | None, level: str | None) -> Filters:
+    """The three query arguments as the hub's own filter.
+
+    Read here rather than in the hub for the reason every other query
+    argument in this API is read here: what a filter is spelled as, and
+    what a caller is told when it is not, is transport. What the values
+    mean is the hub's, which is why what comes back is its type and not
+    three strings.
+
+    Every refusal is a fixed sentence carrying the rule, and none of
+    them quotes what was sent: a query string reaches a response body,
+    a proxy log and a browser's history.
+    """
+    return Filters(
+        device=_device_filter(device),
+        session=_session_filter(session),
+        level=_level_filter(level),
+    )
+
+
+def _device_filter(value: str | None) -> str | None:
+    """The device filter, normalized the way every other MAC in this
+    project is, so `AA-BB-...` and `aa:bb:...` tail the same board."""
+    if value is None:
+        return None
+    problem: ConfigError | None = None
+    try:
+        return normalize_mac(value)
+    except ValueError:
+        # Built here and raised outside the arm, this codebase's rule: a
+        # refusal raised inside one carries what it caught as its
+        # `__context__`, and the caller is a response body.
+        problem = ConfigError(_EVENTS_DEVICE_REFUSED)
+    raise problem
+
+
+def _session_filter(value: str | None) -> str | None:
+    """The session filter, lower-cased so a listing's id and an id typed
+    in capitals reach the same session."""
+    if value is None:
+        return None
+    if _SESSION_HEX.match(value) is None:
+        raise ConfigError(_EVENTS_SESSION_REFUSED)
+    return value.lower()
+
+
+def _level_filter(value: str | None) -> int:
+    """The level threshold, by name and in any case."""
+    if value is None:
+        return DEFAULT_LEVEL
+    level = LEVELS.get(value.strip().upper())
+    if level is None:
+        raise ConfigError(_EVENTS_LEVEL_REFUSED)
+    return level
 
 
 # How a client finds the options a provider write may carry

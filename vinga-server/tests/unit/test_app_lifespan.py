@@ -47,11 +47,11 @@ from vinga_server.config.loader import DatabaseBusyError
 from vinga_server.config.models import API_MOUNT_PATH, DatabaseConfig
 from vinga_server.db import DOMAIN_CHAIN, read_engine
 from vinga_server.device.bindings import DeviceBindings
-from vinga_server.onboarding.origin import onboarding_url
 from vinga_server.events import ServerEvents
 from vinga_server.events.catalog import APP_CHANNEL, CaptureDisabled
 from vinga_server.events.live import LiveEvents
 from vinga_server.events.values import ConfiguredPath
+from vinga_server.onboarding.origin import onboarding_url
 from vinga_server.providers import ProviderError
 from vinga_server.providers import world as provider_world
 from vinga_server.providers.mock import MockTts

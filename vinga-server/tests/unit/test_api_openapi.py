@@ -168,6 +168,10 @@ def test_the_document_describes_every_route_the_api_serves() -> None:
         "/runtime/info": ["get"],
         "/runtime/agents/{name}/prompt": ["get"],
         "/runtime/mcp-servers": ["get"],
+        # The one route in this document that does not answer and end:
+        # the live event stream, whose 200 is `text/event-stream` and
+        # whose refusals are the ordinary problem shape.
+        "/runtime/events": ["get"],
         # And the two that span both sides, under `/runtime/config/`
         # rather than beside the entity reads: one answers what is
         # stored and not yet served, the other puts it in front of the

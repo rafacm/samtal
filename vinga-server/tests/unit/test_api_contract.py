@@ -81,6 +81,13 @@ EXCLUDED: dict[tuple[str, str], str] = {
         "stored is a line of the document show prints, and a read command here would "
         "give one noun a verb no other setting has"
     ),
+    ("GET", "/runtime/events"): (
+        "the live event stream, which no act of this grammar can carry: an act is one "
+        "buffered request answered once and handed to one renderer, and this operation "
+        "answers `text/event-stream` and goes on answering until the reader leaves. "
+        "`vinga events tail` reads it through the streaming client seam instead of "
+        "through a row (#342, milestone 2)"
+    ),
     ("GET", "/sessions/{session}/turns"): (
         "the session's own timeline, which the grammar has no verb for: a turn listing "
         "wraps and a wrapped column is not a column, so reading dialogue is the "
