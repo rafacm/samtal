@@ -202,11 +202,20 @@ generated artifact. New pins, by milestone:
   the grammar completeness pins (`_ORDER`, tree/table agreement,
   refusal rows per family, driven rows) move with the row.
 - M3: `apply` runs both acts in order (client-recording fixture);
-  `--no-reload` runs one; a reload refusal after a committed apply
-  renders the stored-not-applied sentence; notices suppressed under
+  `--no-reload` runs one; a failed reload after a committed apply
+  renders the committed-but-unanswered sentence; notices quiet under
   the default and present under `--no-reload`; `set` notices
-  unchanged; the live lane drives `apply` once end to end and asserts
-  the reload listing follows.
+  unchanged. The migration of the existing apply surface is named
+  work, not fallout: inventory every apply invocation in the tests by
+  grep, convert the tests that exercise storage semantics,
+  idempotence, limits, recovery and preset validity to `--no-reload`
+  (the unit runner's default `reload=None` runtime would otherwise
+  turn every one into a committed write plus exit 1), inject a
+  runtime where the default behavior is itself the subject, and recut
+  the live-lane sequence so its bootstrap stays a staged apply where
+  it asserts staging and one controlled mock-provider document proves
+  the default reload end to end. A preset test whose command is no
+  longer run verbatim is renamed to say what it now runs.
 
 The no-leak lens on `info` is answered with a keyful sentinel suite,
 not a claim: with onboarding on and a derived key present, pin the
