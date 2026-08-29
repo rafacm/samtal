@@ -199,7 +199,7 @@ the file still passes.
 
 ## M2: the command
 
-PR TBD.
+PR #354.
 
 ### What landed
 
