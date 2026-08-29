@@ -881,6 +881,27 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.variant }}
           cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
 
+      # The marker the image sets for itself, asked of the image rather
+      # than assumed from the Dockerfile. Everything else that reads it
+      # plants it first, as a test of the check has to, so deleting the
+      # `ENV` line leaves the whole suite green and takes the warning
+      # about a provider naming localhost inside a container with it
+      # (#340). A container built from this Dockerfile is the only thing
+      # that can tell, which is what this step is.
+      #
+      # Asked through the server's own resolver rather than with
+      # `printenv`, so what is checked is the answer a provider build
+      # asks for. Both variants, since the `ENV` is in the stage they
+      # share and both are published; amd64 alone, since an environment
+      # variable does not vary by architecture the way a wheel does.
+      - name: Check the image says it is a container
+        run: |
+          if ! docker run --rm --entrypoint python vinga-server:ci-amd64 -c \
+              "from vinga_server.build_info import in_container; raise SystemExit(0 if in_container() else 1)"; then
+            echo "::error::the ${{ matrix.variant }} image does not report itself as a container; VINGA_CONTAINER is missing from its ENV, and a provider entry naming localhost would build in it without a word"
+            exit 1
+          fi
+
       # A wheel with no aarch64 variant is a thing a user should never be
       # the first to find out about, so both architectures are asked to
       # import the extras before anything is published.
