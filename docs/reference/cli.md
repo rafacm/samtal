@@ -79,6 +79,41 @@ page can describe a grammar this server does not have. The recipes
 carry a marker pair of their own inside it, checked against the
 fragments separately.
 
+## Asking the grammar what it has
+
+Two ways, and they differ in one thing: whether you arrived with a
+command or not.
+
+```bash
+vinga --help                  # the root's page, on stdout, exit 0
+vinga provider secret --help  # any page of the tree, the same way
+vinga                         # the same page, on stderr, exit 1
+vinga device pending          # the page of the noun you stopped at
+```
+
+`--help` (and `-h`, on every page) is a question, and it is answered on
+stdout with exit 0, because asking is not failing. It works at every
+level: the root, a noun, a sub-noun and a command.
+
+A bare invocation is not a question but it is not a typo either, so it
+is answered with the same page rather than with a sentence telling you
+to ask again. `vinga` on its own prints the root's page, and a noun with
+no verb after it prints that noun's page: `vinga device pending` lists
+what `pending` has, not what the root has. The difference from `--help`
+is where it goes and what it exits with. The page goes to **stderr**,
+because stdout carries data and an invocation that ran no command
+produced none, so `vinga > commands.txt` writes an empty file rather
+than a help page. And the exit code is **1**, because no command ran;
+scripts that branch on it keep reading a bare invocation as a failure.
+
+Both work before anything else does. Neither reads the `.env` file, and
+neither needs a server, a database or a key, so they answer in a
+directory and on a machine where nothing is configured yet.
+
+A word this grammar does not have is a different thing again, and gets
+the fixed refusal every mistake gets: `vinga sttatus` says that is not a
+command and points at `--help`, and prints no page.
+
 ## Installing it
 
 Three doors. They are three different things rather than three
