@@ -31,7 +31,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from vinga_server import events_cli, events_docgen
+from vinga_server import events_docgen
+from vinga_server.broken_pipe import BROKEN_PIPE_STATUS
 from vinga_server.events.catalog import (
     SESSION_CHANNEL,
     Declaration,
@@ -546,4 +547,4 @@ def test_a_reader_who_stops_reading_gets_no_traceback(tmp_path: Path) -> None:
     # interpreter shutdown prints a complaint without a traceback.
     assert "Exception ignored" not in errors
     assert errors == ""
-    assert status == events_cli.BROKEN_PIPE_STATUS
+    assert status == BROKEN_PIPE_STATUS
