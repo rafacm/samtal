@@ -512,3 +512,114 @@ a reload prints either way.
   the generator was run to check.
 - Not verified here: nothing on hardware, and nothing in the image lane,
   which is CI's. M3 adds no board or device procedure.
+
+### PR review round
+
+External review of PR #353, verdict mergeable after fixes. Five
+findings, condensed but faithful, each with its resolution and the
+commit that carries it. The two that are about ordering or about a
+world being installed were confirmed against the merged code first, by
+restoring the half being fixed and watching the new case fail.
+
+1. **P1: the apply renderer could print response data or leave as a
+   traceback.** `AppliedEntry`'s section, identity and notice were
+   unconstrained strings printed verbatim: a body could steer a
+   terminal through an escape sequence in a notice, an `unchanged`
+   entry could carry a boundary sentence the field's own description
+   says it never carries, and a lone surrogate in an identity raised
+   `UnicodeEncodeError` out of `print` and past the boundary that turns
+   a failure into a sentence.
+
+   *Resolution*: adopted, `99380f99`. `AppliedEntry` refuses what this
+   API cannot answer: `section` is the closed token it is printed as,
+   and the outcome and the notice are one fact, so an unchanged entry
+   carries null and a write carries its boundary. Every string an
+   applied answer carries then goes through `printable` before it
+   reaches a stream, notices whole for the reason a prompt and the
+   onboarding URL are printed whole. The new cases cover the escape
+   sequence, the surrogate (written to a real encoder, since a buffer
+   that never encodes cannot raise), both disagreements, a section this
+   API does not emit, and the chain behind a refusal.
+
+   Not adopted as written: the review asked the model to require a
+   KNOWN notice for a write. The sentences live in `config.entities`
+   and `responses.py` imports nothing of this server, which is what
+   lets a generated client stand in for it and is pinned by
+   `test_cli_import_weight.py`. What stands in for it is the pairing
+   rule above plus the defensive rendering, which makes an arbitrary
+   sentence harmless rather than impossible. A credential pasted into
+   an identity still prints, deliberately: an identity is the name of a
+   row the operator asked about and nothing tells a pasted value from a
+   name.
+
+2. **P2: the added sentence claimed a write that may not have
+   happened.** It opened "The document was written", which is false of
+   an all-unchanged apply and of an empty one, and it is the one claim
+   an operator has no other way to check.
+
+   *Resolution*: adopted, `035a754e`, taking the reword rather than
+   threading the previous act's answer through: the sentence now opens
+   on what an apply promises and what its own outcomes spell out, that
+   the apply was answered and the store is what the document says. The
+   constant is `APPLY_UNANSWERED`, because "committed" was the same
+   half-truth in the name. Both cases are pinned behind a held reload,
+   each asserting the words "was written" appear nowhere.
+
+3. **P2: the live case did not prove the default contract.** It wrote a
+   fragment nothing included and asserted section headings a reload
+   prints whether or not anything moved, so it would have passed
+   against a server that reinstalled the world it already had.
+
+   *Resolution*: adopted, `381c19ca`. The document is a fragment and
+   the agent that includes it, and the proof is `agent preview`, a read
+   of the running process whose assembled prompt carries text that
+   exists only in the document just applied; the reload's listing names
+   the agent whose prompt moved. Confirmed by staging the same apply
+   and watching the case fail. The plan's own words asked for a
+   mock-provider document, and that is the deviation: a reload builds
+   the engines the world needs, so an entry no agent names is written
+   and never built, and pointing the lane's agent at one would have
+   changed the list of defined providers that another test pins inside
+   a refusal sentence.
+
+4. **P2: the recovery summaries still said apply-then-credentials.**
+   The step-by-step procedures moved when the verb changed; the
+   sentences that point at them did not.
+
+   *Resolution*: adopted, `951c796d`. Every summary says the same three
+   steps in the export header's order: the cli-guide's reproduction
+   example, both of the server README's summaries and the two beside
+   them, and the recovery sentence in `config.example.yaml`. Left as
+   they are, deliberately: the one-clause pointers in the unreachable
+   refusal and in the generated domain reference, which name no
+   credential step and send the reader to the command reference.
+
+5. **P2: an empty apply's line could arrive after the failure it came
+   before.** The `NOTHING_APPLIED` branch returned ahead of the flush,
+   so with a buffered stdout and an unbuffered stderr the reload's
+   refusal was read first.
+
+   *Resolution*: adopted, `d2c320d7`. The empty case leaves through the
+   same flush as every other, and the early return is gone rather than
+   duplicated: an answer with no entries has nothing to be waiting on
+   and the generator over it is empty already. Pinned over one shared
+   buffer with two wrappers, because ordering between two independently
+   captured streams is not something a test can see, which is what hid
+   it. Confirmed by restoring the early return.
+
+### Verification after the round
+
+- `uv run ruff check .`: clean.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: 4510 passed,
+  19 skipped. An earlier run of the same command on a loaded machine
+  failed two timing-sensitive cases unrelated to this milestone
+  (`test_tts_lookahead.py::test_a_handover_speaks_the_new_agents_voice`
+  and
+  `test_conversations_session.py::test_a_parked_writer_never_delays_a_reply`);
+  the re-run above is the whole lane green.
+- `uv run pytest tests/integration -q`: 214 passed, against the
+  Postgres on 127.0.0.1:5432.
+- `python3 scripts/check_doc_links.py .`: 166 files, 0 failures.
+- `docs/reference/api-openapi.json` is regenerated in this round, unlike
+  the milestone itself: the section token is a contract change and the
+  document carries it now.
