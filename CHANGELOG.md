@@ -37,7 +37,18 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Fixed
 
-- The `vinga` command line imports `Exit` from the vendored Click's core module, where typer 0.27.1 and 0.27.2 both define it, instead of the exceptions module 0.27.2 moved it out of. A fresh install resolving typer 0.27.2 crashed at import; installs pinned by the lockfile were unaffected.
+### Added
+
+- **A warning when a provider entry points at localhost from inside a
+  container** (#340). The image now sets `VINGA_CONTAINER` in its own
+  environment, and a build that meets a `base_url` naming `localhost`,
+  `127.0.0.1` or `::1` says so once, at WARNING, on the boot and on
+  every apply that rebuilds the entry, naming the entry and
+  `host.docker.internal` as the likely fix. The new
+  `provider_reaches_loopback` event carries the stage, the entry, its
+  type and which of the three spellings it named, and nothing else of
+  the URL. Never a refusal: the same configuration is right where the
+  endpoint shares the container or its network namespace.
 
 ## 2026-08-28
 
