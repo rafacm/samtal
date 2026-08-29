@@ -117,9 +117,17 @@ every other route's, so the refusal-media pin holds untouched.
 dataclass is a buffered request-response shape, and pretending a
 stream through it would deform the grammar's core for one command.
 The `events tail` row is a `does=callable` command (the grammar's
-existing second shape) that opens the streaming request on the same
-client seam (`build_client`), reads SSE lines incrementally, prints
-one line per event to stdout, and renders `dropped` notices to
+existing second shape). It does not touch `build_client` bare: the
+safety of every CLI request lives in `_call`/`_sent` (quieted request
+loggers, sanitized address failures, no request URL in any exception
+chain, close-failure handling, `Address.shown` as the only rendered
+address), and a stream can fail after the response opens, where a
+bare client preserves none of that. The row therefore goes through a
+streaming sibling of `_sent` in `config/cli.py` that applies the same
+address, logging, exception-chain, refusal-body and close rules
+across client construction, stream opening, iteration and teardown,
+and the callable reads SSE lines from it, printing one line per
+event to stdout and `dropped` notices to
 stderr. The two modes have exact exit contracts. Without
 `--follow`, the command waits for the first matching event, prints
 it, and exits 0: a scriptable "wait for the next X", which is the
