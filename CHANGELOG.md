@@ -83,6 +83,22 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   rather than of the whole deployment. What it prints is unchanged, and
   there is no alias: the old spelling answers the same refusal any other
   word the grammar does not have answers.
+- **`vinga apply` applies what it wrote** (#341). The verb wrote the
+  document and stopped, so every operator learned to type `vinga reload`
+  after it and the ones who did not left a deployment serving what it
+  had before. It now writes the document and installs it, as two
+  requests on one row, and prints the reload's listing under the
+  outcomes; the per-entity boundary notices are dropped there, because
+  the listing under them is the boundary being crossed. `--no-reload`
+  writes without installing, which is what a rebuild does while its
+  credentials are still missing, and it keeps the notices. A write that
+  committed whose reload then failed prints the server's refusal and
+  then only what the client knows: the write committed and no completed
+  reload answer arrived, so run `vinga diff` and then `vinga reload` if
+  they differ. The bounds are per request, the write unbounded and the
+  reload's sixty seconds. The header `vinga export` writes now names
+  three steps, staging the apply so that the stored credentials are
+  entered before anything is built.
 
 ### Fixed
 

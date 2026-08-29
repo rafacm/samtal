@@ -987,6 +987,14 @@ weather: connected since 2026-08-13T11:02:44.118902+00:00
   agents: house
 ```
 
+An `apply` asks for this itself: it writes the document and then makes
+exactly this request, printing the listing above under the outcomes, so
+a whole deployment is one command. `--no-reload` writes without it,
+which is what a rebuild does while its credentials are still missing.
+The per-entity writes are the other half of the picture, and they say
+which boundary they are waiting at, because nothing installs one until
+somebody asks.
+
 **What it applies** is the whole domain half, re-read from the
 configuration database: the `providers` entries and the `mcp_servers`
 entries with the secrets stored on them, the agents' effective `mcp`
@@ -1305,7 +1313,11 @@ entities are written one at a time; a document is validated against the
 state it would leave and written in one transaction, so the providers,
 the defaults naming them and the agent inheriting them all arrive
 together and nothing is ever half applied. Applying is additive and
-never deletes, and the same document twice changes nothing.
+never deletes, and the same document twice changes nothing. And it ends
+on the running server: an apply installs what it wrote, which is
+[Applying a change without a restart](#applying-a-change-without-a-restart)
+run for you, and `--no-reload` is the spelling for writing without
+installing.
 [`examples/`](examples/) holds a commented fragment per entity for
 writing one at a time with a noun's own `set`, which is what editing a
 deployment looks like once it exists.
@@ -1656,7 +1668,9 @@ transport error. `apply` is the exception, and deliberately: its
 transaction loads the whole existing configuration and validates the
 whole resulting one, whose size no request bound limits, so it waits for
 the answer however long that takes rather than giving up on a write the
-server may be about to commit.
+server may be about to commit. The reload behind that write is a request
+of its own and carries the reload's own sixty seconds, because a bound
+belongs to the endpoint rather than to the command that reached it.
 
 The whole command line, including installing it away from a deployment
 and every command's own help page, is
@@ -2779,10 +2793,15 @@ psql "$ADMIN_URL" -f deploy/postgres-init.sql
 # Start it again, which boots clean on the empty database, then put the
 # configuration back and re-enter the credentials it could not carry.
 docker run -d --name vinga ...          # the run command from above
-docker exec -i vinga vinga-server config apply -f - < deployment.yaml
+docker exec -i vinga vinga-server config apply --no-reload -f - < deployment.yaml
 docker exec -i vinga vinga-server \
   config provider secret set -- llm claude api_key
+docker exec vinga vinga-server config reload
 ```
+
+The apply stages, which is what `--no-reload` says: the engines the
+document names are built at the reload on the last line, and their
+credentials are the line before it.
 
 **A dropped database takes the conversation record with it**, since
 both halves live in one. What is broken here is the domain half, so a
@@ -2828,11 +2847,13 @@ rolled is an export from a server that will not start:
 docker exec -i vinga vinga-server config export > deployment.yaml
 
 # Then point VINGA_DB_* at an empty database, roll the image, and put
-# the configuration back exactly as above: apply, then re-enter each
-# stored credential from wherever the deployment keeps its secrets.
-docker exec -i vinga vinga-server config apply -f - < deployment.yaml
+# the configuration back exactly as above: stage the document, re-enter
+# each stored credential from wherever the deployment keeps its secrets,
+# and reload.
+docker exec -i vinga vinga-server config apply --no-reload -f - < deployment.yaml
 docker exec -i vinga vinga-server \
   config provider secret set -- llm claude api_key
+docker exec vinga vinga-server config reload
 ```
 
 **The conversation record does not come across, and nothing pretends
