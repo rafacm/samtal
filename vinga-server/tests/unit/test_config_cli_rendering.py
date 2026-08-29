@@ -26,6 +26,7 @@ reach the terminal on any of them.
 """
 
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -33,6 +34,7 @@ import pytest
 from tests.support.config_cli import SECRET, runner
 from tests.support.config_cli import chain as _chain
 from tests.support.config_cli import showing as _showing
+from tests.support.notices import RELOAD, boundaries
 from vinga_server.config import Config, cli, printing
 from vinga_server.config.cli import (
     DIFF_SECTIONS,
@@ -42,7 +44,7 @@ from vinga_server.config.cli import (
     nested,
     outcomes,
 )
-from vinga_server.config.loader import ConfigError
+from vinga_server.config.loader import ConfigError, ReloadInProgressError
 from vinga_server.config.responses import (
     AgentsReload,
     ConfigReloadResult,
@@ -827,6 +829,188 @@ def test_no_token_the_comparison_refuses_is_retained_on_its_chain(answered: obje
         cli.DIFF.read(body)
 
     assert str(caught.value) == cli.UNREADABLE_READ
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert SECRET not in _chain(caught.value)
+
+
+# Applying, and the reload behind it
+#
+# `apply` writes the document and then installs it (#341), which makes
+# it the one row whose acts an invocation chooses between: the default
+# runs both, `--no-reload` stages the write for a later reload. The
+# cases belong in this file rather than beside the acceptance spine's
+# other apply cases because what decides the behavior is a running
+# server, and this is the file that injects one.
+#
+# What each of the three surfaces is: two requests in order under the
+# default and one under the flag, the notices dropped under the default
+# because the reload's own listing follows them and kept under the flag
+# because nothing else will say it, and the sentence a committed write
+# whose reload did not answer may add.
+
+# The MCP entry every case here configures, which is referenced by one
+# agent and connected by nobody: what these are about is the reload's
+# answer rather than a live connection.
+ENTRY = {"transport": "streamable_http", "url": "http://127.0.0.1:9/mcp"}
+
+WRITTEN = """\
+providers:
+  llm:
+    brain:
+      type: mock
+      reply: Hello.
+"""
+
+# What the entry above is called in an applied document's answer, which
+# is the section and the identity under it.
+WROTE = "providers.llm.brain: wrote"
+
+HELD = "a reload of this server's configuration is already running."
+
+
+def _held():
+    """A running server whose reload is refused because another one has
+    it, which is the 409 an operator most plausibly meets behind a
+    committed write: two people administering one deployment."""
+
+    async def reload() -> ConfigReloadResult:
+        raise ReloadInProgressError(HELD)
+
+    return reload
+
+
+def test_apply_installs_what_it_wrote(run, capsys: pytest.CaptureFixture[str]) -> None:
+    """The default, which is the verb doing what its name promises.
+
+    Two requests in one command, and the order is readable in the
+    output: what was written, and then what the reload made of it.
+    """
+    servers = _configured({"weather": ENTRY}, {"sam": ["weather"]})
+    run.runtime["mcp_servers"] = servers
+    run.runtime["reload"] = _applied(
+        servers, providers=ProvidersReload(built=["llm.brain"], reused=[], retired=[])
+    )
+
+    assert run("apply", "-f", "-", stdin=WRITTEN) == 0
+
+    printed = capsys.readouterr()
+    lines = printed.out.splitlines()
+    assert lines[0] == WROTE
+    assert "  built: llm.brain" in lines
+    # Two clients, because each request builds one and closes it: the
+    # write and the reload are two requests rather than a flag on one.
+    assert len(run.clients) == 2
+    # And nothing on stderr. The boundary the notice names is the
+    # reload, and the reload is the answer above it: printing the
+    # sentence here would tell an operator to run the command whose
+    # answer they are reading.
+    assert printed.err == ""
+
+
+def test_no_reload_stages_the_write_and_says_what_it_is_waiting_on(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The staging spelling, which is the rendering that keeps the
+    notices: nothing in this command installs the write, so the
+    boundary it is waiting at is the operator's to know.
+
+    One request, which is the other half of the claim: the flag turns
+    the second act off rather than quietening it.
+    """
+    assert run("apply", "--no-reload", "-f", "-", stdin=WRITTEN) == 0
+
+    printed = capsys.readouterr()
+    assert printed.out.splitlines() == [WROTE]
+    assert boundaries(printed.err) == {RELOAD}
+    assert len(run.clients) == 1
+
+
+def test_a_write_whose_reload_is_held_claims_only_what_it_knows(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The first of the two failures behind a committed write.
+
+    A 409 says another reload is already running, and that one re-read
+    the store either side of this commit, so whether the document is
+    live is not knowable from here. What the command may say is what it
+    saw: the write was acknowledged, no reload answered, and here are
+    the two commands that settle it.
+    """
+    run.runtime["mcp_servers"] = _configured({"weather": ENTRY}, {"sam": ["weather"]})
+    run.runtime["reload"] = _held()
+
+    assert run("apply", "-f", "-", stdin=WRITTEN) == 1
+
+    printed = capsys.readouterr()
+    # The write's own answer is printed first, because it happened.
+    assert printed.out.splitlines() == [WROTE]
+    # Then the server's refusal, and then what this client knows.
+    assert printed.err == f"{HELD}\n{cli.COMMITTED_UNANSWERED}\n"
+    assert "Traceback" not in printed.err
+    # And the write really did commit, which is the claim the sentence
+    # makes and the one thing here that is checkable.
+    capsys.readouterr()
+    assert run("provider", "show", "llm", "brain") == 0
+    assert "Hello." in capsys.readouterr().out
+
+
+def test_a_refused_document_never_reaches_the_reload(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The other order the two acts can end in. A document that will not
+    resolve changed nothing, so there is nothing to install and no
+    second request to make, and the refusal is the whole answer."""
+    run.runtime["mcp_servers"] = _configured({"weather": ENTRY}, {"sam": ["weather"]})
+    run.runtime["reload"] = _held()
+
+    assert run("apply", "-f", "-", stdin="agents:\n  sam: {prompt: p, llm: ghost}\n") == 1
+
+    printed = capsys.readouterr()
+    assert printed.out == ""
+    assert cli.COMMITTED_UNANSWERED not in printed.err
+    assert len(run.clients) == 1
+
+
+def test_what_a_second_act_adds_is_raised_with_nothing_behind_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The half no assertion about a stream can make.
+
+    The sentence is composed while a refusal is being handled, and an
+    exception raised inside a handler carries the one it was handling on
+    `__context__`, where a chain walker finds whatever THAT one was
+    holding. Which is why the refusal below carries a cause of its own:
+    a transport failure behind a request is the shape that does it, and
+    an httpx exception holds the URL it was given.
+    """
+    answered: list[object] = []
+
+    def call(*_args: object, **_kwargs: object) -> object:
+        answered.append(_args)
+        if len(answered) == 1:
+            return {"entries": []}
+        refused = ConfigError("the request did not complete")
+        refused.__cause__ = RuntimeError(SECRET)
+        raise refused
+
+    monkeypatch.setattr(cli, "_call", call)
+    first = cli.Act(
+        method="POST",
+        path=lambda _args: "/apply",
+        answers=dict[str, object],
+        render=lambda _answer: None,
+    )
+    reached = cli.Reached(address=cli.Address(base="", query="", shown=""), token="")
+
+    with pytest.raises(ConfigError) as caught:
+        cli._performed(
+            cli.Invocation(),
+            (first, replace(first, unanswered=cli.COMMITTED_UNANSWERED)),
+            reached,
+        )
+
+    assert str(caught.value).endswith(cli.COMMITTED_UNANSWERED)
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
     assert SECRET not in _chain(caught.value)
