@@ -176,9 +176,9 @@ def test_asking_for_help_carries_no_library_exception_with_it(
 #
 # Every group of the tree, nested ones included, because the page has to
 # be the one the reader stopped at rather than the root's, and what
-# makes it so is that the mistake carries the context it was raised
-# from. A group whose parent's page were printed instead would list
-# commands the words already typed cannot reach.
+# makes it so is that each group raises from its own context. A group
+# whose parent's page were printed instead would list commands the words
+# already typed cannot reach.
 BARE: list[tuple[str, ...]] = [(), *sorted(cli.GROUPS)]
 
 
@@ -245,6 +245,50 @@ def test_a_bare_invocation_says_nothing_of_the_address_it_was_given(
     assert SECRET not in caplog.text
     assert SECRET not in both_formats(caplog)
     assert SECRET not in chain(_refusal(("--api-url", ADDRESSED, *path)))
+
+
+# And the same invocation, typed by somebody trying to be it
+#
+# The page is chosen by class: the group raises `NoArgsIsHelpError` and
+# nothing else in this grammar does. The reading it replaced was
+# Click's wording, "Missing command", looked for in the message, and the
+# trouble with reading a wording is that a wording is something a caller
+# can type. Both of these put that exact phrase where Click composes it
+# into a sentence of its own, and each is owed the fixed refusal for the
+# mistake it really is rather than a page.
+#
+# Not a leak of a credential, so the sentinel here is the marker itself:
+# what would go wrong is a refusal turning into a help page, which tells
+# a reader their typo was a command they merely under-specified.
+MARKER = "Missing command"
+
+COLLIDING = [
+    ("a command named like the marker", (MARKER,), "that is not a command"),
+    (
+        "an argument that says it",
+        ("list", MARKER),
+        "unrecognized extra arguments",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("argv", "sentence"),
+    [(argv, sentence) for _, argv, sentence in COLLIDING],
+    ids=[shape for shape, _, _ in COLLIDING],
+)
+def test_a_command_line_cannot_type_its_way_to_the_help_page(
+    run, capsys: pytest.CaptureFixture[str], argv: tuple[str, ...], sentence: str
+) -> None:
+    """One sentence, and no page anywhere in it."""
+    assert run(*argv) == 1, argv
+
+    captured = capsys.readouterr()
+    assert sentence in captured.err, argv
+    assert "run with --help for the grammar" in captured.err, argv
+    assert "Commands:" not in captured.err, argv
+    assert "Usage:" not in captured.err, argv
+    assert captured.out == "", argv
 
 
 # One case per shape the usage boundary names
