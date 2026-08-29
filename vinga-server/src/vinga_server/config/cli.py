@@ -4648,6 +4648,19 @@ LEVEL_NAMES = tuple(
 # say that it is one.
 UNNAMED_LEVEL = "INFO"
 
+# How far a frame may nest before this client stops reading it.
+#
+# An event is a small object of scalars by construction, and the deepest
+# thing any of them carries is a mapping of counts a level or two down.
+# The bound is not about taste: `json.loads` raises `RecursionError` on a
+# document nested a few thousand deep, and so can rendering it, and a
+# stream is untrusted input all the way down. Refusing above a depth no
+# event reaches means neither can be provoked from the far side, and the
+# check that applies it walks the structure with a stack of its own
+# rather than by recursion, since a recursive check would be the third
+# thing that could be made to blow up.
+MAX_FRAME_DEPTH = 8
+
 # What may be printed as a bare word rather than as an encoded value.
 #
 # Two things go through this: an event's name and its level's name, both
@@ -4711,9 +4724,9 @@ def _events_tail(args: Invocation) -> None:
         try:
             for name, fields in _frames(lines):
                 if name == DROPPED_EVENT:
-                    print(_dropped_notice(fields), file=sys.stderr)
+                    print(_shown(_dropped_notice, fields), file=sys.stderr)
                     continue
-                print(_event_line(fields))
+                print(_shown(_event_line, fields))
                 sys.stdout.flush()
                 if not args.follow:
                     return
@@ -4783,12 +4796,19 @@ def _frame_fields(name: str, data: str) -> Mapping[str, Any]:
     this module's rule, and here it is not a formality: a JSON decoding
     error carries the document it was decoding, and this document came
     off a socket.
+
+    `RecursionError` is caught beside `ValueError` because it is the
+    same event wearing another name. A document nested a few thousand
+    deep makes the decoder exhaust the stack rather than reject the
+    input, and an untrusted stream can send one, so without this arm the
+    far side chooses whether this command ends with a sentence or with a
+    traceback.
     """
     problem: str | None = None
     read: list[object] = []
     try:
         read.append(json.loads(data))
-    except ValueError:
+    except (ValueError, RecursionError):
         problem = UNREADABLE_EVENT
     if problem is not None:
         raise ConfigError(problem)
@@ -4820,7 +4840,7 @@ def _carries(name: str, fields: object) -> bool:
     a string means is the renderer's question, and one that will not
     parse still prints as the value it is.
     """
-    if not isinstance(fields, dict):
+    if not isinstance(fields, dict) or _too_deep(fields):
         return False
     if name == DROPPED_EVENT:
         return list(fields) == [DROPPED_EVENT] and _is_count(fields[DROPPED_EVENT])
@@ -4831,6 +4851,28 @@ def _carries(name: str, fields: object) -> bool:
         and fields.get(STREAM_LEVEL) in LEVEL_NAMES
         and isinstance(fields.get(STREAM_TIME), str)
     )
+
+
+def _too_deep(fields: Mapping[str, Any]) -> bool:
+    """Whether a frame nests further than an event ever does.
+
+    Walked with a stack of its own rather than by recursion, which is the
+    whole point: this runs on untrusted input to keep the decoder and the
+    renderer from being made to exhaust the stack, and a recursive walk
+    would be a third way to do exactly that. The depth is checked before
+    a container's contents are pushed, so a document nested a thousand
+    deep is refused having been walked eight levels.
+    """
+    standing: list[tuple[object, int]] = [(fields, 1)]
+    while standing:
+        value, depth = standing.pop()
+        if not isinstance(value, dict | list):
+            continue
+        if depth > MAX_FRAME_DEPTH:
+            return True
+        held = value.values() if isinstance(value, dict) else value
+        standing.extend((inner, depth + 1) for inner in held)
+    return False
 
 
 def _is_count(value: object) -> bool:
@@ -4844,6 +4886,29 @@ def _is_bare(value: object) -> bool:
     """Whether a value is one of the declared words this prints
     unquoted."""
     return isinstance(value, str) and _BARE_WORD.match(value) is not None
+
+
+def _shown(render: Callable[[Mapping[str, Any]], str], fields: Mapping[str, Any]) -> str:
+    """One frame rendered, or the refusal a rendering that could not
+    finish becomes.
+
+    The envelope check above bounds what reaches a renderer, so nothing
+    here should ever fire. It is here anyway, and for one reason: what
+    is being rendered came off a socket, and the cost of being wrong
+    about that is the far side choosing that this command ends in a
+    traceback. `RecursionError` beside `ValueError` for the reason
+    `_frame_fields` catches it, since encoding a structure walks it as
+    surely as decoding one built it.
+    """
+    problem: str | None = None
+    written: list[str] = []
+    try:
+        written.append(render(fields))
+    except (ValueError, RecursionError):
+        problem = UNREADABLE_EVENT
+    if problem is not None:
+        raise ConfigError(problem)
+    return written[0]
 
 
 def _event_line(fields: Mapping[str, Any]) -> str:

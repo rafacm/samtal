@@ -47,6 +47,7 @@ from tests.support.config_cli import TOKEN, answering, chain, logged, runner
 from tests.support.events import both_formats
 from vinga_server.broken_pipe import BROKEN_PIPE_STATUS
 from vinga_server.config import cli
+from vinga_server.config.cli import MAX_FRAME_DEPTH
 from vinga_server.config.loader import ConfigError
 from vinga_server.config.responses import EVENT_STREAM_MEDIA_TYPE
 
@@ -665,6 +666,61 @@ def test_a_frame_that_is_not_this_stream_s_is_never_printed(
     assert cli.UNRECOGNIZED_ANSWER in printed.err
     for surface in (printed.out, printed.err, logged(caplog), both_formats(caplog)):
         assert ANSWERED not in surface
+
+
+def nested(depth: int) -> bytes:
+    """One frame whose envelope is right and whose value is nested past
+    anything an event carries.
+
+    Built as text rather than through `json.dumps`, because at the
+    deeper of the two depths below the encoder is one of the things
+    under test on the other side, and it would run out of stack building
+    the input.
+    """
+    head = json.dumps({"event": "heard", "level": "INFO", "ts": STAMP})[:-1]
+    deep = "[" * depth + json.dumps(ANSWERED) + "]" * depth
+    return body(f'{head},"deep":{deep}}}')
+
+
+@pytest.mark.parametrize("depth", [MAX_FRAME_DEPTH + 1, 20_000])
+def test_a_frame_nested_past_an_event_ends_in_a_sentence(
+    run, capsys: pytest.CaptureFixture[str], depth: int
+) -> None:
+    """Nesting is the one thing about a frame that can cost more than
+    the frame. `json.loads` exhausts the stack on a document a few
+    thousand deep and raises `RecursionError`, which is not a
+    `ValueError` and would have left this command as a traceback with
+    the far side choosing when; encoding a structure walks it as surely
+    as decoding one built it.
+
+    Both depths answer the same sentence and they reach it by different
+    roads, which is why both are here: the shallow one parses and is
+    refused by the bound, and the deep one never parses at all and is
+    refused by the arm that catches what the decoder does instead of
+    returning.
+    """
+    answering(run, serving(nested(depth)))
+    capsys.readouterr()
+
+    assert run("events", "tail") == 1
+
+    printed = capsys.readouterr()
+    assert printed.out == ""
+    assert printed.err.strip() == cli.UNREADABLE_EVENT
+    assert "Traceback" not in printed.err
+    assert ANSWERED not in printed.err
+
+
+def test_a_frame_nested_past_an_event_leaves_nothing_on_the_chain(run) -> None:
+    """And the exception it leaves carries neither the document nor the
+    library's own account of running out of stack."""
+    answering(run, serving(nested(20_000)))
+
+    caught = refused(["events", "tail"])
+
+    assert caught.__cause__ is None
+    assert caught.__context__ is None
+    assert ANSWERED not in carried(caught)
 
 
 def test_an_unreadable_frame_leaves_nothing_on_the_chain() -> None:
