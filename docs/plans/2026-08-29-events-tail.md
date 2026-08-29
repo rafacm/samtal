@@ -170,9 +170,18 @@ pipe follows the `events_cli` SIGPIPE pattern so
 program's spelling and keeps its own home, which the cli-guide's
 two-spellings section already explains.
 
-**Line format.** One line per event on stdout: the `ts` time-of-day,
-the level name when above INFO, the `event` name, then the payload's
-remaining fields as `key=value` in payload order. It is a rendering of
+**Line format.** One physical line per event on stdout, guaranteed
+by encoding rather than by hope: the `ts` time-of-day, the level
+name for every level other than INFO (DEBUG included, since an
+admitted event must say what it is), the `event` name, then the
+payload's remaining fields as `key=value` in payload order with
+every non-numeric value rendered as its compact JSON encoding, so a
+value carrying a newline, a quote or a terminal control sequence
+arrives escaped instead of breaking the line or steering the
+terminal (the identifier vocabulary explicitly permits such bytes,
+and the output-determinism practice already forbids letting an
+answer steer a terminal). Tests cover newline, escape, quote, list
+and nested-map values and assert exactly one physical line. It is a rendering of
 the same record the JSON log retains, not a new vocabulary; a reader
 who needs the exact object pipes the JSON log instead, and the
 events.md note says both things.
