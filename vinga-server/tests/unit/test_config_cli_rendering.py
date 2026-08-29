@@ -25,6 +25,8 @@ prompt's reader came to see whole, and the escape sequence that must not
 reach the terminal on any of them.
 """
 
+import contextlib
+import io
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -44,6 +46,7 @@ from vinga_server.config.cli import (
     nested,
     outcomes,
 )
+from vinga_server.config.entities import RELOAD_NOTICE as RELOAD_NOTICE_TEXT
 from vinga_server.config.loader import ConfigError, ReloadInProgressError
 from vinga_server.config.responses import (
     AgentsReload,
@@ -1013,4 +1016,175 @@ def test_what_a_second_act_adds_is_raised_with_nothing_behind_it(
     assert str(caught.value).endswith(cli.COMMITTED_UNANSWERED)
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
+    assert SECRET not in _chain(caught.value)
+
+
+# What an applied answer may put where text belongs
+#
+# The three strings an applied entry carries reach stdout and stderr as
+# themselves: the section and the identity are composed into a line, and
+# the notice is the sentence under it. A section is a closed token and
+# the outcome is one too, but an identity is a name as the store holds
+# it and a notice is a sentence the server composed, so what a hostile
+# or broken far side can put in either is whatever it likes.
+#
+# Two shapes reach a stream and one never does. An escape sequence
+# steers a terminal, and a lone surrogate raises out of `print` itself,
+# past the boundary that turns a failure into a sentence, which no
+# assertion about a stream would have caught. A credential pasted into
+# an identity is the third and is deliberately NOT one of them: an
+# identity is the name of a row the operator asked about, nothing
+# distinguishes a pasted value from a name, and a rendering that hid it
+# would hide what the store holds. Where a credential must not reach is
+# a refusal and the chain under it, which is what the cases further
+# down are about.
+
+# An escape sequence that clears the screen and moves the cursor, which
+# is what "an answer cannot steer a terminal" is about.
+STEERING = "\x1b[2J\x1b[H"
+
+# The one character a str may hold that stdout cannot encode.
+SURROGATE = "\ud800"
+
+
+def _entry(**overrides: object) -> dict[str, object]:
+    """One applied entry as the API answers one, with whatever a case
+    wants to see refused or neutralized in it."""
+    return {
+        "section": "agents",
+        "identity": "sam",
+        "outcome": "wrote",
+        "notice": RELOAD_NOTICE_TEXT,
+    } | overrides
+
+
+APPLIED_HOSTILE = [
+    ("an escape sequence in an identity", {"identity": f"sam{STEERING}"}),
+    ("an escape sequence in a notice", {"notice": f"wait{STEERING}"}),
+    ("a lone surrogate in an identity", {"identity": f"sam{SURROGATE}"}),
+    ("a lone surrogate in a notice", {"notice": f"wait{SURROGATE}"}),
+]
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [overrides for _, overrides in APPLIED_HOSTILE],
+    ids=[what for what, _ in APPLIED_HOSTILE],
+)
+@pytest.mark.parametrize(
+    "render",
+    [cli._applied, cli._applied_quietly],
+    ids=["staging", "quiet"],
+)
+def test_neither_apply_rendering_lets_an_answer_steer_a_terminal(
+    render, overrides: dict[str, object], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Both renderings, because they print the same two strings and
+    differ only in whether the notice is one of them.
+
+    Read through the act rather than handed a dictionary, so what is
+    exercised is the shape this client insists on and then the renderer
+    it feeds, which is the path an answer really takes.
+    """
+    render(cli.APPLY.read({"entries": [_entry(**overrides)]}))
+
+    printed = capsys.readouterr()
+    written = printed.out + printed.err
+    assert STEERING not in written
+    assert SURROGATE not in written
+    # And the line is still the answer to what was asked, so what
+    # happened to the character is neutralizing rather than dropping the
+    # output it was in. Which of the two streams carried it is the
+    # difference between the renderings and is pinned elsewhere.
+    assert "agents.sam" in written
+
+
+def test_a_staged_notice_arrives_neutralized_rather_than_dropped(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The other half of the rule above, on the one stream the staging
+    rendering writes a far side's sentence to: what a notice loses is
+    the characters that steer a terminal, and it keeps the words. A
+    sentence dropped whole would be a boundary an operator was never
+    told about."""
+    cli._applied(cli.APPLY.read({"entries": [_entry(notice=f"wait{STEERING}")]}))
+
+    written = capsys.readouterr().err
+    assert written.startswith("wait?")
+    assert STEERING not in written
+
+
+def test_an_unprintable_identity_never_leaves_as_an_exception() -> None:
+    """The failure a stream assertion cannot see: `print` encodes, and a
+    lone surrogate raises `UnicodeEncodeError` from inside it, which
+    leaves this boundary as a traceback carrying the value.
+
+    Written to a real encoding rather than to pytest's capture, because
+    what raises is the encoder and a buffer that never encodes cannot
+    raise.
+    """
+    stream = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors="strict")
+
+    with contextlib.redirect_stdout(stream):
+        cli._applied_quietly(cli.APPLY.read({"entries": [_entry(identity=SURROGATE)]}))
+
+    stream.flush()
+    assert "agents" in stream.buffer.getvalue().decode("utf-8")
+
+
+@pytest.mark.parametrize(
+    ("outcome", "notice"),
+    [
+        pytest.param("unchanged", RELOAD_NOTICE_TEXT, id="unchanged-with-a-boundary"),
+        pytest.param("wrote", None, id="wrote-with-none"),
+    ],
+)
+def test_an_entry_whose_outcome_and_notice_disagree_is_refused(
+    outcome: str, notice: str | None
+) -> None:
+    """The model's own stated contract, enforced rather than described.
+
+    An entry that changed nothing has nothing waiting to be applied, so
+    a boundary sentence on one is a sentence printed by an entry with
+    nothing to say; a write with no boundary is the same disagreement
+    from the other side. Read through the act, so the refusal is the
+    fixed one an operator meets.
+    """
+    body = {"entries": [_entry(outcome=outcome, notice=notice)]}
+
+    with pytest.raises(ConfigError) as caught:
+        cli.APPLY.read(body)
+
+    assert str(caught.value) == cli.UNREADABLE_WRITE
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+
+
+@pytest.mark.parametrize(
+    "section",
+    [
+        pytest.param(SECRET, id="a credential pasted where a section belongs"),
+        pytest.param("agent", id="a word this API does not emit"),
+    ],
+)
+def test_a_section_this_api_does_not_emit_is_refused(section: str) -> None:
+    """A section is printed as itself, so it is a closed token: seven
+    words and nothing else, which is what keeps a body's own text out of
+    the left-hand side of a line."""
+    with pytest.raises(ConfigError) as caught:
+        cli.APPLY.read({"entries": [_entry(section=section)]})
+
+    assert str(caught.value) == cli.UNREADABLE_WRITE
+    assert SECRET not in _chain(caught.value)
+
+
+def test_no_applied_refusal_is_retained_on_its_chain() -> None:
+    """The half no assertion about a stream can make: a validation error
+    retains the input it rejected, and the input here is a refused entry
+    carrying a pasted credential in every field a body chooses."""
+    body = {"entries": [_entry(outcome="unchanged", identity=SECRET, notice=SECRET)]}
+
+    with pytest.raises(ConfigError) as caught:
+        cli.APPLY.read(body)
+
     assert SECRET not in _chain(caught.value)

@@ -3278,7 +3278,15 @@ def _applied_entries(answer: Mapping[str, object]) -> tuple[str, ...]:
     sys.stdout.flush()
     return tuple(
         dict.fromkeys(
-            str(entry["notice"]) for entry in entries if entry["notice"] is not None
+            # Whole, for the reason a prompt and the onboarding URL are
+            # printed whole: a boundary sentence cut at a bound would
+            # lose the command it ends with, which is the half an
+            # operator acts on. What the bound is never for is the other
+            # half of this function, which has no exceptions: nothing an
+            # answer carries steers a terminal.
+            printable(str(entry["notice"]), UNBOUNDED)
+            for entry in entries
+            if entry["notice"] is not None
         )
     )
 
@@ -3286,9 +3294,17 @@ def _applied_entries(answer: Mapping[str, object]) -> tuple[str, ...]:
 def _entry_name(entry: Mapping[str, object]) -> str:
     """Where one applied entry is, as an operator reads their own
     document: the section, and the identity under it where the section
-    holds entries rather than one thing."""
-    section, identity = entry["section"], entry["identity"]
-    return f"{section}.{identity}" if identity else str(section)
+    holds entries rather than one thing.
+
+    Both halves go through `printable` even though one of them is a
+    closed token, because this line is far-side text on stdout: an
+    identity is an operator's own name for a row as the store holds it,
+    and a body that put an escape sequence or a lone surrogate in one
+    would otherwise steer a terminal or raise a `UnicodeEncodeError`
+    past the boundary that turns a failure into a sentence.
+    """
+    section, identity = printable(str(entry["section"])), printable(str(entry["identity"]))
+    return f"{section}.{identity}" if identity else section
 
 
 def _acknowledged(acknowledgement: Mapping[str, object]) -> None:

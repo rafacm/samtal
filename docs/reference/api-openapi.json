@@ -3769,6 +3769,15 @@
         "properties": {
           "section": {
             "type": "string",
+            "enum": [
+              "providers",
+              "mcp_servers",
+              "prompt_fragments",
+              "agent_defaults",
+              "agents",
+              "devices",
+              "default_agent"
+            ],
             "title": "Section",
             "description": "Which section of the domain configuration the entry is in: one of `providers`, `mcp_servers`, `prompt_fragments`, `agent_defaults`, `agents`, `devices`, `default_agent`. The entries are listed in that order, which is the order the configuration documents as its write, read and creation order."
           },
