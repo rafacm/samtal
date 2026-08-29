@@ -471,8 +471,12 @@ the departure in its docstring.
 The default is driven where a reload can answer: four cases in the
 rendering suite against an injected runtime, two in the transport suite
 against mock transports, and one over the wire in the live lane, on a
-document of its own after the reload test, asserting the write's line,
-the reload's listing under it and an empty stderr.
+document of its own after the reload test. What that one asserts is the
+write's lines, the reload's listing under them, an empty stderr, and
+then a read of the running process (`agent preview`) carrying text that
+exists only in the document just applied, which is what makes it a
+claim about the world that was installed rather than about the headings
+a reload prints either way.
 
 ### Discoveries
 

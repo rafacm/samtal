@@ -947,17 +947,31 @@ def test_info_names_the_deployment_it_reached(
 #
 # One controlled document, applied the way an operator applies one: the
 # default, both acts, over the wire. It sits here because the reload
-# above has already happened, so what this adds to the lane's server is
-# a fragment nothing includes, and because the two tests either side of
-# it are what its own claim is measured against: the staged bootstrap
-# left an agent unserved, and this leaves nothing waiting.
+# above has already happened, so the world this lands in is one the lane
+# has already read back, and because the two tests either side of it are
+# what its own claim is measured against: the staged bootstrap left an
+# agent unserved, and this leaves nothing waiting.
 #
-# A prompt fragment rather than a provider or an agent, so the store
-# this lane goes on reading is the one every test after this was
-# written against.
+# What it writes is chosen so that the claim is provable rather than
+# plausible. A reload prints every section's heading whether or not
+# anything moved, so a document naming a kind the reload merely reports
+# on would pass against a server that reinstalled the world it already
+# had. A fragment the lane's agent includes cannot: the text reaches an
+# assembled prompt only if the reload behind this apply built the world
+# this document describes, and `agent preview` is a read of the running
+# process rather than of the store.
+#
+# The agent's body is repeated whole because an applied document
+# replaces an entity rather than editing it, which is the same reason
+# `export` is the document `apply` takes.
+
+WIRED = "The dog is called Bosse."
 
 INSTALLED: dict[str, object] = {
-    "prompt_fragments": {"wire": {"text": "The dog is called Bosse."}}
+    "prompt_fragments": {"wire": {"text": WIRED}},
+    "agents": {
+        "sam": {"prompt": "You are Sam.", "prompt_includes": ["household", "wire"]}
+    },
 }
 
 
@@ -966,27 +980,45 @@ def test_an_apply_installs_what_it_wrote(
 ) -> None:
     """The default `apply`, end to end against a real server (#341).
 
-    Two requests in one command, and both answers are the real ones:
-    the write is a transaction on a Postgres, and the reload behind it
-    is a running server composing a new world and swapping it in. What
-    an operator reads is what was written and then what the reload made
-    of it, with nothing on stderr, because the boundary a notice would
-    have named is the answer printed underneath it.
+    Two requests in one command, and both answers are the real ones: the
+    write is a transaction on a Postgres, and the reload behind it is a
+    running server composing a new world and swapping it in. What an
+    operator reads is what was written and then what the reload made of
+    it, with nothing on stderr, because the boundary a notice would have
+    named is the answer printed underneath it.
+
+    The proof that the world which arrived is this one is the read
+    underneath, and it is a read of the process: `agent preview`
+    assembles the prompt the running server would send, and the fragment
+    in it exists only in the document this command just applied. The
+    reload's own listing says the same thing from the other side, naming
+    the agent whose assembled prompt moved.
     """
-    document_path = written(tmp_path, "fragment.yaml", INSTALLED)
+    document_path = written(tmp_path, "wired.yaml", INSTALLED)
 
     assert run("apply", "-f", document_path) == 0
 
     printed = capsys.readouterr()
     lines = printed.out.splitlines()
-    assert lines[0] == "prompt_fragments.wire: wrote"
-    # The reload's own listing, which is the second act's answer: what
-    # it did to each kind, and then what every MCP entry is doing.
+    assert lines[:2] == ["prompt_fragments.wire: wrote", "agents.sam: wrote"]
+    # The reload's own listing, which is the second act's answer: the
+    # agent whose assembled prompt this document moved, and then what
+    # every MCP entry is doing.
     assert "prompts:" in lines
+    assert "  changed: sam" in lines
     assert "mcp:" in lines
     assert "house" in printed.out
     # And nothing waiting, which is the whole of what the default buys.
     assert printed.err == ""
+
+    # The read that says the running server is serving this document
+    # rather than the world it had a moment ago. Nothing in the store
+    # answers it: an assembled prompt is built by the process from the
+    # world it installed.
+    assert run("agent", "preview", "sam") == 0
+    assembled = capsys.readouterr().out
+    assert WIRED in assembled
+    assert "The bins go out on Tuesday." in assembled
 
 
 # The board nobody owns, over the wire

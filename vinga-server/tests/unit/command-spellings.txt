@@ -1085,8 +1085,8 @@ vinga-server/tests/integration/data/pre-cutover-export.yaml:4  respell  vinga ap
 vinga-server/tests/integration/data/pre-cutover-export.yaml:6  respell  vinga reload
 vinga-server/tests/integration/data/pre-cutover-export.yaml:62  respell  vinga provider secret set
 vinga-server/tests/integration/test_cli_live.py:480  respell  config apply
-vinga-server/tests/integration/test_cli_live.py:1541  respell  config export
-vinga-server/tests/integration/test_cli_live.py:1718  respell  vinga-server config device pending list
+vinga-server/tests/integration/test_cli_live.py:1573  respell  config export
+vinga-server/tests/integration/test_cli_live.py:1750  respell  vinga-server config device pending list
 vinga-server/tests/integration/test_cli_simulator.py:1  respell  vinga simulator run
 vinga-server/tests/smoke/seed-local-engines.sh:19  respell  vinga-server config provider set llm mock
 vinga-server/tests/smoke/seed-local-engines.sh:23  respell  vinga-server config provider set asr whisper
