@@ -828,6 +828,71 @@ class ConfigDiff(BaseModel):
 type ConfigDiffReader = Callable[[], Awaitable[ConfigDiff]]
 
 
+class RuntimeInfo(BaseModel):
+    """Which deployment this is: the build that is running, and the URL
+    a board is onboarded at.
+
+    The one answer to "what server am I talking to". Every field of it
+    is a fact of the process and of the file half it booted from,
+    neither of which a reload moves, so the whole of it is composed once
+    at startup and answered as it stands.
+
+    It carries a credential, and it is the only read here that does. The
+    onboarding URL's last segment is a key derived from the device-auth
+    secret and it stands in front of the token issuer, which is why the
+    startup banner deliberately prints the origin and not the URL. The
+    gate in front of this API is what makes serving it here no wider
+    than what the caller already holds: the bearer token grants
+    everything this API can do, secret writes included. The response
+    carries `Cache-Control: no-store` for the same reason, and the one
+    client that renders it prints it on stdout and nowhere else.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    version: str = Field(
+        description=(
+            "The package version of the server answering, which says what this is "
+            "rather than which build of it."
+        )
+    )
+    revision: str = Field(
+        description=(
+            "Which build of it: the revision baked into the image, or what `git "
+            "describe` says of the checkout it runs from, or `unknown` when neither "
+            "is there to read. It is what matches a running server to the change that "
+            "produced it."
+        )
+    )
+    onboarding_enabled: bool = Field(
+        description=(
+            "Whether this deployment serves the short onboarding path a person can "
+            "type into a device's captive portal (`server.onboarding.enabled`). False "
+            "leaves the two fields below null: devices are configured at the path "
+            "`server.ota_path` names, which is this deployment's secret and is not "
+            "answered here."
+        )
+    )
+    onboarding_url: str | None = Field(
+        description=(
+            "The URL to type into a device's captive portal, or null when onboarding "
+            "is off. It is the origin this deployment names itself by and the derived "
+            "key after it, the same value `vinga-server config ota-url` prints from "
+            "the file half alone, so a deployment names itself identically wherever it "
+            "is named. It is a credential: the key stands in front of the token "
+            "issuer."
+        )
+    )
+    onboarding_provenance: str | None = Field(
+        description=(
+            "Where the origin in that URL came from, in the words the startup banner "
+            "uses (`from server.public_url`, `guessed from the listen address, ...`), "
+            "or null when onboarding is off. Two of the three sources are inferences, "
+            "so a URL that named neither would read as fact."
+        )
+    )
+
+
 class DefaultAgent(BaseModel):
     """The agent an unbound device reaches."""
 

@@ -28,12 +28,14 @@ from vinga_server.config.loader import (
     RunningConfigMovedError,
     StorageError,
 )
+from vinga_server.config.models import ServerConfig
 from vinga_server.config.reload import ConfigReload
 from vinga_server.config.responses import (
     ConfigDiff,
     ConfigDiffReader,
     ConfigReloader,
     ConfigReloadResult,
+    RuntimeInfo,
 )
 from vinga_server.config.secrets import SecretStore
 from vinga_server.conversations import ConversationStore, open_conversations, threads
@@ -438,6 +440,15 @@ async def _build_composition(
         # that span both sides refuse in that mode, and a device write
         # says what it can honestly say.
         bindings.snapshot_authoritative,
+        # And which deployment this is, resolved once here because none
+        # of it moves: the build is this process's and the onboarding
+        # URL is derived from the server section, which is the one part
+        # of a configuration that is genuinely read once. Resolved here
+        # rather than in the API for the reason the three callables above
+        # it are: where a deployment's origin comes from and what its key
+        # is derived from are this root's business, and the API is the
+        # one surface that must go on being renderable with none of it.
+        _runtime_identity(config.server),
     )
     # The configuration database, opened once here rather than on every
     # request (#142), and migrated in the same call because nothing may
@@ -749,6 +760,58 @@ def config_diff_reader(
         raise RunningConfigMovedError(CONFIG_MOVED)
 
     return diff
+
+
+# What the identity read is told when onboarding is off, in the one
+# place a caller of `onboarding_url` has to supply it. Never reached
+# from here, because the branch below never asks for a URL a
+# configuration does not serve; supplied anyway rather than left as a
+# placeholder, since a sentence nobody wrote is a sentence nobody can be
+# held to if the branch above it ever moves.
+_NO_SHORT_URL_TO_SERVE = "Turn onboarding on for a URL short enough to type."
+
+
+def _runtime_identity(server: ServerConfig) -> RuntimeInfo:
+    """Which deployment this is, as the configuration API answers it.
+
+    Resolved here because both halves of it are this root's to know: the
+    build comes from `build_info`, which is a fact of the process, and
+    the onboarding URL comes from `onboarding.origin`, which derives it
+    from the origin this deployment names itself by and the key the OTA
+    alias is mounted behind. There is one derivation of that URL and
+    this is not a second one: `vinga-server config ota-url` reaches the
+    same function from the file half alone, which is what keeps a
+    deployment named identically wherever it is named.
+
+    Once, at composition, rather than per request. Nothing in the answer
+    moves while the process runs: a reload replaces the domain half and
+    never the server section, which is where the origin, the path and
+    the key all come from.
+
+    Onboarding off is answered as nulls and a flag rather than as a
+    refusal, because it is a state a deployment is legitimately in: what
+    a device is configured at then is `server.ota_path`, which is that
+    deployment's secret and is not a substitute this read could offer.
+    The other refusal `onboarding_url` can raise, device auth on with no
+    secret anywhere, is a state this server cannot be in: `create_app`
+    and the composition above both refuse the boot for it.
+    """
+    if not server.onboarding.enabled:
+        return RuntimeInfo(
+            version=__version__,
+            revision=revision(),
+            onboarding_enabled=False,
+            onboarding_url=None,
+            onboarding_provenance=None,
+        )
+    url, origin = onboarding.onboarding_url(server, _NO_SHORT_URL_TO_SERVE)
+    return RuntimeInfo(
+        version=__version__,
+        revision=revision(),
+        onboarding_enabled=True,
+        onboarding_url=url,
+        onboarding_provenance=origin.provenance,
+    )
 
 
 def _prompt_preview(
