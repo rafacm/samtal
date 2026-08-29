@@ -141,7 +141,6 @@ from vinga_server.events.live import (
     Filters,
     LiveEvents,
     Streamed,
-    Subscription,
 )
 from vinga_server.events.values import ClassName
 
@@ -1896,16 +1895,14 @@ def _runtime(api: FastAPI) -> None:
         """
         # This docstring is the endpoint's description in the committed
         # document, so what belongs to the handler rather than to the
-        # contract is said here. The subscription is taken before the
-        # response is built and given back in the generator's `finally`,
-        # which is the one place that runs whether the client
-        # disconnected, the server closed the hub, or the stream failed
-        # part way: a reader left subscribed would be a queue nothing
-        # drains.
+        # contract is said here. The filters are read before anything is
+        # opened, so a filter that cannot be read is a refusal with a
+        # status rather than a stream that opens and then dies; the
+        # subscription is the body's own, taken beside the `finally`
+        # that gives it back, for the reason `_sse_body` states.
         if live is None:
             raise NoRuntimeError(_NO_RUNTIME_EVENTS)
-        subscription = live.subscribe(_filters(device, session, level))
-        return _EventStream(_sse_body(live, subscription, keepalive_s))
+        return _EventStream(_sse_body(live, _filters(device, session, level), keepalive_s))
 
 
 class _EventStream(StreamingResponse):
@@ -1927,7 +1924,7 @@ class _EventStream(StreamingResponse):
 
 
 async def _sse_body(
-    live: LiveEvents, subscription: Subscription, keepalive_s: float
+    live: LiveEvents, filters: Filters, keepalive_s: float
 ) -> AsyncIterator[bytes]:
     """One reader's stream, until it goes away or the server does.
 
@@ -1940,7 +1937,22 @@ async def _sse_body(
     (the subscription ends and this returns), and when anything here
     raises, so a subscription is never left on a hub with nobody
     reading it.
+
+    Which is why the subscription is taken HERE, one statement above
+    that `finally`, rather than by the handler that built this. A body
+    is not iterated until the response has begun, Starlette runs it
+    beside a disconnect listener and cancels the one when the other
+    returns, and a generator that never started runs no `finally` when
+    it is closed. A client that went away while `http.response.start`
+    was in flight would therefore leave a queue attached to the hub for
+    the life of the process, filled by every emission and read by
+    nobody. Subscribing inside the body makes "subscribed" and "will be
+    given back" the same moment; a request that never gets this far
+    never subscribed at all. The filters are read by the handler and
+    passed in, because a filter that cannot be read is a refusal and
+    must be answered before a stream is opened.
     """
+    subscription = live.subscribe(filters)
     try:
         while True:
             item = await subscription.next(keepalive_s)
