@@ -4966,7 +4966,7 @@
               }
             ],
             "title": "Onboarding Provenance",
-            "description": "Where the origin in that URL came from, in the words the startup banner uses (`from server.public_url`, `guessed from the listen address, ...`), or null when onboarding is off. Two of the three sources are inferences, so a URL that named neither would read as fact."
+            "description": "Where the origin in that URL came from, in the words the startup banner uses (`from server.public_url`, `guessed from the listen address, ...`), or null when onboarding is off. Two of the three sources are inferences, so a URL that named neither would read as fact. It is null exactly when the URL above is, and non-null exactly when that is: the three fields are one fact and this shape refuses a body that makes them two."
           }
         },
         "additionalProperties": false,

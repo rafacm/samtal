@@ -2296,9 +2296,14 @@ def _identity_block(info: Mapping[str, object]) -> str:
         f"server revision: {printable(str(info['revision']))}",
         "",
     ]
-    url = info["onboarding_url"]
-    if url is None:
+    # Asked of the flag, which is the field whose job the question is.
+    # It cannot disagree with the two below it: `RuntimeInfo` refuses a
+    # body where the three say different things, so this branch and the
+    # value it is about are one fact rather than two that have to be
+    # kept in step here.
+    if not info["onboarding_enabled"]:
         return "\n".join([*lines, ONBOARDING_OFF_HERE]) + "\n"
+    url = info["onboarding_url"]
     provenance = printable(str(info["onboarding_provenance"]), UNBOUNDED)
     return (
         "\n".join(
