@@ -182,6 +182,12 @@ no-em-dash rule is about em-dashes; no character in the banner is one.
 
 ## Documentation footprint
 
+- `CHANGELOG.md` gains dated entries in the milestone that ships
+  each change: Added for `vinga info` and the runtime info route
+  (M1), Changed for bare invocations printing help, the reworded
+  description and the `mcp-server status` relocation (M2), Changed
+  for `apply` reloading by default with `--no-reload` (M3). Existing
+  entries are untouched.
 - Generated through generators: `docs/reference/cli.md`,
   `docs/reference/api-openapi.json`, `docs/reference/domain-config.md`
   (the `models.py` field description), the command-spellings manifest.
@@ -416,3 +422,6 @@ condensed but faithful; resolutions appended per amendment.
 11. **P2: the required changelog entry is absent.** Add dated Added
     and Changed entries for `info`, the status relocation, bare help,
     and default-reloading `apply`; old entries unchanged.
+
+    *Resolution*: adopted: the documentation footprint now opens
+    with the per-milestone changelog entries.
