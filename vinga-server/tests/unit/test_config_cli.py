@@ -1278,6 +1278,16 @@ def test_a_malformed_pair_carries_no_parser_exception(
 # one whose answer is a list. What it prints is one line per entry in
 # the configuration's own section order, and then the boundaries the
 # entries that were written are waiting on, each distinct one once.
+#
+# Staged here, with `--no-reload`, wherever what is being asked about is
+# the store. Since #341 the verb installs what it wrote, and the second
+# act is a request to a running server: this suite's application is
+# built without one, so a default apply here would be a committed write
+# followed by the reload's honest 503. What each of these cases is about
+# is the transaction, the outcomes and the sentences, and the staging
+# spelling is how they go on being about that. The default is exercised
+# where a reload can answer: `test_config_cli_rendering.py` injects one,
+# and the live lane has a real one.
 
 DOCUMENT = """\
 providers:
@@ -1300,7 +1310,7 @@ def test_apply_writes_a_whole_deployment_from_one_file(
     document = tmp_path / "setup.yaml"
     document.write_text(DOCUMENT, encoding="utf-8")
 
-    assert run("apply", "-f", str(document)) == 0
+    assert run("apply", "--no-reload", "-f", str(document)) == 0
 
     written = capsys.readouterr()
     assert written.out.splitlines() == [
@@ -1320,7 +1330,7 @@ def test_apply_writes_a_whole_deployment_from_one_file(
 def test_apply_reads_a_document_from_stdin(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert run("apply", "-f", "-", stdin=DOCUMENT) == 0
+    assert run("apply", "--no-reload", "-f", "-", stdin=DOCUMENT) == 0
 
     assert "agents.sam: wrote" in capsys.readouterr().out
 
@@ -1331,10 +1341,10 @@ def test_the_same_document_twice_changes_nothing_and_says_so(
     """Idempotence is what makes an applied document a thing to keep in
     a repository and run, so it is what the second run has to say: every
     row already what the document names, and no boundary to wait on."""
-    run("apply", "-f", "-", stdin=DOCUMENT)
+    run("apply", "--no-reload", "-f", "-", stdin=DOCUMENT)
     capsys.readouterr()
 
-    assert run("apply", "-f", "-", stdin=DOCUMENT) == 0
+    assert run("apply", "--no-reload", "-f", "-", stdin=DOCUMENT) == 0
 
     again = capsys.readouterr()
     assert {line.split(": ")[-1] for line in again.out.splitlines()} == {"unchanged"}
@@ -1362,7 +1372,7 @@ def test_a_refused_document_prints_every_mistake_and_writes_nothing(
 def test_an_empty_document_says_it_applied_nothing(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert run("apply", "-f", "-", stdin="{}\n") == 0
+    assert run("apply", "--no-reload", "-f", "-", stdin="{}\n") == 0
 
     assert capsys.readouterr().out.startswith("the document names no section")
 
