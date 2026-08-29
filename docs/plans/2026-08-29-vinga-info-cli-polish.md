@@ -41,7 +41,28 @@ reaches the API the way every other runtime fact does: through
 sits downstream of `onboarding.origin` via `serving.py`. The API gains
 a `GET /api/runtime/info` returning version, revision, the onboarding
 URL with its provenance, and whether onboarding is enabled; `api.py`
-itself imports nothing new from `onboarding`. The URL is the retained
+itself imports nothing new from `onboarding`.
+
+This route is a credential-bearing read, and the plan treats it as
+one rather than as prose about error messages. The onboarding URL's
+key segment is derived from the device-auth secret and stands in
+front of the token issuer, which is exactly why the startup banner
+deliberately does not print it; serving it here is the issue's
+decision, and it is the second recorded exception (after `ota-url`)
+to the cli-guide's "a credential never travels in a read" practice,
+recorded there as such. The design that makes the exception safe:
+the route sits behind the same bearer gate as every secret write
+already does (the API token grants everything, secret writes
+included, so this read widens nothing the token does not already
+hold); the response carries `Cache-Control: no-store`; the CLI
+renders the URL to stdout only, never to stderr, and the value
+appears in no log record, no refusal sentence, and no
+`__cause__`/`__context__` chain, with the existing quieted request
+loggers covering the transport's own logging. The API description
+prose (`api_descriptions/api.md`) gains a sentence saying the
+runtime info read carries the onboarding URL and what protects it.
+The runtime string is rendered on its own line, unbroken, so a
+terminal-width concern never truncates a URL an operator will type. The URL is the retained
 form (`public_origin` plus the derived path), same value and provenance
 the startup banner and `ota-url` reason about, so a deployment names
 itself identically wherever it is named. The operator's API request
@@ -171,11 +192,15 @@ generated artifact. New pins, by milestone:
   unchanged; the live lane drives `apply` once end to end and asserts
   the reload listing follows.
 
-No new secrets territory: `info` carries no credential (the onboarding
-URL's key segment is the one recorded exception to the quoting rule,
-exactly as `ota-url` already prints it), and the no-leak lens is
-answered by reusing the existing origin values rather than composing
-new ones.
+The no-leak lens on `info` is answered with a keyful sentinel suite,
+not a claim: with onboarding on and a derived key present, pin the
+successful render (URL on stdout, nowhere else), the 401 for a wrong
+bearer (problem body carries no URL), a malformed response body (the
+refusal sentence carries no fragment of it), the log records of the
+whole invocation in both formats (no key segment anywhere), and the
+exception chain on a failure (empty, per the grammar suite's chain
+practice). The route's response-header pin covers
+`Cache-Control: no-store`.
 
 ## Risks
 
@@ -227,6 +252,15 @@ condensed but faithful; resolutions appended per amendment.
    exception chains, the credential-practice and API security prose
    updates, and a keyful test over success, unauthorized, malformed
    response, logging and exception-chain retention.
+
+   *Resolution*: adopted. The route is now specified as a
+   credential-bearing read: bearer gate rationale, no-store header,
+   stdout-only rendering, absence from stderr, logs, refusals and
+   exception chains, the cli-guide practice gaining the recorded
+   exception, the api.md prose sentence, and the keyful sentinel
+   suite over success, unauthorized, malformed response, both log
+   formats and the chain. The unbroken-line rendering rule covers
+   terminal safety without truncation.
 
 2. **P1: "stored but not applied" is unknowable after several reload
    failures.** A 409 reload-held means another reload may have re-read
