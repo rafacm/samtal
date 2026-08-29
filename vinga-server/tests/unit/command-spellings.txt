@@ -622,7 +622,8 @@ docs/plans/2026-08-28-first-class-conversations.md:274  historical  vinga conver
 docs/plans/2026-08-28-first-class-conversations.md:275  historical  vinga conversation show
 docs/plans/2026-08-28-first-class-conversations.md:276  historical  vinga conversation delete
 docs/plans/2026-08-29-vinga-info-cli-polish-implementation.md:10  historical  vinga info
-docs/plans/2026-08-29-vinga-info-cli-polish-implementation.md:94  historical  vinga-server config ota-url
+docs/plans/2026-08-29-vinga-info-cli-polish-implementation.md:99  historical  vinga-server config ota-url
+docs/plans/2026-08-29-vinga-info-cli-polish-implementation.md:154  historical  vinga list
 docs/plans/2026-08-29-vinga-info-cli-polish.md:10  historical  vinga info
 docs/plans/2026-08-29-vinga-info-cli-polish.md:18  historical  vinga info
 docs/plans/2026-08-29-vinga-info-cli-polish.md:23  historical  vinga mcp-server status
