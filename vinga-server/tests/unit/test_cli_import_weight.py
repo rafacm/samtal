@@ -40,7 +40,7 @@ SOURCE = Path(__file__).resolve().parents[2] / "src" / "vinga_server"
 # Every `vinga_server` module importing `config.cli` loads, and the
 # reason each is on the list.
 #
-# Twenty-three, and each of them is the client half of something: the
+# Twenty-six, and each of them is the client half of something: the
 # models and the registry the grammar is derived from, the loader that
 # reads the file half, the renderers the four document commands print,
 # the response shapes the answers are read through, the transport policy
@@ -71,6 +71,15 @@ SOURCE = Path(__file__).resolve().parents[2] / "src" / "vinga_server"
 # and M2's extra gate depends on that import happening inside `run`'s own
 # arm rather than at the top of the grammar.
 #
+# `broken_pipe` joined them with `events tail` (#342), and it is the
+# cheapest entry on this list: `os`, `signal` and `sys`, and nothing of
+# this server at all. It is here rather than duplicated because what it
+# holds is a two-part trap (the shell's status for a process cut off by
+# SIGPIPE, and the descriptor redirection that keeps the interpreter's
+# final flush from raising again), and the other program that answers a
+# closed pipe is `events_cli`, which the client tier may not reach: it
+# would drag the whole event catalog in behind it.
+#
 # What is NOT here is the other point of the list: no `store`, so no
 # SQLAlchemy; no `secrets`, so no cryptography; no `api` and no
 # `onboarding`, so no FastAPI; no `db`, so no Alembic. Each of those
@@ -79,6 +88,7 @@ SOURCE = Path(__file__).resolve().parents[2] / "src" / "vinga_server"
 CLI_REACH = frozenset(
     {
         "vinga_server",
+        "vinga_server.broken_pipe",
         "vinga_server.config",
         "vinga_server.config.cli",
         "vinga_server.config.docgen",
