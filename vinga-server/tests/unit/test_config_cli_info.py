@@ -474,6 +474,71 @@ def test_a_body_that_is_not_the_declared_shape_is_quoted_nowhere(
     assert "Traceback" not in printed.err
 
 
+@pytest.mark.parametrize(
+    ("enabled", "url", "provenance"),
+    [
+        pytest.param(True, None, None, id="on-with-no-url"),
+        pytest.param(True, "https://vinga.test.invalid/x/abcdefgh/", None, id="on-with-no-source"),
+        pytest.param(True, None, "from server.public_url", id="on-with-a-source-and-no-url"),
+        pytest.param(
+            False,
+            "https://vinga.test.invalid/x/abcdefgh/",
+            "from server.public_url",
+            id="off-with-a-url",
+        ),
+        pytest.param(
+            False, "https://vinga.test.invalid/x/abcdefgh/", None, id="off-with-a-bare-url"
+        ),
+        pytest.param(False, None, "from server.public_url", id="off-with-a-source"),
+    ],
+)
+def test_an_answer_that_says_two_things_about_onboarding_is_refused(
+    enabled: bool, url: str | None, provenance: str | None
+) -> None:
+    """The flag and the two nullable fields are one fact, and a body
+    that makes them two is one no reader can act on: there is no
+    answering which half to believe, and this client's own renderer
+    branched on one of them while the sentence came from another.
+
+    Read through the act, which is the surface a command reads an answer
+    through, so what is pinned is what a command would meet.
+    """
+    with pytest.raises(ConfigError) as caught:
+        cli.IDENTITY.read(
+            {
+                "version": "0.1.0",
+                "revision": "v0.1.0-3-gdeadbee",
+                "onboarding_enabled": enabled,
+                "onboarding_url": url,
+                "onboarding_provenance": provenance,
+            }
+        )
+
+    assert cli.UNRECOGNIZED_ANSWER in str(caught.value)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    # And the value it was refused over is not in what it says about it.
+    assert "abcdefgh" not in chain(caught.value)
+
+
+def test_the_two_consistent_answers_are_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The other side of the same pin: exactly two of the eight states
+    are a deployment's, and both are read."""
+    info = identity(monkeypatch)
+    served = cli.IDENTITY.read(info.model_dump())
+    off = cli.IDENTITY.read(
+        info.model_dump()
+        | {
+            "onboarding_enabled": False,
+            "onboarding_url": None,
+            "onboarding_provenance": None,
+        }
+    )
+
+    assert served["onboarding_url"] == info.onboarding_url
+    assert off["onboarding_enabled"] is False
+
+
 def test_an_identity_refusal_leaves_nothing_on_the_chain() -> None:
     """Read through the act, because that is what the command reads
     through: a refusal built inside a handler would carry the body it

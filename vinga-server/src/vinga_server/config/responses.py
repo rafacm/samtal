@@ -37,7 +37,7 @@ from collections.abc import Awaitable, Callable
 from enum import StrEnum
 from typing import Any, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # The transport shapes
 #
@@ -887,9 +887,40 @@ class RuntimeInfo(BaseModel):
             "Where the origin in that URL came from, in the words the startup banner "
             "uses (`from server.public_url`, `guessed from the listen address, ...`), "
             "or null when onboarding is off. Two of the three sources are inferences, "
-            "so a URL that named neither would read as fact."
+            "so a URL that named neither would read as fact. It is null exactly when "
+            "the URL above is, and non-null exactly when that is: the three fields are "
+            "one fact and this shape refuses a body that makes them two."
         )
     )
+
+    @model_validator(mode="after")
+    def _one_fact(self) -> "RuntimeInfo":
+        """The flag and the two nullable fields say one thing, so a body
+        may not say two.
+
+        Three independent fields would be eight states, of which two are
+        the deployment's and six are a body nobody can act on: a flag
+        that says the short path is served with no URL under it, a URL
+        with no provenance to judge it by, a provenance for a URL that
+        is not there. The reader would have to pick which half to
+        believe, and the one client that renders this branched on the
+        URL while the flag decided what the sentence said.
+
+        Refused here rather than reconciled, because reconciling is
+        picking a half. Nothing is quoted back: what is wrong is which
+        fields disagree, and the value that would be worth naming is a
+        credential.
+        """
+        served = self.onboarding_url is not None
+        if served != self.onboarding_enabled or served != (
+            self.onboarding_provenance is not None
+        ):
+            raise ValueError(
+                "onboarding_enabled, onboarding_url and onboarding_provenance are one "
+                "fact and disagree: either onboarding is on and both of the other two "
+                "are answered, or it is off and both are null"
+            )
+        return self
 
 
 class DefaultAgent(BaseModel):
