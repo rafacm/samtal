@@ -184,6 +184,42 @@ def test_info_says_which_switch_turned_onboarding_off(
     assert "the URL to type into" not in printed
 
 
+def test_a_long_url_is_printed_whole_and_still_on_one_line(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`server.public_url` is an origin with an optional path prefix and
+    nothing bounds its length, so a legal configuration composes an
+    onboarding URL of any length at all.
+
+    A truncated URL is not a shorter answer, it is a wrong one: it is
+    typed into a captive portal by hand and fails there, with nothing on
+    the terminal saying it was cut. So the whole of it is printed, and
+    still on one line, which is the two halves of the promise this
+    command makes about the value. The provenance goes the same way, and
+    for the same reason: the fix is at the end of it.
+    """
+    monkeypatch.setenv("VINGA_DEVICE_SECRET", DEVICE_SECRET)
+    server = ServerConfig(
+        public_url=f"{ORIGIN}/{'behind-a-proxy' * 40}", auth={"enabled": True}
+    )
+    url, origin = onboarding_url(server, "unused")
+    assert len(url) > 512, len(url)
+    run.runtime["identity"] = RuntimeInfo(
+        version="0.1.0",
+        revision="v0.1.0-3-gdeadbee",
+        onboarding_enabled=True,
+        onboarding_url=url,
+        onboarding_provenance=origin.provenance,
+    )
+    capsys.readouterr()
+
+    assert run("info") == 0
+
+    lines = capsys.readouterr().out.splitlines()
+    assert url in lines
+    assert lines[lines.index(url) - 1].endswith(f"{origin.provenance}:")
+
+
 def test_a_server_that_answers_the_first_act_and_refuses_the_second(
     run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
