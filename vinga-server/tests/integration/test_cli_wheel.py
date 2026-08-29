@@ -494,8 +494,15 @@ def test_the_binary_exists_and_answers(installed: Path, elsewhere: Path, live: L
 def test_a_whole_deployment_applies_from_the_installed_wheel(run) -> None:
     """The bootstrap, and the first command of the session: one
     document, one transaction, every section named, against a server
-    that booted on an empty database."""
-    written = answered(run("apply", "-f", "deployment.yaml"), "apply")
+    that booted on an empty database.
+
+    Staged (`--no-reload`), because this lane's session has the same
+    shape the in-process one has: the agent written here is one the
+    server is not serving until the reload further down, which is what
+    that test is about. An apply installs what it wrote since #341, and
+    installing it here would answer the question two tests early.
+    """
+    written = answered(run("apply", "--no-reload", "-f", "deployment.yaml"), "apply")
 
     assert written.strip()
     assert set(line.split(": ")[-1] for line in written.splitlines()) == {"wrote"}

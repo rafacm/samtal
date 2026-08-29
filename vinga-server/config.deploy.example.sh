@@ -38,13 +38,21 @@
 # reach it over TLS, through a tunnel that terminates TLS, or on
 # loopback from inside the container.
 #
-# What is written here reaches a running server when it is asked to
-# reload (`vinga-server config reload`), with no restart and no
-# conversation dropped; the device binding at the foot applies at that
-# board's next check-in without being asked at all.
+# This stages the document rather than installing it, which is what
+# --no-reload says. An apply installs what it wrote by default, and
+# installing this one builds its engines: the ASR weights below are a
+# download of minutes on a first run, and a deployment chooses when to
+# spend that rather than having a seeding script choose. So the last
+# step is yours:
+#
+#   vinga-server config reload
+#
+# which reaches the running server with no restart and no conversation
+# dropped; the device binding at the foot applies at that board's next
+# check-in without being asked at all.
 set -eu
 
-vinga-server config apply -f - <<'YAML'
+vinga-server config apply --no-reload -f - <<'YAML'
 providers:
   llm:
     claude:
