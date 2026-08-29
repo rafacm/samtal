@@ -93,9 +93,9 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   writes without installing, which is what a rebuild does while its
   credentials are still missing, and it keeps the notices. A write that
   committed whose reload then failed prints the server's refusal and
-  then only what the client knows: the write committed and no completed
-  reload answer arrived, so run `vinga diff` and then `vinga reload` if
-  they differ. The bounds are per request, the write unbounded and the
+  then only what the client knows: the apply was answered and the store
+  says what the document says, and no completed reload answer arrived,
+  so run `vinga diff` and then `vinga reload` if they differ. The bounds are per request, the write unbounded and the
   reload's sixty seconds. The header `vinga export` writes now names
   three steps, staging the apply so that the stored credentials are
   entered before anything is built.

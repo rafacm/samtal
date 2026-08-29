@@ -271,9 +271,18 @@ UNREADABLE_WRITE = (
     f"read the configuration back to see whether it was applied."
 )
 
-# What `apply` adds when the document was written and the reload behind
-# it did not answer. Everything it says is something this client knows:
-# the write was acknowledged, and no completed reload answer arrived.
+# What `apply` adds when the apply was answered and the reload behind it
+# was not. Everything it says is something this client knows: the
+# transaction ran and its outcomes are printed above, and no completed
+# reload answer arrived.
+#
+# It opens on the store rather than on the write, and that is a
+# correction rather than a style. "The document was written" is false of
+# two successful applies in three: a document every entry of which was
+# already what the store held wrote nothing, and an empty document names
+# nothing to write. What is true of all three is what an apply promises,
+# which is that the store says what the document says, and that promise
+# is exactly what the outcome per entry above spells out.
 #
 # What it deliberately does not say is what the server is now serving,
 # because that is not knowable from here. A 409 says another reload is
@@ -286,11 +295,12 @@ UNREADABLE_WRITE = (
 # So the sentence sends the operator to the read that does know
 # (`diff` compares the stored half against the running one) and to the
 # command that settles it either way.
-COMMITTED_UNANSWERED = (
-    "The document was written. This command did not get a completed answer to the "
-    f"reload behind it, so what the server is serving now is not said here: run "
-    f"`{PROGRAM} diff`, which compares the stored configuration against the running "
-    f"one, and `{PROGRAM} reload` if they differ."
+APPLY_UNANSWERED = (
+    "The apply was answered and the store is what the document says, entry by entry "
+    "above. What did not arrive is a completed answer to the reload behind it, so "
+    f"what the server is serving now is not said here: run `{PROGRAM} diff`, which "
+    f"compares the stored configuration against the running one, and `{PROGRAM} "
+    "reload` if they differ."
 )
 
 # How a stored secret is introduced in `show` and `list`. Comment lines
@@ -3386,7 +3396,7 @@ class Act:
     # its command, which is to say when something before it has already
     # changed the deployment. None for every act that either changes
     # nothing or runs alone, which is all but one of them: see
-    # `COMMITTED_UNANSWERED`, the sentence `apply`'s reload carries.
+    # `APPLY_UNANSWERED`, the sentence `apply`'s reload carries.
     #
     # On the act rather than at the boundary because it is a fact about
     # what this act follows: the same reload run by `reload` itself
@@ -4004,7 +4014,7 @@ APPLY = Act(
 # prints.
 APPLY_QUIETLY = replace(APPLY, render=_applied_quietly)
 
-APPLY_RELOAD = replace(RELOAD, unanswered=COMMITTED_UNANSWERED)
+APPLY_RELOAD = replace(RELOAD, unanswered=APPLY_UNANSWERED)
 
 
 def _applying(args: Invocation) -> tuple[Act, ...]:

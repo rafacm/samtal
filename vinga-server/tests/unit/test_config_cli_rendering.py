@@ -949,13 +949,60 @@ def test_a_write_whose_reload_is_held_claims_only_what_it_knows(
     # The write's own answer is printed first, because it happened.
     assert printed.out.splitlines() == [WROTE]
     # Then the server's refusal, and then what this client knows.
-    assert printed.err == f"{HELD}\n{cli.COMMITTED_UNANSWERED}\n"
+    assert printed.err == f"{HELD}\n{cli.APPLY_UNANSWERED}\n"
     assert "Traceback" not in printed.err
     # And the write really did commit, which is the claim the sentence
     # makes and the one thing here that is checkable.
     capsys.readouterr()
     assert run("provider", "show", "llm", "brain") == 0
     assert "Hello." in capsys.readouterr().out
+
+
+APPLIED_NOTHING = [
+    ("a document that names nothing", "{}\n", []),
+    ("a document the store already says", WRITTEN, [WROTE.replace("wrote", "unchanged")]),
+]
+
+
+@pytest.mark.parametrize(
+    ("document", "printed_lines"),
+    [(document, lines) for _, document, lines in APPLIED_NOTHING],
+    ids=[what for what, _, _ in APPLIED_NOTHING],
+)
+def test_an_apply_that_wrote_nothing_says_nothing_about_a_write(
+    run,
+    capsys: pytest.CaptureFixture[str],
+    document: str,
+    printed_lines: list[str],
+) -> None:
+    """The sentence has to be true of every apply that was answered, and
+    two of the three wrote nothing at all.
+
+    A document every entry of which the store already holds writes no
+    row, and a document naming no section has nothing to write in the
+    first place. A sentence opening "The document was written" would be
+    false in both, which is the one thing a sentence added to a refusal
+    may never be: it is the half the operator has no other way to check.
+    """
+    # The all-unchanged case needs the row there first, staged, so that
+    # what the second run meets is a store that already says it.
+    if printed_lines:
+        assert run("apply", "--no-reload", "-f", "-", stdin=document) == 0
+        capsys.readouterr()
+    run.runtime["mcp_servers"] = _configured({"weather": ENTRY}, {"sam": ["weather"]})
+    run.runtime["reload"] = _held()
+
+    assert run("apply", "-f", "-", stdin=document) == 1
+
+    printed = capsys.readouterr()
+    if printed_lines:
+        assert printed.out.splitlines() == printed_lines
+    else:
+        assert printed.out.startswith(cli.NOTHING_APPLIED)
+    assert printed.err == f"{HELD}\n{cli.APPLY_UNANSWERED}\n"
+    # The claim itself, held to what happened: nothing was written, and
+    # the sentence says nothing that says otherwise.
+    assert "was written" not in printed.err
 
 
 def test_a_refused_document_never_reaches_the_reload(
@@ -971,7 +1018,7 @@ def test_a_refused_document_never_reaches_the_reload(
 
     printed = capsys.readouterr()
     assert printed.out == ""
-    assert cli.COMMITTED_UNANSWERED not in printed.err
+    assert cli.APPLY_UNANSWERED not in printed.err
     assert len(run.clients) == 1
 
 
@@ -1009,11 +1056,11 @@ def test_what_a_second_act_adds_is_raised_with_nothing_behind_it(
     with pytest.raises(ConfigError) as caught:
         cli._performed(
             cli.Invocation(),
-            (first, replace(first, unanswered=cli.COMMITTED_UNANSWERED)),
+            (first, replace(first, unanswered=cli.APPLY_UNANSWERED)),
             reached,
         )
 
-    assert str(caught.value).endswith(cli.COMMITTED_UNANSWERED)
+    assert str(caught.value).endswith(cli.APPLY_UNANSWERED)
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
     assert SECRET not in _chain(caught.value)

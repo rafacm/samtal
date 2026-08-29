@@ -638,14 +638,17 @@ Two consequences follow, and both are the practice above applied to a
 command that is now two acts. The write's boundary notice is printed
 under `--no-reload` and dropped under the default, because the reload's
 own listing is on the next line and a sentence telling the operator to
-run it would be telling them to run what they are reading. And a write
-that committed whose reload did not answer says exactly that, and no
-more: it does not say "stored but not applied", because it cannot know.
-A 409 means another reload is running and re-read the store on one side
-or the other of this commit; a transport failure is ambiguous because a
-reload outlives the connection that asked for it. So the sentence claims
-the two things the client saw and sends the operator to `vinga diff`,
-which does know, and then to `vinga reload`.
+run it would be telling them to run what they are reading. And an apply
+whose reload did not answer says what it saw and no more: that the apply
+was answered and the store says what the document says, entry by entry
+above. It does not say "stored but not applied", because it cannot know:
+a 409 means another reload is running and re-read the store on one side
+or the other of this commit, and a transport failure is ambiguous
+because a reload outlives the connection that asked for it. Nor does it
+say the document was written, which is false of the two applies in three
+that write nothing, an all-unchanged one and an empty one. So the
+sentence sends the operator to `vinga diff`, which does know, and then
+to `vinga reload`.
 
 **Counterexample, merged and retired.** `apply` as a pure write. It read
 as the whole of the operation to everybody who typed it, which is what

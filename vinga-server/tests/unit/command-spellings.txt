@@ -18,8 +18,8 @@ CHANGELOG.md:81  historical  vinga status
 CHANGELOG.md:81  historical  vinga mcp-server status
 CHANGELOG.md:86  historical  vinga apply
 CHANGELOG.md:87  historical  vinga reload
-CHANGELOG.md:97  historical  vinga diff
-CHANGELOG.md:97  historical  vinga reload
+CHANGELOG.md:98  historical  vinga diff
+CHANGELOG.md:98  historical  vinga reload
 CHANGELOG.md:99  historical  vinga export
 CHANGELOG.md:113  historical  vinga-server config ota-url
 CHANGELOG.md:151  historical  vinga session list
@@ -158,13 +158,13 @@ docs/architecture/cli-guide.md:340  respell  vinga mcp-server status
 docs/architecture/cli-guide.md:461  respell  vinga export
 docs/architecture/cli-guide.md:566  respell  vinga provider
 docs/architecture/cli-guide.md:567  respell  vinga device pending
-docs/architecture/cli-guide.md:647  respell  vinga diff
-docs/architecture/cli-guide.md:648  respell  vinga reload
-docs/architecture/cli-guide.md:676  respell  vinga provider set llm claude
-docs/architecture/cli-guide.md:690  respell  vinga ota-url
-docs/architecture/cli-guide.md:697  respell  vinga info
-docs/architecture/cli-guide.md:731  respell  vinga export
-docs/architecture/cli-guide.md:732  respell  vinga apply
+docs/architecture/cli-guide.md:650  respell  vinga diff
+docs/architecture/cli-guide.md:651  respell  vinga reload
+docs/architecture/cli-guide.md:679  respell  vinga provider set llm claude
+docs/architecture/cli-guide.md:693  respell  vinga ota-url
+docs/architecture/cli-guide.md:700  respell  vinga info
+docs/architecture/cli-guide.md:734  respell  vinga export
+docs/architecture/cli-guide.md:735  respell  vinga apply
 docs/architecture/design-guide.md:196  respell  vinga-server config agent preview
 docs/architecture/observability-surfaces.md:35  respell  vinga session delete
 docs/architecture/observability-surfaces.md:35  respell  vinga session purge
@@ -1028,12 +1028,12 @@ vinga-server/src/vinga_server/config/api.py:425  respell  vinga-server config de
 vinga-server/src/vinga_server/config/api.py:444  respell  vinga-server config list
 vinga-server/src/vinga_server/config/api.py:544  respell  vinga-server config reload
 vinga-server/src/vinga_server/config/api.py:545  respell  vinga-server config list
-vinga-server/src/vinga_server/config/cli.py:453  respell  vinga list
-vinga-server/src/vinga_server/config/cli.py:606  respell  vinga provider
-vinga-server/src/vinga_server/config/cli.py:2520  respell  vinga list
-vinga-server/src/vinga_server/config/cli.py:2552  respell  config list
-vinga-server/src/vinga_server/config/cli.py:6024  respell  vinga provider
-vinga-server/src/vinga_server/config/cli.py:6024  respell  vinga device pending
+vinga-server/src/vinga_server/config/cli.py:463  respell  vinga list
+vinga-server/src/vinga_server/config/cli.py:616  respell  vinga provider
+vinga-server/src/vinga_server/config/cli.py:2530  respell  vinga list
+vinga-server/src/vinga_server/config/cli.py:2562  respell  config list
+vinga-server/src/vinga_server/config/cli.py:6034  respell  vinga provider
+vinga-server/src/vinga_server/config/cli.py:6034  respell  vinga device pending
 vinga-server/src/vinga_server/config/docgen.py:198  respell  config schema
 vinga-server/src/vinga_server/config/docgen.py:587  respell  config schema
 vinga-server/src/vinga_server/config/loader.py:76  respell  vinga simulator run
