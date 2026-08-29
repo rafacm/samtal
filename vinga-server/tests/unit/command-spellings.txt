@@ -1036,8 +1036,8 @@ vinga-server/src/vinga_server/config/cli.py:463  respell  vinga list
 vinga-server/src/vinga_server/config/cli.py:616  respell  vinga provider
 vinga-server/src/vinga_server/config/cli.py:2530  respell  vinga list
 vinga-server/src/vinga_server/config/cli.py:2562  respell  config list
-vinga-server/src/vinga_server/config/cli.py:6034  respell  vinga provider
-vinga-server/src/vinga_server/config/cli.py:6034  respell  vinga device pending
+vinga-server/src/vinga_server/config/cli.py:6043  respell  vinga provider
+vinga-server/src/vinga_server/config/cli.py:6043  respell  vinga device pending
 vinga-server/src/vinga_server/config/docgen.py:198  respell  config schema
 vinga-server/src/vinga_server/config/docgen.py:587  respell  config schema
 vinga-server/src/vinga_server/config/loader.py:76  respell  vinga simulator run
