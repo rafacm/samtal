@@ -1069,15 +1069,26 @@ class AuthRejection(StrEnum):
 
 
 class OriginSource(StrEnum):
-    """Which configuration key the startup banner's origin came out of.
+    """Where an origin this server names came from.
 
-    The last of the three is a guess and the provenance fragment beside
-    it says so; the token is which key was read, not how sure it is.
+    The first three are what a configuration with no request in hand can
+    resolve, and they are the whole of what the startup banner may
+    carry, which is why the banner's field is annotated with those three
+    rather than with this enumeration. The third is a guess and the
+    provenance fragment beside it says so; the token is which key was
+    read, not how sure it is.
+
+    The fourth belongs to a line answering a request (#340), which has a
+    source the banner cannot have: the address the request itself
+    arrived on. No event carries it, and it is here rather than beside
+    the sentence that renders it because one enumeration of the answers
+    to "where did this origin come from" is one place to read them.
     """
 
     PUBLIC_URL = "server.public_url"
     WEBSOCKET_URL = "server.websocket_url"
     LISTEN_ADDRESS = "the listen address (server.host and server.port)"
+    REQUEST_HOST = "the address this request arrived on"
 
 
 class ActivationRefusal(StrEnum):

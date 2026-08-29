@@ -3139,7 +3139,10 @@ differently. Four things to get right:
 - **Set `server.public_url` too.** TLS ends at the proxy, so nothing a
   request carries says what a person should type; without it the
   onboarding URL is derived from `server.websocket_url`, and failing
-  that guessed from the listen address, which is a guess that says so.
+  that from the address the request reached the OTA endpoint on, which
+  behind a proxy is the address the proxy used rather than the one a
+  person has. The startup line has no request to read at all and
+  guesses from the listen address, saying that it is a guess.
 - **One idle timeout is enough, above 20 seconds.** The server pings every
   connected device every 20 seconds, so a conversation WebSocket is never
   actually idle even when nobody is speaking. A proxy therefore needs only
