@@ -267,14 +267,24 @@ async def test_the_first_signal_drains_before_uvicorn_exits() -> None:
     assert session.shutdown is not None
 
 
-async def test_a_second_signal_forces_the_exit() -> None:
-    server = draining_server(registry_with(FakeSession(speaking_for=30)))
+async def test_a_second_signal_forces_the_exit(monkeypatch: pytest.MonkeyPatch) -> None:
+    hub = LiveEvents()
+    server = draining_server(registry_with(FakeSession(speaking_for=30)), live=hub)
+    watching = hub.subscribe()
+    counts = readers_when_uvicorn_stopped(monkeypatch, hub)
+
     server.handle_exit(signal.SIGTERM, None)
     assert not server.should_exit
     # An operator in a hurry: the second signal is passed straight to
     # uvicorn rather than starting another drain.
     server.handle_exit(signal.SIGTERM, None)
+
     assert server.should_exit
+    # And it is still a path out of this process, so the tails end on it
+    # too. The drain it interrupted may never reach its own close, and a
+    # stream left open is a response uvicorn's shutdown waits out.
+    assert counts == [0], "uvicorn was told to stop with a tail still open"
+    assert await anext(aiter(watching), None) is None, "the tail was not ended"
 
 
 async def test_a_signal_before_the_composition_exists_is_passed_straight_through() -> None:
