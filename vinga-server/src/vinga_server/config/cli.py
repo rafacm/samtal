@@ -430,18 +430,27 @@ ONBOARDING_OFF_HERE = (
 # `info` answers is orientation, and `vinga list` is the tree.
 CONFIGURED = "configured:"
 
-# How much of the two long values an identity answer carries may be
-# printed. `GLIMPSE_LENGTH` is the bound for far-side text quoted inside
-# a sentence, and neither of these is that: a URL truncated at 120
-# characters is a URL an operator retypes wrongly, and a provenance
-# truncated mid-clause loses the fix it ends with. Bounded still, for
-# the two reasons everything an answer carries is bounded (no answer
-# chooses how long a command's output is, and nothing an answer carries
-# steers a terminal), at a length nothing this server composes reaches:
-# the longest provenance `onboarding.origin` writes is under 250
-# characters, and an origin with a derived key after it is shorter
-# again.
-IDENTITY_LENGTH = 512
+# The two values an identity answer carries that are printed whole
+#
+# `GLIMPSE_LENGTH` is the bound for far-side text quoted inside a
+# sentence, and neither of these is that. The URL is the thing this
+# command exists to hand a person, and a truncated URL is not a shorter
+# answer, it is a wrong one: it is typed into a captive portal by hand
+# and fails there, silently, with nothing on the terminal saying it was
+# cut. The provenance is the sentence that says whether to trust the
+# origin in it, and it ends with the fix, so a cut at any length loses
+# exactly the half worth reading.
+#
+# No number would have done. `server.public_url` accepts an origin with
+# a path prefix and bounds neither, so a legal configuration can compose
+# an onboarding URL of any length; a bound here refuses nothing and
+# corrupts quietly, which is the one failure this project's refusal
+# posture exists to avoid. So they are printed whole, terminal-safe,
+# which is the same call `_block` makes for a prompt and for the same
+# reason. What a hostile far side could do with that it could already do
+# through `agent preview`, and it would need this deployment's API token
+# to try.
+UNBOUNDED = None
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -2263,10 +2272,11 @@ def _identity_block(info: Mapping[str, object]) -> str:
     """What `info` prints of the server's own answer: which build is
     running, and the URL a board is onboarded at.
 
-    Every line is bounded and made printable, like every other value an
-    answer carries: what is on the other end of `--api-url` is not this
-    command's to vouch for, and the URL is the one value here that an
-    operator is going to select and retype.
+    Every line is made printable, like every other value an answer
+    carries: what is on the other end of `--api-url` is not this
+    command's to vouch for. The build's two lines are bounded as well;
+    the URL and its provenance are not, and the note on `UNBOUNDED`
+    above says why.
 
     The URL lands on a line with nothing in front of it, and its
     provenance goes on the label line above it. A terminal wraps a long
@@ -2289,13 +2299,13 @@ def _identity_block(info: Mapping[str, object]) -> str:
     url = info["onboarding_url"]
     if url is None:
         return "\n".join([*lines, ONBOARDING_OFF_HERE]) + "\n"
-    provenance = printable(str(info["onboarding_provenance"]), IDENTITY_LENGTH)
+    provenance = printable(str(info["onboarding_provenance"]), UNBOUNDED)
     return (
         "\n".join(
             [
                 *lines,
                 f"{ONBOARDING_URL_LABEL}, {provenance}:",
-                printable(str(url), IDENTITY_LENGTH),
+                printable(str(url), UNBOUNDED),
             ]
         )
         + "\n"

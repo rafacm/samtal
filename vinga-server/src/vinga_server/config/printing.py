@@ -109,7 +109,7 @@ def shown_url(parsed: SplitResult) -> str:
     return urlunsplit((parsed.scheme, host, parsed.path, urlencode(kept), ""))
 
 
-def printable(value: str, limit: int = GLIMPSE_LENGTH) -> str:
+def printable(value: str, limit: int | None = GLIMPSE_LENGTH) -> str:
     """Text that arrived in a response, bounded before it is printed.
 
     Truncated first and then made printable, so no answer can choose how
@@ -117,6 +117,18 @@ def printable(value: str, limit: int = GLIMPSE_LENGTH) -> str:
     terminal control code into it. Unprintable characters become a
     question mark rather than disappearing, because something that
     arrived mangled should read as mangled.
+
+    `None` is no bound, and it is a different rule rather than a bigger
+    number. The bound is right for a value quoted inside a sentence,
+    where the sentence is what the reader came for; it is wrong for a
+    value that IS what the reader came for, because a renderer that
+    quietly cut one would make it lie about the one thing it exists to
+    show. `config/cli.py` draws that line twice: `_block` prints a
+    prompt whole with a rule of its own, since a prompt is written in
+    newlines, and the onboarding URL is printed whole through here,
+    since a URL that reaches a terminal with a newline in it is a URL on
+    two lines. Nothing an answer carries steers a terminal either way,
+    which is the half of this function that has no exceptions.
     """
     return "".join(
         character if character.isprintable() else "?" for character in value.strip()[:limit]
