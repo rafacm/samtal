@@ -91,6 +91,7 @@ from vinga_server.events.catalog import (
     SessionOpen,
     SpeakingStarted,
 )
+from vinga_server.events.live import LiveEvents
 from vinga_server.events.values import (
     AgentList,
     AgentNames,
@@ -172,6 +173,7 @@ class DeviceSession:
         bindings: DeviceBindings | None = None,
         conversations: ConversationStore | None = None,
         sessions: "SessionRegistry | None" = None,
+        live: LiveEvents | None = None,
     ) -> None:
         self.websocket = websocket
         # The world this server is serving, asked rather than kept: a
@@ -224,6 +226,19 @@ class DeviceSession:
         # `device: None` the way it does today; the edge writes the MAC
         # onto it as soon as one is understood.
         self._events = SessionEvents(self.session_id)
+        # And whoever is watching this server right now, attached in the
+        # same breath (#342). The attach point is precise because the
+        # early events are exactly what an operator opens a tail for: a
+        # Device-Id that is not a MAC, a device bound to no agent, a
+        # rejection at capacity. The conversation store's tap attaches
+        # after the hello, which is where it has a manifest to open a
+        # record from, and every one of those refusals happens before
+        # it. `detach_live` below is what takes it off again, in an
+        # outer `finally` over the whole of `run` and on the one branch
+        # in `ws.py` where a session that was built never runs.
+        self._live = live
+        if live is not None:
+            self._events.attach(live)
         # The conversation behind this connection, built once the device
         # has proved which agents it may talk to. Until then there is
         # nothing to build one for: the rejections in `run` happen
@@ -323,6 +338,35 @@ class DeviceSession:
         return self.runtime is not None and self.runtime.replying()
 
     async def run(self) -> None:
+        """Serve this connection, and stop being watched when it ends.
+
+        The outer `finally` is the whole of this wrapper, and it is
+        outside `_converse` rather than inside it because the live tap
+        was attached at construction: it has to come off however the
+        connection ended, including the rejections that return before
+        the guard inside, and including a cancellation on the way out.
+        The tap is a consumer of this session's events and holding it
+        after the session would keep an object alive for a conversation
+        that is over.
+        """
+        try:
+            await self._converse()
+        finally:
+            self.detach_live()
+
+    def detach_live(self) -> None:
+        """Stop feeding the live stream from this session.
+
+        Public because `ws.py` needs it: a session rejected at capacity
+        is constructed and never run, so the `finally` above never fires
+        for it, and the tap it attached at construction would outlive
+        the object. Detaching twice is not an error, for the reason
+        `SessionEvents.detach` gives.
+        """
+        if self._live is not None:
+            self._events.detach(self._live)
+
+    async def _converse(self) -> None:
         device_id = self.websocket.headers.get("device-id", "").strip()
         client_id = self.websocket.headers.get("client-id", "").strip()
         await self.websocket.accept()

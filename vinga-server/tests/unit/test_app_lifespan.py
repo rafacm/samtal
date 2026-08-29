@@ -22,6 +22,7 @@ sentence, and re-raised as `StartupFailed` with nothing chained to it,
 which is what keeps an operator's stderr to one line.
 """
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -47,6 +48,10 @@ from vinga_server.config.models import API_MOUNT_PATH, DatabaseConfig
 from vinga_server.db import DOMAIN_CHAIN, read_engine
 from vinga_server.device.bindings import DeviceBindings
 from vinga_server.onboarding.origin import onboarding_url
+from vinga_server.events import ServerEvents
+from vinga_server.events.catalog import APP_CHANNEL, CaptureDisabled
+from vinga_server.events.live import LiveEvents
+from vinga_server.events.values import ConfiguredPath
 from vinga_server.providers import ProviderError
 from vinga_server.providers import world as provider_world
 from vinga_server.providers.mock import MockTts
@@ -484,6 +489,102 @@ def test_a_deployment_with_onboarding_off_answers_no_url(
     assert answered["onboarding_url"] is None
     assert answered["onboarding_provenance"] is None
     assert answered["revision"] == revision()
+# --- the live event tap, which is process-global ----------------------
+#
+# The one acquisition in this build that is not a file, a socket or a
+# thread, and the one whose leak would be invisible: the server tap set
+# lives in the events package for the life of the process, so a hub
+# attached by a lifespan and never detached would go on receiving every
+# server event afterwards, and a second lifespan in the same process
+# would deliver each of them to two hubs (#342). Both tests below emit
+# one real server event and count the deliveries, which is the only
+# place the difference shows.
+#
+# The lifespan is entered directly rather than through `TestClient`,
+# because what is under test is the exit stack itself and a reader in
+# this loop is what the deliveries have to reach.
+
+
+def hubs_built(monkeypatch: pytest.MonkeyPatch) -> list[LiveEvents]:
+    """Every hub a build constructs while this test runs, in order.
+
+    A build that refuses installs no composition, so this is the only
+    way to reach the hub it had already attached; the spy is the shape
+    `opened_bindings` above already uses for the same reason.
+    """
+    built: list[LiveEvents] = []
+    real = app_module.LiveEvents
+
+    def spy(*args: Any, **kwargs: Any) -> LiveEvents:
+        hub = real(*args, **kwargs)
+        built.append(hub)
+        return hub
+
+    monkeypatch.setattr(app_module, "LiveEvents", spy)
+    return built
+
+
+async def delivered(subscription: Any) -> list[Any]:
+    """Everything one reader was handed, without waiting for what it was
+    not."""
+    items: list[Any] = []
+    while True:
+        item = await subscription.next(timeout=0)
+        if item is None:
+            return items
+        items.append(item)
+
+
+def one_server_event(where: Path) -> None:
+    """One real event on a server channel, which is what a detached hub
+    must not hear."""
+    ServerEvents(APP_CHANNEL).emit(
+        lambda: CaptureDisabled(path=ConfiguredPath(str(where)))
+    )
+
+
+async def test_a_second_lifespan_does_not_deliver_the_events_twice(
+    tmp_path: Path,
+) -> None:
+    """Two servers in one process, one after the other, which is what a
+    test lane and an embedded caller both do. The first lifespan's hub
+    is detached on its way out, so the second one's reader is the only
+    one an event reaches."""
+    first = served(recording_config())
+    async with app_module.lifespan(first):
+        retired = first.state.composition.live
+    second = served(recording_config())
+    async with app_module.lifespan(second):
+        current = second.state.composition.live
+        watching_retired = retired.subscribe()
+        watching_current = current.subscribe()
+
+        one_server_event(tmp_path)
+
+        assert len(await delivered(watching_current)) == 1
+        assert await delivered(watching_retired) == [], (
+            "the retired lifespan's hub is still attached to the server tap"
+        )
+
+
+async def test_a_startup_that_failed_after_attaching_leaves_no_hub_behind(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The hub is attached first, so that the boot's own events reach a
+    tail; a boot that then refuses unwinds through the same exit stack
+    everything else is registered on."""
+    built = hubs_built(monkeypatch)
+    refusing_providers(monkeypatch)
+    app = served(recording_config())
+
+    with pytest.raises(StartupFailed):
+        async with app_module.lifespan(app):
+            pass  # pragma: no cover - the startup refuses before this
+
+    (hub,) = built
+    watching = hub.subscribe()
+    one_server_event(tmp_path)
+    assert await delivered(watching) == []
 
 
 # --- the database this build brings into existence --------------------
