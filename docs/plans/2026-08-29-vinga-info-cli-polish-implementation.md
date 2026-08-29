@@ -81,6 +81,11 @@ print and this milestone had to decide how.
    bounded: no answer chooses how long a command's output is, and
    nothing an answer carries steers a terminal.
 
+   *Superseded by the review round below, finding 2.* The reasoning
+   above is right about why 120 is wrong and wrong about 512 being
+   enough: nothing bounds `server.public_url`, so no number is. The two
+   values are printed whole.
+
 ### Discoveries
 
 - **The census was already stale on the plan branch.** `docs/plans/
@@ -117,3 +122,78 @@ print and this milestone had to decide how.
   the image lane is CI's.
 - Not verified here: nothing on hardware. M1 adds no board or device
   procedure, and no page under `docs/devices/` speaks about the API.
+
+### PR review round
+
+External review of PR #347, verdict mergeable after fixes. Four
+findings, condensed but faithful, each with the resolution and the
+commit that carries it. Every one of them was confirmed against the
+merged code before it was fixed, by reverting the fix's source half and
+running the case it added.
+
+1. **P1: the counts act could print rejected response data or escape
+   with a traceback.** `ConfigDocument` declares the masked
+   configuration as `dict[str, Any]` and stops there, and
+   `_configured_counts` trusted every type under it: a `default_agent`
+   that was an object was printed as its repr, a section that was a
+   number or a list raised a `TypeError` out of the boundary, and an
+   absent section raised a `KeyError`. The malformed-answer cases that
+   existed replaced the first act's response, which is refused before
+   the second act runs, so the renderer had never met a body it did not
+   compose itself.
+
+   *Resolution*: adopted, `9080b17f`. Every section is read as a shape
+   through `_understood`, with the nesting taken off the descriptor's
+   addressing rather than a second list, so an unreadable one meets the
+   fixed chainless sentence. Seven second-act cases cover the wrong
+   container, the wrong scalar and the absent section, across both
+   streams, both log formats and the exception chain. Confirmed against
+   the old code, which printed the planted value on stdout.
+
+   Not fixed here, and recorded rather than left silent: `_summary`
+   renders the same document with the same trust, so `vinga list` has
+   the shape of this bug for the sections it walks. It is not this
+   change's code and deserves its own.
+
+2. **P2: a valid configuration could produce a silently truncated
+   URL.** `server.public_url` accepts an origin with a path prefix and
+   bounds neither, so a 642-character public URL composes a
+   654-character onboarding URL, of which 512 rendered.
+
+   *Resolution*: adopted, `5f87c62f`, taking the review's first option.
+   No number fixes it, because no number bounds what a configuration
+   can legally hold, so the choice was between refusing a configuration
+   nothing else refuses and printing the value whole. Whole, which is
+   the call `_block` already makes for a prompt and for the same
+   reason: a renderer that quietly cuts the thing it exists to show
+   makes it lie, and a URL cut at any length is typed into a captive
+   portal and fails there silently. `printable` gains `None` as its
+   bound, documented as a different rule rather than a bigger number,
+   and the half with no exceptions is unchanged: nothing an answer
+   carries steers a terminal.
+
+3. **P2: `RuntimeInfo` accepted contradictory onboarding states.** The
+   flag and the two nullable fields were independent, and the renderer
+   branched on the URL while the sentence came from the flag.
+
+   *Resolution*: adopted, `2a2c4baa`. A model validator makes the three
+   one fact: onboarding on with both answered, or off with both null.
+   Refused rather than reconciled, since reconciling is picking a half
+   to believe, and nothing is quoted back. The renderer asks the flag
+   now. All six inconsistent shapes and both consistent ones are pinned
+   through `IDENTITY.read`.
+
+4. **P2: the displayed API address was not necessarily the one either
+   act contacted.** `_call` re-read the file half and re-resolved the
+   address and the token per request, and the opener resolved a third
+   time, so `info` performed three independent resolutions of one
+   question and a file changing under a running command could put one
+   endpoint on the banner and another behind the answers.
+
+   *Resolution*: adopted, `4276c9a9`. `Reached` is what an invocation
+   resolved about where it is talking and with what, built once by
+   `Command.perform` in front of the opener and every act. The
+   simulator's claim resolves its own inside the `--claim` arm, which
+   is what keeps the device side clear of the operator-side credential.
+   The test counts the reads of the file half and moves the port under
+   the command; the old code read three times.
