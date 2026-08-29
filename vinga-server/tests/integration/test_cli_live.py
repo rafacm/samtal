@@ -484,9 +484,17 @@ def deployed(live: Live, tmp_path_factory: pytest.TempPathFactory) -> Live:
     fixture rather than a test because everything below stands on it:
     one document, one transaction, every section named, against a server
     that booted on an empty database.
+
+    Staged, which is the one thing about it that is a choice. Since #341
+    an apply installs what it wrote, and this lane's sequence is built on
+    the store and the running server being two different things for a
+    while: the agent written here is one the server is not serving until
+    `test_the_running_server_is_read_after_a_reload` reloads, which is
+    what that test is about. The default is driven where it can be
+    driven honestly, on a document of its own, below that test.
     """
     document_path = written(tmp_path_factory.mktemp("apply"), "deployment.yaml", DEPLOYMENT)
-    assert run("apply", "-f", document_path) == 0
+    assert run("apply", "--no-reload", "-f", document_path) == 0
     return live
 
 
@@ -520,10 +528,12 @@ def test_the_same_document_twice_changes_nothing(
     The outcome listing is the assertion because it is the only order an
     apply observably has, and `unchanged` on every line is the claim
     that the comparison happened rather than the rows being rewritten.
+    Staged like the bootstrap, and for the same reason: what is being
+    asked about is the store.
     """
     document_path = written(tmp_path, "deployment.yaml", DEPLOYMENT)
 
-    assert run("apply", "-f", document_path) == 0
+    assert run("apply", "--no-reload", "-f", document_path) == 0
 
     captured = capsys.readouterr()
     outcomes = [line.split(": ")[-1] for line in captured.out.splitlines()]
@@ -933,6 +943,52 @@ def test_info_names_the_deployment_it_reached(
     assert SECRET not in said
 
 
+# The document that installs itself
+#
+# One controlled document, applied the way an operator applies one: the
+# default, both acts, over the wire. It sits here because the reload
+# above has already happened, so what this adds to the lane's server is
+# a fragment nothing includes, and because the two tests either side of
+# it are what its own claim is measured against: the staged bootstrap
+# left an agent unserved, and this leaves nothing waiting.
+#
+# A prompt fragment rather than a provider or an agent, so the store
+# this lane goes on reading is the one every test after this was
+# written against.
+
+INSTALLED: dict[str, object] = {
+    "prompt_fragments": {"wire": {"text": "The dog is called Bosse."}}
+}
+
+
+def test_an_apply_installs_what_it_wrote(
+    deployed: Live, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The default `apply`, end to end against a real server (#341).
+
+    Two requests in one command, and both answers are the real ones:
+    the write is a transaction on a Postgres, and the reload behind it
+    is a running server composing a new world and swapping it in. What
+    an operator reads is what was written and then what the reload made
+    of it, with nothing on stderr, because the boundary a notice would
+    have named is the answer printed underneath it.
+    """
+    document_path = written(tmp_path, "fragment.yaml", INSTALLED)
+
+    assert run("apply", "-f", document_path) == 0
+
+    printed = capsys.readouterr()
+    lines = printed.out.splitlines()
+    assert lines[0] == "prompt_fragments.wire: wrote"
+    # The reload's own listing, which is the second act's answer: what
+    # it did to each kind, and then what every MCP entry is doing.
+    assert "prompts:" in lines
+    assert "mcp:" in lines
+    assert "house" in printed.out
+    # And nothing waiting, which is the whole of what the default buys.
+    assert printed.err == ""
+
+
 # The board nobody owns, over the wire
 #
 # The one command of the grammar that reaches something other than the
@@ -1292,7 +1348,7 @@ def test_the_store_exports_as_a_document_it_applies_back_unchanged(
     path = tmp_path / "exported.yaml"
     path.write_text(exported, encoding="utf-8")
 
-    assert run("apply", "-f", str(path)) == 0
+    assert run("apply", "--no-reload", "-f", str(path)) == 0
     applied = capsys.readouterr()
     outcomes = [line.split(": ")[-1] for line in applied.out.splitlines()]
     assert outcomes and set(outcomes) == {"unchanged"}
@@ -1414,7 +1470,7 @@ def test_a_deployment_is_rebuilt_from_its_export_on_an_empty_database(
 
     with serving(database) as before:
         seeded = ("--api-url", before.api_url)
-        assert run(*seeded, "apply", "-f", document_path) == 0
+        assert run(*seeded, "apply", "--no-reload", "-f", document_path) == 0
         # A deployment that can be started, which an empty database also
         # is and a store holding agents and nothing bound to one is not.
         # The rebuild has to reach a server that boots, so what it puts
@@ -1450,7 +1506,7 @@ def test_a_deployment_is_rebuilt_from_its_export_on_an_empty_database(
 
         path = tmp_path / "exported.yaml"
         path.write_text(exported, encoding="utf-8")
-        assert run(*rebuilt, "apply", "-f", str(path)) == 0
+        assert run(*rebuilt, "apply", "--no-reload", "-f", str(path)) == 0
         outcomes = [line.split(": ")[-1] for line in capsys.readouterr().out.splitlines()]
         # Every entry the document names was written, the default agent
         # included, because the store it landed in was empty: an
@@ -1528,7 +1584,7 @@ def test_a_pre_cutover_export_applies_into_an_empty_postgres_database(
 
         path = tmp_path / "kept.yaml"
         path.write_text(kept, encoding="utf-8")
-        assert run(*rebuilt, "apply", "-f", str(path)) == 0
+        assert run(*rebuilt, "apply", "--no-reload", "-f", str(path)) == 0
         outcomes = [line.split(": ")[-1] for line in capsys.readouterr().out.splitlines()]
         assert outcomes and set(outcomes) == {"wrote"}
 
@@ -1986,6 +2042,10 @@ def test_a_large_document_is_waited_out_however_long_it_takes(
     took longer than that bound, does not. (Each command builds a client
     of its own and closes it, so what the two share is the server and
     the code that talks to it, not one open connection.)
+
+    Staged, so that what is timed is the one request the bound is about:
+    a reload behind it would put a second, differently bounded request
+    into the same wall clock.
     """
     entries = APPLY_LIMIT - 1
     many = {f"agent-{number:03d}": {"prompt": "You are one of many."} for number in range(entries)}
@@ -1993,7 +2053,9 @@ def test_a_large_document_is_waited_out_however_long_it_takes(
     monkeypatch.setattr(cli, "COMMANDS", impatient(("show",), IMPATIENT_S))
 
     started = time.monotonic()
-    assert run("apply", "-f", document_path, "--api-url", isolated.api_url) == 0
+    assert run(
+        "apply", "--no-reload", "-f", document_path, "--api-url", isolated.api_url
+    ) == 0
     took = time.monotonic() - started
 
     applied = capsys.readouterr()
@@ -2074,6 +2136,14 @@ def test_an_over_limit_document_is_refused_with_the_store_unmutated(
 # environment, which is the documented remote shape, and the working
 # directory is `vinga-server/`, which is where the recipes say to run
 # them from.
+#
+# The presets are the one exception, and it is in their test's name.
+# Since #341 applying a preset installs it, and installing a preset
+# means building what it names: a local stack downloads speech models
+# and dials an Ollama nobody is running here. So the presets are staged
+# rather than applied, which is a claim about the document rather than
+# about the deployment it describes, and the name says which of the two
+# is being made.
 
 # Where the example fragments and the presets are, which is the
 # directory every recipe's `-f examples/...` is relative to.
@@ -2083,33 +2153,41 @@ PRESETS = sorted((SERVER / "examples" / docgen.PRESET_DIR).glob("*.yaml"))
 
 
 @pytest.mark.parametrize("preset", PRESETS, ids=[path.stem for path in PRESETS])
-def test_a_preset_applies_onto_an_empty_store(
+def test_a_preset_stages_onto_an_empty_store(
     live: Live,
     isolated: Live,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     preset: Path,
 ) -> None:
-    """One preset, applied to a server that booted on nothing.
+    """One preset, written to a server that booted on nothing.
 
-    That is the whole claim a preset makes: it is what an operator runs
-    first, before there is anything for a reference to resolve against,
-    so every entry it names has to arrive in one transaction and the
-    document has to be complete enough to leave a store that reads back.
+    That is the whole claim a preset makes as a document: it is what an
+    operator runs first, before there is anything for a reference to
+    resolve against, so every entry it names has to arrive in one
+    transaction and the document has to be complete enough to leave a
+    store that reads back.
 
-    Applied twice, because the second half of the claim is that applying
+    Written twice, because the second half of the claim is that applying
     is idempotent: the same document again reports every entry unchanged
     and writes nothing, which is what makes a preset safe to keep in
     version control and re-run.
+
+    `--no-reload`, which is the one way this is not the command the
+    documentation prints. An operator applying a preset installs it, and
+    installing one means building the engines it names: the local stack
+    downloads its speech models and dials an Ollama, and neither is a
+    thing this lane may make a test depend on. The half that is dropped
+    is exercised on a document of this lane's own, further up.
     """
     monkeypatch.chdir(SERVER)
     monkeypatch.setenv(cli.API_URL_ENV, isolated.api_url)
 
-    assert run("apply", "-f", str(preset.relative_to(SERVER))) == 0
+    assert run("apply", "--no-reload", "-f", str(preset.relative_to(SERVER))) == 0
     first = [line.split(": ")[-1] for line in capsys.readouterr().out.splitlines()]
     assert first and set(first) == {"wrote"}
 
-    assert run("apply", "-f", str(preset.relative_to(SERVER))) == 0
+    assert run("apply", "--no-reload", "-f", str(preset.relative_to(SERVER))) == 0
     again = [line.split(": ")[-1] for line in capsys.readouterr().out.splitlines()]
     assert again == ["unchanged"] * len(first)
 
@@ -2121,6 +2199,14 @@ def test_a_preset_applies_onto_an_empty_store(
     assert shown["agents"].keys() >= written_document["agents"].keys()
     for stage, entries in written_document["providers"].items():
         assert shown["providers"][stage].keys() >= entries.keys()
+
+
+def _staged(argv: list[str]) -> list[str]:
+    """One published command line, with an apply staged rather than
+    installed. Everything else is run exactly as it is published."""
+    if argv[:1] != ["apply"]:
+        return argv
+    return [argv[0], "--no-reload", *argv[1:]]
 
 
 def test_every_published_recipe_runs_against_the_server(
@@ -2143,6 +2229,14 @@ def test_every_published_recipe_runs_against_the_server(
     The credentials the secrets recipe stores are read from stdin, which
     is where those commands read them from and the reason none of them
     takes the value as an argument.
+
+    One departure from verbatim, and it is the preset test's: an apply
+    is staged. A published preset is applied and installed by the
+    operator who runs it, and installing a preset builds what it names,
+    which here is a cloud stack whose credentials the recipe stores two
+    lines later and a local stack whose models are a download. The words
+    that are being checked are the recipe's own, so the staging is added
+    where the run happens rather than published into the document.
     """
     monkeypatch.chdir(SERVER)
     monkeypatch.setenv(cli.API_URL_ENV, isolated.api_url)
@@ -2157,7 +2251,7 @@ def test_every_published_recipe_runs_against_the_server(
     for line in published:
         argv = line.split()
         secret = argv[1:3] == ["secret", "set"]
-        assert run(*argv, stdin=SECRET if secret else None) == 0, line
+        assert run(*_staged(argv), stdin=SECRET if secret else None) == 0, line
         assert capsys.readouterr().out.strip(), line
 
     # The deployment those commands add up to, read back through the
