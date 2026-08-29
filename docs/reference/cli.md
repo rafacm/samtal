@@ -326,11 +326,22 @@ vinga-server config list
 ## Writing a whole deployment at once
 
 `apply` takes one document holding any number of entities and settings,
-and writes all of it in one transaction:
+writes all of it in one transaction, and applies it to the running
+server:
 
 ```bash
 vinga-server config apply -f examples/presets/local-stack.yaml
 ```
+
+The second half of that is what the verb's name promises, and it is a
+second request: the write, and then the reload that installs it, whose
+listing is printed under the outcomes. `--no-reload` writes the document
+and stops there, for the two cases where the halves belong apart, a
+rebuild whose credentials arrive after the document and a change an
+operator wants to install at a moment of their own choosing. A write
+that committed whose reload then failed says so and no more: what the
+running server ended up serving is not knowable from the client, so the
+sentence sends you to `diff` and then `reload`.
 
 The document's top-level keys are the sections of the domain
 configuration, the entity bodies are exactly the fragments `set` takes,
@@ -374,7 +385,9 @@ therefore waits for the answer however long it takes. The connect
 timeout stays bounded, because a server that is not there must still say
 so quickly. What remains is the connection dying mid-wait, which is the
 exposure every write already has, and the recovery is the same one: read
-the store back with `export` or `show`.
+the store back with `export` or `show`. The reload behind the write is a
+request of its own and carries the bound `reload` carries, sixty
+seconds, which is the server's own envelope with room to spare.
 
 ## Reading it back out
 
@@ -392,18 +405,22 @@ vinga-server config agent export assistant > assistant.yaml
 A credential never travels in a read, so an exported document does not
 carry one. What it carries instead is the `secret set` command that
 enters each stored credential, as comment lines at the foot of the file.
-Reproducing a deployment is therefore two steps, in this order:
+Reproducing a deployment is therefore three steps, in this order, which
+is the order the export's own header names:
 
 ```bash
-vinga-server config apply -f deployment.yaml
+vinga-server config apply --no-reload -f deployment.yaml
 # then the secret set commands the export listed, one per stored slot
+vinga-server config reload
 ```
 
 That order is not a nicety. A masked value is not something a creating
 write would accept, so an export that injected masks into the bodies
 would fail to apply onto an empty store, which is the one place an
 export most has to work; and a secret set addresses an entity, so it
-cannot run before the entity exists.
+cannot run before the entity exists. The staging is the same argument
+once more: a reload builds the engines the document names, and their
+credentials are the step after it.
 
 ## When the server will not start
 
@@ -438,12 +455,16 @@ psql "$ADMIN_URL" -f deploy/postgres-init.sql
 # 4. Start it again, which migrates from nothing and boots clean.
 docker run -d --name vinga ...
 
-# 5. Put the configuration back.
-vinga-server config apply -f deployment.yaml
+# 5. Put the configuration back, staged: the engines it names are
+#    built at the reload in step 7, and their credentials are step 6.
+vinga-server config apply --no-reload -f deployment.yaml
 
 # 6. Re-enter each stored credential, one per secret set command the
 #    export listed at the foot of that file.
 vinga-server config provider secret set -- llm claude api_key
+
+# 7. Install what was put back.
+vinga-server config reload
 ```
 
 **The domain schema alone, when the record is worth keeping.** A dropped
@@ -497,9 +518,10 @@ vinga-server config export > deployment.yaml
 # 3. Roll the image, which migrates from nothing on first boot.
 
 # 4. Put the configuration back and re-enter each stored credential,
-#    exactly as in steps 5 and 6 above.
-vinga-server config apply -f deployment.yaml
+#    exactly as in steps 5, 6 and 7 above.
+vinga-server config apply --no-reload -f deployment.yaml
 vinga-server config provider secret set -- llm claude api_key
+vinga-server config reload
 ```
 
 **The conversation record does not come across, and nothing pretends
@@ -665,10 +687,11 @@ Commands:
                    running server's version and revision, the URL to type into a
                    device's captive portal, and how much of each kind is
                    configured
-  apply            write a whole document in one transaction, refused whole if
-                   anything in it will not resolve; additive, never deleting,
-                   and waiting for the server's answer however long the
-                   transaction takes
+  apply            write a whole document in one transaction and apply it to the
+                   running server, refused whole if anything in it will not
+                   resolve; additive, never deleting, and waiting for the
+                   write's answer however long the transaction takes; or write
+                   it without applying, with --no-reload
   list             a summary tree
   show             print the whole stored configuration, with its stored secrets
                    masked
@@ -1893,14 +1916,18 @@ Options:
 ```
 Usage: vinga apply [OPTIONS]
 
-  write a whole document in one transaction, refused whole if anything in it
-  will not resolve; additive, never deleting, and waiting for the server's
-  answer however long the transaction takes
+  write a whole document in one transaction and apply it to the running server,
+  refused whole if anything in it will not resolve; additive, never deleting,
+  and waiting for the write's answer however long the transaction takes; or
+  write it without applying, with --no-reload
 
 Options:
   -f, --file PATH  YAML document to apply, or - to read it from stdin: the
                    sections of the domain configuration, with the entities in
                    each written as they are for set  [required]
+  --no-reload      write the document and stop there, leaving the running server
+                   on what it is already serving until a `vinga reload`
+                   (default: write it, then reload)
   --config PATH    path to the YAML config file naming server.port and
                    server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL    base URL of the configuration API (default: $VINGA_API_URL,

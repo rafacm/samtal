@@ -5775,7 +5775,7 @@ COMMANDS: tuple[Command, ...] = (
             "write a whole document in one transaction and apply it to the running "
             "server, refused whole if anything in it will not resolve; additive, "
             "never deleting, and waiting for the write's answer however long the "
-            "transaction takes. --no-reload stages the write instead"
+            "transaction takes; or write it without applying, with --no-reload"
         ),
     ),
     Command(words=("list",), does=LIST, declare=_plain, help="a summary tree"),

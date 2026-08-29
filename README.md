@@ -115,11 +115,9 @@ vinga apply -f local-stack.yaml
 # Which agent an unknown device reaches. Bind specific devices instead
 # with: vinga device bind aa:bb:cc:dd:ee:ff assistant
 vinga default-agent set assistant
-
-vinga reload
 ```
 
-A write is stored, not yet in effect; `reload` builds the engines and serves them, without a restart and without dropping a conversation ([how](vinga-server/README.md#applying-a-change-without-a-restart)). The first one downloads the speech models onto the data volume, so it takes a few minutes; later ones take seconds. [`vinga-server/examples/presets/`](vinga-server/examples/presets/) holds the same deployment on vendor APIs, [`vinga-server/examples/`](vinga-server/examples/) a commented fragment per entity to copy from, and every field of them is documented in [`docs/reference/domain-config.md`](docs/reference/domain-config.md).
+`apply` writes the document and applies it: the engines are built and served without a restart and without dropping a conversation ([how](vinga-server/README.md#applying-a-change-without-a-restart)), which the first run spends a few minutes on because it downloads the speech models onto the data volume; later ones take seconds. `--no-reload` writes without applying, for the case where the two belong apart, and `vinga reload` is then the step that installs. The default agent needs neither: it is read as a device asks for it. [`vinga-server/examples/presets/`](vinga-server/examples/presets/) holds the same deployment on vendor APIs, [`vinga-server/examples/`](vinga-server/examples/) a commented fragment per entity to copy from, and every field of them is documented in [`docs/reference/domain-config.md`](docs/reference/domain-config.md).
 
 **4. Flash** the prebuilt xiaozhi merged binary for your board at offset `0x0`. Every serial gotcha is in [`docs/devices/README.md`](docs/devices/README.md#driving-a-board-from-a-terminal-session).
 

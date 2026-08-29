@@ -624,6 +624,34 @@ entities is waiting on one reload, not nine.
 finds out at the next field test that the board is still speaking in the
 old voice, and has no way to know whether that is a bug or a boundary.
 
+**A verb does what its name says, and the exception is the one that is
+spelled** (#341). `apply` used to write the document and stop, so every
+operator learned to type `reload` after it and the ones who did not left
+a deployment serving what it had before. Applying a configuration means
+installing it, so the verb does both, and the other thing (write it now,
+install it later) is `--no-reload`, named for what it turns off. The
+rule this is an instance of: when a verb's plain meaning and what it
+does come apart, move the command rather than the reader, and give the
+narrower behavior a flag rather than giving the wider one a second verb.
+
+Two consequences follow, and both are the practice above applied to a
+command that is now two acts. The write's boundary notice is printed
+under `--no-reload` and dropped under the default, because the reload's
+own listing is on the next line and a sentence telling the operator to
+run it would be telling them to run what they are reading. And a write
+that committed whose reload did not answer says exactly that, and no
+more: it does not say "stored but not applied", because it cannot know.
+A 409 means another reload is running and re-read the store on one side
+or the other of this commit; a transport failure is ambiguous because a
+reload outlives the connection that asked for it. So the sentence claims
+the two things the client saw and sends the operator to `vinga diff`,
+which does know, and then to `vinga reload`.
+
+**Counterexample, merged and retired.** `apply` as a pure write. It read
+as the whole of the operation to everybody who typed it, which is what
+made "and now reload" a step people were told about rather than one they
+could infer.
+
 ### A credential is never an argument, and never travels in a read
 
 **Example.** A `secret set` reads the value from stdin, without echo
@@ -855,6 +883,13 @@ transaction validates the whole resulting configuration, whose size
 nothing about the request bounds, so no finite number can be derived
 that would not sometimes expire on a transaction the server goes on to
 commit, which is the one outcome every timeout here exists to prevent.
+
+A bound belongs to the endpoint rather than to the command that reached
+it, which is what a two-act command makes visible: the write of a
+default `apply` waits without a bound and the reload behind it waits the
+same sixty `reload` does, on its own request. Neither inherits the
+other, so the unbounded one does not quietly become this command's
+answer to a reload that stopped answering.
 
 **Counterexample, merged as a rejected default.** Leaving the HTTP
 library's five-second default in place. It is below the database's busy
