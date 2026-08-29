@@ -294,6 +294,7 @@ A verb with no noun in front of it is one that acts on the whole
 deployment, or on nothing stored at all. Those stay at the top level.
 
 ```bash
+vinga info
 vinga apply -f deployment.yaml
 vinga export > deployment.yaml
 vinga reload
@@ -301,7 +302,7 @@ vinga schema provider asr faster_whisper
 vinga ota-url
 ```
 
-Two groups, for two reasons. `apply`, `export`, `reload` and the
+Two groups, for two reasons. `info`, `apply`, `export`, `reload` and the
 reserved `diff` (#193) act on the configuration as a whole: their
 subject is the deployment, and inventing a noun to put in front of them
 would be inventing a word (`deployment apply`) that names the thing the
@@ -309,6 +310,15 @@ program is already about. `schema`, `reference`, `openapi`,
 `cli-reference` and `ota-url` render a document out of the models, the
 routes, the command tree or the file half, and reach no database, no
 key and no server at all; they have no stored subject to be a verb of.
+
+`info` (#341) is in the first group and is the clearest case of what
+puts a word there. What it answers is which deployment this is: the
+address the CLI reached, the version and revision of the build that
+answered, the URL a board is onboarded at, and a count per kind. Every
+one of those is a fact of the whole, so a noun in front of it
+(`deployment info`, `server info`) would name the thing the program is
+already about, and there is no per-entity form of the question for a
+noun to be earned by.
 
 A verb that has both a whole-deployment form and a per-entity form
 keeps the flat spelling for the whole and moves under the noun for the
@@ -601,6 +611,43 @@ right.
 api_key=sk-...`, which is refused by the shape of the key whichever way
 the entity was written. Arguments land in shell history and in the
 process list, where a value cannot be taken back.
+
+**Two recorded exceptions, and they are the same value twice.** The
+onboarding URL ends in a key derived from the device-auth secret, and
+that key stands in front of the endpoint that issues device tokens, so
+it is a credential by this page's own definition. It is nevertheless
+printed, because a URL nobody can be told is a URL nobody can type into
+a captive portal, and the whole point of it is that it is short enough
+to type. Both exceptions are recorded rather than assumed, and each
+carries the design that makes it safe.
+
+- **`vinga ota-url`** derives it locally and prints it. It contacts
+  nothing, so there is no connection for it to cross: it reads the file
+  half and the device-auth secret the server itself reads, on the host
+  the server runs on. The URL goes to stdout alone and the provenance to
+  stderr, so a capture gets the value and nothing else, and it is
+  deliberately not what the startup banner prints, since a banner is a
+  retained record shipped to whatever collects logs.
+- **`vinga info`** reads it back over the API (#341), which is what
+  makes a deployment administrable from somewhere other than its own
+  host. That one is a credential travelling in a read and is designed as
+  one: the route sits behind the same bearer gate every secret write
+  does, so it widens nothing a caller does not already hold; the answer
+  carries `Cache-Control: no-store`, so nothing between the two ends
+  retains it; the transport policy already refuses plain HTTP to
+  anything but a loopback address; and the value is rendered to stdout
+  alone, appearing in no notice, no refusal, no log record and no
+  exception chain. Each of those is a test rather than a sentence
+  (`tests/unit/test_config_cli_info.py`), with the URL derived from a
+  real device-auth secret so that what is hunted for is what a
+  deployment would really serve.
+
+What the pair does **not** license is a read that answers a stored
+provider credential. Those have no counterpart to the argument above:
+nobody types one into a portal, an `export` carries the command to set
+one rather than the value, and a read masks with a fixed eight
+characters. A third exception would need its own case made here, in
+the same shape.
 
 ### One machine-readable shape, and it is the document `apply` takes
 

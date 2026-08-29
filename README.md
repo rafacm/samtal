@@ -123,14 +123,16 @@ A write is stored, not yet in effect; `reload` builds the engines and serves the
 
 **4. Flash** the prebuilt xiaozhi merged binary for your board at offset `0x0`. Every serial gotcha is in [`docs/devices/README.md`](docs/devices/README.md#driving-a-board-from-a-terminal-session).
 
-**5. Get the URL to type.** This step runs where the server is, because the URL is derived from the file half and the device-auth secret, which live with the server rather than with the client. Run it from the directory step 1 made, which is where the compose file names the service.
+**5. Get the URL to type.** The server derives it from the file half and the device-auth secret, and answers it over the API along with which build is running, so this runs from the directory step 1 made like everything else.
 
 ```bash
-docker compose exec vinga vinga-server config ota-url
+vinga info
+# ...
+# the URL to type into a device's captive portal, from server.public_url:
 # http://192.168.1.10:8003/x/AB2C4D5E/
 ```
 
-The key at the end is derived from the device-auth secret, so a trial that turned device authentication off in step 1 has none and the URL ends at `/x/`; it serves the same activation flow either way. No `--profile` is needed once the stack is up: the profile decides what starts, and this reaches a service that is already running. `docker compose exec vinga vinga-server doctor` says what a device would be told on that URL, or what is wrong. No cable is involved in either; the whole cable-free story is [Onboarding a device](vinga-server/README.md#onboarding-a-device).
+The key at the end is derived from the device-auth secret, so a trial that turned device authentication off in step 1 has none and the URL ends at `/x/`; it serves the same activation flow either way. That key is why the read is behind the same token every other one is: it stands in front of the endpoint that issues device tokens, which is also why the server's own startup line names the origin without it. `docker compose exec vinga vinga-server doctor` says what a device would be told on that URL, or what is wrong, and runs where the server is because that is what it checks; no `--profile` is needed once the stack is up, since the profile decides what starts and this reaches a service that is already running. No cable is involved in any of it; the whole cable-free story is [Onboarding a device](vinga-server/README.md#onboarding-a-device).
 
 **6. Provision WiFi and give the board that URL.** How the URL gets there depends on the image your board runs, so start from your board's guide in [`docs/devices/`](docs/devices/README.md), which says which button brings its portal up and also covers its wake word, its display, and the rest of its controls. Where the image's captive portal carries a Custom OTA URL field in its advanced section, that is the whole step and no cable is needed: join the board's access point and enter your WiFi and the URL together. Where it does not, and the Touch-LCD-1.54 image tested here is one that does not, write the URL into the board's NVS over USB first, by [the procedure on the common page](docs/devices/README.md#writing-the-servers-address-into-nvs), then provision WiFi from the portal.
 

@@ -293,7 +293,8 @@ practice). The route's response-header pin covers
 
 ## Milestones
 
-- [ ] M1: `vinga info`. The `/api/runtime/info` route fed through
+- [x] [M1: `vinga info`](2026-08-29-vinga-info-cli-polish-implementation.md#m1-vinga-info)
+  (PR TBD). The `/api/runtime/info` route fed through
   `ApiRuntime`, the two-act `info` row with banner and counts render,
   OpenAPI description page, generated references, live-lane drive,
   cli-guide's flat-verbs section gains `info`.
