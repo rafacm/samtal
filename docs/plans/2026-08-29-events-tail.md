@@ -115,9 +115,20 @@ nothing off the host; the JSON log's `ts` is likewise the formatter's,
 not the payload's, so the stream is consistent with the retained
 surface rather than novel. Filters (`device`, `session`, `level` as a
 minimum threshold) are applied at enqueue against the payload's own
-identity fields; an event carrying neither key passes a device or
-session filter only when no filter is set for it, so a device-filtered
-tail shows that device's traffic and not the server's whole life. The
+identity fields, and the query contract is complete rather than
+implied. `device` accepts the MAC in any case with any of the usual
+separators and canonicalizes to the lowercase-colon form the events
+carry; `session` must be the hex id shape a listing prints, and an
+invalid value of either refuses with the fixed sentence naming the
+rule, echoing nothing back. `level` is one of DEBUG, INFO, WARNING,
+ERROR, case-insensitive, and defaults to INFO: the tap hears
+emissions before any logger threshold, and a default that admitted
+DEBUG would stream events the retained log itself would not carry.
+The CLI exposes `--level` alongside `--device` and `--session`, the
+same words as the query. An event carrying no device or session key
+passes such a filter only when no filter is set for it, so a
+device-filtered tail shows that device's traffic and not the
+server's whole life. The
 dropped count rides the stream in-band as its own SSE event named
 `dropped`, carrying how many were overwritten since the last delivery,
 so a UI and the CLI render it the same way and silence never means
