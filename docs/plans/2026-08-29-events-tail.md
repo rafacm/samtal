@@ -35,8 +35,15 @@ fed from the event tap, not from a store."
 
 **SSE, and not a websocket, and not polling.** Server-Sent Events over
 a plain HTTP GET (`text/event-stream` via a streaming response). Three
-reasons. First, the reuse constraint: EventSource consumes it with no
-library, so the admin UI's live view is this exact route. Second, the
+reasons. First, the reuse constraint, stated precisely: native
+EventSource cannot set an Authorization header, so the admin UI
+consumes this exact route with `fetch()` streaming (reading the same
+SSE body through a stream reader, a dozen lines and no library), and
+a token never rides a query string, because URLs are retained
+everywhere. The SSE wire format is still the right one: it keeps the
+route consumable by native EventSource the day a same-origin
+authenticated front end exists, and it costs the fetch reader
+nothing today. Second, the
 auth boundary: the API's bearer check is ASGI middleware that guards
 `http` scopes and deliberately passes other scope types through
 because the application declares none of them, so a websocket under
@@ -247,6 +254,10 @@ amended below with resolutions.
    a query-string token is unacceptable because URLs are retained.
    Reconcile explicitly: fetch() streaming in the browser, or a
    same-origin auth mechanism.
+
+   *Resolution*: adopted: the browser story is fetch() streaming of
+   the same SSE body, no query-string token ever, with EventSource
+   named as what the format keeps possible rather than what ships.
 
 2. **P1: `--follow` has no defined behavior.** Define when the
    command exits in both modes, and unexpected EOF under `--follow`
