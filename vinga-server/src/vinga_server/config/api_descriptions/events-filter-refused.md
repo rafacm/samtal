@@ -1,0 +1,1 @@
+One of the three filters could not be read: `device` has to be a MAC address, `session` a session's uuid hex, and `level` one of the four level names in any case. Nothing sent is quoted back, here or in the server's log. This read addresses nothing and carries no body, so it has no other 422.

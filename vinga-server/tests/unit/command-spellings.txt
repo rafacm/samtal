@@ -646,12 +646,26 @@ docs/plans/2026-08-29-vinga-info-cli-polish.md:407  historical  vinga info
 docs/plans/2026-08-29-vinga-info-cli-polish.md:423  historical  vinga status
 docs/plans/2026-08-29-vinga-info-cli-polish.md:424  historical  vinga mcp-server status
 docs/reference/api-openapi.json:5  generated  vinga schema provider
-docs/reference/api-openapi.json:4957  generated  vinga ota-url
-docs/reference/api-openapi.json:5906  generated  vinga provider secret set
-docs/reference/api-openapi.json:6027  generated  vinga agent preview
-docs/reference/api-openapi.json:6059  generated  vinga agent preview
-docs/reference/api-openapi.json:6102  generated  vinga status
-docs/reference/api-openapi.json:6126  generated  vinga status
+docs/reference/api-openapi.json:5056  generated  vinga ota-url
+docs/reference/api-openapi.json:6005  generated  vinga provider secret set
+docs/reference/api-openapi.json:6126  generated  vinga agent preview
+docs/reference/api-openapi.json:6158  generated  vinga agent preview
+docs/reference/api-openapi.json:6201  generated  vinga status
+docs/reference/api-openapi.json:6225  generated  vinga status
+docs/reference/api-openapi.json:5  generated  vinga schema provider
+docs/reference/api-openapi.json:5056  generated  vinga ota-url
+docs/reference/api-openapi.json:6005  generated  vinga provider secret set
+docs/reference/api-openapi.json:6126  generated  vinga agent preview
+docs/reference/api-openapi.json:6158  generated  vinga agent preview
+docs/reference/api-openapi.json:6201  generated  vinga status
+docs/reference/api-openapi.json:6225  generated  vinga status
+docs/reference/api-openapi.json:5  generated  vinga schema provider
+docs/reference/api-openapi.json:5056  generated  vinga ota-url
+docs/reference/api-openapi.json:6005  generated  vinga provider secret set
+docs/reference/api-openapi.json:6126  generated  vinga agent preview
+docs/reference/api-openapi.json:6158  generated  vinga agent preview
+docs/reference/api-openapi.json:6201  generated  vinga status
+docs/reference/api-openapi.json:6225  generated  vinga status
 docs/reference/cli.md:39  respell  vinga provider set llm local
 docs/reference/cli.md:40  respell  vinga-server config provider set llm local
 docs/reference/cli.md:61  respell  vinga config list
@@ -993,11 +1007,21 @@ vinga-server/examples/vad-silero.yaml:5  respell  vinga provider set vad silero
 vinga-server/pyproject.toml:84  respell  vinga simulator run
 vinga-server/pyproject.toml:165  respell  config cli-reference
 vinga-server/pyproject.toml:181  respell  vinga simulator run
-vinga-server/src/vinga_server/app.py:782  respell  vinga-server config ota-url
-vinga-server/src/vinga_server/config/api.py:414  respell  vinga-server config device pending list
-vinga-server/src/vinga_server/config/api.py:433  respell  vinga-server config list
-vinga-server/src/vinga_server/config/api.py:533  respell  vinga-server config reload
-vinga-server/src/vinga_server/config/api.py:534  respell  vinga-server config list
+vinga-server/src/vinga_server/app.py:805  respell  vinga-server config ota-url
+vinga-server/src/vinga_server/app.py:805  respell  vinga-server config ota-url
+vinga-server/src/vinga_server/app.py:805  respell  vinga-server config ota-url
+vinga-server/src/vinga_server/config/api.py:426  respell  vinga-server config device pending list
+vinga-server/src/vinga_server/config/api.py:445  respell  vinga-server config list
+vinga-server/src/vinga_server/config/api.py:545  respell  vinga-server config reload
+vinga-server/src/vinga_server/config/api.py:546  respell  vinga-server config list
+vinga-server/src/vinga_server/config/api.py:426  respell  vinga-server config device pending list
+vinga-server/src/vinga_server/config/api.py:445  respell  vinga-server config list
+vinga-server/src/vinga_server/config/api.py:545  respell  vinga-server config reload
+vinga-server/src/vinga_server/config/api.py:546  respell  vinga-server config list
+vinga-server/src/vinga_server/config/api.py:426  respell  vinga-server config device pending list
+vinga-server/src/vinga_server/config/api.py:445  respell  vinga-server config list
+vinga-server/src/vinga_server/config/api.py:545  respell  vinga-server config reload
+vinga-server/src/vinga_server/config/api.py:546  respell  vinga-server config list
 vinga-server/src/vinga_server/config/cli.py:430  respell  vinga list
 vinga-server/src/vinga_server/config/cli.py:2411  respell  vinga list
 vinga-server/src/vinga_server/config/cli.py:2443  respell  config list
@@ -1021,7 +1045,7 @@ vinga-server/src/vinga_server/conversations/api.py:122  respell  vinga session s
 vinga-server/src/vinga_server/conversations/api.py:123  respell  vinga conversation show
 vinga-server/src/vinga_server/conversations/docgen.py:243  respell  vinga session delete
 vinga-server/src/vinga_server/conversations/docgen.py:243  respell  vinga session
-vinga-server/src/vinga_server/device/session.py:731  respell  config schema
+vinga-server/src/vinga_server/device/session.py:775  respell  config schema
 vinga-server/src/vinga_server/device_endpoint.py:5  respell  vinga simulator
 vinga-server/src/vinga_server/doctor.py:29  respell  vinga simulator
 vinga-server/src/vinga_server/doctor.py:183  respell  vinga-server config ota-url
@@ -1107,7 +1131,7 @@ vinga-server/tests/unit/data/cli-respelling.txt:302  historical  vinga-server co
 vinga-server/tests/unit/data/cli-respelling.txt:310  historical  vinga-server config reload
 vinga-server/tests/unit/data/cli-respelling.txt:316  historical  vinga-server config apply
 vinga-server/tests/unit/data/cli-respelling.txt:318  historical  vinga-server config apply
-vinga-server/tests/unit/test_api_contract.py:314  respell  vinga simulator
+vinga-server/tests/unit/test_api_contract.py:321  respell  vinga simulator
 vinga-server/tests/unit/test_api_openapi.py:38  respell  vinga-server config openapi
 vinga-server/tests/unit/test_cli_import_weight.py:52  respell  vinga simulator
 vinga-server/tests/unit/test_command_spellings.py:140  historical  bind-device
