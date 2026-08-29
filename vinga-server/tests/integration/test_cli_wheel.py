@@ -547,7 +547,7 @@ def test_the_running_server_is_read_after_a_reload(run) -> None:
     assert "The bins go out on Tuesday." in previewed
 
     assert "applies at " in answered(run("diff"), "diff")
-    assert "house" in answered(run("status"), "status")
+    assert "house" in answered(run("mcp-server", "status"), "mcp-server", "status")
 
     # And the read that says which deployment answered at all. From the
     # installed binary it is also a packaging claim: the response model

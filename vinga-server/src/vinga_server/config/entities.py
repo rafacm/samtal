@@ -531,7 +531,7 @@ NESTED: tuple[NestedShape, ...] = (
             "nothing else, so an agent can switch the lights without being able to "
             "unlock the door. Tools are named by the published name without the "
             "entry prefix (`turn_on_light` for `home__turn_on_light`), which is what "
-            f"`{PROGRAM} status` prints and what the model calls."
+            f"`{PROGRAM} mcp-server status` prints and what the model calls."
         ),
         notes=(
             "There is no deny list, deliberately. A denied set fails open: a server "

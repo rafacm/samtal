@@ -5416,6 +5416,29 @@ COMMANDS: tuple[Command, ...] = (
         help="remove a stored credential from mcp_servers.<name>",
         destroys=True,
     ),
+    # The read of the running server that belongs to the MCP entries:
+    # what is stored is `mcp-server show`, and what each entry is doing
+    # right now is this. A read of the process rather than of the
+    # database, so there is no state to report when there is no server
+    # to ask.
+    #
+    # Under the noun since #341, where it always belonged: it is a verb
+    # of the MCP servers and of nothing else, so the flat spelling put a
+    # per-noun read at the top level, next to the verbs whose subject is
+    # the whole deployment. The word is unchanged and there is no alias,
+    # which is the pre-release stance: a board is reflashable and a
+    # deployment is this repository's own.
+    Command(
+        words=("mcp-server", "status"),
+        kind="mcp-server",
+        does=STATUS,
+        declare=_plain,
+        help=(
+            "what each configured MCP server is doing on the running server: connected, "
+            "down, or unused because no agent references it, since when, and which "
+            "tools it published"
+        ),
+    ),
     # The read of the running server that belongs to one agent: what is
     # stored is `agent show`, and what a new session would be sent is
     # this. A verb rather than the noun `prompt`, because a noun in the
@@ -5627,18 +5650,6 @@ COMMANDS: tuple[Command, ...] = (
             "sessions themselves are left with a gap rather than deleted"
         ),
         destroys=True,
-    ),
-    # A read of the running server rather than of the database: there is
-    # no state to report when there is no server to ask.
-    Command(
-        words=("status",),
-        does=STATUS,
-        declare=_plain,
-        help=(
-            "what each configured MCP server is doing on the running server: connected, "
-            "down, or unused because no agent references it, since when, and which "
-            "tools it published"
-        ),
     ),
     # The one command that changes what the server is doing rather than
     # what is stored, which is why it is a verb of its own rather than a

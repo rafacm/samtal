@@ -869,7 +869,7 @@ def test_the_running_server_is_read_after_a_reload(
     assert "providers: applies at reload" in compared
     assert "devices: applies at check-in" in compared
 
-    assert run("status") == 0
+    assert run("mcp-server", "status") == 0
     running = capsys.readouterr().out
     # Configured, and connected for nobody: no agent grants either
     # entry, so the reload started nothing and both are reported as the
@@ -1727,7 +1727,6 @@ REFUSALS: tuple[Refusal, ...] = (
         "and a thread that lost every turn to an erasure was deleted with them.",
         True,
     ),
-    Refusal(("status",), ("status", "extra"), USAGE, False),
     Refusal(("reload",), ("reload", "extra"), USAGE, False),
     Refusal(
         ("ota-url",),

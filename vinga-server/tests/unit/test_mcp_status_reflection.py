@@ -13,7 +13,7 @@ to be.
 Both transports get a server that does it, over a real connection: a
 subprocess for stdio, an in-process uvicorn for HTTP. Each asserts the
 value reaches none of the three surfaces it could have: the status
-response, the `config status` output, and the log.
+response, the `config mcp-server status` output, and the log.
 
 What does cross, deliberately, is a name that publishes: the model has
 to be given it and an operator has to be able to write it down, and the
@@ -109,9 +109,9 @@ def cli_status(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> str:
-    """`vinga-server config status`, run the way the entry point runs
-    it against an application holding these managers, and everything it
-    printed on either stream."""
+    """`vinga-server config mcp-server status`, run the way the entry
+    point runs it against an application holding these managers, and
+    everything it printed on either stream."""
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
     monkeypatch.delenv(cli.API_URL_ENV, raising=False)
     monkeypatch.setenv(API_SECRET_ENV, TOKEN)
@@ -124,7 +124,7 @@ def cli_status(
         )
 
     monkeypatch.setattr(cli, "build_client", factory)
-    assert cli.main(["status"]) == 0
+    assert cli.main(["mcp-server", "status"]) == 0
     captured = capsys.readouterr()
     return captured.out + captured.err
 

@@ -645,7 +645,7 @@ async def test_an_allow_list_offers_only_the_tools_it_names() -> None:
 async def test_a_grant_names_the_published_name_after_sanitizing() -> None:
     """The stdio server lists `weather.today/v2`, which publishes as
     `tools__weather_today_v2`. The grant is written the way the operator
-    reads it off `config status`, and the raw listed name grants
+    reads it off `config mcp-server status`, and the raw listed name grants
     nothing: it is not a name anything on this side ever answers to."""
     config = config_with(
         {"tools": entry_data()},
@@ -1098,8 +1098,8 @@ async def test_a_connected_server_says_so_with_a_count_of_its_tools(
     assert connected.levelno == logging.INFO
     # A count, and no names in the line at all: half of a published name
     # is what the far side called its tool, and which names an entry
-    # published is answered by `vinga-server config status` rather than
-    # by the retained logs.
+    # published is answered by `vinga-server config mcp-server status`
+    # rather than by the retained logs.
     fields = fields_of(connected)
     assert isinstance(fields.pop("duration_ms"), int)
     assert fields == {

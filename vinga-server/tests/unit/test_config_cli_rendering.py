@@ -117,7 +117,7 @@ def _configured(servers: dict[str, object], grants: dict[str, list]) -> McpServe
 def test_status_says_so_when_nothing_is_configured(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert run("status") == 0
+    assert run("mcp-server", "status") == 0
 
     assert capsys.readouterr().out.startswith("this server has no MCP servers configured")
 
@@ -130,7 +130,7 @@ def test_status_shows_each_entry_its_state_and_who_may_reach_it(
         {"weather": entry, "shelved": entry}, {"sam": ["weather"]}
     )
 
-    assert run("status") == 0
+    assert run("mcp-server", "status") == 0
 
     printed = capsys.readouterr().out
     assert "weather: down since " in printed
@@ -153,7 +153,7 @@ def test_status_lists_the_agents_of_an_entry_in_name_order(
         {"home": entry}, {"kids": ["home"], "house": ["home"]}
     )
 
-    assert run("status") == 0
+    assert run("mcp-server", "status") == 0
 
     assert "  agents: house, kids" in capsys.readouterr().out
 
@@ -169,7 +169,7 @@ def test_status_shows_how_much_of_a_server_each_agent_gets(
         {"weather": entry}, {"sam": [{"server": "weather", "tools": ["forecast", "wind"]}]}
     )
 
-    assert run("status") == 0
+    assert run("mcp-server", "status") == 0
 
     assert "  agents: sam (forecast, wind)" in capsys.readouterr().out
 
@@ -182,7 +182,7 @@ def test_status_refuses_an_answer_it_cannot_read(
     had."""
     monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: {"weather": {"up": True}})
 
-    assert run("status") == 1
+    assert run("mcp-server", "status") == 1
 
     assert cli.UNRECOGNIZED_ANSWER in capsys.readouterr().err
 
@@ -232,7 +232,7 @@ def test_status_prints_nothing_from_an_answer_of_the_wrong_shape(
     is text nobody vouched for."""
     monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: body)
 
-    assert run("status") == 1
+    assert run("mcp-server", "status") == 1
 
     captured = capsys.readouterr()
     assert cli.UNRECOGNIZED_ANSWER in captured.err
@@ -248,7 +248,7 @@ def test_the_valid_shape_those_refusals_were_built_from_is_accepted(
     refusals about the replacement."""
     monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: {"weather": _status_entry()})
 
-    assert run("status") == 0
+    assert run("mcp-server", "status") == 0
 
     assert "weather: connected since 2026-08-13T09:12" in capsys.readouterr().out
 

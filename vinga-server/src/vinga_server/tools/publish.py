@@ -21,11 +21,12 @@ a server that was handed a credential of this deployment's can hand it
 back by listing a tool under it. So no name reaches a log line here,
 whether it published or not. The model is given the published ones
 because it has to be, and an operator reads them from
-`vinga-server config status`, in a terminal, on request; a log is
-shipped to whatever collects it and kept as long as that keeps things,
-which is a different thing to be. Every line below therefore says which
-tool it means by its position in the listing, a number this code
-counted, which identifies the tool without repeating a syllable of it.
+`vinga-server config mcp-server status`, in a terminal, on request; a
+log is shipped to whatever collects it and kept as long as that keeps
+things, which is a different thing to be. Every line below therefore
+says which tool it means by its position in the listing, a number this
+code counted, which identifies the tool without repeating a syllable of
+it.
 """
 
 import logging

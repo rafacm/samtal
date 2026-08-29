@@ -390,13 +390,13 @@ than all of it. An entry written as a plain string is the whole server; an
 entry written as this object is the tools it lists and nothing else, so an
 agent can switch the lights without being able to unlock the door. Tools are
 named by the published name without the entry prefix (`turn_on_light` for
-`home__turn_on_light`), which is what `vinga status` prints and what the model
-calls.
+`home__turn_on_light`), which is what `vinga mcp-server status` prints and
+what the model calls.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `server` | `str` | `required` | The MCP server this grant is about, by the name it is defined under in mcp_servers. |
-| `tools` | `list[str] \| null` | `null` | Which of that server's tools this layer may reach, by the published name without its entry prefix (turn_on_light for home__turn_on_light), which is the name `vinga status` shows. Leaving it out grants the whole server, exactly as naming the server as a plain string does. A name that matches nothing the server published is not an error at write time, since only a live connection knows the list; it is logged when the server publishes and visible under grants on the status surface. |
+| `tools` | `list[str] \| null` | `null` | Which of that server's tools this layer may reach, by the published name without its entry prefix (turn_on_light for home__turn_on_light), which is the name `vinga mcp-server status` shows. Leaving it out grants the whole server, exactly as naming the server as a plain string does. A name that matches nothing the server published is not an error at write time, since only a live connection knows the list; it is logged when the server publishes and visible under grants on the status surface. |
 
 There is no deny list, deliberately. A denied set fails open: a server that
 adds a tool would silently grant it to every agent that denied the old ones,

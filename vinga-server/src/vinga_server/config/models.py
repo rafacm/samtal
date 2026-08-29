@@ -1726,8 +1726,8 @@ class McpGrant(BaseModel):
     Tools are named by the published name without its entry prefix
     (`turn_on_light` grants `home__turn_on_light`), matched exactly. That
     identifier is this application's own: it has been through the
-    publishing rule, it is what `vinga status` shows and
-    what the model calls, so an operator writes down the name they read.
+    publishing rule, it is what `vinga mcp-server status` shows and what
+    the model calls, so an operator writes down the name they read.
     What a server listed before the rule got to it never appears on a
     vinga surface, and cannot be granted by.
     """
@@ -1757,7 +1757,7 @@ class McpGrant(BaseModel):
         description=(
             "Which of that server's tools this layer may reach, by the published name "
             "without its entry prefix (turn_on_light for home__turn_on_light), which "
-            f"is the name `{PROGRAM} status` shows. Leaving it out grants "
+            f"is the name `{PROGRAM} mcp-server status` shows. Leaving it out grants "
             "the whole server, exactly as naming the server as a plain string does. A "
             "name that matches nothing the server published is not an error at write "
             "time, since only a live connection knows the list; it is logged when the "
