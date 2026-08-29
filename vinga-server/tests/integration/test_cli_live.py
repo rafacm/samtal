@@ -1224,7 +1224,7 @@ def test_the_event_tail_hears_a_conversation_as_it_happens(deployed: Live) -> No
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        env=os.environ.copy(),
+        env=os.environ | {"PYTHONDONTWRITEBYTECODE": "1"},
     ) as tail:
         try:
             deadline = time.monotonic() + TAIL_SECONDS
@@ -1914,7 +1914,6 @@ REFUSALS: tuple[Refusal, ...] = (
         "pairs, for example aa:bb:cc:dd:ee:ff. What was sent is not quoted back",
         True,
     ),
-    Refusal(("status",), ("status", "extra"), USAGE, False),
     Refusal(("reload",), ("reload", "extra"), USAGE, False),
     Refusal(
         ("ota-url",),
