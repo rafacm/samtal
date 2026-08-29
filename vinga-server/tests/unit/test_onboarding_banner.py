@@ -14,6 +14,12 @@ of the endpoint that issues device tokens. `vinga-server config
 ota-url` prints it instead, to the operator's own terminal. The portal
 line on the OTA GET still carries the full URL, and may: it is served
 only to whoever already reached the path it names.
+
+The portal line has a fourth source the banner cannot have (#340): the
+address the request arrived on, which beats the listen-address guess and
+loses to anything configured. It is rebuilt from the request's parsed
+hostname and port rather than taken verbatim the way the websocket URL
+beside it is, because it is a URL printed for a person to type.
 """
 
 import logging
@@ -237,6 +243,99 @@ def test_an_unreadable_websocket_url_falls_back_instead_of_raising(
     assert "guessed from" in line
     assert "server.websocket_url could not be read" in line
     assert PASTED not in line
+
+
+def portal_line(response) -> str:
+    """The one line of the OTA GET that names the URL to type."""
+    lines = [
+        line for line in response.text.splitlines() if line.startswith("Type this into")
+    ]
+    assert lines, response.text
+    return lines[0]
+
+
+def test_with_no_origin_configured_the_line_is_the_address_that_asked() -> None:
+    """The bug this file's neighbour on the same reply never had (#340).
+
+    A default configuration listens on 0.0.0.0, so the banner's origin is
+    the listen address and a guess. The websocket line in this same reply
+    has always answered with the address the request arrived on, and this
+    line printed `http://0.0.0.0:8003/...` beside it: one reply, two
+    answers, and the one a person is told to type was the one that works
+    nowhere.
+    """
+    with entered_client(Config()) as client:
+        response = client.get(f"/x/{KEY}/", headers={"Host": "192.168.1.34:8003"})
+
+    line = portal_line(response)
+    assert f"http://192.168.1.34:8003/x/{KEY}/" in line
+    assert "from the address this request arrived on" in line
+    # The guess and its caveat belong to a line with no request behind
+    # it, and there is a request behind this one.
+    assert "guessed from" not in line
+    assert "0.0.0.0" not in line
+    # And the two lines of the reply now name one server.
+    assert "ws://192.168.1.34:8003/xiaozhi/v1/" in response.text
+
+
+def test_a_configured_origin_still_wins_over_the_address_that_asked() -> None:
+    """Unchanged, and the half of the order that must not move: an
+    operator who named the deployment is answered with what they named,
+    whatever Host a request carried."""
+    for server in (
+        {"public_url": "https://voice.example"},
+        {"websocket_url": "wss://voice.example/xiaozhi/v1/"},
+    ):
+        with entered_client(Config(server=server)) as client:
+            response = client.get(f"/x/{KEY}/", headers={"Host": "192.168.1.34:8003"})
+
+        line = portal_line(response)
+        assert f"https://voice.example/x/{KEY}/" in line
+        assert "192.168.1.34" not in line
+
+
+def test_an_ipv6_host_comes_back_in_the_brackets_a_url_needs() -> None:
+    """The rebuild goes through a parsed hostname, which is where the
+    brackets are lost, and `_bracketed` is what puts them back."""
+    with entered_client(Config()) as client:
+        response = client.get(f"/x/{KEY}/", headers={"Host": "[2001:db8::1]:8003"})
+
+    assert f"http://[2001:db8::1]:8003/x/{KEY}/" in portal_line(response)
+
+
+def test_an_unreadable_host_falls_back_to_the_guess_rather_than_raising() -> None:
+    """Reading a port out of a Host header is the step that raises: a
+    number outside the range is shaped like a port and is not one, and
+    the endpoint is unauthenticated, so what arrives is whatever a
+    stranger sent. The guess is what is left when the request names no
+    address this server can read, which is better than a traceback."""
+    with entered_client(Config()) as client:
+        response = client.get(f"/x/{KEY}/", headers={"Host": "voice.example:99999"})
+
+    line = portal_line(response)
+    assert "http://0.0.0.0:8003" in line
+    assert "guessed from" in line
+
+
+def test_userinfo_in_the_host_header_never_reaches_the_reply() -> None:
+    """Two layers, and the test is of the reply rather than of either.
+
+    Starlette refuses a Host header that is not a bare host with an
+    optional port, and answers from the address the server is listening
+    on instead, so a `user:password@host` never becomes this request's
+    netloc at all. Behind that, the portal line is rebuilt from the
+    parsed hostname and port for the reason this module's docstring
+    gives, which is what keeps the rule a fact about the value rather
+    than about a framework version.
+    """
+    with entered_client(Config()) as client:
+        response = client.get(
+            f"/x/{KEY}/", headers={"Host": f"admin:{PASTED}@192.168.1.34:8003"}
+        )
+
+    assert PASTED not in response.text
+    assert "admin" not in response.text
+    assert portal_line(response).endswith(f"/x/{KEY}/ (from the address this request arrived on)")
 
 
 def test_the_describe_portal_line_carries_no_userinfo_either() -> None:

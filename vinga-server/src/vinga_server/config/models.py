@@ -546,8 +546,10 @@ class ServerConfig(BaseModel):
     # would type it: scheme, host, optional port, and an optional path
     # prefix when a proxy serves the server under one. Its only job is to
     # say the onboarding URL out loud at startup and on the OTA GET.
-    # Unset, the origin is derived from websocket_url, and failing that
-    # guessed from the listen address, which is a guess that says so.
+    # Unset, the origin is derived from websocket_url. Failing that, the
+    # OTA GET answers with the address the request arrived on, and the
+    # startup line, which has no request to read, guesses from the listen
+    # address and says it is a guess.
     public_url: str | None = None
 
     # Where the OTA endpoint is served. It is the token issuer, so it cannot

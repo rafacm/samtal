@@ -598,8 +598,15 @@ def test_a_failed_capture_write_names_its_track_by_member() -> None:
 def test_the_banners_origin_carries_a_member_rather_than_a_key_name() -> None:
     """By identity on what `public_origin` really answers, which is the
     half a signature cannot give: a dataclass annotated with the type
-    still takes whatever it is handed."""
+    still takes whatever it is handed.
+
+    Held against the narrowing the banner's field declares rather than
+    against the whole enumeration (#340). The fourth member is a line
+    answering a request, which the banner is not: what it can say and
+    what its field admits are one set, checked both ways here.
+    """
     from vinga_server.config import ServerConfig
+    from vinga_server.events.catalog import BannerOrigin
     from vinga_server.onboarding.origin import public_origin
 
     answered = [
@@ -609,7 +616,8 @@ def test_the_banners_origin_carries_a_member_rather_than_a_key_name() -> None:
     ]
 
     assert [type(one) for one in answered] == [OriginSource] * 3
-    assert frozenset(answered) == frozenset(OriginSource)
+    assert frozenset(answered) == frozenset(get_args(BannerOrigin))
+    assert OriginSource.REQUEST_HOST not in answered
 
 
 def test_the_two_new_fragments_are_built_by_the_types_that_declare_them() -> None:

@@ -61,10 +61,11 @@ server:
   # types it: scheme, host, optional port, and a path prefix when a
   # proxy serves the server under one. Its only job is the onboarding
   # URL the server prints at startup and on a GET of the OTA endpoint.
-  # Left unset, that origin is taken from websocket_url, and failing
-  # that guessed from the listen address, which is a guess the line says
-  # is one (0.0.0.0 is where the server listens, not somewhere a device
-  # can go).
+  # Left unset, that origin is taken from websocket_url. Failing that,
+  # the line on the OTA GET uses the address the request arrived on,
+  # and the startup line, which has no request to read, guesses from the
+  # listen address and says the line is a guess (0.0.0.0 is where the
+  # server listens, not somewhere a device can go).
   # public_url: https://voice.example
   #
   # Binary protocol version advertised to devices: 1 is bare Opus frames,

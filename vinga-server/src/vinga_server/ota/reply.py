@@ -359,9 +359,12 @@ async def describe(request: Request) -> Response:
         f"vinga-server {__version__} (revision {revision()}) OTA endpoint.\n"
         f"Devices are sent to {websocket_url_for(server, request)} "
         f"(protocol version {server.protocol_version}).\n"
-        # The path this was reached on, so the line is the URL that
-        # works rather than the one this server would recommend.
-        f"{portal_url_line(server, request.url.path)}\n"
+        # The request itself, so the line is the URL that works rather
+        # than the one this server would recommend: both the path it was
+        # reached on and, with no origin configured, the address it
+        # arrived on, which is what the line above has always used
+        # (#340).
+        f"{portal_url_line(server, request)}\n"
     )
 
 

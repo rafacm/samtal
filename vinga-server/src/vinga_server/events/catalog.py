@@ -2136,6 +2136,19 @@ class OtaRequestRejected(Variant):
 # --- onboarding/: the banner and the short path -----------------------
 
 
+# The origins a line printed with no request in hand can have, which is
+# the whole of what the banner below may say. `OriginSource` gained a
+# fourth member for the portal line on the OTA GET (#340), which
+# resolves the address a request arrived on and is not an event: the
+# narrowing is what keeps the banner's declared token set the three it
+# has always been, rather than widening a surface because a sentence
+# elsewhere gained an answer.
+BannerOrigin = Literal[
+    OriginSource.PUBLIC_URL,
+    OriginSource.WEBSOCKET_URL,
+    OriginSource.LISTEN_ADDRESS,
+]
+
 
 @dataclass(frozen=True)
 class OnboardingOff(Variant):
@@ -2151,7 +2164,7 @@ class OnboardingOff(Variant):
     ARGS: ClassVar[tuple[str, ...]] = ("origin", "provenance")
 
     origin: Identifier = value()
-    origin_source: OriginSource = value()
+    origin_source: BannerOrigin = value()
     onboarding: Flag = value(fixed=Flag(False))
     provenance: OriginProvenance = value(carried=False)
 
@@ -2171,7 +2184,7 @@ class OnboardingOn(Variant):
     ARGS: ClassVar[tuple[str, ...]] = ("origin", "provenance")
 
     origin: Identifier = value()
-    origin_source: OriginSource = value()
+    origin_source: BannerOrigin = value()
     onboarding: Flag = value(fixed=Flag(True))
     keyed: Flag = value(
         note=(
@@ -3091,6 +3104,7 @@ __all__ = [
     "BARGE_IN_MERGED",
     "BARGE_IN_SUPPRESSED",
     "BINDINGS_CHANNEL",
+    "BannerOrigin",
     "BargeIn",
     "BargeInInRefractory",
     "BargeInMerged",

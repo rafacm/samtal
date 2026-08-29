@@ -1,14 +1,22 @@
 """What address the outside world reaches this server on, and the
 startup line that says it.
 
-One question, asked in four places: the banner below, the line
+One question, asked in five places: the banner below, the line
 `vinga-server config ota-url` and `vinga-server doctor` print, the
-`message` an activating device shows on its screen, and the websocket
-URL the OTA reply hands every board. The first three call
+`message` an activating device shows on its screen, the websocket URL
+the OTA reply hands every board, and the portal line printed beside it
+on the human GET of the same endpoint. The first three call
 `public_origin`, so a deployment names itself the same way wherever it
 is named, and the provenance travels with the value because two of the
 three sources it resolves are inferences. The fourth calls
-`websocket_url_for`.
+`websocket_url_for` and the fifth `portal_url_line`.
+
+The two that answer a request share the fallback the other three cannot
+have. An explicitly configured origin wins for all five; where there is
+none, a request is a demonstration of an address that reached this
+server, and the listen address is a guess (issue #340). So the banner
+and the two commands guess, because nothing has asked them anything,
+and the two lines in a reply prefer what the request arrived on.
 
 `onboarding_url` is the assembly the two commands share, and it lives
 here for the same reason the origin does: it is one composition of the
@@ -28,6 +36,15 @@ WIRE, to the board that just reached us, is the request's own netloc
 verbatim: it is the address that demonstrably works, this server trusts
 no forwarded header to improve on it, and a rebuild could only make it
 different from what arrived.
+
+Which mode a request-derived origin is in is decided by what is done
+with it rather than by where it came from. `websocket_url_for` is on the
+wire and takes the netloc verbatim; the portal line is a URL printed for
+a person to type, so it is retained by that rule and is rebuilt from the
+request's own parsed hostname and port. The two agree on every Host a
+board or a browser really sends, and where they would differ (userinfo
+in the header, a port that is not a number) it is the printed line that
+must not carry it.
 """
 
 from dataclasses import dataclass
@@ -123,27 +140,45 @@ class Origin:
         return f"{prefix} {self.source}{self.note}"
 
 
+def _configured(server: ServerConfig) -> Origin | None:
+    """The origin this configuration states, and None where it states
+    none: `public_url` as written, else the origin of `websocket_url`.
+
+    The half of the order every caller here shares, held in one place so
+    that a line answering a request and a line printed with no request
+    cannot come to disagree about which key wins (#340). What differs
+    between them is only what happens when this answers None.
+    """
+    if server.public_url:
+        return Origin(server.public_url, OriginSource.PUBLIC_URL)
+    if server.websocket_url:
+        derived = _origin_of(server.websocket_url)
+        if derived is not None:
+            return Origin(derived, OriginSource.WEBSOCKET_URL)
+    return None
+
+
 def public_origin(server: ServerConfig) -> Origin:
     """Where a device reaches this server, in the order the plan sets:
     `public_url` as written, else the origin of `websocket_url`, else the
     listen address, which is a guess and says so.
+
+    The answer where nothing has asked anything: the startup banner and
+    the two commands that print a URL with no server running. A line
+    answering a request has a better last source than the listen address
+    and takes it (`portal_url_line`).
 
     Total by construction. Every step that could raise falls through to
     the next source instead, and the last source is two configuration
     fields that cannot fail, so an operator never meets this as a
     traceback at startup.
     """
-    if server.public_url:
-        return Origin(server.public_url, OriginSource.PUBLIC_URL)
-    unreadable = False
-    if server.websocket_url:
-        derived = _origin_of(server.websocket_url)
-        if derived is not None:
-            return Origin(derived, OriginSource.WEBSOCKET_URL)
-        unreadable = True
+    configured = _configured(server)
+    if configured is not None:
+        return configured
 
     reasons: list[str] = []
-    if unreadable:
+    if server.websocket_url:
         # Reachable only for a configuration built in code, since the
         # validator refuses one a file could hold. Said out loud anyway:
         # a guess that had a better source and could not use it is not
@@ -231,11 +266,59 @@ def onboarding_url(server: ServerConfig, fix: str) -> tuple[str, Origin]:
     return f"{origin.url}{onboarding_path(key)}", origin
 
 
-def portal_url_line(server: ServerConfig, path: str) -> str:
+def _arrived_on(request: Request) -> Origin | None:
+    """The origin this request reached this server on, or None when its
+    Host carries no address to read.
+
+    The retained mode of `assemble`, for the reason this module's
+    docstring gives: the line built from this is printed for a person to
+    type, so it is rebuilt from the parsed hostname and port rather than
+    taken from the netloc the way the websocket URL beside it is.
+
+    Starlette takes a Host header as the request's netloc only when it
+    is a bare host with an optional port, and answers from the listen
+    address otherwise, so userinfo does not arrive here to begin with.
+    The rebuild is this module's own layer behind that one, which is
+    what makes the rule a fact about the value rather than about a
+    framework version. Reading the port is caught for its own reason,
+    the one `_origin_of` catches it for: a number outside the range is
+    shaped like a port and is not one, this endpoint is
+    unauthenticated, and a printed line is no place to learn that a
+    header could not be parsed.
+    """
+    try:
+        hostname, port = request.url.hostname, request.url.port
+    except ValueError:
+        return None
+    if not hostname:
+        return None
+    scheme = "https" if request.url.scheme == "https" else "http"
+    return Origin(assemble(scheme, (hostname, port)), OriginSource.REQUEST_HOST)
+
+
+def portal_url_line(server: ServerConfig, request: Request) -> str:
     """The one line naming the URL to type into a device's captive
-    portal, for the path it is served on."""
-    origin = public_origin(server)
-    return f"Type this into the device's captive portal: {origin.url}{path} ({origin.provenance})"
+    portal, for the request that asked for it.
+
+    Three sources, first answer wins, and only the last of them is new
+    (#340). A configured origin wins exactly as it does everywhere else
+    in this module. Failing that the address is the one this request
+    arrived on, which is the same preference the websocket URL in the
+    same reply has always had: this line used to print the listen-address
+    guess beside a websocket URL derived from the request, so one reply
+    said `ws://192.168.1.34:8003/` and `http://0.0.0.0:8003/` about the
+    same server. Failing both, the guess, which is reachable only for a
+    Host header that names no readable address.
+
+    The path is the request's own, so the line is the URL that works for
+    whoever is holding it rather than the one this server would
+    recommend.
+    """
+    origin = _configured(server) or _arrived_on(request) or public_origin(server)
+    return (
+        f"Type this into the device's captive portal: "
+        f"{origin.url}{request.url.path} ({origin.provenance})"
+    )
 
 
 def log_banner(server: ServerConfig) -> None:
