@@ -652,20 +652,6 @@ docs/reference/api-openapi.json:6126  generated  vinga agent preview
 docs/reference/api-openapi.json:6158  generated  vinga agent preview
 docs/reference/api-openapi.json:6201  generated  vinga status
 docs/reference/api-openapi.json:6225  generated  vinga status
-docs/reference/api-openapi.json:5  generated  vinga schema provider
-docs/reference/api-openapi.json:5056  generated  vinga ota-url
-docs/reference/api-openapi.json:6005  generated  vinga provider secret set
-docs/reference/api-openapi.json:6126  generated  vinga agent preview
-docs/reference/api-openapi.json:6158  generated  vinga agent preview
-docs/reference/api-openapi.json:6201  generated  vinga status
-docs/reference/api-openapi.json:6225  generated  vinga status
-docs/reference/api-openapi.json:5  generated  vinga schema provider
-docs/reference/api-openapi.json:5056  generated  vinga ota-url
-docs/reference/api-openapi.json:6005  generated  vinga provider secret set
-docs/reference/api-openapi.json:6126  generated  vinga agent preview
-docs/reference/api-openapi.json:6158  generated  vinga agent preview
-docs/reference/api-openapi.json:6201  generated  vinga status
-docs/reference/api-openapi.json:6225  generated  vinga status
 docs/reference/cli.md:39  respell  vinga provider set llm local
 docs/reference/cli.md:40  respell  vinga-server config provider set llm local
 docs/reference/cli.md:61  respell  vinga config list
@@ -868,13 +854,13 @@ docs/reference/domain-config.md:444  generated  vinga device delete
 docs/reference/domain-config.md:454  generated  vinga default-agent set
 docs/reference/domain-config.md:457  generated  vinga default-agent clear
 docs/reference/domain-config.md:467  generated  vinga show
-docs/reference/events.md:377  generated  vinga-server config reload
-docs/reference/events.md:1122  generated  vinga-server config device pending claim
-docs/reference/events.md:1147  generated  vinga-server config reload
-docs/reference/events.md:1236  generated  vinga-server config device bind
-docs/reference/events.md:1393  generated  vinga-server config ota-url
-docs/reference/events.md:1417  generated  vinga-server config ota-url
-docs/reference/events.md:1436  generated  vinga-server config ota-url
+docs/reference/events.md:387  generated  vinga-server config reload
+docs/reference/events.md:1132  generated  vinga-server config device pending claim
+docs/reference/events.md:1157  generated  vinga-server config reload
+docs/reference/events.md:1246  generated  vinga-server config device bind
+docs/reference/events.md:1403  generated  vinga-server config ota-url
+docs/reference/events.md:1427  generated  vinga-server config ota-url
+docs/reference/events.md:1446  generated  vinga-server config ota-url
 docs/related-projects.md:122  respell  vinga provider
 docs/system-overview.md:32  respell  vinga conversation
 docs/xiaozhi-notes.md:256  respell  config device pending claim
@@ -1008,16 +994,6 @@ vinga-server/pyproject.toml:84  respell  vinga simulator run
 vinga-server/pyproject.toml:165  respell  config cli-reference
 vinga-server/pyproject.toml:181  respell  vinga simulator run
 vinga-server/src/vinga_server/app.py:805  respell  vinga-server config ota-url
-vinga-server/src/vinga_server/app.py:805  respell  vinga-server config ota-url
-vinga-server/src/vinga_server/app.py:805  respell  vinga-server config ota-url
-vinga-server/src/vinga_server/config/api.py:426  respell  vinga-server config device pending list
-vinga-server/src/vinga_server/config/api.py:445  respell  vinga-server config list
-vinga-server/src/vinga_server/config/api.py:545  respell  vinga-server config reload
-vinga-server/src/vinga_server/config/api.py:546  respell  vinga-server config list
-vinga-server/src/vinga_server/config/api.py:426  respell  vinga-server config device pending list
-vinga-server/src/vinga_server/config/api.py:445  respell  vinga-server config list
-vinga-server/src/vinga_server/config/api.py:545  respell  vinga-server config reload
-vinga-server/src/vinga_server/config/api.py:546  respell  vinga-server config list
 vinga-server/src/vinga_server/config/api.py:426  respell  vinga-server config device pending list
 vinga-server/src/vinga_server/config/api.py:445  respell  vinga-server config list
 vinga-server/src/vinga_server/config/api.py:545  respell  vinga-server config reload
