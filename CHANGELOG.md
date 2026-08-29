@@ -65,6 +65,25 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   the URL. Never a refusal: the same configuration is right where the
   endpoint shares the container or its network namespace.
 
+### Changed
+
+- **A bare invocation prints its own help** (#341). `vinga` on its own,
+  and every noun with no verb after it (`vinga provider`, `vinga device
+  pending`), print the page they were one word short of instead of one
+  sentence telling the reader to ask for it. The page goes to stderr and
+  the exit code stays 1, because stdout is data and this invocation
+  produced none, and a 0 would say a command completed when none was
+  typed. `--help` is unchanged: stdout, exit 0.
+- **The root help says what the CLI does in the reader's words** (#341).
+  Its first sentence opened with "the domain half of the configuration",
+  a distinction nobody has met at the moment they run `vinga` for the
+  first time; it now names the thing they came to do.
+- **`vinga status` is `vinga mcp-server status`** (#341). The read says
+  what each configured MCP server is doing, which is a verb of one noun
+  rather than of the whole deployment. What it prints is unchanged, and
+  there is no alias: the old spelling answers the same refusal any other
+  word the grammar does not have answers.
+
 ### Fixed
 
 - **The onboarding line on the OTA GET answers with the address the
