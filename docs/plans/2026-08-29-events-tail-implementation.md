@@ -117,3 +117,82 @@ Three, none of them a change of behavior the plan states.
 - No device checkpoint: nothing in this milestone changes what a board
   sends or is sent. The live lane against a real server is M2's, where
   the plan puts it.
+
+### PR review round
+
+One external review of the branch as pushed to PR #349, plus one CI
+failure the lane found on its own. Three findings, condensed below as
+received, each carrying its resolution and the commit that landed it.
+The verdict was mergeable after the fixes.
+
+Two of the three are the same shape, and it is worth naming: a
+lifecycle whose cleanup runs on the ordinary path and not on the
+abrupt one. The stream gives its subscription back when a reader
+leaves, and did not when the reader left before the response had
+begun; the shutdown ends the tails when it drains, and did not when an
+operator forced it past the drain. Both were found by asking what runs
+when the usual path is skipped, which is the question this milestone's
+own tests were not asking.
+
+1. **P2: an immediate disconnect leaked a subscription permanently.**
+   The handler subscribed and then built the response, while the
+   cleanup lived in the streaming generator's `finally`. Starlette
+   runs the body beside a disconnect listener and cancels the one when
+   the other returns, so a client that goes away while
+   `http.response.start` is in flight kills the response before its
+   body is ever iterated, and a generator that never started runs no
+   `finally` when it is closed. The queue stayed on the hub for the
+   life of the process, on the hot path, read by nobody.
+   *Resolution* (`43197355`): the subscription is taken inside the
+   body, one statement above the `finally` that gives it back, so
+   "subscribed" and "will be cleaned up" are the same moment and a
+   request that never gets that far never subscribed. The filters stay
+   the handler's, read before anything opens, because a filter that
+   cannot be read is a refusal with a status rather than a stream that
+   opens and dies. The harness case holds the response start while the
+   disconnect lands; it fails on the old shape with one subscriber
+   left behind.
+2. **P2: a second shutdown signal bypassed the hub close.** The
+   forced-exit branch called uvicorn directly with every stream still
+   open, and the drain it interrupted was what would have closed them.
+   *Resolution* (`8fa68baf`): the two paths that reach uvicorn
+   directly, a second signal and a server configured not to drain, are
+   one branch again with the close in front of it; neither drains a
+   conversation, which is what `drain_s <= 0` has always meant, and
+   the close is idempotent so the ordinary path closing them again
+   costs nothing. The second-signal test holds an open subscription
+   and reads the subscriber count at the moment uvicorn is invoked; on
+   the old shape it reads one.
+3. **P3: the published contract overstated what the stream carries.**
+   It said the JSON object the retained log carries plus `ts` and
+   `level`; the retained object also carries the channel and the
+   rendered sentence, while the stream serializes the catalogued event
+   fields and the two it owns.
+   *Resolution* (`323338c6`): the route docstring, which is the
+   operation's description, the document's own prose and the changelog
+   entry say the catalogued fields plus stream-owned `ts` and `level`,
+   and say what the log has beside them rather than implying it is
+   there. The observability map's row said the identical thing and was
+   corrected with them, deliberately beyond the finding's list: one
+   surviving copy of a sentence just found wrong is how it comes back.
+   The OpenAPI document and the command-spellings census are
+   regenerated through their generators in the same commit.
+
+Beside them, one CI failure with no finding attached
+(`cb5aff4e`). `test_the_level_defaults_to_info_and_reads_in_any_case`
+failed in the distributed unit lane alone, with `assert [] ==
+['loud-one']`. An empty parse is what a keepalive yields: it is a
+comment with no `data:` line, and the test read it as the event it was
+waiting for. The injected interval was 0.05 s for every test in the
+file, and that test opens a second application and drives a second
+request between subscribing and reading, which a contended runner
+takes longer than the deadline to do. The hub was cleared first: an
+emission either lands before a reader clears its wakeup, under the
+same lock, or schedules a set the reader meets after it parks, and
+neither the same-loop nor the foreign-thread path loses one over
+thousands of rounds. So the interval a test is not about became an
+hour, the one test whose subject IS the keepalive injects the short
+one it asserts, and the readers that assert what a stream carried skip
+a comment frame rather than parsing it: with the interval forced to a
+tenth of a millisecond, so a keepalive is written on every deadline,
+the file still passes.
