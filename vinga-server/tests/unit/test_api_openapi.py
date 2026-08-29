@@ -160,7 +160,12 @@ def test_the_document_describes_every_route_the_api_serves() -> None:
         "/apply": ["post"],
         # The runtime namespace, which is deliberately not a route
         # inside an entity namespace: an entry may be named `status`,
-        # and an agent may be named `prompt`.
+        # `info` or `prompt`, and an agent may be named `prompt` too.
+        #
+        # The identity read is first of them and is the one credential
+        # this API answers to a read: the onboarding URL's last segment
+        # is a key derived from the device-auth secret.
+        "/runtime/info": ["get"],
         "/runtime/agents/{name}/prompt": ["get"],
         "/runtime/mcp-servers": ["get"],
         # And the two that span both sides, under `/runtime/config/`
