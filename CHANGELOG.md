@@ -34,11 +34,6 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   version. Recorded in `docs/architecture/cli-guide.md` as the second
   exception to "a credential is never an argument, and never travels in
   a read", beside `ota-url`.
-
-### Fixed
-
-### Added
-
 - **A warning when a provider entry points at localhost from inside a
   container** (#340). The image now sets `VINGA_CONTAINER` in its own
   environment, and a build that meets a `base_url` naming `localhost`,
@@ -49,6 +44,21 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   type and which of the three spellings it named, and nothing else of
   the URL. Never a refusal: the same configuration is right where the
   endpoint shares the container or its network namespace.
+
+### Fixed
+
+- **The onboarding line on the OTA GET answers with the address the
+  request arrived on** (#340). The same reply derived the websocket URL
+  from the request and printed the listen-address guess beside it, so a
+  default deployment was told to type `http://0.0.0.0:8003/...` under a
+  `ws://192.168.1.34:8003/...` that worked. A configured origin still
+  wins (`server.public_url`, then the origin of
+  `server.websocket_url`), the request's own address is the fallback,
+  and the provenance in brackets says which it was. The startup banner,
+  `vinga-server config ota-url` and `vinga-server doctor` are unchanged:
+  none of them has a request to read, so they keep the guess and its
+  caveat.
+- The `vinga` command line imports `Exit` from the vendored Click's core module, where typer 0.27.1 and 0.27.2 both define it, instead of the exceptions module 0.27.2 moved it out of. A fresh install resolving typer 0.27.2 crashed at import; installs pinned by the lockfile were unaffected.
 
 ## 2026-08-28
 
