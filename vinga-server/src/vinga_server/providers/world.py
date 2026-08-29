@@ -48,9 +48,13 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import cast
 
+from vinga_server.build_info import in_container
 from vinga_server.config.models import PROVIDER_STAGES, Config, ProviderConfig
 from vinga_server.config.secrets import SecretStore, provider_identity
 from vinga_server.egress import EgressRefusal, check_provider
+from vinga_server.events import ServerEvents
+from vinga_server.events.catalog import ProviderReachesLoopback
+from vinga_server.events.values import Identifier, LoopbackHost
 from vinga_server.providers.base import (
     AsrProvider,
     LlmProvider,
@@ -63,6 +67,8 @@ from vinga_server.providers.base import (
 from vinga_server.providers.registry import AgentProviders, construct_provider
 
 logger = logging.getLogger(__name__)
+
+events = ServerEvents(__name__)
 
 # How long one teardown is given, whatever it is letting go of. A bound
 # rather than a wait, because disposal runs after the swap: a client
@@ -228,7 +234,52 @@ async def build_entry(
         host=provider.host,
         model=provider.model,
     )
+    _loopback_inside_a_container(stage, name, config, provider)
     return provider
+
+
+def _loopback_inside_a_container(
+    stage: str, name: str, config: ProviderConfig, provider: Provider
+) -> None:
+    """Say so when a container's entry points at the container itself.
+
+    The failure this exists for looks like nothing at all (#340). A
+    `base_url` naming localhost is what an operator runs on their own
+    machine, and copied into a container it still boots clean, still
+    applies clean, and still hears the utterance; the first sign of it
+    is a call that fails at the first round, on a device that shows
+    nothing. Whether this process is inside a container is a thing the
+    image knows and says (`build_info.in_container`), and whether the
+    endpoint is this machine is three spellings, so the check is two
+    reads and belongs where the answer is: this is the one place that
+    holds the stage, the entry, the type and the host at once.
+
+    A warning and never a refusal, because the same configuration is
+    right where the endpoint shares this container or its network
+    namespace, and only the deployment knows which it is.
+
+    Every type that resolves a host is covered rather than the LLM one
+    the issue met, and it costs nothing: `provider.host` is the parsed
+    hostname each openai-shaped type already publishes for its identity
+    and its failure events, so the openai TTS and ASR types are in by
+    construction. A type that reaches nothing leaves it None and cannot
+    match, and a type with a fixed vendor host never spells one of the
+    three.
+    """
+    if not in_container():
+        return
+    try:
+        host = LoopbackHost(provider.host)
+    except ValueError:
+        return
+    events.emit(
+        lambda: ProviderReachesLoopback(
+            stage=Identifier(stage),
+            provider=Identifier(name),
+            type=Identifier(config.type),
+            host=host,
+        )
+    )
 
 
 async def _abandoned(constructing: "asyncio.Future[Provider]") -> None:

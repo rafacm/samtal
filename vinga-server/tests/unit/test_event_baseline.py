@@ -87,17 +87,18 @@ def capture(
 
 def test_every_driver_names_a_path_of_its_own() -> None:
     """One driver per emit path, so a capture keyed by identity is a
-    capture of eighty-two paths rather than of however many survived a
+    capture of eighty-three paths rather than of however many survived a
     collision.
 
     Eighty since #283, when `BindingsSnapshotOnly` retired with the
     file-existence probe that was the only thing able to emit it,
     eighty-one since #190 gave a reply a second kind of boundary to
-    move at, and eighty-two since a consented recap became a checkpoint
-    worth announcing."""
+    move at, eighty-two since a consented recap became a checkpoint
+    worth announcing, and eighty-three since a provider built inside a
+    container says so when its endpoint is this machine (#340)."""
     claimed = [driver.identity for driver in DRIVERS]
 
-    assert len(set(claimed)) == len(claimed) == 82
+    assert len(set(claimed)) == len(claimed) == 83
 
 
 def test_every_driven_path_produces_the_event_it_emits(
@@ -723,6 +724,9 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
     ),
     "vinga_server.providers.openai_asr:OpenAiAsr._retry_without_prompt #5": (
         ("EchoRecovered", ("duration_s", "event", "host", "outcome", "retry_ms")),
+    ),
+    "vinga_server.providers.world:_loopback_inside_a_container #1": (
+        ("ProviderReachesLoopback", ("event", "host", "provider", "stage", "type")),
     ),
     "vinga_server.registry:SessionRegistry.drain #1": (
         ("DrainStarted", ("event", "sessions", "timeout_s")),

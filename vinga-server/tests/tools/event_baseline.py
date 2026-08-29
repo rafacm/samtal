@@ -164,11 +164,12 @@ from tests.support.wire import (
 )
 from vinga_server import onboarding
 from vinga_server.app import create_app
+from vinga_server.build_info import CONTAINER_ENV
 from vinga_server.capture import CaptureStore, SessionCapture
 from vinga_server.config import Config
 from vinga_server.config.api import build_api
 from vinga_server.config.loader import StorageError
-from vinga_server.config.models import DatabaseConfig
+from vinga_server.config.models import DatabaseConfig, ProviderConfig
 from vinga_server.conversations import store as store_module
 from vinga_server.conversations import threads
 from vinga_server.conversations.records import Acknowledgement, ToolInvocation, TurnRecord
@@ -179,7 +180,7 @@ from vinga_server.events.catalog import CHANNELS
 from vinga_server.filler import build_agent_fillers
 from vinga_server.logs import _STANDARD_ATTRIBUTES
 from vinga_server.ota import ACTIVATE_SEGMENT, OTA_PATH
-from vinga_server.providers import AsrResult, Usage
+from vinga_server.providers import AsrResult, Usage, build_entry
 from vinga_server.providers.openai_asr import OpenAiAsr
 from vinga_server.runtime.pipeline import bespoke_runtime_factory
 from vinga_server.tools.mcp import McpServers
@@ -1586,6 +1587,29 @@ def drive_session_rejected_at_capacity(directory: Path) -> None:
                 pass
 
 
+async def drive_provider_reaches_loopback(_: Path) -> None:
+    """One entry built with the image's marker set, which is the pair of
+    facts the warning is made of.
+
+    The marker is put in the environment around the build rather than
+    through a fixture, because a driver is a plain callable and this is
+    the only thing here that reads it. Nothing else in the run can see
+    it: the build is awaited, not backgrounded.
+    """
+    entry = ProviderConfig.model_validate(
+        {
+            "type": "openai_compatible",
+            "base_url": "http://localhost:11434/v1",
+            "model": MODEL,
+        }
+    )
+    os.environ[CONTAINER_ENV] = "1"
+    try:
+        await build_entry("llm", "local", entry)
+    finally:
+        del os.environ[CONTAINER_ENV]
+
+
 APP = "vinga_server.app"
 CAPTURE = "vinga_server.capture"
 CONFIG_API = "vinga_server.config.api"
@@ -1596,6 +1620,7 @@ ORIGIN = "vinga_server.onboarding.origin"
 POLL = "vinga_server.ota.poll"
 REPLY = "vinga_server.ota.reply"
 ASR = "vinga_server.providers.openai_asr"
+WORLD = "vinga_server.providers.world"
 REGISTRY = "vinga_server.registry"
 MANAGER = "vinga_server.tools.mcp.manager"
 MCP_REGISTRY = "vinga_server.tools.mcp.registry"
@@ -1634,6 +1659,11 @@ SERVER_DRIVERS: tuple[Driver, ...] = (
     Driver((KEYS, "_log_mismatch", 2), drive_onboarding_key_unshaped, "onboarding_key_unshaped"),
     Driver((ORIGIN, "log_banner", 1), drive_onboarding_banner_off, "onboarding_banner"),
     Driver((ORIGIN, "log_banner", 2), drive_onboarding_banner_on, "onboarding_banner"),
+    Driver(
+        (WORLD, "_loopback_inside_a_container", 1),
+        drive_provider_reaches_loopback,
+        "provider_reaches_loopback",
+    ),
     Driver((POLL, "activate", 1), drive_activation_complete, "activation_complete"),
     Driver((POLL, "activate", 2), drive_activation_pending, "activation_pending"),
     Driver(
