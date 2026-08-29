@@ -64,12 +64,27 @@ A `live.py` module inside the events package (strict-typed there by
 the package's mypy scope): a `LiveEvents` hub whose `emit(emission)`
 is the tap contract, holding the subscriber set. It must hear both
 channels, and they arrive differently. Server events: the hub is
-attached with `attach_server_tap` at composition time. Session
+attached with `attach_server_tap` at composition time, and
+`detach_server_tap` is registered on the application's exit stack in
+the same breath, because the server hub is process-global and an
+attachment that outlives the lifespan would deliver into a dead app
+and double-deliver under a second lifespan; the registration rides
+the same stack that already unwinds partial startups. Tests enter
+two lifespans sequentially and fail a startup after attachment,
+proving no duplicate delivery and no retained hub. Session
 events: `SessionEvents` dispatches only to its own attached taps and
 a session publishes no accessor, so the composition root hands the
 hub to the device edge the same way the conversation store's sink
-already travels (Composition field, `ws.py` construction,
-`DeviceSession` attaches it for the session's lifetime). One hub
+already travels (Composition field, `ws.py` construction). The
+attach point is precise because the early events are the point: the
+hub attaches immediately after `SessionEvents` is constructed in
+`DeviceSession.__init__`, before any hello exchange, and detaches in
+an outer finally that covers the entire `run()` lifetime, because
+the conversation sink's later attach point would miss exactly the
+rejections and early refusals an operator tails for, and the
+existing cleanup finally begins only after the hello. Tests cover an
+early rejection and an event emitted during runtime construction,
+not only an ordinary utterance. One hub
 object, attached in both places; the emission's own payload says
 which channel it rode. The hub is a leaf of the events package: it
 imports the tap vocabulary and nothing of FastAPI, sessions, or the
