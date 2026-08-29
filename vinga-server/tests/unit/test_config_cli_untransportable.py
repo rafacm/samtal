@@ -369,7 +369,7 @@ def test_the_cli_apply_path_receives_the_document_word(
     document = tmp_path / "document.yaml"
     document.write_text(f"providers:\n  llm:\n    {NAME_SENTINEL}:\n      type: anthropic\n")
 
-    run("apply", "-f", str(document))
+    run("apply", "--no-reload", "-f", str(document))
 
     assert spy[0] == transport.APPLY_LOCATION
     for section in spy:

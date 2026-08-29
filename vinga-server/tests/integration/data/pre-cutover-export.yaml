@@ -1,12 +1,15 @@
 # The domain configuration of this deployment, in the shape
-# `vinga apply` takes. Reproduce it in two steps, in this order:
+# `vinga apply` takes. Reproduce it in three steps, in this order:
 #
-#   1. vinga apply -f <this file>
+#   1. vinga apply --no-reload -f <this file>
 #   2. the secret set commands at the foot of this file, if any
+#   3. vinga reload
 #
 # A stored credential never travels in a read, which is what the second
-# step is for. Applying is additive: a section this document does not
-# name is left alone, and nothing in it deletes.
+# step is for, and why the first stages rather than installing: a
+# reload builds the engines the document names, and their credentials
+# are not in it yet. Applying is additive: a section this document does
+# not name is left alone, and nothing in it deletes.
 providers:
   llm:
     brain:

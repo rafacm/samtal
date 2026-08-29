@@ -23,15 +23,24 @@ happen to agree. Capturing it again after the rename would prove
 nothing, so it is done once and the file is read in review rather than
 trusted.
 
-`RESPELLINGS` is the one licensed difference. Some of what these
-commands print quotes a command back at the operator: an export's header
-says how to reproduce a deployment, its foot lists a `set-secret` per
-stored slot, a read's secrets heading names the command that fills one,
-and the reload notice names the command that applies a write. Those move
-with the grammar, deliberately, and the table below is the complete list
-of the substitutions that licenses. It is applied to the TRANSCRIPT
-before the comparison, so a difference the table does not explain is a
-failure, and the table itself is short enough to read.
+`RESPELLINGS` is the licensed difference. Some of what these commands
+print quotes a command back at the operator: an export's header says how
+to reproduce a deployment, its foot lists a `set-secret` per stored slot,
+a read's secrets heading names the command that fills one, and the reload
+notice names the command that applies a write. Those move with the
+grammar, deliberately, and the table below is the complete list of the
+substitutions that licenses. It is applied to the TRANSCRIPT before the
+comparison, so a difference the table does not explain is a failure, and
+the table itself is short enough to read.
+
+One entry is not the rename's, and it is labelled: #341 made `apply`
+install what it wrote, which rewrote the header an export opens with
+into the three steps a rebuild now takes. A transcript captured before
+that cannot say it, and the differential is about behavior rather than
+about a paragraph, so the change is licensed here rather than left to
+falsify a record. An entry added for any later change belongs in the
+same place and with the same label: a substitution nobody can name a
+reason for is what this table must never grow.
 """
 
 import os
@@ -76,6 +85,31 @@ RESPELLINGS: tuple[tuple[str, str], ...] = (
     ("config set prompt-fragment <name>", "config prompt-fragment set <name>"),
     ("the set-secret commands at the foot", "the secret set commands at the foot"),
     ("vinga-server config ", "vinga "),
+    # Not the rename's: #341's, and the last entry because it quotes
+    # the program word the line above shortened. The header an export
+    # opens with is the rebuild procedure, and the procedure grew a step
+    # when `apply` stopped stopping at the store.
+    (
+        """takes. Reproduce it in two steps, in this order:
+#
+#   1. vinga apply -f <this file>
+#   2. the secret set commands at the foot of this file, if any
+#
+# A stored credential never travels in a read, which is what the second
+# step is for. Applying is additive: a section this document does not
+# name is left alone, and nothing in it deletes.""",
+        """takes. Reproduce it in three steps, in this order:
+#
+#   1. vinga apply --no-reload -f <this file>
+#   2. the secret set commands at the foot of this file, if any
+#   3. vinga reload
+#
+# A stored credential never travels in a read, which is what the second
+# step is for, and why the first stages rather than installing: a
+# reload builds the engines the document names, and their credentials
+# are not in it yet. Applying is additive: a section this document does
+# not name is left alone, and nothing in it deletes.""",
+    ),
 )
 
 
