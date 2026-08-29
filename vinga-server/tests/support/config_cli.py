@@ -100,6 +100,12 @@ def runner(monkeypatch: pytest.MonkeyPatch, database: str | None = None):
         "mcp_servers": None,
         "reload": None,
         "agent_prompt": None,
+        # Which deployment the API says it is, which on a deployment the
+        # composition root resolves from the build and the server
+        # section. None here for the same reason the three above are
+        # None: an application built without a server around it has no
+        # deployment to describe, and the identity read refuses.
+        "identity": None,
     }
     # Every client the entry point built, kept so a test can read the
     # timeouts a command chose after it has run.
@@ -123,6 +129,7 @@ def runner(monkeypatch: pytest.MonkeyPatch, database: str | None = None):
             mcp_servers=runtime["mcp_servers"],
             reload=runtime["reload"],
             agent_prompt=runtime["agent_prompt"],
+            identity=runtime["identity"],
         )
         # A base URL with a path prefix is the deployed shape, where the
         # sub-application is mounted on the server's own port, so the

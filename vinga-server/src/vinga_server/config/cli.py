@@ -128,6 +128,7 @@ from vinga_server.config.responses import (
     McpServerStatus,
     PendingDevice,
     Problem,
+    RuntimeInfo,
     SecretValue,
     SessionDetail,
     SessionList,
@@ -389,6 +390,45 @@ OTA_URL_GUIDANCE = (
 # goes into is `origin.ONBOARDING_OFF`, which is the derivation's own,
 # and the fix is the asking command's.
 ONBOARDING_OFF_FOR_URL = "Turn onboarding on for a URL short enough to type."
+
+
+# What `info` prints, and what it is careful about
+#
+# The banner is the maintainer's own string, character for character. A
+# plain hyphen and not a dash of any other width: the no-em-dash rule is
+# about em-dashes, and none of these characters is one.
+BANNER = "vinga - Conversational AI. Sweded."
+
+# The label in front of the address this CLI actually contacted, which
+# is the first question `info` exists to answer. It is a different
+# question from the onboarding URL below it, and legitimately a
+# different answer: a device reaches this deployment on the origin it
+# publishes, and an operator reaches the API wherever they exec'd into.
+# What is printed is `Address.shown`, never what was typed.
+CONTACTED = "configuration API"
+
+# The label in front of the onboarding URL, carrying the provenance, so
+# that the URL itself lands on a line of its own with nothing in front
+# of it. Deliberate: a terminal wraps a long line wherever it runs out,
+# and this is a value an operator types into a captive portal by hand or
+# selects whole. The provenance travels with it for the reason the
+# banner and `ota-url` carry it: two of the three sources it can come
+# from are inferences.
+ONBOARDING_URL_LABEL = "the URL to type into a device's captive portal"
+
+# And what stands there instead when the answer says onboarding is off.
+# The path devices are configured at is named and never printed: it is
+# `server.ota_path`, which is this deployment's secret, exactly as the
+# derivation's own refusal has it.
+ONBOARDING_OFF_HERE = (
+    "device onboarding is off (server.onboarding.enabled is false), so this deployment "
+    "serves no short URL. Devices are configured at the path server.ota_path names, "
+    "which is not printed here, since it is this deployment's secret."
+)
+
+# The heading over the count per kind. A count and not the tree: what
+# `info` answers is orientation, and `vinga list` is the tree.
+CONFIGURED = "configured:"
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -2206,6 +2246,81 @@ def _diff_block(
     return lines
 
 
+def _identity_block(info: Mapping[str, object]) -> str:
+    """What `info` prints of the server's own answer: which build is
+    running, and the URL a board is onboarded at.
+
+    Every line is bounded and made printable, like every other value an
+    answer carries: what is on the other end of `--api-url` is not this
+    command's to vouch for, and the URL is the one value here that an
+    operator is going to select and retype.
+
+    The URL lands on a line with nothing in front of it, and its
+    provenance goes on the label line above it. A terminal wraps a long
+    line wherever it happens to run out, and a URL broken across two
+    rows is one an operator mistypes; a label in front of it would only
+    make it happen sooner. With onboarding off there is no URL at all,
+    and the sentence that stands there says which switch decides it.
+
+    Everything goes to stdout, this block included. That is not the
+    stream split being bent: the whole of what `info` answers is the
+    artifact, and the URL in particular must reach the one stream a
+    caller can capture, never the one a terminal scrolls past.
+    """
+    lines = [
+        "",
+        f"server version: {printable(str(info['version']))}",
+        f"server revision: {printable(str(info['revision']))}",
+        "",
+    ]
+    url = info["onboarding_url"]
+    if url is None:
+        return "\n".join([*lines, ONBOARDING_OFF_HERE]) + "\n"
+    provenance = printable(str(info["onboarding_provenance"]))
+    return (
+        "\n".join(
+            [*lines, f"{ONBOARDING_URL_LABEL}, {provenance}:", printable(str(url))]
+        )
+        + "\n"
+    )
+
+
+def _configured_counts(document: Mapping[str, object]) -> str:
+    """What `info` prints of the stored half: how many of each kind
+    there are, and which agent an unbound board reaches.
+
+    A count and not the tree. The question this command answers is
+    orientation, so what belongs here is the shape of the deployment and
+    not its contents, and `vinga list` prints the contents already.
+
+    The kinds and their order come from the registry, so a kind added
+    there is counted here by existing. A kind addressed by no segment is
+    the singleton, which there is exactly one of and no count to give;
+    one addressed by two is nested a level deeper, which is the same
+    fact its URL states. The devices and the default agent are written
+    out for the reason `_summary` writes them out: neither is an entity,
+    and forcing them into a kind's shape would be inventing a
+    generalization rather than finding one.
+    """
+    config = document["config"]
+    lines = ["", CONFIGURED]
+    for kind in entities.ENTITIES:
+        if not kind.addressing:
+            continue
+        section = config[kind.moved_key]
+        counted = (
+            sum(len(under) for under in section.values())
+            if len(kind.addressing) > 1
+            else len(section)
+        )
+        lines.append(f"  {kind.moved_key}: {counted}")
+    lines.append(f"  devices: {len(config['devices'])}")
+    default_agent = config["default_agent"]
+    named = printable(str(default_agent)) if default_agent else "(none)"
+    lines.append(f"  default_agent: {named}")
+    return "\n".join(lines) + "\n"
+
+
 def _summary(document: Mapping[str, object]) -> str:
     """The tree `config list` prints: one line per entity, with the
     slots that hold a stored secret named but never their values.
@@ -3020,6 +3135,33 @@ def _act(args: Invocation, act: Act) -> None:
     act.render(act.read(answer))
 
 
+def _contacted(args: Invocation) -> None:
+    """The banner, and the address this CLI is about to contact.
+
+    What `info` knows before it has asked anything, and the half of its
+    answer no server can supply: which server it is talking to. The
+    device-facing origin the answer carries and the address an operator
+    dialled can legitimately differ, so printing one as though it were
+    the other would answer the question wrongly rather than not at all.
+
+    `Address.shown` and never `args.api_url`. The transport policy
+    refuses a credential in a URL's userinfo and says nothing about its
+    query string, so an accepted address can still hold `?token=...`;
+    the display form is the one with that taken out, bounded and made
+    printable, and it is the only form anything here may name (#290).
+
+    Resolved through `_address`, which is what a request resolves it
+    through, so the line names where the requests after it actually go
+    rather than a second opinion about it. Flushed for the reason
+    `_acknowledged` flushes: stderr is unbuffered and stdout is not, so
+    a refusal from the first act would otherwise land above the lines it
+    followed.
+    """
+    print(BANNER)
+    print(f"{CONTACTED}: {_address(args, load_file_config(args.config)).shown}")
+    sys.stdout.flush()
+
+
 def _identity(descriptor: entities.EntityDescriptor, args: Invocation) -> tuple[str, ...]:
     """What addresses one entry of this kind, taken off the command
     line. The descriptor's parameters are the URL's path parameters and
@@ -3252,11 +3394,26 @@ def _assembled_path(args: Invocation) -> str:
     return _path("runtime", "agents", args.name, "prompt")
 
 
+def _info_path(args: Invocation) -> str:
+    return _path("runtime", "info")
+
+
 LIST = Act(
     method="GET",
     path=_config_path,
     answers=ConfigDocument,
     render=_printed(_summary),
+)
+
+# The same read, rendered as a count per kind. `info`'s second act: what
+# it needs of the stored half is its shape rather than its contents, and
+# a read that already answers the whole document can be asked for either
+# (`show` and `export` are two more renderings of it).
+COUNTS = Act(
+    method="GET",
+    path=_config_path,
+    answers=ConfigDocument,
+    render=_printed(_configured_counts),
 )
 
 SHOW_ALL = Act(
@@ -3425,6 +3582,16 @@ DELETE_CONVERSATION = Act(
     answers=ThreadErasure,
     refusal=UNREADABLE_WRITE,
     render=_printed(_erasure_block),
+)
+
+# The read that says which deployment answered, which none of the reads
+# above it does: they say what is stored or what is running, and this
+# one says whose. `info`'s first act.
+IDENTITY = Act(
+    method="GET",
+    path=_info_path,
+    answers=RuntimeInfo,
+    render=_printed(_identity_block),
 )
 
 # A read of the running server rather than of the database: what a
@@ -4057,6 +4224,16 @@ class Command:
     # because one of them is paginated and the other is not.
     does: "Act | tuple[Act, ...] | Callable[[Invocation], None]"
 
+    # What it prints before its first request, for the one command whose
+    # answer starts with something no server can supply. `info` opens
+    # with the banner and with the address this CLI is about to contact,
+    # and a renderer cannot say either: an act's renderer is handed the
+    # answer and nothing else, which is what keeps a rendering a function
+    # of what came back. So the fact about the invocation is printed by
+    # the row that knows it, before any act runs, rather than smuggled
+    # into an act that would then be two things.
+    opens: "Callable[[Invocation], None] | None" = None
+
     # How its arguments are declared, which is a function Typer reads a
     # signature off. One per argument shape rather than one per command,
     # and the row is handed to it, so what a command performs is read
@@ -4099,6 +4276,8 @@ class Command:
         """What this command does, once its arguments are in hand."""
         if self.destroys:
             _permitted_to_destroy(args)
+        if self.opens is not None:
+            self.opens(args)
         performed = self.acts()
         if performed:
             for act in performed:
@@ -5127,6 +5306,23 @@ COMMANDS: tuple[Command, ...] = (
     # stored at all. Inventing a noun to put in front of them would
     # invent a word for the thing the program is already about.
     #
+    # First of them, because it is the one an operator runs first: which
+    # deployment is this, and am I talking to the one I think I am. Two
+    # acts in one row for the reason `conversation show` has two: what
+    # was asked for is one thing, and the API answers it as two
+    # resources because identity is the running server's and the counts
+    # are the store's.
+    Command(
+        words=("info",),
+        does=(IDENTITY, COUNTS),
+        opens=_contacted,
+        declare=_plain,
+        help=(
+            "what deployment this is: the API this CLI reached, the running server's "
+            "version and revision, the URL to type into a device's captive portal, and "
+            "how much of each kind is configured"
+        ),
+    ),
     # The one write that carries the whole configuration. Its own row
     # rather than a flag on a noun's `set`, because what it takes is a
     # document and what it promises is one transaction over all of it.
@@ -5332,7 +5528,8 @@ COMMANDS: tuple[Command, ...] = (
 
 # The order a reader meets the top level in, which is the table's own:
 # the nouns in the registry's order, then the device and the default
-# agent, then the flat verbs.
+# agent, then the flat verbs, of which `info` is the first because it is
+# the one an operator runs before they know anything else.
 _ORDER = tuple(dict.fromkeys(row.words[0] for row in COMMANDS))
 
 
