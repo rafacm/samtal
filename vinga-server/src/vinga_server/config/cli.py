@@ -271,6 +271,28 @@ UNREADABLE_WRITE = (
     f"read the configuration back to see whether it was applied."
 )
 
+# What `apply` adds when the document was written and the reload behind
+# it did not answer. Everything it says is something this client knows:
+# the write was acknowledged, and no completed reload answer arrived.
+#
+# What it deliberately does not say is what the server is now serving,
+# because that is not knowable from here. A 409 says another reload is
+# already running, and that one re-read the store either before this
+# commit or after it, which decides whether the document is live and is
+# not in the answer. A transport failure or a timeout is ambiguous in a
+# second way: the request is carried out in tasks that outlive the
+# connection, so a reload whose client went away can still finish.
+#
+# So the sentence sends the operator to the read that does know
+# (`diff` compares the stored half against the running one) and to the
+# command that settles it either way.
+COMMITTED_UNANSWERED = (
+    "The document was written. This command did not get a completed answer to the "
+    f"reload behind it, so what the server is serving now is not said here: run "
+    f"`{PROGRAM} diff`, which compares the stored configuration against the running "
+    f"one, and `{PROGRAM} reload` if they differ."
+)
+
 # How a stored secret is introduced in `show` and `list`. Comment lines
 # rather than a mapping: the mask is not a value that could be written
 # back, and saying so in the document is more honest than rendering it
@@ -748,6 +770,12 @@ class Invocation:
     pairs: tuple[str, ...] = ()
     from_env: str | None = None
     entity: str | None = None
+
+    # Whether the one row with a second act was told to leave it out.
+    # `apply` writes the document and installs it; this stages the write
+    # instead, and it is a field of the invocation because the row reads
+    # it to choose what it runs (`Command.selects`).
+    no_reload: bool = False
 
     # And the provider type a schema is asked about, which goes with the
     # `stage` above: the two together name one type's options, since the
@@ -1732,14 +1760,17 @@ def _show_everything(document: Mapping[str, object]) -> str:
 
 EXPORT_HEADER = f"""\
 # The domain configuration of this deployment, in the shape
-# `{PROGRAM} apply` takes. Reproduce it in two steps, in this order:
+# `{PROGRAM} apply` takes. Reproduce it in three steps, in this order:
 #
-#   1. {PROGRAM} apply -f <this file>
+#   1. {PROGRAM} apply --no-reload -f <this file>
 #   2. the secret set commands at the foot of this file, if any
+#   3. {PROGRAM} reload
 #
 # A stored credential never travels in a read, which is what the second
-# step is for. Applying is additive: a section this document does not
-# name is left alone, and nothing in it deletes.
+# step is for, and why the first stages rather than installing: a
+# reload builds the engines the document names, and their credentials
+# are not in it yet. Applying is additive: a section this document does
+# not name is left alone, and nothing in it deletes.
 """
 
 EXPORT_SECRETS_HEADING = (
@@ -3196,8 +3227,12 @@ def _read_secret(args: Invocation) -> str:
 
 
 def _applied(answer: Mapping[str, object]) -> None:
-    """One applied document read out: what each entry did, and then the
+    """One staged document read out: what each entry did, and then the
     boundaries the ones that were written are waiting on.
+
+    The rendering of `--no-reload`, which is the invocation that leaves
+    a write waiting: nothing in this command installs it, so the
+    boundaries are what the operator has to be told about.
 
     One line per entry on stdout, in the order the answer lists them,
     which is the configuration's own section order. The notices go to
@@ -3205,19 +3240,47 @@ def _applied(answer: Mapping[str, object]) -> None:
     document that wrote nine entities is waiting on one reload, not on
     nine, and printing the sentence nine times would say otherwise.
     """
+    for notice in _applied_entries(answer):
+        print(notice, file=sys.stderr)
+
+
+def _applied_quietly(answer: Mapping[str, object]) -> None:
+    """The same document read out with its boundaries left off, which is
+    what a default `apply` prints.
+
+    The reload runs behind this rendering and prints what it applied, so
+    a notice saying to run one would be telling the operator to run the
+    command whose answer is on the next line. What is dropped is only
+    the notice: the outcome per entry is the answer to what was asked,
+    and it is printed either way.
+    """
+    _applied_entries(answer)
+
+
+def _applied_entries(answer: Mapping[str, object]) -> tuple[str, ...]:
+    """What an applied document did, entry by entry, and the distinct
+    boundaries the entries that were written are waiting on.
+
+    The half both renderings share, printed here rather than returned,
+    so the two of them differ in exactly the thing they are named for.
+    """
     entries = answer["entries"]
     if not entries:
         print(NOTHING_APPLIED)
-        return
+        return ()
     for entry in entries:
         print(f"{_entry_name(entry)}: {entry['outcome']}")
-    # Flushed first, so the notices land after the lines they are about
-    # rather than ahead of them: stderr is unbuffered and stdout is not.
+    # Flushed here rather than by the caller, so whatever follows on
+    # stderr lands after the lines it is about rather than ahead of
+    # them: stderr is unbuffered and stdout is not. That is a notice
+    # under `--no-reload` and a refusal from the reload under the
+    # default, and both have to arrive underneath what was written.
     sys.stdout.flush()
-    for notice in dict.fromkeys(
-        str(entry["notice"]) for entry in entries if entry["notice"] is not None
-    ):
-        print(notice, file=sys.stderr)
+    return tuple(
+        dict.fromkeys(
+            str(entry["notice"]) for entry in entries if entry["notice"] is not None
+        )
+    )
 
 
 def _entry_name(entry: Mapping[str, object]) -> str:
@@ -3303,6 +3366,17 @@ class Act:
     # What is printed, given the answer.
     render: Callable[[Any], None]
 
+    # What this act adds to its refusal when it is not the first act of
+    # its command, which is to say when something before it has already
+    # changed the deployment. None for every act that either changes
+    # nothing or runs alone, which is all but one of them: see
+    # `COMMITTED_UNANSWERED`, the sentence `apply`'s reload carries.
+    #
+    # On the act rather than at the boundary because it is a fact about
+    # what this act follows: the same reload run by `reload` itself
+    # follows nothing and has nothing extra to say.
+    unanswered: str | None = None
+
     def read(self, answer: object) -> Any:
         """One answer, read as the shape this act says it is sent.
 
@@ -3333,6 +3407,37 @@ def _act(args: Invocation, act: Act, reached: Reached) -> None:
         query=act.query(args) if act.query is not None else {},
     )
     act.render(act.read(answer))
+
+
+def _performed(args: Invocation, acts: "tuple[Act, ...]", reached: Reached) -> None:
+    """One invocation's acts, in the order it makes them, stopping at
+    the first that is refused.
+
+    Stopping is what makes a sequence honest about what ran: a refused
+    `apply` never reaches the reload behind it, because there is
+    nothing to install and the refusal is the whole answer.
+
+    An act that failed behind an act that already changed something
+    answers with its own refusal and then with what its row says is now
+    unknown (`Act.unanswered`). The sentence is built inside the
+    handler and raised outside it, the way every boundary in this
+    module raises: an exception raised while another is being handled
+    carries that one on `__context__` for a chain walker to find, and
+    what a refusal quotes is this module's own words rather than
+    whatever the failure was carrying.
+    """
+    problem: str | None = None
+    for position, act in enumerate(acts):
+        try:
+            _act(args, act, reached)
+            continue
+        except ConfigError as refused:
+            problem = str(refused)
+            if position and act.unanswered is not None:
+                problem = f"{problem}\n{act.unanswered}"
+        break
+    if problem is not None:
+        raise ConfigError(problem)
 
 
 def _contacted(args: Invocation, reached: Reached) -> None:
@@ -3871,6 +3976,34 @@ APPLY = Act(
     render=_applied,
 )
 
+# The two acts an `apply` actually runs, which are the two above with
+# what one invocation makes of them written on: the write rendered
+# without the boundaries a reload is about to cross, and the reload
+# carrying the sentence a failure behind a committed write may claim.
+#
+# Derived from the rows rather than written out beside them, so the
+# request half cannot come apart from the row the contract check
+# enumerates: the method, the path, the body, the shapes and the two
+# timeouts are the ones above, and what differs is what this command
+# prints.
+APPLY_QUIETLY = replace(APPLY, render=_applied_quietly)
+
+APPLY_RELOAD = replace(RELOAD, unanswered=COMMITTED_UNANSWERED)
+
+
+def _applying(args: Invocation) -> tuple[Act, ...]:
+    """Which acts one `apply` runs.
+
+    The verb does what its name promises: it writes the document and
+    installs it, which is the two acts in that order. `--no-reload`
+    stages instead, and stages is the whole of what it does: the write
+    is the same request either way, and what changes is that nothing
+    installs it and the rendering says so.
+    """
+    if args.no_reload:
+        return (APPLY,)
+    return (APPLY_QUIETLY, APPLY_RELOAD)
+
 
 # The simulated board
 #
@@ -4250,6 +4383,14 @@ DOCUMENT_HELP = (
     "configuration, with the entities in each written as they are for set"
 )
 
+# The staging spelling. Named for what it turns off rather than for what
+# it leaves, because what it leaves is what the verb used to do and the
+# verb is what changed: the write is the same request either way.
+NO_RELOAD_HELP = (
+    "write the document and stop there, leaving the running server on what it is "
+    f"already serving until a `{PROGRAM} reload` (default: write it, then reload)"
+)
+
 PAIRS_HELP = (
     "the entity written inline, one key=value per field; a dotted key nests "
     "(filler.enabled=true) and a value reads as one YAML scalar. The alternative to "
@@ -4448,6 +4589,19 @@ class Command:
     # nothing: there would be no address to name and no token to demand.
     opens: "Callable[[Invocation, Reached], None] | None" = None
 
+    # Which of the acts above one invocation runs, for the row where an
+    # option decides. `apply` is the one: it writes and then installs
+    # what it wrote, and `--no-reload` stages instead.
+    #
+    # A hook from the invocation rather than a tuple cut down after the
+    # fact, because the two things that vary are not the same thing.
+    # What a row CAN reach is what `acts()` answers and what the
+    # contract check enumerates coverage from, and it does not change
+    # with a flag. What one invocation ran is this, and it is also
+    # where the rendering is chosen, since an act's renderer is handed
+    # the answer and nothing else.
+    selects: "Callable[[Invocation], tuple[Act, ...]] | None" = None
+
     # How its arguments are declared, which is a function Typer reads a
     # signature off. One per argument shape rather than one per command,
     # and the row is handed to it, so what a command performs is read
@@ -4486,20 +4640,25 @@ class Command:
             return self.does
         return ()
 
+    def performs(self, args: Invocation) -> "tuple[Act, ...]":
+        """The acts this invocation runs, which for every row but one
+        are the acts the row has: see `selects`."""
+        if self.selects is None:
+            return self.acts()
+        return self.selects(args)
+
     def perform(self, args: Invocation) -> None:
         """What this command does, once its arguments are in hand."""
         if self.destroys:
             _permitted_to_destroy(args)
-        performed = self.acts()
-        if performed:
+        if self.acts():
             # Once, in front of every act and of the opener, so that
             # what this command says about where it is reaching is true
             # of every request it then makes (`Reached`).
             reached = _reached(args)
             if self.opens is not None:
                 self.opens(args, reached)
-            for act in performed:
-                _act(args, act, reached)
+            _performed(args, self.performs(args), reached)
             return
         # No acts is the third arm of `does`: a command that reaches no
         # API, carrying its own function.
@@ -4883,12 +5042,18 @@ def _applied_document(row: Command) -> Callable[..., None]:
         file: Annotated[
             str, typer.Option("-f", "--file", metavar="PATH", help=DOCUMENT_HELP)
         ],
+        no_reload: Annotated[bool, typer.Option("--no-reload", help=NO_RELOAD_HELP)] = False,
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
         force: ForceOption = None,
         no_input: NoInputOption = None,
     ) -> None:
-        row.perform(_invocation(row, context, config, api_url, force, no_input, file=file))
+        row.perform(
+            _invocation(
+                row, context, config, api_url, force, no_input,
+                file=file, no_reload=no_reload,
+            )
+        )
 
     return run
 
@@ -5594,14 +5759,23 @@ COMMANDS: tuple[Command, ...] = (
     # The one write that carries the whole configuration. Its own row
     # rather than a flag on a noun's `set`, because what it takes is a
     # document and what it promises is one transaction over all of it.
+    #
+    # Two acts, because applying a configuration is what the word means
+    # to the person typing it: the document is written and then
+    # installed on the running server. `--no-reload` is the spelling for
+    # the other thing, staging a write for a later reload, and which of
+    # the two an invocation runs is `_applying`'s to say. `does` is what
+    # the row can reach either way, which is what coverage is about.
     Command(
         words=("apply",),
-        does=APPLY,
+        does=(APPLY, RELOAD),
+        selects=_applying,
         declare=_applied_document,
         help=(
-            "write a whole document in one transaction, refused whole if anything in "
-            "it will not resolve; additive, never deleting, and waiting for the "
-            "server's answer however long the transaction takes"
+            "write a whole document in one transaction and apply it to the running "
+            "server, refused whole if anything in it will not resolve; additive, "
+            "never deleting, and waiting for the write's answer however long the "
+            "transaction takes. --no-reload stages the write instead"
         ),
     ),
     Command(words=("list",), does=LIST, declare=_plain, help="a summary tree"),
