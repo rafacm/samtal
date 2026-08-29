@@ -625,6 +625,10 @@ Commands:
   agent-defaults   read and write agent_defaults
   device           read and write devices.<mac>, which agents a board reaches
   default-agent    the agent an unbound device reaches
+  info             what deployment this is: the API this CLI reached, the
+                   running server's version and revision, the URL to type into a
+                   device's captive portal, and how much of each kind is
+                   configured
   apply            write a whole document in one transaction, refused whole if
                    anything in it will not resolve; additive, never deleting,
                    and waiting for the server's answer however long the
@@ -1790,6 +1794,28 @@ Options:
 Usage: vinga default-agent clear [OPTIONS]
 
   unset it, leaving the devices map as the allowlist
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
+  -h, --help     Show this message and exit.
+```
+
+### `vinga info`
+
+```
+Usage: vinga info [OPTIONS]
+
+  what deployment this is: the API this CLI reached, the running server's
+  version and revision, the URL to type into a device's captive portal, and how
+  much of each kind is configured
 
 Options:
   --config PATH  path to the YAML config file naming server.port and
