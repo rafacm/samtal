@@ -897,6 +897,21 @@ same sixty `reload` does, on its own request. Neither inherits the
 other, so the unbounded one does not quietly become this command's
 answer to a reload that stopped answering.
 
+**Example, the second unbounded one**, and it reaches the same
+conclusion from the opposite direction. `events tail` reads a response
+that never finishes arriving: the answer *is* the server saying what it
+is doing, and a deployment saying nothing at four in the morning is a
+stream with nothing on it, which is the reading an operator opened it
+for. `STREAM_READ_TIMEOUT_S` is therefore `None` with the paragraph
+attached, because any finite number would end a healthy tail and report
+it as the server going away, which is the one thing that command's
+end-of-stream sentence has to be able to mean. What makes that safe
+rather than merely intended is not the client at all: the stream writes
+a keepalive comment on its own idle interval, so a connection that has
+genuinely died is a read that fails rather than a read that waits
+forever. The connect timeout stays five seconds in both cases, for the
+reason it always is.
+
 **Counterexample, merged as a rejected default.** Leaving the HTTP
 library's five-second default in place. It is below the database's busy
 timeout, so it would turn exactly that retryable answer into a transport

@@ -29,6 +29,25 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   does not close it; and the stream ends when the reader goes away or
   when the server shuts down, which it now does explicitly, between the
   session drain and uvicorn's own shutdown.
+- **`vinga events tail`** (#342). The stream above, read from wherever
+  the CLI already reaches, so the two moments that used to mean reading
+  the container's log on the server host (watching a board's `ota_check`
+  after provisioning, and diagnosing a reply that never came) are a
+  command. One physical line per event on stdout: the clock time, the
+  level's name unless it is `INFO`, the event's name, and its own fields
+  as `key=value`, every non-numeric value rendered as compact JSON so a
+  value carrying a newline or an escape sequence arrives escaped rather
+  than breaking the line or steering the terminal. `--device`,
+  `--session` and `--level` are the query's own three filters, in the
+  same words. Without `--follow` it waits for the first matching event,
+  prints it and exits 0, which is a scriptable "wait for the next X";
+  with `--follow` it prints until interrupted, which is exit 0. An end
+  nobody asked for is exit 1 with a fixed sentence on stderr, and
+  nothing reconnects: a tail that rejoined across a gap would look
+  continuous while missing what happened in it. A reader that fell
+  behind is told on stderr, so `tail | grep` still reads only events;
+  `tail | head -n 1` answers the shell's own status for a closed pipe
+  rather than a traceback.
 - **`vinga info`** (#341). One read that says what deployment the CLI
   is talking to: the address it actually contacted, the version and
   revision of the build that answered, the URL to type into a device's

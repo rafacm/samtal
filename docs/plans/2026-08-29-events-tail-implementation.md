@@ -196,3 +196,149 @@ one it asserts, and the readers that assert what a stream carried skip
 a comment frame rather than parsing it: with the interval forced to a
 tenth of a millisecond, so a keepalive is written on every deadline,
 the file still passes.
+
+## M2: the command
+
+PR TBD.
+
+### What landed
+
+- **`vinga events tail`,** an `events` noun with one verb in `GROUPS`
+  and `COMMANDS`, declared by `_tailed` with `--device`, `--session`,
+  `--level` and `--follow`, and performing `_events_tail` as a
+  `does=callable` row on the `ota-url` precedent. The three filters are
+  the query's own words and travel only when they were written, the
+  `_session_filters` rule, so the API's defaults stay said once.
+- **`_streamed`,** the streaming sibling of `_sent` in `config/cli.py`.
+  It carries the whole boundary across client construction, stream
+  opening, iteration and teardown: the request loggers are quieted for
+  the length of the stream rather than for its opening, an address that
+  the library refuses is `_unopenable`'s sentence, a connect failure is
+  `_unreachable`'s, a non-2xx is read whole and handed to `_answer` so a
+  401 here says what a 401 says anywhere, and the close answers a
+  sentence rather than raising. It always ends by raising, which is the
+  shape of the thing: a stream that stopped is either a failure with a
+  sentence or `STREAM_ENDED`, which is also one.
+- **`STREAM_READ_TIMEOUT_S = None`,** with the paragraph the cli-guide's
+  bound-every-wait practice now records beside `apply`'s: the answer
+  never finishes arriving, so any finite number would end a healthy tail
+  and report it as the server going away. The connect timeout is kept.
+- **The line,** `_event_line` and the three functions under it. The
+  clock time off `ts`, the level's name for everything but `INFO`, the
+  event's name, then the payload's remaining fields as `key=value` in
+  payload order. Values are compact JSON with `ensure_ascii`, so a
+  newline, a quote or an escape sequence arrives escaped; numbers are
+  bare and booleans are `true`/`false`.
+- **The two streams and the two statuses.** Events on stdout, flushed
+  per line; `dropped` counts as notices on stderr. Ctrl-C ends a follow
+  with exit 0, caught in the command whose ordinary ending it is; a
+  broken pipe answers `BROKEN_PIPE_STATUS`, caught at `main` for every
+  command.
+- **The lanes.** The unit suite is `tests/unit/test_config_cli_events.py`
+  on the runner fixture with a streaming transport; the live lane opens
+  the stream against the real uvicorn while a real board holds a
+  conversation over a socket; the wheel lane drives the row from the
+  installed binary against a real server.
+- **The documents.** The cli-guide's second unbounded-read example, the
+  README's "watching a deployment as it runs" subsection under Logging,
+  the regenerated `docs/reference/cli.md`, the command-spellings
+  manifest, and the changelog's dated entry.
+
+### Deviations from the plan
+
+Two, and one of them adds a module the plan did not name.
+
+- **The SIGPIPE answer moved to a module of its own,**
+  `vinga_server/broken_pipe.py`. The plan says the tail "follows the
+  `events_cli` SIGPIPE pattern", and following it by copying would have
+  meant two copies of a two-part trap: the shell's status for a process
+  cut off by SIGPIPE, and the descriptor redirection that keeps the
+  interpreter's own final flush from raising again where nothing can
+  catch it. Importing `events_cli` was not available: it pulls
+  `events_docgen` and the whole event catalog, and the configuration
+  CLI's module-scope reach is an inventory a test holds
+  (`test_cli_import_weight`). So the pattern has one home, stdlib only,
+  and the inventory gains exactly one entry with its reason. The catch
+  is at `main` rather than in the row, because `vinga export | head` is
+  the same shape and had the same traceback waiting in it.
+- **A mid-stream transport failure is `STREAM_ENDED`, not a transport
+  sentence of its own.** The plan lists what an unexpected end is (a
+  server restarting, a proxy dropping the connection, a deployment
+  upgrade), and every one of those arrives here as an httpx error with
+  the stream open rather than as a clean end of body. From this side the
+  two are one thing, the tail going quiet, so they answer the same fixed
+  sentence; a client that told them apart would be reporting a
+  distinction it cannot make. A failure at CONNECT time still names the
+  masked address, because which address was never reached is the whole
+  of what a reader needs there, and the unit suite pins both halves.
+
+### Discoveries
+
+- **`iter_lines` is already an SSE reader's line source.** httpx strips
+  the line endings and yields `""` for a blank line, which is exactly
+  the frame boundary the format defines, so the parser is a state
+  machine over three line shapes and nothing else.
+- **A generator is the right shape for the boundary, and its `finally`
+  is the whole cleanup contract.** A reader that has read enough leaves
+  by closing the generator, which raises `GeneratorExit` at the `yield`;
+  that runs the `finally` and gives the connection back, and it does not
+  reach the `raise` after it, so a first-match exit is not an
+  end-of-stream failure. The command wraps the generator in
+  `contextlib.closing` so that leaving is a statement rather than a
+  collection cycle.
+- **A refusal on this route has to be read before it can be answered.**
+  A streamed response has no body in hand, so `_refused_stream` calls
+  `.read()` inside the boundary before handing it to `_answer`: the read
+  is itself a request that can fail, and a failure there is
+  `_unreachable`'s sentence rather than a traceback.
+- **The buffered test client cannot drive this row at all.** It reads a
+  whole body before handing it back and this body has no end, which is
+  M1's discovery met from the client side. `tests/support/config_cli`
+  grew `answering`, which puts a handler of the test's own behind a real
+  `httpx.Client`: a handler that raises is a connection that never
+  opens, and a body chunk that raises is one that dies mid-stream, which
+  are the two moments the no-leak cases need.
+- **A tail holds the quieting lock for as long as it watches, so it
+  cannot share a process with what it is watching.** `logs.quieted`
+  serializes on one process-global lock, because the state it holds is
+  the process's: two threads quieting at once would restore each other's
+  levels. Every request boundary in the package uses it, the simulator's
+  socket half included, and this command's span is the length of the
+  stream rather than the length of a request. The first live-lane case
+  drove the conversation in the same process as the tail and deadlocked
+  outright: the tail waited for an event the conversation could not
+  produce, and the whole lane hung rather than failing. On a deployment
+  the question does not arise, since a tail IS a process doing one
+  thing, so the boundary keeps the span the no-leak contract needs and
+  the lane runs the command as a subprocess, which also gives it a
+  deadline it cannot outlive. `_streamed` says so where a reader of the
+  code will meet it. A hung lane is worse than a red one, which is what
+  `tests/support/commands.py` exists to say.
+- **The live lane has to check the board in BEFORE it opens the
+  stream.** The case exists to prove the session attach, and a session
+  event is the only thing that can: it reaches the hub because the hub
+  is attached to `SessionEvents` at construction, where a server event
+  would have reached it through the process-global tap that any test can
+  drive. A check-in inside the stream's lifetime emits an `ota_check`
+  that would be the first event admitted, and the case would then be
+  proving the tap it is not about. The discriminator asserted is
+  `session=`, which is the field a server event does not carry.
+- **Nothing can observe the moment a subscription attaches**, from
+  outside the process or in. Both lanes therefore drive their event in a
+  loop until the tail has seen one, with a deadline: a stream that
+  opened a millisecond after the only event would otherwise wait for a
+  second one that never came.
+
+### Verification
+
+- `uv run ruff check .`: clean.
+- `uv run mypy` (the events package's strict scope, as CI runs it): no
+  issues; nothing in this milestone is inside that scope.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: green.
+- `uv run pytest tests/integration -q`: green, against the compose
+  Postgres already listening on 127.0.0.1:5432.
+- The command-spellings census and `scripts/check_doc_links.py`: green.
+- No device checkpoint: nothing in this milestone changes what a board
+  sends or is sent. The live lane drives a real board through a real
+  conversation against a real server, which is what this milestone's
+  claim about session events needed.

@@ -701,6 +701,13 @@ Commands:
                    reach a conversation at
   session          the sessions this server recorded, and erasing them
   conversation     the conversations this server recorded, and erasing them
+<<<<<<< HEAD
+=======
+  events           what the running server is saying right now, as it says it
+  status           what each configured MCP server is doing on the running
+                   server: connected, down, or unused because no agent
+                   references it, since when, and which tools it published
+>>>>>>> 2d8c9fab (Say where a deployment is watched from now)
   reload           apply the stored configuration to the running server, without
                    a restart and without dropping a conversation
   ota-url          the URL to type into a device's captive portal; derived from
@@ -2235,6 +2242,74 @@ Options:
   -h, --help     Show this message and exit.
 ```
 
+<<<<<<< HEAD
+=======
+### `vinga events`
+
+```
+Usage: vinga events [OPTIONS] COMMAND [ARGS]...
+
+  what the running server is saying right now, as it says it
+
+Options:
+  -h, --help  Show this message and exit.
+
+Commands:
+  tail  what this server is saying right now, one line per event, as it says it;
+        without --follow it waits for the first event, prints it and exits
+```
+
+### `vinga events tail`
+
+```
+Usage: vinga events tail [OPTIONS]
+
+  what this server is saying right now, one line per event, as it says it;
+  without --follow it waits for the first event, prints it and exits
+
+Options:
+  --device MAC   only the events of this board, by MAC (default: every board)
+  --session ID   only the events of this session, by its uuid hex (default:
+                 every session)
+  --level LEVEL  the lowest level to show, in any case: DEBUG, INFO, WARNING or
+                 ERROR (default: INFO, which is what the retained log carries)
+  --follow       keep streaming until interrupted; without it the command prints
+                 the first matching event and exits
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
+  -h, --help     Show this message and exit.
+```
+
+### `vinga status`
+
+```
+Usage: vinga status [OPTIONS]
+
+  what each configured MCP server is doing on the running server: connected,
+  down, or unused because no agent references it, since when, and which tools it
+  published
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
+  -h, --help     Show this message and exit.
+```
+
+>>>>>>> 2d8c9fab (Say where a deployment is watched from now)
 ### `vinga reload`
 
 ```
