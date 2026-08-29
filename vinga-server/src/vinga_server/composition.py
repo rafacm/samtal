@@ -27,6 +27,7 @@ from vinga_server.config.api import ApiRuntime
 from vinga_server.conversations import ConversationStore
 from vinga_server.device.bindings import DeviceBindings
 from vinga_server.device.boundary import RuntimeFactory
+from vinga_server.events.live import LiveEvents
 from vinga_server.generation import Generations
 from vinga_server.onboarding import PendingDevices
 from vinga_server.registry import SessionRegistry
@@ -81,4 +82,13 @@ class Composition:
     runtime_factory: RuntimeFactory
     device_facts: DeviceFacts
     capture: CaptureStore | None
+    # Everyone watching this server's events right now (#342). Not
+    # optional, and it is the one field that is a resource nothing
+    # configures: a hub with no subscribers costs a lock per event, and
+    # a deployment does not ask for the ability to tail its own server
+    # any more than it asks for its log. It rides the composition
+    # because two of its three reaches are here (the device edge builds
+    # a session with it, the shutdown closes it), and the third is the
+    # API runtime beside it.
+    live: LiveEvents
     api: ApiRuntime

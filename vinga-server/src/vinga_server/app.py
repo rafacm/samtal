@@ -40,8 +40,9 @@ from vinga_server.config.responses import (
 from vinga_server.config.secrets import SecretStore
 from vinga_server.conversations import ConversationStore, open_conversations, threads
 from vinga_server.device.bindings import DeviceBindings
-from vinga_server.events import ServerEvents
+from vinga_server.events import ServerEvents, attach_server_tap, detach_server_tap
 from vinga_server.events.catalog import CaptureDisabled, CaptureEnabled
+from vinga_server.events.live import LiveEvents
 from vinga_server.events.values import ConfiguredPath
 from vinga_server.filler import build_agent_fillers
 from vinga_server.generation import Generation, Generations
@@ -194,6 +195,22 @@ async def _build_composition(
     open (the plan review's finding 6).
     """
     config, secrets = seed.config, seed.secrets
+    # Everyone watching this server's events right now (#342), built
+    # first so that the boot's own events reach whoever is watching the
+    # next one: what an operator tails a redeploy for is exactly the
+    # lines a hub attached at the end of the build would miss.
+    #
+    # The detach is registered in the same breath, and that is the whole
+    # of why it is here rather than beside the emit sites. The server
+    # tap set is process-global and outlives any one application, so an
+    # attachment that survived this lifespan would deliver into a dead
+    # app, and a second lifespan in the same process would deliver every
+    # server event twice. The exit stack is what already unwinds a
+    # partial startup, so the registration is on it rather than in a
+    # `finally` that a failure part way through would skip.
+    live = LiveEvents()
+    attach_server_tap(live)
+    stack.callback(detach_server_tap, live)
     # Auth is resolved first and fails the boot when it is enabled with no
     # secret in the environment, so a deployment that forgot one never
     # comes up serving every device that connects. `create_app` already
@@ -490,6 +507,7 @@ async def _build_composition(
         runtime_factory=runtime_factory,
         device_facts=device_facts,
         capture=capture,
+        live=live,
         api=api_runtime,
     )
     app.state.composition = composition

@@ -145,6 +145,7 @@ async def conversation(websocket: WebSocket) -> None:
         comp.bindings,
         comp.conversations,
         comp.sessions,
+        comp.live,
     )
     # Capacity is checked after the token, so a full server still answers a
     # bad token with a refusal about the token.
@@ -169,6 +170,13 @@ async def conversation(websocket: WebSocket) -> None:
                 shown=DeviceOrUnidentified.of(known),
             )
         )
+        # The one path where a session that was built never runs, so the
+        # `finally` inside `run` never fires for it. The live tap it
+        # attached at construction comes off here instead, after the
+        # rejection above, which is an event a tail wants precisely
+        # because it is the one that explains a device that keeps
+        # reconnecting (#342).
+        session.detach_live()
         await websocket.close()
         return
 
