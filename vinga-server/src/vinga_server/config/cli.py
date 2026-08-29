@@ -4289,10 +4289,17 @@ SCHEMA_STAGE_HELP = "with TYPE, the options of one provider type: llm, asr, tts 
 
 SCHEMA_TYPE_HELP = "with STAGE, the provider type whose options to print"
 
+# The first thing anybody reads of this grammar, so it is written in the
+# vocabulary of the person reading it rather than in this repository's.
+# "The domain half" is a real distinction here (the file half boots a
+# server, the domain half is what it serves) and it is a distinction
+# nobody has met yet at the moment they run `vinga` for the first time:
+# a sentence that opens with it says what this command group is NOT
+# before it has said what it is. What it is, is the thing they came to
+# do.
 DESCRIPTION = (
-    "Read and write the domain half of the configuration: providers, "
-    "MCP servers, agents, devices and their secrets. Commands go through the "
-    "configuration API on the running server."
+    "Configure a running vinga server: providers, MCP servers, agents, "
+    "devices and their secrets. Commands go through the configuration API."
 )
 
 # The declared copy of each option, as one annotation apiece, so a

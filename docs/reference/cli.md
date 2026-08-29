@@ -1,10 +1,12 @@
 # The configuration CLI
 
-`vinga` reads and writes the domain half of a deployment's
-configuration: the providers, the MCP servers, the prompt fragments, the
-agent defaults, the agents, the device bindings and the default agent.
-It is a client of the configuration API rather than a second way into
-the database, so a refusal reads the same whichever way it was reached.
+`vinga` configures a running deployment: the providers, the MCP servers,
+the prompt fragments, the agent defaults, the agents, the device
+bindings and the default agent. Those are the domain half of a
+deployment's configuration, the half a server serves; the file half it
+boots from is read here and never written. It is a client of the
+configuration API rather than a second way into the database, so a
+refusal reads the same whichever way it was reached.
 That is the normal path and almost every command is on it, which means
 almost every command needs a server to be running. An empty database is
 a valid state for that server to be running on, which is what makes
@@ -600,9 +602,8 @@ and a value given before it survives a command that was not given one.
 ```
 Usage: vinga [OPTIONS] COMMAND [ARGS]...
 
-  Read and write the domain half of the configuration: providers, MCP servers,
-  agents, devices and their secrets. Commands go through the configuration API
-  on the running server.
+  Configure a running vinga server: providers, MCP servers, agents, devices and
+  their secrets. Commands go through the configuration API.
 
 Options:
   --config PATH  path to the YAML config file naming server.port and
