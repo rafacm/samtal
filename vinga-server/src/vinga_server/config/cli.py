@@ -1461,7 +1461,13 @@ def _sent(
         except (httpx.InvalidURL, ValueError):
             problem = _unopenable(address)
     finally:
-        problem = problem or _close_failed(client, address)
+        # Unconditionally, and the first problem still wins: the `or`
+        # this was read as though it did both, and a request that failed
+        # skipped its own close for it. The streaming sibling had the
+        # identical line and the identical hole, which is why both are
+        # written this way now rather than only the one a review found.
+        closing = _close_failed(client, address)
+        problem = problem if problem is not None else closing
     if answered is None or problem is not None:
         raise ConfigError(problem)
     return answered
@@ -1593,7 +1599,16 @@ def _reading(
                 # here is the stream ending: see `STREAM_ENDED`.
                 problem = STREAM_ENDED
     finally:
-        problem = problem or _close_failed(client, address)
+        # Unconditionally, and the first problem still wins. `or` read
+        # as though it were both, and it is not: a transport failure
+        # sets `problem` before this runs, and the short circuit then
+        # skipped the close altogether, leaving the connection open on
+        # exactly the paths where something had already gone wrong with
+        # it. What is kept is the ordering, which is `_sent`'s: a real
+        # failure over a close failure, and a close failure over the
+        # stream merely having ended.
+        closing = _close_failed(client, address)
+        problem = problem if problem is not None else closing
     raise ConfigError(problem if problem is not None else STREAM_ENDED)
 
 

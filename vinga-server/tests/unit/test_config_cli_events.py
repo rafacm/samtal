@@ -740,6 +740,78 @@ def test_an_unreadable_frame_leaves_nothing_on_the_chain() -> None:
     assert caught.__context__ is None
 
 
+# Giving the connection back
+
+
+@pytest.mark.parametrize(
+    ("handler", "argv"),
+    [
+        pytest.param(
+            failing(httpx.ConnectError("connection refused")),
+            ("events", "tail"),
+            id="connect-time",
+        ),
+        pytest.param(
+            serving(event(event="ota_check", device=MAC), httpx.ReadError("gone")),
+            ("events", "tail", "--follow"),
+            id="mid-stream",
+        ),
+        pytest.param(
+            serving(event(event="ota_check", device=MAC)),
+            ("events", "tail"),
+            id="first-match",
+        ),
+        pytest.param(
+            serving(KEEPALIVE),
+            ("events", "tail", "--follow"),
+            id="the-stream-ending",
+        ),
+    ],
+)
+def test_the_connection_is_given_back_however_the_stream_ends(
+    run, handler: Callable[[httpx.Request], httpx.Response], argv: tuple[str, ...]
+) -> None:
+    """Every way out of the boundary, including the two that had gone
+    without one: a failure recorded before the close short circuited
+    past it, so exactly the paths where something had already gone wrong
+    with the connection were the paths that left it open."""
+    answering(run, handler)
+
+    run(*argv)
+
+    [client] = run.clients
+    assert client.is_closed
+
+
+def test_a_connection_that_will_not_close_says_so_in_this_module_s_words(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A transport failing on its way out puts the address, a header or
+    its own text into what it raises, so the close answers a sentence
+    rather than raising it, and the sentence is this module's.
+
+    Read on the follow path because that is where it is reachable: a
+    reader that has had its event leaves by closing the generator, and
+    an exception is not what a reader who got what it came for should
+    be handed.
+    """
+
+    def refuses(self: httpx.Client) -> None:
+        raise RuntimeError(f"the transport will not let go of {ANSWERED}")
+
+    answering(run, serving(KEEPALIVE))
+    monkeypatch.setattr(httpx.Client, "close", refuses)
+    capsys.readouterr()
+
+    assert run("events", "tail", "--follow") == 1
+
+    printed = capsys.readouterr()
+    assert "could not be closed" in printed.err
+    assert "127.0.0.1" in printed.err
+    assert ANSWERED not in printed.err
+    assert "Traceback" not in printed.err
+
+
 # The credential, on every surface a deployment keeps
 #
 # Two cases and not one, because a stream has two moments a bare client
