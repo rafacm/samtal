@@ -9,6 +9,26 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **The structured events, streamed live** (#342). `GET
+  /api/runtime/events` answers `text/event-stream` and keeps answering:
+  one JSON object per event, carrying that event's catalogued fields
+  plus two the stream owns, `ts`, the wall-clock instant it was emitted
+  at, and `level`, the name of its level. Those are the fields the
+  retained JSON log carries too, under the same names; the log's own
+  record-keeping beside them, the channel and the rendered sentence, is
+  not repeated on the stream. Nothing is kept behind it, so a reader
+  joins the present and reads what happened before from the conversation
+  record; what was said in a conversation is not on it, because the
+  events are metadata by construction. Three filters narrow it, applied
+  as the events arrive: `device` takes a MAC in either separator and any
+  case, `session` a session's uuid hex, and `level` a threshold over the
+  four level names, defaulting to `INFO`, which is what the retained log
+  carries. A reader that falls behind loses its oldest events rather
+  than slowing a conversation down, and is told how many by a `dropped`
+  event of its own; an idle stream sends a keepalive comment so a proxy
+  does not close it; and the stream ends when the reader goes away or
+  when the server shuts down, which it now does explicitly, between the
+  session drain and uvicorn's own shutdown.
 - **`vinga info`** (#341). One read that says what deployment the CLI
   is talking to: the address it actually contacted, the version and
   revision of the build that answered, the URL to type into a device's
