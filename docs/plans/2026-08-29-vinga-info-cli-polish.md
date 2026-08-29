@@ -106,9 +106,21 @@ to record that history, and the living cli-guide lines that name flat
 regenerated in the same commit as the last doc edit.
 
 **How `apply --no-reload` gates the second act.** `apply` becomes a
-two-act row (`APPLY`, then `RELOAD`), and the row grows a boolean
-option that truncates the act tuple to its first element. `_act`
-raises out of a failed first act, so a refused apply never reloads.
+two-act row (`APPLY`, then `RELOAD`), and the selection is
+invocation-aware by design rather than by tuple surgery: `Command`
+gains an explicit act-selection hook (a callable from invocation to
+the acts to run, defaulting to the static tuple), and `Command.acts()`
+keeps answering the full static set, because the API contract test
+enumerates coverage from it and coverage is about what the row can
+reach, not what one invocation ran. The render is likewise
+invocation-aware: the apply act renders through a quiet renderer when
+the reload act follows (no per-entity `RELOAD_NOTICE`, since the
+reload listing that follows says what applied) and through the
+staging renderer under `--no-reload` (notices kept). This is a small
+`Command`/`Act` interface change and M3 names it as such, with tests
+proving both renderers and both request sequences (two requests by
+default, one under the flag). `_act` raises out of a failed first
+act, so a refused apply never reloads.
 A committed apply whose reload act then fails renders the apply
 result first and the reload failure after it, and the sentence it
 adds claims only what the client actually knows: the write committed,
@@ -121,11 +133,7 @@ requester goes away. The sentence directs the operator to
 `vinga diff` (which says whether the stored and running worlds agree)
 and then `vinga reload` if they do not. Both shapes are tested: a
 concurrent 409 from a held reload, and an ambiguous transport failure
-mid-reload. With the default
-now reloading, the `RELOAD_NOTICE` lines `apply` used to print per
-written entity are suppressed when the reload act runs (the reload
-listing that follows says what applied); they still print under
-`--no-reload`, and single-entity `set` writes keep their notice
+mid-reload. Single-entity `set` writes keep their notice
 untouched. The apply act keeps its unbounded read timeout and the
 reload act its 60 s one, each on its own request.
 
