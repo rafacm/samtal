@@ -144,8 +144,20 @@ no-em-dash rule is about em-dashes; no character in the banner is one.
 ## Design footprint
 
 - `config/api.py` deepens: one new runtime route in `_runtime`,
-  answering from `ApiRuntime`, with its `api_descriptions/` page and
-  OpenAPI presence. No new module.
+  answering from `ApiRuntime`, with its OpenAPI presence and its
+  refusal descriptions following the `_problems` pattern. The
+  response model is a strict `RuntimeInfo` in `config/responses.py`,
+  where every model the CLI's acts share already lives so the CLI
+  imports no FastAPI. With onboarding off the URL and provenance
+  fields are null and the flag says why; on an application built
+  without a surrounding server (`build_api()` standalone) the route
+  answers the honest 503 the other runtime reads answer, never
+  invented identity data. `build_api`/`build_api_runtime` keep their
+  existing positional calls working (appended defaulted parameters,
+  or internal calls converted to keywords). Tests cover enabled,
+  disabled, standalone-503, and exact equality of the served values
+  with `onboarding_url()` and `revision()` through the composition
+  root.
 - `app.py` (composition root) deepens: it already assembles the
   runtime facts; it adds the identity facts (version, revision,
   onboarding URL callable) to what it hands `build_api_runtime`.
@@ -331,6 +343,11 @@ condensed but faithful; resolutions appended per amendment.
    surrounding server, preserve builder call compatibility, and test
    enabled, disabled, standalone-503 and exact equality with
    `onboarding_url()` and `revision()` through the composition root.
+
+   *Resolution*: adopted: strict `RuntimeInfo` in
+   `config/responses.py`, nullable-with-reason when onboarding is
+   off, standalone 503, builder-call compatibility, and the four
+   named test cases.
 
 6. **P2: `info` does not show the API endpoint the CLI contacted.**
    The output has only server-returned identity and the device-facing
