@@ -552,6 +552,22 @@ boundary rather than letting the library print and exit on its own,
 because a failure that bypassed the boundary would bypass the
 sanitizing with it.
 
+**A bare invocation is answered with its own help page** (#341). `vinga`
+on its own, and every noun with no verb after it (`vinga provider`,
+`vinga device pending`), prints the page it was one word short of, on
+stderr, and exits 1. Three things are being held together there. The
+reader is not making a mistake about the grammar, they are asking to
+see it, so what they get is the grammar rather than a sentence telling
+them to ask a second time. Stdout stays data-only, per [Data on stdout,
+notices on stderr](#data-on-stdout-notices-on-stderr): this invocation
+produced no data, so nothing goes there, and a pipe does not fill with
+a help page. And the exit code still says what happened, which is that
+no command was typed; a 0 would say one completed. `--help` is the
+other invocation and keeps stdout and 0, because asking for help is not
+a failure. The libraries' own no-args-help does both of the other
+things (stdout, exit 0), so it is deliberately off and the boundary
+answers that one usage mistake with the page instead of a sentence.
+
 **The exception, stated because it is real.** The root `vinga-server`
 dispatch answers its own usage errors, and an unrecognized first word,
 with exit 2. That is what argparse has always answered a usage error

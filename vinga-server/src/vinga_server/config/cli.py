@@ -83,6 +83,7 @@ from typer._click.exceptions import (
     ClickException,
     MissingParameter,
     NoSuchOption,
+    UsageError,
 )
 from typer.core import TyperCommand, TyperGroup
 
@@ -522,6 +523,10 @@ def _parsed(argv: Sequence[str], spelled: str) -> None:
     is still on `__context__`, and this module's whole no-leak
     discipline is about what a chain walker finds rather than about what
     is displayed.
+
+    One usage mistake is answered with a page rather than a sentence,
+    and it leaves through the same door as every other: see
+    `_page_instead`.
     """
     problem: str | None = None
     asked_for: int | None = None
@@ -533,10 +538,51 @@ def _parsed(argv: Sequence[str], spelled: str) -> None:
     except Exit as asked:
         asked_for = asked.exit_code
     except ClickException as exc:
-        problem = _usage_problem(exc)
+        problem = _page_instead(exc) or _usage_problem(exc)
     if asked_for is not None:
         raise SystemExit(asked_for)
     raise ConfigError(problem)
+
+
+# Click's fixed words for a group that was given no verb, which is the
+# one usage mistake this grammar answers with a help page. Read as a
+# marker for the reason `_USAGE_SHAPES` below reads markers: the base
+# `UsageError` is one class for several different mistakes, and its
+# fixed words are the part of the sentence carrying no value.
+NO_COMMAND = "Missing command"
+
+
+def _page_instead(exc: ClickException) -> str | None:
+    """The help page a bare invocation is answered with, or None for
+    every other mistake.
+
+    `vinga`, `vinga provider` and `vinga device pending` are each a page
+    of the grammar with nothing chosen off it. What the reader needs
+    there is the list of what they could have chosen, and they need it
+    without typing a second command, so this hands back the page that
+    Click's `no_args_is_help` would have printed and the boundary prints
+    it the way it prints every other answer to an invocation that was
+    not a completed command: on stderr, exiting 1.
+
+    Not `no_args_is_help=True`, which prints to stdout and exits 0. Both
+    halves of that are wrong here. Stdout is data (see the cli-guide's
+    stdout/stderr practice) and a bare invocation produced none, so a
+    pipe would fill with a help page; and exit 0 says a command
+    completed, when what happened is that none was typed. `--help` is
+    the other invocation and keeps both, because asking for help is not
+    a failure.
+
+    The page comes off the context the mistake was raised from, which is
+    the group that was left without a verb rather than the root, so a
+    bare sub-noun answers with its own page. A `UsageError` carrying no
+    context cannot be answered this way and falls through to the
+    sentence `_USAGE_SHAPES` has for it.
+    """
+    if not isinstance(exc, UsageError) or exc.ctx is None:
+        return None
+    if NO_COMMAND not in exc.format_message():
+        return None
+    return exc.ctx.get_help()
 
 
 # What a mistake in the grammar says
@@ -585,7 +631,13 @@ SECRET_NEVER_AN_ARGUMENT = (
 _USAGE_SHAPES: tuple[tuple[str, str], ...] = (
     ("Got unexpected extra argument", SECRET_NEVER_AN_ARGUMENT),
     ("No such command", "that is not a command"),
-    ("Missing command", "a command is missing"),
+    # The third has no route through this grammar any more: a group left
+    # without a verb is answered with its own page by `_page_instead`,
+    # which reads the context the mistake carries. The sentence stays as
+    # the answer for the same mistake with no context on it, because a
+    # shape that cannot be answered with a page still has to be answered
+    # with something, and the vague fallback would say less than this.
+    (NO_COMMAND, "a command is missing"),
 )
 
 # What an unrecognized shape gets. Deliberately vague about the mistake
@@ -5677,9 +5729,14 @@ def command() -> TyperGroup:
     """
     app = typer.Typer(
         help=DESCRIPTION,
-        # A group with nothing after it is a mistake in the grammar, not
-        # a request for help: `vinga-server config` on its own answers
-        # the way every other mistake does.
+        # A group with nothing after it is still not a completed
+        # command, and it is answered with this page: the parse is left
+        # to fail the way it always did and `_page_instead` turns that
+        # one failure into the help, printed on stderr, exiting 1. Not
+        # the library's own no-args help, which prints to stdout and
+        # exits 0, and is wrong twice over: stdout is data and this
+        # invocation produced none, and 0 would say a command completed
+        # when none was typed.
         no_args_is_help=False,
         # Neither of the two options Typer would otherwise add: this
         # group's options are the three below and nothing else.
@@ -5698,6 +5755,14 @@ def command() -> TyperGroup:
     # row three words deep finds the group its leading words name rather
     # than being registered under the first of them with the word in the
     # middle discarded.
+    #
+    # The same no-args answer at every noun as at the root above, and
+    # for the same reason: `vinga provider` and `vinga device pending`
+    # are pages of the grammar with nothing chosen off them, and each is
+    # answered with its own page rather than the root's. What makes that
+    # one behavior rather than two is that the mistake carries the
+    # context it was raised from, which is the group that was left
+    # without a verb.
     groups = {path: typer.Typer(no_args_is_help=False, rich_markup_mode=None) for path in GROUPS}
     for row in COMMANDS:
         under = groups[row.words[:-1]] if len(row.words) > 1 else app

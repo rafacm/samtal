@@ -2,8 +2,8 @@
 
 Every other config suite drives a command that parses. This one is about
 the parse: a subcommand nobody has, a missing positional, an unknown
-flag, an argument too many, and `--help`, which is the one invocation
-that is not a failure.
+flag, an argument too many, a bare invocation that named no command at
+all, and `--help`, which is the one invocation that is not a failure.
 
 The exit code is the contract under all of it. Click's own error path
 prints the mistake and exits 2, which would make a typed command the
@@ -160,6 +160,88 @@ def test_asking_for_help_carries_no_library_exception_with_it(
     assert capsys.readouterr().out.startswith("Usage: vinga-server config")
 
 
+# A bare invocation, at the root and at every noun
+#
+# Arriving with no command is not a completed command, so it exits 1
+# like every other one of those; what it gets instead of a sentence is
+# the page it was one word short of, because the reader is not making a
+# mistake about the grammar, they are asking to see it. The page goes to
+# stderr, since stdout is data and this invocation produced none, and
+# `--help` above keeps stdout and 0.
+#
+# Every group of the tree, nested ones included, because the page has to
+# be the one the reader stopped at rather than the root's, and what
+# makes it so is that the mistake carries the context it was raised
+# from. A group whose parent's page were printed instead would list
+# commands the words already typed cannot reach.
+BARE: list[tuple[str, ...]] = [(), *sorted(cli.GROUPS)]
+
+
+def _bare_id(path: tuple[str, ...]) -> str:
+    return " ".join(path) if path else "the group"
+
+
+@pytest.mark.parametrize("path", BARE, ids=[_bare_id(path) for path in BARE])
+def test_a_bare_invocation_prints_its_own_help_and_exits_one(
+    run, capsys: pytest.CaptureFixture[str], path: tuple[str, ...]
+) -> None:
+    """Exit 1, the page on stderr, and nothing at all on stdout."""
+    assert run(*path) == 1, path
+
+    captured = capsys.readouterr()
+    assert captured.out == "", path
+    assert captured.err.startswith(
+        " ".join(["Usage:", cli.DISPATCHED, *path]) + " [OPTIONS] COMMAND [ARGS]..."
+    ), path
+    assert "Commands:" in captured.err, path
+    assert "Traceback" not in captured.err, path
+
+
+@pytest.mark.parametrize("path", BARE, ids=[_bare_id(path) for path in BARE])
+def test_a_bare_invocation_carries_nothing_on_its_chain(path: tuple[str, ...]) -> None:
+    """The half no assertion about a stream can make, and the reason
+    this answer is raised after the handler rather than inside it: a
+    Click exception holds the context it was raised from and that
+    context holds the argument list."""
+    refusal = _refusal(path)
+
+    assert refusal.__cause__ is None, path
+    assert refusal.__context__ is None, path
+
+
+# And one of them with a credential in the place a credential really can
+# be typed. `--api-url` is a URL and a URL can carry a query, so an
+# operator who has been handed an addressed endpoint pastes the whole
+# thing; the option is accepted before the command word, so it is
+# accepted in front of a group with no verb after it, which is exactly
+# the invocation this page is printed for.
+ADDRESSED = f"https://vinga.example/api?token={SECRET}"
+
+
+@pytest.mark.parametrize("path", [("provider",), ("device", "pending")], ids=[
+    "a noun", "a sub-noun"
+])
+def test_a_bare_invocation_says_nothing_of_the_address_it_was_given(
+    run,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+    path: tuple[str, ...],
+) -> None:
+    """The page is generated from the tree and the invocation reaches
+    none of it: not the page, not stdout, and not the log in either of
+    the two renderings a deployment keeps it in."""
+    with caplog.at_level(logging.DEBUG):
+        assert run("--api-url", ADDRESSED, *path) == 1
+
+    captured = capsys.readouterr()
+    assert "Commands:" in captured.err
+    assert SECRET not in captured.err
+    assert SECRET not in captured.out
+    assert SECRET not in caplog.text
+    assert SECRET not in both_formats(caplog)
+    assert SECRET not in chain(_refusal(("--api-url", ADDRESSED, *path)))
+
+
 # One case per shape the usage boundary names
 #
 # Click states a usage mistake two ways: as a subclass of `UsageError`,
@@ -202,7 +284,6 @@ PLANTED: list[tuple[str, tuple[str, ...], str]] = [
         ("provider", "secret", "set", "llm", SECRET),
         "a required argument is missing",
     ),
-    ("a command that is missing", ("provider",), "a command is missing"),
 ]
 
 
@@ -287,6 +368,12 @@ def test_a_refusal_carries_nothing_of_the_command_line_on_its_chain(
 # becomes reachable, so these are driven at the boundary itself, with a
 # credential in the message each of them would have carried.
 #
+# One of them used to be reachable and is not any more. A group left
+# without a verb is answered with its own page above, off the context
+# the mistake carries; the sentence stays for the same mistake with no
+# context on it, which is a shape no command line produces and which
+# would otherwise fall to the vague fallback.
+#
 # The base `UsageError` is reached through a subclass `cli` imports
 # rather than through a second import of Typer's private copy of Click:
 # one place breaking on a Typer upgrade is enough.
@@ -302,6 +389,11 @@ CONSTRUCTED = [
         "an argument in a shape it does not take",
         cli.BadArgumentUsage(f"Got unexpected extra arguments ({SECRET})"),
         "an argument was given in a shape this command does not take",
+    ),
+    (
+        "a group with no command and no context",
+        USAGE_ERROR(f"Missing command. {SECRET}"),
+        "a command is missing",
     ),
     (
         "a usage error whose words are new",
