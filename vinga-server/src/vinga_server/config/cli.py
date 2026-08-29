@@ -2302,6 +2302,44 @@ def _identity_block(info: Mapping[str, object]) -> str:
     )
 
 
+# What a count of the masked configuration depends on, and what says so
+#
+# `ConfigDocument` declares the document as `dict[str, Any]` and stops
+# there, deliberately: the document's shape is its own prose, and the
+# entity models cannot validate an entry whose credential-bearing values
+# have been replaced by the mask. So the act's answer is read as far as
+# the outer mapping and no further, and everything under it is a body
+# nobody has vouched for.
+#
+# A count needs more than that: that a section is a mapping of entries,
+# that a provider section is a mapping of those, and that the default
+# agent is a name or nothing. Those are read as shapes through
+# `_understood`, like every other answer this module renders, so a
+# section that is a number, a list or absent meets the one fixed
+# sentence a body this client cannot read gets, rather than a
+# `TypeError` or a `KeyError` leaving the boundary as a traceback with
+# the answer inside it.
+ENTRIES = dict[str, Any]
+
+STAGED_ENTRIES = dict[str, ENTRIES]
+
+NAMED = str | None
+
+
+def _counted(section: object, kind: entities.EntityDescriptor) -> int:
+    """How many entries one section of the masked document holds, read
+    as the nesting the descriptor says it has.
+
+    A kind addressed by two segments is a mapping of mappings in the
+    document exactly as it is two path parameters on the API, which is
+    one fact read off the registry rather than two written down.
+    """
+    if len(kind.addressing) > 1:
+        staged = _understood(STAGED_ENTRIES, section, UNREADABLE_READ)
+        return sum(len(under) for under in staged.values())
+    return len(_understood(ENTRIES, section, UNREADABLE_READ))
+
+
 def _configured_counts(document: Mapping[str, object]) -> str:
     """What `info` prints of the stored half: how many of each kind
     there are, and which agent an unbound board reaches.
@@ -2318,22 +2356,23 @@ def _configured_counts(document: Mapping[str, object]) -> str:
     out for the reason `_summary` writes them out: neither is an entity,
     and forcing them into a kind's shape would be inventing a
     generalization rather than finding one.
+
+    Every section is read as a shape before it is counted, and the
+    default agent before it is printed: see the note above this
+    function. `.get` rather than a subscript, so a section the answer
+    left out arrives as None and meets that refusal too, instead of a
+    `KeyError` from outside the boundary.
     """
     config = document["config"]
     lines = ["", CONFIGURED]
     for kind in entities.ENTITIES:
         if not kind.addressing:
             continue
-        section = config[kind.moved_key]
-        counted = (
-            sum(len(under) for under in section.values())
-            if len(kind.addressing) > 1
-            else len(section)
-        )
-        lines.append(f"  {kind.moved_key}: {counted}")
-    lines.append(f"  devices: {len(config['devices'])}")
-    default_agent = config["default_agent"]
-    named = printable(str(default_agent)) if default_agent else "(none)"
+        lines.append(f"  {kind.moved_key}: {_counted(config.get(kind.moved_key), kind)}")
+    bound = _understood(ENTRIES, config.get("devices"), UNREADABLE_READ)
+    lines.append(f"  devices: {len(bound)}")
+    default_agent = _understood(NAMED, config.get("default_agent"), UNREADABLE_READ)
+    named = printable(default_agent) if default_agent else "(none)"
     lines.append(f"  default_agent: {named}")
     return "\n".join(lines) + "\n"
 

@@ -194,14 +194,7 @@ def test_a_server_that_answers_the_first_act_and_refuses_the_second(
     then failed.
     """
     run.runtime["identity"] = identity(monkeypatch)
-    real = cli._call
-
-    def refuse_the_second(args, method, path, *rest, **kwargs):
-        if path == "/config":
-            raise ConfigError("the configuration API could not be reached")
-        return real(args, method, path, *rest, **kwargs)
-
-    monkeypatch.setattr(cli, "_call", refuse_the_second)
+    refused(monkeypatch, ConfigError("the configuration API could not be reached"))
     capsys.readouterr()
 
     assert run("info") == 1
@@ -211,6 +204,143 @@ def test_a_server_that_answers_the_first_act_and_refuses_the_second(
     assert "server version: 0.1.0" in printed.out
     assert "could not be reached" in printed.err
     assert "configured:" not in printed.out
+
+
+# The second act's own answer
+#
+# The first act is what the cases above replace, so until these the
+# counts renderer had never been handed a body it did not compose
+# itself. It needs its own set: `ConfigDocument` declares the masked
+# document as `dict[str, Any]` and stops there, so everything a count
+# walks into is undeclared and arrives from wherever answered.
+
+
+def answering_config(monkeypatch: pytest.MonkeyPatch, body: object) -> None:
+    """A server that answers the identity read for real and the
+    configuration read with this body.
+
+    The two acts have to be told apart, because a stub that answered
+    both would be refused at the first one and the second would never
+    run, which is exactly the hole these cases close.
+    """
+    _second(monkeypatch, lambda: body)
+
+
+def refused(monkeypatch: pytest.MonkeyPatch, problem: ConfigError) -> None:
+    """A server that answers the identity read and refuses the
+    configuration read."""
+
+    def raise_it() -> object:
+        raise problem
+
+    _second(monkeypatch, raise_it)
+
+
+def _second(monkeypatch: pytest.MonkeyPatch, answer) -> None:
+    real = cli._call
+
+    def call(reached, method, path, *rest, **kwargs):
+        if path == "/config":
+            return answer()
+        return real(reached, method, path, *rest, **kwargs)
+
+    monkeypatch.setattr(cli, "_call", call)
+
+
+def document(**sections: object) -> dict[str, object]:
+    """A whole-configuration answer whose outer shape is valid, so that
+    what a case replaces is what a count walks into rather than what the
+    act reads."""
+    return {
+        "config": {
+            "providers": {"llm": {"brain": {"type": "mock"}}},
+            "mcp_servers": {},
+            "prompt_fragments": {},
+            "agent_defaults": {},
+            "agents": {},
+            "devices": {},
+            "default_agent": None,
+        }
+        | sections,
+        "secrets": [],
+    }
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(document(providers=1), id="section-is-a-number"),
+        pytest.param(document(agents=[ANSWERED]), id="section-is-a-list"),
+        pytest.param(document(providers={"llm": ANSWERED}), id="stage-is-not-a-mapping"),
+        pytest.param(document(devices=ANSWERED), id="devices-is-not-a-mapping"),
+        pytest.param(document(default_agent={"leak": ANSWERED}), id="default-agent-is-an-object"),
+        pytest.param(document(default_agent=4), id="default-agent-is-a-number"),
+        pytest.param({"config": {}, "secrets": []}, id="every-section-absent"),
+    ],
+)
+def test_a_configuration_a_count_cannot_walk_is_quoted_nowhere(
+    body: object,
+    run,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A body whose outer shape is the declared one and whose insides
+    are not.
+
+    The act reads `ConfigDocument`, which says the masked document is a
+    mapping and says nothing about what is under it, so this is the body
+    that gets past the act and reaches the renderer. What it must meet
+    there is the same fixed sentence every other unreadable answer
+    meets, and never a `TypeError` or a `KeyError` out of the boundary.
+    """
+    run.runtime["identity"] = identity(monkeypatch)
+    answering_config(monkeypatch, body)
+    capsys.readouterr()
+
+    with caplog.at_level(0):
+        assert run("info") == 1
+
+    printed = capsys.readouterr()
+    # The first act rendered, which is the multi-act contract.
+    assert "server version: 0.1.0" in printed.out
+    assert cli.UNRECOGNIZED_ANSWER in printed.err
+    assert "Traceback" not in printed.err
+    assert "configured:" not in printed.out
+    for surface in (printed.out, printed.err, logged(caplog), both_formats(caplog)):
+        assert ANSWERED not in surface
+
+
+def test_a_count_refusal_leaves_nothing_on_the_chain() -> None:
+    """Read through the act's own renderer, because that is where the
+    nesting is read: a refusal built inside the handler would carry the
+    body it refused as its `__context__` for anything walking the
+    chain."""
+    with pytest.raises(ConfigError) as caught:
+        cli.COUNTS.render(cli.COUNTS.read(document(default_agent={"leak": ANSWERED})))
+
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert ANSWERED not in chain(caught.value)
+
+
+def test_a_default_agent_is_bounded_and_made_printable(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The one value in the counts that is not a number, so the one that
+    can carry anything. It is a name the store answered, so it is
+    printed, and it is printed the way every value an answer carries
+    is: bounded, and with nothing in it that could steer a terminal."""
+    run.runtime["identity"] = identity(monkeypatch)
+    answering_config(monkeypatch, document(default_agent="sa\x1b[31mm" + "x" * 400))
+    capsys.readouterr()
+
+    assert run("info") == 0
+
+    printed = capsys.readouterr().out
+    assert "  default_agent: sa?[31mmxxx" in printed
+    assert "\x1b" not in printed
+    assert len(printed.splitlines()[-1]) < 200
 
 
 # What the URL must not reach
