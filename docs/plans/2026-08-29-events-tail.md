@@ -58,10 +58,15 @@ was enabled. The stream sends a comment-line keepalive every 15
 seconds so idle streams survive proxies (the interval is an injected
 seam so a test never waits it out), and it ends when the client
 disconnects or when the server shuts down. Shutdown is explicit
-rather than incidental: `serving.py` closes the hub after
-`sessions.drain()` and before uvicorn's own shutdown, and the close
-wakes and terminates every subscription, including on the
-`drain_s <= 0` path, so a shutdown never hangs on an open tail.
+rather than incidental, and it has two paths because the drain
+does: with a positive `drain_s`, `serving.py` awaits
+`sessions.drain()` and then closes the hub before uvicorn's own
+shutdown; with `drain_s <= 0`, where today's code never drains and
+calls uvicorn directly, the hub closes immediately before that
+direct shutdown and `sessions.drain()` stays uncalled, so the
+zero-drain semantics are genuinely unchanged. Either way the close
+wakes and terminates every subscription, so a shutdown never hangs
+on an open tail.
 That ordering is verified at process level against the real draining
 server, not inferred from a client disconnect.
 
@@ -85,7 +90,11 @@ already travels (Composition field, `ws.py` construction). The
 attach point is precise because the early events are the point: the
 hub attaches immediately after `SessionEvents` is constructed in
 `DeviceSession.__init__`, before any hello exchange, and detaches in
-an outer finally that covers the entire `run()` lifetime, because
+an outer finally that covers the entire `run()` lifetime; the one
+path where a constructed session never runs (the capacity rejection
+in `ws.py` between construction and `run()`) detaches explicitly on
+that branch, with a capacity-rejection cleanup test pinning it,
+because
 the conversation sink's later attach point would miss exactly the
 rejections and early refusals an operator tails for, and the
 existing cleanup finally begins only after the hello. Tests cover an
@@ -104,7 +113,9 @@ guarded by the same lock, with the waiting reader woken through
 `loop.call_soon_threadsafe` on an `asyncio.Event`. The tap contract
 (never blocking, never raising) is kept by construction: append to a
 bounded deque under a lock, count the overwrite when full, set the
-event, return. No await, no I/O, no allocation beyond the record.
+event, return. No await and no I/O, with bounded synchronous work
+(the wakeup scheduling and the dispatcher's per-tap copy are
+allocations, so the claim is boundedness, not allocation-freedom).
 
 **What a subscriber receives.** One JSON object per event: the
 emission's payload (already plain builtins, metadata only by the
@@ -250,12 +261,14 @@ events.md note says both things.
   guard covers the hub as it covers any tap.
 - Filter tests at enqueue: device, session, level threshold, and the
   no-identity-event rule.
-- Route tests: bearer 401, 503 standalone, and the response
-  headers go through the ordinary test client, whose buffered
-  transport is fine for refusals; the streaming behavior does not,
-  because the sync TestClient buffers a response to completion, so
-  the incremental assertions run over a direct ASGI send/receive
-  harness (and the live lane covers the real server). The keepalive
+- Route tests: bearer 401 and 503 standalone go through the
+  ordinary test client, whose buffered transport is fine for
+  refusals; everything about a successful stream does not, headers
+  included, because a live 200 stream never completes for the sync
+  TestClient to observe, so the SSE headers are asserted from the
+  first `http.response.start` in the direct ASGI send/receive
+  harness, where the incremental body assertions also run (and the
+  live lane covers the real server). The keepalive
   interval is injected so no test waits fifteen seconds.
   Unsubscription is asserted through the hub's public diagnostic
   (`LiveEvents.subscribers`, a documented count the info surface may
@@ -381,3 +394,25 @@ amended below with resolutions.
     spellings, session-id validation without echo, case-insensitive
     level enum with INFO default, `--level` on the CLI, and every
     non-INFO level rendered.
+
+## Plan review delta round
+
+Terra re-review of the amended plan (backend codex, codex-cli
+0.149.1, model gpt-5.6-terra, 2026-08-29, reviewed commit 5ece3ea9).
+Verdict: ready after amendments; all four applied.
+
+1. **P2: rejected-before-run sessions leak the attach.** The
+   capacity rejection in ws.py returns without run(), so the outer
+   finally never runs. *Resolution*: adopted; explicit detach on
+   that branch with a cleanup test.
+
+2. **P2: the shutdown ordering conflicted with zero-drain
+   semantics.** *Resolution*: adopted; two paths stated, and
+   sessions.drain() stays uncalled on the zero path.
+
+3. **P2: stream headers cannot be observed through the buffered
+   client.** *Resolution*: adopted; SSE headers assert from the
+   first response-start message in the ASGI harness.
+
+4. **P3: the allocation-free claim was inaccurate.** *Resolution*:
+   adopted; the claim is bounded synchronous work.
