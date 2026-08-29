@@ -93,6 +93,8 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
+import time
 import zipfile
 from collections.abc import Iterator
 from pathlib import Path
@@ -623,6 +625,54 @@ def test_a_simulated_board_checks_in_from_the_installed_wheel(run, live: Live) -
     assert code in listed
     assert SIMULATED_MAC in listed
     assert board.BOARD_TYPE in listed
+
+
+# The board the tail below watches, which is one nothing else here
+# checks in: what ends that command is the first event of this address,
+# and a second case driving the same one would decide when it ended.
+TAILED_MAC = "02:00:00:00:00:33"
+
+# How long the tail is given to see one. A ceiling on a hang rather than
+# an expectation, and comfortably inside the budget the subprocess
+# itself is given, so an expiry is reported by the assertion below
+# rather than by a command that outlived its own deadline.
+TAIL_SECONDS = 60
+
+
+def test_the_event_tail_answers_from_the_installed_wheel(run, live: Live) -> None:
+    """The one row of the grammar that reads an answer which does not
+    finish arriving, driven from the artifact.
+
+    Ungated like every other request row: a stream is an HTTP GET, and
+    what reads it is httpx and the standard library. What this proves
+    that the in-process lane cannot is that the installed binary really
+    opens one over a socket against a real uvicorn, and exits 0 on the
+    first event rather than waiting for a body that never ends.
+
+    The command runs beside the thing it is watching, because there is
+    nothing behind the stream to catch up from: the check-ins are driven
+    in a loop until the tail has seen one, since nothing here can
+    observe the moment its subscription was attached.
+    """
+    answers: list[subprocess.CompletedProcess[str]] = []
+    tail = threading.Thread(
+        target=lambda: answers.append(run("events", "tail", "--device", TAILED_MAC)),
+        daemon=True,
+    )
+    tail.start()
+    deadline = time.monotonic() + TAIL_SECONDS
+    while tail.is_alive() and time.monotonic() < deadline:
+        time.sleep(0.2)
+        if tail.is_alive():
+            check_in(live, TAILED_MAC)
+    tail.join(timeout=TAIL_SECONDS)
+
+    assert not tail.is_alive(), "the tail outlived the deadline its own subprocess has"
+    assert answers, "the installed command saw no event of this board"
+    [finished] = answers
+    [line] = answered(finished, "events tail").splitlines()
+    assert "ota_check" in line, line
+    assert f'device="{TAILED_MAC}"' in line
 
 
 # The writes that cannot be undone, driven against entries written to be

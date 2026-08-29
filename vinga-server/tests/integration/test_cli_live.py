@@ -56,6 +56,7 @@ import logging
 import os
 import shlex
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -100,7 +101,7 @@ from vinga_server.conversations.store import ConversationStore
 from vinga_server.db import open_database
 from vinga_server.device_endpoint import SUPPLIED_ENDPOINT
 from vinga_server.ota import OTA_PATH
-from vinga_server.simulator import board, conversation
+from vinga_server.simulator import board, conversation, utterance
 
 # The variable a secret set's `--from-env` is pointed at. Not a real
 # credential, and shaped so a substring check for it cannot match by
@@ -1169,6 +1170,92 @@ def test_a_simulated_board_holds_a_conversation_over_the_wire(
     assert leaked(issued.websocket, **surfaces) == []
 
 
+# How long the tail below is given to see one event of a board that is
+# holding a conversation. A ceiling on a hang rather than an
+# expectation: the first session event goes out before the reply does,
+# and a run that approaches this is already a bug worth reading about.
+TAIL_SECONDS = 60
+
+
+def test_the_event_tail_hears_a_conversation_as_it_happens(deployed: Live) -> None:
+    """The stream, opened against the real server by the real command,
+    while a real board talks to it.
+
+    This is the one case that can prove the half M1 wired through the
+    session edge. A server event reaches the hub through the
+    process-global tap, which any test can drive; a SESSION event
+    reaches it only because the hub is attached to `SessionEvents` as
+    the session is constructed, and only a conversation over a socket
+    against a booted server produces one. What the line printed here
+    carries is `session=`, which is exactly the field a server event
+    does not have.
+
+    **The tail is a process of its own, and it has to be.** Every
+    request boundary in this repository holds the request loggers quiet
+    under one process-global lock, for the span from raising a level to
+    putting it back (`logs.quieted`). A tail's span is the length of the
+    stream, so an in-process tail holds that lock while it watches, and
+    the conversation this case drives goes through the same boundary:
+    the two would deadlock, with the tail waiting for an event the
+    conversation could not produce. On a deployment the question does
+    not arise, since a tail IS a process doing one thing. Here it means
+    `subprocess`, which also gives the case a deadline it cannot outlive
+    and a kill it cannot skip, so a regression makes this lane red
+    rather than hung.
+
+    The check-in happens BEFORE the stream opens, deliberately. It is
+    what mints the token this conversation presents, and it emits an
+    `ota_check` of its own; with the tail already open that event would
+    be the first one admitted, and this case would be proving the tap it
+    is not about. What runs while the stream is open is the socket and
+    nothing else.
+
+    The conversation is driven in a loop because nothing here can
+    observe the moment the subscription attaches, and a stream that
+    opened a millisecond after the only event would otherwise wait for a
+    second one that never came.
+    """
+    issued = check_in(deployed, SIMULATED_MAC)
+    assert isinstance(issued, board.Admitted)
+
+    argv = ("events", "tail", "--device", SIMULATED_MAC)
+    with subprocess.Popen(
+        [str(Path(sys.executable).parent / cli.CONSOLE_SCRIPT), *argv],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=os.environ.copy(),
+    ) as tail:
+        try:
+            deadline = time.monotonic() + TAIL_SECONDS
+            while tail.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.2)
+                if tail.poll() is None:
+                    conversation.converse(
+                        target=issued.websocket,
+                        token=issued.token,
+                        identity=board.Identity.of(SIMULATED_MAC),
+                        version=issued.protocol_version,
+                        said=utterance.packaged(),
+                        say=lambda _line: None,
+                    )
+        finally:
+            if tail.poll() is None:
+                tail.kill()
+        printed, complained = tail.communicate()
+
+    assert tail.returncode == 0, (printed, complained)
+    assert complained == ""
+    [line] = printed.splitlines()
+    assert f'device="{SIMULATED_MAC}"' in line
+    assert "session=" in line, line
+    # Recorded against the row by hand, which `run` does for every other
+    # case: this is the same command line, run and answered, and the
+    # only difference is the process it ran in.
+    assert registered(argv) == ("events", "tail")
+    DRIVEN.add(registered(argv))
+
+
 def test_the_device_half_needs_no_api_token_at_all(
     deployed: Live, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1815,6 +1902,19 @@ REFUSALS: tuple[Refusal, ...] = (
         "and a thread that lost every turn to an erasure was deleted with them.",
         True,
     ),
+    # The live half of the same store's family, and the sentence is the
+    # server's again: a filter the endpoint will not read, refused
+    # before a stream is opened. The value handed to it is the planted
+    # credential, because `--device` is where this command's own input
+    # can carry one, and the rule says it is not quoted back.
+    Refusal(
+        ("events",),
+        ("events", "tail", "--device", PLANTED),
+        "device has to be a MAC address: six colon-separated or dash-separated hex "
+        "pairs, for example aa:bb:cc:dd:ee:ff. What was sent is not quoted back",
+        True,
+    ),
+    Refusal(("status",), ("status", "extra"), USAGE, False),
     Refusal(("reload",), ("reload", "extra"), USAGE, False),
     Refusal(
         ("ota-url",),
