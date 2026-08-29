@@ -103,11 +103,14 @@ an `_ORDER` update, and the respell sweep the census enumerated:
 `vinga-server/README.md` invocations, the `models.py:1727` field
 description (which regenerates `domain-config.md` and
 `api-openapi.json`), docstrings in `tools/mcp/manager.py`,
-`tools/publish.py` and two test files, the `_runtime` docstring in
-`api.py` whose collision rationale ("an `mcp_servers` entry may
-legally be named `status`") is superseded by the move and is rewritten
-to record that history, and the living cli-guide lines that name flat
-`status` (`:374`, `:622-626`, audit row 25). Historical records
+`tools/publish.py` and two test files, and the living cli-guide
+lines that name flat `status` (`:374`, `:622-626`). Two corrections
+against the first cut of this plan: the `_runtime` docstring's
+collision rationale is about the API namespace, which the CLI respell
+does not change, so it stays current as written (extended to mention
+the info route if that reads naturally); and `cli-guide-audit.md` is
+a dated record whose rows are not edited into agreement with later
+changes, so audit row 25 is left alone. Historical records
 (CHANGELOG, docs/plans/, the cli-guide's pre-#223 counterexample at
 `:216`) are not respelled. The command-spellings manifest is
 regenerated in the same commit as the last doc edit.
@@ -186,8 +189,8 @@ no-em-dash rule is about em-dashes; no character in the banner is one.
   `docs/architecture/cli-guide.md` (a no-args-help paragraph under
   "One sentence and exit 1", the apply naming under "A write says what
   it did", the flat-system-verbs section gains `info` and loses
-  `status`, the two living lines that name flat `status`), its audit
-  companion row 25, `vinga-server/README.md` status invocations and
+  `status`, the two living lines that name flat `status`),
+  `vinga-server/README.md` status invocations and
   the "What the MCP servers are doing" section heading command, the
   root `README.md` lines the census listed (`vinga list` at :98,
   apply/reload at :113-:121) only where this issue falsifies them (the
