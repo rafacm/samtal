@@ -792,7 +792,7 @@ def test_reload_gives_the_server_longer_to_answer_than_a_write(
 
     monkeypatch.setattr(cli, "build_client", factory)
 
-    assert run("status") == 0
+    assert run("mcp-server", "status") == 0
     assert run("reload") == 0
 
     status_client, reload_client = made

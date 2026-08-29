@@ -3,7 +3,8 @@
 Every other config suite drives a command that parses. This one is about
 the parse: a subcommand nobody has, a missing positional, an unknown
 flag, an argument too many, a bare invocation that named no command at
-all, and `--help`, which is the one invocation that is not a failure.
+all, a word the grammar used to have, and `--help`, which is the one
+invocation that is not a failure.
 
 The exit code is the contract under all of it. Click's own error path
 prints the mistake and exits 2, which would make a typed command the
@@ -57,8 +58,12 @@ def test_the_status_help_names_every_state_it_can_print(
 ) -> None:
     """`unused` is a state of its own and the one an operator has never
     met before, so leaving it out of the help would leave it out of the
-    place they look first."""
-    help_text = printed_help(run, capsys)
+    place they look first.
+
+    Read off the MCP servers' own page since #341, which is where the
+    listing that carries this line now is.
+    """
+    help_text = printed_help(run, capsys, "mcp-server")
 
     assert "connected, down, or unused because no agent references it" in help_text
 
@@ -977,6 +982,40 @@ def test_every_row_is_reachable_by_its_own_words(row) -> None:
         assert word in getattr(found, "commands", {}), " ".join(row.words)
         found = found.commands[word]
     assert row.words[-1] in getattr(found, "commands", {}), " ".join(row.words)
+
+
+# A word the grammar used to have, and does not
+#
+# Every completeness test on this page is positive: each says something
+# the tree HAS is reachable, described and driven. Not one of them can
+# see a word the tree should no longer have, and an alias kept for
+# kindness would pass all of them as one more row. So the removal is
+# pinned the way the arrival is, from both ends in one test: the word is
+# gone from the table and from the page a reader lists commands off, the
+# invocation answers the refusal any other invented word gets, and the
+# spelling that replaced it works.
+#
+# No alias, deliberately, and the stance rather than an oversight:
+# nothing third-party is installed against this grammar, and a
+# deployment that types the old word is told it is not a command in the
+# same sentence every other typo gets.
+
+
+def test_the_flat_status_word_is_gone_and_the_noun_spelling_answers(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`status` moved under `mcp-server` in #341, with no alias left
+    behind."""
+    assert ("status",) not in {row.words for row in cli.COMMANDS}
+    assert "status" not in cli.command().commands
+
+    assert run("status") == 1
+    refused = capsys.readouterr()
+    assert refused.err.strip() == cli.usage_line("that is not a command")
+    assert refused.out == ""
+
+    assert run("mcp-server", "status") == 0
+    assert capsys.readouterr().out.startswith("this server has no MCP servers configured")
 
 
 def test_every_group_of_the_tree_carries_a_command() -> None:

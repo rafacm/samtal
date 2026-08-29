@@ -332,6 +332,14 @@ reloads the server.
 symmetry with the noun-verb commands. It reads as though there were some
 other kind of apply, and there is not.
 
+**Counterexample, historical.** `vinga-server config status`, flat until
+#341 and quoted in the spelling it had while it was. Its subject was
+never the deployment: what it says is what each configured MCP server is
+doing, which is a verb of one noun, and that noun was already in the
+tree. What put it at the top level is that it arrived before the top
+level was a list of things. It is `vinga mcp-server status` now, with no
+alias behind it.
+
 ### Naming a new noun, naming a new verb
 
 - **A noun is the configuration's own word for the thing.** `provider`,
@@ -381,7 +389,9 @@ first it would have landed as `agent prompt kids`, which reads as a
 possessive rather than an action. **It got a verb, and the verb is
 `preview`.** The exception was not taken, because a rule with an
 exception at the first command that asks it is unenforceable, and
-`pending` and `status` were both queued behind it. `preview` is this
+`pending` and `status` were both queued behind it, and both landed under
+a noun in the end: `device pending`, and `mcp-server status` since #341.
+`preview` is this
 repository's own word for the act: the design guide, describing exactly
 this route, says it *previews what an agent would be sent*. And it pairs
 with `show`, which is what noun first is for: `agent show kids` prints
@@ -682,8 +692,8 @@ wraps and stops being one line per entry.
 `vinga apply -f deployment.yaml` reproduces a deployment. `pending`
 prints five short columns, header included, because the question it
 answers ("which of these boards is the one I am holding") is read
-across a line. `status` prints blocks, because two of its three fields
-are lists of names.
+across a line. `mcp-server status` prints blocks, because two of its
+three fields are lists of names.
 
 **Counterexample, constructed.** `_status_listing` rendered as columns.
 The tools a server published would wrap, and the one-entry-per-line

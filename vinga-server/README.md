@@ -590,8 +590,8 @@ YAML
 
 The tools are named the way the model is given them minus the entry
 prefix (`turn_on_light` for `home__turn_on_light`), which is the name
-`vinga-server config status` prints, so an operator writes down the
-name they read; what the server called the tool before the publishing
+`vinga-server config mcp-server status` prints, so an operator writes
+down the name they read; what the server called the tool before the publishing
 rule got to it is never a name this side answers to. Leaving `tools` out
 of the object means the whole server, the same as the string form, and
 an empty list is refused: "granted, nothing allowed" is a confusing
@@ -605,8 +605,8 @@ not offered is refused rather than run if the model asks for it anyway.
 An allow list cannot be checked when it is written, since only a live
 connection knows what a server publishes. A name that matches nothing is
 logged when the server's tools come out of the publishing rule, and
-`config status` shows each agent's allowed tools beside the published
-ones, so the mismatch is answerable in one read. The comparison is
+`config mcp-server status` shows each agent's allowed tools beside the
+published ones, so the mismatch is answerable in one read. The comparison is
 against what published rather than against what the server listed: a
 tool dropped for a name collision or for being too long once prefixed is
 exactly as unreachable as one that was never offered.
@@ -896,10 +896,10 @@ that is what installs one.
 ### What the MCP servers are doing
 
 The configuration says what should be running; `vinga-server config
-status` says what is:
+mcp-server status` says what is:
 
 ```console
-$ vinga-server config status
+$ vinga-server config mcp-server status
 home: connected since 2026-08-13T09:12:03.104213+00:00
   tools: home__turn_on_light, home__turn_off_light, home__unlock_door
   agents: house, kids (turn_on_light, turn_off_light)
@@ -933,7 +933,10 @@ why what it says cannot disagree with what is actually connected. Over
 the API it is `GET /api/runtime/mcp-servers`, keyed by entry name. The `/runtime`
 namespace is separate from the entity namespaces on purpose: an
 `mcp_servers` entry may legally be named `status`, and a runtime route
-under `/mcp-servers/` would have shadowed it.
+under `/mcp-servers/` would have shadowed it. The CLI's
+`mcp-server status` has no such problem and is not an exception to it:
+there the word is a verb of the grammar, in the slot a verb is read
+from, and an entry name is only ever an argument after one.
 
 The tool lists are published names and nothing else, deliberately: a
 description, or the name a server listed before the publishing rule got
@@ -1521,7 +1524,7 @@ else, so a rotated credential shows up as the provider that holds it
 being listed as changed. The third answers what each configured MCP
 server is doing right now, which [What the MCP servers are
 doing](#what-the-mcp-servers-are-doing) describes and `vinga-server
-config status` prints. The reload applies what the stored configuration
+config mcp-server status` prints. The reload applies what the stored configuration
 holds to the running server, which [Applying a change without a
 restart](#applying-a-change-without-a-restart) describes and
 `vinga-server config reload` prints; it is the only route here that
@@ -2097,8 +2100,8 @@ the characters both LLM APIs refuse, and an alphanumeric credential goes
 through that untouched, so a server handed one of your own could put it
 in the logs you keep by listing a tool under it. Every line about a
 single tool therefore says which one by its position in that server's
-listing. `vinga-server config status` prints the names themselves, to a
-terminal, when you ask it.
+listing. `vinga-server config mcp-server status` prints the names
+themselves, to a terminal, when you ask it.
 
 Every event above is declared: its channel, its level, the sentence it
 renders, the arguments that sentence takes and every field it may carry,

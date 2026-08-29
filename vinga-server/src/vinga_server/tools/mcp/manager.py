@@ -512,8 +512,8 @@ class McpServerManager:
                 # deployment's own could put it into the retained logs
                 # by listing a tool under it. Which names an entry
                 # published is a question with an answer that is not a
-                # log line: `vinga-server config status` prints them,
-                # to a terminal, for whoever asked.
+                # log line: `vinga-server config mcp-server status`
+                # prints them, to a terminal, for whoever asked.
                 published = len(self._published.tools)
                 events.emit(
                     lambda: McpConnected(
@@ -706,8 +706,8 @@ class McpServerManager:
         server that lists a tool under one of this deployment's own
         secrets could put it in the retained logs by failing a call.
         The position is a number this code counted; the name is a
-        question `vinga-server config status` answers, in a terminal,
-        for whoever asked.
+        question `vinga-server config mcp-server status` answers, in a
+        terminal, for whoever asked.
         """
         # And the kind of failure it was, as the class name `_reason`
         # answers with, which is the same field `provider_failed` has
