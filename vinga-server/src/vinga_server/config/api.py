@@ -61,7 +61,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from cryptography.fernet import MultiFernet
-from fastapi import Body, Depends, FastAPI, Request
+from fastapi import Body, Depends, FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
@@ -119,6 +119,7 @@ from vinga_server.config.responses import (
     PendingDevice,
     Problem,
     PromptBlock,
+    RuntimeInfo,
     SecretSlot,
     SecretValue,
     ServableAgents,
@@ -572,6 +573,28 @@ _DIFF_MOVED_DESCRIPTION = _description("diff-moved")
 
 _NO_RUNTIME_DIFF_DESCRIPTION = _description("no-runtime-diff")
 
+# And the identity read's, for the same reason as those two: the shared
+# 503 sentence says the reads in this namespace answer emptily, and
+# there is no empty identity. A version and a revision this application
+# invented would be a claim about a server that is not there.
+_NO_RUNTIME_INFO_DESCRIPTION = _description("no-runtime-info")
+
+# What the caller is told, which is not the shared sentence, for the
+# reason the diff's is not. Nothing of the deployment is named: what is
+# missing is the server, not something the caller asked for wrongly.
+_NO_RUNTIME_INFO = (
+    "this API has no running server around it, so there is no deployment for it to "
+    "describe. The version, the revision and the onboarding URL are facts of a running "
+    "server and of the file half it booted from, and an application built without one "
+    "has neither. A deployment reaches this read on its server's own port."
+)
+
+# The one response header this API sets on a route of its own, and the
+# route it is set on is the one that answers a credential. `no-store`
+# rather than `no-cache`: a proxy or a browser that revalidated would
+# still have written the URL to a disk in the meantime.
+NO_STORE = "no-store"
+
 # And what the caller is told, which is not the shared sentence: that
 # one says the reads in this namespace answer emptily, and this read
 # refuses precisely because an empty answer would be a claim about a
@@ -719,6 +742,16 @@ class ApiRuntime:
     every deployment with recording off. The other six are the live
     objects the server shares with this application, or the honest
     empties an application built without a server around it gets.
+
+    `identity` is the odd one and says so: a value rather than a live
+    object or a callable over one, because what it holds moves for
+    neither a reload nor a request. The build is the process's and the
+    onboarding URL is derived from the server section, which is the one
+    part of a deployment's configuration that is genuinely read once. So
+    the composition root resolves it in the same breath as everything
+    else here and hands over the answer, and None is what an application
+    with no server around it carries, since it can describe no
+    deployment at all.
     """
 
     store: StoreHandle | None
@@ -731,6 +764,7 @@ class ApiRuntime:
     agent_prompt: Callable[[str], Awaitable[Any]] | None
     config_diff: ConfigDiffReader | None
     snapshot_only: bool = False
+    identity: RuntimeInfo | None = None
 
 
 def build_api(
@@ -743,6 +777,7 @@ def build_api(
     agent_prompt: Callable[[str], Awaitable[Any]] | None = None,
     config_diff: ConfigDiffReader | None = None,
     snapshot_only: bool = False,
+    identity: RuntimeInfo | None = None,
 ) -> FastAPI:
     """The sub-application the server mounts: the routes, gated.
 
@@ -806,6 +841,16 @@ def build_api(
     and this application must not learn which kind of configuration
     converges where. None is the honest answer without a server, and the
     route answers 503 rather than reporting that nothing is pending.
+
+    `identity` says which deployment this is: the build that is running
+    and the URL a board is onboarded at. A composed value rather than a
+    callable, for the reason `ApiRuntime` gives, and it arrives from the
+    composition root for the reason the three callables do: it is
+    derived from the device-auth secret and the origin this deployment
+    names itself by, and this application must not learn where either of
+    those comes from. None is the honest answer without a server, and
+    the route answers 503, like the prompt read and the diff: identity
+    has no honest empty.
     """
     runtime = build_api_runtime(
         database,
@@ -816,6 +861,7 @@ def build_api(
         agent_prompt,
         config_diff,
         snapshot_only,
+        identity,
     )
     # A lifespan of its own, which runs only when this application is the
     # top-level one: it opens the configuration database and installs the
@@ -844,6 +890,7 @@ def build_api_runtime(
     agent_prompt: Callable[[str], Awaitable[Any]] | None = None,
     config_diff: ConfigDiffReader | None = None,
     snapshot_only: bool = False,
+    identity: RuntimeInfo | None = None,
 ) -> ApiRuntime:
     """What a request to this application resolves out of the server
     around it, assembled.
@@ -882,6 +929,7 @@ def build_api_runtime(
         agent_prompt=agent_prompt,
         config_diff=config_diff,
         snapshot_only=snapshot_only,
+        identity=identity,
     )
 
 
@@ -1070,6 +1118,17 @@ def _config_diff(request: Request) -> ConfigDiffReader | None:
 
 
 ConfigDiffDep = Annotated[ConfigDiffReader | None, Depends(_config_diff)]
+
+
+def _identity(request: Request) -> RuntimeInfo | None:
+    """Which deployment this is, as the composition root resolved it, or
+    None for an application built without a server around it. Taken from
+    the application for the reason the store is."""
+    runtime: ApiRuntime = request.app.state.api_runtime
+    return runtime.identity
+
+
+IdentityDep = Annotated[RuntimeInfo | None, Depends(_identity)]
 
 
 def _pending_view(device: PendingRecord) -> dict[str, Any]:
@@ -1362,8 +1421,55 @@ def _runtime(api: FastAPI) -> None:
     `mcp_servers` entry-name rule, an existing database may already hold
     it, and a runtime route under `/mcp-servers/` would shadow it. Kept
     apart, the entity namespaces stay purely CRUD and no runtime route
-    added later has to fight a name either.
+    added later has to fight a name either. `info` is the newest of
+    them and would have had the same fight: an operator may legally name
+    an MCP server `info`.
     """
+
+    @api.get(
+        "/runtime/info",
+        response_model=RuntimeInfo,
+        responses=_problems(401, 503, instead={503: _NO_RUNTIME_INFO_DESCRIPTION}),
+    )
+    async def read_runtime_info(identity: IdentityDep, response: Response) -> RuntimeInfo:
+        """Which deployment this is: the build that is running, and the
+        URL a board is onboarded at.
+
+        The read that answers "what server am I talking to", which
+        nothing else here does: the entity reads say what is stored, the
+        reads below say what is running, and none of them says which
+        deployment is answering at all.
+
+        It carries a credential, and it is the only read in this API
+        that does. The onboarding URL's last segment is a key derived
+        from the device-auth secret, standing in front of the token
+        issuer, which is why the startup banner prints the origin and
+        not the URL: a banner is a retained record shipped to whatever
+        collects logs. Serving it here widens nothing, because the
+        bearer token this request carried already grants every secret
+        write this API has; what the design adds is that the answer is
+        not retained anywhere on the way, hence `Cache-Control:
+        no-store` below, and that the one client rendering it prints it
+        on stdout alone.
+
+        With onboarding off the URL and its provenance are null and the
+        flag says why, because there is no short URL to serve and the
+        path `server.ota_path` names is this deployment's secret rather
+        than a substitute for one.
+
+        An application built without a server around it answers 503,
+        like the prompt read and the diff rather than like the MCP
+        status read: an invented version is not an empty listing.
+        """
+        # The docstring is this endpoint's description in the committed
+        # document, so what belongs to the handler is said here. Nothing
+        # is composed: the composition root resolved the whole answer at
+        # startup, because every fact in it is a fact of the process or
+        # of the server section, and neither moves while this runs.
+        if identity is None:
+            raise NoRuntimeError(_NO_RUNTIME_INFO)
+        response.headers["cache-control"] = NO_STORE
+        return identity
 
     @api.get(
         "/runtime/mcp-servers",

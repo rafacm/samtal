@@ -1,0 +1,1 @@
+This application has no running server around it, so there is no deployment for it to describe. Unlike the MCP status read beside it, there is no honest empty answer: a version and a revision are facts of the process that is serving, and an onboarding URL is derived from the file half a server booted from, so an application built without one would have to invent all three.
