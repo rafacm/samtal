@@ -192,9 +192,15 @@ no-em-dash rule is about em-dashes; no character in the banner is one.
   `status`, the two living lines that name flat `status`),
   `vinga-server/README.md` status invocations and
   the "What the MCP servers are doing" section heading command, the
-  root `README.md` lines the census listed (`vinga list` at :98,
-  apply/reload at :113-:121) only where this issue falsifies them (the
-  full Getting Started rewrite is #346), and `docs/reference/cli.md`'s
+  root `README.md` lines this issue falsifies: `vinga list` at :98,
+  apply/reload at :113-:121, and step 5's
+  `docker compose exec vinga vinga-server config ota-url`, which M1
+  replaces with `vinga info` the moment the API serves the URL,
+  because leaving the container-exec spelling in Getting Started
+  would retain the exact remote trap this issue retires (`ota-url`
+  keeps its place in offline diagnosis and recovery documentation
+  only; the full Getting Started restructure stays #346's). Also
+  `docs/reference/cli.md`'s
   hand-written halves where they describe the bare-invocation refusal
   and the command inventory.
 - M1's new route needs no board or device guide change; no page under
