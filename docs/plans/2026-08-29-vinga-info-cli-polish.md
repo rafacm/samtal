@@ -72,7 +72,14 @@ prefer it; #340 changes the device-facing GET, not this.
 
 **One request or two.** `info` renders identity (the new route) and a
 short entities summary (a count line per kind plus `default_agent`,
-not the full `list` tree). The summary comes from the existing
+not the full `list` tree). Before either, it prints the address this
+CLI actually contacted, on its own labelled line, because the API
+address and the device-facing onboarding URL can legitimately differ
+and "what server am I talking to" is the goal sentence. The line uses
+the client's existing sanitized display form (`Address.shown`, which
+strips secret-shaped query parameters), never the raw `--api-url`,
+and a query-token test proves a credential-shaped parameter is absent
+from the rendered line. The summary comes from the existing
 `GET /api/config` as a second act on the same row; `Command.does`
 already takes a tuple and `conversation show` already runs two acts in
 order, so no new machinery. A server reachable for act one but failing
