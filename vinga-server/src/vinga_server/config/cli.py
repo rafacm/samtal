@@ -1506,6 +1506,16 @@ def _streamed(
     of it is a sanitized sentence naming `Address.shown` and nothing
     else, no exception raised here carries the request URL in its chain,
     and the client is given back however the reader leaves.
+
+    Quieting for that length has a consequence worth stating, because it
+    is invisible from here: `quieted` holds a process-global lock for
+    the span it covers (`logs.py` says why, and the level it is holding
+    is the process's whatever guards it), so this block holds it for as
+    long as the stream is open. Every other request boundary in this
+    package waits behind it. On a deployment that costs nothing, since a
+    tail is a process watching one thing; in a test it means the tail
+    cannot share a process with what it is watching, which is why the
+    live lane runs it as a subprocess.
     """
     with quieted(REQUEST_LOGGERS, QUIET_LEVEL):
         yield from _reading(reached, path, query)
