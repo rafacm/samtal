@@ -950,7 +950,7 @@ def test_a_committed_write_whose_reload_dies_in_transport_says_what_it_knows(
     # nothing of the operator's query string.
     assert "cannot reach the configuration API" in refused
     assert SECRET not in printed.err
-    assert unanswered == cli.COMMITTED_UNANSWERED + "\n"
+    assert unanswered == cli.APPLY_UNANSWERED + "\n"
     assert "Traceback" not in printed.err
 
 
