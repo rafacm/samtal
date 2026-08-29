@@ -82,8 +82,8 @@ from typer._click.exceptions import (
     BadParameter,
     ClickException,
     MissingParameter,
+    NoArgsIsHelpError,
     NoSuchOption,
-    UsageError,
 )
 from typer.core import TyperCommand, TyperGroup
 
@@ -524,9 +524,19 @@ def _parsed(argv: Sequence[str], spelled: str) -> None:
     discipline is about what a chain walker finds rather than about what
     is displayed.
 
-    One usage mistake is answered with a page rather than a sentence,
-    and it leaves through the same door as every other: see
-    `_page_instead`.
+    One invocation is answered with a page rather than a sentence, and
+    it leaves through the same door as every other: an invocation that
+    named no command at all, told apart BY CLASS. `NoArgsIsHelpError` is
+    raised by `_Grouped` below and by nothing else in this grammar, and
+    it carries the group that was left without a verb, so its page is
+    the page the reader stopped at rather than the root's.
+
+    By class rather than by wording, and that distinction is the whole
+    of this arm. Every other shape here is a sentence of Click's about
+    something that was typed, so a reading that matched on words would
+    be a reading a caller could satisfy: `vinga "Missing command"` is an
+    unknown command whose name is the marker, and it gets the refusal
+    every other unknown command gets.
     """
     problem: str | None = None
     asked_for: int | None = None
@@ -537,52 +547,60 @@ def _parsed(argv: Sequence[str], spelled: str) -> None:
         return
     except Exit as asked:
         asked_for = asked.exit_code
+    except NoArgsIsHelpError as bare:
+        problem = bare.ctx.get_help()
     except ClickException as exc:
-        problem = _page_instead(exc) or _usage_problem(exc)
+        problem = _usage_problem(exc)
     if asked_for is not None:
         raise SystemExit(asked_for)
     raise ConfigError(problem)
 
 
-# Click's fixed words for a group that was given no verb, which is the
-# one usage mistake this grammar answers with a help page. Read as a
-# marker for the reason `_USAGE_SHAPES` below reads markers: the base
-# `UsageError` is one class for several different mistakes, and its
-# fixed words are the part of the sentence carrying no value.
-NO_COMMAND = "Missing command"
+# What the context holds after a group has parsed its own options: the
+# word that would name a command, and the words after it. Click reads
+# exactly these two to decide whether a command was named at all, and
+# `_Grouped` reads them for the same decision.
+#
+# Named rather than felt for, like the exception classes at the top of
+# this module and for the same reason: the leading underscore is Typer's
+# copy of Click's private spelling, and a release that renames it must
+# fail loudly here (an `AttributeError` on the first invocation, which
+# every test of this grammar makes) rather than quietly answer False and
+# turn every invocation into a bare one.
+_LEFT_TO_RESOLVE = ("_protected_args", "args")
 
 
-def _page_instead(exc: ClickException) -> str | None:
-    """The help page a bare invocation is answered with, or None for
-    every other mistake.
+class _Grouped(TyperGroup):
+    """Every group of this grammar: the root, and one per noun path.
 
-    `vinga`, `vinga provider` and `vinga device pending` are each a page
-    of the grammar with nothing chosen off it. What the reader needs
-    there is the list of what they could have chosen, and they need it
-    without typing a second command, so this hands back the page that
-    Click's `no_args_is_help` would have printed and the boundary prints
-    it the way it prints every other answer to an invocation that was
-    not a completed command: on stderr, exiting 1.
+    What it adds is the answer to an invocation that reached a group and
+    named no command under it. `vinga`, `vinga provider` and `vinga
+    device pending` are each a page of the grammar with nothing chosen
+    off it, and what the reader needs there is the list of what they
+    could have chosen, without typing a second command to see it. So the
+    group raises `NoArgsIsHelpError`, which is Click's own class for
+    exactly that meaning, and the boundary prints its context's page the
+    way it prints every other answer to an invocation that was not a
+    completed command: on stderr, exiting 1.
 
-    Not `no_args_is_help=True`, which prints to stdout and exits 0. Both
-    halves of that are wrong here. Stdout is data (see the cli-guide's
-    stdout/stderr practice) and a bare invocation produced none, so a
-    pipe would fill with a help page; and exit 0 says a command
-    completed, when what happened is that none was typed. `--help` is
-    the other invocation and keeps both, because asking for help is not
-    a failure.
+    Raised here rather than left to Click for two reasons, and the first
+    is the load-bearing one. Click states this mistake as a sentence on
+    the base `UsageError` ("Missing command."), which is the same class
+    and the same shape as an unknown command and an argument too many,
+    both of which quote what was typed; a boundary that told them apart
+    by wording could be handed the wording. Raising it here makes the
+    class the answer. And Click's own `no_args_is_help` sees only the
+    case where nothing at all followed, while `vinga --api-url URL` also
+    named no command and is also owed the page.
 
-    The page comes off the context the mistake was raised from, which is
-    the group that was left without a verb rather than the root, so a
-    bare sub-noun answers with its own page. A `UsageError` carrying no
-    context cannot be answered this way and falls through to the
-    sentence `_USAGE_SHAPES` has for it.
+    The library's flag stays off, so this is the one place the decision
+    is made.
     """
-    if not isinstance(exc, UsageError) or exc.ctx is None:
-        return None
-    if NO_COMMAND not in exc.format_message():
-        return None
-    return exc.ctx.get_help()
+
+    def invoke(self, ctx: Context) -> Any:
+        if not any(getattr(ctx, held) for held in _LEFT_TO_RESOLVE):
+            raise NoArgsIsHelpError(ctx)
+        return super().invoke(ctx)
 
 
 # What a mistake in the grammar says
@@ -631,13 +649,14 @@ SECRET_NEVER_AN_ARGUMENT = (
 _USAGE_SHAPES: tuple[tuple[str, str], ...] = (
     ("Got unexpected extra argument", SECRET_NEVER_AN_ARGUMENT),
     ("No such command", "that is not a command"),
-    # The third has no route through this grammar any more: a group left
-    # without a verb is answered with its own page by `_page_instead`,
-    # which reads the context the mistake carries. The sentence stays as
-    # the answer for the same mistake with no context on it, because a
-    # shape that cannot be answered with a page still has to be answered
-    # with something, and the vague fallback would say less than this.
-    (NO_COMMAND, "a command is missing"),
+    # The third has no route through this grammar any more: `_Grouped`
+    # decides that case before Click can state it, and answers it with a
+    # page. The sentence stays because the marker is still Click's
+    # wording for a real mistake, and a Typer release that reached it by
+    # some path this module has not seen should meet the sentence for it
+    # rather than the vague fallback. It is unreachable, not wrong, and
+    # the boundary suite drives it directly.
+    ("Missing command", "a command is missing"),
 )
 
 # What an unrecognized shape gets. Deliberately vague about the mistake
@@ -5747,14 +5766,17 @@ def command() -> TyperGroup:
     """
     app = typer.Typer(
         help=DESCRIPTION,
-        # A group with nothing after it is still not a completed
-        # command, and it is answered with this page: the parse is left
-        # to fail the way it always did and `_page_instead` turns that
-        # one failure into the help, printed on stderr, exiting 1. Not
-        # the library's own no-args help, which prints to stdout and
-        # exits 0, and is wrong twice over: stdout is data and this
-        # invocation produced none, and 0 would say a command completed
-        # when none was typed.
+        # Every group of this grammar is a `_Grouped`, which is where an
+        # invocation that named no command is answered with this page.
+        cls=_Grouped,
+        # And the library's own no-args help stays off, so that decision
+        # is made in one place. It would also be the wrong answer twice
+        # over: it sees only the case where nothing at all followed, and
+        # it is a request for help rather than a failure, while arriving
+        # without a command is a failure that this grammar answers
+        # helpfully. The page goes to stderr, since stdout is data and
+        # this invocation produced none, and the exit stays 1, since a 0
+        # would say a command completed when none was typed.
         no_args_is_help=False,
         # Neither of the two options Typer would otherwise add: this
         # group's options are the three below and nothing else.
@@ -5774,14 +5796,15 @@ def command() -> TyperGroup:
     # than being registered under the first of them with the word in the
     # middle discarded.
     #
-    # The same no-args answer at every noun as at the root above, and
-    # for the same reason: `vinga provider` and `vinga device pending`
-    # are pages of the grammar with nothing chosen off them, and each is
-    # answered with its own page rather than the root's. What makes that
-    # one behavior rather than two is that the mistake carries the
-    # context it was raised from, which is the group that was left
-    # without a verb.
-    groups = {path: typer.Typer(no_args_is_help=False, rich_markup_mode=None) for path in GROUPS}
+    # The same class and the same flag at every noun as at the root
+    # above, so `vinga provider` and `vinga device pending` are answered
+    # with their own pages rather than the root's: each group raises
+    # from its own context, and the boundary prints the page of whatever
+    # context it is handed.
+    groups = {
+        path: typer.Typer(cls=_Grouped, no_args_is_help=False, rich_markup_mode=None)
+        for path in GROUPS
+    }
     for row in COMMANDS:
         under = groups[row.words[:-1]] if len(row.words) > 1 else app
         under.command(

@@ -574,9 +574,21 @@ produced no data, so nothing goes there, and a pipe does not fill with
 a help page. And the exit code still says what happened, which is that
 no command was typed; a 0 would say one completed. `--help` is the
 other invocation and keeps stdout and 0, because asking for help is not
-a failure. The libraries' own no-args-help does both of the other
-things (stdout, exit 0), so it is deliberately off and the boundary
-answers that one usage mistake with the page instead of a sentence.
+a failure. The library's own no-args-help is deliberately off, so the
+decision is made in one place: it sees only the invocation where nothing
+at all followed, and `vinga --api-url URL` named no command either and
+is owed the same page.
+
+**And the invocation is recognized by type, never by wording.** The
+group raises the one exception class that means "no command was named",
+and the boundary answers that class. Reading it off the text of a
+library's error would be reading something a caller can type: `vinga
+"Missing command"` is an unknown command whose name is the phrase the
+library uses, and it must meet the refusal every other unknown command
+meets. The rule generalizes past this one case: a boundary that decides
+what to print by matching words in a message has made the message an
+input, and every practice on this page about not quoting the caller
+back is undone by it.
 
 **The exception, stated because it is real.** The root `vinga-server`
 dispatch answers its own usage errors, and an unrecognized first word,
