@@ -732,7 +732,10 @@ is blocks instead, because a column holding a list is a column that
 wraps and stops being one line per entry.
 
 **Example.** `vinga export > deployment.yaml` followed by
-`vinga apply -f deployment.yaml` reproduces a deployment. `pending`
+`vinga apply --no-reload -f deployment.yaml`, the `secret set` commands
+the export listed, and `vinga reload` reproduces a deployment; the
+staging is what keeps the engines from being built before their
+credentials are back. `pending`
 prints five short columns, header included, because the question it
 answers ("which of these boards is the one I am holding") is read
 across a line. `mcp-server status` prints blocks, because two of its
