@@ -1104,6 +1104,30 @@ def patched(owner: object, name: str, replacement: object) -> Iterator[None]:
         setattr(owner, name, original)
 
 
+@contextmanager
+def exported(name: str, value: str) -> Iterator[None]:
+    """One environment variable set for the length of a block, and
+    whatever was there before put back.
+
+    The sibling of `patched` above and for the same reason: `monkeypatch`
+    is a fixture and a driver is an ordinary function that anything may
+    call. Restoring is not a tidiness here. A driver that set a variable
+    and then deleted it would answer for the whole process, so a machine
+    that really is a container (a lane inside one, an operator's shell
+    that exported the marker) would run every driver after it as one
+    that is not.
+    """
+    before = os.environ.get(name)
+    os.environ[name] = value
+    try:
+        yield
+    finally:
+        if before is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = before
+
+
 def raising(exc: BaseException) -> Callable[..., Any]:
     def refuse(*_args: object, **_kwargs: object) -> Any:
         raise exc
@@ -1592,9 +1616,12 @@ async def drive_provider_reaches_loopback(_: Path) -> None:
     facts the warning is made of.
 
     The marker is put in the environment around the build rather than
-    through a fixture, because a driver is a plain callable and this is
-    the only thing here that reads it. Nothing else in the run can see
-    it: the build is awaited, not backgrounded.
+    through a fixture, because a driver is a plain callable, and it goes
+    back to whatever it was through `exported` rather than being
+    deleted: a lane that really is inside a container has the marker
+    already, and taking it away here would answer for every driver after
+    this one. Nothing else in the run can see the change while it
+    stands: the build is awaited, not backgrounded.
     """
     entry = ProviderConfig.model_validate(
         {
@@ -1603,11 +1630,8 @@ async def drive_provider_reaches_loopback(_: Path) -> None:
             "model": MODEL,
         }
     )
-    os.environ[CONTAINER_ENV] = "1"
-    try:
+    with exported(CONTAINER_ENV, "1"):
         await build_entry("llm", "local", entry)
-    finally:
-        del os.environ[CONTAINER_ENV]
 
 
 APP = "vinga_server.app"
