@@ -49,6 +49,16 @@ that variant; nullable says it may be present and null. An argument position
 carries the same nullability column, for the positions whose value the
 sentence may have to render as nothing.
 
+This catalog is also a LIVE surface. The same emissions are streamed to an
+authenticated operator over `GET /api/runtime/events`, one JSON object per
+event, and what rides there is what is documented here plus two fields the
+stream owns: `ts`, the wall-clock instant the event was emitted at, and
+`level`, the name of the level in that variant's row. Nothing is kept behind
+that stream, which is what makes it a second transport over this surface
+rather than a store: a reader joins the present, and what happened before is
+the conversation record's to answer. A reader who needs the exact object reads
+the JSON log, which is the retained copy of the same records.
+
 Two per-frame samples are outside all of this on purpose. The endpointer track
 and the dropped-frame counts are capture side channels rather than events, so
 they are outside the tap contract and outside this registry, which is what
