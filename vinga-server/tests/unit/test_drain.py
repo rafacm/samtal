@@ -21,6 +21,7 @@ import uvicorn
 from tests.support.registry import FakeSession, registry_with
 from vinga_server import serving
 from vinga_server.config import Config
+from vinga_server.events.live import LiveEvents
 from vinga_server.registry import SessionRegistry
 from vinga_server.serving import (
     PING_INTERVAL_S,
@@ -146,10 +147,17 @@ async def test_the_drain_reports_a_clean_finish(caplog: pytest.LogCaptureFixture
 
 
 class FakeApp:
-    def __init__(self, registry: SessionRegistry) -> None:
+    def __init__(self, registry: SessionRegistry, live: LiveEvents | None = None) -> None:
         # The registry where the drain reads it: on the composition, which
-        # is the one thing a served app's state carries.
-        composition = type("Composition", (), {"sessions": registry})()
+        # is the one thing a served app's state carries. The event hub
+        # rides beside it for the same reason: the shutdown closes it
+        # through the composition, so a stand-in that had none would let
+        # the close read something a served app never carries.
+        composition = type(
+            "Composition",
+            (),
+            {"sessions": registry, "live": live if live is not None else LiveEvents()},
+        )()
         self.state = type("State", (), {"composition": composition})()
 
 
@@ -162,9 +170,84 @@ class StartingApp:
         self.state = type("State", (), {})()
 
 
-def draining_server(registry: SessionRegistry, drain_s: float = 5.0) -> DrainingServer:
-    app = cast(Any, FakeApp(registry))
+def draining_server(
+    registry: SessionRegistry,
+    drain_s: float = 5.0,
+    live: LiveEvents | None = None,
+) -> DrainingServer:
+    app = cast(Any, FakeApp(registry, live))
     return DrainingServer(uvicorn.Config(app), app, drain_s)
+
+
+def readers_when_uvicorn_stopped(
+    monkeypatch: pytest.MonkeyPatch, hub: LiveEvents
+) -> list[int]:
+    """How many event tails were still open each time uvicorn was told
+    to stop.
+
+    The ordering is the claim, and this is what makes it observable: the
+    hub is closed before uvicorn's shutdown, so the count read at that
+    moment is zero while it was one a line earlier. Patched on uvicorn's
+    own class, which is what `super().handle_exit` reaches.
+    """
+    counts: list[int] = []
+    real = uvicorn.Server.handle_exit
+
+    def spy(self: uvicorn.Server, sig: int, frame: Any) -> None:
+        counts.append(hub.subscribers)
+        real(self, sig, frame)
+
+    monkeypatch.setattr(uvicorn.Server, "handle_exit", spy)
+    return counts
+
+
+async def test_the_event_tails_end_after_the_drain_and_before_uvicorn_stops(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The shutdown ordering, against the real draining server rather
+    than inferred from a client that went away: the conversations get
+    their say, then every open tail is ended, then uvicorn is told to
+    stop. A stream left open would be a response uvicorn's graceful
+    shutdown waits out."""
+    hub = LiveEvents()
+    session = FakeSession(speaking_for=0.1)
+    server = draining_server(registry_with(session), live=hub)
+    watching = hub.subscribe()
+    assert hub.subscribers == 1
+    counts = readers_when_uvicorn_stopped(monkeypatch, hub)
+
+    server.handle_exit(signal.SIGTERM, None)
+    for _ in range(100):
+        await asyncio.sleep(0.02)
+        if server.should_exit:
+            break
+
+    assert server.should_exit
+    assert session.shutdown is not None, "the conversations were not drained"
+    assert counts == [0], "uvicorn was told to stop with a tail still open"
+    assert await anext(aiter(watching), None) is None, "the tail was not ended"
+
+
+async def test_a_zero_drain_still_ends_the_tails_and_drains_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`drain_s = 0` is a server that does not drain, and this changes
+    nothing about that: no conversation is asked to stop, uvicorn is
+    called directly, and the only thing between the signal and that call
+    is the close every open tail needs in order not to outlive the
+    process."""
+    hub = LiveEvents()
+    session = FakeSession()
+    server = draining_server(registry_with(session), drain_s=0.0, live=hub)
+    watching = hub.subscribe()
+    counts = readers_when_uvicorn_stopped(monkeypatch, hub)
+
+    server.handle_exit(signal.SIGTERM, None)
+
+    assert server.should_exit
+    assert session.shutdown is None, "a zero drain asked a conversation to finish"
+    assert counts == [0], "uvicorn was told to stop with a tail still open"
+    assert await anext(aiter(watching), None) is None, "the tail was not ended"
 
 
 async def test_the_first_signal_drains_before_uvicorn_exits() -> None:
