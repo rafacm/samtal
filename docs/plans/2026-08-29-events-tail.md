@@ -234,3 +234,62 @@ events.md note says both things.
   SIGPIPE and Ctrl-C behavior, cli-guide unbounded-read record,
   README watching paragraph, live-lane drive, generated references,
   changelog.
+
+## Plan review round
+
+External review of commit 77cc0232: backend codex (codex-cli
+0.149.1), model gpt-5.6-sol, sandbox read-only, 2026-08-29. Verdict:
+not ready as reviewed, ready after the P1/P2 amendments; all ten are
+amended below with resolutions.
+
+1. **P1: native EventSource cannot authenticate to this route.** The
+   bearer gate reads an Authorization header EventSource cannot set;
+   a query-string token is unacceptable because URLs are retained.
+   Reconcile explicitly: fetch() streaming in the browser, or a
+   same-origin auth mechanism.
+
+2. **P1: `--follow` has no defined behavior.** Define when the
+   command exits in both modes, and unexpected EOF under `--follow`
+   (visible, never a successful-looking silence).
+
+3. **P1: the streaming CLI bypasses the no-leak request boundary.**
+   `build_client` alone preserves none of `_call`/`_sent`'s
+   guarantees (quieted loggers, sanitized addresses, chain rules,
+   close handling); a streaming sibling of `_sent` must carry them
+   across open, iteration and teardown, with planted-secret tests
+   for connect-time and mid-stream failures.
+
+4. **P2: the process-global server tap is never detached.** Register
+   `detach_server_tap` on the application's exit stack; test two
+   sequential lifespans and a failed startup after attachment.
+
+5. **P2: the session attach point misses early session events.**
+   Attach immediately after `SessionEvents` construction, detach in
+   an outer finally over the whole `run()`; test an early rejection.
+
+6. **P2: shutdown is asserted against the wrong lifecycle.** Put
+   `serving.py` in M1: an explicit hub close after session drain and
+   before uvicorn shutdown, `drain_s <= 0` included, verified at
+   process level rather than by client disconnect.
+
+7. **P2: the route-test mechanism cannot prove streaming.** The
+   sync TestClient buffers; use a direct ASGI harness or a real
+   server, inject the keepalive interval, verify unsubscription
+   observably, and specify the no-leak comparison as stream minus
+   ts/level equals the log record's fields.
+
+8. **P2: the renderer does not guarantee one physical line.** Event
+   values may carry newlines and control characters; require compact
+   JSON escaping for non-numeric values with tests over hostile
+   values.
+
+9. **P2: the cost analysis is wrong.** The hub pays the dispatch
+   deep copy and lock whether or not anyone subscribes, and the
+   attach-on-first-subscriber fallback cannot reach already-live
+   sessions; acknowledge the cost, drop the fallback, fix the
+   no-subscriber claim, and fix the unspecified capacity.
+
+10. **P2: the filter contract is underspecified.** Canonical MAC
+    spellings, session-id validation without echo, case-insensitive
+    level enum with INFO default, `--level` on the CLI, and every
+    non-INFO level rendered.
