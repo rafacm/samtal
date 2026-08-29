@@ -120,13 +120,23 @@ The `events tail` row is a `does=callable` command (the grammar's
 existing second shape) that opens the streaming request on the same
 client seam (`build_client`), reads SSE lines incrementally, prints
 one line per event to stdout, and renders `dropped` notices to
-stderr. The read timeout for the stream is deliberately unbounded
-with the connect timeout kept, recorded the way `apply`'s unbounded
-read already is (the cli-guide's bound-every-wait practice, with the
-why written down); Ctrl-C ends it with exit 0 (an interactive tail
-that was told to stop did its job), and a broken pipe follows the
-`events_cli` SIGPIPE pattern so `vinga events tail | head` cannot
-traceback. A new `events` noun group holds the row; the adjacent
+stderr. The two modes have exact exit contracts. Without
+`--follow`, the command waits for the first matching event, prints
+it, and exits 0: a scriptable "wait for the next X", which is the
+only live-only reading a tail with no retained buffer can have. With
+`--follow`, it streams until interrupted. In both modes an
+unexpected end of stream (the server restarting, a proxy dropping
+the connection, a deployment upgrade) exits 1 with a fixed "the
+event stream ended" sentence on stderr; there is no automatic
+reconnect, because a tail that silently rejoined across a gap would
+look continuous while lying, and the operator who wants to resume
+runs it again. The read timeout for the stream is deliberately
+unbounded with the connect timeout kept, recorded the way `apply`'s
+unbounded read already is (the cli-guide's bound-every-wait
+practice, with the why written down); Ctrl-C ends it with exit 0 (an
+interactive tail that was told to stop did its job), and a broken
+pipe follows the `events_cli` SIGPIPE pattern so
+`vinga events tail | head` cannot traceback. A new `events` noun group holds the row; the adjacent
 `vinga-server events reference` dispatch group is a different
 program's spelling and keeps its own home, which the cli-guide's
 two-spellings section already explains.
