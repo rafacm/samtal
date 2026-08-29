@@ -196,18 +196,28 @@ def test_the_refusal_carries_nothing_of_the_failure_on_its_chain(
     assert PLANTED_SECRET not in _chain(caught.value)
 
 
-# The one question that is answered in front of the read
+# The invocations that are answered without the read
+#
+# Three shapes, one reason: an invocation that runs no command needs no
+# environment, and a `.env` that will not decode is exactly the state in
+# which a reader most needs those three to work.
 #
 # `--version` has to succeed whatever else is wrong. It is what an
 # operator asks when they are already comparing two halves of a
 # deployment that disagree, which is exactly when the rest of a machine
-# is not in a state to be relied on, and a `.env` that will not decode
-# is one such state. Reading it first made the one command that must
-# always answer exit 1 with a sentence about a file it was never asked
-# about.
+# is not in a state to be relied on. `--help` and a bare invocation are
+# what they ask when they do not yet know what to type, and answering
+# either with a sentence about a file they may not have written tells
+# them nothing they can act on: the reader is trying to find out what
+# this program is, and gets told its working directory is wrong.
 #
-# Both spellings, because both read a `.env` and the contract is the
-# grammar's rather than one entry point's.
+# What makes all three true is where the read happens, which is on the
+# way into a command (`_Verbatim.invoke`) rather than at the mouth of
+# the boundary. Reading it first made every one of them exit 1 with a
+# sentence about a file none of them was asked about.
+#
+# Both spellings for the version, because both read a `.env` and the
+# contract is the grammar's rather than one entry point's.
 
 
 def an_unreadable_dotenv(directory: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -289,11 +299,88 @@ def test_everything_else_goes_to_the_parser(argv: tuple[str, ...]) -> None:
     assert cli._version_asked(list(argv)) is False
 
 
+def test_asking_for_help_answers_with_a_broken_dotenv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Nothing about a file, and the page on stdout, because `--help`
+    is answered during the parse and no command runs."""
+    an_unreadable_dotenv(tmp_path, monkeypatch)
+
+    with pytest.raises(SystemExit) as left:
+        cli.main(["--help"])
+
+    assert left.value.code == 0
+    captured = capsys.readouterr()
+    assert captured.out.startswith(f"Usage: {cli.DISPATCHED}")
+    assert DOTENV_UNREADABLE not in captured.err
+
+
+# And the bare invocation, at the root and at a noun and at a sub-noun,
+# which is the shape this was found in: the page a reader gets for
+# typing the program's name is the one answer that has to work before
+# they have set anything up at all, and a `.env` in the directory they
+# happen to be standing in was answering it with a refusal instead.
+BARE = [(), ("provider",), ("device", "pending")]
+
+
+@pytest.mark.parametrize(
+    "path", BARE, ids=["the group", "a noun", "a sub-noun"]
+)
+def test_a_bare_invocation_answers_its_page_with_a_broken_dotenv(
+    run,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+    path: tuple[str, ...],
+) -> None:
+    """The page, exit 1, and not a syllable of the file on any surface.
+
+    The `.env` here is the one the other cases plant: a real address and
+    a real credential followed by bytes no encoding will decode. It is
+    never opened on this path, and this is what says so from the outside
+    rather than by reading the code.
+    """
+    an_unreadable_dotenv(tmp_path, monkeypatch)
+    capsys.readouterr()
+
+    with caplog.at_level(logging.DEBUG):
+        assert run(*path) == 1, path
+
+    found = surfaces(capsys, caplog)
+    assert found["stderr"].startswith(" ".join(["Usage:", cli.DISPATCHED, *path])), path
+    assert DOTENV_UNREADABLE not in found["stderr"], path
+    assert found["stdout"] == "", path
+    for sentinel in (PLANTED_URL, PLANTED_SECRET):
+        assert [where for where, text in found.items() if sentinel in text] == [], path
+
+
+@pytest.mark.parametrize(
+    "path", BARE, ids=["the group", "a noun", "a sub-noun"]
+)
+def test_a_bare_invocation_carries_no_dotenv_on_its_chain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path: tuple[str, ...]
+) -> None:
+    """The surface `surfaces` cannot reach for this refusal: the chain
+    of the exception the page is carried by, which is a different
+    exception from the one a `.env` failure raises."""
+    an_unreadable_dotenv(tmp_path, monkeypatch)
+
+    with pytest.raises(ConfigError) as caught:
+        cli._parsed(list(path), cli.DISPATCHED)
+
+    assert caught.value.__cause__ is None, path
+    assert caught.value.__context__ is None, path
+    for sentinel in (PLANTED_URL, PLANTED_SECRET):
+        assert sentinel not in _chain(caught.value), path
+
+
 def test_a_broken_dotenv_still_stops_every_other_command(
     run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The other half, so the exemption is one question and not a hole:
-    a command that needs the environment still meets the sentence."""
+    """The other half, so the exemption is three invocations and not a
+    hole: a command that needs the environment still meets the
+    sentence."""
     an_unreadable_dotenv(tmp_path, monkeypatch)
     capsys.readouterr()
 

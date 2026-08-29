@@ -467,27 +467,34 @@ def main(argv: Sequence[str] | None = None) -> int:
     `sys.argv[2:]` and the script hands it nothing. What that decides is
     one string in a help page, and nothing else.
 
-    The `.env` file is read here rather than only in `vinga-server.main`,
-    because both spellings have to behave identically and the console
-    script never reaches that function. Read into the environment before
-    anything looks at it, with the real environment winning, and
-    searched from the invocation directory rather than from this file's.
+    The `.env` file is read for this group rather than only in
+    `vinga-server.main`, because both spellings have to behave
+    identically and the console script never reaches that function. It
+    is read where a command is about to run (`_Verbatim.invoke`) rather
+    than in front of the parse, so that an invocation which runs no
+    command needs no readable environment: a bare `vinga` gets its help
+    page whatever the `.env` in the working directory is, which is the
+    one moment a reader is least able to act on a sentence about a file
+    they may not have written. Every command still runs with the
+    environment loaded, because nothing here reads it earlier.
 
     It is read INSIDE the boundary, which is the whole of why the read
-    is a function of the loader's rather than two library calls here: a
+    is a function of the loader's rather than two library calls: a
     `.env` that will not open or will not decode is a failure on a path
     nobody validated, holding the variables an API token and the
     provider credentials come from, and outside the boundary it would
-    leave as a traceback with those bytes on the exception.
+    leave as a traceback with those bytes on the exception. The read has
+    moved down the call stack and not out of the boundary: it is still
+    inside this `try`, one frame further in.
 
-    And one invocation is answered in front of that read, because it
-    has to be answerable when nothing else is: see `_version_asked`.
+    And one invocation is answered in front of the parse as well as the
+    read, because it has to be answerable when nothing else is: see
+    `_version_asked`.
     """
     if _version_asked(sys.argv[1:] if argv is None else argv):
         _print_version()
         raise SystemExit(0)
     try:
-        load_environment_file()
         _parsed(
             sys.argv[1:] if argv is None else argv,
             CONSOLE_SCRIPT if argv is None else DISPATCHED,
@@ -4500,15 +4507,38 @@ class Command:
 
 
 class _Verbatim(TyperCommand):
-    """A command whose epilog is printed as it was laid out.
+    """Every leaf of this grammar: one command, about to run.
 
-    Click rewraps an epilog paragraph by paragraph, which would reflow
-    the field listing under a `set` command into prose. That listing is
-    generated already wrapped, at a width narrower than a terminal, for
-    exactly the reason argparse's raw formatter was asked for before
-    this: a line that wraps on its own is worse than one wrapped on
-    purpose.
+    Two things it does that Click's own command class does not, and they
+    are unrelated except in being true of every command here.
+
+    Its epilog is printed as it was laid out. Click rewraps an epilog
+    paragraph by paragraph, which would reflow the field listing under a
+    `set` command into prose. That listing is generated already wrapped,
+    at a width narrower than a terminal, for exactly the reason
+    argparse's raw formatter was asked for before this: a line that
+    wraps on its own is worse than one wrapped on purpose.
+
+    And the `.env` file is read here, which is the last moment before a
+    command runs and the first moment it is known that one will. Every
+    command of this group needs the environment (the API address, the
+    token, the config path and the master key are all read from it) and
+    no invocation that runs no command does: a bare `vinga` is answered
+    with a help page, and `--help` and `--version` are answered without
+    one, so none of the three may be turned into a sentence about a
+    `.env` the reader may not have written. Reading it at the boundary's
+    mouth made that failure the answer to every invocation, including
+    the ones whose whole purpose is to work when nothing else does.
+
+    It is read on the way in rather than by each command body for the
+    reason the boundary exists: forty-odd bodies reading it is forty-odd
+    chances to forget, and the environment has to be loaded before the
+    first thing looks at it whichever command that is.
     """
+
+    def invoke(self, ctx: Any) -> Any:
+        load_environment_file()
+        return super().invoke(ctx)
 
     def format_epilog(self, ctx: Any, formatter: Any) -> None:
         if not self.epilog:
@@ -4526,9 +4556,13 @@ def _version(shown: bool) -> None:
     `--help` leaves, through the exit the boundary carries out of its
     handler, because asking is not failing.
 
-    Reached only when the environment was readable, since `main`
-    answers the same question in front of that read; both print through
-    `_print_version` rather than one of them formatting the line again.
+    Rarely reached at all, since `main` answers the same question in
+    front of the parse and this one is what answers it if that
+    recognizer ever stops recognizing a spelling. Both print through
+    `_print_version` rather than one of them formatting the line again,
+    and `test_the_version_is_the_same_bytes_through_either_spelling`
+    holds them to it. Neither needs the environment: no `.env` is read
+    until a command is about to run.
     """
     if not shown:
         return
