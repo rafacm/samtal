@@ -200,22 +200,24 @@ running the case it added.
 
 ## M2: the polish
 
-PR TBD.
+PR #352.
 
 ### What landed
 
 Four commits, each a change and the pages it falsified: the bare
 invocation, the description, the relocation, the changelog.
 
-- **A bare invocation is answered with its own help page.** The parse
-  is still left to fail the way it always did, and `_page_instead`
-  turns that one failure into the page, off the context the mistake
-  carries, so a bare sub-noun (`vinga device pending`) gets its own page
-  rather than the root's. It leaves through `ConfigError` like every
-  other answer to an invocation that was not a completed command:
-  stderr, exit 1, chain empty. Not `no_args_is_help=True`, which is
-  wrong twice (stdout for something that is not data, and a 0 that says
-  a command completed).
+- **A bare invocation is answered with its own help page**, off the
+  context of the group that was left without a verb, so a bare sub-noun
+  (`vinga device pending`) gets its own page rather than the root's. It
+  leaves through `ConfigError` like every other answer to an invocation
+  that was not a completed command: stderr, exit 1, chain empty.
+
+  *Superseded in part by the review round below, findings 1 and 2.* The
+  first cut recognized the invocation by the wording of Click's message
+  and read the `.env` in front of the parse; the mechanism is now a
+  group class raising a typed exception, and the read has moved to the
+  command it is for.
 - **The root description**, in the vocabulary of the person reading it
   rather than this repository's. The hand-written head of
   `docs/reference/cli.md` is reordered the same way, keeping the
@@ -263,12 +265,14 @@ the plan.
 ### Discoveries
 
 - **A bare group's help page comes off the exception, not off the
-  tree.** Click's `Context.fail` attaches the failing context to the
-  `UsageError`, and for `vinga device pending` that is the innermost
-  group's context, still carrying its parent chain. So one branch at the
-  boundary answers every depth, and there is nothing to walk: no lookup
-  of "which group did they stop at", which would have been a second
-  place the tree is traversed.
+  tree.** The exception a group raises carries that group's own
+  context, and for `vinga device pending` that is the innermost group's,
+  still holding its parent chain. So one arm at the boundary answers
+  every depth, and there is nothing to walk: no lookup of "which group
+  did they stop at", which would have been a second place the tree is
+  traversed. True of the wording-based first cut and of the class-based
+  one the review round replaced it with, which is why the fix was a
+  change of discriminator and not of shape.
 - **The refusal that moved was a deletion, not an edit.** The live
   lane's refusal table is keyed by family, and `family_of` reads the
   noun path off the row, so `("mcp-server", "status")` belongs to a
@@ -283,10 +287,78 @@ the plan.
 
 ### Verification
 
+Re-run after the review round below; the counts are that run's.
+
 - `uv run ruff check .`: clean.
-- `uv run pytest tests/unit -q`: 4396 passed, 19 skipped.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: 4423 passed,
+  19 skipped.
 - `uv run pytest tests/integration -q`: 212 passed, against the Postgres
   this machine was already running with the compose defaults.
 - `python3 scripts/check_doc_links.py .`: 164 files, 0 failures.
 - Not verified here: nothing on hardware, and nothing in the image lane,
   which is CI's. M2 adds no board or device procedure.
+
+### PR review round
+
+External review of PR #352, verdict mergeable after fixes. Four
+findings, condensed but faithful, each with the resolution and the
+commit that carries it.
+
+1. **P2: a command line could type its way to the help page.** The
+   boundary told a bare invocation apart by looking for Click's words
+   "Missing command" in the message it composed, and that message is
+   composed around what was typed: `vinga "Missing command"` is an
+   unknown command whose name is the marker, and `vinga list "Missing
+   command"` is an argument too many carrying it. Both got a help page
+   instead of the fixed refusal for the mistake they really were.
+
+   *Resolution*: adopted, `759f06d9`. Every group is a `_Grouped`,
+   which decides the question itself from the context's own record of
+   what is left to resolve and raises `NoArgsIsHelpError`, Click's own
+   class for that meaning and raised nowhere else here. The boundary
+   answers a class rather than a wording. Deciding it in the group
+   rather than leaving it to the library also keeps the invocation with
+   options and no command (`vinga --api-url URL`), which Click's own
+   no-args flag does not see, and the two private attributes the
+   decision reads are named rather than felt for, so a Typer rename
+   fails on the first invocation instead of answering that every
+   command line is bare. The cli-guide gains the general rule: a
+   boundary that matches words in a message has made the message an
+   input.
+
+2. **P2: a broken `.env` pre-empted the page it was supposed to
+   print.** The read sat at the mouth of the boundary, in front of the
+   parse, so a bare `vinga` in a directory holding an unreadable `.env`
+   answered `DOTENV_UNREADABLE` rather than its help, contradicting the
+   changelog entry shipped beside it.
+
+   *Resolution*: adopted, `9e6325da`. The read moves one frame in, to
+   `_Verbatim.invoke`, which is the last moment before a command runs
+   and the first at which it is known that one will. Still inside the
+   boundary, still before anything looks at the environment, so every
+   command behaves exactly as before and no invocation that runs no
+   command opens the file at all. That makes three answers that need no
+   environment (`--version`, `--help`, a bare invocation) where the
+   dotenv suite's section had recorded one, and the suite now drives
+   the root, a noun and a sub-noun with the planted `.env` in place,
+   over both streams, the log and the chain.
+
+3. **P2: the CLI reference described only explicit `--help`.** The
+   behavior this milestone changed was written down in the guide that
+   explains why the grammar has its shape, and not on the page a reader
+   opens to find out what it does.
+
+   *Resolution*: adopted, `26ce722b`. A section of its own in the
+   hand-written half, where the plan's documentation footprint put it:
+   the two ways to ask, what differs (stderr and exit 1, so a redirect
+   gets an empty file and a script still reads it as a failure), which
+   page a bare noun prints, that neither way needs a `.env` or a
+   server, and that a word the grammar does not have gets the refusal
+   rather than a page.
+
+4. **P2: the milestone's PR number was still a placeholder.** Both the
+   plan's checklist tick and this section said "PR TBD".
+
+   *Resolution*: adopted, in this commit, with the census manifest
+   regenerated beside it because these are the milestone's last
+   documentation edits.
