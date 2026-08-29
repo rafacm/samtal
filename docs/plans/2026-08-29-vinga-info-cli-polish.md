@@ -222,8 +222,15 @@ generated artifact. New pins, by milestone:
   neighbors; the multi-act refusal shape (identity up, config read
   refused) renders both parts; the live lane drives `info` once so the
   driven-row completeness pins stay green.
-- M2: bare `vinga` and one bare group print help to stderr and exit 1
-  (replacing the `("provider",)` refusal pin); the reworded
+- M2: bare invocation is parameterized over every `GROUPS` path,
+  nested groups included, plus the root (replacing the
+  `("provider",)` refusal pin); each case asserts exit 1, help on
+  stderr only, and an empty `__cause__`/`__context__` chain, because
+  raising `SystemExit` while handling Click's exception retains the
+  context and the argument list, a leak this CLI has already had
+  once; at least one case carries a credential-shaped query in
+  `--api-url` and asserts the value reaches no stream and no log
+  record in either format; the reworded
   description appears in the regenerated cli.md (drift test carries
   it); the moved row keeps `_status_block` rendering byte-identical
   (rendering tests re-point their argv to `mcp-server status`);
