@@ -26,6 +26,7 @@ from collections.abc import Sequence
 from typing import Any
 from urllib.parse import urlsplit
 
+import httpx
 import pytest
 import yaml
 from fastapi.testclient import TestClient
@@ -109,13 +110,35 @@ def runner(monkeypatch: pytest.MonkeyPatch, database: str | None = None):
     }
     # Every client the entry point built, kept so a test can read the
     # timeouts a command chose after it has run.
-    clients: list[TestClient] = []
+    clients: list[httpx.Client] = []
+    # And the transport a command's client is built on, when the test
+    # client cannot be it. Empty for every suite but the event tail's:
+    # `TestClient` buffers a whole response body before handing it back,
+    # and the one answer in this API that never finishes arriving is the
+    # event stream, so a command that reads a stream incrementally
+    # cannot be driven through it at all. `answering` below is how a
+    # test puts one here.
+    transport: list[httpx.BaseTransport] = []
     # What holds the clients one command builds open, replaced by `_run`
     # with a fresh one per command and closed when that command ends.
     lifespans = contextlib.ExitStack()
 
-    def factory(base_url: str, token: str) -> TestClient:
+    def factory(base_url: str, token: str) -> httpx.Client:
         reached.append(base_url)
+        if transport:
+            # A real `httpx.Client`, which is what the entry point
+            # builds on a deployment, on a transport of the test's own.
+            # Built with the timeouts `cli.build_client` builds with,
+            # because a command that sets its own overwrites them and a
+            # command that does not is entitled to the module's.
+            given = httpx.Client(
+                base_url=base_url,
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=httpx.Timeout(cli.READ_TIMEOUT_S, connect=cli.CONNECT_TIMEOUT_S),
+                transport=transport[-1],
+            )
+            clients.append(given)
+            return given
         database = load_file_config(None).server.database
         # The server's token is fixed here and is not the one the CLI
         # resolved. Building the gate out of whatever the client happened
@@ -163,7 +186,27 @@ def runner(monkeypatch: pytest.MonkeyPatch, database: str | None = None):
     _run.pending = pending
     _run.runtime = runtime
     _run.clients = clients
+    _run.transport = transport
     return _run
+
+
+def answering(run, handler: Any) -> None:
+    """Answer this runner's requests from a handler of the test's own,
+    rather than from an application built per request.
+
+    The seam is the same one every suite here runs through,
+    `cli.build_client`; what changes is what the client is built on. A
+    handler takes an `httpx.Request` and answers an `httpx.Response`,
+    and a response built over an iterator is one whose body arrives in
+    pieces, which is the whole point: the event stream is an answer that
+    never finishes, and the buffered test client cannot hand back a body
+    that has no end.
+
+    A handler may raise instead of answering, which is how a connection
+    that never opens is written, and its iterator may raise partway
+    through, which is how one that dies mid-stream is.
+    """
+    run.transport.append(httpx.MockTransport(handler))
 
 
 # Which row of the grammar a command line names
