@@ -268,13 +268,21 @@ events.md note says both things.
 
 ## Risks
 
-- A tap that allocates per event on the hot audio path: mitigated by
-  enqueue being append+count+wake and by the existing per-tap guard;
-  the hub attaches to sessions only when built, and building it is
-  unconditional but subscribing is what fans out work, so an idle hub
-  is one deque append per event with no subscribers to wake. If even
-  that offends the profile, the plan's fallback is attach-on-first-
-  subscriber, but the simple always-attached shape ships first.
+- A tap on the hot audio path costs something whether or not anyone
+  is watching, and the plan selects that cost knowingly rather than
+  wishing it away: the dispatcher deep-copies the payload once per
+  attached non-log tap and the hub takes its lock, on every event,
+  subscribers or none (with no subscribers there is no deque append
+  and no wakeup, but the copy and the lock stand). That is the same
+  price the capture and conversation taps already pay per event, on
+  payloads that are small dicts of scalars by construction. There is
+  no attach-on-first-subscriber fallback: sessions publish no event
+  accessor, so a late attach could never reach a session already in
+  progress, which is the very reason the hub wires through
+  construction. The per-subscriber queue capacity is fixed at 256
+  events, documented on the module: at the log's own volume that is
+  minutes of buffer for a stalled terminal, and past it the dropped
+  counter is the honest answer.
 - SSE through the mounted-app middleware stack: `_SanitizedErrors`
   swallows failures after a response starts, which is correct for a
   stream (a mid-stream failure ends the stream rather than inventing
