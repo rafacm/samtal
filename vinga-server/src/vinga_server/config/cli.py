@@ -70,14 +70,17 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 # a help page is rendered through, which has to be that copy's. Imported
 # from where they actually are, named one by one rather than felt for
 # through an ancestor, so a Typer release that moves them fails loudly at
-# import instead of quietly widening what reaches an operator.
-from typer._click.core import Context
+# import instead of quietly widening what reaches an operator. That
+# tripwire fired once: typer 0.27.2 moved Exit out of the vendored
+# exceptions module, so Exit is imported from the core module beside
+# Context, where both 0.27.1 and 0.27.2 define it as the same class
+# typer exports publicly as typer.Exit.
+from typer._click.core import Context, Exit
 from typer._click.exceptions import (
     BadArgumentUsage,
     BadOptionUsage,
     BadParameter,
     ClickException,
-    Exit,
     MissingParameter,
     NoSuchOption,
 )

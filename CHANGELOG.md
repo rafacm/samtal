@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-08-29
+
+### Fixed
+
+- The `vinga` command line imports `Exit` from the vendored Click's core module, where typer 0.27.1 and 0.27.2 both define it, instead of the exceptions module 0.27.2 moved it out of. A fresh install resolving typer 0.27.2 crashed at import; installs pinned by the lockfile were unaffected.
+
 ## 2026-08-28
 
 ### Added
