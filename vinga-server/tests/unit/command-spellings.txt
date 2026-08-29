@@ -1038,7 +1038,7 @@ vinga-server/src/vinga_server/onboarding/keys.py:37  respell  vinga-server confi
 vinga-server/src/vinga_server/onboarding/keys.py:105  respell  vinga-server config ota-url
 vinga-server/src/vinga_server/onboarding/keys.py:165  respell  vinga-server config ota-url
 vinga-server/src/vinga_server/onboarding/origin.py:5  respell  vinga-server config ota-url
-vinga-server/src/vinga_server/onboarding/origin.py:336  respell  vinga-server config ota-url
+vinga-server/src/vinga_server/onboarding/origin.py:355  respell  vinga-server config ota-url
 vinga-server/src/vinga_server/protocol/framing.py:129  respell  vinga simulator
 vinga-server/src/vinga_server/protocol/messages.py:104  respell  vinga simulator
 vinga-server/src/vinga_server/protocol/messages.py:259  respell  vinga simulator

@@ -11,12 +11,24 @@ is named, and the provenance travels with the value because two of the
 three sources it resolves are inferences. The fourth calls
 `websocket_url_for` and the fifth `portal_url_line`.
 
-The two that answer a request share the fallback the other three cannot
-have. An explicitly configured origin wins for all five; where there is
-none, a request is a demonstration of an address that reached this
-server, and the listen address is a guess (issue #340). So the banner
-and the two commands guess, because nothing has asked them anything,
-and the two lines in a reply prefer what the request arrived on.
+What a deployment may configure is two rules rather than one, and they
+are deliberately not the same rule. The four addresses a person or a
+screen is shown resolve `public_url` first and the origin of
+`websocket_url` behind it, which is `_configured` below: `public_url`
+is the name a deployment goes by, and where it is unset the websocket
+URL is the one key a proxied deployment has already had to get right.
+`websocket_url_for` consults `server.websocket_url` and nothing else,
+because what it answers is the URL a board is handed rather than an
+origin to print: `public_url` names an origin, may carry a path prefix
+and says nothing about the websocket route, so a wire URL built from it
+would be a guess wearing a configured key's authority.
+
+Where the applicable key is unset, the two that answer a request have a
+fallback the other three cannot have. A request is a demonstration of
+an address that reached this server and the listen address is a guess
+(issue #340), so the banner and the two commands guess, because nothing
+has asked them anything, and the two lines in a reply prefer what the
+request arrived on.
 
 `onboarding_url` is the assembly the two commands share, and it lives
 here for the same reason the origin does: it is one composition of the
@@ -144,10 +156,15 @@ def _configured(server: ServerConfig) -> Origin | None:
     """The origin this configuration states, and None where it states
     none: `public_url` as written, else the origin of `websocket_url`.
 
-    The half of the order every caller here shares, held in one place so
-    that a line answering a request and a line printed with no request
-    cannot come to disagree about which key wins (#340). What differs
-    between them is only what happens when this answers None.
+    The half of the order the four printed addresses share, held in one
+    place so that a line answering a request and a line printed with no
+    request cannot come to disagree about which key wins (#340). What
+    differs between them is only what happens when this answers None.
+
+    Not the wire's order, which is `websocket_url_for`'s own and reads
+    one key: `public_url` names an origin rather than a websocket URL,
+    and this module's docstring says why that is a distinction rather
+    than an omission.
     """
     if server.public_url:
         return Origin(server.public_url, OriginSource.PUBLIC_URL)
@@ -301,14 +318,16 @@ def portal_url_line(server: ServerConfig, request: Request) -> str:
     portal, for the request that asked for it.
 
     Three sources, first answer wins, and only the last of them is new
-    (#340). A configured origin wins exactly as it does everywhere else
-    in this module. Failing that the address is the one this request
-    arrived on, which is the same preference the websocket URL in the
-    same reply has always had: this line used to print the listen-address
-    guess beside a websocket URL derived from the request, so one reply
-    said `ws://192.168.1.34:8003/` and `http://0.0.0.0:8003/` about the
-    same server. Failing both, the guess, which is reachable only for a
-    Host header that names no readable address.
+    (#340). A configured origin wins exactly as it does for the banner
+    and the two commands, which is the shared rule `_configured` holds.
+    Failing that the address is the one this request arrived on, which
+    is the preference the websocket URL in the same reply has always
+    had for the key it reads: this line used to print the
+    listen-address guess beside a websocket URL derived from the
+    request, so one reply said `ws://192.168.1.34:8003/` and
+    `http://0.0.0.0:8003/` about the same server. Failing both, the
+    guess, which is reachable only for a Host header that names no
+    readable address.
 
     The path is the request's own, so the line is the URL that works for
     whoever is holding it rather than the one this server would
