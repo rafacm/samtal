@@ -972,6 +972,15 @@ class FieldError(BaseModel):
 # did without reading either.
 PROBLEM_MEDIA_TYPE = "application/problem+json"
 
+# And what the event stream is served as, here for the same reason and
+# read by both ends: the route answers with it and `config/cli.py`
+# refuses to read a body that arrives under anything else. A 200 is not
+# by itself a reason to parse what came back, since a proxy, a captive
+# portal or a gateway can answer one with a body of its own, and the
+# only thing standing between such a body and an operator's terminal is
+# this check plus the frame shape behind it.
+EVENT_STREAM_MEDIA_TYPE = "text/event-stream"
+
 # And what a refusal of each status is called: the status's standard HTTP
 # reason phrase, which is what RFC 9457 asks a problem with no `type` to
 # carry.
