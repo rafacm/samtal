@@ -161,7 +161,9 @@ no-em-dash rule is about em-dashes; no character in the banner is one.
   imports no FastAPI. With onboarding off the URL and provenance
   fields are null and the flag says why; on an application built
   without a surrounding server (`build_api()` standalone) the route
-  answers the honest 503 the other runtime reads answer, never
+  answers the honest 503 of the runtime reads that require a full
+  server, prompt and diff specifically (the MCP read answers an
+  honest empty instead, and identity has no honest empty), never
   invented identity data. `build_api`/`build_api_runtime` keep their
   existing positional calls working (appended defaulted parameters,
   or internal calls converted to keywords). Tests cover enabled,
@@ -279,9 +281,9 @@ practice). The route's response-header pin covers
   deliberately in the same commit, and the cli-guide paragraph is the
   record of why. Mitigation: M2 touches the boundary and the pin
   together.
-- `apply`'s notice suppression could hide a real staging state if the
-  reload act fails silently; mitigated by the explicit
-  stored-not-applied sentence and its pin.
+- `apply`'s quiet default renderer could hide a real staging state if
+  the reload act fails silently; mitigated by the explicit
+  committed-but-unanswered sentence and its pin.
 - The respell sweep can stale the spellings census mid-stack;
   mitigated by regenerating in the same commit as the last doc edit,
   per the standing rule.
@@ -300,9 +302,10 @@ practice). The route's response-header pin covers
   root description, `status` relocated to `mcp-server status` with the
   respell sweep and superseded-rationale rewrites, generated
   references and census regenerated.
-- [ ] M3: `apply` reloads by default. The two-act row with
-  `--no-reload`, notice suppression, stored-not-applied refusal
-  rendering, README and server-README lines this falsifies, cli-guide
+- [ ] M3: `apply` reloads by default. The invocation-aware act
+  selection with `--no-reload`, the quiet and staging renderers, the
+  committed-but-unanswered failure rendering, the apply-test
+  migration, README and server-README lines this falsifies, cli-guide
   naming rationale.
 
 ## Plan review round
@@ -425,3 +428,22 @@ condensed but faithful; resolutions appended per amendment.
 
     *Resolution*: adopted: the documentation footprint now opens
     with the per-milestone changelog entries.
+
+## Plan review delta round
+
+Terra re-review of the amended plan (backend codex, codex-cli
+0.149.1, model gpt-5.6-terra, 2026-08-29, reviewed commit e49c752e).
+Verdict: ready after amendments; both applied.
+
+1. **P2: stale stored-not-applied wording.** The Risks entry and the
+   M3 milestone still said "stored-not-applied" after the amendment
+   limited the claim to committed-but-unanswered.
+
+   *Resolution*: adopted; both labels now carry the limited claim.
+
+2. **P2: the standalone rationale overstated the pattern.** The MCP
+   runtime read answers an honest empty without a server; prompt and
+   diff are the 503 reads.
+
+   *Resolution*: adopted; the plan names prompt and diff as the
+   pattern and says why identity has no honest empty.
