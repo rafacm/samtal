@@ -235,7 +235,12 @@ generated artifact. New pins, by milestone:
   it); the moved row keeps `_status_block` rendering byte-identical
   (rendering tests re-point their argv to `mcp-server status`);
   the grammar completeness pins (`_ORDER`, tree/table agreement,
-  refusal rows per family, driven rows) move with the row.
+  refusal rows per family, driven rows) move with the row; and the
+  no-alias decision gets its own negative pin, since inventory
+  completeness would happily accept a retained alias as one more
+  row: `("status",)` is absent from `COMMANDS` and from the root
+  tree, `vinga status` answers the fixed unknown-command refusal,
+  and `vinga mcp-server status` succeeds in the same test.
 - M3: `apply` runs both acts in order (client-recording fixture);
   `--no-reload` runs one; a failed reload after a committed apply
   renders the committed-but-unanswered sentence; notices quiet under
