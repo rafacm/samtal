@@ -42,8 +42,25 @@ MAC = "aa:bb:cc:dd:ee:ff"
 
 SESSION = "0123456789abcdef0123456789abcdef"
 
-# Short enough that a test never waits for it, long enough that it does
-# not fire between two lines of an asserted stream.
+# What an idle stream writes, which is a comment and carries no event.
+KEEPALIVE = b": keepalive\n\n"
+
+# Long enough that no keepalive is ever due while a test is looking at a
+# stream. It is not a wait: no test reaches it, because every assertion
+# below is about something the test itself put on the stream.
+#
+# It was 0.05 s, shared by every test here, and that was a race rather
+# than a setting: a reader with nothing to deliver writes its keepalive
+# the moment the deadline passes, so any test slow enough to cross it
+# read a comment where it expected an event, and parsed it as no events
+# at all. Fifty milliseconds is nothing on a contended runner, and CI
+# duly failed on the one test that opens a second application between
+# subscribing and reading (#349).
+QUIET_S = 3600.0
+
+# And the short one, injected by the single test whose subject is the
+# keepalive itself, where the interval is what is being asserted rather
+# than something to stay clear of.
 KEEPALIVE_S = 0.05
 
 
@@ -59,7 +76,7 @@ def emission(event: str = "something", level: int = logging.INFO, **payload: Any
 
 
 def api_with(
-    live: LiveEvents | None = None, keepalive_s: float = KEEPALIVE_S
+    live: LiveEvents | None = None, keepalive_s: float = QUIET_S
 ) -> FastAPI:
     """The configuration API with the running server's hub, or without
     one, which is an application built with no server around it."""
@@ -88,11 +105,27 @@ class Stream:
         return message
 
     async def chunk(self) -> bytes:
-        """The next piece of body written, and nothing about what
-        follows it."""
+        """The next piece of body written, whatever it is, and nothing
+        about what follows it."""
         message = await asyncio.wait_for(self._outgoing.get(), timeout=5)
         assert message["type"] == "http.response.body", message
         return bytes(message["body"])
+
+    async def written(self) -> bytes:
+        """The next piece of body that carries frames, skipping any
+        keepalive.
+
+        A keepalive is a comment and says nothing happened, so a test
+        that asserts what a stream carried is never about one: reading
+        it as if it were an event is how a slow run turns into a failure
+        about the wrong thing. The interval is a long one here, so this
+        skips nothing in practice; it is what keeps that true whatever a
+        runner is doing.
+        """
+        while True:
+            chunk = await self.chunk()
+            if chunk != KEEPALIVE:
+                return chunk
 
     async def until_ended(self) -> list[bytes]:
         """Everything written from here to the end of the body, which is
@@ -234,7 +267,7 @@ async def test_an_event_reaches_the_reader_while_the_stream_is_open() -> None:
 
         hub.emit(emission("heard", session=SESSION, device=MAC))
 
-        (streamed,) = events_in(await stream.chunk())
+        (streamed,) = events_in(await stream.written())
 
     assert streamed["event"] == "heard"
     assert streamed["session"] == SESSION
@@ -253,7 +286,7 @@ async def test_a_device_filter_is_canonicalized_before_it_is_applied() -> None:
         hub.emit(emission("theirs", device="11:22:33:44:55:66"))
         hub.emit(emission("mine", device=MAC))
 
-        (streamed,) = events_in(await stream.chunk())
+        (streamed,) = events_in(await stream.written())
 
     assert streamed["event"] == "mine"
 
@@ -269,9 +302,9 @@ async def test_the_level_defaults_to_info_and_reads_in_any_case() -> None:
             hub.emit(emission("loud-one", level=logging.WARNING))
 
             assert [
-                event["event"] for event in events_in(await everything.chunk())
+                event["event"] for event in events_in(await everything.written())
             ] == ["quiet-one"]
-        assert [event["event"] for event in events_in(await quiet.chunk())] == [
+        assert [event["event"] for event in events_in(await quiet.written())] == [
             "loud-one"
         ]
 
@@ -286,7 +319,7 @@ async def test_a_reader_that_fell_behind_is_told_how_many_it_lost() -> None:
         for number in range(4):
             hub.emit(emission(f"event-{number}"))
 
-        chunk = await stream.chunk()
+        chunk = await stream.written()
 
     assert chunk.startswith(b"event: dropped\ndata: ")
     assert json.loads(chunk.decode().splitlines()[1][len("data: ") :]) == {"dropped": 3}
@@ -296,10 +329,10 @@ async def test_an_idle_stream_says_it_is_still_there() -> None:
     """A comment line, which every SSE reader ignores and every proxy
     counts as traffic. The interval is injected, so this takes a
     fiftieth of a second rather than fifteen."""
-    async with streaming(api_with(LiveEvents())) as stream:
+    async with streaming(api_with(LiveEvents(), keepalive_s=KEEPALIVE_S)) as stream:
         await stream.start()
 
-        assert await stream.chunk() == b": keepalive\n\n"
+        assert await stream.chunk() == KEEPALIVE
 
 
 async def test_the_stream_ends_when_the_server_closes_the_hub() -> None:
