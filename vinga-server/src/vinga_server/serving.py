@@ -83,7 +83,17 @@ class DrainingServer(uvicorn.Server):
         self._drain_task: asyncio.Task[None] | None = None
 
     def handle_exit(self, sig: int, frame: FrameType | None) -> None:
-        if self._draining or self._drain_s <= 0:
+        if self._draining:
+            super().handle_exit(sig, frame)
+            return
+        if self._drain_s <= 0:
+            # A server configured not to drain calls uvicorn directly,
+            # so this is where the event tails end: immediately before
+            # that shutdown, which is the same place they end on the
+            # draining path below. `sessions.drain()` stays uncalled
+            # here, because that is the whole of what a zero drain
+            # means and closing a tail is not draining a conversation.
+            self._close_live()
             super().handle_exit(sig, frame)
             return
         if getattr(self._app.state, "composition", None) is None:
@@ -130,7 +140,31 @@ class DrainingServer(uvicorn.Server):
             # Whatever the drain did or did not manage, the process is
             # going: uvicorn's own shutdown, and the 1012 fail-close it
             # begins with, are the backstop for anything still holding on.
+            #
+            # The event tails end between the two, after the
+            # conversations have had their say and before uvicorn is
+            # told to stop: an operator watching a redeploy sees the
+            # drain it was watching for, and no open stream is left for
+            # uvicorn's graceful shutdown to wait on.
+            self._close_live()
             super().handle_exit(sig, frame)
+
+    def _close_live(self) -> None:
+        """End every open event tail.
+
+        Explicit rather than incidental. A live stream is a response
+        that never completes on its own, so uvicorn's graceful shutdown
+        would wait out its whole budget on one; closing the hub wakes
+        every reader and ends it, which costs the shutdown nothing.
+
+        The composition is read defensively for the reason the drain's
+        own read is: a signal can arrive while the lifespan is still
+        building, and a state bag that cannot answer is exactly the case
+        where there is nothing to close.
+        """
+        composition: Composition | None = getattr(self._app.state, "composition", None)
+        if composition is not None:
+            composition.live.close()
 
     async def _serve(self, sockets: list[socket.socket] | None = None) -> None:
         """Uvicorn's serving, with the drain settled before it lets go.
