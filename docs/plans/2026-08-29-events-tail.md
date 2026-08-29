@@ -230,15 +230,23 @@ events.md note says both things.
   guard covers the hub as it covers any tap.
 - Filter tests at enqueue: device, session, level threshold, and the
   no-identity-event rule.
-- Route tests over the test client: bearer 401; 503 standalone;
-  `Cache-Control: no-store` and `text/event-stream` headers; a
-  streamed body yields the enqueued event and the keepalive comment;
-  disconnect unsubscribes (subscriber count returns to zero).
+- Route tests: bearer 401, 503 standalone, and the response
+  headers go through the ordinary test client, whose buffered
+  transport is fine for refusals; the streaming behavior does not,
+  because the sync TestClient buffers a response to completion, so
+  the incremental assertions run over a direct ASGI send/receive
+  harness (and the live lane covers the real server). The keepalive
+  interval is injected so no test waits fifteen seconds.
+  Unsubscription is asserted through the hub's public diagnostic
+  (`LiveEvents.subscribers`, a documented count the info surface may
+  some day also want), never a private reach-in.
 - No-leak: the stream carries exactly the payload the log retains,
-  pinned by comparing a streamed object against the JSON log record's
-  non-standard attributes for the same emission (both_formats
-  pattern); no event value vocabulary change means no new leak
-  surface, and the sentinel is the equality itself.
+  pinned as: the streamed object minus its two stream-owned fields
+  (`ts`, `level`) equals `fields_of` of the same emission's log
+  record; direct whole-object equality is impossible because those
+  two fields do not exist in the emission payload. No event value
+  vocabulary change means no new leak surface, and the sentinel is
+  that equality itself.
 - CLI tests on the runner fixture with a streaming-capable fake
   transport: line rendering, dropped-to-stderr, Ctrl-C exit 0, broken
   pipe exit follows the SIGPIPE pattern.
