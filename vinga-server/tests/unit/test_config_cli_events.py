@@ -723,21 +723,30 @@ def test_a_frame_nested_past_an_event_leaves_nothing_on_the_chain(run) -> None:
     assert ANSWERED not in carried(caught)
 
 
-def test_an_unreadable_frame_leaves_nothing_on_the_chain() -> None:
+def test_an_unreadable_frame_leaves_nothing_on_the_chain(run) -> None:
     """A refusal built inside the handler would carry the document it
     could not decode as its `__context__`, for anything walking the
-    chain to find."""
-    caught = refused(
-        [
-            "--api-url",
-            "http://127.0.0.1:9101/api",
-            "events",
-            "tail",
-        ]
-    )
+    chain to find, and a JSON decoder puts the whole document in what it
+    raises.
 
+    Driven through the runner's own transport with a frame that really
+    arrives, which is the half this was missing. Pointed at a port
+    nothing listens on it never received a frame at all: it proved the
+    connect-failure path under the name of the decoding one, and would
+    have gone on passing with every sanitizing rule here deleted. What
+    it asserts now is the planted value's absence from the whole chain
+    as well as the two links being empty, because an empty
+    `__context__` is a claim about one link and the value is what the
+    claim is for.
+    """
+    answering(run, serving(body(ANSWERED)))
+
+    caught = refused(["events", "tail"])
+
+    assert cli.UNRECOGNIZED_ANSWER in str(caught)
     assert caught.__cause__ is None
     assert caught.__context__ is None
+    assert ANSWERED not in carried(caught)
 
 
 # Giving the connection back
