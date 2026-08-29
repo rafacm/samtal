@@ -208,3 +208,101 @@ new ones.
   `--no-reload`, notice suppression, stored-not-applied refusal
   rendering, README and server-README lines this falsifies, cli-guide
   naming rationale.
+
+## Plan review round
+
+External review of commit d7e699c2: backend codex (codex-cli
+0.149.1), model gpt-5.6-sol, sandbox read-only, 2026-08-29, runtime
+about 9 minutes. Verdict: ready after the P1/P2 amendments. Findings
+condensed but faithful; resolutions appended per amendment.
+
+1. **P1: `info` exposes a credential-bearing URL without a security
+   design.** The onboarding URL's key is derived from the device-auth
+   secret, guards the token issuer, and is deliberately kept out of
+   retained startup logs; serving it over a read is a new exception to
+   "a credential never travels in a read" (cli-guide), not merely to
+   error-message quoting. The plan must specify bearer auth,
+   TLS-or-loopback transport expectations, `Cache-Control: no-store`,
+   stdout-only rendering, exclusion from stderr, logs, refusals and
+   exception chains, the credential-practice and API security prose
+   updates, and a keyful test over success, unauthorized, malformed
+   response, logging and exception-chain retention.
+
+2. **P1: "stored but not applied" is unknowable after several reload
+   failures.** A 409 reload-held means another reload may have re-read
+   before or after the commit; a transport failure is ambiguous because
+   the reload continues in shielded tasks; the client discards response
+   status when building `ConfigError`. After any second-act failure the
+   command may claim only that the write committed and that it did not
+   receive a completed reload answer, directing the operator to
+   `vinga diff` then `vinga reload`; test the concurrent 409 and an
+   ambiguous transport failure.
+
+3. **P1: tuple truncation cannot implement the promised notice
+   behavior.** `Act.render` receives only the answer, not the
+   invocation or knowledge of later acts, and `Command.acts()` is
+   static and consumed by the API contract test. The plan must name an
+   invocation-aware act-selection mechanism with distinct quiet and
+   staging apply renderers while preserving a static enumeration for
+   contract coverage, and include the `Command`/`Act` interface change
+   with tests over both renderers and both request sequences.
+
+4. **P2: M3 omits the migration of existing apply tests and live
+   sequencing.** The unit runner supplies `reload=None`, so every
+   successful apply test becomes a committed write plus exit 1; the
+   live suite bootstraps through apply and asserts the agent stays
+   unloaded until a later reload; preset tests apply cloud documents a
+   default reload would try to build. Inventory every apply call,
+   convert storage-semantics tests to `--no-reload`, inject a runtime
+   where the default matters, and recut the live sequence so one
+   controlled document proves the default end to end.
+
+5. **P2: the runtime-info contract has no named shared model or
+   no-runtime behavior.** Response models shared with CLI acts live in
+   `config/responses.py` so the CLI need not import FastAPI;
+   `build_api()` is routinely constructed without a running server.
+   Add a strict `RuntimeInfo` model there, define nullable
+   URL/provenance when onboarding is off, answer 503 with no
+   surrounding server, preserve builder call compatibility, and test
+   enabled, disabled, standalone-503 and exact equality with
+   `onboarding_url()` and `revision()` through the composition root.
+
+6. **P2: `info` does not show the API endpoint the CLI contacted.**
+   The output has only server-returned identity and the device-facing
+   origin, which can legitimately differ from the address dialed.
+   Render a separate labelled line for the sanitized configuration API
+   address using `Address.shown`, never the raw `--api-url`, with a
+   query-token test proving credential removal.
+
+7. **P2: two documentation edits are factually wrong.** The
+   `_runtime` collision rationale is about the API namespace and is
+   not superseded by a CLI respell; `cli-guide-audit.md` declares
+   itself a dated record whose rows are not edited into agreement.
+   Keep the rationale current (extend it to mention the info route if
+   useful) and do not edit the audit.
+
+8. **P2: Getting Started would retain the remote-`ota-url` trap.**
+   The README would still instruct `docker compose exec ...
+   config ota-url` after this issue ships the API-served URL. Step 5
+   reuses the URL `vinga info` prints, no container exec; `ota-url`
+   stays only in offline diagnosis and recovery documentation.
+
+9. **P2: the bare-help tests miss the known exception-chain leak
+   path.** Existing help tests require an empty exception chain
+   because raising `SystemExit` while handling Click's exception
+   retains context and argument list, a bug the Typer implementation
+   already had once. Parameterize bare invocation over every `GROUPS`
+   path including nested groups; at least one case carries a
+   credential-shaped query in `--api-url`; each asserts exit 1, help
+   only on stderr, no logs containing the value, and empty
+   `__cause__`/`__context__`.
+
+10. **P2: no test enforces the removal of flat `status`.** Inventory
+    completeness would accept a retained alias as another row. Add a
+    negative grammar pin: `("status",)` absent from `COMMANDS` and the
+    root tree, `vinga status` answers the fixed unknown-command
+    refusal, `vinga mcp-server status` succeeds.
+
+11. **P2: the required changelog entry is absent.** Add dated Added
+    and Changed entries for `info`, the status relocation, bare help,
+    and default-reloading `apply`; old entries unchanged.
