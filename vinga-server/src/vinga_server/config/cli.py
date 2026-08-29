@@ -6412,18 +6412,6 @@ COMMANDS: tuple[Command, ...] = (
         declare=_tailed,
         help=TAIL_HELP,
     ),
-    # A read of the running server rather than of the database: there is
-    # no state to report when there is no server to ask.
-    Command(
-        words=("status",),
-        does=STATUS,
-        declare=_plain,
-        help=(
-            "what each configured MCP server is doing on the running server: connected, "
-            "down, or unused because no agent references it, since when, and which "
-            "tools it published"
-        ),
-    ),
     # The one command that changes what the server is doing rather than
     # what is stored, which is why it is a verb of its own rather than a
     # flag on a write: an operator writes several entries and grant
