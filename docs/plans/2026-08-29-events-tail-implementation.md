@@ -342,3 +342,85 @@ Two, and one of them adds a module the plan did not name.
   sends or is sent. The live lane drives a real board through a real
   conversation against a real server, which is what this milestone's
   claim about session events needed.
+
+### PR review round
+
+One external review of the branch as pushed to PR #354. Four findings,
+condensed below as received, each with its resolution and the commit
+that landed it. The verdict was mergeable after the fixes.
+
+Two of the four are the same shape, and it is the shape this milestone
+should have been readiest for: a boundary that was written for what the
+API sends rather than for what an address can answer. The stream is the
+one surface here whose input is a socket from the first byte to the
+last, and the reading end trusted a status code and a JSON parser to
+stand in for a contract. The other two are a short circuit that read as
+though it did two things, and a test that named the wrong path.
+
+1. **P1: a non-SSE 2xx could put a stranger's values on stdout.** The
+   read accepted any successful response without looking at what it
+   was, any JSON object was a readable frame, and every field of one
+   was printed; a proxy, a captive portal or a gateway answering 200
+   with a body of its own had its values rendered to an operator's
+   terminal.
+   *Resolution* (`2ed1e1a1`): two checks in front of the read, neither
+   of which reads anything to decide. The media type is compared before
+   a line is taken, and it moves to `responses.py` beside
+   `PROBLEM_MEDIA_TYPE`, which is where a wire fact both ends read
+   belongs; the route reads it from there now rather than spelling it
+   again. Then the frame envelope: an ordinary frame carries the three
+   keys every streamed event carries, in the published shapes, and a
+   `dropped` frame is its own small object and nothing else, with any
+   other frame name outside the contract. What this half cannot check
+   it says it cannot, since an event's own field names are the
+   catalogue's and the client tier may not import it; past the envelope
+   those fields are still rendered escaped. The check makes the
+   renderers total, and the four level names they are held to are
+   derived from `logging` the way `events/live.py` derives the
+   server's, so the `--level` help is composed from them and comes out
+   byte for byte what it was. Planted-value cases cover a valid object
+   under the wrong media type and twelve malformed frames.
+2. **P1: a deeply nested frame escaped as a library traceback.**
+   `json.loads` does not reject a document nested a few thousand deep,
+   it exhausts the stack and raises `RecursionError`, which is not a
+   `ValueError` and was caught by nothing; rendering one can do the
+   same.
+   *Resolution* (`07796c5b`): a frame may nest eight deep, which is past
+   anything an event carries and nowhere near what a decoder minds, and
+   the walk applying it uses a stack of its own rather than recursion,
+   because a recursive check would be a third way to blow the stack on
+   the same input. `RecursionError` joins `ValueError` where a frame is
+   decoded and again around rendering, built inside the handler and
+   raised outside it. Both roads to the one sentence are driven: a frame
+   just past the bound parses and is refused by it, and one twenty
+   thousand deep never parses and is refused by the arm behind it.
+   Neither leaves what it carried anywhere, chain included.
+3. **P2: a transport failure skipped the client's teardown.**
+   `problem = problem or _close_failed(...)` short circuits, so a
+   failure recorded before the close meant no close at all, on exactly
+   the paths where something had already gone wrong with the connection.
+   *Resolution* (`41ed3668`): the call is unconditional and the first
+   problem still wins, in both boundaries rather than only the one the
+   review looked at, because `_sent` carried the identical line and
+   fixing one of a pair is how the bug returns. The four ways out of the
+   streaming boundary are driven and the client is asked whether it is
+   closed, which its own interface answers; two of the four fail on the
+   old shape. The close failure itself is read on the follow path, where
+   it is reachable, and asserted to be this module's sentence with the
+   transport's own words nowhere in it.
+4. **P2: the unreadable-frame chain test never received a frame.** It
+   named no runner fixture and a literal port, so nothing was listening
+   and the command failed opening a connection: the assertion was about
+   the connect-failure path under the decoding path's name, and would
+   have passed with every sanitizing rule in that function deleted.
+   *Resolution* (`484e2946`): it runs through the runner's streaming
+   transport with a frame that really arrives and really cannot be read,
+   and asks for the planted value's absence from the whole chain beside
+   the two links being empty. Restoring the raise-inside-the-handler
+   shape fails it, which is what says it now tests what it says it
+   tests.
+
+What the round changed about the milestone's own claims: the stream is
+no longer described as a body this client reads, but as one it reads
+only where two checks say it is this API's. The line format is
+unchanged, and so are both exit contracts.
