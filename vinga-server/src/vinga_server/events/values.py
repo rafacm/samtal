@@ -1091,6 +1091,24 @@ class OriginSource(StrEnum):
     REQUEST_HOST = "the address this request arrived on"
 
 
+class LoopbackHost(StrEnum):
+    """The host spellings that mean "this machine", and the whole of
+    what the container warning may name (#340).
+
+    The set and the check are one thing: `providers/world.py` classifies
+    a built entry's host by asking this enumeration whether it holds it,
+    so the members are the spellings and there is no second list to
+    agree with them. A closed set rather than an identifier for the
+    reason every host on this surface would want and only this one can
+    have: what a `base_url` resolved to is an operator's string, and
+    three fixed tokens are the only thing this event can carry.
+    """
+
+    LOCALHOST = "localhost"
+    IPV4 = "127.0.0.1"
+    IPV6 = "::1"
+
+
 class ActivationRefusal(StrEnum):
     """Which check a version-2 activation poll failed.
 
@@ -1422,6 +1440,7 @@ __all__ = [
     "FromEntry",
     "Identifier",
     "LanguageTag",
+    "LoopbackHost",
     "MachineId",
     "McpConnectFailure",
     "McpDown",

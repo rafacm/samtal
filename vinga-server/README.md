@@ -2069,6 +2069,7 @@ This index is the other half: what exists, and when it fires.
 | `mcp_call_dropped` | a tool call failed and the connection was dropped because of it, always beside an `mcp_down` with `call_failed` |
 | `mcp_tool_shadowed` | a published tool is dropped because a more specific entry owns its name |
 | `mcp_reload` | a reload of the MCP servers finishes, whether or not the caller is still connected |
+| `provider_reaches_loopback` | a provider entry built inside a container names this machine in its endpoint |
 | `memory_unreadable` | an agent's memory could not be read, so it remembers nothing this round |
 | `filler_disabled` | filler synthesis failed for one agent, so latency masking is off for it |
 | `capture_started` | a session is being recorded |

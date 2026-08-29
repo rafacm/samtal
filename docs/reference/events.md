@@ -9,7 +9,7 @@ The structured events are this server's observability surface
 ([ADR](../adr/2026-08-04-json-logs-are-the-observability-surface.md)), and
 they carry metadata and nothing else
 ([ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)).
-This document is that surface written down: 58 events in 83 variants. What was
+This document is that surface written down: 59 events in 84 variants. What was
 said in a conversation is in the conversation store instead, keyed by the same
 `session` ([its reference](conversations-schema.md)).
 
@@ -57,7 +57,7 @@ keeps validation a cost paid per decision rather than per frame.
 ## The channels
 
 The channel is the scope. One session channel, `vinga_server.session`, carries
-everything a conversation says about itself; the 13 server channels are each a
+everything a conversation says about itself; the 14 server channels are each a
 subsystem's own module name. An event declared on one channel and emitted from
 another is a violation even when its fields are lawful.
 
@@ -71,6 +71,7 @@ another is a violation even when its fields are lawful.
 - `vinga_server.onboarding`
 - `vinga_server.ota`
 - `vinga_server.providers.openai_asr`
+- `vinga_server.providers.world`
 - `vinga_server.registry`
 - `vinga_server.tools.mcp`
 - `vinga_server.tools.memory`
@@ -233,6 +234,7 @@ meets them, from a device's check-in to the server's own lifecycle surfaces.
 | `mcp_call_dropped` | `vinga_server.tools.mcp` | WARNING | 1 |
 | `mcp_tool_shadowed` | `vinga_server.tools.mcp` | WARNING | 1 |
 | `mcp_reload` | `vinga_server.tools.mcp` | INFO, WARNING | 2 |
+| `provider_reaches_loopback` | `vinga_server.providers.world` | WARNING | 1 |
 | `memory_unreadable` | `vinga_server.tools.memory` | WARNING | 1 |
 | `filler_disabled` | `vinga_server.filler` | WARNING | 1 |
 | `capture_started` | `vinga_server.capture` | INFO | 1 |
@@ -1738,6 +1740,37 @@ mcp servers reloaded: %d started, %d restarted, %d stopped, %d unchanged
 | `stopped` | `COUNT` | yes | no |  |  |
 | `unchanged` | `COUNT` | yes | no |  |  |
 | `duration_ms` | `INT` | yes | no |  | Measured from when the request was accepted, so it covers the re-read as well as the apply. |
+
+### `provider_reaches_loopback`
+
+A provider entry built inside a container names this machine in its endpoint,
+which inside a container is the container. At WARNING and once per build of
+the entry, on the boot and on every apply that rebuilds it. Never a refusal:
+the same configuration is correct where the endpoint shares the container or
+its network namespace.
+
+#### Variant 1: `vinga_server.providers.world` at WARNING
+
+A warning and never a refusal: localhost is right for an endpoint sharing this
+container or its network namespace, and only the deployment knows which it is.
+
+```text
+providers.%s.%s reaches %s, which inside a container is the container itself rather than the machine running it; if that endpoint is on the machine, name it instead (host.docker.internal, which the compose file resolves on every platform) and apply
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `stage` (`IDENTIFIER`) | no |  |  |
+| 2 | `provider` (`IDENTIFIER`) | no |  |  |
+| 3 | `host` (`TOKEN`) | no | one of: `127.0.0.1`, `::1`, `localhost` |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `stage` | `IDENTIFIER` | yes | no |  |  |
+| `provider` | `IDENTIFIER` | yes | no |  | The configuration entry, by name. |
+| `type` | `IDENTIFIER` | yes | no |  | The entry's provider type. |
+| `host` | `TOKEN` | yes | no | one of: `127.0.0.1`, `::1`, `localhost` | Which spelling of this machine the entry's endpoint named. The whole of what this event says about a base_url, and a closed set of three, so nothing an operator wrote can ride it. |
 
 ### `memory_unreadable`
 

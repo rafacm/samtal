@@ -87,6 +87,7 @@ from vinga_server.events.values import (
     Identifier,
     Kind,
     LanguageTag,
+    LoopbackHost,
     McpConnectFailure,
     McpDown,
     McpRefusal,
@@ -141,6 +142,7 @@ FILLER_CHANNEL = "vinga_server.filler"
 ONBOARDING_CHANNEL = "vinga_server.onboarding"
 OTA_CHANNEL = "vinga_server.ota"
 ASR_CHANNEL = "vinga_server.providers.openai_asr"
+PROVIDERS_CHANNEL = "vinga_server.providers.world"
 REGISTRY_CHANNEL = "vinga_server.registry"
 MCP_CHANNEL = "vinga_server.tools.mcp"
 MEMORY_CHANNEL = "vinga_server.tools.memory"
@@ -156,6 +158,7 @@ SERVER_CHANNELS: tuple[str, ...] = (
     ONBOARDING_CHANNEL,
     OTA_CHANNEL,
     ASR_CHANNEL,
+    PROVIDERS_CHANNEL,
     REGISTRY_CHANNEL,
     MCP_CHANNEL,
     MEMORY_CHANNEL,
@@ -2365,6 +2368,45 @@ class EchoRecovered(Variant):
     retry_ms: Whole = value()
 
 
+# --- providers/world.py: what building an entry noticed ---------------
+#
+# No session and no device: this is said while a world is being built,
+# which is a boot or an apply and never a conversation.
+
+
+@dataclass(frozen=True)
+class ProviderReachesLoopback(Variant):
+    """A built entry points at this machine, from inside a container."""
+
+    CHANNEL: ClassVar[str] = PROVIDERS_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "providers.%s.%s reaches %s, which inside a container is the "
+        "container itself rather than the machine running it; if that "
+        "endpoint is on the machine, name it instead "
+        "(host.docker.internal, which the compose file resolves on every "
+        "platform) and apply"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("stage", "provider", "host")
+    NOTE: ClassVar[str] = (
+        "A warning and never a refusal: localhost is right for an "
+        "endpoint sharing this container or its network namespace, and "
+        "only the deployment knows which it is."
+    )
+
+    stage: Identifier = value()
+    provider: Identifier = value(note="The configuration entry, by name.")
+    type: Identifier = value(note="The entry's provider type.")
+    host: LoopbackHost = value(
+        note=(
+            "Which spelling of this machine the entry's endpoint named. "
+            "The whole of what this event says about a base_url, and a "
+            "closed set of three, so nothing an operator wrote can ride "
+            "it."
+        )
+    )
+
+
 # --- tools/mcp/: the MCP lifecycle ------------------------------------
 #
 # No session or device: one entry serves every conversation.
@@ -2980,6 +3022,19 @@ MCP_RELOAD = declare(
     variants=(McpReloadRefused, McpReloadApplied),
 )
 
+PROVIDER_REACHES_LOOPBACK = declare(
+    "provider_reaches_loopback",
+    note=(
+        "A provider entry built inside a container names this machine "
+        "in its endpoint, which inside a container is the container. At "
+        "WARNING and once per build of the entry, on the boot and on "
+        "every apply that rebuilds it. Never a refusal: the same "
+        "configuration is correct where the endpoint shares the "
+        "container or its network namespace."
+    ),
+    variants=(ProviderReachesLoopback,),
+)
+
 MEMORY_UNREADABLE = declare(
     "memory_unreadable",
     note="An agent's memory could not be read; it remembers nothing this round.",
@@ -3214,8 +3269,11 @@ __all__ = [
     "OtaRequestRejected",
     "PROMPT_ASSEMBLED",
     "PROVIDER_FAILED",
+    "PROVIDER_REACHES_LOOPBACK",
+    "PROVIDERS_CHANNEL",
     "PromptAssembled",
     "ProviderFailed",
+    "ProviderReachesLoopback",
     "PruneFailed",
     "REGISTRY_CHANNEL",
     "REPLIED",
