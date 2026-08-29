@@ -305,7 +305,7 @@ practice). The route's response-header pin covers
   respell sweep and superseded-rationale rewrites, generated
   references and census regenerated.
 - [x] [M3: `apply` reloads by default](2026-08-29-vinga-info-cli-polish-implementation.md#m3-apply-reloads-by-default)
-  (PR TBD). The invocation-aware act
+  (PR #353). The invocation-aware act
   selection with `--no-reload`, the quiet and staging renderers, the
   committed-but-unanswered failure rendering, the apply-test
   migration, README and server-README lines this falsifies, cli-guide

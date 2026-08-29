@@ -365,7 +365,7 @@ commit that carries it.
 
 ## M3: `apply` reloads by default
 
-PR TBD.
+PR #353.
 
 ### What landed
 
