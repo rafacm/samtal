@@ -2129,6 +2129,38 @@ emitter's own channel, naming a fixed label and a fixed code and nothing
 about the emission itself; it is dropped rather than written in some
 other shape, because a telemetry bug must never cost a reply.
 
+### Watching a deployment as it runs
+
+The table above is what gets written down. The same events are also
+readable as they happen, over the configuration API and from wherever
+the CLI already reaches, which is what the two moments that used to mean
+reading the container's log on the server host are:
+
+```bash
+# Wait for the next event of one board, print it and exit: what to run
+# after typing a URL into a captive portal.
+vinga events tail --device aa:bb:cc:dd:ee:ff
+
+# Or watch until you stop it, which is the diagnostic reading.
+vinga events tail --follow
+vinga events tail --follow --session 6f1a2b3c4d5e6f708192a3b4c5d6e7f8
+vinga events tail --follow --level warning
+```
+
+One line per event: the clock time, the level unless it is `INFO`, the
+event's name, and its own fields. Nothing is kept behind the stream, so
+it carries what happens while it is open and a reader that reconnects
+rejoins the present; what happened before is the conversation record's
+to answer. A reader that falls behind loses its oldest events rather
+than slowing a conversation down, and is told how many on stderr. The
+stream ends when you stop it or when the server shuts down, and an end
+you did not ask for is a sentence and exit 1 rather than a quiet
+terminal, because nothing reconnects on its own: a tail that rejoined
+across a gap would look continuous while missing what happened in it.
+
+The same route is `GET /api/runtime/events`, behind the same bearer
+token, answering `text/event-stream`.
+
 These events are metadata, and metadata only. What was said is in the
 conversation store, keyed by the same `session`: query `turns` there for
 the transcript and the reply, and `tool_invocations` for what a tool was

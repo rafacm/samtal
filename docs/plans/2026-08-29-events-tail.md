@@ -328,7 +328,9 @@ events.md note says both things.
   keepalive and dropped events, contract/OpenAPI bookkeeping,
   events.md live-surface note, observability page paragraph,
   changelog.
-- [ ] M2: the command. The `events` group and `tail` row on the
+- [x] [M2: the
+  command](2026-08-29-events-tail-implementation.md#m2-the-command)
+  (PR TBD). The `events` group and `tail` row on the
   streaming client read, line rendering and stderr dropped notices,
   SIGPIPE and Ctrl-C behavior, cli-guide unbounded-read record,
   README watching paragraph, live-lane drive, generated references,

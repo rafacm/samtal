@@ -325,6 +325,8 @@ APPLY_UNANSWERED = (
     f"what the server is serving now is not said here: run `{PROGRAM} diff`, which "
     f"compares the stored configuration against the running one, and `{PROGRAM} "
     "reload` if they differ."
+)
+
 # And what the event stream says when it stops, which is the same
 # sentence whether the body ended cleanly or the connection under it
 # died: to whoever is watching, both are the tail going quiet, and a
