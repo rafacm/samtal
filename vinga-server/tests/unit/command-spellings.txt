@@ -644,6 +644,8 @@ docs/plans/2026-08-29-vinga-info-cli-polish-implementation.md:212  historical  v
 docs/plans/2026-08-29-vinga-info-cli-polish-implementation.md:261  historical  vinga mcp-server status
 docs/plans/2026-08-29-vinga-info-cli-polish-implementation.md:269  historical  vinga device pending
 docs/plans/2026-08-29-vinga-info-cli-polish-implementation.md:311  historical  vinga list
+docs/plans/2026-08-29-vinga-info-cli-polish-implementation.md:395  historical  vinga diff
+docs/plans/2026-08-29-vinga-info-cli-polish-implementation.md:396  historical  vinga reload
 docs/plans/2026-08-29-vinga-info-cli-polish.md:10  historical  vinga info
 docs/plans/2026-08-29-vinga-info-cli-polish.md:18  historical  vinga info
 docs/plans/2026-08-29-vinga-info-cli-polish.md:23  historical  vinga mcp-server status
@@ -656,14 +658,14 @@ docs/plans/2026-08-29-vinga-info-cli-polish.md:206  historical  vinga info
 docs/plans/2026-08-29-vinga-info-cli-polish.md:250  historical  vinga status
 docs/plans/2026-08-29-vinga-info-cli-polish.md:251  historical  vinga mcp-server status
 docs/plans/2026-08-29-vinga-info-cli-polish.md:296  historical  vinga info
-docs/plans/2026-08-29-vinga-info-cli-polish.md:348  historical  vinga diff
-docs/plans/2026-08-29-vinga-info-cli-polish.md:348  historical  vinga reload
-docs/plans/2026-08-29-vinga-info-cli-polish.md:353  historical  vinga diff
-docs/plans/2026-08-29-vinga-info-cli-polish.md:354  historical  vinga reload
-docs/plans/2026-08-29-vinga-info-cli-polish.md:407  historical  config ota-url
-docs/plans/2026-08-29-vinga-info-cli-polish.md:408  historical  vinga info
-docs/plans/2026-08-29-vinga-info-cli-polish.md:424  historical  vinga status
-docs/plans/2026-08-29-vinga-info-cli-polish.md:425  historical  vinga mcp-server status
+docs/plans/2026-08-29-vinga-info-cli-polish.md:349  historical  vinga diff
+docs/plans/2026-08-29-vinga-info-cli-polish.md:349  historical  vinga reload
+docs/plans/2026-08-29-vinga-info-cli-polish.md:354  historical  vinga diff
+docs/plans/2026-08-29-vinga-info-cli-polish.md:355  historical  vinga reload
+docs/plans/2026-08-29-vinga-info-cli-polish.md:408  historical  config ota-url
+docs/plans/2026-08-29-vinga-info-cli-polish.md:409  historical  vinga info
+docs/plans/2026-08-29-vinga-info-cli-polish.md:425  historical  vinga status
+docs/plans/2026-08-29-vinga-info-cli-polish.md:426  historical  vinga mcp-server status
 docs/reference/api-openapi.json:5  generated  vinga schema provider
 docs/reference/api-openapi.json:5056  generated  vinga ota-url
 docs/reference/api-openapi.json:6005  generated  vinga provider secret set
