@@ -295,6 +295,13 @@ def erasures_announced_to(
 # A process-level lock and not a per-store one, for the reason the
 # register above gives: a deletion runs where no store object need
 # exist at all.
+#
+# There are two chains under it now, because a deletion also takes the
+# memory of the threads it takes, and the order there is `db`'s:
+# ascending by key, the record chain's before the memory chain's, so two
+# transactions over the same pair can only queue. Both rules are one
+# discipline read from the outside in: this lock outside every chain
+# lock, and the chain locks in ascending order under it.
 _erasure_order = threading.Lock()
 
 
