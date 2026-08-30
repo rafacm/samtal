@@ -276,10 +276,12 @@ surface, its API reference is the document that earns generating.
   absent from every record in both log formats); the integration
   fact-persists test reads the store back instead of the file.
 - **New, named for the acceptance criteria**: persistence across a
-  store close and reopen (restart); transactional pruning (a
-  `remember` that fails after insert leaves row count and rendering
-  consistent, proven with the lock-holding harness aborting the
-  transaction); independent concurrent writers (two `MemoryStore`
+  store close and reopen (restart); transactional pruning (the store
+  prefilled to its cap, a test-only `BEFORE DELETE` trigger on the
+  facts table raising, `remember` called through its public
+  interface and failing sanitized; an independent connection then
+  sees the exact pre-call count and rendering, proving the insert
+  rolled back with the pruning rather than surviving it); independent concurrent writers (two `MemoryStore`
   instances over separate engines, interleaved `remember` calls,
   every fact present up to the cap; the existing
   `the_lock_held(MEMORY_CHAIN)` harness proves serialization);
@@ -416,6 +418,11 @@ resolution.
    pruning (a test-only raising trigger), then verify through an
    independent connection that the insert and all pruning rolled
    back, leaving the exact pre-call rendering and count.
+
+   *Resolution*: adopted with the reviewer's mechanism verbatim:
+   prefill to the cap, a raising test-only `BEFORE DELETE` trigger,
+   the public `remember`, and the independent-connection assertion
+   of the exact pre-call state.
 
 4. **P2: the concurrent-writer test can pass without
    serialization.** Plain concurrent inserts below the pruning
