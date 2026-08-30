@@ -197,33 +197,46 @@ end (the thread is resumable, and an undo after an explicit resume is
 the reversibility decision working). The consequence is stated in the
 docs: the undo window is the thread's lifetime, not the connection's.
 
-**The cross-store coupling is explicit ids on the erasure and
-retention paths, plus a healing sweep at boot, and never two chain
-locks at once.** Thread erasure (`conversations/api.py`'s `_erasure`)
-already runs inside `store.erasure_order()`; after the record
-transaction commits and before `store.erased(threads)` publishes, the
-handler purges the taken threads' memory (state rows, and held facts
-whose `forgotten_in` names them) in the memory chain's own
-transaction. Retention gains the same coupling by giving it the ids
-it lacks: `threads.prune` and `Pruned` gain the taken thread ids, and
-`ConversationStore` is handed a purge callable at construction (wired
-in `app.py` to the memory store), called after the prune transaction
-commits. The two transactions are sequential, never nested, so no
-connection ever holds two advisory keys and `db`'s no-deadlock
-statement stays true; the rule is written where the erasure-order
-comment already documents ordering. The crash window (record
-committed, memory purge not yet run) is healed rather than denied:
-at boot the memory store sweeps state and held rows whose thread no
-longer exists in `record.conversations` and whose latest write is
-older than a one-day grace period. The grace period exists because
-threads materialize lazily at the first turn, so fresh state can
-briefly precede its thread's row; and on a deployment with recording
-off, where no thread rows land at all, the sweep is also what keeps
-abandoned state bounded, which matches the documented semantics that
-such deployments start every thread clean. The sweep's anti-join
-reads `record.conversations` through the chain-agnostic read engine;
-the memory store importing `conversations.schema` for the table is
-the honest statement that the deletion promise crosses schemas.
+**The cross-store deletion is one transaction under a fixed
+ascending lock order, and thread-keyed memory writes join the
+erasure-order protocol.** Thread erasure and retention pruning
+delete the record rows and the thread's memory (state rows, and held
+facts whose `forgotten_in` names them) in the same database
+transaction: the schemas share one database, so atomicity is
+available and taken, and there is never a moment when the thread is
+gone while its state remains, nor counts that a later failure could
+falsify. The memory deletes are issued by a purge callable the
+memory store provides (it owns the SQL; the caller owns the
+transaction), invoked by `threads.erase_conversations`'s and
+`threads.prune`'s callers on the connection they already hold. A
+transaction that writes both stores takes both chains' advisory
+locks in ascending key order: the record chain's (key 2) from its
+write engine's begin listener, then the memory chain's (key 3)
+explicitly before the first memory statement. The ascending rule is
+documented beside `advisory_key` and in the erasure-order comment,
+and it is what keeps `db`'s no-deadlock statement true.
+Resurrection by an in-flight writer is closed the way the
+conversation writer already closes it: every thread-keyed memory
+write (`set_state`, `clear_state`, a soft `forget`, a restore) takes
+`erasure_order()` outside its own transaction and consults the
+dead-thread set the `erased()` fan-out publishes, to which the
+memory store now subscribes beside the conversation writers. A
+write that began before the erasure completes before it, and its
+rows are then deleted inside the erasure transaction; one that
+begins after meets the dead set and refuses with a fixed sentence.
+Retention publishes through the same fan-out, which is why
+`threads.prune` and `Pruned` gain the taken thread ids. The boot
+sweep remains, narrowed to healing what no transaction covers:
+state and held rows whose thread has no row in
+`record.conversations` and whose latest write is older than a
+one-day grace period, which is pre-upgrade leftovers, threads that
+never landed a first turn, and recording-off deployments, where no
+thread rows land at all. The grace period exists because threads
+materialize lazily at the first turn, so fresh state can briefly
+precede its thread's row. The sweep's anti-join reads
+`record.conversations` through the chain-agnostic read engine; the
+memory store importing `conversations.schema` for the table is the
+honest statement that the deletion promise crosses schemas.
 
 **The runtime hands tools and prompt reads a session context, as a
 type.** `BuiltinTools` gains a zero-argument callable answering a
@@ -342,9 +355,9 @@ ends; the operator API as the deletion door).
   it has; `BuiltinTools` gains the `MemoryContext` callable and stays
   the one `ToolSource` that runs memory; the protocol is untouched.
 - `conversations/threads.py` and `store.py` deepen by carrying ids
-  they already compute (`Pruned.threads`) and a purge callable; the
-  erasure choreography gains one step inside the window it already
-  owns.
+  they already compute (`Pruned.threads`) and invoking a purge
+  callable inside the transactions they already own; the memory
+  store subscribes to the `erased()` fan-out that already exists.
 - `config/models.py` gains `MemoryPolicy`, one more nested shape in
   the `filler` mold; `entities.NESTED` lists it.
 
@@ -419,9 +432,12 @@ Named by role, homes confirmed against the authority taxonomy:
     takes the same; the boot sweep takes an orphan older than grace
     and leaves a younger one; a live `remember` during an erasure
     serializes correctly (the two-writer arrangement from #314,
-    reused); no test or code path ever holds two chain locks in one
-    transaction (asserted by the lock-order test walking both
-    paths).
+    reused); every transaction that takes both chains' locks takes
+    them in ascending key order (asserted by a test walking the
+    erasure and retention paths); and a thread-keyed memory write
+    forced to straddle an erasure is either deleted with the thread
+    or refused by the dead set, both interleavings forced with the
+    #314 gate technique rather than reasoned about.
   - *Tools and rendering*: each of the seven tools offered,
     executed, refusing bad arguments in the ValueError shape;
     forget's result carries the removed text; a fact forgotten in
@@ -466,10 +482,11 @@ Named by role, homes confirmed against the authority taxonomy:
   moment state or device facts exist.** The agent-only rendering is
   byte-pinned unchanged, so nothing changes until an agent actually
   uses the new scopes, which is the gentlest cutover available.
-- **Cross-chain coupling invites deadlocks.** The rule is
-  sequential transactions, never nested locks, written where the
-  erasure-order comment lives and asserted by test; the healing
-  sweep makes the crash window eventual rather than silent.
+- **Cross-chain coupling invites deadlocks.** The rule is one
+  ascending lock order for any transaction that writes both stores,
+  written beside `advisory_key` and asserted by test; erasure and
+  retention are atomic so no crash window exists on those paths, and
+  the sweep heals only what no transaction covers.
 - **State can precede its thread's row** (threads land at first
   turn). The sweep's grace period covers it; the erasure path
   cannot race it because erasure addresses threads that have rows.
@@ -543,6 +560,14 @@ resolution.
    thread-lifecycle data. Require an ordering protocol covering
    every thread-keyed memory write across erasure and retention,
    with tests forcing writes on both sides.
+
+   *Resolution*: adopted, atomically rather than by outbox: erasure
+   and retention delete both stores in one transaction under a fixed
+   ascending lock order, thread-keyed memory writes take
+   `erasure_order()` and consult the dead set the `erased()` fan-out
+   publishes (the memory store subscribes beside the conversation
+   writers), and the straddling-write interleavings are forced with
+   the #314 gate technique in the coupling test family.
 
 2. **P1: a cleanup failure after the record commit has no truthful
    outcome.** With the record deletion committed and the memory
