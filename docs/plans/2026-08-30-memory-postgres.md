@@ -370,7 +370,7 @@ surface, its API reference is the document that earns generating.
 
 ## Milestones
 
-- [ ] **M1: the memory chain exists.** `memory/schema.py` (the
+- [x] **[M1: the memory chain exists](2026-08-30-memory-postgres-implementation.md#m1-the-memory-chain-exists)** (PR TBD). `memory/schema.py` (the
   `facts` table and its index), `memory/migrations/` with `env.py`
   in the record chain's shape and baseline `2001_agent_memory`,
   `memory/store.py` in its permanent home from the first commit,
