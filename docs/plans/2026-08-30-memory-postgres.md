@@ -388,7 +388,7 @@ surface, its API reference is the document that earns generating.
   bullet, changelog. No caller changes; the schema is dormant. Design footprint: the `StoreChain` seam
   carries a third chain with no opener changes, which is the seam
   doing its job.
-- [x] **[M2: the store cutover](2026-08-30-memory-postgres-implementation.md#m2-the-store-cutover)** (PR TBD). `memory/store.py` deepens in
+- [x] **[M2: the store cutover](2026-08-30-memory-postgres-implementation.md#m2-the-store-cutover)** (PR #358). `memory/store.py` deepens in
   place (`MemoryStore`'s `read` and `remember` over the engines M1
   already owns, caps in the write transaction, containment and
   sanitized failures), the catalog's channel move and
