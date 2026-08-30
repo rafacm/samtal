@@ -1393,11 +1393,45 @@ Seven, and none changes what the milestone ships.
   stored one. That is the honest answer for an inspection surface: what
   a session opening now would be sent.
 
+### The rebase onto M4 as it merged
+
+M4 gained five commits after this branch was cut, four of them review
+fixes, and this branch was rebased onto them. Two conflicts, and both
+were resolved by the rule that covers them rather than by hand.
+
+- **The command-spellings census.** Both sides added spellings, so it
+  was regenerated on the rebased tree through its own generator, which
+  is the only way a manifest of every quoted spelling in the repository
+  can be right when two branches have both quoted new ones.
+- **The implementation doc**, where M4's review-round section and this
+  one wanted the same lines. Both are kept whole and in order, M4's
+  round before M5's milestone.
+
+The other two generated documents both sides touched, `cli.md` and
+`api-openapi.json`, merged without a conflict and were regenerated on
+the rebased tree anyway, along with the other three: all five answer
+with the committed bytes.
+
+What M4's post-branch commits made true is true here, and each was
+checked rather than assumed: the ledger deletion reads its body from
+the request through an async dependency, telling an absent body from an
+explicit `null`; the memory listings take `--cursor` and print the
+continuation to stderr; the three no-leak failure paths are covered;
+and `storable` is one predicate asked at every door. That last one is
+the one this milestone could have broken: the tool doors it names are
+the store's own (`add`, `update`, `recall`, `set_state`,
+`clear_state`), and the gating this milestone adds either withholds a
+tool before it is offered or dispatches into exactly those doors, so
+none of them moved. Run against the mutation that lets everything
+through, eleven of M4's cases fail, two of them at the tool doors.
+
 ### Verification
+
+Run on the rebased tree, which is the tree this milestone ships.
 
 - `uv run ruff check .`: clean.
 - `uv run mypy`: clean (5 source files, the events package).
-- `uv run pytest tests/unit -q`: 4900 passed, 19 skipped.
+- `uv run pytest tests/unit -q`: 4918 passed, 19 skipped.
 - `uv run pytest tests/unit -q -n auto --dist loadfile`, the shape CI
   runs: the same.
 - `uv run pytest tests/integration -q`: 233 passed.
@@ -1406,10 +1440,12 @@ Seven, and none changes what the milestone ships.
   each regenerate to their committed bytes; the first, the fourth and
   the fifth are regenerated in this change and the other two are
   unchanged. The command-spellings census was regenerated after the
-  README and changelog edits, and `python scripts/check_doc_links.py .`
-  checked 172 files with no failures.
+  README and changelog edits and again on the rebased tree, and
+  `python scripts/check_doc_links.py .` checked 172 files with no
+  failures.
 - Every new guard was run against the mutation it exists for before
-  being trusted, six of them: the policy resolved per round rather than
+  being trusted, and every one of them again after the rebase, six of
+  them: the policy resolved per round rather than
   per reply, which both interleaving cases catch and nothing else does;
   the offer's condition removed; the dispatch's re-check removed; the
   prompt's skip removed, which the sibling case and the no-read case
