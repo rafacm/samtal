@@ -544,12 +544,13 @@ async def test_a_state_tool_asked_with_arguments_it_cannot_use_refuses(
     assert ledger(store, thread) == ""
 
 
-# Two ledger writes in one round
+# Two writes to one thing in a round
 #
-# Both name the same entry by a key the model chose, so what is current
-# afterwards is whichever ran last: the model's order is the answer. The
-# round dispatches everything else concurrently, which would leave the
-# answer to whichever transaction reached the chain's lock first.
+# Both name the same thing by an identity the model chose, a ledger key
+# or a fact's number, so what is true afterwards is whichever ran last:
+# the model's order is the answer. The round dispatches everything else
+# concurrently, which would leave the answer to whichever transaction
+# reached the chain's lock first.
 #
 # The interleaving is forced rather than hoped for. The first write is
 # parked until the second one arrives, with a bound so the ordered
@@ -566,18 +567,17 @@ OVERTAKE_S = 0.25
 
 
 @contextlib.asynccontextmanager
-async def the_first_write_parked() -> Any:
-    """The first ledger write held until a second one arrives.
+async def the_first_write_parked(*written: str) -> Any:
+    """The first of these store calls held until a second one arrives.
 
-    Both entry points are gated, because what the two cases need is the
-    same shape with different tools: whichever of `set_state` and
-    `clear_state` the model asks for first is the one parked, and
-    whichever comes second is the one that releases it.
+    Every entry point a case uses is gated, because what the cases need
+    is one shape with different tools: whichever the model asks for
+    first is the one parked, and whichever comes second is the one that
+    releases it. The names are the store's own, since what is under test
+    is which order two of its writes land in.
     """
     arrived = asyncio.Event()
     started = 0
-    writing = MemoryStore.set_state
-    clearing = MemoryStore.clear_state
 
     async def park() -> None:
         nonlocal started
@@ -588,17 +588,16 @@ async def the_first_write_parked() -> Any:
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(arrived.wait(), OVERTAKE_S)
 
-    async def gated_set(self: MemoryStore, *args: Any, **kwargs: Any) -> Any:
-        await park()
-        return await writing(self, *args, **kwargs)
+    def gating(real: Any) -> Any:
+        async def gated(self: MemoryStore, *args: Any, **kwargs: Any) -> Any:
+            await park()
+            return await real(self, *args, **kwargs)
 
-    async def gated_clear(self: MemoryStore, *args: Any, **kwargs: Any) -> Any:
-        await park()
-        return await clearing(self, *args, **kwargs)
+        return gated
 
     with pytest.MonkeyPatch.context() as patching:
-        patching.setattr(MemoryStore, "set_state", gated_set)
-        patching.setattr(MemoryStore, "clear_state", gated_clear)
+        for name in written:
+            patching.setattr(MemoryStore, name, gating(getattr(MemoryStore, name)))
         yield
 
 
@@ -618,7 +617,7 @@ async def test_two_writes_to_one_entry_in_a_round_land_in_the_model_s_order() ->
     thread = events_of(session).conversation
     assert thread is not None
 
-    async with the_first_write_parked():
+    async with the_first_write_parked("set_state", "clear_state"):
         await run_reply(session, "we go from the tavern to the docks")
 
     assert ledger(store, thread) == "- scene: the docks"
@@ -642,10 +641,44 @@ async def test_a_write_and_a_clear_of_one_entry_land_in_the_model_s_order() -> N
     thread = events_of(session).conversation
     assert thread is not None
 
-    async with the_first_write_parked():
+    async with the_first_write_parked("set_state", "clear_state"):
         await run_reply(session, "we are in a tavern, and then we are not")
 
     assert ledger(store, thread) == ""
+
+
+async def test_a_correction_and_a_removal_of_one_fact_land_in_the_models_order() -> None:
+    """Correct, then forget: what the removal answers with, and
+    therefore what the agent says out loud, is the corrected words.
+
+    Run concurrently the removal can overtake the correction, and then
+    the agent reads out something the user has already replaced, while
+    the correction meets a fact that is no longer there.
+    """
+    store = lane_memory()
+    fact_id = await store.add(
+        MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet"
+    )
+    script = ScriptedLlm(
+        [
+            [
+                call("update_memory", id=fact_id, text="the user is vegan"),
+                call("forget", id=fact_id),
+            ],
+            "Taken off the list.",
+        ]
+    )
+    session = session_for(base_config(), POET_MAC, {"poet": script}, memory=store)
+
+    async with the_first_write_parked("update", "forget"):
+        await run_reply(session, "I am vegan now, and forget that too")
+
+    corrected, removed = [
+        result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
+    ]
+    assert not corrected.is_error and not removed.is_error
+    assert removed.content == f"Forgot [{fact_id}]: the user is vegan"
+    assert facts(store) == ""
 
 
 def ledger(store: MemoryStore, conversation: str) -> str:

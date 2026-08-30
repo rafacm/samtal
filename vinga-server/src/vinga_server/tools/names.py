@@ -76,19 +76,30 @@ BUILTIN_TOOL_NAMES = (
 # The tools whose order in a round is their meaning, so a reply may not
 # run two of them at once.
 #
-# Both write one conversation's ledger and both are addressed by a key
-# the model chooses, so two calls in one round can name the same entry:
-# a set and a clear of `scene`, or two sets of it. What is current after
-# that round is whichever ran last, which means the model's order IS the
+# Every one of them is addressed by an identity the model names: a key
+# it chose for the ledger, a number it read out of a lookup. Two calls
+# in one round can therefore name the same thing, a set and a clear of
+# `scene` or a correction and a removal of fact 7, and what is true
+# after that round is whichever ran last. The model's order IS the
 # answer, and a round that ran them concurrently would leave the
-# database's lock arrival deciding it instead.
+# database's lock arrival deciding it instead. Worse for the numbered
+# three than for the ledger: a removal that overtook the correction
+# beside it answers with words the correction had already replaced, and
+# the agent says them out loud.
 #
 # Nothing else here has the property. A device tool and a server tool
 # touch different worlds; `remember` appends rather than replacing, so
 # two of them in a round leave both facts whichever order they land in;
-# and the three that move a session are resolved by the loop itself, in
-# issue order, and never reach a dispatch at all.
-ORDERED_TOOL_NAMES = (SET_STATE, CLEAR_STATE)
+# `recall` changes nothing; and the three that move a session are
+# resolved by the loop itself, in issue order, and never reach a
+# dispatch at all.
+ORDERED_TOOL_NAMES = (
+    UPDATE_MEMORY,
+    FORGET,
+    RESTORE_MEMORY,
+    SET_STATE,
+    CLEAR_STATE,
+)
 
 # Names an mcp_servers entry may not take, because they already mean
 # something in the merged list.
