@@ -195,16 +195,17 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]
 
-# The conversations baseline reproduces every column comment from
-# `conversations/schema.py`, verbatim, because the comments are what
-# `\d+` shows an analyst reading the store through psql and what the
-# generated reference is rendered from. Reflowing them here would make
-# the migration and the metadata two copies of one paragraph that could
-# come to differ, which is exactly what a baseline reproduced from
-# autogenerate exists not to be. The line limit is waived for that one
-# file rather than for migrations generally.
+# Two baselines reproduce every column comment from the metadata beside
+# them, verbatim, because the comments are what `\d+` shows whoever
+# reads the store through psql and, for the conversation record, what
+# the generated reference is rendered from. Reflowing them here would
+# make the migration and the metadata two copies of one paragraph that
+# could come to differ, which is exactly what a baseline reproduced from
+# autogenerate exists not to be. The line limit is waived for those two
+# files rather than for migrations generally.
 [tool.ruff.lint.per-file-ignores]
 "src/vinga_server/conversations/migrations/versions/1002_conversation_threads.py" = ["E501"]
+"src/vinga_server/memory/migrations/versions/2001_agent_memory.py" = ["E501"]
 
 # Static typing, scoped to the typed event package and nothing else.
 #
