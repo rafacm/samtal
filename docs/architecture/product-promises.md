@@ -105,7 +105,8 @@ states it rather than leaving it to be inferred:
 - **In-place upgrades begin at the three current baselines**,
   `3001_postgres_domain` for the domain configuration,
   `1002_conversation_threads` for the conversation record, and
-  `2001_agent_memory` for what an agent was asked to remember, added
+  `2001_agent_memory` for the agent memory schema, which is provisioned
+  and migrated ahead of the store that will write to it, added
   by [the 2026-08-30 storage move](../plans/2026-08-30-memory-postgres.md)
   and a forward extension rather than a priced exit: nothing existing
   is re-cut, and a deployment that has never had the schema meets it

@@ -1,9 +1,12 @@
 """Agent memory baseline
 
-The whole of the memory chain: one table, `facts`, and the index its
-ordered read and its prune walk share. What an agent was asked to
-remember stops being a Markdown file under `memory.dir` and becomes a
-row in a schema the server owns, migrated at every boot.
+The whole of the memory chain: one table, `facts`, and the index the
+ordered read and the prune walk will share. It is the storage half of
+moving remembered facts out of the Markdown files under `memory.dir`,
+and it lands on its own: the server migrates this schema at every boot
+and writes nothing to it, because the store that reads and writes a
+fact arrives with the cutover. Until then the files are still where
+remembered facts live.
 
 The revision id opens the unused `2xxx` numbering block, which no
 database has ever been stamped at: the SQLite-era `2001_json_body_baseline`
