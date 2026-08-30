@@ -462,7 +462,14 @@ Named by role, homes confirmed against the authority taxonomy:
   household's facts while everything personal stays with the
   persona, and "replacing hardware loses nothing" becomes "loses
   only the device's own notes". `docs/glossary.md` gains the Memory
-  entry the scope vocabulary now demands. `docs/system-overview.md`
+  entry the scope vocabulary now demands. The egress statement is
+  written where the reader weighs it (`docs/concepts.md`'s Memory
+  section and the README's security prose): storage never leaves
+  the host, but injected and recalled content follows the active
+  LLM provider's egress like the rest of the prompt, device facts
+  therefore reach every sibling agent's provider on that device,
+  and `server.local_only` is the existing guard that keeps all of
+  it on the host. `docs/system-overview.md`
   step 7's "its memory of the conversation" is reworded now that
   the phrase names a real thing. `vinga-server/README.md`: the
   builtins list (both spellings), the memory paragraph and the
@@ -858,6 +865,11 @@ resolution.
     device scope sends household-wide facts to every sibling
     agent's provider. Document that storage is local, egress
     follows the provider, and `local_only` is the existing guard.
+
+    *Resolution*: adopted; the documentation footprint now carries
+    the egress statement in the concepts Memory section and the
+    README's security prose, including the sibling-provider
+    consequence of device scope.
 
 14. **P2: the central resume and pre-first-turn behavior has no
     end-to-end test.** Nothing drives state written before the
