@@ -179,9 +179,10 @@ The changed test is the deliverable; what verifies it:
 
 ## Milestones
 
-- [ ] M1: the hold. The test change, the changelog entry, the
-  implementation doc section, and the #254 watch-table row for run
-  33140677096 posted before or with the PR; PR TBD.
+- [x] [M1: the hold](2026-08-30-peer-close-test-race-implementation.md#m1-the-hold).
+  The test change, the changelog entry, the implementation doc section,
+  and the #254 watch-table row for run 33140677096 posted before or with
+  the PR; PR TBD.
 
 ## Plan review round
 
