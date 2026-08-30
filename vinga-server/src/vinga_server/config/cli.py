@@ -133,6 +133,15 @@ from vinga_server.config.responses import (
     Envelope,
     Erasure,
     McpServerStatus,
+    MemoryConversations,
+    MemoryCorrection,
+    MemoryErasure,
+    MemoryFact,
+    MemoryFacts,
+    MemoryOwners,
+    MemoryState,
+    MemoryStateErasure,
+    MemoryStateKey,
     PendingDevice,
     Problem,
     RuntimeInfo,
@@ -476,6 +485,12 @@ CELL_LENGTH = 64
 # The last two are the memory the deleted threads took with them, which
 # goes in the same transaction as their turns: what each conversation
 # was keeping, and the facts it had forgotten.
+#
+# `facts` is last and is the memory noun's alone: an erasure of what an
+# agent or a board remembers answers that one count and none of the
+# others, and the block prints the counts its answer carries. One tuple
+# rather than two, because what this states is the order counts are read
+# in and there is one such order.
 ERASED_COUNTS = (
     "sessions",
     "turns",
@@ -485,7 +500,44 @@ ERASED_COUNTS = (
     "milestones",
     "state",
     "held_facts",
+    "facts",
 )
+
+# The memory listings' columns, upper case for the reason the record's
+# are. What an owner listing answers is short on every column, so it is
+# a table; what a fact listing answers is content, so it is not.
+MEMORY_OWNER_COLUMNS = ("OWNER", "FACTS")
+
+MEMORY_CONVERSATION_COLUMNS = ("CONVERSATION", "STATE", "HELD")
+
+NO_MEMORY_OWNERS = (
+    "nothing is remembered under that scope. An agent is told something with the "
+    "remember tool during a conversation, and a board's notes are made the same way; "
+    "an operator writes none of it"
+)
+
+NO_MEMORY_CONVERSATIONS = (
+    "no conversation is keeping anything. A conversation's ledger is written by the "
+    "agent as it goes and is deleted with the thread, so an empty answer here is a "
+    "deployment with nothing live and nothing recently forgotten"
+)
+
+NO_FACTS = (
+    "this memory holds nothing. An owner with no rows is not an error: an agent that "
+    "has been told nothing, a board nobody has made a note about, and a name that was "
+    "never anybody's all read the same way"
+)
+
+NO_STATE = (
+    "this conversation is keeping nothing. A ledger is written by the agent as the "
+    "conversation goes and is deleted whole when the thread ends, so this is what a "
+    "thread that has ended, or one that has been told nothing, reads as"
+)
+
+# What a held fact's line says, and what an active one's does not say at
+# all. A word rather than a column, because held is the rare state and a
+# column of blanks would be a column nobody reads.
+FORGOTTEN_IN = "forgotten in"
 
 # What to do with the URL `ota-url` prints, said beside it on stderr so
 # that stdout holds the URL and nothing else.
@@ -899,6 +951,24 @@ class Invocation:
     # `conversation list --agent sam` filters threads by an agent's
     # name, which `name` is already carrying.
     conversation: str = ""
+
+    # What the memory noun addresses beyond the three owners above, which
+    # it reuses: `name` is an agent, `mac` is a board and `conversation`
+    # is a thread, because those are the words the routes' own path
+    # parameters use and one of the three is filled per invocation.
+    #
+    # `scope` is which of them a command was asked about, taken as the
+    # first positional and read by the row to choose the act it performs.
+    # `fact` is a fact's number, carried as text because it is a path
+    # segment: what a number has to be is the API's rule, said in the
+    # API's own fixed sentence, and a second parser here would be a
+    # second vocabulary for one refusal.
+    #
+    # `all_of_it` is the flag that stands in for an absent id on the
+    # deletions, so a mistyped number can never mean everything.
+    scope: str = ""
+    fact: str = ""
+    all_of_it: bool = False
 
     # What narrows the live event stream beyond the board and the
     # session above, which `mac` and `session` carry for it: what
@@ -2325,6 +2395,113 @@ def _dialogue_blocks(page: Mapping[str, Any]) -> str:
     )
 
 
+def _memory_owner_listing(page: Mapping[str, Any]) -> str:
+    """Who is remembering anything in one scope, one line each.
+
+    Columns, because both fields are short and the question is which of
+    several owners is the one wanted. An owner is an agent's name or a
+    board's MAC, so it goes through the bounding every other name from an
+    answer does.
+    """
+    items = page["items"]
+    if not items:
+        return f"{NO_MEMORY_OWNERS}\n"
+    rows = [MEMORY_OWNER_COLUMNS] + [
+        (_cell(item["owner"]), _cell(item["facts"])) for item in items
+    ]
+    return _columns(rows)
+
+
+def _memory_conversation_listing(page: Mapping[str, Any]) -> str:
+    """Which conversations hold memory, one line each: what each is
+    keeping now, and what it has forgotten and could bring back."""
+    items = page["items"]
+    if not items:
+        return f"{NO_MEMORY_CONVERSATIONS}\n"
+    rows = [MEMORY_CONVERSATION_COLUMNS] + [
+        (
+            _cell(item["conversation"]),
+            _cell(item["state"]),
+            _cell(item["held_facts"]),
+        )
+        for item in items
+    ]
+    return _columns(rows)
+
+
+def _memory_fact_blocks(page: Mapping[str, Any]) -> str:
+    """What one memory holds, oldest first, a block per fact.
+
+    Blocks rather than columns, and the fact itself printed whole. This
+    command exists to show what an agent will be sent, so a concealed
+    tail is exactly what the operator came to see, which is the rule
+    `agent preview` already draws: a value that IS what the reader came
+    for is not bounded, and nothing an answer carries may steer a
+    terminal either way. A fact is stored as one line, so a newline
+    arriving in one is a mangled answer and reads as mangled.
+
+    The forgotten line is printed only where there is one. A held fact
+    is the rare state and the conversation that can bring it back is
+    what an operator needs to know about it; a line saying "not
+    forgotten" on every other fact would bury it.
+    """
+    items = page["items"]
+    if not items:
+        return f"{NO_FACTS}\n"
+    lines: list[str] = []
+    for item in items:
+        lines.append(f"{_cell(item['id'])}: {_stored(item['fact'])}")
+        lines.append(f"  written: {_cell(item['at'])}")
+        if item["forgotten_at"] is not None:
+            lines.append(
+                f"  forgotten: {_cell(item['forgotten_at'])}"
+                f" ({FORGOTTEN_IN} {_cell(item['forgotten_in'])})"
+            )
+    return "\n".join(lines) + "\n"
+
+
+def _memory_state_blocks(body: Mapping[str, Any]) -> str:
+    """What one conversation is currently keeping, by key.
+
+    Blocks and printed whole for the reason the facts are: both halves
+    of an entry are content, the key as much as the value, since the
+    model chose both.
+    """
+    items = body["items"]
+    if not items:
+        return f"{NO_STATE}\n"
+    lines: list[str] = []
+    for item in items:
+        lines.append(f"{_stored(item['key'])}: {_stored(item['value'])}")
+        lines.append(f"  updated: {_cell(item['updated_at'])}")
+    return "\n".join(lines) + "\n"
+
+
+def _memory_fact_line(fact: Mapping[str, Any]) -> str:
+    """One corrected fact read back, the block the listing prints for
+    it. One rendering rather than two, so what a correction answers and
+    what the listing shows are the same shape."""
+    return _memory_fact_blocks({"items": [fact]})
+
+
+def _stored(value: object) -> str:
+    """One stored value printed whole, made safe for a terminal and
+    nothing else.
+
+    `printable` with no bound, which is a different rule rather than a
+    bigger number and is the one that module states for a value that IS
+    what the reader came for. A remembered fact and a ledger entry are
+    that value: this command's whole purpose is to show what an agent
+    will be sent, and a renderer that quietly cut one would make it lie
+    about it. Every unprintable becomes a question mark, a newline
+    included, so nothing a room said can add a line or drive the
+    terminal.
+    """
+    if value is None:
+        return NOTHING_THERE
+    return printable(str(value), None) or NOTHING_THERE
+
+
 def _erasure_block(taken: Mapping[str, Any]) -> str:
     """What a deletion took, one line per table.
 
@@ -3470,6 +3647,76 @@ def _read_secret(args: Invocation) -> str:
     return secret
 
 
+# The content the memory noun carries, which is never an argument
+#
+# A corrected fact is what somebody said in a room and a ledger key is a
+# word a model chose, so both are held to the rule a credential is held
+# to rather than to a weaker one: an argument lands in shell history and
+# in the process list, where a value cannot be taken back, and either of
+# these can be exactly the value that matters. They arrive from a file
+# or from standard input, and the command refuses rather than blocking
+# where there is nobody to read from.
+
+MEMORY_TEXT_AT_A_TERMINAL = (
+    "the corrected fact is read from a file named with -f or from standard input, "
+    "never from an argument, and standard input here is a terminal with nothing piped "
+    "into it. Pipe the text in, or name a file with -f"
+)
+
+MEMORY_TEXT_EMPTY = (
+    "nothing was read to correct the fact with, and nothing was changed. A correction "
+    "says what the fact should say instead, so an empty read is refused rather than "
+    "stored"
+)
+
+MEMORY_KEY_AT_A_TERMINAL = (
+    "the entry to clear is read from standard input, never from an argument, and "
+    "standard input here is a terminal with nothing piped into it. Pipe the name in, "
+    "or clear the whole ledger with --all"
+)
+
+MEMORY_KEY_EMPTY = (
+    "nothing was read to name the entry to clear, and nothing was changed. Pipe the "
+    "name in, or clear the whole ledger with --all"
+)
+
+# And what a stream that would not give one says. Its own sentence
+# rather than the secret read's, because what it is about is a fact
+# rather than a credential, and neither of them repeats what it could
+# not read: a decoding failure retains the bytes it failed on.
+MEMORY_UNREADABLE = (
+    "what this command was to carry could not be read, and nothing was changed. What "
+    "could not be read is not repeated here, and neither is what the system said about "
+    "it"
+)
+
+
+def _typed(args: Invocation, at_a_terminal: str, empty: str) -> str:
+    """One piece of content this command carries, from the file `-f`
+    names or from standard input.
+
+    `-f -` is standard input, the spelling this grammar already has for
+    it. A terminal with nothing piped into it is answered with one
+    sentence and the usage tail rather than a cursor, which is the
+    mistake `apply -f -` used to make from the other side.
+
+    The trailing newline is the shell's rather than the content's, and
+    what is left after it is refused where it is empty: an empty read is
+    a command that was given nothing, not a command that was given the
+    empty value.
+    """
+    if args.file and args.file != "-":
+        text = _file(args.file)
+    elif sys.stdin is None or sys.stdin.isatty():
+        raise ConfigError(usage_line(at_a_terminal))
+    else:
+        text = _read_from(_stdin, MEMORY_UNREADABLE)
+    text = text.strip()
+    if not text:
+        raise ConfigError(empty)
+    return text
+
+
 # Output
 
 
@@ -4160,6 +4407,304 @@ DELETE_CONVERSATION = Act(
     refusal=UNREADABLE_WRITE,
     render=_printed(_erasure_block),
 )
+
+# And the third schema: what this deployment remembers.
+#
+# Three scopes with an owner apiece, addressed in the URL's own order,
+# which is why the scope is a positional rather than a flag: it is the
+# first segment of every one of these paths. Each act reads the field
+# whose name is its own path parameter, and which act an invocation
+# performs is the row's to choose from the scope it was given.
+
+
+def _memory_owners_path(args: Invocation) -> str:
+    return _path("memory", "agents")
+
+
+def _memory_devices_path(args: Invocation) -> str:
+    return _path("memory", "devices")
+
+
+def _memory_conversations_path(args: Invocation) -> str:
+    return _path("memory", "conversations")
+
+
+def _agent_memory_path(args: Invocation) -> str:
+    return _path("memory", "agents", args.name, "facts")
+
+
+def _device_memory_path(args: Invocation) -> str:
+    return _path("memory", "devices", args.mac, "facts")
+
+
+def _agent_fact_path(args: Invocation) -> str:
+    return _path("memory", "agents", args.name, "facts", args.fact)
+
+
+def _device_fact_path(args: Invocation) -> str:
+    return _path("memory", "devices", args.mac, "facts", args.fact)
+
+
+def _memory_state_path(args: Invocation) -> str:
+    return _path("memory", "conversations", args.conversation, "state")
+
+
+def _memory_page(args: Invocation) -> dict[str, str]:
+    """What bounds a memory listing. The rule the record's filters
+    follow: only what was written, so the API's own default is the
+    default, said once. No cursor flag, for the reason there is none
+    there: one invocation prints one page."""
+    return {"limit": args.limit} if args.limit else {}
+
+
+def _correction(args: Invocation) -> object:
+    """What a fact should say instead, read from a file or from standard
+    input and never from an argument."""
+    return {"fact": _typed(args, MEMORY_TEXT_AT_A_TERMINAL, MEMORY_TEXT_EMPTY)}
+
+
+def _state_key(args: Invocation) -> object:
+    """Which entry to clear, read from standard input, or no body at
+    all, which is what clears the whole ledger.
+
+    One act rather than two, because the two are one operation with and
+    without a body: what makes them different requests is `--all`, and
+    the API's own rule is that a request carrying no body means the
+    ledger.
+    """
+    if args.all_of_it:
+        return _NOTHING
+    return {"key": _typed(args, MEMORY_KEY_AT_A_TERMINAL, MEMORY_KEY_EMPTY)}
+
+
+LIST_AGENT_MEMORIES = Act(
+    method="GET",
+    path=_memory_owners_path,
+    query=_memory_page,
+    answers=MemoryOwners,
+    render=_printed(_memory_owner_listing),
+)
+
+LIST_DEVICE_MEMORIES = Act(
+    method="GET",
+    path=_memory_devices_path,
+    query=_memory_page,
+    answers=MemoryOwners,
+    render=_printed(_memory_owner_listing),
+)
+
+LIST_CONVERSATION_MEMORIES = Act(
+    method="GET",
+    path=_memory_conversations_path,
+    query=_memory_page,
+    answers=MemoryConversations,
+    render=_printed(_memory_conversation_listing),
+)
+
+READ_AGENT_MEMORY = Act(
+    method="GET",
+    path=_agent_memory_path,
+    query=_memory_page,
+    answers=MemoryFacts,
+    render=_printed(_memory_fact_blocks),
+)
+
+READ_DEVICE_MEMORY = Act(
+    method="GET",
+    path=_device_memory_path,
+    query=_memory_page,
+    answers=MemoryFacts,
+    render=_printed(_memory_fact_blocks),
+)
+
+READ_STATE = Act(
+    method="GET",
+    path=_memory_state_path,
+    answers=MemoryState,
+    render=_printed(_memory_state_blocks),
+)
+
+CORRECT_AGENT_FACT = Act(
+    method="PUT",
+    path=_agent_fact_path,
+    body=_correction,
+    sends=MemoryCorrection,
+    answers=MemoryFact,
+    refusal=UNREADABLE_WRITE,
+    render=_printed(_memory_fact_line),
+)
+
+CORRECT_DEVICE_FACT = Act(
+    method="PUT",
+    path=_device_fact_path,
+    body=_correction,
+    sends=MemoryCorrection,
+    answers=MemoryFact,
+    refusal=UNREADABLE_WRITE,
+    render=_printed(_memory_fact_line),
+)
+
+FORGET_AGENT_FACT = Act(
+    method="DELETE",
+    path=_agent_fact_path,
+    answers=MemoryErasure,
+    refusal=UNREADABLE_WRITE,
+    render=_printed(_erasure_block),
+)
+
+FORGET_DEVICE_FACT = Act(
+    method="DELETE",
+    path=_device_fact_path,
+    answers=MemoryErasure,
+    refusal=UNREADABLE_WRITE,
+    render=_printed(_erasure_block),
+)
+
+CLEAR_AGENT_MEMORY = Act(
+    method="DELETE",
+    path=_agent_memory_path,
+    answers=MemoryErasure,
+    refusal=UNREADABLE_WRITE,
+    render=_printed(_erasure_block),
+)
+
+CLEAR_DEVICE_MEMORY = Act(
+    method="DELETE",
+    path=_device_memory_path,
+    answers=MemoryErasure,
+    refusal=UNREADABLE_WRITE,
+    render=_printed(_erasure_block),
+)
+
+CLEAR_STATE = Act(
+    method="DELETE",
+    path=_memory_state_path,
+    body=_state_key,
+    sends=MemoryStateKey,
+    answers=MemoryStateErasure,
+    refusal=UNREADABLE_WRITE,
+    render=_printed(_erasure_block),
+)
+
+# What the three scopes mean on each verb, read by the rows below.
+#
+# One mapping per verb rather than one with three-tuples in it, because
+# the verbs do not cover the same scopes: a conversation's ledger is
+# read and cleared but never corrected, since what is in it is written
+# by the agent as the conversation goes and an operator's correction of
+# a live position would be a move nobody made.
+_MEMORY_LISTINGS: dict[str, tuple[Act, Act]] = {
+    "agent": (LIST_AGENT_MEMORIES, READ_AGENT_MEMORY),
+    "device": (LIST_DEVICE_MEMORIES, READ_DEVICE_MEMORY),
+    "conversation": (LIST_CONVERSATION_MEMORIES, READ_STATE),
+}
+
+_MEMORY_CORRECTIONS: dict[str, Act] = {
+    "agent": CORRECT_AGENT_FACT,
+    "device": CORRECT_DEVICE_FACT,
+}
+
+_MEMORY_DELETIONS: dict[str, tuple[Act, Act]] = {
+    "agent": (FORGET_AGENT_FACT, CLEAR_AGENT_MEMORY),
+    "device": (FORGET_DEVICE_FACT, CLEAR_DEVICE_MEMORY),
+}
+
+# What a scope this grammar does not have is answered with, and what a
+# verb that does not reach a scope it does have is. Fixed sentences
+# naming the words this grammar knows, never the word that was typed:
+# what follows the verb is typed, and a mistyped command is where a
+# value lands in an address field.
+UNKNOWN_SCOPE = (
+    "the first word after the verb says which memory: agent, device or conversation. "
+    "What was typed is not quoted back"
+)
+
+STATE_IS_NOT_CORRECTED = (
+    "a conversation's ledger is not corrected from here. It holds what is currently "
+    "true in one conversation, written by the agent as the conversation goes, and an "
+    "operator's correction of it would be a move nobody made; clear an entry instead, "
+    "with memory delete conversation"
+)
+
+NO_FACT_TO_DELETE = (
+    "this deletes one fact, named by the number the listing shows beside it, or the "
+    "whole of a memory with --all. A number and --all are two different requests, so "
+    "exactly one of them is given and a mistyped number can never mean everything"
+)
+
+NO_NUMBER_FOR_STATE = (
+    "a conversation's ledger is addressed by the names its entries were written "
+    "under, not by numbers. Clearing one reads its name from standard input, and "
+    "--all clears the whole ledger"
+)
+
+
+def _memory_listing(args: Invocation) -> tuple[Act, ...]:
+    """Which listing an invocation asked for: the owners in a scope
+    where it named none, and one owner's own memory where it did.
+
+    The same words one level up, which is what makes the pair one verb:
+    `memory list agent` is who is remembering anything and
+    `memory list agent poet` is what one of them remembers.
+    """
+    owners, one = _MEMORY_LISTINGS[_scope(args)]
+    return (one,) if _owner(args) else (owners,)
+
+
+def _memory_correction(args: Invocation) -> tuple[Act, ...]:
+    """Which correction an invocation asked for.
+
+    The address is three required positionals, so the only thing left to
+    decide is the scope, and one of the three is refused rather than
+    answered.
+    """
+    scope = _scope(args)
+    if scope not in _MEMORY_CORRECTIONS:
+        raise ConfigError(STATE_IS_NOT_CORRECTED)
+    return (_MEMORY_CORRECTIONS[scope],)
+
+
+def _memory_deletion(args: Invocation) -> tuple[Act, ...]:
+    """Which deletion an invocation asked for.
+
+    A number and `--all` are two different requests and exactly one of
+    them is given, which is the whole reason the whole-scope form is a
+    flag rather than an absent number: a mistyped number would otherwise
+    mean everything.
+
+    A conversation is the exception in shape rather than in rule: its
+    entries are named rather than numbered and the name never rides
+    argv, so what stands in for the number there is a read of standard
+    input.
+    """
+    scope = _scope(args)
+    if scope == "conversation":
+        if args.fact:
+            raise ConfigError(NO_NUMBER_FOR_STATE)
+        return (CLEAR_STATE,)
+    one, whole = _MEMORY_DELETIONS[scope]
+    if bool(args.fact) == args.all_of_it:
+        raise ConfigError(NO_FACT_TO_DELETE)
+    return (whole,) if args.all_of_it else (one,)
+
+
+def _scope(args: Invocation) -> str:
+    """Which memory a command was asked about, refused where it is not
+    one of the three."""
+    if args.scope not in _MEMORY_LISTINGS:
+        raise ConfigError(UNKNOWN_SCOPE)
+    return args.scope
+
+
+def _owner(args: Invocation) -> str:
+    """The owner this invocation addressed, whichever scope it named.
+
+    One of the three fields is filled per invocation, by the declaration
+    that read the positional, so this is which of them it was rather
+    than a second decision about the scope.
+    """
+    return args.name or args.mac or args.conversation
+
 
 # The read that says which deployment answered, which none of the reads
 # above it does: they say what is stored or what is running, and this
@@ -5118,6 +5663,18 @@ SELECTED_SESSION_HELP = (
     "leave)"
 )
 
+# The memory noun's address, one line per segment, in the order the
+# routes' own paths carry them.
+MEMORY_SCOPE_HELP = "which memory: agent, device or conversation"
+
+MEMORY_OWNER_HELP = (
+    "whose memory: the agent's name, the board's MAC, or the conversation's uuid hex"
+)
+
+MEMORY_ID_HELP = "the fact's number, as the listing prints it beside the fact"
+
+MEMORY_ALL_HELP = "the whole of that memory rather than one fact of it"
+
 # The two that follow `schema provider`. A provider type is addressed by
 # its stage and its name together everywhere else in this command group,
 # and its options are addressed the same way for the same reason: one
@@ -5168,6 +5725,18 @@ NoInputOption = Annotated[bool | None, typer.Option("--no-input", help=NO_INPUT_
 # command; what refuses neither and both is `_written_entity`, which is
 # the only place that can see the pair of them.
 FileOption = Annotated[str, typer.Option("-f", "--file", metavar="PATH", help=FILE_HELP)]
+
+# The same flag on the memory noun, with its own sentence: what it names
+# there is not a fragment and there is no key=value form beside it, so
+# the fragment's help would describe a command this one is not.
+MEMORY_FILE_HELP = (
+    "read the corrected fact from this file, or from - for standard input (default: "
+    "standard input); never an argument, because a remembered fact is content"
+)
+
+MemoryFileOption = Annotated[
+    str, typer.Option("-f", "--file", metavar="PATH", help=MEMORY_FILE_HELP)
+]
 
 PairsArgument = Annotated[
     list[str] | None, typer.Argument(metavar="KEY=VALUE", help=PAIRS_HELP)
@@ -5943,6 +6512,123 @@ def _filtered_conversations(row: Command) -> Callable[..., None]:
     return run
 
 
+def _memory_read(row: Command) -> Callable[..., None]:
+    """A memory listing: the scope, and the owner where one was named.
+
+    Two positionals in the URL's own order, which is what identity
+    addressing means here: `/memory/agents/{name}/facts` is scope then
+    owner, so the command is too. The owner is optional because its
+    absence is a different question one level up, which the row answers
+    by performing a different act.
+
+    The owner is routed to the field whose name is its own path
+    parameter, so each act reads what it addresses rather than a shared
+    word that would have to be translated twice.
+    """
+
+    def run(
+        context: typer.Context,
+        scope: Annotated[str, typer.Argument(metavar="SCOPE", help=MEMORY_SCOPE_HELP)],
+        owner: Annotated[
+            str | None, typer.Argument(metavar="OWNER", help=MEMORY_OWNER_HELP)
+        ] = None,
+        limit: Annotated[
+            str | None, typer.Option("--limit", metavar="N", help=LIMIT_HELP)
+        ] = None,
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        force: ForceOption = None,
+        no_input: NoInputOption = None,
+    ) -> None:
+        row.perform(
+            _invocation(
+                row, context, config, api_url, force, no_input,
+                scope=scope, limit=limit or "", **_addressing(scope, owner),
+            )
+        )
+
+    return run
+
+
+def _memory_write(row: Command) -> Callable[..., None]:
+    """A correction: the scope, the owner and the fact's number, and the
+    text from a file or from standard input.
+
+    Three address segments, which is the guide's ceiling and exactly
+    what the route's own path has. The text is not among them and is not
+    an option's value either: `-f` names where to read it, and nothing
+    of the fact itself ever reaches argv.
+    """
+
+    def run(
+        context: typer.Context,
+        scope: Annotated[str, typer.Argument(metavar="SCOPE", help=MEMORY_SCOPE_HELP)],
+        owner: Annotated[str, typer.Argument(metavar="OWNER", help=MEMORY_OWNER_HELP)],
+        fact: Annotated[str, typer.Argument(metavar="ID", help=MEMORY_ID_HELP)],
+        file: MemoryFileOption = "",
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        force: ForceOption = None,
+        no_input: NoInputOption = None,
+    ) -> None:
+        row.perform(
+            _invocation(
+                row, context, config, api_url, force, no_input,
+                scope=scope, fact=fact, file=file, **_addressing(scope, owner),
+            )
+        )
+
+    return run
+
+
+def _memory_deletion_arguments(row: Command) -> Callable[..., None]:
+    """A deletion: the scope, the owner, and either one fact's number or
+    `--all`.
+
+    The number is optional and `--all` is the other way to say what to
+    delete, never the absence of one: a mistyped number that meant
+    everything is the mistake this shape exists to make impossible.
+    """
+
+    def run(
+        context: typer.Context,
+        scope: Annotated[str, typer.Argument(metavar="SCOPE", help=MEMORY_SCOPE_HELP)],
+        owner: Annotated[str, typer.Argument(metavar="OWNER", help=MEMORY_OWNER_HELP)],
+        fact: Annotated[
+            str | None, typer.Argument(metavar="ID", help=MEMORY_ID_HELP)
+        ] = None,
+        all_of_it: Annotated[bool, typer.Option("--all", help=MEMORY_ALL_HELP)] = False,
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        force: ForceOption = None,
+        no_input: NoInputOption = None,
+    ) -> None:
+        row.perform(
+            _invocation(
+                row, context, config, api_url, force, no_input,
+                scope=scope, fact=fact or "", all_of_it=all_of_it,
+                **_addressing(scope, owner),
+            )
+        )
+
+    return run
+
+
+def _addressing(scope: str, owner: str | None) -> dict[str, str]:
+    """The owner positional, under the name the route's own path
+    parameter uses.
+
+    Read here rather than carried as one word, because the three paths
+    name three different parameters and each act reads the one it
+    addresses: an agent is `{name}`, a board is `{mac}` and a thread is
+    `{conversation}`. A scope this grammar does not have fills nothing
+    and is refused by the row, which is where every other refusal about
+    the scope is decided.
+    """
+    field = {"agent": "name", "device": "mac", "conversation": "conversation"}.get(scope)
+    return {} if field is None or not owner else {field: owner}
+
+
 def _provider_secret(row: Command) -> Callable[..., None]:
     """Storing a credential on one provider. The value is never here: it
     is read from stdin or from the variable `--from-env` names."""
@@ -6274,6 +6960,12 @@ GROUPS: dict[tuple[str, ...], str] = {
     # what the events ARE and needs no server, this one prints what a
     # server is saying and reaches one.
     ("events",): "what the running server is saying right now, as it says it",
+    # What the agents, the boards and the conversations remember.
+    # Singular under the naming rule, because its verbs address one
+    # memory; one noun rather than three, because the scope is the first
+    # segment of every one of the routes' own paths and is therefore
+    # part of the address rather than part of the noun.
+    ("memory",): "what is remembered about a person, a place and a conversation",
 }
 
 
@@ -6606,6 +7298,58 @@ COMMANDS: tuple[Command, ...] = (
             "erase one recorded conversation: its turns out of whatever sessions they "
             "were spoken in, the calls they made, and its recap checkpoints; the "
             "sessions themselves are left with a gap rather than deleted"
+        ),
+        destroys=True,
+    ),
+    # What this deployment remembers, and the one noun in this grammar
+    # whose verbs reach three resources apiece: the scope is the first
+    # address segment, so which act a row performs is read off it
+    # (`Command.selects`) and every one of them is what the row can
+    # reach, which is what coverage is about.
+    Command(
+        words=("memory", "list"),
+        does=(
+            LIST_AGENT_MEMORIES,
+            READ_AGENT_MEMORY,
+            LIST_DEVICE_MEMORIES,
+            READ_DEVICE_MEMORY,
+            LIST_CONVERSATION_MEMORIES,
+            READ_STATE,
+        ),
+        selects=_memory_listing,
+        declare=_memory_read,
+        help=(
+            "with no owner, who is remembering anything in that scope and how much; "
+            "with one, what that agent, board or conversation holds, oldest first, "
+            "with the number each fact is addressed by"
+        ),
+    ),
+    Command(
+        words=("memory", "set"),
+        does=(CORRECT_AGENT_FACT, CORRECT_DEVICE_FACT),
+        selects=_memory_correction,
+        declare=_memory_write,
+        help=(
+            "correct one remembered fact in place, keeping its number, reading the "
+            "corrected text from a file named with -f or from standard input and never "
+            "from an argument"
+        ),
+    ),
+    Command(
+        words=("memory", "delete"),
+        does=(
+            FORGET_AGENT_FACT,
+            CLEAR_AGENT_MEMORY,
+            FORGET_DEVICE_FACT,
+            CLEAR_DEVICE_MEMORY,
+            CLEAR_STATE,
+        ),
+        selects=_memory_deletion,
+        declare=_memory_deletion_arguments,
+        help=(
+            "erase one remembered fact by its number, or the whole of one memory with "
+            "--all; for a conversation, clear one entry of its ledger by a name read "
+            "from standard input, or the whole ledger with --all"
         ),
         destroys=True,
     ),

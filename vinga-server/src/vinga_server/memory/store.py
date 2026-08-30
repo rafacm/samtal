@@ -1084,15 +1084,17 @@ class MemoryStore:
         return await asyncio.to_thread(self._clear_state, agent, conversation, key)
 
     def _clear_state(self, agent: str, conversation: str, key: str | None) -> int:
-        def work(connection: Connection) -> int:
-            where = [schema.state.c.conversation == conversation]
-            if key is not None:
-                where.append(schema.state.c.key == _one_line(key))
-            return int(connection.execute(delete(schema.state).where(*where)).rowcount)
-
+        # The same statement the operator's door issues, which is the
+        # whole of what clearing a ledger is: what the two doors differ
+        # in is the guard around it, not the SQL. A second copy here
+        # would be a second place for the key's normalization to change.
         return self._thread_keyed(
             conversation,
-            lambda: self._written(agent, (MemoryScope.CONVERSATION,), work),
+            lambda: self._written(
+                agent,
+                (MemoryScope.CONVERSATION,),
+                lambda connection: clear_ledger(connection, conversation, key),
+            ),
         )
 
     async def restore(

@@ -701,6 +701,7 @@ Commands:
                    reach a conversation at
   session          the sessions this server recorded, and erasing them
   conversation     the conversations this server recorded, and erasing them
+  memory           what is remembered about a person, a place and a conversation
   events           what the running server is saying right now, as it says it
   reload           apply the stored configuration to the running server, without
                    a restart and without dropping a conversation
@@ -2224,6 +2225,116 @@ Arguments:
   CONVERSATION  the conversation's uuid hex, as a listing prints it  [required]
 
 Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
+  -h, --help     Show this message and exit.
+```
+
+### `vinga memory`
+
+```
+Usage: vinga memory [OPTIONS] COMMAND [ARGS]...
+
+  what is remembered about a person, a place and a conversation
+
+Options:
+  -h, --help  Show this message and exit.
+
+Commands:
+  list    with no owner, who is remembering anything in that scope and how much;
+          with one, what that agent, board or conversation holds, oldest first,
+          with the number each fact is addressed by
+  set     correct one remembered fact in place, keeping its number, reading the
+          corrected text from a file named with -f or from standard input and
+          never from an argument
+  delete  erase one remembered fact by its number, or the whole of one memory
+          with --all; for a conversation, clear one entry of its ledger by a
+          name read from standard input, or the whole ledger with --all
+```
+
+### `vinga memory list`
+
+```
+Usage: vinga memory list [OPTIONS] {SCOPE} [OWNER]
+
+  with no owner, who is remembering anything in that scope and how much; with
+  one, what that agent, board or conversation holds, oldest first, with the
+  number each fact is addressed by
+
+Arguments:
+  SCOPE  which memory: agent, device or conversation  [required]
+  OWNER  whose memory: the agent's name, the board's MAC, or the conversation's
+         uuid hex
+
+Options:
+  --limit N      how many rows this page may hold (default: the API's own, 50)
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
+  -h, --help     Show this message and exit.
+```
+
+### `vinga memory set`
+
+```
+Usage: vinga memory set [OPTIONS] {SCOPE} {OWNER} {ID}
+
+  correct one remembered fact in place, keeping its number, reading the
+  corrected text from a file named with -f or from standard input and never from
+  an argument
+
+Arguments:
+  SCOPE  which memory: agent, device or conversation  [required]
+  OWNER  whose memory: the agent's name, the board's MAC, or the conversation's
+         uuid hex  [required]
+  ID     the fact's number, as the listing prints it beside the fact  [required]
+
+Options:
+  -f, --file PATH  read the corrected fact from this file, or from - for
+                   standard input (default: standard input); never an argument,
+                   because a remembered fact is content
+  --config PATH    path to the YAML config file naming server.port and
+                   server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL    base URL of the configuration API (default: $VINGA_API_URL,
+                   then http://127.0.0.1:<server.port>/api)
+  --force          answer the confirmation a destructive command asks at a
+                   terminal, so it does not ask (default: it asks)
+  --no-input       never prompt: a destructive command refuses rather than
+                   asking, and a secret is read from stdin or --from-env
+                   (default: prompt at a terminal)
+  -h, --help       Show this message and exit.
+```
+
+### `vinga memory delete`
+
+```
+Usage: vinga memory delete [OPTIONS] {SCOPE} {OWNER} [ID]
+
+  erase one remembered fact by its number, or the whole of one memory with
+  --all; for a conversation, clear one entry of its ledger by a name read from
+  standard input, or the whole ledger with --all
+
+Arguments:
+  SCOPE  which memory: agent, device or conversation  [required]
+  OWNER  whose memory: the agent's name, the board's MAC, or the conversation's
+         uuid hex  [required]
+  ID     the fact's number, as the listing prints it beside the fact
+
+Options:
+  --all          the whole of that memory rather than one fact of it
   --config PATH  path to the YAML config file naming server.port and
                  server.api.secret_env (default: $VINGA_CONFIG)
   --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,

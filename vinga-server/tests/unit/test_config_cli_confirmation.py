@@ -87,6 +87,12 @@ def intended() -> set[tuple[str, ...]]:
         ("session", "delete"),
         ("session", "purge"),
         ("conversation", "delete"),
+        # And memory's own, which is one verb over three scopes. Every
+        # deletion it makes is a hard delete: the soft forgetting an
+        # agent does belongs to the conversation that spoke it, and this
+        # door is correction and audit rather than that flow, so nothing
+        # it takes is held for an undo.
+        ("memory", "delete"),
     }
 
 
@@ -98,7 +104,7 @@ def test_the_table_marks_exactly_the_destructive_commands() -> None:
     marked = {row.words for row in cli.COMMANDS if row.destroys}
 
     assert marked == intended()
-    assert len(marked) == 11
+    assert len(marked) == 12
 
 
 def test_a_replacement_write_is_not_destructive() -> None:

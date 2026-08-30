@@ -118,6 +118,11 @@ def _addressed(kind: str) -> cli.Invocation:
         slot="{slot}",
         session="{session}",
         conversation="{conversation}",
+        # The memory noun's third address segment. The other two are the
+        # agent and the board above, under the names the routes' own
+        # path parameters use, which is what lets one invocation answer
+        # for every act of every scope.
+        fact="{id}",
     )
 
 
