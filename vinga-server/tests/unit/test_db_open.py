@@ -232,33 +232,44 @@ def test_a_database_that_is_not_there_refuses_the_same_way() -> None:
 #
 # The one migration failure whose answer is a command rather than a
 # connection to check, and the shape an existing least-privilege
-# deployment meets a release that adds a schema in (#314). The whole
-# path is driven in the integration lane, against a real restricted
-# role and the committed provisioning file; what is pinned here is the
-# classification, which is by exception class and never by message.
+# deployment meets a release that adds a schema in (#314). The sentence
+# is raised at the `CREATE SCHEMA` in `upgrade_to_head` and nowhere
+# else, so both real paths are driven in the integration lane, where a
+# restricted role and the committed provisioning file exist: a missing
+# schema the role may not create, answered with the rerun, and a schema
+# standing under the wrong owner, answered with the general sentence.
+#
+# What is pinned here is the half that lane cannot show, which is what
+# `migration_failure` does NOT do. A classifier that reached for the
+# exception class would answer the rerun for every privilege failure a
+# migration can meet, and most of them are failures the rerun cannot
+# fix: its creates are `IF NOT EXISTS`, so a wrongly owned schema stays
+# wrongly owned and a missing table grant stays missing.
 
 
-def test_a_privilege_the_role_lacks_names_the_provisioning_rerun() -> None:
-    """`InsufficientPrivilege`, walked to through SQLAlchemy's `orig` the
-    way the retryable set is, and answered with the rerun.
+def test_a_privilege_failure_inside_a_migration_prescribes_nothing() -> None:
+    """`InsufficientPrivilege` reaching the general classifier is an
+    instance this server cannot use as configured, and not the rerun.
 
-    Constructed rather than provoked, because what this pins is the
-    classifier: a database that phrases its refusal differently, or in
-    another language, has to be classified the same, which is only true
-    while nothing here reads a message.
+    Constructed rather than provoked, because what this pins is an
+    absence: whatever a migration was refused, the answer is the
+    sentence that prescribes nothing unless the refused statement was
+    the schema creation itself, and that decision is made at the
+    statement rather than here.
     """
     import psycopg
     from sqlalchemy.exc import DBAPIError
 
     refused = psycopg.errors.InsufficientPrivilege(
-        "permission denied for database sk-test-9e21b4-never-a-real-credential"
+        "permission denied for table sk-test-9e21b4-never-a-real-credential"
     )
-    problem = migration_failure(DBAPIError("create schema", {}, refused))
+    problem = migration_failure(DBAPIError("create table", {}, refused))
 
-    assert str(problem) == SCHEMA_NOT_PERMITTED
+    assert str(problem) == UNREACHABLE
+    assert str(problem) != SCHEMA_NOT_PERMITTED
+    assert "deploy/postgres-init.sql" not in str(problem)
     assert isinstance(problem, StorageError)
     assert not isinstance(problem, DatabaseBusyError)
-    assert "deploy/postgres-init.sql" in str(problem)
 
 
 def test_the_refused_privilege_repeats_nothing_the_driver_said() -> None:
@@ -269,12 +280,20 @@ def test_the_refused_privilege_repeats_nothing_the_driver_said() -> None:
 
     planted = "sk-test-9e21b4-never-a-real-credential"
     refused = psycopg.errors.InsufficientPrivilege(f"permission denied for {planted}")
-    problem = migration_failure(DBAPIError("create schema", {"p": planted}, refused))
+    problem = migration_failure(DBAPIError("create table", {"p": planted}, refused))
 
     assert planted not in str(problem)
     assert planted not in repr(problem.args)
     assert problem.__cause__ is None
     assert problem.__context__ is None
+
+
+def test_the_rerun_sentence_names_the_file_and_no_value() -> None:
+    """The remedy is the only thing the sentence carries, and the file
+    it names is a path in this repository rather than anything read off
+    a connection or a configuration."""
+    assert "deploy/postgres-init.sql" in SCHEMA_NOT_PERMITTED
+    assert "VINGA_DB" not in SCHEMA_NOT_PERMITTED
 
 
 @pytest.mark.parametrize(
