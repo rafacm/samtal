@@ -8,7 +8,7 @@ says so explicitly.
 
 ## M1: the scoped schema and the store's new sentences
 
-PR TBD.
+PR #359.
 
 ### What landed
 
