@@ -1248,4 +1248,172 @@ and the fourth is the half of the no-leak family that was never driven.
   being trusted, sixteen of them: the two above on the body, the three
   on the cursor, the four on the failure boundary, the six on the
   storable rule, and the boundary moved inside its transaction.
+
+## M5: per-agent memory control
+
+PR TBD.
+
+### What landed
+
+In the order the commits tell it: the field, what it decides, and the
+documents it falsifies.
+
+- **`MemoryPolicy`,** one field in the `filler` mould, declared on
+  `AgentDefaults` and inherited by `AgentConfig`, so it inherits and
+  replaces exactly as every other nested section does and
+  `memory: {enabled: false}` opts an agent out. `entities.NESTED` lists
+  it, which is what puts it in the generated reference with its own two
+  notes; the agent entry's own note gains the section beside the rename
+  orphaning it already stated, which now says that a rename orphans the
+  agent's scope and not the board's.
+- **`Config.memory_for_agent`,** answering a section rather than None
+  where nothing is written. That is the one place this differs from
+  `filler_for_agent`, and the reason is on it: an absent filler section
+  and one that is off mean the same thing, and an absent memory section
+  means the opposite of an off one.
+- **`names.MEMORY_TOOL_NAMES`,** the seven the section switches,
+  declared where every other grouping of the namespace is. What is not
+  in it is `switch_agent` and the two conversation tools, neither of
+  which touches a memory.
+- **`BuiltinTools` takes the condition as a callable,** `remembers`,
+  beside the `MemoryContext` one it already had. The offer withholds the
+  seven and the dispatch checks again, which is the rule the protocol
+  already states about a grant: a tool the snapshot withheld is refused
+  rather than run when a model asks for it anyway. What answers is
+  `no_such_tool`, now one function rather than two copies of a sentence.
+- **One clock per reply**, which is the plan review's finding 11.
+  `PipelineRuntime._remembering` is written by `_tool_loop` alone, on
+  the line the tool snapshot is taken on, and read by
+  `_remembering_now` (which is what the builtin source holds) and by
+  `_system_prompt`. A leg of a reply that hands over resolves its own,
+  because the loop runs once per leg, which is the same rule the
+  snapshot already had.
+- **The read is skipped rather than filtered.** `_system_prompt`
+  returns the cached half where the policy is off, so a switched-off
+  agent costs no round trip at all; the preview does the same through
+  the configuration it already reads, and its route description says so.
+- **The documents.** The `mcp` field description stops asserting that
+  remember is offered to every agent; the README's grant-model
+  paragraph is the policy that exists now, with the field, what off
+  withholds, and the promise that nothing stored goes with it; the
+  concepts page's per-agent paragraph is current behavior and its
+  egress sentence stops promising a device note to a sibling that may
+  not read one; the changelog carries the whole of it. Five generated
+  documents move with the model: `domain-config.md`, `cli.md` and
+  `api-openapi.json`. The two example fragments carry the section
+  commented out, beside the `filler` one they already carried.
+
+### The pins that translated
+
+Two, and neither is a literal that moved.
+
+- the offered-tool comment in `test_session_tools.py`, which explained
+  the memory family as unconditional. The names it asserts are
+  unchanged, because no agent in that lane writes a section; what
+  changed is why they are due, and the comment says so and names the
+  suite the condition is proven in.
+- `DUE_BUILTINS` in `tests/integration/test_tools.py`, which is
+  `MEMORY_BUILTINS | {the two conversation tools}` now. The set is the
+  same set: every agent there leaves the section unwritten. Splitting it
+  is what makes the comparison express the condition rather than hide
+  it, which is what the plan asks of a conditional builtin in a set that
+  is compared whole.
+
+### Deviations from the plan
+
+Seven, and none changes what the milestone ships.
+
+- **The condition is the builtin source's, taken as a callable.** The
+  plan says an agent switched off is offered no memory tools and does
+  not say who withholds them. `BuiltinTools` is where the other
+  conditional builtin already lives (`switch_agent`'s device), so the
+  filtering is there and the runtime hands in the answer; the
+  `ToolSource` protocol does not widen, which is the trade M2 made for
+  `MemoryContext` and for the same reason.
+- **`_world_of` was extracted.** Which configuration answers about an
+  agent (the current one, or the session's own where an apply deleted
+  it) was written out inside `_activate_agent`, and the policy
+  resolution is a second caller of that rule. Two structures that must
+  agree are one structure with a bug pending, so it is one method and
+  the activation's docstring points at it.
+- **`no_such_tool` was given one home.** The sentence a withheld tool is
+  refused with is the sentence a name nobody publishes gets, and the two
+  had a copy each. The claim is now load-bearing rather than incidental:
+  a model told something else would learn that a withheld tool exists
+  somewhere.
+- **`memory_for_agent` answers a section rather than None.** Recorded
+  above with its reason. `filler_for_agent`'s shape would have made
+  every call site decide what an absent section means, and the answer
+  is the opposite of the filler's.
+- **`RELOAD_NOTICE` was left alone, deliberately.** The plan asks
+  whether its clocks sentence needs the memory policy named, and the
+  answer is no, for two reasons. The clock is the one that sentence
+  already names: the section is a tools switch first, and its injection
+  half rides the same reply, so "the tools an agent may reach at its
+  next utterance" is exactly when a memory edit lands. And the notice is
+  one sentence shown after writing any entity of the domain half, so a
+  memory clause would be printed at an operator who has just rewritten
+  a voice. What says it where it is asked is the agent entry's own note
+  and the nested section's, both of which the reference renders.
+- **The reload diff gains no `memory` breakdown.** `agents` carries
+  three of them (`grants`, `prompt`, `filler`), one per moment a
+  conversation meets a part of an entry at, and a memory edit is
+  reported under `changed` like any other field of the entry. Its clock
+  is the reply, which is `grants`' clock, but it is not a grant and
+  folding it in would make that entry mean two things; a fourth entry
+  is a response model, a CLI rendering and an OpenAPI change that no
+  milestone of this plan asks for. Recorded rather than slipped.
+- **The example fragments carry the section.** The plan's footprint
+  names the reference, the README and the concepts page. The fragments
+  are what the reference links to as this entity's worked example, and
+  one that showed `filler` and not `memory` would be a second
+  description of an agent that is missing a field.
+
+### Discoveries
+
+- **The interleaving test needed a lever the policy cannot move.** A
+  reload landing mid-reply is only observable if the reply has a second
+  round, and a second round needs the model to call something. Every
+  memory tool is exactly what the case is about, so calling one would
+  have made the arrangement depend on the answer: the off-to-on
+  direction has no memory tool to call in its first round. A name
+  nobody publishes is the neutral lever, and it comes back as the error
+  result any unknown name does.
+- **A switched-off agent had to be asked about at the reply, not at the
+  activation.** Resolving it where the know-how half is assembled would
+  have been the smaller change and a second clock: an activation is a
+  session open or a switch, so a reload switching an agent off would not
+  have reached a conversation in progress at all, while its tools would
+  have moved at the next utterance. The two halves would then disagree
+  for the rest of the conversation rather than for one reply, which is
+  the same defect finding 11 names, one clock further apart.
+- **The preview has no reply to resolve against, and needs none.** It
+  reads the world at the moment of the request, which is what it
+  already does for the prompt text, so the section it honours is the
+  stored one. That is the honest answer for an inspection surface: what
+  a session opening now would be sent.
+
+### Verification
+
+- `uv run ruff check .`: clean.
+- `uv run mypy`: clean (5 source files, the events package).
+- `uv run pytest tests/unit -q`: 4900 passed, 19 skipped.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`, the shape CI
+  runs: the same.
+- `uv run pytest tests/integration -q`: 233 passed.
+- The five generated documents (`domain-config.md`,
+  `conversations-schema.md`, `events.md`, `api-openapi.json`, `cli.md`)
+  each regenerate to their committed bytes; the first, the fourth and
+  the fifth are regenerated in this change and the other two are
+  unchanged. The command-spellings census was regenerated after the
+  README and changelog edits, and `python scripts/check_doc_links.py .`
+  checked 172 files with no failures.
+- Every new guard was run against the mutation it exists for before
+  being trusted, six of them: the policy resolved per round rather than
+  per reply, which both interleaving cases catch and nothing else does;
+  the offer's condition removed; the dispatch's re-check removed; the
+  prompt's skip removed, which the sibling case and the no-read case
+  catch together; the preview's honoured section removed; and
+  `memory_for_agent` ignoring the agent's own section, which is the
+  whole-replacement case.
 - Not verified: the `image` job, which builds and smokes the container.
