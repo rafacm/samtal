@@ -1,4 +1,10 @@
-"""The table holding what an agent was asked to remember.
+"""The table remembered facts are moving into.
+
+Declared and migrated ahead of the store that writes to it: this
+milestone provisions the schema and nothing reads or writes a row, so
+what an agent has been asked to remember is still the Markdown files
+under `memory.dir` until the cutover. Everything below describes the
+shape a fact takes once it is a row.
 
 Its own `MetaData` and its own schema (`memory`), beside the domain
 configuration and the conversation record rather than inside either,

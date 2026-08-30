@@ -1,7 +1,7 @@
 -- Provision one vinga database: the three schemas, `domain` for the
--- configuration, `record` for what was said and `memory` for what an
--- agent was asked to remember, and the read-only role an analyst
--- queries the conversation record through.
+-- configuration, `record` for what was said and `memory`, which agent
+-- memory is moving into and which nothing writes to yet, and the
+-- read-only role an analyst queries the conversation record through.
 --
 -- One file, run in two places. The compose service mounts it into
 -- /docker-entrypoint-initdb.d, where Postgres executes it once as the
