@@ -285,7 +285,7 @@ that declares it, and why the chain is asserted empty beside it.
 
 ## M2: the store cutover
 
-PR TBD.
+PR #358.
 
 ### What landed
 
