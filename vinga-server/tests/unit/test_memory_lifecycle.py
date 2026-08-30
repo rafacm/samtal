@@ -50,8 +50,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from tests.support.configs import DEVICE_MAC
-from tests.support.sessions import until
+from tests.support.configs import DEVICE_MAC, POET_MAC, base_config
+from tests.support.sessions import events_of, session_for, until
 from tests.support.stores import memory, memory_rows
 from vinga_server import db as db_module
 from vinga_server.config.api import build_api
@@ -339,6 +339,68 @@ async def test_retention_takes_the_memory_of_the_threads_it_prunes(
     # thread the record knows about.
     assert state_of(other_thread) == [("scene", "the tavern")]
     assert held_in(other_thread) == [f"forgotten in {other_thread}"]
+
+
+# Where nothing is recorded, a session's close is its threads' end
+
+
+async def test_two_sessions_closing_take_their_own_memory_with_them() -> None:
+    """The bound on a deployment that records nothing.
+
+    No thread row ever lands there, so no erasure and no retention will
+    come for these, and a closed session's threads can never be resumed:
+    the close IS the thread's end. Two sessions in one process lifetime,
+    because what this exists for is a server that never restarts, and a
+    boot sweep alone would leave the rows until it did.
+    """
+    store = memory()
+    threads: list[str] = []
+    for scene in ("the tavern", "the docks"):
+        session = session_for(base_config(), POET_MAC, memory=store)
+        conversation = events_of(session).conversation
+        assert conversation is not None
+        threads.append(conversation)
+        await store.set_state(conversation, "scene", scene, agent="poet")
+        assert state_of(conversation) == [("scene", scene)]
+
+        await session.runtime.close()
+
+        assert state_of(conversation) == []
+    # Two threads, so the second session really was a second one and the
+    # first was not simply resumed.
+    assert threads[0] != threads[1]
+
+
+async def test_a_session_that_records_keeps_its_threads_memory_on_close() -> None:
+    """The other side of the same condition, and the reason it is a
+    condition at all: where threads are recorded, a session's close is
+    not a thread's end. The conversation can be resumed, so what it was
+    keeping survives the disconnect and is taken by whatever takes the
+    thread."""
+    store = memory()
+    session = session_for(
+        base_config(), POET_MAC, memory=store, conversations=_NoWriter()
+    )
+    conversation = events_of(session).conversation
+    assert conversation is not None
+    await store.set_state(conversation, "scene", "the tavern", agent="poet")
+
+    await session.runtime.close()
+
+    assert state_of(conversation) == [("scene", "the tavern")]
+
+
+class _NoWriter:
+    """A conversation store that records nothing and exists to say that
+    one is there.
+
+    What the factory reads off `conversations` is its presence, which is
+    what decides whether a session purges its own threads at close; what
+    it does with a turn is another suite's business.
+    """
+
+    def record_turn(self, session_id: str, record: Any) -> None:
+        return None
 
 
 # The lock order
