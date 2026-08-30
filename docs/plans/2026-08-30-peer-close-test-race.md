@@ -60,9 +60,8 @@ inside `_read_until_reply_ends`, so `_received` raises
 never builds a `Reply`: the assertions this test exists for
 (`reply.closed == UNKNOWN_CLOSE`, the code's number absent, the
 reason absent from every surface) have nothing to attach to. That
-shape is also already owned by
-`test_a_disconnect_mid_utterance_is_contained_by_the_send_boundary`,
-which closes 1011 mid-utterance and asserts the `ConfigError` path.
+alone rejects it: the shape this test exists for is a completed
+turn whose close code was the peer's.
 
 The test therefore holds the client's own close until the peer's
 close frame has been read, exactly the issue's second shape, and
@@ -77,8 +76,12 @@ seam is the module's own: the case monkeypatches
 replacing the module's name replaces the seam and not the library)
 with a wrapper that, on the one socket this turn opens, replaces
 `socket.close` with a function that waits until `socket.close_code`
-is not `None` (bounded at ten seconds, the bound the 1011 case
-already uses for the same wait) before delegating to the real close.
+is not `None` (bounded at ten seconds, the bound
+`test_a_peer_that_goes_away_mid_utterance_is_a_sentence_not_a_traceback`
+already uses when it polls the same attribute; that case is
+precedent for the wait, not coverage of this path, since it closes
+1011 after the first outgoing audio frame to test `_send_audio`)
+before delegating to the real close.
 The bound expiring is a synchronization failure with its own name,
 not a quiet return to the race: the wrapper records the expiry in a
 list the case holds, the case asserts that list empty after the
@@ -104,8 +107,8 @@ Two facts verified against the installed library (websockets 16.1.1)
 rather than assumed: `Connection` defines no `__slots__`, so an
 instance attribute may shadow `close`; and `close_code` becomes
 non-`None` when the peer's close frame is processed, without this
-side calling `close` at all, which is the same property the 1011
-case's `wait_for_the_close` already relies on.
+side calling `close` at all, which is the same property the
+mid-utterance case's `wait_for_the_close` already relies on.
 
 ## Design footprint
 
@@ -234,6 +237,10 @@ condensed but faithful; resolutions appended per amendment.
    Reject the mid-reply alternative solely because it raises before
    a `Reply` exists, and cite the 1011 case only as precedent for
    polling `close_code`.
+
+   *Resolution*: adopted. The rejection now rests on the missing
+   `Reply` alone, and the mid-utterance case is cited by its real
+   name as wait precedent, with what it actually tests stated.
 
 5. **P3: the ordinary-turn test does not pin which side initiated
    the 1000 close.** The scripted peer's handler returns after
