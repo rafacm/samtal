@@ -52,8 +52,8 @@ def tool_source(
     malformed call, a name nobody publishes) and the handover it never
     sees at all get the same treatment as the rest.
 
-    Names, not outcomes. A builtin whose feature is switched off (asking
-    to `remember` where no memory is configured) is still a builtin
+    Names, not outcomes. A builtin the deployment cannot run (asking to
+    `switch_agent` on a device bound to one agent) is still a builtin
     asked for: the source says which namespace the model reached into,
     and whether the call then ran is what the result and the duration
     say. Builtins are checked first, which is also what makes the
