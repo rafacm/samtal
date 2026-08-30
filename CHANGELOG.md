@@ -9,7 +9,7 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
-- **A schema reserved for agent memory** (#314). The
+- **A schema for what an agent was asked to remember** (#314). The
   database gains a third schema, `memory`, with one table, `facts`, and
   a migration chain of its own whose baseline is `2001_agent_memory`.
   The server migrates it at every boot the way it migrates the
