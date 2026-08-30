@@ -258,6 +258,25 @@ timestamps the problem in the audio and the transcript, surviving
 even a wrongly pinned ASR because three repeated bursts are visible
 in the waveform.
 
+### Memory
+
+What an assistant keeps between replies, in three scopes named by
+whose the remembered thing is: the **agent** scope, what this agent
+knows about the user, keyed by the agent and not by the board it was
+said to; the **device** scope, what is known about the place and its
+household, shared by every agent bound to that device; and
+**conversation state**, a keyed ledger of what is currently true in the
+thread happening now, which dies with it. All three are injected into
+the system prompt in that order, each under a heading stating its rank,
+and what is most current wins. A removed fact is held rather than
+erased until the conversation that removed it ends, which is what makes
+"no, put that back" answerable. The agent scope is larger than a
+prompt, so it splits in two: a small injected core of the newest facts,
+and the rest reached by looking it up. Distinct from what an assistant
+appears to know inside one conversation, which is the dialogue it is
+reading. See
+[the concepts page](concepts.md#memory).
+
 ### MCP (Model Context Protocol)
 
 The protocol vinga uses for tools
