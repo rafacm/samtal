@@ -671,7 +671,7 @@ Named by role, homes confirmed against the authority taxonomy:
   entry, changelog. Design footprint: `tools/builtin.py` grows
   beside its four; the two-tier shape the old docstring predicted
   arrives.
-- [x] **[M4: the operator surface](2026-08-30-memory-scopes-implementation.md#m4-the-operator-surface)** (PR TBD).
+- [x] **[M4: the operator surface](2026-08-30-memory-scopes-implementation.md#m4-the-operator-surface)** (PR #362).
   `memory/api.py` routes, the
   responses shapes, the `memory` CLI noun with its acts and
   commands, `api-openapi.json` and `cli.md` regenerated,
