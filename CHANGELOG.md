@@ -9,6 +9,28 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **Memory grows scopes, editing and a conversation ledger, in the
+  storage** (#83). The `memory` schema gains a forward migration,
+  `2002_memory_scopes`: `facts` is now addressed by a scope and an
+  owner rather than by an agent alone, a forgotten fact is held rather
+  than erased until the conversation that forgot it ends, and a new
+  `state` table keeps one keyed ledger per conversation. The store
+  behind them gains the operations the tools will speak: add with a
+  returned id, correct, forget and bring back, a bounded lookup over
+  everything an agent can reach, the ledger's writes, one call that
+  answers a whole prompt's memory in a single round trip, and the
+  purges that take a thread's memory when the thread goes.
+  Nothing above the store changed. No new tool is offered, no injected
+  prompt moves, and every agent remembers exactly what it did before:
+  what lands here is the storage and the sentences, and the behavior
+  arrives in the milestones that follow.
+  **Stop the running server before starting this image.** The
+  migration renames a column, so an older process still serving through
+  it would fail its next memory statement. Stop, then start: this
+  single-server project has no rolling upgrade to preserve, and an
+  expand-and-contract migration would price a property no supported
+  deployment shape uses. Every fact already stored is carried across as
+  it stands, under the scope it always had.
 - **A schema for what an agent was asked to remember** (#314). The
   database gains a third schema, `memory`, with one table, `facts`, and
   a migration chain of its own whose baseline is `2001_agent_memory`.

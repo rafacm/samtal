@@ -2663,6 +2663,18 @@ does not need the rerun for that, though rerunning is still the
 simplest way to be sure the analyst role's grants are what this
 release's file says.
 
+**Stop the running server before starting this image.** This release
+migrates the memory schema into scopes, and the migration renames a
+column `facts` has had since it was created. An older process still
+serving while that runs would fail its next memory statement, so the
+order is stop, then start, rather than start-then-stop. Nothing else
+about the upgrade changes: every fact already stored is carried across
+as it stands, under the scope it always had, and the server migrates
+the schema at boot as it always does. This is a single-server project
+with no rolling upgrade to preserve; a schema change bought with an
+expand-and-contract migration would price a property no supported
+deployment shape uses.
+
 **What the memory files on disk do next is yours to decide.** Memory
 used to be one Markdown file per agent under a `memory:` directory this
 server was told about. That section has retired: a configuration file
