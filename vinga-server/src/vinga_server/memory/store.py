@@ -81,7 +81,7 @@ from vinga_server.events.catalog import (
 )
 from vinga_server.events.values import ClassName, Identifier
 from vinga_server.memory import schema
-from vinga_server.memory.schema import MemoryScope
+from vinga_server.memory.schema import FACT_SCOPES, MemoryScope
 
 events = ServerEvents(__name__)
 
@@ -215,6 +215,19 @@ PURGE_BUSY = (
     "the memory of those conversations could not be removed: another connection was "
     "writing to memory for longer than the lock timeout allows, and nothing was "
     "changed. The same request may simply be made again"
+)
+
+# What a fact operation named with a scope no fact can carry answers.
+#
+# Decided here rather than left to the check constraint, which would
+# also refuse it: a constraint violation arrives as a database failure,
+# and this module would report a healthy database as broken and tell a
+# model its fact could not be stored. What went wrong is that the call
+# was wrong, and this is the sentence that says so.
+NOT_A_FACT_SCOPE = (
+    "a fact belongs either to the agent or to the device. What is currently true in "
+    "one conversation is kept as that conversation's state instead, which is a "
+    "different thing to write and a different thing to read back. Nothing was changed"
 )
 
 NOTHING_TO_LOOK_FOR = "there is nothing to look for"
@@ -637,6 +650,7 @@ class MemoryStore:
         blocking and the caller is the event loop every live conversation
         shares.
         """
+        _only_a_fact_scope(scope)
         text = _one_line(fact)
         if not text:
             raise ValueError(NOTHING_TO_REMEMBER)
@@ -871,6 +885,7 @@ class MemoryStore:
         waiting to be brought back as it was said, and editing it there
         would make the undo answer with something the user never said.
         """
+        _only_a_fact_scope(scope)
         corrected = _one_line(text)
         if not corrected:
             raise ValueError(NOTHING_TO_REMEMBER)
@@ -919,6 +934,7 @@ class MemoryStore:
         to find. It is the one door for a fact that should not have been
         stored at all.
         """
+        _only_a_fact_scope(scope)
         return await asyncio.to_thread(
             self._forget, agent, scope, owner, fact_id, conversation, permanently
         )
@@ -1070,6 +1086,7 @@ class MemoryStore:
         one it always had, because the held area kept the row rather than
         a copy of its text.
         """
+        _only_a_fact_scope(scope)
         return await asyncio.to_thread(
             self._restore, agent, scope, owner, conversation, fact_id
         )
@@ -1132,6 +1149,24 @@ def _addressed(scope: MemoryScope, owner: str, fact_id: int) -> tuple[object, ..
     )
 
 
+def _only_a_fact_scope(scope: MemoryScope) -> None:
+    """Refuse a scope no fact can carry, before a connection is reached.
+
+    Every operation that names a scope asks this first. The check
+    constraint on the table would refuse the row too, and that is the
+    wrong place for it to be caught: a constraint violation arrives here
+    as a database failure, so a caller's mistake would be reported as a
+    memory that could not be written and an operator would be told a
+    healthy database refused a write.
+
+    Value-free like every refusal here, and it names the two members
+    rather than the one that was passed: the members are this module's
+    own vocabulary and what a caller passed is a caller's value.
+    """
+    if scope not in FACT_SCOPES:
+        raise ValueError(NOT_A_FACT_SCOPE)
+
+
 def _caps(scope: MemoryScope) -> tuple[int, int]:
     """How many lines and how many bytes one scope keeps.
 
@@ -1140,6 +1175,10 @@ def _caps(scope: MemoryScope) -> tuple[int, int]:
     agent accumulates a person's whole history, a device accumulates the
     few notes a place has, and one pair of numbers over both would either
     starve the first or let the second grow into the prompt.
+
+    Two scopes and not three: every caller that reaches here has passed
+    `_only_a_fact_scope`, and a conversation's ledger is bounded by its
+    own two constants rather than by these.
     """
     if scope is MemoryScope.DEVICE:
         return DEVICE_LINES, DEVICE_BYTES
@@ -1470,6 +1509,7 @@ __all__ = [
     "NOTHING_PURGED",
     "NOTHING_REMEMBERED",
     "NOTHING_TO_REMEMBER",
+    "NOT_A_FACT_SCOPE",
     "NOTHING_TO_SET",
     "NO_FACT_TO_FORGET",
     "NO_FACT_TO_RESTORE",

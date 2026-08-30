@@ -341,6 +341,41 @@ async def test_remembering_a_fact_over_the_byte_cap_still_keeps_it(
     assert _rows("poet") == ["x" * 41]
 
 
+async def test_a_fact_cannot_belong_to_a_conversation(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The vocabulary is three and a fact carries two of them. The
+    refusal is decided before a connection, so a caller's mistake stays
+    a caller's mistake: reaching the table's own check would arrive here
+    as a database failure, and a healthy database would be reported as
+    broken to whoever reads the log."""
+    store = memory()
+    kept = await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
+
+    with caplog.at_level("WARNING"):
+        for call in (
+            lambda: store.add(
+                MemoryScope.CONVERSATION, THREAD, "white to move", agent="poet"
+            ),
+            lambda: store.update(
+                MemoryScope.CONVERSATION, THREAD, kept, "white to move", agent="poet"
+            ),
+            lambda: store.forget(
+                MemoryScope.CONVERSATION, THREAD, kept, THREAD, agent="poet"
+            ),
+            lambda: store.restore(MemoryScope.CONVERSATION, THREAD, THREAD, agent="poet"),
+        ):
+            with pytest.raises(ValueError) as refusal:
+                await call()
+            assert str(refusal.value) == store_module.NOT_A_FACT_SCOPE
+
+    # Nothing was written, nothing was taken, and no operator was told
+    # that a database refused anything.
+    assert _rows("poet") == ["the user is vegetarian"]
+    assert _state(THREAD) == []
+    assert events(caplog, "memory_unwritable") == []
+
+
 async def test_an_add_too_long_for_its_scope_is_refused(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
