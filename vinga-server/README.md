@@ -1124,14 +1124,14 @@ uv run pytest tests/unit -q -n auto --dist loadfile
 ```
 
 **A Postgres is a prerequisite of running the server at all**, because
-both halves of what it stores live in one, and the compose service at
+every schema it stores its state in lives in one, and the compose service at
 the repository root is the development instance. Its defaults are the
 server's own defaults (`127.0.0.1:5432`, database `vinga`, role
 `vinga`, password `vinga`), so a checkout needs no configuration for
 any of it, and the password being shipped in the open is exactly why
 the service is published on loopback and nowhere else. Starting it
 also runs [`../deploy/postgres-init.sql`](../deploy/postgres-init.sql)
-once, which creates the two schemas and the read-only `vinga_ro` role
+once, which creates the three schemas and the read-only `vinga_ro` role
 the conversation record is read through; the tables inside them are
 Alembic's, made by the server on its first boot. `docker compose down
 -v` throws the whole thing away, and the next `up` rebuilds it from
@@ -2433,8 +2433,10 @@ nothing to copy safely: the store is SQL, and the way in is a
 read-only session as the role
 [`../deploy/postgres-init.sql`](../deploy/postgres-init.sql)
 provisions. It has `SELECT` on every table in the `record`
-schema, now and after the next migration, and nothing at all on the
-`domain` schema next door, where the stored secrets' ciphertexts live:
+schema, now and after the next migration, and nothing at all on the two
+schemas beside it: `domain`, where the stored secrets' ciphertexts
+live, and `memory`, whose read surface is being designed as an
+addressed API rather than as raw tables:
 
 ```bash
 psql "postgresql://vinga_ro@127.0.0.1:5432/vinga" \
@@ -2616,7 +2618,7 @@ runs on it.
 `CREATEDB`: the server migrates schemas, never databases, so the
 database exists before it starts. Run
 [`../deploy/postgres-init.sql`](../deploy/postgres-init.sql) against it
-once, which creates the `domain` and `record` schemas
+once, which creates the `domain`, `record` and `memory` schemas
 `WITH AUTHORIZATION` to the server role and provisions the read-only
 `vinga_ro` role beside them:
 
@@ -2631,26 +2633,38 @@ owns. Provisioning them any other way works as long as the server role
 owns them: `CREATE` on the database does not grant it `CREATE` inside a
 schema somebody else owns, which is where Alembic would then fail to
 make its tables. Grant the server role `CREATE` on the database
-instead, and it creates the two schemas itself at first boot. Either
+instead, and it creates the schemas itself at first boot. Either
 way, **rerun that file after any database reset**: a `dropdb`/`createdb`
 takes the schemas and the database-local default privileges with it,
 while the instance-level `vinga_ro` role survives, which is why every
 statement in the file is written to be run again.
 
 **Rerun it when a release moves the file, too, before starting the new
-image.** The upgrade order is: rerun the updated
+image.** The upgrade order is always the same: rerun the updated
 [`../deploy/postgres-init.sql`](../deploy/postgres-init.sql), then
-boot. This release moves it, because the store's schema is renamed from
-`conversations` to `record`. On the privilege contract above, the
-server role has no `CREATE` on the database and cannot make the new
-schema for itself, so an image started before the rerun refuses to
-start with the fixed database refusal, which repeats no part of the
-connection; the rerun is what makes the next start migrate. A
-deployment whose server role owns its database creates the schema at
-boot and still needs the rerun, because nothing else grants `vinga_ro`
-`SELECT` on the new schema. The old `conversations` schema is left
-where it is, readable beside the new one until somebody drops it; what
-is in it does not come across, which
+boot. Every statement in the file is written to be run again, so a
+rerun over a database that already has everything is a no-op.
+
+This release moves it, because it adds a third schema, `memory`, where
+what an agent was asked to remember is stored. On the privilege
+contract above, the server role has no `CREATE` on the database and
+cannot make a new schema for itself, so an image started before the
+rerun refuses to start with a fixed sentence naming this rerun and
+repeating no part of the connection; the rerun is what makes the next
+start migrate. Nothing already stored is touched: the two schemas that
+are there keep every row, and the new one starts empty. A deployment
+whose server role owns its database creates the schema at boot and
+does not need the rerun for that, though rerunning is still the
+simplest way to be sure the analyst role's grants are what this
+release's file says.
+
+The release before it moved the file too, by renaming the store's
+schema from `conversations` to `record`, and a deployment crossing
+that one needs the rerun whether or not its server role owns the
+database, because nothing else grants `vinga_ro` `SELECT` on the
+renamed schema. The old `conversations` schema is left where it is,
+readable beside the new one until somebody drops it; what is in it does
+not come across, which
 [`CHANGELOG.md`](../CHANGELOG.md) announces and
 [the compatibility record](../docs/adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md)
 prices.
@@ -2695,7 +2709,7 @@ pg_dump --format=custom --file "/backup/vinga-$(date +%F).dump" \
   "postgresql://vinga@db.internal:5432/vinga"
 ```
 
-Both schemas travel in one dump, because both halves are one database.
+Every schema travels in one dump, because they are one database.
 A restore is `pg_restore` into an empty database for the custom format
 above (`pg_restore --dbname ...`), or `psql --file` for a plain-text
 dump, and it is worth rehearsing on something disposable rather than
@@ -2839,7 +2853,7 @@ document names are built at the reload on the last line, and their
 credentials are the line before it.
 
 **A dropped database takes the conversation record with it**, since
-both halves live in one. What is broken here is the domain half, so a
+every schema lives in one. What is broken here is the domain half, so a
 deployment that is recording and wants to keep what it recorded drops
 that half alone, as the server role, and reruns the provisioning file
 after it:
