@@ -108,7 +108,14 @@ from vinga_server.runtime.turntaking import TurnTaking
 from vinga_server.text import SentenceSplitter
 from vinga_server.tools import builtin, names
 from vinga_server.tools.mcp import McpServers
-from vinga_server.tools.source import BuiltinTools, DeviceTools, McpTools, ToolSource
+from vinga_server.tools.source import (
+    BuiltinTools,
+    DeviceTools,
+    McpTools,
+    ToolSource,
+    no_such_tool,
+    withheld,
+)
 
 # How many times one reply may stream, call tools, and stream again.
 # The last permitted round forbids calling, so a reply always ends in
@@ -2188,10 +2195,21 @@ class PipelineRuntime:
     async def _dispatch(self, call: ToolCall, classified: ToolInvocation) -> tuple[str, bool]:
         """Hand a call to the source that owns it, or answer it here.
 
-        Two answers are nobody's tool to give and stay: a call whose
-        arguments the model never closed, which no source should be
-        asked to run, and a name none of them claims, which is what the
-        model invented one looks like.
+        Three answers are nobody's tool to give and stay: a name this
+        reply withheld, which does not exist for the length of it; a
+        call whose arguments the model never closed, which no source
+        should be asked to run; and a name none of them claims, which is
+        what the model invented one looks like.
+
+        The withheld one is first, and the order is the contract rather
+        than a preference. Everything below it is an answer about a tool
+        that exists: "the arguments were not a JSON object" is what a
+        real tool says to a mangled call, so answering it for a
+        withheld name would tell a model that the name is real and only
+        its arguments were wrong. A withheld memory tool is answered
+        exactly as a name nobody publishes is, whatever the model sent
+        with it, and nothing about the call is logged, because there is
+        no tool here to have been called badly.
 
         `classified` is the answer `_run_one` already has, passed in
         rather than recomputed, and it is the whole of what a source is
@@ -2199,6 +2217,8 @@ class PipelineRuntime:
         describes it exactly as its `tool_call` event does, two
         classifications of one call could disagree, and a source that
         resolved the name again could route around the reservation."""
+        if withheld(classified.name, self._remembering_now):
+            return no_such_tool(classified.name)
         if call.malformed_arguments is not None:
             # A plain line and not an event, and it obeys the same rule
             # as the event beside it (#120): the size of what the model
