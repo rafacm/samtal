@@ -778,14 +778,16 @@ cannot be resumed at all, so every conversation there begins with an
 empty ledger and anything worth keeping has to be remembered instead.
 
 No builtin is granted the way an MCP server is. One appears under a
-structural condition and the other three are simply always there.
+structural condition and the other five are simply always there.
 `switch_agent`'s condition is the device's: it exists exactly when the
 board is bound to more than one agent, and withholding it from one of
 them would strand a conversation on whichever agent has no way back,
-which is the receptionist handoff the tool was written for. `remember`
-has no condition: every server keeps remembered facts, and the
-injection into the system prompt is unconditional, so an agent with the
-tool withheld would recall for ever and never learn. Whether a
+which is the receptionist handoff the tool was written for. The three
+memory tools have no condition: every server keeps remembered facts and
+every conversation can keep a ledger, and the injection into the system
+prompt is unconditional, so an agent with `remember` withheld would
+recall for ever and never learn, and one with the state tools withheld
+would be read a ledger it had no way to write. Whether a
 particular agent should be allowed to remember at all is genuinely
 per-agent policy, and it is
 [#83](https://github.com/rafacm/vinga/issues/83)'s to decide. The two
