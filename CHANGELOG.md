@@ -9,6 +9,32 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **What this deployment remembers is an operator's to read and to
+  correct** (#83). A scope-addressed `/api/memory` namespace and a
+  `vinga memory` noun in front of it. `vinga memory list agent` says
+  which agents are remembering anything and how much,
+  `vinga memory list agent poet` says what one of them holds with the
+  number each fact is addressed by, and `device` and `conversation` are
+  the same two questions about a board's notes and about one
+  conversation's ledger. `vinga memory set agent poet 7` corrects one
+  fact in place, keeping its number, and `vinga memory delete` removes
+  one fact, the whole of one memory with `--all`, or one entry of a
+  conversation's ledger. Every deletion through this door is permanent:
+  the soft forgetting an assistant does belongs to the conversation
+  that spoke it, and this door is correction and audit rather than that
+  flow.
+  The listings answer owners nothing is configured under, which is what
+  they are for: renaming an agent orphans what it remembered and
+  replacing a board orphans that board's notes, and `--all` is how
+  those rows leave.
+  A corrected fact and the name of a ledger entry are read from a file
+  or from standard input and never from an argument, and they travel in
+  a request body and never in a URL. Both are content somebody said or
+  a model chose, so either can be shaped like a credential, and an
+  argument reaches shell history and the process list while a path
+  reaches proxy and access logs.
+  The `memory` schema is still granted to no read-only role, so this
+  API is the surface rather than SQL.
 - **An assistant can correct, remove and bring back what it
   remembered, and keep notes about the place** (#83). `remember` gains
   a scope and answers with the number the fact is kept under, and four
