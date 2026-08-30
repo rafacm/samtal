@@ -152,15 +152,19 @@ Six, none of them a change to what the plan decided.
   `upgrade_to_head` asks whether a schema exists before it creates one
   precisely so a least-privilege deployment can provision its schemas
   externally, which means every chain reaches the same `CREATE SCHEMA`
-  and the same `InsufficientPrivilege`. Classifying it in
-  `migration_failure` rather than in the memory opener is what makes
-  the sentence true for the next release that adds a schema, and it is
-  why the older upgrade case changed its expected sentence for free.
+  and the same `InsufficientPrivilege`. Raising the sentence there
+  rather than in the memory opener is what makes it true for the next
+  release that adds a schema, and it is why the older upgrade case
+  changed its expected sentence for free. (It was first written as an
+  arm of `migration_failure`, which was wider than that statement;
+  finding 1 of the review round below moves it to the statement
+  itself, which is where it belongs and where this discovery already
+  pointed.)
 - **A third chain cost the `StoreChain` seam nothing.** No opener
   changed, `db` gained no argument, and the only edits inside `db` were
-  a docstring count and the new refusal arm, which is a different
-  concern that happened to land in the same file. That is the seam
-  (#283) doing what it was cut for.
+  a docstring count and the new refusal, which is a different concern
+  that happened to land in the same file. That is the seam (#283) doing
+  what it was cut for.
 
 ### Verification
 
@@ -178,3 +182,103 @@ Six, none of them a change to what the plan decided.
 - No device checkpoint: nothing in this milestone changes what a board
   sends or is sent, and nothing it adds is read by any code path a
   conversation reaches.
+
+### PR review round
+
+External review of the branch as pushed to PR #357, at `07f1c458`
+against `origin/main`: backend codex (codex-cli 0.151.0), model
+gpt-5.6-sol, 2026-08-30, runtime 6m21s. Four findings, all P2, verdict
+as received: mergeable after the listed fixes. Condensed below as
+received, each with its resolution and the commit that landed it.
+
+Three of the four are one shape, and it is worth naming: a claim made
+wider than the thing that backs it. The refusal prescribed a remedy for
+failures the remedy does not reach; the milestone's own suites asserted
+what an opener does and called it what the boot does; and three
+sentences described a cutover that has not happened. The fourth is the
+plainer omission of a flag nothing exercised.
+
+1. **P2: the rerun sentence answered privilege failures a rerun cannot
+   fix.** Every `InsufficientPrivilege` reaching `migration_failure`
+   became `SCHEMA_NOT_PERMITTED`, but `deploy/postgres-init.sql`
+   creates missing schemas and nothing else: its creates are
+   `IF NOT EXISTS`, so a schema standing under the wrong owner, or a
+   table-level grant a later revision wanted, would be answered with a
+   command that changes nothing. Narrow it to the missing-schema
+   `CREATE SCHEMA` in `upgrade_to_head`, and cover an existing schema
+   owned by another role.
+
+   *Resolution* (`5f86ed2c`): adopted whole. The refusal is raised at
+   that one statement, built inside the handler and raised after it;
+   anything else the statement is refused is re-raised untouched for
+   the caller's handler to sanitize into the general sentence, which
+   prescribes nothing. The sentence is reworded to what it now answers,
+   a schema that is missing and a role that may not create one, and
+   `migration_failure` is back to three arms. The integration lane
+   drives both sides at real refusals: a schema present under the
+   administrator's ownership, where Alembic is refused its version
+   table and the answer is the general sentence, and a missing schema,
+   where the answer names the rerun and carries no chain. The unit lane
+   pins the absence, that the general classifier prescribes nothing.
+
+2. **P2: the boot's open and close were not pinned.** The upgrade case
+   called `open_memory` directly and the lane fixture migrated the
+   schema before any test ran, so deleting the composition's open and
+   its exit-stack callback left every suite green and would have
+   shipped an image whose memory schema is never migrated. Drive the
+   application lifespan against the restricted two-schema deployment
+   before and after the rerun, and assert the closure on shutdown and
+   on a later startup failure.
+
+   *Resolution* (`8e343d00`): adopted whole. The unit lane enters the
+   lifespan over a blank database and reads the chain at head
+   afterwards, asserts the store is held while the server serves and
+   let go when it stops, and asserts a boot that refuses after the
+   store is opened lets go of it. The integration lane drives the
+   choreography through the application rather than through the
+   opener: refused against the two-schema shape with the sentence read
+   where `main()` reads it and no chain on it, then entered again after
+   the administrator's rerun and found at head. Both were checked
+   against the mutation the finding names: with the composition's two
+   lines removed, the unit cases see no store opened and the
+   integration case does not raise at all.
+
+3. **P2: three sentences said the cutover had happened.** The server
+   README's upgrade paragraph called the new schema the place
+   remembered facts are stored, the baseline's docstring said they stop
+   being files and become rows, and the backup section implied a dump
+   carries them, while the same README two sections down and the
+   changelog correctly said the files remain.
+
+   *Resolution* (`a8047444`): adopted, and applied past the three
+   places named. All of them now say the schema is provisioned and
+   migrated ahead of the store that writes to it, that nothing writes
+   to it in this release, and that the files under `memory.dir` and
+   their backup instructions stay current until the cutover. The same
+   wording was corrected where it appeared more quietly, in the
+   provisioning file's header, the promises page's baseline bullet, the
+   schema module's docstring, the analyst paragraph and the changelog
+   entry's title: one surviving copy of a sentence just found wrong is
+   how it comes back.
+
+4. **P2: the `--memory` selector had no test.** Removing it, or
+   mapping it to the wrong chain, would have stayed green, since every
+   case in that suite passed a chain in directly.
+
+   *Resolution* (`00e4ba9d`): all three selectors are asserted by the
+   spelling a maintainer types, the flagless domain default included,
+   through `generate`, which is the public seam the command reaches its
+   work through; the usage line is asserted to name both flags; and the
+   memory chain is driven through the whole maintenance lifecycle once,
+   because its environment refuses to run without a connection and a
+   chain on the config's attributes and a revision file written is the
+   only proof the command supplies both. The wrong-chain mutation the
+   finding names fails the first of these.
+
+One thing surprised us, in a test the fix itself had to drop. The
+missing-schema refusal was asserted to carry no part of the database
+password, and the assertion failed: the lane's password is `vinga` and
+the sentence begins "the vinga database". A substring hunt for a
+credential is only as good as the credential, which is why every
+refusal in this project is compared for equality against the constant
+that declares it, and why the chain is asserted empty beside it.
