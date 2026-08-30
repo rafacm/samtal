@@ -302,7 +302,11 @@ the conversations-API shape.** Routes, registered from a new
 
 - `GET /memory/agents`, `GET /memory/devices`,
   `GET /memory/conversations`: owners with row counts, the audit
-  door (orphaned owners included, which is the point).
+  door (orphaned owners included, which is the point), each
+  keyset-paginated on the owner text under the same
+  `LIMIT_DEFAULT`/`LIMIT_MAX` discipline as every other listing,
+  because conversation owners grow at thread-creation pace and an
+  unbounded page is a page that eventually cannot be served.
 - `GET /memory/agents/{name}/facts` and
   `GET /memory/devices/{mac}/facts`: the facts with ids and
   timestamps, held ones marked, id-cursor pagination in the
@@ -529,7 +533,9 @@ Named by role, homes confirmed against the authority taxonomy:
   - *Operator surface*: the conversations-API property set applied
     to `/memory`: nothing a caller sends quoted back (sentinel hunt
     through bodies, both log formats, process output), cursors
-    exact, empty shapes for no rows, 404 fixed sentences, the
+    exact on the fact listings and on all three owner listings
+    (boundary and continuation cases each), empty shapes for no
+    rows, 404 fixed sentences, the
     whole-scope delete requiring its flag on the CLI, destroys
     prompting and `--force`; `test_api_contract.py` covering every
     route through a CLI act.
@@ -792,6 +798,11 @@ resolution.
     pace and the conversations API bounds every page. Paginate all
     owner collections with keyset cursors under the existing limit
     discipline.
+
+    *Resolution*: adopted; all three owner listings keyset-paginate
+    on the owner text under `LIMIT_DEFAULT`/`LIMIT_MAX`, with
+    boundary and continuation tests named beside the fact-listing
+    cursor tests.
 
 11. **P2: memory enablement has no atomic reload clock.** The tool
     snapshot is per reply while injection is per round, so a reload
