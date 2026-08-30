@@ -605,7 +605,7 @@ rather than the shape around it, a disclosure, and a count.
 
 ## M3: scoped facts and the editing tools
 
-PR TBD.
+PR #361.
 
 ### What landed
 
