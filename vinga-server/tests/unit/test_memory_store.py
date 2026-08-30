@@ -602,8 +602,9 @@ async def test_a_wildcard_in_the_query_is_looked_for_rather_than_obeyed() -> Non
 async def test_a_lookup_says_so_where_more_matched_than_fits(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The line bound at an exact boundary: two matches fit, the third
-    is left out, and the fixed sentence is what says so."""
+    """The line bound at an exact boundary, counted over the answer
+    rather than over the matches: at two lines, one match and the
+    sentence that says there were more is the whole of what fits."""
     monkeypatch.setattr(store_module, "RECALL_LINES", 2)
     store = memory()
     ids = [
@@ -615,17 +616,25 @@ async def test_a_lookup_says_so_where_more_matched_than_fits(
 
     assert found.splitlines() == [
         f"- [{ids[2]}] a cheese fact 2",
-        f"- [{ids[1]}] a cheese fact 1",
         store_module.MORE_MATCHED,
     ]
-    # And exactly at the bound, with nothing left out, it says nothing.
+    # And exactly at the bound, with nothing left out, it says nothing
+    # and spends the line it would have spent saying it.
     monkeypatch.setattr(store_module, "RECALL_LINES", 3)
-    assert store.recall("poet", "aa:bb", "cheese").splitlines()[-1] != store_module.MORE_MATCHED
+    assert store.recall("poet", "aa:bb", "cheese").splitlines() == [
+        f"- [{ids[2]}] a cheese fact 2",
+        f"- [{ids[1]}] a cheese fact 1",
+        f"- [{ids[0]}] a cheese fact 0",
+    ]
 
 
-async def test_a_lookup_is_bounded_by_bytes_as_well_as_by_lines(
+async def test_a_lookup_answer_is_inside_its_byte_bound_whole(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The byte bound is on the answer, sentence included, so the exact
+    total is what this asserts: room for one line and the continuation
+    is an answer of exactly that size, not one over it by the length of
+    the continuation."""
     monkeypatch.setattr(store_module, "RECALL_LINES", 10)
     store = memory()
     ids = [
@@ -633,15 +642,62 @@ async def test_a_lookup_is_bounded_by_bytes_as_well_as_by_lines(
         for index in range(3)
     ]
     newest = f"- [{ids[2]}] a cheese fact 2"
-    middle = f"- [{ids[1]}] a cheese fact 1"
-    # Room for the two newest lines and not the third.
-    monkeypatch.setattr(
-        store_module, "RECALL_BYTES", len(f"{newest}\n{middle}".encode())
-    )
+    budget = len(f"{newest}\n{store_module.MORE_MATCHED}".encode())
+    monkeypatch.setattr(store_module, "RECALL_BYTES", budget)
 
     found = store.recall("poet", "aa:bb", "cheese")
 
-    assert found.splitlines() == [newest, middle, store_module.MORE_MATCHED]
+    assert found.splitlines() == [newest, store_module.MORE_MATCHED]
+    assert len(found.encode()) == budget
+    # One byte less and the line no longer fits beside the sentence, so
+    # the answer is still inside the bound rather than over it.
+    monkeypatch.setattr(store_module, "RECALL_BYTES", budget - 1)
+    assert len(store.recall("poet", "aa:bb", "cheese").encode()) <= budget - 1
+
+
+async def test_a_match_too_long_for_the_bound_comes_back_with_its_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The case the sentence alone cannot answer. A single fact longer
+    than the whole bound has nothing to narrow towards, so it comes back
+    cut, with the id the model needs in order to correct or forget it."""
+    monkeypatch.setattr(store_module, "MAX_BYTES", 4096)
+    store = memory()
+    long_one = await store.add(
+        MemoryScope.AGENT, "poet", "a cheese fact " + "y" * 200, agent="poet"
+    )
+    monkeypatch.setattr(store_module, "RECALL_BYTES", 60)
+
+    found = store.recall("poet", "aa:bb", "cheese")
+
+    assert len(found.encode()) <= 60
+    assert found.startswith(f"- [{long_one}] a cheese fact ")
+    assert found.endswith(store_module.ELLIPSIS)
+    # Nothing was left out of the answer, so nothing says there was.
+    assert store_module.MORE_MATCHED not in found
+
+
+async def test_an_injected_core_over_its_bound_is_empty_rather_than_over_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The prune keeps a fact bigger than the whole cap, so the block
+    has to be able to drop it: keeping it would put an over-cap block
+    into every round's prompt, which is the one thing the block's bound
+    exists to prevent. The fact is still stored and still found."""
+    monkeypatch.setattr(store_module, "CORE_BYTES", 40)
+    store = memory()
+    long_one = await store.remember("poet", "a cheese fact " + "y" * 200)
+
+    read = store.read_for_prompt("poet", "aa:bb", THREAD)
+
+    assert read.agent == ""
+    assert long_one is None
+    assert len(_rows("poet")) == 1
+    assert "cheese" in store.recall("poet", "aa:bb", "cheese")
+    # And a fact that fits is injected as it always was, so the empty
+    # block is the bound working rather than the block being broken.
+    await store.remember("poet", "a short one")
+    assert store.read_for_prompt("poet", "aa:bb", THREAD).agent == "- a short one"
 
 
 # The conversation's ledger
