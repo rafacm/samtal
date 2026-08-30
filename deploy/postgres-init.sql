@@ -1,6 +1,7 @@
--- Provision one vinga database: the two schemas, `domain` for the
--- configuration and `record` for what was said, and the read-only role
--- an analyst queries the conversation record through.
+-- Provision one vinga database: the three schemas, `domain` for the
+-- configuration, `record` for what was said and `memory` for what an
+-- agent was asked to remember, and the read-only role an analyst
+-- queries the conversation record through.
 --
 -- One file, run in two places. The compose service mounts it into
 -- /docker-entrypoint-initdb.d, where Postgres executes it once as the
@@ -24,7 +25,13 @@
 -- role is create-or-rotate and every grant is written to be run again.
 -- Rerun this file after any database reset.
 --
--- Nothing here is a migration. The tables inside the two schemas are
+-- Rerun it when a release moves the file, too, before starting the new
+-- image. A release that adds a schema is exactly that case: the server
+-- role deliberately has no CREATE on the database, so it cannot make a
+-- new schema for itself, and an image started before the rerun refuses
+-- to start with a fixed sentence naming this file.
+--
+-- Nothing here is a migration. The tables inside the three schemas are
 -- Alembic's, created by the server on its first boot against a fresh
 -- database; a database provisioned without this file simply has no
 -- analyst role, and migrates and serves exactly the same.
@@ -49,11 +56,12 @@
 -- assertions all say, and one fact with one home.
 \set ro_role vinga_ro
 
--- The two schemas, one per Alembic chain. `IF NOT EXISTS` so a rerun is
--- a no-op, and `AUTHORIZATION` so the server role owns them whoever
+-- The three schemas, one per Alembic chain. `IF NOT EXISTS` so a rerun
+-- is a no-op, and `AUTHORIZATION` so the server role owns them whoever
 -- executes this file.
 CREATE SCHEMA IF NOT EXISTS domain AUTHORIZATION :"server_role";
 CREATE SCHEMA IF NOT EXISTS record AUTHORIZATION :"server_role";
+CREATE SCHEMA IF NOT EXISTS memory AUTHORIZATION :"server_role";
 
 -- The read-only role, created when it is missing and given its password
 -- either way. Two statements rather than one PL/pgSQL block, because
@@ -111,5 +119,21 @@ SELECT format('REVOKE ALL ON SCHEMA domain FROM %I', :'ro_role')
 
 SELECT format(
     'REVOKE ALL ON ALL TABLES IN SCHEMA domain FROM %I', :'ro_role'
+)
+\gexec
+
+-- And nothing at all on the memory schema either, written down the same
+-- way and for a different reason. Remembered facts are not more
+-- sensitive than the transcripts this role already reads; the operator
+-- read surface for memory is #83's deliberate design, addressed by
+-- scope and served over the API, and granting the raw tables here would
+-- freeze a contract #83 is about to reshape. Narrowing a granted read
+-- later breaks somebody; widening later is one additive line in this
+-- file, which is the door #83 opens.
+SELECT format('REVOKE ALL ON SCHEMA memory FROM %I', :'ro_role')
+\gexec
+
+SELECT format(
+    'REVOKE ALL ON ALL TABLES IN SCHEMA memory FROM %I', :'ro_role'
 )
 \gexec

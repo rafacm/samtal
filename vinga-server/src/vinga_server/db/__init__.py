@@ -15,15 +15,16 @@ And an opener that refused would fail worse than the boot does. A boot
 refuses naming the entity and the slot; a database that would not open
 is one nothing can migrate, read or repair through this server at all.
 
-There are two stores and one database. What keeps them apart is a
+There are three stores and one database. What keeps them apart is a
 schema each, which is also where each Alembic chain keeps its own
-version table and what the read-only analyst role is scoped to. A
+version table and what the read-only analyst role is scoped to (it
+reads the conversation record and neither of the others). A
 `StoreChain` is the whole of what a store tells this module about
 itself: which schema it owns, where its migrations are, and which
 advisory-lock key serializes its writers. The domain chain is declared
-below, beside the opener that takes it; the conversations chain is
-declared beside the conversations store, because a chain is a fact of
-the store that owns it.
+below, beside the opener that takes it; the conversations and memory
+chains are declared beside their own stores, because a chain is a fact
+of the store that owns it.
 
 Three properties every caller gets and none of them states:
 
@@ -118,6 +119,33 @@ UNREACHABLE = (
     "VINGA_DB_PASSWORD are the credentials it expects. Set VINGA_DB_URL to override "
     "all five at once. The development instance starts with "
     "`docker compose up -d --wait`"
+)
+
+# What a boot that may not create the schema it needs is told, and the
+# whole of the upgrade choreography a release that adds one asks for.
+#
+# `deploy/postgres-init.sql` runs when a data directory initializes, and
+# it deliberately leaves the server role without `CREATE` on the
+# database, so an existing least-privilege deployment meeting a release
+# that adds a schema cannot make it for itself. The remedy is the rerun
+# the recovery documentation already carries, and the file is repeatable
+# by construction, so the sentence names it and nothing else.
+#
+# Fixed and value-free like every other refusal here. The schema that
+# was missing is not quoted back: it is this module's own constant
+# rather than anything a caller reaches, and naming it would put a
+# second thing in a sentence whose whole answer is one command. The
+# connection is not repeated for the reason the sentences around it
+# give.
+SCHEMA_NOT_PERMITTED = (
+    "the vinga database refused this server a privilege its migration needs, which "
+    "on an existing deployment means a schema this release adds and a server role "
+    "that deliberately may not create one. Rerun deploy/postgres-init.sql "
+    "administratively against this database before starting this image: it creates "
+    "every schema the server owns with AUTHORIZATION to the server role, and every "
+    "statement in it is written to be run again. Nothing of the connection is "
+    "repeated here, because a database URL carries credentials in its authority and "
+    "can carry another in its query"
 )
 
 MIGRATION_BUSY = (
@@ -466,12 +494,19 @@ def is_busy(exc: BaseException) -> bool:
 def migration_failure(exc: Exception) -> ConfigError:
     """What an open that did not migrate is answered with.
 
-    Three sentences and no fourth: the lock that did not arrive, which
-    the caller may retry; a database stamped at a revision a re-cut
-    deleted, which has to be replaced; and everything else, which is an
+    Four sentences and no fifth: the lock that did not arrive, which the
+    caller may retry; a database stamped at a revision a re-cut deleted,
+    which has to be replaced; a privilege the role does not have, which
+    is the provisioning file's rerun; and everything else, which is an
     instance the server cannot use as configured. None of them carries a
     word of the driver's own text, because a psycopg connection error
     quotes the DSN it tried.
+
+    The privilege arm is classified by exception class and never by
+    message, the rule this module holds everywhere: `InsufficientPrivilege`
+    is walked to through SQLAlchemy's `orig` exactly as the retryable set
+    is, so a database that phrases its refusal differently, or in another
+    language, is classified the same.
 
     The middle arm is narrow on purpose, because the sentence it answers
     with says to throw a database away. Three things have to hold before
@@ -491,7 +526,34 @@ def migration_failure(exc: Exception) -> ConfigError:
         return DatabaseBusyError(MIGRATION_BUSY)
     if _stranded(exc):
         return StorageError(SUPERSEDED_REVISION)
+    if _not_permitted(exc):
+        return StorageError(SCHEMA_NOT_PERMITTED)
     return StorageError(UNREACHABLE)
+
+
+def _not_permitted(exc: Exception) -> bool:
+    """Whether the database refused this migration a privilege.
+
+    The one failure whose answer is an administrative rerun rather than
+    a connection to check, and the shape an existing least-privilege
+    deployment meets a release that adds a schema in: `CREATE SCHEMA`
+    checks `CREATE` on the database before it looks at whether the
+    schema is there, so the role that has served every previous release
+    is refused here and nowhere else.
+
+    Walked through `orig` like `is_busy`, and by class, because a driver
+    error arrives wrapped and its message is the one thing that may not
+    be read: the wording is the server's, it is localized, and reading
+    it is how a classifier comes to depend on a sentence.
+    """
+    seen: set[int] = set()
+    cause: BaseException | None = exc
+    while cause is not None and id(cause) not in seen:
+        seen.add(id(cause))
+        if isinstance(cause, psycopg.errors.InsufficientPrivilege):
+            return True
+        cause = getattr(cause, "orig", None)
+    return False
 
 
 def _stranded(exc: Exception) -> bool:
@@ -566,6 +628,7 @@ __all__ = [
     "LOCK_TIMEOUT_MS",
     "MIGRATION_BUSY",
     "PASSWORD_ENV",
+    "SCHEMA_NOT_PERMITTED",
     "SUPERSEDED_REVISION",
     "SUPERSEDED_REVISIONS",
     "URL_ENV",
