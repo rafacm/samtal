@@ -65,7 +65,13 @@ shape is also already owned by
 which closes 1011 mid-utterance and asserts the `ConfigError` path.
 
 The test therefore holds the client's own close until the peer's
-close frame has been read, exactly the issue's second shape. The
+close frame has been read, exactly the issue's second shape, and
+the two sides are coordinated by a `threading.Event` rather than by
+adjacency: the scripted peer sends `tts stop` and then waits on the
+event (ten-second bound, outcome recorded) before closing with
+4001, and the client-side wrapper sets the event on entry. The
+disputed interleaving (client at its close, peer's 4001 still
+unsent) is thereby forced on every run, not merely survived. The
 seam is the module's own: the case monkeypatches
 `conversation.connect` (the pattern the `opened` fixture documents:
 replacing the module's name replaces the seam and not the library)
@@ -128,12 +134,22 @@ beside `opened` in the fixtures, not before.
 
 The changed test is the deliverable; what verifies it:
 
-- The deterministic reproduction: with the 0.3 s delay planted in the
-  peer's script, the unfixed test fails with both sightings' exact
-  assertion, and the fixed test passes, because the hold outwaits the
-  delay. The planted delay is spike evidence recorded here and in the
-  implementation doc, not a committed second test: committing it
-  would pin a sleep, which is the shape this plan removes.
+- The committed test carries its own bite through the event: with
+  the hold reverted (the `connect` monkeypatch removed), nothing
+  sets the event, the peer sits out its bounded wait while the
+  client completes a normal close, and the case fails
+  deterministically with both sightings' exact assertion diff,
+  rather than reverting to a mostly green flake. The bite is
+  demonstrated once during implementation and recorded in the
+  implementation doc.
+- The peer's wait outcome and the wrapper's expiry are both
+  asserted, so either side outliving its bound is a named
+  synchronization failure.
+- The original diagnosis stays recorded as spike evidence (a 0.3 s
+  delay planted between `tts stop` and the close reproduces both
+  sightings on a warm machine); it is not committed, because a
+  pinned sleep is the shape this plan removes and the event now
+  owns the interleaving.
 - The fixed test, 10 consecutive single runs and the whole file,
   green; the full unit lane serial and under
   `-n auto --dist loadfile` (the CI shape), green.
@@ -187,6 +203,12 @@ condensed but faithful; resolutions appended per amendment.
    waits on an event after `tts stop`; the close wrapper sets the
    event, waits for `close_code`, then delegates; both bounded
    waits expose asserted timeout markers.
+
+   *Resolution*: adopted. The peer now waits on an event the close
+   wrapper sets before sending its 4001, both bounded waits are
+   asserted, and the bite (revert the monkeypatch, the test fails
+   deterministically) is demonstrated during implementation and
+   recorded in the implementation doc.
 
 3. **P2: the second sighting is left outside every milestone.** The
    plan defers the #254 watch-table update to merge time, so if the
