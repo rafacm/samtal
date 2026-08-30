@@ -28,8 +28,10 @@ from vinga_server.config.models import DatabaseConfig
 from vinga_server.db import (
     DOMAIN_CHAIN,
     LOCK_TIMEOUT_MS,
+    SCHEMA_NOT_PERMITTED,
     UNREACHABLE,
     connection_url,
+    migration_failure,
     open_database,
 )
 
@@ -224,6 +226,55 @@ def test_a_database_that_is_not_there_refuses_the_same_way() -> None:
         open_database(DatabaseConfig(name="vinga_no_such_database_at_all"))
 
     assert str(caught.value) == UNREACHABLE
+
+
+# A schema the role may not create
+#
+# The one migration failure whose answer is a command rather than a
+# connection to check, and the shape an existing least-privilege
+# deployment meets a release that adds a schema in (#314). The whole
+# path is driven in the integration lane, against a real restricted
+# role and the committed provisioning file; what is pinned here is the
+# classification, which is by exception class and never by message.
+
+
+def test_a_privilege_the_role_lacks_names_the_provisioning_rerun() -> None:
+    """`InsufficientPrivilege`, walked to through SQLAlchemy's `orig` the
+    way the retryable set is, and answered with the rerun.
+
+    Constructed rather than provoked, because what this pins is the
+    classifier: a database that phrases its refusal differently, or in
+    another language, has to be classified the same, which is only true
+    while nothing here reads a message.
+    """
+    import psycopg
+    from sqlalchemy.exc import DBAPIError
+
+    refused = psycopg.errors.InsufficientPrivilege(
+        "permission denied for database sk-test-9e21b4-never-a-real-credential"
+    )
+    problem = migration_failure(DBAPIError("create schema", {}, refused))
+
+    assert str(problem) == SCHEMA_NOT_PERMITTED
+    assert isinstance(problem, StorageError)
+    assert not isinstance(problem, DatabaseBusyError)
+    assert "deploy/postgres-init.sql" in str(problem)
+
+
+def test_the_refused_privilege_repeats_nothing_the_driver_said() -> None:
+    """A psycopg error quotes what it was asked about, and a refusal is
+    printed to an operator's terminal and into whatever captured it."""
+    import psycopg
+    from sqlalchemy.exc import DBAPIError
+
+    planted = "sk-test-9e21b4-never-a-real-credential"
+    refused = psycopg.errors.InsufficientPrivilege(f"permission denied for {planted}")
+    problem = migration_failure(DBAPIError("create schema", {"p": planted}, refused))
+
+    assert planted not in str(problem)
+    assert planted not in repr(problem.args)
+    assert problem.__cause__ is None
+    assert problem.__context__ is None
 
 
 @pytest.mark.parametrize(
