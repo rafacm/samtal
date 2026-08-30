@@ -15,7 +15,7 @@ shared by every agent bound to that device), and a keyed ledger of
 what is currently true in this conversation (conversation state,
 sharing its thread's lifecycle). The single `remember` tool becomes a
 small family: add with a returned id, update and forget by id, restore
-of the last thing forgotten, lookup over what is not injected, and
+of the last thing forgotten, lookup over everything stored, and
 set/clear for conversation state. The injected block becomes a labeled
 per-scope rendering that states its own precedence. An operator gets a
 scope-addressed REST surface with the CLI as its client, and per-agent
@@ -166,8 +166,8 @@ Agent scope: the storage cap grows to `MAX_LINES = 1000` and
 monkeypatch shape), pruned oldest-first at write exactly as today;
 the injected core is the newest `CORE_LINES = 40` rendered lines
 within `CORE_BYTES = 4096`, chosen newest-first because a fact worth
-keeping tends to get said again, and the remainder is the lookup
-tool's territory. Device scope: `DEVICE_LINES = 30` within
+keeping tends to get said again, and the remainder is reachable
+only through recall, which itself searches the core too. Device scope: `DEVICE_LINES = 30` within
 `DEVICE_BYTES = 2048`, injected whole, pruned oldest-first at write
 (the same trade `remember` has always made, on a scope the issue
 calls few). Conversation state: `STATE_KEYS = 50` and
