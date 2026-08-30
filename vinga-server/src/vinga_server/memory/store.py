@@ -250,6 +250,12 @@ MORE_MATCHED = (
     "More was remembered than fits here. Ask for something narrower to see the rest"
 )
 
+# What a match too long to be answered whole ends with. Three dots and
+# nothing more: the marker has to be shorter than anything it could be
+# asked to stand in for, and it says the one thing a reader needs, which
+# is that there was more of this line.
+ELLIPSIS = "..."
+
 
 @dataclass(frozen=True)
 class Purged:
@@ -1262,9 +1268,17 @@ def _core(stored: Sequence[tuple[int, str]]) -> str:
     Newest by which are kept and oldest-first in how they read, which is
     not a contradiction: what falls out of the block is what was said
     longest ago, and what remains is read in the order it was said.
+
+    It trims to empty where it has to, unlike the prune, and the
+    difference is what each of the two protects. The prune never goes
+    below one fact because dropping it would lose it; this drops
+    nothing, and a fact longer than the whole block is still stored,
+    still looked up and still corrected by its id. Keeping it here
+    instead would put a block over its cap into every round's prompt,
+    which is the one thing the cap exists to prevent.
     """
     kept = list(stored[-CORE_LINES:])
-    while len(kept) > 1 and len(_rendered(kept).encode("utf-8")) > CORE_BYTES:
+    while kept and len(_rendered(kept).encode("utf-8")) > CORE_BYTES:
         kept.pop(0)
     return _rendered(kept)
 
@@ -1344,20 +1358,64 @@ def _bounded(matches: Sequence[tuple[int, str]]) -> str:
     """As many matches as the bound allows, and a fixed sentence when
     that was not all of them.
 
-    The sentence rides outside the byte bound rather than inside it,
-    which is deliberate: it is this module's own constant, its length is
-    known, and letting it compete with the matches for room would mean a
-    lookup answering with one fact fewer the longer the sentence got.
+    The bound is on the answer rather than on the matches, so the
+    continuation counts against both limits: what a caller was promised
+    is a result inside `RECALL_LINES` and `RECALL_BYTES`, and a sentence
+    appended after the arithmetic would be a result that is over them by
+    exactly the length of this module's longest constant.
+
+    Whether the continuation is needed depends on where this stops, and
+    where it stops depends on the continuation, so each prefix is
+    measured as the answer it would produce: the lines, plus the
+    sentence if anything would be left over.
+
+    One match always survives. A single fact longer than the whole
+    bound would otherwise answer with the refinement sentence and
+    nothing else, and there is nothing to refine towards: the model
+    would have asked for the one thing that matched and been told to ask
+    again. It comes back cut instead, with its id intact, because the id
+    is what the answer is for.
     """
     kept: list[tuple[int, str]] = []
-    for match in matches[:RECALL_LINES]:
-        if len(_rendered([*kept, match]).encode("utf-8")) > RECALL_BYTES:
+    for match in matches:
+        candidate = [*kept, match]
+        left_over = len(candidate) < len(matches)
+        if len(candidate) + int(left_over) > RECALL_LINES:
+            break
+        if len(_answered(candidate, left_over).encode("utf-8")) > RECALL_BYTES:
             break
         kept.append(match)
+    if not kept and matches:
+        row_id, line = matches[0]
+        room = RECALL_BYTES
+        if len(matches) > 1:
+            room -= len(MORE_MATCHED.encode("utf-8")) + 1
+        kept = [(row_id, _shortened(line, room))]
+    return _answered(kept, len(kept) < len(matches))
+
+
+def _answered(kept: Sequence[tuple[int, str]], left_over: bool) -> str:
+    """One lookup's whole answer: the lines it kept, and the fixed
+    sentence where it kept fewer than matched."""
     found = _rendered(kept)
-    if len(kept) == len(matches):
+    if not left_over:
         return found
     return f"{found}\n{MORE_MATCHED}" if found else MORE_MATCHED
+
+
+def _shortened(line: str, room: int) -> str:
+    """One rendered match cut to fit, from the right, so the id at the
+    front of it survives.
+
+    Cut on bytes and decoded with what will not decode dropped, because
+    the bound is a byte bound and a multibyte character straddling it is
+    not half a character. The marker is inside the room rather than
+    added to it, for the reason the caller's bound exists.
+    """
+    if len(line.encode("utf-8")) <= room:
+        return line
+    keeping = max(room - len(ELLIPSIS), 0)
+    return line.encode("utf-8")[:keeping].decode("utf-8", "ignore") + ELLIPSIS
 
 
 def _rendered(stored: Sequence[tuple[int, str]]) -> str:
@@ -1402,6 +1460,7 @@ __all__ = [
     "CORE_BYTES",
     "CORE_LINES",
     "DEVICE_BYTES",
+    "ELLIPSIS",
     "DEVICE_LINES",
     "MAX_BYTES",
     "MAX_LINES",
