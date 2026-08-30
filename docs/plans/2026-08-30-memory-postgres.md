@@ -239,8 +239,13 @@ surface, its API reference is the document that earns generating.
 
 - **M1** (the chain, no behavior change):
   `docs/architecture/product-promises.md` gains the third baseline
-  in the floor bullet, citing this plan; `docs/README.md`'s
-  `postgres-init.sql` bullet counts three schemas;
+  in the floor bullet, citing this plan, and its CI sentence stops
+  saying "both chains"; every other current-count statement moves
+  in the same milestone that falsifies it: `db/__init__.py`'s
+  module contract ("two stores and one database"), the autogen
+  entry point's two-chains documentation and usage, and
+  `docs/README.md`'s `postgres-init.sql` bullet counting the
+  schemas;
   `deploy/postgres-init.sql` comments carry the #83 pointer;
   `CHANGELOG.md` Added.
 - **M2** (the cutover): `vinga-server/README.md` (the builtins
@@ -507,3 +512,7 @@ resolution.
    heads; the database module contract says two stores and one
    database; the autogen entry point says two chains. Add every
    current-count statement to M1's footprint.
+
+   *Resolution*: adopted; the M1 footprint enumerates the promise's
+   CI sentence, the database module contract and the autogen
+   documentation beside the baseline bullet.
