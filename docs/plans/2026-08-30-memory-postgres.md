@@ -249,11 +249,19 @@ surface, its API reference is the document that earns generating.
   is configured or it is not" retired, the backup sentence inverted
   since memory is now in the database `pg_dump` covers, the three
   agent-rename-orphan sentences kept true and reworded to rows, the
-  capture-budget sentence dropping memory from the volume);
+  capture-budget sentence dropping memory from the volume, and the
+  reset stated in the operator's own terms, in the README and the
+  changelog both: existing files under the old `memory.dir` are not
+  read, not imported and not deleted by this release, database
+  memory starts empty, and archiving or deleting the old files is
+  the operator's deliberate act);
   `config.example.yaml` and `config.deploy.example.yaml` lose their
   `memory:` blocks in the same change as the schema change, per
-  standing rule; `docs/concepts.md`'s Memory section updates its
-  storage sentence (it already names #314 as the mover);
+  standing rule; `docs/concepts.md`'s whole Memory section is
+  brought current, not just its storage sentence: both places it
+  says memory is configured through the configuration reference
+  come out, and the section states that memory is always present
+  until #83 adds per-agent control;
   `docs/architecture/diagrams/plantuml/architecture-overview.puml`
   moves the memory side-store into the database; generated pages
   through their generators only (`docs/reference/domain-config.md`
@@ -488,6 +496,11 @@ resolution.
    operators archive or delete the files themselves. Update the
    full Memory section of `docs/concepts.md`, which twice claims
    memory is configured through the configuration reference.
+
+   *Resolution*: adopted; the M2 footprint now requires the
+   not-read, not-imported, not-deleted, starts-empty,
+   operator-archives language in both the README and the changelog,
+   and the concepts Memory section is brought current whole.
 
 8. **P3: M1 leaves current two-chain design claims false.** The
    product promise says CI migrates a fresh database to both chain
