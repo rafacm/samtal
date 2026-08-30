@@ -324,7 +324,13 @@ PUBLISHED = {
 # Spelled as a set the assertions below compare against, so that a
 # conditional builtin appearing where its condition does not hold fails
 # this test rather than passing under a subtraction.
-DUE_BUILTINS: set[str] = {"remember", "new_conversation", "resume_conversation"}
+DUE_BUILTINS: set[str] = {
+    "remember",
+    "set_state",
+    "clear_state",
+    "new_conversation",
+    "resume_conversation",
+}
 
 
 async def test_a_restricted_agent_is_offered_exactly_its_subset(serve, simulate) -> None:

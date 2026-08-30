@@ -1,18 +1,25 @@
 """The tools the server implements itself.
 
-Four of them, all bare-named because the namespace rules in `names`
-reserve those names. Two are executed here: `remember`, against the
-memory store, and the search half of `resume_conversation`, against
-whatever the runtime injected as its way of reading stored threads.
-The other two are defined here and executed by the session, because
-what they do is end the tool loop rather than produce a result the
-model reads: `switch_agent` hands the conversation to another agent,
-and `new_conversation` and the selection half of `resume_conversation`
-move it to another thread.
+Six of them, all bare-named because the namespace rules in `names`
+reserve those names. Four are executed here: `remember`, `set_state` and
+`clear_state`, against the memory store, and the search half of
+`resume_conversation`, against whatever the runtime injected as its way
+of reading stored threads. The other two are defined here and executed
+by the session, because what they do is end the tool loop rather than
+produce a result the model reads: `switch_agent` hands the conversation
+to another agent, and `new_conversation` and the selection half of
+`resume_conversation` move it to another thread.
 
-What `remember` writes is injected by `runtime.prompt`, which is where
-the whole system prompt is assembled: this module defines and runs the
-tools, and how their output reaches the model is the runtime's.
+What `remember` and the two state tools write is injected by
+`runtime.prompt`, which is where the whole system prompt is assembled:
+this module defines and runs the tools, and how their output reaches the
+model is the runtime's.
+
+The two state tools are the ones that need to know which conversation
+they are in, which is what `MemoryContext` is: the session's memory
+address as a value, asked for at the moment a call runs rather than kept
+from when the source was built, because a reply can move a session to
+another thread.
 
 The sentences a selection answers with also live here, all of them, and
 that is deliberate rather than tidy. They are one closed vocabulary,
@@ -24,6 +31,7 @@ model is told is what happened and what to do about it.
 """
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vinga_server.memory.store import MemoryStore
@@ -36,6 +44,26 @@ if TYPE_CHECKING:
     # package at import time. The same trade `tools/source.py` makes for
     # the classification it routes by.
     from vinga_server.conversations import threads
+
+
+@dataclass(frozen=True)
+class MemoryContext:
+    """Which memory a call belongs to: the device it is happening on and
+    the thread it is happening in.
+
+    A value rather than two arguments threaded through the tool
+    interface, and read at the moment a call runs rather than kept: a
+    reply can move a session to another conversation, and a note written
+    after that move belongs to the thread the session is on now.
+
+    Both are optional because both genuinely can be absent. A session
+    whose device never identified itself has no device scope, and the
+    thread is minted at the first activation, which happens before any
+    tool can be called.
+    """
+
+    device: str | None
+    conversation: str | None
 
 
 def switch_agent_tool(agents: Sequence[str]) -> ToolDef:
@@ -90,6 +118,76 @@ def remember_tool() -> ToolDef:
                 }
             },
             "required": ["text"],
+        },
+    )
+
+
+def set_state_tool() -> ToolDef:
+    """Write down what is currently true in this conversation, under a
+    name the model chooses.
+
+    The description carries the scope rule of thumb, because the
+    steering is the enforcement: if losing the thread should lose it, it
+    is state, and anything that should outlive the conversation has to be
+    promoted with `remember`. A game agent saving the game is that
+    promotion, and an agent that never makes it loses the campaign to
+    retention.
+    """
+    return ToolDef(
+        name=names.SET_STATE,
+        description=(
+            "Write down one thing that is true in this conversation right now, under "
+            "a short name you choose. Writing the same name again replaces what it "
+            "held, so this is how you keep track of something that changes: the scene "
+            "and the hit points in a game, the position on a board, which step of "
+            "something you are on. It is only about this conversation and is lost when "
+            "the conversation ends, so anything the user should still have next time "
+            "has to be kept with remember instead."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string",
+                    "description": (
+                        "A short name for this note, which you use again to change it."
+                    ),
+                },
+                "value": {
+                    "type": "string",
+                    "description": "What is true now, as one short sentence.",
+                },
+            },
+            "required": ["key", "value"],
+        },
+    )
+
+
+def clear_state_tool() -> ToolDef:
+    """Forget one of those notes.
+
+    Separate from writing an empty one, because a ledger of what is
+    currently true has no entry for something that has stopped being
+    true: what the model should read next round is nothing at all rather
+    than a name holding a blank.
+    """
+    return ToolDef(
+        name=names.CLEAR_STATE,
+        description=(
+            "Forget one thing you wrote down about this conversation, by the name you "
+            "wrote it under. Use it when what it said has stopped being true and "
+            "nothing takes its place; to change it, write it again with set_state "
+            "instead."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string",
+                    "description": "The name of the note to forget.",
+                }
+            },
+            "required": ["key"],
         },
     )
 
@@ -320,3 +418,78 @@ async def remember(store: MemoryStore, agent: str, arguments: dict[str, object])
         raise ValueError('remember needs a "text" argument holding the fact to remember')
     await store.remember(agent, text)
     return f"Remembered: {' '.join(text.split())}"
+
+
+# What the two state tools refuse a call they cannot act on. Fixed
+# sentences in this module's own vocabulary, saying what the call was
+# missing rather than what arrived: the arguments are the model's, and
+# what it needs back is what to send instead.
+SET_STATE_NEEDS_BOTH = (
+    'set_state needs a "key" naming the note and a "value" saying what is true now'
+)
+
+CLEAR_STATE_NEEDS_A_KEY = (
+    'clear_state needs a "key" naming the note to forget, which is the name it was '
+    "written under"
+)
+
+
+async def set_state(
+    store: MemoryStore, context: MemoryContext, agent: str, arguments: dict[str, object]
+) -> str:
+    """Execute `set_state` against this conversation's ledger.
+
+    The conversation comes off the context rather than out of the
+    arguments, which is the whole reason the context exists: which thread
+    a note belongs to is a fact of the session, and a model that could
+    name one could write into another conversation's ledger.
+    """
+    key = arguments.get("key")
+    value = arguments.get("value")
+    if not isinstance(key, str) or not key.strip():
+        raise ValueError(SET_STATE_NEEDS_BOTH)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(SET_STATE_NEEDS_BOTH)
+    await store.set_state(_conversation_of(context), key, value, agent=agent)
+    return f"Noted {_said(key)}: {_said(value)}"
+
+
+async def clear_state(
+    store: MemoryStore, context: MemoryContext, agent: str, arguments: dict[str, object]
+) -> str:
+    """Execute `clear_state`, saying whether there was anything there.
+
+    Both answers are ordinary. The store refuses nothing for a name that
+    holds nothing, because clearing what is already clear is what the
+    caller asked for, and the model is told which of the two happened so
+    that it does not tell the user it removed something it did not.
+    """
+    key = arguments.get("key")
+    if not isinstance(key, str) or not key.strip():
+        raise ValueError(CLEAR_STATE_NEEDS_A_KEY)
+    taken = await store.clear_state(_conversation_of(context), key, agent=agent)
+    if not taken:
+        return f"Nothing was written down under {_said(key)}"
+    return f"Forgot {_said(key)}"
+
+
+def _conversation_of(context: MemoryContext) -> str:
+    """The thread this call belongs to.
+
+    Asserted rather than refused: a session activates an agent before it
+    can be asked for anything, and minting the thread is part of that
+    activation, so a tool call with no conversation behind it is a defect
+    here and not something to tell a model about.
+    """
+    assert context.conversation is not None
+    return context.conversation
+
+
+def _said(text: str) -> str:
+    """One argument as it goes back into a confirmation, on one line.
+
+    The model's own words rather than the store's reading of them, and
+    the same normalization the store applies, so what a confirmation
+    quotes is what the next round's ledger shows.
+    """
+    return " ".join(text.split())
