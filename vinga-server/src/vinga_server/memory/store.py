@@ -316,7 +316,10 @@ class MemoryStore:
             with self._connected(), self._engine.begin() as connection:
                 connection.execute(
                     schema.facts.insert().values(
-                        agent=agent, at=_utc_now().isoformat(), fact=fact
+                        scope=schema.MemoryScope.AGENT,
+                        owner=agent,
+                        at=_utc_now().isoformat(),
+                        fact=fact,
                     )
                 )
                 doomed = _over_the_cap(_stored(connection, agent))
@@ -340,16 +343,27 @@ class MemoryStore:
 
 
 def _stored(connection: Connection, agent: str) -> list[tuple[int, str]]:
-    """One agent's facts, oldest first, each already a rendered line.
+    """One agent's active facts, oldest first, each already a rendered
+    line.
 
     `ORDER BY id` is the file's line order, and the index the schema
-    declares is on exactly this pair. Rendered here rather than at the
-    two call sites because the byte cap is applied to the rendering, so
-    the line is what both the reader and the prune have to be counting.
+    declares is on exactly the three columns this walks. Rendered here
+    rather than at the two call sites because the byte cap is applied to
+    the rendering, so the line is what both the reader and the prune
+    have to be counting.
+
+    Held facts are not stored facts. A forgotten one is out of every
+    read, out of the prune's arithmetic and out of the caps until it is
+    restored, which is what makes the undo a promise rather than a race
+    against the next write.
     """
     rows = connection.execute(
         select(schema.facts.c.id, schema.facts.c.fact)
-        .where(schema.facts.c.agent == agent)
+        .where(
+            schema.facts.c.scope == schema.MemoryScope.AGENT,
+            schema.facts.c.owner == agent,
+            schema.facts.c.forgotten_at.is_(None),
+        )
         .order_by(schema.facts.c.id)
     ).all()
     return [(row_id, f"- {fact}") for row_id, fact in rows]
