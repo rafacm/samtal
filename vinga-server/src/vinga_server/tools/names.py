@@ -73,6 +73,29 @@ BUILTIN_TOOL_NAMES = (
     RESUME_CONVERSATION,
 )
 
+# The family an agent's `memory` section switches on and off, which is
+# every builtin that reaches a memory: the five that address facts and
+# the two that write the conversation's ledger. Named here rather than
+# listed at the source that offers them, for the reason every other
+# grouping in this module is here: what a name means in the merged list
+# is this module's answer, and a second list beside the offer would be a
+# structure that has to agree with this one.
+#
+# Whole rather than partial, because a half-off agent is a worse answer
+# than either whole one: one that could write and not read would recall
+# nothing it had been told, and one that could read and not write would
+# be read a ledger it had no way to change. `switch_agent` and the two
+# conversation tools are not here: neither touches a memory.
+MEMORY_TOOL_NAMES = (
+    REMEMBER,
+    UPDATE_MEMORY,
+    FORGET,
+    RESTORE_MEMORY,
+    RECALL,
+    SET_STATE,
+    CLEAR_STATE,
+)
+
 # The tools whose order in a round is their meaning, so a reply may not
 # run two of them at once.
 #

@@ -185,12 +185,13 @@ async def test_switch_agent_is_offered_only_where_there_is_somewhere_to_go() -> 
 
     # Both offers whole, so the conditional tool is the entire
     # difference between them: the device bound to one agent has nowhere
-    # to switch, and is offered only the five that are always offered.
-    # Those five are unconditional on purpose: what a server that
-    # cannot resume anything answers with is a sentence the agent reads
-    # out, a tool that is simply absent is a tool a model invents
-    # (#190), and there is no deployment without a memory store (#314),
-    # which is what makes the ledger offered wherever memory is.
+    # to switch, and is offered everything else these agents are due.
+    # The two conversation tools are unconditional on purpose, since
+    # what a server that cannot resume anything answers with is a
+    # sentence the agent reads out and a tool that is simply absent is a
+    # tool a model invents (#190); the memory family is due because
+    # neither agent's `memory` section says otherwise, which is the
+    # condition `test_session_memory_policy.py` is about.
     assert [tool.name for tool in alone.seen[0][1]] == [
         "remember",
         "update_memory",

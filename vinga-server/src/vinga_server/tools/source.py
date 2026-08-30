@@ -107,6 +107,22 @@ class ThreadSearch(Protocol):
     async def described(self, agent: str, description: str) -> str: ...
 
 
+def no_such_tool(name: str | None) -> tuple[str, bool]:
+    """The error result for a name this server does not publish, as the
+    result pair a dispatch answers with.
+
+    One home for it because two callers say it and their saying the same
+    thing is the contract rather than a coincidence: the runtime answers
+    a name no source claims, and this module's builtins answer a name
+    they own and cannot run, which is a builtin this deployment does not
+    have and an agent switched off from memory alike. A model that asked
+    for the second and got different words would learn that the tool
+    exists somewhere, which is exactly what a withheld tool must not
+    say.
+    """
+    return f'there is no tool called "{name}"', True
+
+
 class BuiltinTools:
     """The tools the server implements itself.
 
@@ -130,11 +146,22 @@ class BuiltinTools:
     with: a tool that is simply absent is a tool a model invents, and a
     refusal it can read out is something the user hears.
 
-    The memory family is offered to every agent, unconditionally,
-    because memory lives in a schema this server migrates at every boot
-    (#314) and there is no deployment without one. `remember` used to be
-    offered only where a memory directory was configured, which is the
-    one branch this class lost.
+    The memory family is offered wherever the agent's own `memory`
+    section leaves it on, which is everywhere it says nothing: memory
+    lives in a schema this server migrates at every boot (#314), so
+    there is no deployment without one and the default is on. `remembers`
+    is that condition, and it is the whole of it. An agent switched off
+    is offered none of the seven and is answered as a name this server
+    does not publish if it asks for one anyway, which is the same words
+    a builtin that cannot run is refused with: for the length of that
+    reply the tool does not exist, and saying so twice differently would
+    be telling the model two things.
+
+    A callable rather than a value for the reason `context` is one, and
+    it answers what the reply resolved rather than what the world
+    currently says: the policy has one clock per reply, taken where the
+    snapshot is, so that the tools this offers and the blocks that
+    reply's prompt carries cannot come from two halves of a reload.
 
     `context` is what every one of those tools is addressed by: a
     callable rather than a value, because a reply can move a session to
@@ -155,12 +182,14 @@ class BuiltinTools:
         memory: MemoryStore,
         timeout_s: float,
         context: Callable[[], builtin.MemoryContext],
+        remembers: Callable[[], bool],
         threads: ThreadSearch | None = None,
     ) -> None:
         self._agents = agents
         self._memory = memory
         self._timeout_s = timeout_s
         self._context = context
+        self._remembers = remembers
         self._threads = threads
 
     def snapshot(self, agent: str) -> Sequence[ToolDef]:
@@ -169,13 +198,17 @@ class BuiltinTools:
         # no dead tool.
         if len(self._agents) > 1:
             tools.append(builtin.switch_agent_tool(self._agents))
-        tools.append(builtin.remember_tool())
-        tools.append(builtin.update_memory_tool())
-        tools.append(builtin.forget_tool())
-        tools.append(builtin.restore_memory_tool())
-        tools.append(builtin.recall_tool())
-        tools.append(builtin.set_state_tool())
-        tools.append(builtin.clear_state_tool())
+        # And an agent whose memory section is off gets none of the
+        # seven, in the same shape and for the same reason: a tool it
+        # may not run is a tool it should not be shown.
+        if self._remembers():
+            tools.append(builtin.remember_tool())
+            tools.append(builtin.update_memory_tool())
+            tools.append(builtin.forget_tool())
+            tools.append(builtin.restore_memory_tool())
+            tools.append(builtin.recall_tool())
+            tools.append(builtin.set_state_tool())
+            tools.append(builtin.clear_state_tool())
         tools.append(builtin.new_conversation_tool())
         tools.append(builtin.resume_conversation_tool())
         return tools
@@ -184,6 +217,13 @@ class BuiltinTools:
         return claim.name in names.BUILTIN_TOOL_NAMES
 
     async def dispatch(self, claim: "records.ToolInvocation", agent: str) -> tuple[str, bool]:
+        # The snapshot's condition, checked again at the call, which is
+        # the rule the protocol states about a grant: a tool the offer
+        # withheld is refused rather than run when a model asks for it
+        # anyway. The name is still this source's to own, so what
+        # answers is this source saying there is no such tool.
+        if claim.name in names.MEMORY_TOOL_NAMES and not self._remembers():
+            return no_such_tool(claim.name)
         if claim.name == names.REMEMBER:
             return (
                 await builtin.remember(
@@ -238,7 +278,7 @@ class BuiltinTools:
             # arrives here: the runtime takes those, because a selection
             # ends the reply's loop.
             return await self._search(agent, claim.arguments or {}), False
-        return f'there is no tool called "{claim.name}"', True
+        return no_such_tool(claim.name)
 
     async def _search(self, agent: str, arguments: dict[str, Any]) -> str:
         """One search, or the sentence saying why there was none.
@@ -334,4 +374,11 @@ class McpTools:
         return self._default_timeout_s
 
 
-__all__ = ["BuiltinTools", "DeviceTools", "McpTools", "ThreadSearch", "ToolSource"]
+__all__ = [
+    "BuiltinTools",
+    "DeviceTools",
+    "McpTools",
+    "ThreadSearch",
+    "ToolSource",
+    "no_such_tool",
+]

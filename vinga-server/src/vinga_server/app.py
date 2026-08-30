@@ -913,6 +913,10 @@ def _prompt_preview(
     conversation to show its ledger, would be a second prompt assembler
     pretending to be the first. The route's own description says so where
     a caller reads it.
+
+    Agent-keyed also means the agent's own `memory` section applies: one
+    that may not remember is previewed with no block and costs no read,
+    which is the prompt a reply of that agent's carries.
     """
 
     async def assemble(agent: str) -> prompt.Assembled | None:
@@ -924,6 +928,12 @@ def _prompt_preview(
             config.fragments_for_agent(agent),
             servers.guidance_for_agent(agent),
         )
+        # An agent whose memory section is off is sent no block, so this
+        # shows none and reads nothing, exactly as a reply of that
+        # agent's does. A preview that showed the facts anyway would be
+        # showing a prompt this deployment does not send.
+        if not config.memory_for_agent(agent).enabled:
+            return half
         scopes = await asyncio.to_thread(memory.read_for_prompt, agent, None, None)
         return prompt.with_scopes(half, scopes)
 

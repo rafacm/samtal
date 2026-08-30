@@ -44,6 +44,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from vinga_server.audio.resample import Resampler
+from vinga_server.config import Config
 from vinga_server.conversations.records import (
     Acknowledgement,
     MilestoneRecord,
@@ -441,6 +442,12 @@ class PipelineRuntime:
     - `_llm_round`: reset per reply, counted up per round, read by the
       watchdog's retry line and by `llm_round`, which is what makes the
       generation after a handover a round of its own.
+    - `_remembering`: whether the agent speaking may reach memory,
+      written by `_tool_loop` alone where it takes the tool snapshot and
+      read through `_remembering_now` by the builtin source's offer and
+      dispatch and by `_system_prompt`. A field rather than an argument
+      because those two readers are on two clocks, and one field is what
+      makes them one answer.
     - `_agent`: a property over `self._events.agent` rather than a field,
       because both sides of the boundary attribute events to whoever is
       talking, so the events object is the one place it can live.
@@ -564,6 +571,15 @@ class PipelineRuntime:
         # agents rather than per leg, so the one after a handover is a
         # round of its own in the logs.
         self._llm_round = 0
+        # Whether the agent speaking may reach memory, resolved once per
+        # reply where the tool snapshot is taken and read from there by
+        # the tools it offers and by every round's injected blocks. One
+        # clock for both halves, so a reload landing mid-reply cannot
+        # hand one reply the old policy's tools and the new policy's
+        # prompt. None until the first reply resolves it, because there
+        # is no honest value before then: an agent is what the policy is
+        # about, and nothing asks this outside a reply.
+        self._remembering: bool | None = None
         # The language the ASR provider asked this session to reuse
         # (`AsrResult.lock_language`). Session-scoped on purpose: the
         # provider is shared between sessions and holds no per-session
@@ -602,6 +618,7 @@ class PipelineRuntime:
                 memory,
                 DEFAULT_TOOL_TIMEOUT_S,
                 self._memory_context,
+                self._remembering_now,
                 self._resumption,
             ),
             DeviceTools(output, DEFAULT_TOOL_TIMEOUT_S),
@@ -654,6 +671,50 @@ class PipelineRuntime:
         a second copy here would be a second answer to one question.
         """
         return self._events.device
+
+    def _remembering_now(self) -> bool:
+        """Whether the reply being spoken may reach memory at all.
+
+        What the builtin source asks before it offers the memory family
+        and again before it runs one of them, and what `_system_prompt`
+        asks before it reads a scope. A callable rather than a value
+        handed over at construction, because the answer belongs to the
+        agent speaking and a session can hand over to a sibling with a
+        different section; a read of what this reply resolved rather
+        than of the world, because the world can move between two of
+        this reply's rounds and the policy has one clock.
+
+        Asserted rather than defaulted, the rule `_device_of` keeps: the
+        resolution happens at the top of every tool loop, so a question
+        asked before one is a defect here rather than a state to invent
+        an answer for.
+        """
+        assert self._remembering is not None
+        return self._remembering
+
+    def _resolved_memory(self) -> bool:
+        """This reply's answer, read out of the world at the moment the
+        tool snapshot is taken."""
+        assert self._agent is not None
+        return self._world_of(self._agent).memory_for_agent(self._agent).enabled
+
+    def _world_of(self, agent: str) -> Config:
+        """Which configuration answers about this agent (#191).
+
+        The current one, because that is what an activation converges at
+        and the whole reason a reload reaches a conversation at all; the
+        session's own when the current world has never heard of this
+        agent, which is exactly the state an apply that deleted it
+        leaves behind. This device is still bound to it and this
+        conversation is still allowed to be talking as it, so it goes on
+        being served the world it opened with rather than raising a
+        KeyError inside a tool call.
+
+        One home for that choice because two clocks make it: the prompt
+        at an activation, and the memory policy at a reply.
+        """
+        current = self._generations.current().config
+        return current if agent in current.agents else self._generation.config
 
     def _memory_context(self) -> builtin.MemoryContext:
         """Which memory this session's tool calls belong to, asked at the
@@ -1059,14 +1120,9 @@ class PipelineRuntime:
         session keeps the agent it already had.
 
         Which world the prompt is read out of is the one decision here
-        that is not obvious (#191). The current one, because that is
-        what an activation converges at and the whole reason a reload
-        reaches a conversation at all; the session's own when the
-        current one has never heard of this agent, which is exactly the
-        state an apply that deleted it leaves behind. This device is
-        still bound to it and this conversation is still allowed to hand
-        over to it, so it goes on being served the prompt world it was
-        opened with rather than raising a KeyError inside a tool call.
+        that is not obvious (#191), and it is `_world_of`'s: the current
+        one, or the session's own where an apply has deleted this agent
+        underneath a conversation still allowed to hand over to it.
         """
         if name not in self._agents:
             raise _not_allowed(name, self._agents)
@@ -1077,8 +1133,7 @@ class PipelineRuntime:
         # A uuid hex, the same shape and role as the session id.
         self._conversation = self._conversations.setdefault(name, uuid.uuid4().hex)
         self._providers = self._agent_providers[name]
-        current = self._generations.current().config
-        config = current if name in current.agents else self._generation.config
+        config = self._world_of(name)
         self._know_how = prompt.know_how(
             config.prompt_for_agent(name),
             config.fragments_for_agent(name),
@@ -1459,9 +1514,18 @@ class PipelineRuntime:
         per round, because they belong to the agent speaking; the next
         agent gets its own. The history it works from is the active
         thread's, which after a move is the thread the move landed on,
-        seed and all."""
+        seed and all.
+
+        The memory policy is resolved on the same line as the snapshot,
+        and that is the whole of what makes it one clock. It decides two
+        things on two clocks otherwise: which tools this reply offers,
+        taken once here, and which blocks each round's prompt carries,
+        assembled per round below. A reload landing between them would
+        hand one reply the tools of one policy and the prompt of the
+        other, which is a reply nobody configured."""
         assert self._providers is not None
         providers = self._providers
+        self._remembering = self._resolved_memory()
         tools = self._tool_snapshot()
         working = list(self._turns)
         resampler = Resampler(providers.tts.sample_rate, self._output.output_sample_rate)
@@ -2193,9 +2257,18 @@ class PipelineRuntime:
         It takes no advisory lock, so it never waits on a `remember` in
         flight. It is resolved before the request is built, which is what
         lets the assembler stay a pure function of the text it is handed.
+
+        An agent whose memory section is off is sent the half alone, and
+        the read does not happen: there is no block to assemble, and a
+        round trip whose answer is thrown away is a cost every round of
+        every reply would pay for nothing. The answer is this reply's
+        rather than the world's, so the blocks and the offered tools
+        cannot disagree inside one reply.
         """
         assert self._know_how is not None and self._agent is not None
         assert self._conversation is not None
+        if not self._remembering_now():
+            return self._know_how.text
         scopes = await asyncio.to_thread(
             self._memory.read_for_prompt,
             self._agent,
