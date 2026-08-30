@@ -22,6 +22,7 @@ sentence, and re-raised as `StartupFailed` with nothing chained to it,
 which is what keeps an operator's stderr to one line.
 """
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -45,7 +46,8 @@ from vinga_server.config import Config
 from vinga_server.config.api import ApiRuntime
 from vinga_server.config.loader import DatabaseBusyError
 from vinga_server.config.models import API_MOUNT_PATH, DatabaseConfig
-from vinga_server.db import DOMAIN_CHAIN, read_engine
+from vinga_server.conversations import ConversationStore
+from vinga_server.db import DOMAIN_CHAIN, read_engine, write_engine
 from vinga_server.device.bindings import DeviceBindings
 from vinga_server.events import ServerEvents
 from vinga_server.events.catalog import APP_CHANNEL, CaptureDisabled
@@ -414,7 +416,8 @@ def test_a_boot_that_fails_after_the_memory_store_lets_go_of_it(
     async def refuse(*args: object, **kwargs: object) -> object:
         raise ProviderError(SENTENCE)
 
-    # The next thing the boot does after the memory store is opened.
+    # A step the boot takes after the memory store is opened, and after
+    # the conversation writer it is now opened in front of.
     monkeypatch.setattr(app_module, "build_agent_fillers", refuse)
 
     app = served(recording_config())
@@ -424,6 +427,153 @@ def test_a_boot_that_fails_after_the_memory_store_lets_go_of_it(
 
     assert len(opened) == 1
     assert closed == opened, "a refused boot left the memory store's pools behind"
+
+
+def teardown_order(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """The order the two stores are let go in, which is the whole of what
+    the composition reorder is for.
+
+    Recorded rather than read off the source, because what decides it is
+    the order the callbacks were registered in and that is exactly the
+    kind of thing an edit reverses without meaning to.
+    """
+    order: list[str] = []
+    closing = MemoryStore.close
+    stopping = ConversationStore.stop
+
+    def close(self: MemoryStore) -> None:
+        order.append("memory")
+        closing(self)
+
+    def stop(self: ConversationStore) -> None:
+        order.append("writer")
+        stopping(self)
+
+    monkeypatch.setattr(MemoryStore, "close", close)
+    monkeypatch.setattr(ConversationStore, "stop", stop)
+    return order
+
+
+def test_the_writer_drains_before_the_memory_store_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The order a teardown unwinds in, and the reason memory is opened
+    before the writer is constructed.
+
+    The writer's drain runs retention, and retention deletes the memory
+    of every thread it prunes in its own transaction: a drain that ran
+    after memory had been let go would be a deletion made against a store
+    the process had already closed. Registering the memory close first is
+    what makes it unwind last.
+    """
+    order = teardown_order(monkeypatch)
+
+    app = served(recording_config())
+    with TestClient(app):
+        assert order == [], "something was let go of while the server was serving"
+
+    assert order == ["writer", "memory"]
+
+
+def test_a_boot_that_fails_after_the_writer_starts_unwinds_in_the_same_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same order on the other exit. A partial startup unwinds
+    through the same stack, so a refusal after the writer has started
+    stops it and only then closes the store its retention writes
+    through."""
+    order = teardown_order(monkeypatch)
+
+    async def refuse(*args: object, **kwargs: object) -> object:
+        raise ProviderError(SENTENCE)
+
+    monkeypatch.setattr(app_module, "build_agent_fillers", refuse)
+
+    app = served(recording_config())
+    with pytest.raises(StartupFailed):
+        with TestClient(app):
+            pass
+
+    assert order == ["writer", "memory"]
+
+
+def _wrote_state(conversation: str, key: str, value: str) -> None:
+    """One conversation's note, written the way the store writes one.
+
+    Through the store's own call rather than an insert, so what the
+    sweep meets is a row this server produced; the aging below is the one
+    thing no call can do, because what it stands for is time passing.
+    """
+    store = MemoryStore(
+        write_engine(DatabaseConfig(), MEMORY_CHAIN), read_engine(DatabaseConfig())
+    )
+    try:
+        asyncio.run(store.set_state(conversation, key, value, agent="poet"))
+    finally:
+        store.close()
+
+
+def _aged(conversation: str, when: str) -> None:
+    """Move one thread's ledger back in time, which is how a suite
+    reaches a grace period without waiting out a day."""
+    engine = write_engine(DatabaseConfig(), MEMORY_CHAIN)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "update memory.state set updated_at = :when "
+                    "where conversation = :conversation"
+                ),
+                {"when": when, "conversation": conversation},
+            )
+    finally:
+        engine.dispose()
+
+
+def _state_of(conversation: str) -> list[tuple[str, str]]:
+    engine = read_engine(DatabaseConfig())
+    try:
+        with engine.connect() as connection:
+            return [
+                (row[0], row[1])
+                for row in connection.execute(
+                    text(
+                        "select key, value from memory.state "
+                        "where conversation = :conversation"
+                    ),
+                    {"conversation": conversation},
+                )
+            ]
+    finally:
+        engine.dispose()
+
+
+def test_the_boot_sweeps_the_memory_of_threads_nothing_records(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The heal for what no transaction covers, run where a server
+    starts.
+
+    An orphan older than the grace period is a pre-upgrade leftover, a
+    thread that never landed a first turn, or a deployment that records
+    nothing at all; a younger one is state that has simply arrived before
+    its thread's first turn, which is the whole reason the grace period
+    exists.
+    """
+    orphan = "1111111111111111aaaaaaaaaaaaaaaa"
+    fresh = "2222222222222222bbbbbbbbbbbbbbbb"
+    for conversation in (orphan, fresh):
+        _wrote_state(conversation, "scene", "the tavern")
+    _aged(orphan, "2020-01-01T00:00:00+00:00")
+
+    # Named, so the server boots against the database these rows are in:
+    # a configuration parsed from a dictionary carries the packaged
+    # default rather than the one this lane provisioned.
+    with TestClient(served(recording_config(DatabaseConfig().name))):
+        pass
+
+    assert _state_of(orphan) == []
+    assert _state_of(fresh) == [("scene", "the tavern")]
 
 
 def test_a_build_that_fails_part_way_releases_what_it_took(

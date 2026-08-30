@@ -459,6 +459,7 @@ class PipelineRuntime:
         agents: Sequence[str],
         recorder: TurnRecorder | None = None,
         threads: resumption.ThreadReads | None = None,
+        purge: Callable[[Sequence[str]], object] | None = None,
     ) -> None:
         self._output = output
         # The world this runtime reads its configuration out of, asked
@@ -495,6 +496,13 @@ class PipelineRuntime:
         # the store is wired, and the reply path then behaves exactly as
         # it did before the channel existed.
         self._recorder = recorder
+        # How this session's threads lose their memory when it closes,
+        # and absent wherever a thread outlives its connection. Present
+        # only on a deployment that records nothing, where a closed
+        # session's threads can never be resumed and no erasure or
+        # retention will ever come for them, which makes the close the
+        # thread's end. Compared `is not None` at the one call site.
+        self._purge = purge
         # Whether this server can find a past conversation and pick it
         # up again, and the whole of what says so: absent unless the
         # deployment asked for it, and compared `is not None` by the two
@@ -767,8 +775,19 @@ class PipelineRuntime:
         return bool(done)
 
     async def close(self) -> None:
-        """The conversation is over."""
+        """The conversation is over.
+
+        Where nothing is recorded, this is also the end of every thread
+        this session opened: none of them has a row, none of them can be
+        resumed, and no retention pass will ever reach them. So their
+        ledgers and the facts they were holding for an undo go here, off
+        the loop like every other database call and contained by the
+        store like every other lifecycle cleanup, which is what keeps a
+        process that never restarts from accumulating them.
+        """
         await self.cancel_reply()
+        if self._purge is not None:
+            await asyncio.to_thread(self._purge, list(self._conversations.values()))
 
     # --- the device's outgoing audio, arbitrated against the filler ----
 
@@ -2328,6 +2347,18 @@ def bespoke_runtime_factory(
     not decided here but in the runtime, off the section it already
     holds, so the switch and the keys it reads live in one place.
 
+    The session-close purge is passed only where `conversations` is
+    None, and that condition is the whole of the decision. Where threads
+    are recorded, a session's close is not a thread's end: the thread can
+    be resumed, so its ledger and the undo it is holding outlive the
+    connection, and what takes them is the erasure or the retention pass
+    that takes the thread. Where nothing is recorded, no thread row ever
+    lands, no retention runs and no closed session's thread can ever be
+    resumed, so the session's close IS the thread's end and the runtime
+    takes its own threads' memory as it tears down. That is what keeps a
+    long-running recording-off process bounded without waiting for a
+    reboot.
+
     Deliberately one function rather than a config-selectable registry:
     one runtime exists, and a selection mechanism with one option is
     surface without a reader. This is the seam a second runtime plugs
@@ -2351,6 +2382,7 @@ def bespoke_runtime_factory(
             agents,
             None if conversations is None else SessionTurns(conversations, events.session_id),
             threads,
+            memory.purge_threads if conversations is None else None,
         )
 
     return build

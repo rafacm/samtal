@@ -39,6 +39,7 @@ from vinga_server.config.responses import (
 )
 from vinga_server.config.secrets import SecretStore
 from vinga_server.conversations import ConversationStore, open_conversations, threads
+from vinga_server.conversations.store import erasures_announced_to
 from vinga_server.device.bindings import DeviceBindings
 from vinga_server.events import ServerEvents, attach_server_tap, detach_server_tap
 from vinga_server.events.catalog import CaptureDisabled, CaptureEnabled
@@ -46,7 +47,7 @@ from vinga_server.events.live import LiveEvents
 from vinga_server.events.values import ConfiguredPath
 from vinga_server.filler import build_agent_fillers
 from vinga_server.generation import Generation, Generations
-from vinga_server.memory.store import MemoryStore, PromptMemory, open_memory
+from vinga_server.memory.store import MemoryStore, PromptMemory, open_memory, purge
 from vinga_server.providers import ProviderError, build_world
 from vinga_server.registry import SessionRegistry
 from vinga_server.runtime import prompt
@@ -258,8 +259,40 @@ async def _build_composition(
     # conversation. The stop is registered before the start below: a
     # writer whose thread will not start is exactly the case where the
     # stop has to run anyway.
-    conversations_section = config.server.conversations
     database = config.server.database
+    # What an agent was asked to remember and what a conversation is
+    # keeping, in a schema of its own beside the record's (#314). Opened
+    # here, which is what migrates it, and before the conversation
+    # writer below rather than after it, because that writer's retention
+    # deletes a pruned thread's memory in its own transaction and holds
+    # the seam for that from its first prune. The disposal is registered
+    # in the same breath, so a boot that fails after this point unwinds
+    # through the stack rather than leaving a pool nobody owns, and
+    # registering it FIRST is what makes it unwind LAST: the writer
+    # drains against a store that is still open.
+    #
+    # Unconditionally, and behind no section at all: migrating creates
+    # an empty table, an empty table is not a memory, and an agent that
+    # has been told nothing reads as the empty string and gets no block
+    # in its prompt.
+    memory = open_memory(database)
+    stack.callback(memory.close)
+    # And the other half of the deletion promise: a thread erased through
+    # the operator API publishes what it took, and the memory store
+    # refuses a write addressed to one of those threads from then on. The
+    # subscription is wired here because this is where both sides exist,
+    # and it is a context manager so that a partial startup and a second
+    # application in one process both detach.
+    stack.enter_context(erasures_announced_to(memory.threads_erased))
+    # The heal for what no transaction covers: state and held facts whose
+    # thread has no row in the record and has not been written to for a
+    # day. Pre-upgrade leftovers, threads that never landed a first turn,
+    # and deployments that record nothing at all. Contained inside the
+    # store, so a database that refuses it says so once and the boot
+    # carries on, and off the loop because it is a database round trip
+    # like any other.
+    await asyncio.to_thread(memory.sweep)
+    conversations_section = config.server.conversations
     conversations = (
         None
         if conversations_section is None or not conversations_section.enabled
@@ -268,6 +301,12 @@ async def _build_composition(
             metrics=conversations_section.metrics,
             text=conversations_section.text,
             retention_days=conversations_section.retention_days,
+            # How retention takes the memory of the threads it prunes,
+            # handed over rather than imported: the memory store reads
+            # the record's own table, so naming it there would close a
+            # cycle. It is the same function a deletion through the API
+            # calls.
+            purge_memory=purge,
         )
     )
     if conversations is None:
@@ -285,20 +324,6 @@ async def _build_composition(
         # unwinds through it, and a writer started later would be one
         # more window where a refusal leaves a thread behind.
         conversations.start()
-    # What an agent was asked to remember, in a schema of its own beside
-    # the record's (#314). Opened here, which is what migrates it, and
-    # before the API's runtime below, because the API's prompt read
-    # reports what a session would be sent and memory is part of that.
-    # The disposal is registered in the same breath, so a boot that
-    # fails after this point unwinds through the stack rather than
-    # leaving a pool nobody owns.
-    #
-    # Unconditionally, and behind no section at all: migrating creates
-    # an empty table, an empty table is not a memory, and an agent that
-    # has been told nothing reads as the empty string and gets no block
-    # in its prompt.
-    memory = open_memory(database)
-    stack.callback(memory.close)
     # The filled pauses, in each agent's own voice. Synthesized here
     # rather than beside the providers because synthesis is async, and
     # before the generation below because they are part of the world it
