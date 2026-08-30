@@ -662,7 +662,7 @@ Named by role, homes confirmed against the authority taxonomy:
   handed where they are computed plus one callable seam; no module
   learns another's SQL. One behavior change alone in review: agents
   gain a ledger.
-- [x] **[M3: scoped facts and the editing tools](2026-08-30-memory-scopes-implementation.md#m3-scoped-facts-and-the-editing-tools)** (PR TBD).
+- [x] **[M3: scoped facts and the editing tools](2026-08-30-memory-scopes-implementation.md#m3-scoped-facts-and-the-editing-tools)** (PR #361).
   `remember` with
   scope and id, `update_memory`, `forget`/`restore_memory`,
   `recall`, the agent core/remainder split, the device block live,
