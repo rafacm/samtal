@@ -162,13 +162,6 @@ server:
   # the drain itself, so it needs its own -t raised.
   drain_s: 20
 
-# Facts agents remember between conversations. Removing this section
-# removes the remember tool with it. The directory sits on the data
-# volume, the one place a container running a read-only root
-# filesystem can write.
-memory:
-  dir: /data/memory
-
 # The domain half of this profile lives in the database, not in this
 # file: the providers it runs on, its agent and its device binding are
 # written with `vinga-server config`, and the document that carries them

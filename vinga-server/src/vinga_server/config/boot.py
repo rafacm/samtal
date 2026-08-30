@@ -86,7 +86,7 @@ def reload_domain_config(running: Config) -> BootConfig:
     timeout for it. A caller on the event loop that runs conversations
     runs this in a worker thread.
     """
-    return _with_domain_half(FileConfig(server=running.server, memory=running.memory))
+    return _with_domain_half(FileConfig(server=running.server))
 
 
 def _with_domain_half(file_half: FileConfig) -> BootConfig:

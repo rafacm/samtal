@@ -1,7 +1,6 @@
 """The tool half of the configuration: MCP servers, the agent lists that
-reference them, and the memory section."""
+reference them."""
 
-from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -361,14 +360,3 @@ def test_each_entry_form_serializes_as_itself() -> None:
         {"server": "x"},
     ]
 
-
-def test_memory_is_optional_and_takes_a_directory(tmp_path: Path) -> None:
-    assert config_with().memory is None
-    config = config_with(memory={"dir": str(tmp_path / "memory")})
-    assert config.memory is not None
-    assert config.memory.dir == tmp_path / "memory"
-
-
-def test_a_memory_section_without_a_directory_is_an_error() -> None:
-    with pytest.raises(ValidationError, match="dir"):
-        config_with(memory={})

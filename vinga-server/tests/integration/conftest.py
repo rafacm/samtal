@@ -85,7 +85,7 @@ def booted(config: Config):
     finally:
         engine.dispose()
     composed = compose_config(
-        FileConfig(server=config.server, memory=config.memory),
+        FileConfig(server=config.server),
         domain_fields(snapshot.domain),
         "the domain schema of the vinga database",
     )
@@ -142,7 +142,7 @@ async def restarted_app(config: Config):
     Nothing is seeded: the domain half is read as it stands, which is
     what a restart is, and the difference from `running_app` is the
     whole point of the tests that use it. `config` is only there for its
-    file half, the port and the memory directory this process runs with.
+    file half, the port this process runs with.
 
     There is no directory argument any more, and the reason is the whole
     of the reshape (#283): a test's database is the one the lane

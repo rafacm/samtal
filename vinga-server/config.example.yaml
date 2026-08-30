@@ -7,8 +7,8 @@
 #   uv run vinga-server --config /path/to/config.yaml
 #
 # This file holds the server half of the configuration: how the process
-# runs (server:) and where remembered facts are kept (memory:). The
-# domain half, everything about what the server says and to whom
+# runs (server:). The domain half, everything about what the server says
+# and to whom
 # (providers, mcp_servers, prompt_fragments, agent_defaults, agents,
 # devices, default_agent), lives in the Postgres database
 # server.database names and is written with the config commands. A whole
@@ -274,8 +274,8 @@ server:
     max_total_mb: 2000
     # Refuse to start a capture when the volume has less free than
     # this. The budget above does not protect the volume on its own:
-    # agent memory and the model caches share it and grow underneath,
-    # and capture must not be what fills it.
+    # the model caches share it and grow underneath, and capture must
+    # not be what fills it.
     min_free_mb: 1000
 
   # RECORDS WHAT WAS SAID to the database when enabled. Absent here, and
@@ -375,25 +375,3 @@ server:
   # commonly allows between SIGTERM and SIGKILL; `docker stop` needs its
   # own -t raised above this, since its default is ten.
   # drain_s: 20
-
-# Facts agents remember between conversations. The whole section is
-# optional: without it there is no `remember` tool and nothing is
-# injected into any prompt. One file per agent, created on first write,
-# read into the system prompt on every reply. Memory is keyed by agent
-# and not by device, because an agent is one entity across rooms.
-#
-# Keyed by agent name means **renaming an agent orphans its memory**.
-# The old file stays on disk and the renamed agent starts empty, which
-# costs nothing on an agent created this morning and loses everything
-# on one that has been accumulating facts for months. Rename the file
-# alongside the config, or do not rename the agent.
-#
-# Agent memory is also not the same thing as what an agent appears to
-# know inside one conversation. Conversation history carries across a
-# `switch_agent` handover, so an agent that has never stored a fact
-# can still greet the user by name the moment it takes over: it is
-# reading the transcript, not its own file. The two are easy to
-# conflate when a handover looks uncannily well informed.
-memory:
-  dir: /var/lib/vinga/memory
-

@@ -474,9 +474,10 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         examples=("agent.yaml",),
         notes=(
             "An agent's name is also the key its remembered facts are stored under, "
-            "so renaming an agent orphans its memory: the old file stays on disk and "
-            f"the renamed agent starts empty. The `memory:` section in "
-            f"[`config.example.yaml`]({CONFIG_FILE}) says what to do about it.",
+            "so renaming an agent orphans its memory: the rows stay in the database "
+            "under the old name and the renamed agent starts empty. Rename an agent "
+            "that has been accumulating facts for months only if you mean to lose "
+            "them.",
         ),
         route="/agents",
         addressing=("name",),

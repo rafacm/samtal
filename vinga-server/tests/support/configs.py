@@ -294,7 +294,6 @@ def recording_config(
         server["capture"] = {"enabled": True, "dir": str(tmp_path / "captures")}
     return Config(
         server=server,
-        memory={"dir": str(tmp_path / "memory")},
         providers={
             "llm": {
                 "mock": llm

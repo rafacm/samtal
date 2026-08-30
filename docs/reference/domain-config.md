@@ -9,8 +9,8 @@ field description lives on the model in
 The domain half of the configuration (providers, MCP servers, agent
 defaults, agents, devices, the default agent) is held in the server's
 database and written with the `vinga` commands. The server
-half (`server:` and `memory:`) stays in the YAML file and is documented
-there, in [`config.example.yaml`](../../vinga-server/config.example.yaml).
+half (`server:`) stays in the YAML file and is documented there, in
+[`config.example.yaml`](../../vinga-server/config.example.yaml).
 
 Those commands are a client of the configuration API the server mounts
 at `/api` on its own port, so they need a running server, and the API is
@@ -120,7 +120,8 @@ one no session can be opened as from the moment the apply answers,
 while a conversation already talking as it finishes on the world it
 was built from and is served that world's prompt to the end. The one
 thing an agent carries that a reload does not move is its memory,
-which is keyed by its name and stays where its name left it.
+which is keyed by its name and stays under the name it was stored
+under.
 
 `vinga schema [entity]` prints the same field descriptions
 as JSON Schema, which is what a machine reads before writing a fragment.
@@ -330,16 +331,15 @@ vinga agent set <name> -f fragment.yaml
 | `asr` | `str \| null` | `null` | The speech recognizer, by the name it is defined under in providers.asr. An agent that leaves it unset inherits the agent_defaults entry. |
 | `tts` | `str \| null` | `null` | The voice, by the name it is defined under in providers.tts. An agent that leaves it unset inherits the agent_defaults entry. |
 | `vad` | `str \| null` | `null` | The voice activity detector, by the name it is defined under in providers.vad. An agent that leaves it unset inherits the agent_defaults entry. |
-| `mcp` | `list[str \| McpGrant] \| null` | `null` | The MCP servers whose tools this layer offers the model. An entry is either the entry name on its own, which is the whole server, or an object naming the server and the tools of it this layer may reach ({server: home, tools: [turn_on_light]}), where a tool is named by its published name without the entry prefix. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the tools its siblings have. The builtin tools are outside this model: switch_agent and remember appear under a structural condition (a device bound to more than one agent, memory configured) rather than by grant. |
+| `mcp` | `list[str \| McpGrant] \| null` | `null` | The MCP servers whose tools this layer offers the model. An entry is either the entry name on its own, which is the whole server, or an object naming the server and the tools of it this layer may reach ({server: home, tools: [turn_on_light]}), where a tool is named by its published name without the entry prefix. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the tools its siblings have. The builtin tools are outside this model: remember is offered to every agent, and switch_agent appears under a structural condition (a device bound to more than one agent) rather than by grant. |
 | `filler` | `FillerConfig \| null` | `null` | Latency masking with a pre-synthesized filled pause. Unset inherits the agent_defaults section; naming one replaces it wholly rather than merging with it, so `filler: {enabled: false}` opts an agent out. |
 | `prompt_includes` | `list[str] \| null` | `null` | The shared prompt fragments this agent's system prompt carries, each by the name it is defined under in prompt_fragments, injected in the order listed and directly after the agent's own prompt. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts this agent out of the fragments its siblings share. Every name has to be a fragment that exists, since the fragment is in this same database, and a name listed twice is refused. A reload applies this list, so an edit here reaches a conversation at its next activation, which is a new session or an agent switch. Leaving it unset inherits the agent_defaults list, whose edits reach this agent at the same moment. |
 | `prompt` | `str` | `""` | The instruction this agent replies under, sent as the system prompt on every turn. State the reply language explicitly: a model otherwise picks one by its training bias. |
 
 An agent's name is also the key its remembered facts are stored under, so
-renaming an agent orphans its memory: the old file stays on disk and the
-renamed agent starts empty. The `memory:` section in
-[`config.example.yaml`](../../vinga-server/config.example.yaml) says what to
-do about it.
+renaming an agent orphans its memory: the rows stay in the database under the
+old name and the renamed agent starts empty. Rename an agent that has been
+accumulating facts for months only if you mean to lose them.
 
 Examples:
 
@@ -363,7 +363,7 @@ vinga agent-defaults set -f fragment.yaml
 | `asr` | `str \| null` | `null` | The speech recognizer, by the name it is defined under in providers.asr. An agent that leaves it unset inherits the agent_defaults entry. |
 | `tts` | `str \| null` | `null` | The voice, by the name it is defined under in providers.tts. An agent that leaves it unset inherits the agent_defaults entry. |
 | `vad` | `str \| null` | `null` | The voice activity detector, by the name it is defined under in providers.vad. An agent that leaves it unset inherits the agent_defaults entry. |
-| `mcp` | `list[str \| McpGrant] \| null` | `null` | The MCP servers whose tools this layer offers the model. An entry is either the entry name on its own, which is the whole server, or an object naming the server and the tools of it this layer may reach ({server: home, tools: [turn_on_light]}), where a tool is named by its published name without the entry prefix. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the tools its siblings have. The builtin tools are outside this model: switch_agent and remember appear under a structural condition (a device bound to more than one agent, memory configured) rather than by grant. |
+| `mcp` | `list[str \| McpGrant] \| null` | `null` | The MCP servers whose tools this layer offers the model. An entry is either the entry name on its own, which is the whole server, or an object naming the server and the tools of it this layer may reach ({server: home, tools: [turn_on_light]}), where a tool is named by its published name without the entry prefix. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the tools its siblings have. The builtin tools are outside this model: remember is offered to every agent, and switch_agent appears under a structural condition (a device bound to more than one agent) rather than by grant. |
 | `filler` | `FillerConfig \| null` | `null` | Latency masking with a pre-synthesized filled pause. Unset inherits the agent_defaults section; naming one replaces it wholly rather than merging with it, so `filler: {enabled: false}` opts an agent out. |
 | `prompt_includes` | `list[str] \| null` | `null` | The shared prompt fragments every agent's system prompt carries unless the agent names a list of its own, each by the name it is defined under in prompt_fragments, injected in the order listed and directly after the agent's own prompt. An agent naming a list replaces this one rather than extending it, so an empty list there opts that agent out of the fragments its siblings share. Every name has to be a fragment that exists, since the fragment is in this same database, and a name listed twice is refused. A reload applies this list, along with an agent's own and the text of a fragment either layer names, so a change here reaches every agent that inherits it at that agent's next activation, which is a new session or an agent switch. |
 

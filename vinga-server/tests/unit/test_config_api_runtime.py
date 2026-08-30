@@ -45,7 +45,7 @@ from vinga_server.config.loader import (
     RunningConfigMovedError,
     StorageError,
 )
-from vinga_server.config.models import DatabaseConfig, MemoryConfig
+from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.responses import (
     AgentsDiff,
     Applies,
@@ -818,14 +818,13 @@ def test_the_server_shipped_blocks_are_counted_and_named_on_the_surface(
 
 
 def test_a_running_server_hands_its_own_assembly_to_the_api(
-    monkeypatch: pytest.MonkeyPatch, database: DatabaseConfig, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, database: DatabaseConfig
 ) -> None:
     """The wiring, through the mount a deployment gets: the loaded
     agent, the running slice and the memory store, none of which the API
     application knows anything about."""
     monkeypatch.setenv(API_SECRET_ENV, TOKEN)
     config = config_with({"tools": entry_data(instructions="Ask first.")}, ["tools"], database)
-    config = config.model_copy(update={"memory": MemoryConfig(dir=tmp_path / "memory")})
 
     with entered_client(config, from_store=True) as served:
         answered = served.get(

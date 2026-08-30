@@ -403,7 +403,7 @@ async def test_a_fragment_written_once_is_spoken_by_every_agent_that_includes_it
 # The two clocks, in one held session
 
 
-def held_config(directory: Path) -> Config:
+def held_config() -> Config:
     """Three agents on one device, chained: the first hands over to the
     second and the second to the third, which answers for itself.
 
@@ -414,7 +414,6 @@ def held_config(directory: Path) -> Config:
     and once with the half it cached then.
     """
     return Config(
-        memory={"dir": str(directory)},
         providers={
             "llm": {
                 "to-beta": hands_over_to("beta"),
@@ -492,7 +491,7 @@ async def reconnect(app, shipping: str) -> None:
 
 
 async def test_one_session_across_a_reload_a_switch_and_a_memory_write(
-    serve_app, monkeypatch, tmp_path: Path
+    serve_app, monkeypatch
 ) -> None:
     """The clocks, proven where they can only be proven: inside one
     conversation on one socket.
@@ -507,7 +506,7 @@ async def test_one_session_across_a_reload_a_switch_and_a_memory_write(
     """
     fact = "the user is vegetarian"
     monkeypatch.setenv(SHIPPED_TEXT_ENV, FIRST_SHIPPED)
-    async with serve_app(held_config(tmp_path / "memory")) as (
+    async with serve_app(held_config()) as (
         port,
         app,
     ), control_client(port) as control:

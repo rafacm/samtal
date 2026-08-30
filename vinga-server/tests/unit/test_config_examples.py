@@ -372,8 +372,8 @@ def test_the_example_configuration_mentions_every_server_field() -> None:
     since the file's convention is that a default worth keeping is
     shown as a commented `# key:` line with its reasoning; what does
     not count is prose using the word, which is why the scan wants the
-    key form. The file holds `memory:` beside `server:`, and this pin
-    is about the `server:` tree."""
+    key form. `server:` is the whole of what the file holds, and this
+    pin is about that tree."""
     mentioned = _mentioned(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
     leaves = _leaves(ServerConfig)
 

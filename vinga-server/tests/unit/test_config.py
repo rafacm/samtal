@@ -51,8 +51,6 @@ def test_example_config_parses() -> None:
     # is derived from the device-auth secret.
     assert config.server.onboarding.enabled is True
     assert config.server.onboarding.key is None
-    assert config.memory is not None
-    assert config.memory.dir == Path("/var/lib/vinga/memory")
 
 
 def test_deploy_example_config_parses() -> None:
@@ -63,9 +61,6 @@ def test_deploy_example_config_parses() -> None:
     # should type, so the profile names the origin explicitly.
     assert config.server.public_url == "https://voice.example.com"
     assert config.server.auth.enabled is True
-    # Memory sits on the data volume, the writable place in the image.
-    assert config.memory is not None
-    assert config.memory.dir == Path("/data/memory")
 
 
 def test_no_config_gives_defaults() -> None:
@@ -517,6 +512,85 @@ def test_a_moved_override_is_refused_whatever_its_case(
     # found and unset.
     assert f"{variable}: " in message
     assert "moved to the database" in message
+
+
+# A retired section, which is not a moved one
+#
+# `memory:` did not move to the database's domain half; it stopped
+# existing, because remembered facts are kept whether anybody configures
+# them or not (#314). Both doors onto it refuse, and neither repeats
+# what the operator wrote under it: a directory is not a credential, but
+# a value pasted into the wrong key is exactly what a rule with an
+# exception in it fails to cover.
+
+RETIRED_DIRECTORY = "/var/lib/vinga/memory"
+
+
+def test_a_retired_section_left_in_the_file_says_it_retired(tmp_path: Path) -> None:
+    path = write_config(
+        tmp_path, f"server:\n  port: 9000\nmemory:\n  dir: {RETIRED_DIRECTORY}\n"
+    )
+    with pytest.raises(ConfigError) as excinfo:
+        load_file_config(path)
+    message = str(excinfo.value)
+    assert "memory: retired" in message
+    assert "live in the database" in message
+    # Not the moved-section sentence: nothing writes this anywhere, so
+    # naming a command would send a reader looking for one.
+    assert "moved to the database" not in message
+    assert RETIRED_DIRECTORY not in message
+
+
+def test_a_retired_section_says_the_old_files_are_the_operators(tmp_path: Path) -> None:
+    """The hard cutover, said where a deployment meets it: this release
+    reads nothing that is on disk and removes nothing either."""
+    path = write_config(tmp_path, "server:\n  port: 9000\nmemory:\n  dir: /tmp/x\n")
+    with pytest.raises(ConfigError) as excinfo:
+        load_file_config(path)
+    message = str(excinfo.value)
+    assert "not read, not imported and not deleted" in message
+
+
+@pytest.mark.parametrize(
+    "variable",
+    [
+        "VINGA_MEMORY",
+        "VINGA_MEMORY__DIR",
+        "VINGA_memory__dir",
+        "ViNgA_MeMoRy__DiR",
+    ],
+)
+def test_a_retired_environment_override_is_refused_whatever_its_case(
+    monkeypatch: pytest.MonkeyPatch, variable: str
+) -> None:
+    """Once the field is deleted pydantic-settings ignores the variable
+    under any spelling, `extra="forbid"` notwithstanding, which is the
+    hole this scan exists to close."""
+    monkeypatch.setenv(variable, RETIRED_DIRECTORY)
+    with pytest.raises(ConfigError) as excinfo:
+        load_file_config()
+    message = str(excinfo.value)
+    # Reported in the spelling it was written in, which is what has to
+    # be found and unset, and never with what it was set to.
+    assert f"{variable}: memory is retired" in message
+    assert RETIRED_DIRECTORY not in message
+
+
+def test_nothing_of_a_retired_variable_reaches_any_surface(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The whole refusal, chain included: the value is not on the
+    message, and no exception behind it carries one either."""
+    monkeypatch.setenv("VINGA_MEMORY__DIR", RETIRED_DIRECTORY)
+    with pytest.raises(ConfigError) as excinfo:
+        load_file_config()
+
+    walked: list[BaseException] = []
+    cause: BaseException | None = excinfo.value
+    while cause is not None:
+        walked.append(cause)
+        cause = cause.__cause__ or cause.__context__
+    assert all(RETIRED_DIRECTORY not in str(one) for one in walked)
 
 
 @pytest.mark.parametrize("variable", ["VINGA_server__port", "ViNgA_SeRvEr__PoRt"])
