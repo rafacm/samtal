@@ -417,7 +417,7 @@ def _migrate(name: str) -> None:
     from vinga_server.config.models import DatabaseConfig
     from vinga_server.conversations.store import open_conversations
     from vinga_server.db import open_database
-    from vinga_server.memory import open_memory
+    from vinga_server.memory.store import open_memory
 
     settings = DatabaseConfig(host=DB_HOST, port=DB_PORT, name=name, user=DB_USER)
     open_database(settings).dispose()

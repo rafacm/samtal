@@ -53,7 +53,7 @@ from vinga_server.conversations import schema
 from vinga_server.conversations.records import TurnRecord
 from vinga_server.conversations.store import ConversationStore
 from vinga_server.device.session import DeviceSession
-from vinga_server.memory import MemoryStore
+from vinga_server.memory.store import MemoryStore
 from vinga_server.providers import (
     AsrProvider,
     AsrResult,

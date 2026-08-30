@@ -19,7 +19,7 @@ from tests.support.providers import CountingServers, RecordingLlm, ScriptedLlm
 from tests.support.sessions import call, run_reply, session_with
 from tests.support.stores import memory as lane_memory
 from vinga_server.config import Config
-from vinga_server.memory import MemoryStore
+from vinga_server.memory.store import MemoryStore
 from vinga_server.runtime.prompt import (
     Guidance,
     ServerInstructions,

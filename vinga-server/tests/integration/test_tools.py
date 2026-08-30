@@ -15,7 +15,7 @@ import pytest
 from tests.integration.conftest import dominant_hz, spoken
 from vinga_server.config import Config
 from vinga_server.config.models import DatabaseConfig
-from vinga_server.memory import open_memory
+from vinga_server.memory.store import open_memory
 
 STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
 

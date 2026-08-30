@@ -46,7 +46,7 @@ from vinga_server.events.live import LiveEvents
 from vinga_server.events.values import ConfiguredPath
 from vinga_server.filler import build_agent_fillers
 from vinga_server.generation import Generation, Generations
-from vinga_server.memory import MemoryStore, open_memory
+from vinga_server.memory.store import MemoryStore, open_memory
 from vinga_server.providers import ProviderError, build_world
 from vinga_server.registry import SessionRegistry
 from vinga_server.runtime import prompt
