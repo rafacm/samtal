@@ -1583,10 +1583,25 @@ class PipelineRuntime:
     async def _run_tools(
         self, calls: Sequence[ToolCall], slots: Sequence[int], switches_left: int
     ) -> tuple[list[ToolResult], "_Transition | None"]:
-        """Execute one round of calls. Everything that is not a move runs
-        concurrently, since device and server tools are independent; the
-        moves are resolved here instead, because a successful one ends
-        the loop rather than producing a result the model reads.
+        """Execute one round of calls. Almost everything that is not a
+        move runs concurrently, since device and server tools are
+        independent; the moves are resolved here instead, because a
+        successful one ends the loop rather than producing a result the
+        model reads.
+
+        The exception is the calls `names.ORDERED_TOOL_NAMES` names,
+        which run first and one at a time, in the order the model issued
+        them. They write one conversation's ledger by a key the model
+        chose, so two of them in a round can name the same entry and
+        what is current afterwards is whichever ran last: run
+        concurrently, the answer would be decided by which transaction
+        reached the chain's lock first rather than by what the model
+        asked for, and a set followed by a clear could leave the set.
+
+        Before the rest rather than beside them, which costs a round
+        trip nothing was waiting on and buys the simplest cancellation
+        story there is: a barge-in during one of these leaves no
+        dispatch running that nobody is awaiting.
 
         `slots` says where on the turn's record each of these calls was
         already reserved, index for index with `calls`, which is why
@@ -1607,9 +1622,25 @@ class PipelineRuntime:
         moves = [
             (slots[index], call) for index, call in enumerate(calls) if self._moves(call)
         ]
-        results = list(
-            await asyncio.gather(*(self._run_one(call, slot) for slot, call in plain))
+        answered: dict[int, ToolResult] = {}
+        for slot, call in plain:
+            if call.name in names.ORDERED_TOOL_NAMES:
+                answered[slot] = await self._run_one(call, slot)
+        together = [(slot, call) for slot, call in plain if slot not in answered]
+        answered.update(
+            zip(
+                (slot for slot, _ in together),
+                await asyncio.gather(
+                    *(self._run_one(call, slot) for slot, call in together)
+                ),
+                strict=True,
+            )
         )
+        # Back into the order the model asked in, whatever order they
+        # ran in: what the model reads next is a list of results, and a
+        # list that reordered them would be this method describing a
+        # round that did not happen.
+        results = [answered[slot] for slot, _ in plain]
 
         transition: _Transition | None = None
         for order, (slot, call) in enumerate(moves):

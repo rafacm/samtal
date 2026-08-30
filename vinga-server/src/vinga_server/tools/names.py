@@ -57,6 +57,23 @@ BUILTIN_TOOL_NAMES = (
     RESUME_CONVERSATION,
 )
 
+# The tools whose order in a round is their meaning, so a reply may not
+# run two of them at once.
+#
+# Both write one conversation's ledger and both are addressed by a key
+# the model chooses, so two calls in one round can name the same entry:
+# a set and a clear of `scene`, or two sets of it. What is current after
+# that round is whichever ran last, which means the model's order IS the
+# answer, and a round that ran them concurrently would leave the
+# database's lock arrival deciding it instead.
+#
+# Nothing else here has the property. A device tool and a server tool
+# touch different worlds; `remember` appends rather than replacing, so
+# two of them in a round leave both facts whichever order they land in;
+# and the three that move a session are resolved by the loop itself, in
+# issue order, and never reach a dispatch at all.
+ORDERED_TOOL_NAMES = (SET_STATE, CLEAR_STATE)
+
 # Names an mcp_servers entry may not take, because they already mean
 # something in the merged list.
 RESERVED_ENTRY_NAMES = (DEVICE_PREFIX, *BUILTIN_TOOL_NAMES)
