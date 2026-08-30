@@ -629,7 +629,7 @@ Named by role, homes confirmed against the authority taxonomy:
 
 ## Milestones
 
-- [ ] **M1: the scoped schema and the store's new sentences.**
+- [x] **[M1: the scoped schema and the store's new sentences](2026-08-30-memory-scopes-implementation.md#m1-the-scoped-schema-and-the-stores-new-sentences)** (PR TBD).
   Migration `2002_memory_scopes` (rename, scope, held pair, the
   `state` table, the reshaped index), autogen-produced; the store's
   scoped operations (`add`, `update`, `forget`, `restore`,
