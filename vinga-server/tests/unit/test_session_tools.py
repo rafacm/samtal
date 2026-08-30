@@ -8,6 +8,7 @@ provider entirely.
 """
 
 import asyncio
+import contextlib
 import json
 import logging
 import sys
@@ -460,6 +461,110 @@ async def test_a_state_tool_asked_with_arguments_it_cannot_use_refuses(
     # The loop names the tool that failed and then says what it said, so
     # the sentence is the end of the result rather than the whole of it.
     assert result.content.endswith(refusal)
+    assert ledger(store, thread) == ""
+
+
+# Two ledger writes in one round
+#
+# Both name the same entry by a key the model chose, so what is current
+# afterwards is whichever ran last: the model's order is the answer. The
+# round dispatches everything else concurrently, which would leave the
+# answer to whichever transaction reached the chain's lock first.
+#
+# The interleaving is forced rather than hoped for. The first write is
+# parked until the second one arrives, with a bound so the ordered
+# implementation is not deadlocked by its own correctness: under the
+# concurrent dispatch the second overtakes it and the first commits
+# last, and under the ordered one the first waits out the bound and the
+# second never starts before it finishes.
+
+# How long a parked write waits for the one that is meant to overtake
+# it. Long enough that a concurrent dispatch always arrives inside it,
+# short enough that the ordered dispatch pays it twice per test and
+# nothing else.
+OVERTAKE_S = 0.25
+
+
+@contextlib.asynccontextmanager
+async def the_first_write_parked() -> Any:
+    """The first ledger write held until a second one arrives.
+
+    Both entry points are gated, because what the two cases need is the
+    same shape with different tools: whichever of `set_state` and
+    `clear_state` the model asks for first is the one parked, and
+    whichever comes second is the one that releases it.
+    """
+    arrived = asyncio.Event()
+    started = 0
+    writing = MemoryStore.set_state
+    clearing = MemoryStore.clear_state
+
+    async def park() -> None:
+        nonlocal started
+        started += 1
+        if started > 1:
+            arrived.set()
+            return
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(arrived.wait(), OVERTAKE_S)
+
+    async def gated_set(self: MemoryStore, *args: Any, **kwargs: Any) -> Any:
+        await park()
+        return await writing(self, *args, **kwargs)
+
+    async def gated_clear(self: MemoryStore, *args: Any, **kwargs: Any) -> Any:
+        await park()
+        return await clearing(self, *args, **kwargs)
+
+    with pytest.MonkeyPatch.context() as patching:
+        patching.setattr(MemoryStore, "set_state", gated_set)
+        patching.setattr(MemoryStore, "clear_state", gated_clear)
+        yield
+
+
+async def test_two_writes_to_one_entry_in_a_round_land_in_the_model_s_order() -> None:
+    """Set, then set again: the second is what the next round reads."""
+    store = lane_memory()
+    script = ScriptedLlm(
+        [
+            [
+                call("set_state", key="scene", value="the tavern"),
+                call("set_state", key="scene", value="the docks"),
+            ],
+            "Off to the docks.",
+        ]
+    )
+    session = session_for(base_config(), POET_MAC, {"poet": script}, memory=store)
+    thread = events_of(session).conversation
+    assert thread is not None
+
+    async with the_first_write_parked():
+        await run_reply(session, "we go from the tavern to the docks")
+
+    assert ledger(store, thread) == "- scene: the docks"
+
+
+async def test_a_write_and_a_clear_of_one_entry_land_in_the_model_s_order() -> None:
+    """Set, then clear: the entry is gone. Run concurrently, the write
+    can commit after the clear and leave the note standing, which is the
+    reading a model would then be given as current."""
+    store = lane_memory()
+    script = ScriptedLlm(
+        [
+            [
+                call("set_state", key="scene", value="the tavern"),
+                call("clear_state", key="scene"),
+            ],
+            "That scene is over.",
+        ]
+    )
+    session = session_for(base_config(), POET_MAC, {"poet": script}, memory=store)
+    thread = events_of(session).conversation
+    assert thread is not None
+
+    async with the_first_write_parked():
+        await run_reply(session, "we are in a tavern, and then we are not")
+
     assert ledger(store, thread) == ""
 
 
