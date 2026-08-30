@@ -912,4 +912,188 @@ reviewable.
   remembering taken back out of the ordered lane, against both cap
   cases; the restore ordered by id alone, and decided one memory at a
   time, against the mixed case; and the restore dispatch arm removed.
+
+## M4: the operator surface
+
+PR TBD.
+
+### What landed
+
+In the order the commits tell it: the page contract the second
+paginated namespace needed, the routes, the noun in front of them, the
+documents, and one refusal the framework was answering wrongly.
+
+- **`paging.py`,** one home for what a page on the gated `/api` is: the
+  two bounds, the row-id ceiling, the two refusal sentences, the
+  whole-number parse and the one-row-more trick. The conversation
+  namespace wrote all of that and a second copy beside the memory
+  routes would have been the second structure that has to agree with
+  it. `conversations/api.py` asks this module now and re-exports the
+  two bounds under the names its suites already read them by; what
+  stays with it is the one cursor this contract does not cover, the
+  thread listing's pair, whose activity half is an instant.
+- **The store's operator door,** eight functions beside `purge` and on
+  a caller's connection for the same reason: `owners`,
+  `conversations_holding_memory`, `facts_of`, `correct`, `erase_fact`,
+  `erase_facts`, `ledger_of` and `clear_ledger`. Two rules run through
+  them and both are this door being a different door rather than a
+  second copy of the tools'. Every deletion is a hard delete, because
+  the held area is the spoken undo and belongs to the conversation that
+  forgot the fact. And a correction is held to the same cap invariant a
+  tool's write is: refused where its own line will not fit, and the
+  scope re-pruned inside the same transaction with the corrected row
+  protected from it.
+- **`memory/api.py`,** thirteen routes in the conversations-API shape,
+  registered from `_application()` with `_problems` handed in. Three
+  owner listings keyset-paginated on the owner text, two fact listings
+  paginated on the id, a correction and two deletions per fact scope,
+  and the conversation's ledger read whole and cleared one entry or all
+  of it. `MEMORY_PROBLEMS_INSTEAD` says what each status means here,
+  which for the 404 is a fact number or a ledger entry rather than an
+  entity of the stored configuration.
+- **The two values that never ride a URL.** A corrected fact and a
+  ledger key travel in a request body, parsed by this module's own
+  exact-shape readers, and the plan's finding 8 is what the assertions
+  are written from: no request either the routes or the CLI build
+  carries either in a path or a query string, asserted on the requests
+  themselves rather than reasoned about.
+- **`ApiRuntime` gains two fields,** a per-request reader and a
+  per-request write-transaction factory, both built in
+  `build_api_runtime` from the `DatabaseConfig` it already has. `app.py`
+  needed no change: the composition root hands that config over
+  already, which is what the conversation namespace's own two fields
+  are built from.
+- **The `memory` noun,** singular, three verbs, with the scope as the
+  first address segment because it is the first segment of every one of
+  the routes' own paths. `memory list agent` is who is remembering
+  anything and `memory list agent poet` is what one of them remembers,
+  the same words one level up; `memory set agent poet 7` reads the
+  corrected text from `-f` or from standard input; `memory delete`
+  takes a number or `--all`, and for a conversation reads one entry's
+  name from standard input. Registered `destroys=True`, so it asks at a
+  terminal and takes `--force`.
+- **What it prints.** Owners and conversations are borderless tables,
+  because every field of them is short. A fact and a ledger entry are
+  blocks, and the value itself is printed whole through `printable`
+  with no bound, which is the rule that module states for a value that
+  IS what the reader came for and the one `agent preview` already
+  draws: this command exists to show what an agent will be sent.
+- **The documents.** `api-openapi.json` and the generated region of
+  `cli.md` regenerate; the surfaces page counts five surfaces and
+  memory's row answers the retention question in three parts; the
+  server README's `vinga_ro` sentence is cashed in and the memory prose
+  gains what an operator types; the changelog carries the whole door.
+  `docs/README.md`'s reference bullets stay true and were checked
+  rather than assumed: there is no new generated page, because nobody
+  but the server reads memory's tables, and what is published is the
+  addressed surface in the two documents that already have bullets.
+  The census was regenerated after the README edit.
+- **`test_api_contract.py` gains no exclusion.** All thirteen
+  operations are covered by an act, which is what the three `selects`
+  hooks are for: a row's `does` is every act it can reach and its
+  `selects` is the one this invocation runs.
+- **The two lanes that drive every registered command drive these
+  three.** The live lane seeds memory through the store an agent writes
+  through, reads the owners and one agent's facts back over a real
+  uvicorn, pipes a correction in, and deletes a fact and a ledger; the
+  wheel lane does the same from a bare install, which is where the
+  piped correction is worth most, since what a subprocess reads on
+  standard input is what a script pipes into one. The refusal table
+  gains the family's own row: an addressed deletion of a number nothing
+  has, whose sentence is the server's and repeats neither the number
+  nor the owner.
+
+### Deviations from the plan
+
+Seven, and none changes what the milestone ships.
+
+- **The operator operations are module-level functions, not methods on
+  `MemoryStore`.** The plan says to give the store the operations it
+  lacks, and this is M2's `purge` deviation again for the same reason:
+  the routes open a connection for the length of one request through
+  `db`, so there is no store object to call a method on, and a store
+  would be a parameter no route has to give. The SQL still has one
+  home, which is the rule the plan is stating.
+- **The state deletion holds `erasure_order()` and consults no
+  dead-thread set.** The protocol's two halves exist for different
+  reasons and only one of them applies here. The order is taken,
+  because it is what makes this deletion and a transaction erasing the
+  same thread serialize rather than interleave, so the count answered
+  is a count of rows this request took. The dead set is not consulted,
+  because what it exists to stop is a write recreating a row for a
+  thread that is gone, and every statement this door issues against a
+  thread is a delete. It is also process state on the store instance,
+  which a per-request connection has no way to reach.
+- **`paging.py` is new, and the conversation namespace changed to use
+  it.** The plan names neither. It is the design guide's own rule
+  applied at the moment a second namespace paginates: two structures
+  that must agree are one structure with a bug pending.
+- **`request_body` moved from `config/api.py` to
+  `config/responses.py`.** Both API modules build one now, and
+  `memory/api.py` may not import `config/api.py`, which imports it to
+  register these routes. Nothing in the function is a FastAPI concern,
+  so it sits in the module that pays for pydantic alone; it gained a
+  `required` argument for the one optional body, the state deletion's.
+- **A fact's number is a string path parameter, parsed here.** Declared
+  as an integer it left two refusals wrong, and both are recorded above
+  in the commit that closed them: the framework's own refusal for a
+  path that will not parse is the body-shaped sentence this API
+  substitutes for its validation, and a number past the identity
+  column's range reached the driver and was answered as a storage
+  failure.
+- **`memory set conversation` is refused with a sentence of its own.**
+  The plan gives the ledger a read and a clear and no correction, and
+  the missing verb is a refusal rather than an unknown-scope error: what
+  is in a ledger is written by the agent as the conversation goes, and
+  an operator's correction of a live position would be a move nobody
+  made. The sentence says so and points at the clear.
+- **`ERASED_COUNTS` grew `facts` rather than getting a second tuple.**
+  What that tuple states is the order counts are read in, and there is
+  one such order; a memory erasure answers one of them and the block
+  prints the counts its answer carries.
+
+### Discoveries
+
+- **Two doors were normalizing a ledger key separately.** The tool's
+  `clear_state` and the operator's `clear_ledger` each wrote
+  `key == _one_line(key)`, which a mutation run found by accident: the
+  harness replaced the first occurrence and the guard it was aimed at
+  stayed green. `_clear_state` calls `clear_ledger` now, so the
+  statement has one home and what differs between the two doors is the
+  guard around it.
+- **`_refuse_the_oversized` could not stay a refusal.** Two doors ask
+  the same question and raise different things: a model's write leaves
+  as the `ValueError` the tool layer rephrases, and an operator's
+  correction leaves as the refusal this API answers a 422 with. It is a
+  predicate now, `_oversized`, and each door raises its own.
+- **A mutation harness has to assert its site is unique.** The one that
+  is not is the one that proves nothing, silently, because it mutates
+  something the selected test never runs. Every mutation below was
+  re-run under a count assertion after that.
+
+### Verification
+
+- `uv run ruff check .`: clean.
+- `uv run mypy`: clean (5 source files, the events package).
+- `uv run pytest tests/unit -q`: 4887 passed, 19 skipped.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`, the shape CI
+  runs: the same.
+- `uv run pytest tests/integration -q`: 233 passed.
+- The five generated documents (`domain-config.md`,
+  `conversations-schema.md`, `events.md`, `api-openapi.json`, `cli.md`)
+  each regenerate to their committed bytes; `api-openapi.json` and
+  `cli.md` are regenerated in this change and the other three are
+  unchanged. The command-spellings census was regenerated after the
+  README edit, and `python scripts/check_doc_links.py .` checked 172
+  files with no failures.
+- Every new guard was run against the mutation it exists for before
+  being trusted, nineteen of them: each of the four cursors ignored;
+  the correction not re-pruning, reaching a held fact, and accepting an
+  over-cap line; the addressed deletion reaching any owner; both 404s
+  dropped; the fact number left unparsed and unbounded; the board in
+  the path not normalized; the ledger key not normalized; the
+  whole-scope flag not required; a positional added for the corrected
+  text; the stored value bounded to a cell; a number allowed to address
+  a ledger entry; the scope left unchecked; the ledger correctable; and
+  the key put back into the path.
 - Not verified: the `image` job, which builds and smokes the container.
