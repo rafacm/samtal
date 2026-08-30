@@ -101,11 +101,17 @@ A device is hardware: buttons, microphone, speaker, display, battery,
 an identity (the `Device-Id` it presents), and perhaps a location
 ("the kitchen"). Under
 [thin device, smart server](architecture/guidelines.md#thin-device-smart-server)
-it holds no intelligence and no memory; it does not even know agents
-exist. What a device contributes to a conversation is *context*, never
-memory: its model, its capabilities ("you are speaking through a device
-with no display"), its location. Everything learned in conversation
-belongs to the agent, so replacing or moving hardware loses nothing.
+it holds no intelligence and stores nothing itself; it does not even
+know agents exist. What a device contributes to a conversation is
+*context*: its model, its capabilities ("you are speaking through a
+device with no display"), its location.
+
+What is learned in conversation about the place the device stands in is
+kept under its name, on the server, and shared by every agent bound to
+it: the room, the household, how the hardware here behaves. Everything
+learned about a person stays with the agent, which is one entity across
+rooms. So replacing or moving hardware loses only the device's own
+notes, and nothing anybody told an assistant about themselves.
 
 A device joins a deployment before any of this matters, and that is a
 solved problem rather than a planned one: the board is pointed at the
@@ -412,14 +418,33 @@ remembered thing is:
   the assistant would lose track of otherwise, and each name holds one
   current value that writing the same name again replaces.
 - **Device scope** is what is known about the place and its household,
-  shared by every agent bound to that device. Its tools arrive with the
-  editing family.
+  shared by every agent bound to that device: the room, who lives here,
+  how the hardware behaves. An assistant writes it with the same
+  `remember` tool, saying that the fact is the device's; everything
+  about a person stays in the agent's own scope.
 
 All three are present in every deployment: there is nothing to
 configure and nothing to switch on. They are stored in Postgres, in a
 schema of the server's own that it migrates at every boot (issue #314);
 the `memory:` section that used to name a directory of files has
 retired with the files.
+
+**What is remembered can be corrected, removed and brought back.**
+Every remembered fact has a number, which `remember` answers with and
+`recall` shows, and the number is what `update_memory` and `forget`
+address. Removing is soft: the assistant answers with what it took and
+is expected to say it out loud, so the user can ask for it back with
+`restore_memory`, and erasing something outright is a separate thing to
+ask for. An assistant reaches only its own facts and its device's, so a
+number that belongs to somebody else is answered exactly as a number
+that belongs to nobody.
+
+**The agent scope is bigger than a prompt, so the prompt carries the
+newest of it.** An agent may accumulate a thousand facts; what is
+injected is the newest few within a small budget, and everything else
+is reached with `recall`, which searches the injected part too, since
+that is where the numbers come from. The device scope and the
+conversation ledger are small enough to inject whole.
 
 The injected prompt states its own precedence, because the assistant is
 the one reader that cannot see where a line came from: the conversation
@@ -449,6 +474,16 @@ there starts with an empty ledger. Anything that should outlive the
 conversation has to be promoted to agent memory with `remember`, which
 is what a game agent's "save the game" and a tutor's "you have mastered
 this" actually are.
+
+**Where remembered things go.** They are stored on your own host and
+leave it only the way the rest of a prompt does: whatever is injected
+or looked up is sent to the agent's LLM provider with the reply it is
+part of, so a cloud provider sees it and a local one does not. The
+device scope is worth saying plainly: a note about the household
+reaches the provider of *every* agent bound to that device, not only
+the one that was told it. `server.local_only: true` is the existing
+guard, and it is a boot check rather than a promise: a server that
+starts under it has no provider that sends session data anywhere.
 
 Whether a *particular* agent may remember at all is not answerable
 today, deliberately: per-agent control arrives with the scopes' own
