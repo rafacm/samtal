@@ -2094,6 +2094,7 @@ This index is the other half: what exists, and when it fires.
 | `provider_reaches_loopback` | a provider entry built inside a container names this machine in its endpoint |
 | `memory_unreadable` | one scope of an agent's memory could not be read, so it remembers nothing of that scope this round |
 | `memory_unwritable` | a change an agent asked for could not be stored, so nothing was changed |
+| `memory_cleanup_failed` | the memory of conversations that are gone could not be removed, so the next sweep takes it |
 | `filler_disabled` | filler synthesis failed for one agent, so latency masking is off for it |
 | `capture_started` | a session is being recorded |
 | `capture_declined` | a session is not being recorded, and why |

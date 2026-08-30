@@ -44,6 +44,7 @@ from sqlalchemy import update as sql_update
 
 from vinga_server.config.loader import DatabaseBusyError, StorageError
 from vinga_server.config.models import DatabaseConfig
+from vinga_server.conversations.schema import conversations
 from vinga_server.db import (
     LOCK_TIMEOUT_MS,
     StoreChain,
@@ -53,7 +54,11 @@ from vinga_server.db import (
     read_engine,
 )
 from vinga_server.events import ServerEvents
-from vinga_server.events.catalog import MemoryUnreadable, MemoryUnwritable
+from vinga_server.events.catalog import (
+    MemoryCleanupFailed,
+    MemoryUnreadable,
+    MemoryUnwritable,
+)
 from vinga_server.events.values import ClassName, Identifier
 from vinga_server.memory import schema
 from vinga_server.memory.schema import MemoryScope
@@ -96,6 +101,16 @@ CORE_LINES = 40
 # ledger at all.
 STATE_BYTES = 4096
 STATE_KEYS = 50
+
+# How old an orphan has to be before the sweep takes it.
+#
+# A grace period rather than none, because state can precede its
+# thread's row: a thread materializes at its first turn, so a ledger
+# written before that turn lands has no thread to be found by and is not
+# an orphan yet. A day is long enough that no live conversation is ever
+# inside it and short enough that a deployment which never records
+# threads at all stays bounded.
+SWEEP_GRACE = dt.timedelta(days=1)
 
 # What a lookup answers with. Bounded because a match set is unbounded
 # by nature and a tool result is read by a model with a context window:
@@ -194,6 +209,23 @@ STATE_ENTRY_TOO_LONG = (
 MORE_MATCHED = (
     "More was remembered than fits here. Ask for something narrower to see the rest"
 )
+
+
+@dataclass(frozen=True)
+class Purged:
+    """How much of a thread's memory went with it.
+
+    Counted rather than assumed, because both callers answer with these
+    numbers: an erasure through the operator API reports what it took,
+    and the boot sweep reports what it healed.
+    """
+
+    state: int
+    held_facts: int
+
+
+# What a purge that had nothing to take, or could not take it, answers.
+NOTHING_PURGED = Purged(state=0, held_facts=0)
 
 
 @dataclass(frozen=True)
@@ -566,6 +598,118 @@ class MemoryStore:
             return int(landed)
 
         return self._written(agent, scope, work)
+
+    def purge(self, connection: Connection, threads: Sequence[str]) -> Purged:
+        """Take the memory of threads that are gone, on a connection the
+        caller already holds.
+
+        The seam the cross-store deletion is made of: this module owns
+        the SQL and the caller owns the transaction, so a thread's
+        erasure and its memory leave in the same commit and there is
+        never a moment when the thread is gone while its state remains.
+        That is also why nothing is contained here. A failure has to
+        reach the caller and take its transaction down with it, since a
+        purge that swallowed its own failure would let an erasure answer
+        with counts a rollback made false.
+
+        A thread's memory is its ledger and the facts it forgot. Active
+        facts are nobody's thread: they belong to the agent or the
+        device and outlive every conversation.
+        """
+        if not threads:
+            return NOTHING_PURGED
+        return Purged(
+            state=int(
+                connection.execute(
+                    delete(schema.state).where(
+                        schema.state.c.conversation.in_(threads)
+                    )
+                ).rowcount
+            ),
+            held_facts=int(
+                connection.execute(
+                    delete(schema.facts).where(
+                        schema.facts.c.forgotten_in.in_(threads)
+                    )
+                ).rowcount
+            ),
+        )
+
+    def purge_threads(self, threads: Sequence[str]) -> Purged:
+        """The same purge in a transaction of this store's own, for a
+        caller that holds none.
+
+        What a deployment with no conversation store needs at session
+        close: no thread rows land, so no erasure and no retention will
+        ever come for these, and a closed session's threads can never be
+        resumed. Contained like every other lifecycle cleanup, because
+        there is nobody to refuse: the session is going away either way.
+        """
+        return self._cleaned(lambda connection: self.purge(connection, threads))
+
+    def sweep(self, grace: dt.timedelta = SWEEP_GRACE) -> Purged:
+        """Take the state and the held facts of threads that have no
+        row in the conversation record and have not been written to for
+        a while.
+
+        Narrowed to what no transaction covers, which is what makes it a
+        heal rather than a policy: pre-upgrade leftovers, threads that
+        never landed a first turn, and deployments where no thread rows
+        land at all. Everything a thread erasure or a retention prune
+        reaches is taken inside those transactions instead.
+
+        The anti-join reads `record.conversations`, which is another
+        chain's table in the same database, and this module importing
+        that schema is the honest statement that the deletion promise
+        crosses schemas. It runs on the write engine because it deletes,
+        so it holds the memory chain's lock and nobody else's.
+
+        Contained, and reported as a cleanup rather than as a failed
+        read or write: there is no acting agent and no scope to name,
+        because what this answers for is every thread nobody owns.
+        """
+        cutoff = (_utc_now() - grace).isoformat()
+
+        def work(connection: Connection) -> Purged:
+            return Purged(
+                state=int(
+                    connection.execute(
+                        delete(schema.state).where(
+                            schema.state.c.updated_at < cutoff,
+                            ~_recorded(schema.state.c.conversation),
+                        )
+                    ).rowcount
+                ),
+                held_facts=int(
+                    connection.execute(
+                        delete(schema.facts).where(
+                            schema.facts.c.forgotten_in.is_not(None),
+                            schema.facts.c.forgotten_at < cutoff,
+                            ~_recorded(schema.facts.c.forgotten_in),
+                        )
+                    ).rowcount
+                ),
+            )
+
+        return self._cleaned(work)
+
+    def _cleaned(self, work: Callable[[Connection], Purged]) -> Purged:
+        """One cleanup transaction, contained whole.
+
+        Neither a read nor a write in the sense the other two seams
+        mean: nobody asked for it, nobody is waiting for the answer, and
+        there is no agent whose reply it belongs to. So a failure is not
+        refused to anybody and not attributed to anybody; it is said
+        once, by class, and the rows it did not take are taken by the
+        next boot.
+        """
+        try:
+            with self._connected(), self._engine.begin() as connection:
+                return work(connection)
+        except Exception as exc:  # noqa: BLE001 - the whole point of the seam
+            failure = exc
+            events.emit(lambda: MemoryCleanupFailed(error=ClassName.of(failure)))
+            return NOTHING_PURGED
 
     def read_for_prompt(
         self, agent: str, device: str, conversation: str
@@ -1024,6 +1168,22 @@ def _over_the_cap(
     return [row_id for row_id, _ in stored if row_id not in surviving]
 
 
+def _recorded(column: object) -> object:
+    """Whether a thread named by this column has a row in the
+    conversation record.
+
+    Read through the table another chain declares rather than through a
+    name written here: what makes a thread real is the record's own row,
+    and a copy of that table's name in this module would be a second
+    place to fix when it moves.
+    """
+    return (
+        select(conversations.c.id)
+        .where(conversations.c.conversation == column)
+        .exists()
+    )
+
+
 def _core(stored: Sequence[tuple[int, str]]) -> str:
     """The part of one agent's scope that is injected: the newest lines
     that fit, rendered in the order they were remembered.
@@ -1177,6 +1337,7 @@ __all__ = [
     "MEMORY_CHAIN",
     "MORE_MATCHED",
     "NOTHING_TO_LOOK_FOR",
+    "NOTHING_PURGED",
     "NOTHING_REMEMBERED",
     "NOTHING_TO_REMEMBER",
     "NOTHING_TO_SET",
@@ -1191,11 +1352,13 @@ __all__ = [
     "STATE_FULL",
     "STATE_KEYS",
     "STATE_TOO_MUCH",
+    "SWEEP_GRACE",
     "TOO_LONG",
     "UNWRITABLE",
     "MemoryScope",
     "MemoryStore",
     "PromptMemory",
+    "Purged",
     "StoreClosed",
     "open_memory",
 ]

@@ -9,7 +9,7 @@ The structured events are this server's observability surface
 ([ADR](../adr/2026-08-04-json-logs-are-the-observability-surface.md)), and
 they carry metadata and nothing else
 ([ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)).
-This document is that surface written down: 60 events in 85 variants. What was
+This document is that surface written down: 61 events in 86 variants. What was
 said in a conversation is in the conversation store instead, keyed by the same
 `session` ([its reference](conversations-schema.md)).
 
@@ -247,6 +247,7 @@ meets them, from a device's check-in to the server's own lifecycle surfaces.
 | `provider_reaches_loopback` | `vinga_server.providers.world` | WARNING | 1 |
 | `memory_unreadable` | `vinga_server.memory.store` | WARNING | 1 |
 | `memory_unwritable` | `vinga_server.memory.store` | WARNING | 1 |
+| `memory_cleanup_failed` | `vinga_server.memory.store` | WARNING | 1 |
 | `filler_disabled` | `vinga_server.filler` | WARNING | 1 |
 | `capture_started` | `vinga_server.capture` | INFO | 1 |
 | `capture_declined` | `vinga_server.capture` | WARNING | 3 |
@@ -1835,6 +1836,29 @@ could not write %s memory for agent %s (%s); nothing was changed
 | `agent` | `IDENTIFIER` | yes | no |  | The agent that was acting, by its configured name. |
 | `scope` | `TOKEN` | yes | no | one of: `agent`, `conversation`, `device` | Which memory the refused write was for. |
 | `error` | `CLASS_NAME` | yes | no |  |  |
+
+### `memory_cleanup_failed`
+
+State and held facts belonging to conversations that are gone could not be
+removed. Agent-free on purpose, beside the two events above: the boot sweep
+and a session's own teardown act for no agent and on no scope, so neither of
+the other two could report this honestly. Nothing is lost by a failure here
+except the space, and the next sweep takes what this one did not.
+
+#### Variant 1: `vinga_server.memory.store` at WARNING
+
+```text
+could not remove the memory of conversations that are gone (%s); the next sweep takes what this one did not
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `error` (`CLASS_NAME`) | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `error` | `CLASS_NAME` | yes | no |  | The class of the failure, and the whole of what this event carries. There is no agent and no scope, because what this answers for is the memory of threads nobody owns any more. |
 
 ### `filler_disabled`
 

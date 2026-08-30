@@ -840,6 +840,158 @@ def test_a_prompt_read_that_fails_loses_every_scope_and_says_so(
     assert all(record.exc_info is None for record in reported)
 
 
+# What goes when a thread goes
+#
+# A thread's memory is its ledger and the facts it forgot; its active
+# facts belong to the agent or the device and outlive every
+# conversation. Two doors onto the same deletes: one on a connection the
+# caller already holds, so an erasure takes both stores in one commit,
+# and one of the store's own for a caller that holds none.
+
+
+def _a_recorded_thread(conversation: str) -> None:
+    """A thread with a row in the conversation record, which is what
+    makes it real to the sweep's anti-join."""
+    holder = _connection()
+    try:
+        holder.execute(
+            "insert into record.conversations (conversation, agent, device, "
+            "created_at, last_active_at) values (%s, 'poet', 'aa:bb', %s, %s)",
+            (conversation, "2026-08-30T10:00:00+00:00", "2026-08-30T10:00:00+00:00"),
+        )
+        holder.commit()
+    finally:
+        holder.close()
+
+
+def _age_the_memory_of(conversation: str, when: str) -> None:
+    """Move one thread's ledger and held facts back in time, which is
+    how a suite reaches a grace period without waiting out a day."""
+    holder = _connection()
+    try:
+        holder.execute(
+            "update memory.state set updated_at = %s where conversation = %s",
+            (when, conversation),
+        )
+        holder.execute(
+            "update memory.facts set forgotten_at = %s where forgotten_in = %s",
+            (when, conversation),
+        )
+        holder.commit()
+    finally:
+        holder.close()
+
+
+async def _a_thread_with_memory(store, conversation: str) -> None:
+    await store.set_state(conversation, "turn", "white to move", agent="poet")
+    gone = await store.add(
+        MemoryScope.AGENT, "poet", f"a fact forgotten in {conversation}", agent="poet"
+    )
+    await store.forget(MemoryScope.AGENT, "poet", gone, conversation, agent="poet")
+
+
+async def test_purging_a_thread_takes_its_ledger_and_what_it_forgot() -> None:
+    store = memory()
+    await _a_thread_with_memory(store, THREAD)
+    await _a_thread_with_memory(store, OTHER_THREAD)
+    kept = await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
+
+    taken = store.purge_threads([THREAD])
+
+    assert taken == store_module.Purged(state=1, held_facts=1)
+    assert _state(THREAD) == []
+    assert [held for held, _ in _held("poet")] == [f"a fact forgotten in {OTHER_THREAD}"]
+    assert _state(OTHER_THREAD) == [("turn", "white to move")]
+    # And an active fact is nobody's thread: it belongs to the agent and
+    # outlives every conversation it was said in.
+    assert _rows("poet") == ["the user is vegetarian"]
+    assert kept > 0
+
+
+async def test_purging_nothing_reaches_no_connection() -> None:
+    store = memory()
+    await _a_thread_with_memory(store, THREAD)
+
+    assert store.purge_threads([]) == store_module.NOTHING_PURGED
+    assert _state(THREAD) == [("turn", "white to move")]
+
+
+async def test_a_purge_on_a_callers_connection_belongs_to_its_transaction() -> None:
+    """The seam the cross-store deletion is made of: the caller owns the
+    transaction, so a rollback takes the memory deletes with it and
+    there is no moment when a thread is gone while its state remains."""
+    from vinga_server.db import write_engine
+
+    store = memory()
+    await _a_thread_with_memory(store, THREAD)
+
+    engine = write_engine(DatabaseConfig(), MEMORY_CHAIN)
+    try:
+        with engine.connect() as connection:
+            with connection.begin() as transaction:
+                taken = store.purge(connection, [THREAD])
+                transaction.rollback()
+    finally:
+        engine.dispose()
+
+    assert taken == store_module.Purged(state=1, held_facts=1)
+    # The counts were true of the transaction that was rolled back, and
+    # the rows are exactly where they were.
+    assert _state(THREAD) == [("turn", "white to move")]
+    assert len(_held("poet")) == 1
+
+
+async def test_the_sweep_takes_an_orphan_older_than_the_grace_period() -> None:
+    """Narrowed to what no transaction covers. A thread the record
+    knows is not the sweep's business however old it is, and one it does
+    not know is not the sweep's business yet: state can precede its
+    thread's first turn."""
+    store = memory()
+    await _a_thread_with_memory(store, THREAD)
+    await _a_thread_with_memory(store, OTHER_THREAD)
+    recorded = "abcdef0123456789abcdef0123456789"
+    await _a_thread_with_memory(store, recorded)
+    _a_recorded_thread(recorded)
+
+    # One orphan aged past the grace period, one left where it is, and
+    # the recorded thread aged too so that age alone cannot be what
+    # takes it.
+    long_ago = "2020-01-01T00:00:00+00:00"
+    _age_the_memory_of(THREAD, long_ago)
+    _age_the_memory_of(recorded, long_ago)
+
+    taken = store.sweep()
+
+    assert taken == store_module.Purged(state=1, held_facts=1)
+    assert _state(THREAD) == []
+    # The young orphan is still there, which is the whole reason the
+    # grace period exists: a thread materializes at its first turn.
+    assert _state(OTHER_THREAD) == [("turn", "white to move")]
+    assert _state(recorded) == [("turn", "white to move")]
+    assert [held for held, _ in _held("poet")] == [
+        f"a fact forgotten in {OTHER_THREAD}",
+        f"a fact forgotten in {recorded}",
+    ]
+
+
+def test_a_cleanup_that_cannot_reach_its_database_says_so_and_takes_nothing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Neither a read nor a write in the sense the other two seams mean:
+    nobody asked for it and no agent's reply depends on it, so the
+    failure is said once, by class, with no agent and no scope."""
+    store = memory_that_cannot_write()
+
+    with caplog.at_level("WARNING"):
+        assert store.sweep() == store_module.NOTHING_PURGED
+
+    record = only(caplog, "memory_cleanup_failed")
+    assert record.error == "OperationalError"
+    assert record.exc_info is None
+    assert not hasattr(record, "agent")
+    assert not hasattr(record, "scope")
+
+
 # The cap invariant, across every mutation
 #
 # Held rows are outside all of it: never counted, never pruned, still
