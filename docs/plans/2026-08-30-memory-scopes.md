@@ -169,7 +169,16 @@ the model finds an id to update or forget); `set_state(key, value)`
 and `clear_state(key)` for the conversation ledger. State needs no
 undo: it is a current-truth ledger with overwrite semantics, not a
 record of the user's words, and the soft-deletion decision is about
-facts. All seven join `BUILTIN_TOOL_NAMES`, which reserves them as
+facts. Every id-addressed operation is bounded by ownership in its
+WHERE clause, not by the model's good behavior: `update_memory`,
+`forget` and `restore_memory` reach exactly the rows whose
+`(scope, owner)` is the current agent's or the current device's, and
+a restore by id additionally requires `forgotten_in` to be the
+current conversation, matching the no-id path's meaning. A missing
+id and an inaccessible one are indistinguishable on purpose,
+answered by one fixed sentence, because a distinguishable refusal
+would confirm that another owner's ids exist. All seven join
+`BUILTIN_TOOL_NAMES`, which reserves them as
 MCP entry names; the one-tuple hinge propagates ownership, turn
 classification and the reservation rule, and the reservation growth
 is a flagged compatibility note (a deployment with an MCP entry
@@ -454,7 +463,10 @@ Named by role, homes confirmed against the authority taxonomy:
     round n is out of round n+1's system prompt within the same
     reply (the working-copy clock); the full three-block rendering
     with the precedence sentences, and the agent-only rendering
-    byte-identical to today's.
+    byte-identical to today's; the ownership negatives (another
+    agent's fact id, another device's, a restore against a fact
+    forgotten in another conversation), each answered by the one
+    fixed refusal and each proven to change nothing in the store.
   - *Operator surface*: the conversations-API property set applied
     to `/memory`: nothing a caller sends quoted back (sentinel hunt
     through bodies, both log formats, process output), cursors
@@ -605,6 +617,13 @@ resolution.
    or device's fact. Specify the predicates for every id-addressed
    operation, one fixed refusal for missing and inaccessible alike,
    and cross-agent, cross-device, cross-conversation negative tests.
+
+   *Resolution*: adopted whole: the predicates are stated as WHERE
+   clauses on the current agent, current device, and (for restore by
+   id) the current conversation; missing and inaccessible share one
+   fixed sentence so a refusal confirms nothing; the three negative
+   families are named in the tools tests, each proven to change
+   nothing in the store.
 
 4. **P1: recall excludes the facts whose ids editing needs.** The
    injected core shows no ids and recall searches only what is not
