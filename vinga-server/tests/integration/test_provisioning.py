@@ -50,6 +50,7 @@ from pathlib import Path
 
 import psycopg
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from tests.conftest import reset_database
@@ -65,10 +66,16 @@ from vinga_server.db import (
     UNREACHABLE,
     connection_url,
     open_database,
+    read_engine,
 )
 from vinga_server.db import schema as domain_schema
-from vinga_server.memory import open_memory
+from vinga_server.memory import MEMORY_CHAIN, open_memory
 from vinga_server.memory import schema as memory_schema
+
+# The head of the packaged memory chain, which is one revision. Written
+# here rather than derived, for the reason the sibling suites write
+# theirs: a chain that moved has to move this line, deliberately.
+MEMORY_HEAD = "2001_agent_memory"
 
 PROVISIONING = Path(__file__).resolve().parents[3] / "deploy" / "postgres-init.sql"
 
@@ -712,6 +719,87 @@ def test_a_deployment_on_the_two_schema_shape_upgrades_by_rerunning_it(
         assert _as_analyst(blank_database, f"select * from memory.{table.name}") == (
             "refused: 42501"
         ), table.name
+
+
+def _restricted_app(database: str, server_role: str):
+    """One application described the way a deployment's is, pointed at a
+    database this restricted role connects to.
+
+    Built rather than entered: `create_app` acquires nothing, so the
+    caller decides when the boot happens by entering the lifespan.
+    """
+    from tests.support.configs import config_with_agent
+    from vinga_server.app import create_app
+
+    return create_app(
+        config_with_agent(server={"database": {"name": database, "user": server_role}})
+    )
+
+
+def test_a_boot_on_the_two_schema_shape_refuses_until_the_file_is_rerun(
+    blank_database: str, server_role: str
+) -> None:
+    """The choreography as a deployment meets it, through the lifespan
+    that runs it rather than through the opener underneath.
+
+    Every other case here calls `open_memory` directly, which says what
+    the opener does and nothing about whether the boot calls it. Deleting
+    that call from the composition would leave those green and ship an
+    image whose memory schema is never migrated, so this one drives the
+    application: entered against the previous two-schema shape it must
+    refuse with the sentence naming the rerun, and entered again after
+    the administrator has rerun the file it must come up with the chain
+    at head.
+
+    The refusal is read where `main()` reads it, and its chain is
+    asserted empty, because uvicorn renders a lifespan exception as a
+    traceback and what psycopg raised holds the DSN it connected on.
+    """
+    _require_the_file()
+    from vinga_server.app import StartupFailed, startup_failure
+
+    _the_two_schema_shape(blank_database, server_role)
+    settings = _as_server_role(blank_database, server_role)
+
+    refused = _restricted_app(blank_database, server_role)
+    with pytest.raises(StartupFailed) as raised:
+        with TestClient(refused):
+            pass
+
+    assert startup_failure(refused) == SCHEMA_NOT_PERMITTED
+    assert str(raised.value) == SCHEMA_NOT_PERMITTED
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
+    assert _memory_head(settings) == [], "a refused boot migrated the schema anyway"
+
+    _run_the_file(blank_database, server_role)
+
+    booted = _restricted_app(blank_database, server_role)
+    with TestClient(booted):
+        assert startup_failure(booted) is None
+        assert _memory_head(settings) == [MEMORY_HEAD]
+
+
+def _memory_head(settings: DatabaseConfig) -> list[str]:
+    """What the memory chain is stamped at in one database, or nothing
+    at all when the schema is not there."""
+    engine = read_engine(settings)
+    try:
+        with engine.connect() as connection:
+            found = connection.execute(
+                text("select to_regnamespace(:name) is not null"),
+                {"name": MEMORY_CHAIN.schema},
+            ).scalar()
+            if not found:
+                return []
+            return [
+                row[0]
+                for row in connection.execute(
+                    text(f"select * from {MEMORY_CHAIN.schema}.alembic_version")
+                )
+            ]
+    finally:
+        engine.dispose()
 
 
 def test_a_schema_under_the_wrong_owner_is_not_told_to_rerun_the_file(
