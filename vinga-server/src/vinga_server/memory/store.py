@@ -825,7 +825,7 @@ class MemoryStore:
             return NOTHING_PURGED
 
     def read_for_prompt(
-        self, agent: str, device: str, conversation: str
+        self, agent: str, device: str | None, conversation: str
     ) -> PromptMemory:
         """Everything this reply's prompt needs to know, in one round
         trip.
@@ -845,6 +845,12 @@ class MemoryStore:
         scope, because the whole of it stopped fitting in a prompt when
         the storage cap grew past it; what is not injected is what the
         lookup is for.
+
+        A device that never identified itself has no device scope, and
+        that is said with None rather than reached with an owner nothing
+        matches: an empty string is a name a row could be stored under,
+        and answering "no rows" by accident is not the same as saying
+        there is nothing to read.
         """
         return self._read(
             agent,
@@ -852,7 +858,11 @@ class MemoryStore:
             lambda connection: PromptMemory(
                 state=_ledger_rendered(_ledger(connection, conversation)),
                 agent=_core(_active(connection, MemoryScope.AGENT, agent)),
-                device=_rendered(_active(connection, MemoryScope.DEVICE, device)),
+                device=(
+                    ""
+                    if device is None
+                    else _rendered(_active(connection, MemoryScope.DEVICE, device))
+                ),
             ),
             NOTHING_REMEMBERED,
         )

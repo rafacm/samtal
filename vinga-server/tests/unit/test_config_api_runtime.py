@@ -65,6 +65,7 @@ from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
 from vinga_server.config.store import ConfigStore
 from vinga_server.db import open_database
 from vinga_server.logs import JsonFormatter
+from vinga_server.memory.store import PromptMemory
 from vinga_server.runtime import prompt
 from vinga_server.runtime.prompt import Guidance
 from vinga_server.tools.mcp import (
@@ -75,6 +76,13 @@ from vinga_server.tools.mcp import (
 )
 
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
+
+
+def remembered(facts: str) -> PromptMemory:
+    """The agent's own scope alone, which is the whole of what this
+    preview ever shows: the other two blocks belong to a session and this
+    route is keyed by the agent."""
+    return PromptMemory(state="", agent=facts, device="")
 
 API_SECRET_ENV = "VINGA_API_SECRET"
 
@@ -685,8 +693,9 @@ def test_an_agent_this_server_is_not_serving_is_a_404_naming_the_reload(
 
 
 def test_the_blocks_and_the_total_are_the_assemblers_own(database: DatabaseConfig) -> None:
-    assembled = prompt.with_memory(
-        prompt.know_how("POET", guidance=[Guidance("home", "Ask first.")]), "- a fact"
+    assembled = prompt.with_scopes(
+        prompt.know_how("POET", guidance=[Guidance("home", "Ask first.")]),
+        remembered("- a fact"),
     )
 
     with serving(database, None, agent_prompt=previewing(assembled)) as client:
@@ -748,13 +757,13 @@ def test_a_fragment_is_counted_on_the_surface_under_its_own_provenance(
     which is what makes the fragment section's cost visible rather than
     only its existence."""
     written = "The bins go out on Tuesday."
-    assembled = prompt.with_memory(
+    assembled = prompt.with_scopes(
         prompt.know_how(
             "POET",
             [prompt.Fragment("household", written)],
             [Guidance("home", "Ask first.")],
         ),
-        "- a fact",
+        remembered("- a fact"),
     )
 
     with serving(database, None, agent_prompt=previewing(assembled)) as client:

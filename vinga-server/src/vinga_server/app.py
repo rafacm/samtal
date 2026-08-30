@@ -46,7 +46,7 @@ from vinga_server.events.live import LiveEvents
 from vinga_server.events.values import ConfiguredPath
 from vinga_server.filler import build_agent_fillers
 from vinga_server.generation import Generation, Generations
-from vinga_server.memory.store import MemoryStore, open_memory
+from vinga_server.memory.store import MemoryStore, PromptMemory, open_memory
 from vinga_server.providers import ProviderError, build_world
 from vinga_server.registry import SessionRegistry
 from vinga_server.runtime import prompt
@@ -866,6 +866,13 @@ def _prompt_preview(
     read is a database round trip and goes to a worker thread, which is
     what keeps an inspection request off the loop every live
     conversation is on.
+
+    Agent-keyed, and only that. What this renders is what a fresh
+    session with no device and no thread behind it would be sent, so the
+    agent's own scope is read and the other two are empty: a preview that
+    invented a device to show its notes, or a conversation to show its
+    ledger, would be a second prompt assembler pretending to be the
+    first. The route's own description says so where a caller reads it.
     """
 
     async def assemble(agent: str) -> prompt.Assembled | None:
@@ -877,7 +884,8 @@ def _prompt_preview(
             config.fragments_for_agent(agent),
             servers.guidance_for_agent(agent),
         )
-        return prompt.with_memory(half, await asyncio.to_thread(memory.read, agent))
+        facts = await asyncio.to_thread(memory.read, agent)
+        return prompt.with_scopes(half, PromptMemory(state="", agent=facts, device=""))
 
     return assemble
 

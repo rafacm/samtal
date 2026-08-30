@@ -14,11 +14,12 @@ the guidance of each MCP entry it is granted) is assembled once per
 activation, at session open and
 again at an agent switch, and cached for the life of that activation:
 nothing about it is recomputed per reply and nothing is fetched while
-it is assembled. The **memory block** keeps the clock it already had,
-read on every round and appended to the cached half, because that read
-predates this module and its per-reply freshness is a contract today's
-code documents: a fact remembered in one session is known to a
-concurrent one on its next reply.
+it is assembled. The **memory blocks** keep the clock the first of them
+already had, read on every round and appended to the cached half,
+because that read predates this module and its per-reply freshness is a
+contract today's code documents: a fact remembered in one session is
+known to a concurrent one on its next reply, and a note written in one
+round is read in the next.
 
 Everything here is a pure function over text. What each caller needs
 beyond the prompt itself is the accounting: which block came from
@@ -36,8 +37,12 @@ it is read in that voice; the shared fragments next, in the order the
 including layer lists them, because they are standing context the
 persona speaks within; the guidance blocks after those in grant order,
 each under a one-line heading naming the prefix its tools carry,
-because they are about the tools rather than about the speaker; the
-remembered facts last, which is where they already were.
+because they are about the tools rather than about the speaker; and
+what memory holds last, which is where the remembered facts already
+were. Those last blocks are three, in the order they take precedence in
+and under headings that say so: what is currently true in this
+conversation, what the agent remembers about the user, and what is
+known about the device and its household.
 
 One entry contributes up to three guidance blocks, and their order is
 the order the trust decisions were taken: what the operator wrote about
@@ -50,19 +55,54 @@ that cannot see the provenance every other surface reports.
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from vinga_server.tools import names
+
+if TYPE_CHECKING:
+    # Named for the annotation alone, the trade `tools/source.py` makes
+    # for the same reason: saying which value this module renders should
+    # not make the assembly import a database driver.
+    from vinga_server.memory.store import PromptMemory
 
 # The heading the remembered facts are injected under, as the model
 # reads them. Moved here with the assembly it belongs to.
 MEMORY_HEADING = "You remember these facts about past conversations:"
+
+# And the two beside it, one per scope of memory that is not the agent's
+# own. Each states its own rank, because the model is the one reader that
+# cannot see the ordering any other way: the blocks arrive as text, in
+# one document, and "most current wins" has to be said in it.
+#
+# The state block says it from the top, since it outranks everything
+# after it; the device block says it from below, since everything before
+# it outranks it. Neither names the other by heading, so a deployment
+# with only one of them still reads as a whole sentence.
+STATE_HEADING = (
+    "The current state of this conversation. When anything below disagrees with "
+    "this, this is current:"
+)
+
+DEVICE_HEADING = (
+    "Notes about this device and its household. The conversation and the remembered "
+    "facts above take precedence:"
+)
 
 # What a block says about where it came from. Fixed tokens this
 # application owns: they are printed by the CLI, carried in a structured
 # event and keyed in an API response, so none of them is ever a value
 # that arrived from somewhere else.
 PERSONA = "persona"
+
+# One token per scope, and not one for memory as a whole, because
+# `Assembled.sizes()` is keyed by provenance: three blocks under one
+# token would collapse into one number in the event and in the
+# accounting, and what an operator tunes against is what each of them
+# costs. `memory` keeps its name for the agent's own facts, which is
+# what it has always meant.
 MEMORY = "memory"
+STATE = "state"
+DEVICE = "device"
 
 # The operator's own guidance about one MCP entry, qualified by the
 # entry name, which is safe to print by construction: an entry name has
@@ -223,10 +263,10 @@ class Assembled:
     ordered blocks it was made of.
 
     Both halves of the split live in this one type. `know_how` answers
-    with the cached half, and `with_memory` answers with that half plus
-    a memory block, so what a session hands the model and what the
-    inspection surface reports are the same shape built by the same
-    code.
+    with the cached half, and `with_scopes` answers with that half plus
+    the blocks this round's memory holds, so what a session hands the
+    model and what the inspection surface reports are the same shape
+    built by the same code.
     """
 
     blocks: tuple[Block, ...]
@@ -314,19 +354,51 @@ def _guidance_block(block: GuidanceBlock) -> Block:
     )
 
 
-def with_memory(half: Assembled, facts: str) -> Assembled:
-    """The cached know-how half with whatever the agent remembers
-    appended, which is the prompt one round is sent.
+def with_scopes(half: Assembled, scopes: "PromptMemory") -> Assembled:
+    """The cached know-how half with everything this round's memory
+    holds appended, which is the prompt one round is sent.
 
     Read per round rather than per activation, so a fact remembered in
-    one session is known to a concurrent one on its next reply. `facts`
-    is passed in rather than read here: the read is filesystem I/O and
-    belongs off the event loop, and this stays a pure function of the
-    text it is handed.
+    one session is known to a concurrent one on its next reply, and a
+    note written in one round is read in the next. `scopes` is passed in
+    rather than read here: the read is a database round trip and belongs
+    off the event loop, and this stays a pure function of the text it is
+    handed.
+
+    Three blocks in one fixed order, which is also their precedence: what
+    this conversation is currently doing, what the agent knows about the
+    user, what the place knows. A scope holding nothing contributes no
+    block at all, so a deployment whose agents use none of this sends
+    exactly what it sent before there were scopes, byte for byte, and one
+    that uses only the ledger gets one block rather than three headings
+    over two empty ones.
     """
-    if not facts:
+    blocks = [
+        block
+        for block in (
+            _scope_block(STATE, STATE_HEADING, scopes.state),
+            _scope_block(MEMORY, MEMORY_HEADING, scopes.agent),
+            _scope_block(DEVICE, DEVICE_HEADING, scopes.device),
+        )
+        if block is not None
+    ]
+    if not blocks:
         return half
-    return _assembled([*half.blocks, Block(MEMORY, f"{MEMORY_HEADING}\n{facts}")])
+    return _assembled([*half.blocks, *blocks])
+
+
+def _scope_block(provenance: str, heading: str, rendered: str) -> Block | None:
+    """One scope's block, or nothing at all where the scope holds
+    nothing.
+
+    None rather than an empty block, and the difference is what the
+    caller does with it: an empty block would be dropped by `_assembled`
+    anyway, but it would also be reported at zero characters by a surface
+    whose whole job is saying what the model received.
+    """
+    if not rendered:
+        return None
+    return Block(provenance, f"{heading}\n{rendered}")
 
 
 def _assembled(blocks: Sequence[Block]) -> Assembled:
@@ -373,6 +445,8 @@ def _assembled(blocks: Sequence[Block]) -> Assembled:
 
 
 __all__ = [
+    "DEVICE",
+    "DEVICE_HEADING",
     "FRAGMENT",
     "INSTRUCTIONS",
     "MEMORY",
@@ -380,6 +454,8 @@ __all__ = [
     "PERSONA",
     "SERVER_INSTRUCTIONS",
     "SERVER_PROMPT",
+    "STATE",
+    "STATE_HEADING",
     "Assembled",
     "Block",
     "Fragment",
@@ -395,5 +471,5 @@ __all__ = [
     "server_instructions_provenance",
     "server_prompt_heading",
     "server_prompt_provenance",
-    "with_memory",
+    "with_scopes",
 ]

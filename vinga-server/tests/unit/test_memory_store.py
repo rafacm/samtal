@@ -1314,18 +1314,29 @@ def test_the_tool_asks_for_one_short_fact() -> None:
 async def test_remembered_facts_reach_the_model_through_the_prompt() -> None:
     """What the store holds, as the assembler injects it. The assembly
     itself is `test_runtime_prompt.py`; what this pins is that the two
-    ends meet: one agent's rows are one agent's facts."""
+    ends meet: one agent's rows are one agent's facts, and one
+    conversation's ledger is one conversation's."""
     store = memory()
     half = prompt.know_how("POET")
-    assert prompt.with_memory(half, store.read("poet")).text == "POET"
+    assert prompt.with_scopes(half, store.read_for_prompt("poet", None, THREAD)).text == "POET"
 
     await store.remember("poet", "the user is vegetarian")
-    assembled = prompt.with_memory(half, store.read("poet")).text
+    await store.set_state(THREAD, "scene", "the tavern", agent="poet")
+    assembled = prompt.with_scopes(
+        half, store.read_for_prompt("poet", None, THREAD)
+    ).text
     assert assembled.startswith("POET")
-    assert prompt.MEMORY_HEADING in assembled
-    assert "- the user is vegetarian" in assembled
-    # Another agent's prompt is untouched by it.
-    assert prompt.with_memory(prompt.know_how("TUTOR"), store.read("tutor")).text == "TUTOR"
+    assert f"{prompt.MEMORY_HEADING}\n- the user is vegetarian" in assembled
+    assert f"{prompt.STATE_HEADING}\n- scene: the tavern" in assembled
+    # Another agent's prompt, and another conversation's, are untouched
+    # by both.
+    assert (
+        prompt.with_scopes(
+            prompt.know_how("TUTOR"),
+            store.read_for_prompt("tutor", None, OTHER_THREAD),
+        ).text
+        == "TUTOR"
+    )
 
 
 # The caps, applied where a crash cannot land between them
