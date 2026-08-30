@@ -32,7 +32,10 @@ What a caller gets, in the order the sentences are met:
   answers with and bounded by the ownership of the row rather than by
   the model's good behavior. One door onto keeping a fact, whichever
   scope it belongs to, so the rules a fact is held to cannot differ by
-  which sentence a caller happened to speak.
+  which sentence a caller happened to speak. `restore` is addressed by
+  every memory the caller may reach rather than by one of them, because
+  with no id it is a choice among rows and which memory holds the newest
+  of them is its answer to give.
 - `recall(agent, device, query)`, a bounded lookup over every active
   fact those two scopes hold, which is how the model reaches what the
   prompt did not inject and how it learns the number of a fact it wants
@@ -617,7 +620,10 @@ class MemoryStore:
             return empty
 
     def _written(
-        self, agent: str, scope: MemoryScope, work: Callable[[Connection], T]
+        self,
+        agent: str,
+        scopes: Sequence[MemoryScope],
+        work: Callable[[Connection], T],
     ) -> T:
         """One transaction on the write engine, its failures classified
         and never quoted.
@@ -643,6 +649,13 @@ class MemoryStore:
         exception raised while another is being handled keeps that one on
         `__context__`, and here that one holds the connection string it
         tried.
+
+        `scopes` and not one scope, for the reason `_read` takes a
+        sequence: one write can reach into more than one of them, and a
+        restore with no number reaches into every memory this caller can
+        address to find the newest thing it lost. What a failure costs is
+        all of them, so all of them are said, and a report naming one
+        would be a guess about which row the statement never found.
         """
         problem: Exception
         try:
@@ -652,13 +665,14 @@ class MemoryStore:
             problem = ValueError(str(refusal))
         except Exception as exc:  # noqa: BLE001 - classified, never quoted
             failure = exc
-            events.emit(
-                lambda: MemoryUnwritable(
-                    agent=Identifier(agent),
-                    scope=scope,
-                    error=ClassName.of(failure),
+            for scope in scopes:
+                events.emit(
+                    lambda scope=scope: MemoryUnwritable(  # type: ignore[misc]
+                        agent=Identifier(agent),
+                        scope=scope,
+                        error=ClassName.of(failure),
+                    )
                 )
-            )
             # By class and never by message, through the one classifier
             # `db` owns: a contended write is retryable and says so, and
             # everything else is the general refusal.
@@ -710,7 +724,7 @@ class MemoryStore:
             _prune(connection, scope, owner, protecting=landed)
             return int(landed)
 
-        return self._written(agent, scope, work)
+        return self._written(agent, (scope,), work)
 
     def purge_threads(self, threads: Sequence[str]) -> Purged:
         """The same purge in a transaction of this store's own, for a
@@ -910,7 +924,7 @@ class MemoryStore:
             # the corrected row is the one it may not take.
             _prune(connection, scope, owner, protecting=fact_id)
 
-        self._written(agent, scope, work)
+        self._written(agent, (scope,), work)
 
     async def forget(
         self,
@@ -978,9 +992,9 @@ class MemoryStore:
             # Nothing thread-keyed happens: the row is erased rather than
             # held, so no conversation owns anything afterwards and the
             # erasure of one cannot be undone by this.
-            return self._written(agent, scope, work)
+            return self._written(agent, (scope,), work)
         return self._thread_keyed(
-            conversation, lambda: self._written(agent, scope, work)
+            conversation, lambda: self._written(agent, (scope,), work)
         )
 
     async def set_state(
@@ -1051,7 +1065,8 @@ class MemoryStore:
                 )
 
         self._thread_keyed(
-            conversation, lambda: self._written(agent, MemoryScope.CONVERSATION, work)
+            conversation,
+            lambda: self._written(agent, (MemoryScope.CONVERSATION,), work),
         )
 
     async def clear_state(
@@ -1074,13 +1089,13 @@ class MemoryStore:
             return int(connection.execute(delete(schema.state).where(*where)).rowcount)
 
         return self._thread_keyed(
-            conversation, lambda: self._written(agent, MemoryScope.CONVERSATION, work)
+            conversation,
+            lambda: self._written(agent, (MemoryScope.CONVERSATION,), work),
         )
 
     async def restore(
         self,
-        scope: MemoryScope,
-        owner: str,
+        owners: Sequence[tuple[MemoryScope, str]],
         conversation: str,
         fact_id: int | None = None,
         *,
@@ -1088,37 +1103,58 @@ class MemoryStore:
     ) -> str:
         """Bring back a fact this conversation forgot, and answer it.
 
-        With no id, the last thing forgotten in this conversation, which
-        is the shape a person actually asks for. With one, that fact, and
-        the conversation is still part of the address: a fact forgotten
-        somewhere else is not this conversation's to bring back, which
-        makes the id door mean what the no-id door means.
+        Addressed by every memory the caller may reach rather than by one
+        of them, because with no id this is a choice among rows: the last
+        thing forgotten in this conversation, which is the shape a person
+        actually asks for, and which memory that fact was in is the
+        answer rather than the question. Deciding it one memory at a time
+        would answer with the newest thing the first memory lost, which
+        on a conversation that forgot one fact and one note is the older
+        of the two.
+
+        With an id, that fact, and the conversation is still part of the
+        address: a fact forgotten somewhere else is not this
+        conversation's to bring back, which makes the id door mean what
+        the no-id door means. It is bounded by the same owners, so a
+        number belonging to a memory this caller cannot reach is answered
+        exactly as a number belonging to nobody.
+
+        One statement over both memories inside one transaction, under
+        the chain's lock, which is what makes "the last thing" true of
+        the moment it lands rather than of a read that raced a write.
 
         The restored fact comes back exactly as it was said. Its id is
         the one it always had, and its place in the reading order is the
         one it always had, because the held area kept the row rather than
         a copy of its text.
         """
-        _only_a_fact_scope(scope)
+        for scope, _ in owners:
+            _only_a_fact_scope(scope)
         return await asyncio.to_thread(
-            self._restore, agent, scope, owner, conversation, fact_id
+            self._restore, agent, owners, conversation, fact_id
         )
 
     def _restore(
         self,
         agent: str,
-        scope: MemoryScope,
-        owner: str,
+        owners: Sequence[tuple[MemoryScope, str]],
         conversation: str,
         fact_id: int | None,
     ) -> str:
         def work(connection: Connection) -> str:
-            held = select(schema.facts.c.id, schema.facts.c.fact).where(
-                schema.facts.c.scope == scope,
-                schema.facts.c.owner == owner,
+            held = select(
+                schema.facts.c.id,
+                schema.facts.c.fact,
+                schema.facts.c.scope,
+                schema.facts.c.owner,
+            ).where(
+                _owned_by(owners),
                 schema.facts.c.forgotten_in == conversation,
             )
             if fact_id is None:
+                # Newest by when it was forgotten, and the id breaks a
+                # tie: two rows can carry one timestamp, and an order
+                # that stopped there would be the database's to pick.
                 held = held.order_by(
                     schema.facts.c.forgotten_at.desc(), schema.facts.c.id.desc()
                 ).limit(1)
@@ -1134,14 +1170,17 @@ class MemoryStore:
             )
             # The scope may have refilled while the fact was held, so a
             # restore re-prunes like every other mutation rather than
-            # failing or leaving the scope over its cap. The restored row
-            # is protected: a prune that took it would answer success and
+            # failing or leaving the scope over its cap. It prunes the
+            # memory the row is actually in, which is the row's own pair
+            # and not the caller's first guess, and the restored row is
+            # protected: a prune that took it would answer success and
             # change nothing.
-            _prune(connection, scope, owner, protecting=int(found[0]))
+            _prune(connection, found[2], found[3], protecting=int(found[0]))
             return str(found[1])
 
         return self._thread_keyed(
-            conversation, lambda: self._written(agent, scope, work)
+            conversation,
+            lambda: self._written(agent, [scope for scope, _ in owners], work),
         )
 
 
@@ -1233,6 +1272,22 @@ def _addressed(scope: MemoryScope, owner: str, fact_id: int) -> tuple[object, ..
         schema.facts.c.id == fact_id,
         schema.facts.c.scope == scope,
         schema.facts.c.owner == owner,
+    )
+
+
+def _owned_by(owners: Sequence[tuple[MemoryScope, str]]) -> object:
+    """One WHERE clause over every memory a caller may reach.
+
+    The same bound `_addressed` states for one of them, said once for a
+    set: what an operation reaches is a row whose `(scope, owner)` is one
+    of the pairs the caller named, so a caller that named its own agent
+    and its own device cannot touch anything else by guessing a number.
+    """
+    return or_(
+        *(
+            and_(schema.facts.c.scope == scope, schema.facts.c.owner == owner)
+            for scope, owner in owners
+        )
     )
 
 
