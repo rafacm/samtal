@@ -397,7 +397,7 @@ def test_the_lifespan_migrates_the_memory_schema_and_lets_it_go(
     with TestClient(app):
         assert len(opened) == 1, "the boot opened no memory store"
         assert closed == [], "the memory store was let go while the server was serving"
-        assert memory_head(blank_database) == ["2001_agent_memory"]
+        assert memory_head(blank_database) == ["2002_memory_scopes"]
 
     assert closed == opened, "the memory store outlived the server"
 

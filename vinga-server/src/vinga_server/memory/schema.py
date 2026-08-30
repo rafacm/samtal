@@ -27,8 +27,6 @@ are here for whoever reads the tables through `psql`, and for the
 migrations that reproduce them.
 """
 
-from enum import StrEnum
-
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
@@ -40,6 +38,13 @@ from sqlalchemy import (
     Text,
     text,
 )
+
+# The vocabulary these tables are shaped by, declared in `scopes.py` and
+# read from there by everything that needs it, so the check constraint
+# below and the field on the events cannot come to mean different sets.
+# It is a module of its own because the events package is client-half
+# and this one imports a database driver; the reason is written there.
+from vinga_server.memory.scopes import FACT_SCOPES, MemoryScope
 
 # The same convention the two sibling schemas use, and for the same
 # reason: a constraint the database named for itself is one a migration
@@ -60,33 +65,6 @@ NAMING_CONVENTION = {
 SCHEMA = "memory"
 
 metadata = MetaData(schema=SCHEMA, naming_convention=NAMING_CONVENTION)
-
-
-class MemoryScope(StrEnum):
-    """Where a remembered thing belongs, and therefore whose it is.
-
-    Declared here and nowhere else. The store reads it, the check
-    constraint below is built from it, the events' `scope` field is this
-    enumeration, and #83's tool enum narrows it: a vocabulary spelled
-    out a second time is a vocabulary with a drift pending.
-
-    `owner` means a different thing under each member, which is what
-    keeps one column doing the work of three tables: a thread's uuid hex
-    under `conversation`, an agent's configured name under `agent`, a
-    device's MAC under `device`. That is also the shape a per-user
-    dimension arrives in by ordinary migration.
-    """
-
-    CONVERSATION = "conversation"
-    AGENT = "agent"
-    DEVICE = "device"
-
-
-# The two a fact may carry. Conversation data lives in `state` and
-# nowhere else: a ledger of what is currently true is not a list of
-# what was said, so it has no id, no order and no held area, and a
-# `facts` row claiming that scope would be a row nothing reads.
-FACT_SCOPES = (MemoryScope.AGENT, MemoryScope.DEVICE)
 
 
 def _in(scopes: tuple[MemoryScope, ...]) -> str:
