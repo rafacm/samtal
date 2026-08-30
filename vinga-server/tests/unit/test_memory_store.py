@@ -380,7 +380,9 @@ async def test_a_fact_cannot_belong_to_a_conversation(
             lambda: store.forget(
                 MemoryScope.CONVERSATION, THREAD, kept, THREAD, agent="poet"
             ),
-            lambda: store.restore(MemoryScope.CONVERSATION, THREAD, THREAD, agent="poet"),
+            lambda: store.restore(
+                ((MemoryScope.CONVERSATION, THREAD),), THREAD, agent="poet"
+            ),
         ):
             with pytest.raises(ValueError) as refusal:
                 await call()
@@ -455,6 +457,10 @@ OTHER_THREAD = "0123456789abcdef0123456789abcdef"
 # neither of which a model may name for itself.
 HERE = MemoryContext(device="aa:bb", conversation=THREAD)
 
+# The one memory most of the cases below reach into, as an operation
+# addressed by a set of them takes it: the poet's own.
+MINE = ((MemoryScope.AGENT, "poet"),)
+
 
 async def test_a_correction_keeps_the_id_and_replaces_the_words() -> None:
     store = memory()
@@ -486,7 +492,7 @@ async def test_a_forgotten_fact_is_out_of_the_reading_and_can_come_back() -> Non
     assert injected(store) == "- the user is vegetarian"
     assert _held("poet") == [("the user's dog is called Bosse", THREAD)]
 
-    brought_back = await store.restore(MemoryScope.AGENT, "poet", THREAD, agent="poet")
+    brought_back = await store.restore(MINE, THREAD, agent="poet")
 
     assert brought_back == "the user's dog is called Bosse"
     assert _held("poet") == []
@@ -508,10 +514,10 @@ async def test_the_last_thing_forgotten_is_what_comes_back_first() -> None:
     await store.forget(MemoryScope.AGENT, "poet", first, THREAD, agent="poet")
     await store.forget(MemoryScope.AGENT, "poet", second, THREAD, agent="poet")
 
-    assert await store.restore(MemoryScope.AGENT, "poet", THREAD, agent="poet") == "fact two"
+    assert await store.restore(MINE, THREAD, agent="poet") == "fact two"
     # And the id door reaches the other one, which is still held.
     assert (
-        await store.restore(MemoryScope.AGENT, "poet", THREAD, first, agent="poet")
+        await store.restore(MINE, THREAD, first, agent="poet")
         == "fact one"
     )
     assert _held("poet") == []
@@ -531,7 +537,7 @@ async def test_a_fact_forgotten_permanently_does_not_come_back() -> None:
     # nothing left for an operator to read either.
     assert _held("poet") == []
     with pytest.raises(ValueError) as refusal:
-        await store.restore(MemoryScope.AGENT, "poet", THREAD, agent="poet")
+        await store.restore(MINE, THREAD, agent="poet")
     assert str(refusal.value) == store_module.NO_FACT_TO_RESTORE
 
 
@@ -589,9 +595,9 @@ async def test_a_fact_forgotten_in_another_conversation_stays_forgotten() -> Non
     await store.forget(MemoryScope.AGENT, "poet", gone, OTHER_THREAD, agent="poet")
 
     with pytest.raises(ValueError) as by_id:
-        await store.restore(MemoryScope.AGENT, "poet", THREAD, gone, agent="poet")
+        await store.restore(MINE, THREAD, gone, agent="poet")
     with pytest.raises(ValueError) as by_last:
-        await store.restore(MemoryScope.AGENT, "poet", THREAD, agent="poet")
+        await store.restore(MINE, THREAD, agent="poet")
 
     assert str(by_id.value) == store_module.NO_FACT_TO_RESTORE
     assert str(by_last.value) == store_module.NO_FACT_TO_RESTORE
@@ -1312,7 +1318,7 @@ async def test_held_facts_are_outside_every_cap_and_come_back(
         await store.forget(MemoryScope.AGENT, "poet", first, THREAD, agent="poet")
     assert str(gone.value) == store_module.NO_FACT_TO_FORGET
 
-    assert await store.restore(MemoryScope.AGENT, "poet", THREAD, agent="poet") == "fact 1"
+    assert await store.restore(MINE, THREAD, agent="poet") == "fact 1"
     # Back in its own place, with the scope back inside its cap: the
     # restore re-pruned the oldest active fact rather than refusing or
     # leaving three where two fit.
@@ -1548,6 +1554,45 @@ async def test_bringing_back_the_last_thing_forgotten_needs_no_number() -> None:
     assert _rows("poet") == ["fact one", "fact two"]
 
 
+async def test_the_last_thing_forgotten_is_the_last_one_whichever_memory_it_was_in() -> None:
+    """The mixed case the tool cannot decide for itself. A conversation
+    that forgets a fact about the user and then a note about the room has
+    forgotten the note last, and "put that back" means the note.
+
+    Decided over both memories in one statement rather than by asking one
+    of them first: an order that tried the agent's memory before the
+    device's would answer with the older of the two whenever both are
+    held, which is the one case the ordering is visible in at all.
+    """
+    store = memory()
+    # The note is the older row and the newer removal, so nothing but
+    # when it was forgotten can put it first: an order that read the ids
+    # would answer with the fact, and so would one that asked the agent's
+    # memory before the device's.
+    theirs = await store.add(
+        MemoryScope.DEVICE, "aa:bb", "the kettle is loud", agent="poet"
+    )
+    mine = await store.add(
+        MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet"
+    )
+    assert theirs < mine
+    await forget(store, HERE, "poet", {"id": mine})
+    await forget(store, HERE, "poet", {"id": theirs})
+
+    assert await restore_memory(store, HERE, "poet", {}) == (
+        "Brought back: the kettle is loud"
+    )
+
+    # And the one before it is still held, so asking again reaches it:
+    # the newest is a choice among rows rather than a memory to prefer.
+    assert _held("poet") == [("the user is vegetarian", THREAD)]
+    assert await restore_memory(store, HERE, "poet", {}) == (
+        "Brought back: the user is vegetarian"
+    )
+    assert _rows("poet") == ["the user is vegetarian"]
+    assert _rows("aa:bb", scope="device") == ["the kettle is loud"]
+
+
 async def test_bringing_back_reaches_the_device_and_refuses_another_conversation() -> None:
     """Both edges of the undo at once: a note about the place is this
     session's to bring back, and a fact forgotten somewhere else is not
@@ -1563,7 +1608,7 @@ async def test_bringing_back_reaches_the_device_and_refuses_another_conversation
         await restore_memory(store, HERE, "poet", {"id": theirs})
     assert str(elsewhere.value) == store_module.NO_FACT_TO_RESTORE
 
-    await store.restore(MemoryScope.DEVICE, "aa:bb", OTHER_THREAD, agent="poet")
+    await store.restore(((MemoryScope.DEVICE, "aa:bb"),), OTHER_THREAD, agent="poet")
     await forget(store, HERE, "poet", {"id": theirs})
     assert await restore_memory(store, HERE, "poet", {}) == (
         "Brought back: the kettle is loud"
@@ -1977,7 +2022,7 @@ async def test_nothing_of_a_connection_reaches_a_surface_a_model_or_an_operator_
                     MemoryScope.AGENT, "poet", 7, "corrected", agent="poet"
                 ),
                 lambda: store.forget(MemoryScope.AGENT, "poet", 7, THREAD, agent="poet"),
-                lambda: store.restore(MemoryScope.AGENT, "poet", THREAD, agent="poet"),
+                lambda: store.restore(MINE, THREAD, agent="poet"),
                 lambda: store.set_state(THREAD, "turn", "white to move", agent="poet"),
                 lambda: store.clear_state(THREAD, agent="poet"),
             ):
@@ -2046,9 +2091,7 @@ async def test_nothing_a_caller_offered_is_repeated_back_by_a_refusal(
             lambda: working.forget(
                 MemoryScope.AGENT, "poet", ADDRESSED, THREAD, agent="poet"
             ),
-            lambda: working.restore(
-                MemoryScope.AGENT, "poet", THREAD, ADDRESSED, agent="poet"
-            ),
+            lambda: working.restore(MINE, THREAD, ADDRESSED, agent="poet"),
             # Decided by a database that refused, on every write path.
             lambda: refused.add(MemoryScope.AGENT, "poet", "a short fact", agent="poet"),
             lambda: refused.set_state(THREAD, "turn", "white to move", agent="poet"),

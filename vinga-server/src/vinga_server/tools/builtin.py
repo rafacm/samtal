@@ -696,19 +696,21 @@ async def restore_memory(
 ) -> str:
     """Execute `restore_memory`, answering with what came back.
 
-    With no number this is the last thing forgotten, asked of each memory
-    the session can reach in turn: the agent's own first, then the
-    device's. A conversation that forgot one of each therefore brings the
-    agent's back first, and the answer says which fact it was, so the
-    next ask reaches the other.
+    Both memories go to the store together rather than being tried one
+    after the other, which is what makes "the last thing you forgot" the
+    last thing: with no number the store picks the newest held row across
+    everything this session can reach, in one transaction under the
+    chain's lock. Asking the agent's memory first and the device's only
+    if that refused would answer with the older of the two whenever a
+    conversation had forgotten one of each.
+
+    The answer names the fact that came back, which is what the agent
+    says out loud, so a user who meant the other one can say so.
     """
     named = arguments.get("id")
     fact_id = None if named is None else _numbered(named, RESTORE_TAKES_A_NUMBER)
-    brought = await _wherever_it_is(
-        _owners(context, agent),
-        lambda scope, owner: store.restore(
-            scope, owner, _conversation_of(context), fact_id, agent=agent
-        ),
+    brought = await store.restore(
+        _owners(context, agent), _conversation_of(context), fact_id, agent=agent
     )
     return f"Brought back: {brought}"
 
@@ -732,12 +734,16 @@ async def recall(
 
 
 def _owners(context: MemoryContext, agent: str) -> tuple[tuple[MemoryScope, str], ...]:
-    """The memories this session may reach a fact in, in the order they
-    are tried.
+    """The memories this session may reach a fact in.
 
     The agent's own and the device's, which is exactly what its prompt is
     assembled from: a number the model read out of a lookup came from one
     of those two, and nothing else is reachable from here at all.
+
+    The order is the order the numbered search tries them in, and nothing
+    else reads it that way: what the store is handed for a restore is the
+    set, since which of them holds the newest thing this conversation
+    forgot is the store's answer rather than the caller's guess.
     """
     return ((MemoryScope.AGENT, agent), (MemoryScope.DEVICE, _device_of(context)))
 

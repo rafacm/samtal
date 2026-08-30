@@ -717,22 +717,30 @@ Two, and both are a promise this project stops making.
 
 Six, and none changes what the milestone ships.
 
-- **A numbered call searches the two memories in the tool layer, not in
-  the store.** The plan states the predicates as `(scope, owner)` on
-  each store operation, and a model names a number and not a memory. The
-  alternative was widening the store's operations to take both
-  addresses, which would have made the `scope` field on
-  `memory_unwritable` a guess: the row a failed statement was addressing
-  is not known until it is found. So `_wherever_it_is` tries the agent's
-  scope and then the device's, each call keeping its own honest scope,
-  and the last refusal travels because the store's sentence is identical
-  whichever memory refused.
-- **A restore with no number is therefore per memory, agent first.** "The
-  last thing you forgot" is exact wherever a conversation forgot facts
-  from one memory, which is every ordinary case; a conversation that
-  forgot one of each brings the agent's back first and says which fact
-  it was, so asking again reaches the other. It is a decision rather
-  than an accident and it is pinned by test.
+- **A correction and a removal search the two memories in the tool
+  layer; a restore is addressed by both of them at once.** The plan
+  states the predicates as `(scope, owner)` on each store operation, and
+  a model names a number and not a memory. For the two that address one
+  row by its number the search is the tool's: `_wherever_it_is` tries the
+  agent's memory and then the device's, each call keeping its own honest
+  scope, and the last refusal travels because the store's sentence is
+  identical whichever memory refused. A number names at most one row in
+  the whole store, so trying them in turn cannot answer differently from
+  asking about both at once.
+  A restore with no number is not that: it is a choice among rows, and
+  which memory holds the newest of them is the answer rather than the
+  question. So `restore` takes the owners as a set and picks the newest
+  held row across all of them, ordered by when it was forgotten with the
+  id breaking a tie, in one transaction under the chain's lock. That is
+  the milestone's own correction: it shipped for review deciding one
+  memory at a time, which answered a conversation that had forgotten one
+  fact and one note with the older of the two, and the review round is
+  where that was found and fixed.
+- **`_written` takes the scopes a write reached for, not one scope.**
+  The shape `_read` already had, for the reason it had it: a restore
+  addressed to both memories cannot name the one its statement never
+  found, so a failure reports every scope it reached into and a report
+  naming one would be a guess.
 - **`read_for_prompt` takes `conversation: str | None`,** the widening
   M2 gave the device. A prompt assembled outside any conversation has no
   ledger, and saying so with None is what lets the preview speak this
