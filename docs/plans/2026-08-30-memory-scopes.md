@@ -162,10 +162,13 @@ default `agent`), answering `Remembered [id]: text`; `update_memory
 can speak what it removed, soft by default, erasing immediately when
 `permanently` is true; `restore_memory(id?)`, no id meaning the last
 thing forgotten in this conversation; `recall(query)`,
-case-insensitive substring match over the agent and device facts not
-currently injected plus the injected device facts, answering matches
-with their ids (the injected core shows no ids, so recall is also how
-the model finds an id to update or forget); `set_state(key, value)`
+case-insensitive substring match over all of the current agent's and
+device's active facts, injected or not, answering matches newest
+first with their ids, bounded by `RECALL_LINES = 20` within
+`RECALL_BYTES = 2048` and ending with a fixed
+more-matched-refine-the-query sentence when truncated (the injected
+core shows no ids, so recall is also how the model finds the id of
+any fact it needs to update or forget, core facts included); `set_state(key, value)`
 and `clear_state(key)` for the conversation ledger. State needs no
 undo: it is a current-truth ledger with overwrite semantics, not a
 record of the user's words, and the soft-deletion decision is about
@@ -443,8 +446,11 @@ Named by role, homes confirmed against the authority taxonomy:
     key and refuses the key past the cap with the fixed sentence;
     per-scope caps prune independently (an agent at cap does not
     touch device rows and conversely, proven by exact survivor
-    sets); the core/remainder boundary (fact 41 of 41 is in recall
-    and not in the injected core); `read_for_prompt` is one
+    sets); the core/remainder boundary from both sides (the oldest
+    fact beyond the core is absent from the injected block and
+    found by recall; a fact inside the core is also found by
+    recall, with its id); recall's bound and its fixed continuation
+    sentence at an exact boundary; `read_for_prompt` is one
     connection (asserted by an engine that counts checkouts).
   - *Coupling*: erasing a thread through the API takes its state
     and its held facts and answers the new counts; retention prune
@@ -633,6 +639,13 @@ resolution.
    reachable by the current agent and device, with a result bound,
    deterministic ordering, and a fixed refine-the-query
    continuation.
+
+   *Resolution*: adopted whole: recall searches every active fact of
+   the current agent and device, injected or not, newest first,
+   bounded by `RECALL_LINES`/`RECALL_BYTES` with the fixed
+   continuation sentence, and the boundary test is rewritten to
+   prove both sides (a beyond-core fact reachable, a core fact's id
+   reachable).
 
 5. **P1: the cap rules do not preserve either bounds or undo.** The
    plan does not say whether held rows are counted or prunable
