@@ -81,6 +81,7 @@ from typing import TYPE_CHECKING, Annotated, Any
 from fastapi import Depends, FastAPI, Query, Request
 from sqlalchemy import ColumnElement, Connection, Table, func, select
 
+from vinga_server import paging
 from vinga_server.config.loader import (
     ConfigError,
     DatabaseBusyError,
@@ -116,6 +117,7 @@ from vinga_server.conversations.schema import (
 from vinga_server.conversations.store import CONVERSATIONS_CHAIN
 from vinga_server.db import is_busy, read_engine, write_engine
 from vinga_server.memory.store import Purged, purge
+from vinga_server.paging import LIMIT_DEFAULT, LIMIT_MAX, MAX_ROW_ID
 
 if TYPE_CHECKING:
     # The name only, for the annotation in `_reader`: the configuration
@@ -134,33 +136,17 @@ if TYPE_CHECKING:
 # sources) are written out there for the same reason, and held equal to
 # the schema's own tuples by the pin in `test_api_openapi.py`.
 
-# How many rows a page holds when the caller says nothing, and the most
-# it may ask for. The maximum is the contract rather than a courtesy: a
-# page is assembled in memory and a turn carries its tool invocations
-# nested, so an unbounded limit would be an unbounded response.
-LIMIT_DEFAULT = 50
-LIMIT_MAX = 200
-
-# The range of the `bigint` identity columns the cursors are. True by
-# declaration since the schema says `bigint` (#283), rather than by
-# folklore about what a row id happens to be. A cursor beyond it is
-# refused here rather than bound into a statement, where it would be a
-# driver error and a 500 instead of the caller's own mistake.
-MAX_ROW_ID = 2**63 - 1
-
-# What a refused argument is told. Each says what the argument has to
-# be and none of them repeats what arrived: these are the only values
-# this API is handed outside a request body, and the rule that a body is
-# never quoted back is not a weaker rule out here.
-_LIMIT_REFUSED = (
-    f"limit has to be a whole number between 1 and {LIMIT_MAX}, or absent for "
-    f"{LIMIT_DEFAULT}. What was sent is not quoted back"
-)
-
-_CURSOR_REFUSED = (
-    "cursor has to be one of the row ids this API answers with, as a whole number, "
-    "or absent for the first page. What was sent is not quoted back"
-)
+# How big a page is, what a row-id cursor may be, and what a refused
+# limit or cursor is told, are `paging`'s: the same contract answers the
+# memory namespace's listings, and one of the two writing it out again
+# would be the second structure that has to agree with the first. Named
+# here because this module's routes and its own document read them, and
+# re-exported below because the suites that pin the bounds read them
+# from the namespace they are pinning.
+#
+# What stays here is the one cursor this contract does not cover, the
+# thread listing's pair: it orders on activity rather than on a row id,
+# so half of it is an instant and neither half is a page size.
 
 # The keyset cursor's refusal, which names both parameters because the
 # rule is about the pair rather than about either one. Half a pair is a
@@ -545,12 +531,12 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
         which holds the sessions below it, so a client walks back through
         the record one page at a time.
         """
-        size = _limit(limit)
+        size = paging.limit(limit)
         criteria: list[ColumnElement[bool]] = []
         mac = _device(device)
         if mac is not None:
             criteria.append(sessions.c.device == mac)
-        below = _cursor(cursor)
+        below = paging.cursor(cursor)
         if below is not None:
             criteria.append(sessions.c.id < below)
         # A correlated count rather than a join, so a session with no
@@ -568,7 +554,7 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
             .order_by(sessions.c.id.desc())
             .limit(size + 1),
         )
-        return _page(found, size)
+        return paging.page(found, size)
 
     @api.get(
         "/sessions/{session}",
@@ -608,8 +594,8 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
         the ids are monotonic and never reused, so what came after one is
         a stable question.
         """
-        size = _limit(limit)
-        after = _cursor(cursor)
+        size = paging.limit(limit)
+        after = paging.cursor(cursor)
         # Before the page, so an unknown session is a 404 rather than an
         # empty timeline that reads like a session with nothing in it.
         _session(reader, session)
@@ -623,7 +609,7 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
             .order_by(turns.c.id)
             .limit(size + 1),
         )
-        page = _page(found, size)
+        page = paging.page(found, size)
         _nest_invocations(reader, page["items"])
         return page
 
@@ -698,7 +684,7 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
         appearing at the head of a fresh one, and a page boundary never
         duplicates or skips a thread whose pair did not move.
         """
-        size = _limit(limit)
+        size = paging.limit(limit)
         found = threads.listed(
             reader,
             agent=agent,
@@ -741,12 +727,13 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
         the direction is the one a client reconciling what it has
         already read asks in.
         """
-        size = _limit(limit)
-        after = _cursor(cursor)
+        size = paging.limit(limit)
+        after = paging.cursor(cursor)
         # Before the page, so an unknown thread is a 404 rather than an
         # empty dialogue that reads like a thread with nothing in it.
         _thread(reader, conversation)
-        page = _page(threads.dialogue(reader, conversation, after=after, limit=size + 1), size)
+        found = threads.dialogue(reader, conversation, after=after, limit=size + 1)
+        page = paging.page(found, size)
         _nest_invocations(reader, page["items"])
         return page
 
@@ -895,21 +882,6 @@ def _rows(reader: Connection, query: Any) -> list[dict[str, Any]]:
     return [dict(row) for row in reader.execute(query).mappings()]
 
 
-def _page(found: list[dict[str, Any]], size: int) -> dict[str, Any]:
-    """One page and the cursor after it, from one row more than the page
-    holds.
-
-    The extra row is what makes `next_cursor` honest without a second
-    count: it is null exactly when there was nothing beyond this page at
-    the moment it was read.
-    """
-    items = found[:size]
-    return {
-        "items": items,
-        "next_cursor": items[-1]["id"] if len(found) > size else None,
-    }
-
-
 def _nest_invocations(reader: Connection, items: list[dict[str, Any]]) -> None:
     """The calls of every turn on the page, in the order the model
     issued them, nested under the turn that issued them.
@@ -983,20 +955,6 @@ def _count(reader: Connection, table: Table, session: str) -> int:
     ).scalar_one()
 
 
-def _limit(value: str | None) -> int:
-    number = _whole(value)
-    if value is not None and (number is None or not 1 <= number <= LIMIT_MAX):
-        raise ConfigError(_LIMIT_REFUSED)
-    return LIMIT_DEFAULT if number is None else number
-
-
-def _cursor(value: str | None) -> int | None:
-    number = _whole(value)
-    if value is not None and (number is None or number > MAX_ROW_ID):
-        raise ConfigError(_CURSOR_REFUSED)
-    return number
-
-
 def _keyset(active: str | None, row: str | None) -> tuple[str, int] | None:
     """The thread listing's cursor, as the pair the ordering is over, or
     None for the first page.
@@ -1009,7 +967,7 @@ def _keyset(active: str | None, row: str | None) -> tuple[str, int] | None:
     """
     if active is None and row is None:
         return None
-    number = _whole(row)
+    number = paging.whole(row)
     moment = _instant(active) if active is not None else None
     if moment is None or number is None or number > MAX_ROW_ID:
         raise ConfigError(_CURSOR_PAIR_REFUSED)
@@ -1053,21 +1011,6 @@ def _instant(value: str) -> str | None:
         # as naive as one with no tzinfo at all.
         return None
     return moment.astimezone(dt.UTC).isoformat()
-
-
-def _whole(value: str | None) -> int | None:
-    """A non-negative whole number, or None for anything else, the
-    absent argument included.
-
-    `isdigit` rather than a bare `int()`: that accepts a sign, an
-    underscore and digits outside ASCII, and what these arguments are is
-    a row id or a count, which none of those spellings is. Bounded in
-    length before it is converted, because `int` on a very long string
-    is work a caller should not be able to ask for.
-    """
-    if value is None or len(value) > 19 or not (value.isascii() and value.isdigit()):
-        return None
-    return int(value)
 
 
 def _before(value: str | None) -> str | None:
