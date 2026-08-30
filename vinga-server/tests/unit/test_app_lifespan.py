@@ -576,6 +576,30 @@ def test_the_boot_sweeps_the_memory_of_threads_nothing_records(
     assert _state_of(fresh) == [("scene", "the tavern")]
 
 
+def test_the_boot_sweep_happens_after_the_record_it_asks_about_exists(
+    blank_database: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """What the sweep asks is which of these threads the record has
+    never heard of, so the record's schema has to exist before it can be
+    asked.
+
+    Over a blank database, because that is the only place the ordering
+    is observable: run in front of the migration, the anti-join meets a
+    table that is not there, the containment turns that into
+    `memory_cleanup_failed`, and the boot goes on having advertised a
+    sweep it silently skipped. A boot that heals nothing says nothing.
+    """
+    with caplog.at_level("WARNING"):
+        with TestClient(served(recording_config(blank_database))):
+            pass
+
+    assert [
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "memory_cleanup_failed"
+    ] == []
+
+
 def test_a_build_that_fails_part_way_releases_what_it_took(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
