@@ -282,9 +282,12 @@ surface, its API reference is the document that earns generating.
   interface and failing sanitized; an independent connection then
   sees the exact pre-call count and rendering, proving the insert
   rolled back with the pruning rather than surviving it); independent concurrent writers (two `MemoryStore`
-  instances over separate engines, interleaved `remember` calls,
-  every fact present up to the cap; the existing
-  `the_lock_held(MEMORY_CHAIN)` harness proves serialization);
+  instances over separately opened engines, the store prefilled
+  exactly at the line and byte pruning boundary, both writes
+  started concurrently; the assertion is the exact final survivor
+  set, row count, rendering and byte bound, arranged so a missing
+  chain lock would leave an over-cap state or a wrong survivor set
+  rather than a passing test);
   database refusal, split by path because the paths differ: `read`
   fails only on a genuine read failure (the store handed a read
   engine whose backend is gone, or `USAGE` on the schema revoked
@@ -431,6 +434,10 @@ resolution.
    through separately opened stores, and assert the exact final
    survivor set, count, rendering and byte bound, arranged so a
    missing chain lock produces a wrong result.
+
+   *Resolution*: adopted; the case is rewritten around the pruning
+   boundary with exact final-state assertions whose failure without
+   the lock is the arrangement's own property.
 
 5. **P2: retired environment configuration would be silently
    ignored.** `VINGA_MEMORY__DIR` is a valid spelling today, and
