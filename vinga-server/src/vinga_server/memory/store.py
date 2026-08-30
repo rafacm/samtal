@@ -74,10 +74,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeVar
 
-from sqlalchemy import Connection, Engine, and_, delete, or_, select
+from sqlalchemy import Connection, Engine, and_, delete, func, or_, select, union
 from sqlalchemy import update as sql_update
 
-from vinga_server.config.loader import DatabaseBusyError, StorageError
+from vinga_server.config.loader import ConfigError, DatabaseBusyError, StorageError
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations.schema import conversations
 from vinga_server.conversations.store import erasure_order
@@ -708,7 +708,8 @@ class MemoryStore:
         text = _one_line(fact)
         if not text:
             raise ValueError(NOTHING_TO_REMEMBER)
-        _refuse_the_oversized(text, scope)
+        if _oversized(text, scope):
+            raise ValueError(TOO_LONG)
         return await asyncio.to_thread(self._add, agent, scope, owner, text)
 
     def _add(self, agent: str, scope: MemoryScope, owner: str, fact: str) -> int:
@@ -905,7 +906,8 @@ class MemoryStore:
         corrected = _one_line(text)
         if not corrected:
             raise ValueError(NOTHING_TO_REMEMBER)
-        _refuse_the_oversized(corrected, scope)
+        if _oversized(corrected, scope):
+            raise ValueError(TOO_LONG)
         await asyncio.to_thread(self._update, agent, scope, owner, fact_id, corrected)
 
     def _update(
@@ -1256,6 +1258,268 @@ def purge(connection: Connection, threads: Sequence[str]) -> Purged:
     raise problem
 
 
+# The operator's door
+#
+# The same rows, asked a different question. What an agent reaches is
+# its own memory through a tool; what an operator reaches is every
+# memory this deployment holds, to see what has accrued and to correct
+# or remove it. Both are this module's SQL, for the reason `purge` is:
+# the tables, the caps, the held area and the index are what this module
+# exists to keep from its callers, and a route that wrote its own
+# statements would learn all four.
+#
+# Functions on a caller's connection rather than methods on the store,
+# again for `purge`'s reason: the routes open a connection for the
+# length of one request through `db`, so a deletion works in a
+# deployment with recording off and nothing holds an engine between
+# requests. What the SQL needs is a connection, and a store would be a
+# parameter no route has to give.
+#
+# Two rules run through the block, and both are the operator door being
+# a different door rather than a second copy of the tools':
+#
+# - **Every deletion here is a hard delete.** The held area is the
+#   spoken undo, which belongs to the conversation that forgot the fact;
+#   an operator removing a fact is removing it, and a row held for an
+#   undo nobody is in a position to speak would be the correction not
+#   taken.
+# - **A correction is held to the same cap invariant a tool's is.** It
+#   is refused where its own line alone will not fit, and the scope is
+#   re-pruned inside the same transaction, so no door can leave a scope
+#   over its bound.
+
+
+def owners(
+    connection: Connection, scope: MemoryScope, after: str | None, limit: int
+) -> list[dict[str, object]]:
+    """Who holds facts in one scope, by name, with how many rows each of
+    them holds.
+
+    Ordered by the owner and paged on it, because there is no other
+    total order over a set of names and a listing that could not be
+    walked would be a listing that eventually cannot be served.
+
+    Orphans are answered like anything else: what makes a row an
+    agent's is the name it was stored under, and an agent that has been
+    renamed leaves rows nothing configured points at. Hiding them would
+    hide the reason an operator opened this listing.
+    """
+    query = (
+        select(schema.facts.c.owner, func.count().label("facts"))
+        .where(schema.facts.c.scope == scope)
+        .group_by(schema.facts.c.owner)
+        .order_by(schema.facts.c.owner)
+        .limit(limit)
+    )
+    if after is not None:
+        query = query.where(schema.facts.c.owner > after)
+    return [dict(row) for row in connection.execute(query).mappings()]
+
+
+def conversations_holding_memory(
+    connection: Connection, after: str | None, limit: int
+) -> list[dict[str, object]]:
+    """Which threads hold memory, with how much of each kind.
+
+    A thread holds two things and they live in different tables: the
+    ledger it is currently keeping, and the facts it forgot and could
+    bring back. So the owner set is the union of the two, which is what
+    makes a thread with one and not the other a row rather than an
+    omission, and the counts beside it are read per thread.
+
+    A thread the conversation record no longer has is answered here too,
+    for the reason an orphaned agent is: that is precisely what an
+    operator is looking at this listing to find.
+    """
+    holders = union(
+        select(schema.state.c.conversation.label("conversation")),
+        select(schema.facts.c.forgotten_in.label("conversation")).where(
+            schema.facts.c.forgotten_in.is_not(None)
+        ),
+    ).subquery()
+    query = (
+        select(
+            holders.c.conversation,
+            select(func.count())
+            .select_from(schema.state)
+            .where(schema.state.c.conversation == holders.c.conversation)
+            .scalar_subquery()
+            .label("state"),
+            select(func.count())
+            .select_from(schema.facts)
+            .where(schema.facts.c.forgotten_in == holders.c.conversation)
+            .scalar_subquery()
+            .label("held_facts"),
+        )
+        .order_by(holders.c.conversation)
+        .limit(limit)
+    )
+    if after is not None:
+        query = query.where(holders.c.conversation > after)
+    return [dict(row) for row in connection.execute(query).mappings()]
+
+
+def facts_of(
+    connection: Connection,
+    scope: MemoryScope,
+    owner: str,
+    after: int | None,
+    limit: int,
+) -> list[dict[str, object]]:
+    """One owner's facts in one scope, oldest first, held ones included.
+
+    The reading order the injected block has, extended with what the
+    block never shows: the id every correction and deletion is addressed
+    by, when the row was last written, and the held pair, which is what
+    marks a fact somebody forgot and could still bring back.
+
+    Paged on the id, which is the order, so a walk recovers the whole
+    scope once.
+    """
+    query = (
+        select(
+            schema.facts.c.id,
+            schema.facts.c.fact,
+            schema.facts.c.at,
+            schema.facts.c.forgotten_at,
+            schema.facts.c.forgotten_in,
+        )
+        .where(schema.facts.c.scope == scope, schema.facts.c.owner == owner)
+        .order_by(schema.facts.c.id)
+        .limit(limit)
+    )
+    if after is not None:
+        query = query.where(schema.facts.c.id > after)
+    return [dict(row) for row in connection.execute(query).mappings()]
+
+
+def correct(
+    connection: Connection,
+    scope: MemoryScope,
+    owner: str,
+    fact_id: int,
+    text: str,
+) -> dict[str, object] | None:
+    """Correct one fact in place, and answer the row as it now stands,
+    or None where nothing this call may reach has that id.
+
+    Addressed the way every id-addressed operation in this module is:
+    the id AND the pair that owns it, so a fact of another agent or of
+    another board is not reachable by naming a number under this one.
+    Held facts are not reachable either, exactly as they are not through
+    the tool: a fact that was forgotten is waiting to be brought back as
+    it was said, and editing it there would make the undo answer with
+    something nobody said.
+
+    None rather than a refusal, because which sentence a caller is
+    answered with is the route's to choose and there is only one for
+    both cases: a missing fact and an inaccessible one are told apart by
+    nobody.
+
+    The correction can grow a fact past what its scope holds, so this
+    ends where every mutation in this module ends, at the prune, with
+    the row it just wrote protected from it.
+    """
+    corrected = _one_line(text)
+    if not corrected:
+        raise ConfigError(NOTHING_TO_REMEMBER)
+    if _oversized(corrected, scope):
+        raise ConfigError(TOO_LONG)
+    found = connection.execute(
+        sql_update(schema.facts)
+        .where(*_addressed(scope, owner, fact_id), _ACTIVE)
+        .values(fact=corrected, at=_utc_now().isoformat())
+        .returning(
+            schema.facts.c.id,
+            schema.facts.c.fact,
+            schema.facts.c.at,
+            schema.facts.c.forgotten_at,
+            schema.facts.c.forgotten_in,
+        )
+    ).mappings().first()
+    if found is None:
+        return None
+    _prune(connection, scope, owner, protecting=fact_id)
+    return dict(found)
+
+
+def erase_fact(
+    connection: Connection, scope: MemoryScope, owner: str, fact_id: int
+) -> int:
+    """Erase one fact, held or active, and answer how many rows went,
+    which is one or none.
+
+    The held ones are reachable here and are not through the tool, which
+    is the difference between the two doors rather than an inconsistency:
+    a held fact is a stored fact, it is in the listing above, and an
+    operator who can see it must be able to remove it.
+    """
+    return int(
+        connection.execute(
+            delete(schema.facts).where(*_addressed(scope, owner, fact_id))
+        ).rowcount
+    )
+
+
+def erase_facts(connection: Connection, scope: MemoryScope, owner: str) -> int:
+    """Erase everything one owner holds in one scope, and answer how
+    many rows went.
+
+    Not addressed at a row, so nothing is refused for being absent: an
+    owner with no rows is erased of nothing and the count says so, which
+    is the same contract the selector purge on the conversation record
+    keeps.
+    """
+    return int(
+        connection.execute(
+            delete(schema.facts).where(
+                schema.facts.c.scope == scope, schema.facts.c.owner == owner
+            )
+        ).rowcount
+    )
+
+
+def ledger_of(connection: Connection, conversation: str) -> list[dict[str, object]]:
+    """One conversation's ledger, by key, with the moment each entry was
+    last written.
+
+    Whole rather than paged, and that is the ledger's own property: a
+    write past `STATE_KEYS` or `STATE_BYTES` is refused, so the whole of
+    one is bounded by construction.
+    """
+    return [
+        dict(row)
+        for row in connection.execute(
+            select(
+                schema.state.c.key,
+                schema.state.c.value,
+                schema.state.c.updated_at,
+            )
+            .where(schema.state.c.conversation == conversation)
+            .order_by(schema.state.c.key)
+        ).mappings()
+    ]
+
+
+def clear_ledger(
+    connection: Connection, conversation: str, key: str | None
+) -> int:
+    """Clear one entry of a conversation's ledger, or the whole of it,
+    and answer how many entries went.
+
+    A key names one entry and no key means all of them, which is the
+    request's own difference rather than this function's: what arrives
+    with no body is a caller asking for the ledger.
+    """
+    where = [schema.state.c.conversation == conversation]
+    if key is not None:
+        # Normalized the way the writer normalizes it, so the key an
+        # operator reads out of the ledger above is the key that matches:
+        # what is stored is one line, whatever it arrived as.
+        where.append(schema.state.c.key == _one_line(key))
+    return int(connection.execute(delete(schema.state).where(*where)).rowcount)
+
+
 # What every id-addressed operation adds to its WHERE clause, so the
 # reach is the row's ownership rather than the model's good behavior.
 _ACTIVE = schema.facts.c.forgotten_at.is_(None)
@@ -1334,17 +1598,22 @@ def _one_line(text: str) -> str:
     return " ".join(text.split())
 
 
-def _refuse_the_oversized(text: str, scope: MemoryScope) -> None:
-    """Refuse one item whose rendered line alone will not fit inside its
+def _oversized(text: str, scope: MemoryScope) -> bool:
+    """Whether one item's rendered line alone will not fit inside its
     scope's byte cap.
 
-    Before any connection, because it needs none, and separately from
-    the prune, because the prune cannot answer it: dropping every other
-    fact would still leave this one over the cap. The alternative is a
-    scope that is silently over its bound for as long as the fact lives.
+    Asked before any connection, because it needs none, and separately
+    from the prune, because the prune cannot answer it: dropping every
+    other fact would still leave this one over the cap. The alternative
+    is a scope that is silently over its bound for as long as the fact
+    lives.
+
+    A predicate rather than a refusal, because two doors ask it and they
+    raise different things: a model's write leaves as the `ValueError`
+    the tool layer rephrases, and an operator's correction leaves as the
+    refusal this API answers a 422 with. The rule is one either way.
     """
-    if len(f"- {text}".encode()) > _caps(scope)[1]:
-        raise ValueError(TOO_LONG)
+    return len(f"- {text}".encode()) > _caps(scope)[1]
 
 
 def _reaching(
@@ -1724,6 +1993,14 @@ __all__ = [
     "PromptMemory",
     "Purged",
     "StoreClosed",
+    "clear_ledger",
+    "conversations_holding_memory",
+    "correct",
+    "erase_fact",
+    "erase_facts",
+    "facts_of",
+    "ledger_of",
     "open_memory",
+    "owners",
     "purge",
 ]

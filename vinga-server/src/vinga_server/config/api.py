@@ -120,6 +120,8 @@ from vinga_server.config.responses import (
     FieldError,
     McpServerStatus,
     McpStatusSource,
+    MemoryCorrection,
+    MemoryStateKey,
     PendingDevice,
     Problem,
     PromptBlock,
@@ -128,6 +130,7 @@ from vinga_server.config.responses import (
     SecretValue,
     ServableAgents,
     StoredSecretLocation,
+    request_body,
 )
 from vinga_server.config.secrets import MASK, SecretLocation, load_keys, provider_identity
 from vinga_server.config.store import Applied, ConfigStore
@@ -144,6 +147,7 @@ from vinga_server.events.live import (
     Streamed,
 )
 from vinga_server.events.values import ClassName
+from vinga_server.memory import api as memory
 
 # The pending table, imported like anything else since issue #143 split
 # the onboarding package. It used to be a forward reference, because the
@@ -371,7 +375,7 @@ ENTITY_MODELS: tuple[type[BaseModel], ...] = tuple(
     descriptor.model for descriptor in entities.ENTITIES
 )
 
-# The three bodies that are arguments rather than fragments, as the
+# The bodies that are arguments rather than fragments, as the
 # document describes them. The models are documentation and nothing
 # else: they are injected into `components` beside the entity models and
 # named by the routes' `openapi_extra`, and they are deliberately not
@@ -379,7 +383,20 @@ ENTITY_MODELS: tuple[type[BaseModel], ...] = tuple(
 # either. What enforces them at runtime is the exact-shape parser
 # further down, which describes the expectation and never echoes what it
 # refused.
-REQUEST_MODELS: tuple[type[BaseModel], ...] = (DeviceBinding, DefaultAgentName, SecretValue)
+#
+# The last two are the memory namespace's, and they are here rather than
+# beside its routes because this is where `components` is assembled: a
+# `$ref` a route declares has to resolve into a schema something
+# injected. Their parsers are that module's own, written to the same
+# rule, because what those two bodies carry is a remembered fact and a
+# model-chosen key.
+REQUEST_MODELS: tuple[type[BaseModel], ...] = (
+    DeviceBinding,
+    DefaultAgentName,
+    SecretValue,
+    MemoryCorrection,
+    MemoryStateKey,
+)
 
 # And the fourth, which is the whole domain half rather than one entry
 # of it: `POST /apply` takes a partial `DomainConfig`, so the model that
@@ -835,6 +852,8 @@ class ApiRuntime:
     store: StoreHandle | None
     conversations: Callable[[], Iterator[Connection]]
     erasures: Callable[[], contextlib.AbstractContextManager[Connection]]
+    memory: Callable[[], Iterator[Connection]]
+    memory_writes: Callable[[], contextlib.AbstractContextManager[Connection]]
     loaded_agents: ServableAgents
     pending: PendingDevices
     mcp_servers: McpStatusSource | None
@@ -1016,6 +1035,13 @@ def build_api_runtime(
         # and a deletion has to work in a deployment that records
         # nothing and therefore holds no writer.
         erasures=lambda: conversations.erasing(database),
+        # And the third schema in the same database, opened the same way
+        # and for the same two reasons: nothing is held between requests,
+        # and this door has to work whether or not a reply path is
+        # running, since what it exists for is auditing and correcting
+        # what has accrued.
+        memory=memory.reader(database),
+        memory_writes=lambda: memory.writing(database),
         loaded_agents=_nothing_servable if loaded_agents is None else loaded_agents,
         pending=pending if pending is not None else _empty_pending(),
         mcp_servers=mcp_servers,
@@ -2127,7 +2153,7 @@ def _entity_writes(api: FastAPI) -> None:
         "/providers/{stage}/{name}",
         response_model=Acknowledgement,
         responses=_problems(401, 409, 422, 500),
-        openapi_extra=_request_body(_PROVIDER.model),
+        openapi_extra=request_body(_PROVIDER.model),
         description=PROVIDER_WRITE_DESCRIPTION,
     )
     def write_provider(
@@ -2164,7 +2190,7 @@ def _entity_writes(api: FastAPI) -> None:
         "/providers/{stage}/{name}/secrets/{slot}",
         response_model=Acknowledgement,
         responses=_problems(401, 404, 409, 422, 500),
-        openapi_extra=_request_body(SecretValue),
+        openapi_extra=request_body(SecretValue),
     )
     def write_provider_secret(
         stage: str, name: str, slot: str, body: RawBody, store: StoreDep
@@ -2195,7 +2221,7 @@ def _entity_writes(api: FastAPI) -> None:
         "/mcp-servers/{name}",
         response_model=Acknowledgement,
         responses=_problems(401, 409, 422, 500),
-        openapi_extra=_request_body(_MCP_SERVER.model),
+        openapi_extra=request_body(_MCP_SERVER.model),
     )
     def write_mcp_server(name: str, body: RawBody, store: StoreDep) -> dict[str, Any]:
         """Create or replace one MCP server. The running server applies
@@ -2220,7 +2246,7 @@ def _entity_writes(api: FastAPI) -> None:
         "/mcp-servers/{name}/secrets/{slot}",
         response_model=Acknowledgement,
         responses=_problems(401, 404, 409, 422, 500),
-        openapi_extra=_request_body(SecretValue),
+        openapi_extra=request_body(SecretValue),
     )
     def write_mcp_secret(
         name: str, slot: str, body: RawBody, store: StoreDep
@@ -2252,7 +2278,7 @@ def _entity_writes(api: FastAPI) -> None:
         "/prompt-fragments/{name}",
         response_model=Acknowledgement,
         responses=_problems(401, 409, 422, 500),
-        openapi_extra=_request_body(_PROMPT_FRAGMENT.model),
+        openapi_extra=request_body(_PROMPT_FRAGMENT.model),
     )
     def write_prompt_fragment(
         name: str, body: RawBody, store: StoreDep
@@ -2285,7 +2311,7 @@ def _entity_writes(api: FastAPI) -> None:
         "/agents/{name}",
         response_model=Acknowledgement,
         responses=_problems(401, 409, 422, 500),
-        openapi_extra=_request_body(_AGENT.model),
+        openapi_extra=request_body(_AGENT.model),
     )
     def write_agent(name: str, body: RawBody, store: StoreDep) -> dict[str, Any]:
         """Create or replace one agent. Every provider and MCP server it
@@ -2309,7 +2335,7 @@ def _entity_writes(api: FastAPI) -> None:
         "/agent-defaults",
         response_model=Acknowledgement,
         responses=_problems(401, 409, 422, 500),
-        openapi_extra=_request_body(_AGENT_DEFAULTS.model),
+        openapi_extra=request_body(_AGENT_DEFAULTS.model),
     )
     def write_agent_defaults(body: RawBody, store: StoreDep) -> dict[str, Any]:
         """Replace what every agent uses unless it names something else.
@@ -2353,7 +2379,7 @@ def _writes(api: FastAPI) -> None:
         "/devices/pending/{code}",
         response_model=Acknowledgement,
         responses=_problems(401, 404, 409, 422, 500),
-        openapi_extra=_request_body(DeviceBinding),
+        openapi_extra=request_body(DeviceBinding),
     )
     def add_device(
         code: str,
@@ -2443,7 +2469,7 @@ def _writes(api: FastAPI) -> None:
         "/devices/{mac}",
         response_model=Acknowledgement,
         responses=_problems(401, 409, 422, 500),
-        openapi_extra=_request_body(DeviceBinding),
+        openapi_extra=request_body(DeviceBinding),
     )
     def write_device(
         mac: str,
@@ -2501,7 +2527,7 @@ def _writes(api: FastAPI) -> None:
         "/default-agent",
         response_model=Acknowledgement,
         responses=_problems(401, 409, 422, 500),
-        openapi_extra=_request_body(DefaultAgentName),
+        openapi_extra=request_body(DefaultAgentName),
     )
     def write_default_agent(
         body: RawBody,
@@ -2545,7 +2571,7 @@ def _writes(api: FastAPI) -> None:
         "/apply",
         response_model=AppliedDocument,
         responses=_problems(401, 409, 422, 500),
-        openapi_extra=_request_body(DomainConfig),
+        openapi_extra=request_body(DomainConfig),
     )
     def apply_document(
         request: Request,
@@ -2709,26 +2735,6 @@ def _unloaded(agents: Sequence[str], loaded: Collection[str]) -> list[str]:
     """The names a write mentioned that this server has not built an
     agent for, which is what stands between the write and the device."""
     return [name for name in agents if name not in loaded]
-
-
-def _request_body(model: type[BaseModel]) -> dict[str, Any]:
-    """One route's request body, as the document describes it.
-
-    The schema is a reference into `components`, where `_entity_schemas`
-    injects these models: nothing in the running application declares
-    them, deliberately, so a bare reference would dangle without that
-    injection.
-    """
-    return {
-        "requestBody": {
-            "required": True,
-            "content": {
-                "application/json": {
-                    "schema": {"$ref": f"#/components/schemas/{model.__name__}"}
-                }
-            },
-        }
-    }
 
 
 # The three argument-shaped bodies
@@ -2955,6 +2961,12 @@ def _application(lifespan: Lifespan[FastAPI] | None = None) -> FastAPI:
     # them so that module says its refusals in this one's vocabulary
     # without importing it, which would be a cycle.
     conversations.routes(api, _problems)
+    # And what this deployment remembers, registered the same way and for
+    # the same reason: the memory schema is granted to no analyst role,
+    # so this namespace is the surface an operator audits and corrects it
+    # through, and a route the committed document does not carry is not
+    # in the contract.
+    memory.routes(api, _problems)
     return api
 
 

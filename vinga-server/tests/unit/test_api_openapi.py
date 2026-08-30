@@ -199,6 +199,21 @@ def test_the_document_describes_every_route_the_api_serves() -> None:
         "/conversations": ["get"],
         "/conversations/{conversation}": ["delete", "get"],
         "/conversations/{conversation}/turns": ["get"],
+        # And what this deployment remembers, registered the same way
+        # from vinga_server/memory/api.py. Three owner listings, because
+        # the audit question is asked of a scope before it is asked of
+        # an owner; two fact listings with a correction and two
+        # deletions apiece; and the conversation's ledger, whose
+        # deletion takes a body rather than a path segment, since a key
+        # is a word the model chose.
+        "/memory/agents": ["get"],
+        "/memory/agents/{name}/facts": ["delete", "get"],
+        "/memory/agents/{name}/facts/{id}": ["delete", "put"],
+        "/memory/devices": ["get"],
+        "/memory/devices/{mac}/facts": ["delete", "get"],
+        "/memory/devices/{mac}/facts/{id}": ["delete", "put"],
+        "/memory/conversations": ["get"],
+        "/memory/conversations/{conversation}/state": ["delete", "get"],
     }
 
 
