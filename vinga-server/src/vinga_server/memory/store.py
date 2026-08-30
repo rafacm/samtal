@@ -39,6 +39,12 @@ What a caller gets, in the order the sentences are met:
   else owns, which is how a thread's erasure takes its memory in the
   commit that takes its turns.
 
+A conversation's memory shares its thread's lifecycle, so this store
+keeps the other end of the conversation record's erasure-order protocol:
+every thread-keyed write is ordered against the deletion that may be
+taking that thread, and `threads_erased` is what a deletion tells it.
+What a caller sees is one more fixed refusal.
+
 Injection is still the standard shape for what fits: it costs no lookup
 latency (a lookup round trip is spoken silence) and does not depend on
 a small local model choosing to call it. The caps are what keep that
@@ -67,6 +73,7 @@ from sqlalchemy import update as sql_update
 from vinga_server.config.loader import DatabaseBusyError, StorageError
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.conversations.schema import conversations
+from vinga_server.conversations.store import erasure_order
 from vinga_server.db import (
     LOCK_TIMEOUT_MS,
     StoreChain,
@@ -234,6 +241,18 @@ NOT_A_FACT_SCOPE = (
 )
 
 NOTHING_TO_LOOK_FOR = "there is nothing to look for"
+
+# What a write addressed to a thread that has been deleted answers with.
+#
+# Not a failure, and not something to try again: the conversation this
+# note would belong to has been erased, and writing it would be the
+# erasure undone. The agent goes on talking; what stops is the record of
+# it, which is what erasure means.
+CONVERSATION_ERASED = (
+    "this conversation is no longer stored, so nothing can be kept about it. Nothing "
+    "was changed, and nothing will be; carry on talking, and remember anything worth "
+    "keeping as a fact instead"
+)
 
 NOTHING_TO_SET = "there is nothing to write down: a note needs a name and something to say"
 
@@ -407,6 +426,16 @@ class MemoryStore:
         self._in_flight = 0
         self._closing = False
         self._disposed = False
+        # The threads a deletion in this process has said are gone, and
+        # the lock the two sides agree about them under: a deletion
+        # publishes from a request thread or the writer's, and every
+        # thread-keyed write reads from a worker thread of its own.
+        #
+        # It grows with the threads one process erases, which is what
+        # bounds it: a deleted conversation is something somebody asked
+        # for, not a row this store loops over.
+        self._dead: set[str] = set()
+        self._graves = threading.Lock()
 
     def close(self) -> None:
         """Stop admitting calls, and let go of both connection pools
@@ -483,6 +512,50 @@ class MemoryStore:
                 mine = self._closing and self._claim_the_disposal()
             if mine:
                 self._dispose()
+
+    def threads_erased(self, threads: frozenset[str]) -> None:
+        """These threads are gone; write nothing more about them.
+
+        The memory store's half of the erasure-order protocol, called by
+        the `erased()` fan-out the conversation record publishes through
+        and by nothing else. It does the least it can, for the reason the
+        writer's own `forget` does: it records what was said, and the
+        decision is taken by whoever is about to write.
+        """
+        with self._graves:
+            self._dead |= threads
+
+    def _thread_keyed(self, conversation: str, write: Callable[[], T]) -> T:
+        """One write about one thread, ordered against the deletion that
+        may be taking that thread.
+
+        The other side of what the conversation writer already keeps.
+        `erasure_order()` is held across the whole write, and it is taken
+        OUTSIDE the chain's advisory lock, never inside: a deletion holds
+        it across its transaction and the publication that follows, so
+        whichever of the two went first, the second sees all of it. A
+        write that began before the deletion completes before it, and its
+        rows are then deleted by the deletion's own transaction; one that
+        begins after meets the dead set here and is refused.
+
+        There is no third interleaving, which is the whole point of
+        holding the lock rather than checking the set and hoping: the
+        instant between a deletion's commit and its publication is
+        exactly where a write could otherwise land and recreate a row for
+        a thread that is gone.
+
+        What it costs is that a thread-keyed memory write and a turn
+        being recorded serialize on one process-level lock. Both are
+        conversational-pace writes that already serialize on a chain lock
+        in the database, so what is added is the wait for whichever of
+        the two got there first.
+        """
+        with erasure_order():
+            with self._graves:
+                gone = conversation in self._dead
+            if gone:
+                raise ValueError(CONVERSATION_ERASED)
+            return write()
 
     def _read(
         self,
@@ -921,7 +994,14 @@ class MemoryStore:
             # capacity, never use it.
             return str(found[0])
 
-        return self._written(agent, scope, work)
+        if permanently:
+            # Nothing thread-keyed happens: the row is erased rather than
+            # held, so no conversation owns anything afterwards and the
+            # erasure of one cannot be undone by this.
+            return self._written(agent, scope, work)
+        return self._thread_keyed(
+            conversation, lambda: self._written(agent, scope, work)
+        )
 
     async def set_state(
         self, conversation: str, key: str, value: str, *, agent: str
@@ -990,7 +1070,9 @@ class MemoryStore:
                     )
                 )
 
-        self._written(agent, MemoryScope.CONVERSATION, work)
+        self._thread_keyed(
+            conversation, lambda: self._written(agent, MemoryScope.CONVERSATION, work)
+        )
 
     async def clear_state(
         self, conversation: str, key: str | None = None, *, agent: str
@@ -1011,7 +1093,9 @@ class MemoryStore:
                 where.append(schema.state.c.key == _one_line(key))
             return int(connection.execute(delete(schema.state).where(*where)).rowcount)
 
-        return self._written(agent, MemoryScope.CONVERSATION, work)
+        return self._thread_keyed(
+            conversation, lambda: self._written(agent, MemoryScope.CONVERSATION, work)
+        )
 
     async def restore(
         self,
@@ -1076,7 +1160,9 @@ class MemoryStore:
             _prune(connection, scope, owner, protecting=int(found[0]))
             return str(found[1])
 
-        return self._written(agent, scope, work)
+        return self._thread_keyed(
+            conversation, lambda: self._written(agent, scope, work)
+        )
 
 
 def purge(connection: Connection, threads: Sequence[str]) -> Purged:
@@ -1517,6 +1603,7 @@ def open_memory(settings: DatabaseConfig) -> MemoryStore:
 
 __all__ = [
     "BUSY",
+    "CONVERSATION_ERASED",
     "CORE_BYTES",
     "CORE_LINES",
     "DEVICE_BYTES",
