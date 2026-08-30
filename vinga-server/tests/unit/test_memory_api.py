@@ -33,6 +33,7 @@ What the file is about, beyond the round trip:
 
 import asyncio
 import contextlib
+import json
 import logging
 import uuid
 from collections.abc import Iterator
@@ -70,6 +71,15 @@ AGENT = "poet"
 BOARD = "aa:bb:cc:dd:ee:ff"
 
 OTHER_AGENT = "cook"
+
+# The two things a perfectly ordinary JSON string may be and a database
+# cannot hold: a NUL character, which no Postgres `text` column stores,
+# and a lone surrogate, which is not Unicode that can be encoded at all.
+# Written this way rather than as literals because a source file
+# carrying either is a source file editors and terminals disagree about.
+NUL = "a" + chr(0) + "b"
+
+SURROGATE = "a" + chr(0xD800) + "b"
 
 # Every route, for the two properties that hold on all of them: the gate
 # in front of routing, and the empty shapes a deployment that has been
@@ -1103,3 +1113,92 @@ def test_a_write_another_writer_is_holding_says_it_may_be_retried(
     assert [row["fact"] for row in memory_rows("facts", owner=AGENT)] == [
         "the user likes rain"
     ]
+
+
+# What a database cannot hold, refused as the caller's mistake
+#
+# A JSON string is not obliged to be text a `text` column can store, and
+# neither is a path segment. Left to the driver each is a caller's
+# mistake answered as a server that could not write its own database,
+# which is the shape this namespace already closed once for a number
+# past the identity column's range.
+
+
+@pytest.mark.parametrize("value", [NUL, SURROGATE], ids=["a NUL", "a lone surrogate"])
+def test_a_correction_a_database_cannot_hold_is_the_callers_mistake(
+    client: TestClient,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+    value: str,
+) -> None:
+    (number,) = told(MemoryScope.AGENT, AGENT, "the user likes rain")
+
+    with caplog.at_level(logging.DEBUG):
+        answer = client.put(
+            f"/memory/agents/{AGENT}/facts/{number}",
+            content=json.dumps({"fact": value}).encode("utf-8", "surrogatepass"),
+            headers={"content-type": "application/json"},
+        )
+
+    assert answer.status_code == 422
+    assert "NUL" in refused(answer.json(), 422)
+    assert value not in answer.text
+    assert value not in both_formats(caplog)
+    captured = capsys.readouterr()
+    assert value not in captured.out + captured.err
+    assert [row["fact"] for row in memory_rows("facts", owner=AGENT)] == [
+        "the user likes rain"
+    ]
+
+
+def test_a_ledger_key_a_database_cannot_hold_is_the_callers_mistake(
+    client: TestClient, thread: str
+) -> None:
+    kept(thread, scene="a forest")
+
+    answer = client.request(
+        "DELETE",
+        f"/memory/conversations/{thread}/state",
+        content=json.dumps({"key": NUL}).encode("utf-8"),
+        headers={"content-type": "application/json"},
+    )
+
+    assert answer.status_code == 422
+    assert "NUL" in refused(answer.json(), 422)
+    assert len(memory_rows("state", conversation=thread)) == 1
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("GET", "/memory/agents/a%00b/facts"),
+        ("DELETE", "/memory/agents/a%00b/facts/1"),
+        ("DELETE", "/memory/agents/a%00b/facts"),
+        ("GET", "/memory/conversations/a%00b/state"),
+        ("DELETE", "/memory/conversations/a%00b/state"),
+    ],
+)
+def test_a_name_a_database_cannot_hold_is_refused_before_it_is_bound(
+    client: TestClient, method: str, path: str
+) -> None:
+    """The other half of a request. A name is bound into a statement
+    exactly as a body's value is, and one that cannot be bound would
+    leave as a read or a write this server could not do."""
+    told(MemoryScope.AGENT, AGENT, "the user likes rain")
+
+    answer = client.request(method, path)
+
+    assert answer.status_code == 422
+    assert "name" in refused(answer.json(), 422)
+    assert len(memory_rows("facts", owner=AGENT)) == 1
+
+
+def test_an_unstorable_cursor_is_refused_too(client: TestClient) -> None:
+    """A cursor is a name this API answered with, so one that could
+    never have been answered is refused rather than bound."""
+    told(MemoryScope.AGENT, AGENT, "one")
+
+    answer = client.get("/memory/agents", params={"cursor": NUL})
+
+    assert answer.status_code == 422
+    assert "name" in refused(answer.json(), 422)
