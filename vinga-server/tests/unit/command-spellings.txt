@@ -963,31 +963,31 @@ vinga-server/README.md:1718  respell  config reload
 vinga-server/README.md:1737  respell  vinga-server config provider secret set llm claude
 vinga-server/README.md:1748  respell  config show
 vinga-server/README.md:1885  respell  vinga-server config provider set llm local
-vinga-server/README.md:1953  respell  vinga-server config agent-defaults set
-vinga-server/README.md:2154  respell  vinga-server config mcp-server status
-vinga-server/README.md:2177  respell  vinga events tail
-vinga-server/README.md:2180  respell  vinga events tail
-vinga-server/README.md:2181  respell  vinga events tail
-vinga-server/README.md:2182  respell  vinga events tail
-vinga-server/README.md:2435  respell  vinga session delete
-vinga-server/README.md:2435  respell  vinga session purge
-vinga-server/README.md:2436  respell  vinga conversation delete
-vinga-server/README.md:2599  respell  vinga provider set llm claude
-vinga-server/README.md:2600  respell  vinga reload
-vinga-server/README.md:2905  respell  config apply
-vinga-server/README.md:2907  respell  config provider secret set
-vinga-server/README.md:2908  respell  config reload
-vinga-server/README.md:2932  respell  vinga-server config export
-vinga-server/README.md:2956  respell  config export
-vinga-server/README.md:2962  respell  config apply
-vinga-server/README.md:2964  respell  config provider secret set
-vinga-server/README.md:2965  respell  config reload
-vinga-server/README.md:3054  respell  vinga-server config ota-url
-vinga-server/README.md:3066  respell  vinga info
-vinga-server/README.md:3080  respell  config ota-url
-vinga-server/README.md:3138  respell  vinga-server config device pending list
-vinga-server/README.md:3145  respell  vinga-server config device pending claim
-vinga-server/README.md:3166  respell  vinga-server config reload
+vinga-server/README.md:1965  respell  vinga-server config agent-defaults set
+vinga-server/README.md:2166  respell  vinga-server config mcp-server status
+vinga-server/README.md:2189  respell  vinga events tail
+vinga-server/README.md:2192  respell  vinga events tail
+vinga-server/README.md:2193  respell  vinga events tail
+vinga-server/README.md:2194  respell  vinga events tail
+vinga-server/README.md:2447  respell  vinga session delete
+vinga-server/README.md:2447  respell  vinga session purge
+vinga-server/README.md:2448  respell  vinga conversation delete
+vinga-server/README.md:2611  respell  vinga provider set llm claude
+vinga-server/README.md:2612  respell  vinga reload
+vinga-server/README.md:2917  respell  config apply
+vinga-server/README.md:2919  respell  config provider secret set
+vinga-server/README.md:2920  respell  config reload
+vinga-server/README.md:2944  respell  vinga-server config export
+vinga-server/README.md:2968  respell  config export
+vinga-server/README.md:2974  respell  config apply
+vinga-server/README.md:2976  respell  config provider secret set
+vinga-server/README.md:2977  respell  config reload
+vinga-server/README.md:3066  respell  vinga-server config ota-url
+vinga-server/README.md:3078  respell  vinga info
+vinga-server/README.md:3092  respell  config ota-url
+vinga-server/README.md:3150  respell  vinga-server config device pending list
+vinga-server/README.md:3157  respell  vinga-server config device pending claim
+vinga-server/README.md:3178  respell  vinga-server config reload
 vinga-server/config.deploy.example.sh:48  respell  vinga-server config reload
 vinga-server/config.deploy.example.sh:55  respell  vinga-server config apply
 vinga-server/config.deploy.example.yaml:63  respell  vinga-server config ota-url
@@ -1046,7 +1046,7 @@ vinga-server/examples/vad-silero.yaml:5  respell  vinga provider set vad silero
 vinga-server/pyproject.toml:84  respell  vinga simulator run
 vinga-server/pyproject.toml:165  respell  config cli-reference
 vinga-server/pyproject.toml:181  respell  vinga simulator run
-vinga-server/src/vinga_server/app.py:837  respell  vinga-server config ota-url
+vinga-server/src/vinga_server/app.py:850  respell  vinga-server config ota-url
 vinga-server/src/vinga_server/config/api.py:426  respell  vinga-server config device pending list
 vinga-server/src/vinga_server/config/api.py:445  respell  vinga-server config list
 vinga-server/src/vinga_server/config/api.py:545  respell  vinga-server config reload
