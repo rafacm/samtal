@@ -62,7 +62,9 @@ def _rows(agent: str) -> list[str]:
         return [
             row[0]
             for row in holder.execute(
-                "select fact from memory.facts where agent = %s order by id", (agent,)
+                "select fact from memory.facts where scope = 'agent' and owner = %s "
+                "and forgotten_at is null order by id",
+                (agent,),
             )
         ]
     finally:

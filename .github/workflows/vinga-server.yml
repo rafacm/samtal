@@ -660,8 +660,8 @@ jobs:
               }
               # The row id is an identity column for the reason the
               # cursor tables above are: a sequence never hands out a
-              # value twice, which is what #83's stable fact identity
-              # and its tombstones will lean on.
+              # value twice, which is what the fact identity update,
+              # forget and restore address a row by leans on.
               memory_identity = {
                   row[0]: row[1]
                   for row in connection.execute(
@@ -673,18 +673,29 @@ jobs:
                   )
               }
           memory_tables = set(inspect(reader).get_table_names(schema=memory_schema))
+          memory_columns = {
+              name: {column["name"] for column in inspect(reader).get_columns(name, schema=memory_schema)}
+              for name in sorted(memory_tables)
+          }
           reader.dispose()
 
           # The head of the packaged chain. A new migration moves this
           # line, deliberately, exactly as the two above.
-          if memory_revisions != {"2001_agent_memory"}:
-              sys.exit(f"the wheel's memory chain is at {sorted(memory_revisions)}, not ['2001_agent_memory']")
-          expected = {"facts"}
+          if memory_revisions != {"2002_memory_scopes"}:
+              sys.exit(f"the wheel's memory chain is at {sorted(memory_revisions)}, not ['2002_memory_scopes']")
+          expected = {"facts", "state"}
           missing = expected - memory_tables
           if missing:
               sys.exit("the wheel's memory migrations did not create: " + ", ".join(sorted(missing)))
           if memory_identity.get("facts") != "YES":
               sys.exit("the wheel's facts table would reuse deleted row ids")
+          # The scoped shape, from the wheel's own migrations: the
+          # renamed column, the held pair, and the ledger's key.
+          expected_columns = {"id", "scope", "owner", "at", "fact", "forgotten_at", "forgotten_in"}
+          if memory_columns["facts"] != expected_columns:
+              sys.exit(f"the wheel's facts table is {sorted(memory_columns['facts'])}, not {sorted(expected_columns)}")
+          if memory_columns["state"] != {"conversation", "key", "value", "updated_at"}:
+              sys.exit(f"the wheel's state table is {sorted(memory_columns['state'])}, not the conversation ledger")
           print(f"migrated a fresh memory store from {installed.parent}")
           PY
 

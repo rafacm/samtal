@@ -22,6 +22,8 @@ migration and the disposal.
 
 from pathlib import Path
 
+import psycopg
+import pytest
 from sqlalchemy import inspect, text
 
 import vinga_server
@@ -31,17 +33,28 @@ from vinga_server.db import DOMAIN_CHAIN, advisory_key, open_database, read_engi
 from vinga_server.memory import schema
 from vinga_server.memory.store import MEMORY_CHAIN, open_memory
 
-EXPECTED_TABLES = {"facts"}
+EXPECTED_TABLES = {"facts", "state"}
 
-EXPECTED_COLUMNS = {"id", "agent", "at", "fact"}
+EXPECTED_COLUMNS = {
+    "id",
+    "scope",
+    "owner",
+    "at",
+    "fact",
+    "forgotten_at",
+    "forgotten_in",
+}
+
+EXPECTED_STATE_COLUMNS = {"conversation", "key", "value", "updated_at"}
 
 # Named in the migration rather than left to the database, so a later
-# migration can address it. One index, carrying both halves of the one
-# access path there is: an agent's rows in insertion order, which is
-# what the ordered read walks and what the prune walks.
-EXPECTED_INDEXES = {"ix_facts_agent"}
+# migration can address them. Two, because there are two access paths: an
+# owner's rows within a scope in insertion order, which the ordered read,
+# the prune and the lookup filter walk, and the held rows of one thread,
+# which restore, erasure, retention and the sweep address.
+EXPECTED_INDEXES = {"ix_facts_scope", "ix_facts_forgotten"}
 
-HEAD = "2001_agent_memory"
+HEAD = "2002_memory_scopes"
 
 SCHEMA = MEMORY_CHAIN.schema
 
@@ -66,8 +79,30 @@ def _version(engine, schema_name: str) -> list[str]:
         ]
 
 
-def _fact_row(agent: str, fact: str) -> dict:
-    return {"agent": agent, "at": "2026-08-30T10:00:00+00:00", "fact": fact}
+def _fact_row(owner: str, fact: str) -> dict:
+    return {
+        "scope": "agent",
+        "owner": owner,
+        "at": "2026-08-30T10:00:00+00:00",
+        "fact": fact,
+    }
+
+
+def _refused(engine, statement: str) -> str:
+    """What the database says no to, by the constraint it names.
+
+    The message is read for the constraint name and nothing else, which
+    is a value this suite wrote into the migration rather than anything
+    a caller reaches.
+    """
+    try:
+        with engine.begin() as connection:
+            connection.execute(text(statement))
+    except Exception as exc:
+        cause = getattr(exc, "orig", None)
+        assert isinstance(cause, psycopg.errors.CheckViolation), exc
+        return str(cause.diag.constraint_name)
+    raise AssertionError("the database accepted a row the check forbids")
 
 
 def test_a_blank_database_gains_a_migrated_memory_schema(blank_database: str) -> None:
@@ -82,6 +117,7 @@ def test_a_blank_database_gains_a_migrated_memory_schema(blank_database: str) ->
         assert EXPECTED_TABLES <= _tables(engine, SCHEMA)
         assert _version(engine, SCHEMA) == [HEAD]
         assert _columns(engine, "facts") == EXPECTED_COLUMNS
+        assert _columns(engine, "state") == EXPECTED_STATE_COLUMNS
     finally:
         engine.dispose()
 
@@ -170,10 +206,11 @@ def test_the_row_id_is_a_declared_identity_column() -> None:
 
 
 def test_a_deleted_maximum_id_is_never_issued_again() -> None:
-    """Pruning takes rows off one end and #83's tombstones will take
+    """Pruning takes rows off one end and a permanent forgetting takes
     them from anywhere, so a reissued id would be a fact identity that
-    named two different facts. The next insert lands past every id ever
-    issued rather than back on one that was taken."""
+    named two different facts, and the id is what update, forget and
+    restore address. The next insert lands past every id ever issued
+    rather than back on one that was taken."""
     settings = DatabaseConfig()
     open_memory(settings).close()
     engine = write_engine(settings, MEMORY_CHAIN)
@@ -213,6 +250,113 @@ def test_the_index_the_read_and_the_prune_walk_exists() -> None:
         engine.dispose()
 
     assert EXPECTED_INDEXES <= found
+    # And the index the rename replaced is gone rather than left behind
+    # to be maintained on every write for nobody.
+    assert "ix_facts_agent" not in found
+
+
+def test_the_held_rows_have_an_index_of_their_own() -> None:
+    """Partial, which is the whole point of it: the paths that address
+    held rows by their thread must not walk the active majority under
+    the writer's lock. Read off the database rather than off the
+    metadata, because what a partial index is depends on what was
+    declared to Postgres."""
+    settings = DatabaseConfig()
+    open_memory(settings).close()
+    engine = read_engine(settings)
+    try:
+        with engine.connect() as connection:
+            declared = {
+                row[0]: row[1]
+                for row in connection.execute(
+                    text(
+                        "select indexname, indexdef from pg_indexes "
+                        "where schemaname = :schema"
+                    ),
+                    {"schema": SCHEMA},
+                )
+            }
+    finally:
+        engine.dispose()
+
+    assert "WHERE (forgotten_in IS NOT NULL)" in declared["ix_facts_forgotten"]
+    assert "WHERE" not in declared["ix_facts_scope"]
+
+
+def test_a_scope_the_facts_table_does_not_carry_is_refused() -> None:
+    """The vocabulary is three, and conversation data lives in `state`
+    alone, so a `facts` row claiming that scope is one nothing reads. The
+    check is what makes that a property of the database rather than of
+    the code that happens to write it."""
+    settings = DatabaseConfig()
+    open_memory(settings).close()
+    engine = write_engine(settings, MEMORY_CHAIN)
+    try:
+        refusal = _refused(
+            engine,
+            "insert into memory.facts (scope, owner, at, fact) values "
+            "('conversation', 'poet', '2026-08-30T10:00:00+00:00', 'a fact')",
+        )
+    finally:
+        engine.dispose()
+
+    assert refusal == "ck_facts_scope"
+
+
+def test_half_a_forgetting_is_refused() -> None:
+    """Set together or null together. A row with a moment and no thread
+    could never be swept, and one with a thread and no moment could never
+    age out, so neither half is allowed to stand alone."""
+    settings = DatabaseConfig()
+    open_memory(settings).close()
+    engine = write_engine(settings, MEMORY_CHAIN)
+    try:
+        refusal = _refused(
+            engine,
+            "insert into memory.facts (scope, owner, at, fact, forgotten_at) values "
+            "('agent', 'poet', '2026-08-30T10:00:00+00:00', 'a fact', "
+            "'2026-08-30T11:00:00+00:00')",
+        )
+        mirrored = _refused(
+            engine,
+            "insert into memory.facts (scope, owner, at, fact, forgotten_in) values "
+            "('agent', 'poet', '2026-08-30T10:00:00+00:00', 'a fact', 'abc')",
+        )
+    finally:
+        engine.dispose()
+
+    assert {refusal, mirrored} == {"ck_facts_forgotten"}
+
+
+def test_one_conversation_holds_one_value_per_key() -> None:
+    """Upsert by key is the whole of the ledger's semantics, and the
+    primary key is what makes a second row under the same key
+    impossible rather than merely unwritten."""
+    settings = DatabaseConfig()
+    open_memory(settings).close()
+    engine = write_engine(settings, MEMORY_CHAIN)
+    entry = (
+        "insert into memory.state (conversation, key, value, updated_at) values "
+        "('abc', 'turn', '%s', '2026-08-30T10:00:00+00:00')"
+    )
+    try:
+        with engine.begin() as connection:
+            connection.execute(text(entry % "white"))
+        with pytest.raises(Exception) as refusal:
+            with engine.begin() as connection:
+                connection.execute(text(entry % "black"))
+        # And the same key under another thread is another entry, which
+        # is what keyed-by-thread means.
+        with engine.begin() as connection:
+            connection.execute(text(entry.replace("'abc'", "'def'") % "black"))
+            held = connection.execute(
+                text("select conversation, value from memory.state order by conversation")
+            ).all()
+    finally:
+        engine.dispose()
+
+    assert isinstance(refusal.value.orig, psycopg.errors.UniqueViolation)
+    assert held == [("abc", "white"), ("def", "black")]
 
 
 def test_the_chain_serializes_on_a_key_of_its_own() -> None:
