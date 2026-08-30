@@ -1071,11 +1071,42 @@ Seven, and none changes what the milestone ships.
   something the selected test never runs. Every mutation below was
   re-run under a count assertion after that.
 
+### The rebase onto M3 as it merged
+
+M3 gained six commits after this branch was cut, five of them review
+fixes, and this branch was rebased onto them. Three conflicts, and each
+is recorded rather than summarized because two of them are semantics
+rather than text.
+
+- **`_clear_state`'s call into `clear_ledger`.** The one real merge.
+  This milestone had made the tool's ledger clear delegate to the
+  operator's statement, so the key's normalization has one home; M3's
+  review round had widened `_written` to take the scopes a write reached
+  for rather than one scope. Both are kept: the delegation stands and
+  the call passes `(MemoryScope.CONVERSATION,)`. The guard was re-run
+  against the delegation being dropped, and against `_written`'s own
+  suite, before the resolution was trusted.
+- **The census manifest**, regenerated on the rebased tree through its
+  own generator rather than hand-merged, which is the only way a
+  manifest of every quoted spelling in the repository can be right when
+  both sides added spellings.
+- **The implementation doc**, where M3's own review-round section and
+  this section wanted the same lines. Both are kept whole and in order,
+  M3's round before M4's milestone.
+
+Nothing else conflicted, and the four things M3's post-branch commits
+made true are true here: `remember` is in `ORDERED_TOOL_NAMES` beside
+the edits, `MemoryStore.restore` takes the reachable memories together
+and picks the newest held row across them, the glossary states the
+conversation-agent-device order, and the changelog's compatibility claim
+names both of the block's bounds. The first two were re-run against
+their own mutations on the rebased tree.
+
 ### Verification
 
 - `uv run ruff check .`: clean.
 - `uv run mypy`: clean (5 source files, the events package).
-- `uv run pytest tests/unit -q`: 4887 passed, 19 skipped.
+- `uv run pytest tests/unit -q`: 4891 passed, 19 skipped.
 - `uv run pytest tests/unit -q -n auto --dist loadfile`, the shape CI
   runs: the same.
 - `uv run pytest tests/integration -q`: 233 passed.
@@ -1095,5 +1126,7 @@ Seven, and none changes what the milestone ships.
   whole-scope flag not required; a positional added for the corrected
   text; the stored value bounded to a cell; a number allowed to address
   a ledger entry; the scope left unchecked; the ledger correctable; and
-  the key put back into the path.
+  the key put back into the path. The one the rebase added is the
+  ledger delegation dropped, which is what stands in front of the key's
+  normalization now that both doors issue one statement.
 - Not verified: the `image` job, which builds and smokes the container.
