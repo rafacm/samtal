@@ -677,7 +677,7 @@ Named by role, homes confirmed against the authority taxonomy:
   commands, `api-openapi.json` and `cli.md` regenerated,
   `test_api_contract.py` coverage, the surfaces-page memory row and
   the README's `vinga_ro` sentence cashed in, changelog.
-- [ ] **M5: per-agent memory control.** `MemoryPolicy` on the agent
+- [x] **[M5: per-agent memory control](2026-08-30-memory-scopes-implementation.md#m5-per-agent-memory-control)** (PR TBD). `MemoryPolicy` on the agent
   model, tool and injection gating, the preview honoring it, the
   `mcp` description and grant-paragraph rewrites, `domain-config.md`
   regenerated, body fixtures, concepts' control paragraph brought
