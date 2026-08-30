@@ -694,12 +694,12 @@ docs/plans/2026-08-30-memory-scopes.md:358  historical  vinga memory list conver
 docs/plans/2026-08-30-memory-scopes.md:359  historical  vinga memory delete conversation
 docs/plans/2026-08-30-memory-scopes.md:363  historical  vinga memory list agent
 docs/reference/api-openapi.json:5  generated  vinga schema provider
-docs/reference/api-openapi.json:6465  generated  vinga ota-url
-docs/reference/api-openapi.json:7426  generated  vinga provider secret set
-docs/reference/api-openapi.json:7547  generated  vinga agent preview
-docs/reference/api-openapi.json:7579  generated  vinga agent preview
-docs/reference/api-openapi.json:7622  generated  vinga mcp-server status
-docs/reference/api-openapi.json:7646  generated  vinga mcp-server status
+docs/reference/api-openapi.json:6473  generated  vinga ota-url
+docs/reference/api-openapi.json:7434  generated  vinga provider secret set
+docs/reference/api-openapi.json:7555  generated  vinga agent preview
+docs/reference/api-openapi.json:7587  generated  vinga agent preview
+docs/reference/api-openapi.json:7630  generated  vinga mcp-server status
+docs/reference/api-openapi.json:7654  generated  vinga mcp-server status
 docs/reference/cli.md:41  respell  vinga provider set llm local
 docs/reference/cli.md:42  respell  vinga-server config provider set llm local
 docs/reference/cli.md:63  respell  vinga config list
@@ -1140,9 +1140,9 @@ vinga-server/tests/integration/data/pre-cutover-export.yaml:2  respell  vinga ap
 vinga-server/tests/integration/data/pre-cutover-export.yaml:4  respell  vinga apply
 vinga-server/tests/integration/data/pre-cutover-export.yaml:6  respell  vinga reload
 vinga-server/tests/integration/data/pre-cutover-export.yaml:62  respell  vinga provider secret set
-vinga-server/tests/integration/test_cli_live.py:481  respell  config apply
-vinga-server/tests/integration/test_cli_live.py:1660  respell  config export
-vinga-server/tests/integration/test_cli_live.py:1837  respell  vinga-server config device pending list
+vinga-server/tests/integration/test_cli_live.py:489  respell  config apply
+vinga-server/tests/integration/test_cli_live.py:1739  respell  config export
+vinga-server/tests/integration/test_cli_live.py:1916  respell  vinga-server config device pending list
 vinga-server/tests/integration/test_cli_simulator.py:1  respell  vinga simulator run
 vinga-server/tests/smoke/seed-local-engines.sh:19  respell  vinga-server config provider set llm mock
 vinga-server/tests/smoke/seed-local-engines.sh:23  respell  vinga-server config provider set asr whisper
