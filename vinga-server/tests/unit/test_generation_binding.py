@@ -22,6 +22,7 @@ import pytest
 
 from tests.support.configs import DEVICE_MAC, DEVICE_UUID, config_with, world
 from tests.support.providers import built_world
+from tests.support.stores import memory as lane_memory
 from vinga_server.device.bindings import BoundNames
 from vinga_server.device.session import DeviceSession
 from vinga_server.registry import SessionRegistry
@@ -108,7 +109,7 @@ def connection(
     return DeviceSession(
         cast(Any, socket),
         generations,
-        bespoke_runtime_factory(generations, McpServers({}), None),
+        bespoke_runtime_factory(generations, McpServers({}), lane_memory()),
         sessions=registry,
         **over,
     )

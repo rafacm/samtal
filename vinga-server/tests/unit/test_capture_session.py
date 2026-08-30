@@ -30,6 +30,7 @@ from tests.support.events import both_formats
 from tests.support.providers import built_world
 from tests.support.sessions import attached_capture, drive_reply
 from tests.support.sockets import LoopingSocket
+from tests.support.stores import memory as lane_memory
 from tests.support.wire import (
     collect_reply,
     connect,
@@ -362,7 +363,7 @@ def capturing_session(tmp_path: Path) -> tuple[DeviceSession, LoopingSocket]:
     config = capturing_config(tmp_path)
     captures = CaptureStore(tmp_path / "captures", 900.0, 2000.0, 0.0)
     generations = world(config, providers=built_world(config))
-    factory = bespoke_runtime_factory(generations, McpServers({}), None, None)
+    factory = bespoke_runtime_factory(generations, McpServers({}), lane_memory(), None)
     websocket = LoopingSocket()
     session = DeviceSession(cast(Any, websocket), generations, factory, captures)
     return session, websocket

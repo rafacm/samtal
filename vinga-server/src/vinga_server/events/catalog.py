@@ -139,13 +139,13 @@ CONFIG_API_CHANNEL = "vinga_server.config.api"
 CONVERSATIONS_CHANNEL = "vinga_server.conversations.store"
 BINDINGS_CHANNEL = "vinga_server.device.bindings"
 FILLER_CHANNEL = "vinga_server.filler"
+MEMORY_CHANNEL = "vinga_server.memory.store"
 ONBOARDING_CHANNEL = "vinga_server.onboarding"
 OTA_CHANNEL = "vinga_server.ota"
 ASR_CHANNEL = "vinga_server.providers.openai_asr"
 PROVIDERS_CHANNEL = "vinga_server.providers.world"
 REGISTRY_CHANNEL = "vinga_server.registry"
 MCP_CHANNEL = "vinga_server.tools.mcp"
-MEMORY_CHANNEL = "vinga_server.tools.memory"
 WS_CHANNEL = "vinga_server.ws"
 
 SERVER_CHANNELS: tuple[str, ...] = (
@@ -155,13 +155,13 @@ SERVER_CHANNELS: tuple[str, ...] = (
     CONVERSATIONS_CHANNEL,
     BINDINGS_CHANNEL,
     FILLER_CHANNEL,
+    MEMORY_CHANNEL,
     ONBOARDING_CHANNEL,
     OTA_CHANNEL,
     ASR_CHANNEL,
     PROVIDERS_CHANNEL,
     REGISTRY_CHANNEL,
     MCP_CHANNEL,
-    MEMORY_CHANNEL,
     WS_CHANNEL,
 )
 
@@ -2566,7 +2566,7 @@ class McpReloadApplied(Variant):
     )
 
 
-# --- tools/memory.py --------------------------------------------------
+# --- memory/store.py --------------------------------------------------
 
 
 
@@ -2578,6 +2578,21 @@ class MemoryUnreadable(Variant):
     LEVEL: ClassVar[int] = logging.WARNING
     TEMPLATE: ClassVar[str] = (
         "could not read memory for agent %s (%s); it remembers nothing this round"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("agent", "error")
+
+    agent: Identifier = value()
+    error: ClassName = value()
+
+
+@dataclass(frozen=True)
+class MemoryUnwritable(Variant):
+    """A fact an agent was asked to remember could not be stored."""
+
+    CHANNEL: ClassVar[str] = MEMORY_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "could not store a fact for agent %s (%s); nothing was remembered"
     )
     ARGS: ClassVar[tuple[str, ...]] = ("agent", "error")
 
@@ -3041,6 +3056,21 @@ MEMORY_UNREADABLE = declare(
     variants=(MemoryUnreadable,),
 )
 
+MEMORY_UNWRITABLE = declare(
+    "memory_unwritable",
+    note=(
+        "A fact an agent was asked to remember could not be stored, so "
+        "nothing was remembered. The write path's own event, beside the "
+        "read path's above: the two fail differently and answer "
+        "differently. A read that fails is contained (the agent "
+        "remembers nothing this round and the reply happens), while a "
+        "write that fails is a sanitized refusal the model reads out, "
+        "so this is where an operator learns what the database actually "
+        "said, by class name and never by message."
+    ),
+    variants=(MemoryUnwritable,),
+)
+
 FILLER_DISABLED = declare(
     "filler_disabled",
     note="Filler synthesis failed for one agent, so latency masking is off for it.",
@@ -3239,6 +3269,7 @@ __all__ = [
     "MCP_TOOL_SHADOWED",
     "MEMORY_CHANNEL",
     "MEMORY_UNREADABLE",
+    "MEMORY_UNWRITABLE",
     "MILESTONE_RECORDED",
     "McpCallDropped",
     "McpConnectFailed",
@@ -3250,6 +3281,7 @@ __all__ = [
     "McpToolCall",
     "McpToolShadowed",
     "MemoryUnreadable",
+    "MemoryUnwritable",
     "MilestoneRecorded",
     "ONBOARDING_BANNER",
     "ONBOARDING_CHANNEL",

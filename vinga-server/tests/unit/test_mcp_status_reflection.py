@@ -37,6 +37,7 @@ from mcp.server.fastmcp import FastMCP
 
 from tests.support.configs import world
 from tests.support.mcp_reflecting_server import REFLECTED_ENV
+from tests.support.stores import memory as lane_memory
 from tests.support.tools_mcp import serving
 from vinga_server import logs
 from vinga_server.app import _prompt_preview
@@ -140,7 +141,7 @@ def prompt_api(database: DatabaseConfig, servers: McpServers, entry: dict[str, o
             TOKEN,
             database,
             mcp_servers=servers,
-            agent_prompt=_prompt_preview(world(config_with(entry)), servers, None),
+            agent_prompt=_prompt_preview(world(config_with(entry)), servers, lane_memory()),
         ),
     )
     return served

@@ -33,6 +33,7 @@ from tests.support.boundary import FakeDevice, StubRuntime
 from tests.support.configs import DEVICE_MAC, config_with_agent, world
 from tests.support.providers import built_world
 from tests.support.sessions import device_session, listening_in
+from tests.support.stores import memory as lane_memory
 from tests.support.wire import connect, send_pcm, shake_hands, speech_pcm
 from vinga_server import __version__
 from vinga_server.app import create_app
@@ -293,7 +294,7 @@ def runtime_for(config: Config, device: FakeDevice, llm: Any = None) -> Any:
             },
         )
     generations = world(config, providers=built)
-    factory = bespoke_runtime_factory(generations, McpServers({}), None)
+    factory = bespoke_runtime_factory(generations, McpServers({}), lane_memory())
     return factory(
         cast(DeviceOutput, device),
         SessionEvents("contract"),

@@ -11,14 +11,15 @@ per round, and moves off the event loop rather than moving in time.
 
 import asyncio
 import threading
-from pathlib import Path
 
 import pytest
 
 from tests.support.configs import BOTH_MAC, POET_MAC, base_config
 from tests.support.providers import CountingServers, RecordingLlm, ScriptedLlm
 from tests.support.sessions import call, run_reply, session_with
+from tests.support.stores import memory as lane_memory
 from vinga_server.config import Config
+from vinga_server.memory import MemoryStore
 from vinga_server.runtime.prompt import (
     Guidance,
     ServerInstructions,
@@ -28,7 +29,6 @@ from vinga_server.runtime.prompt import (
     server_instructions_heading,
     server_prompt_heading,
 )
-from vinga_server.tools.memory import MemoryStore
 
 GUIDANCE = "Ask before unlocking the door."
 
@@ -206,10 +206,8 @@ async def test_activation_logs_the_fragment_beside_the_persona(
 # The memory clock, which did not move
 
 
-async def test_a_fact_remembered_between_replies_is_in_the_next_one(
-    tmp_path: Path,
-) -> None:
-    store = MemoryStore(tmp_path)
+async def test_a_fact_remembered_between_replies_is_in_the_next_one() -> None:
+    store = lane_memory()
     llm = RecordingLlm()
     servers = CountingServers()
     session = session_with(servers, {"poet": llm}, memory=store)
@@ -226,13 +224,13 @@ async def test_a_fact_remembered_between_replies_is_in_the_next_one(
 
 
 async def test_the_memory_read_happens_off_the_event_loop(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`MemoryStore.read` is a synchronous file read reached from the
-    loop every live conversation shares, so it runs in a worker thread.
-    Proven by which thread it ran on rather than by reading the call
-    site."""
-    store = MemoryStore(tmp_path)
+    """`MemoryStore.read` is a synchronous database round trip reached
+    from the loop every live conversation shares, so it runs in a worker
+    thread. Proven by which thread it ran on rather than by reading the
+    call site."""
+    store = lane_memory()
     await store.remember("poet", "the user is vegetarian")
     reads: list[int] = []
     real = MemoryStore.read
@@ -250,13 +248,15 @@ async def test_the_memory_read_happens_off_the_event_loop(
     assert all(where != threading.get_ident() for where in reads)
 
 
-async def test_a_session_without_memory_reads_nothing_at_all() -> None:
-    """No store means no thread hop and no memory block: the half the
-    activation assembled is the whole prompt."""
+async def test_an_agent_that_remembers_nothing_gets_no_memory_block() -> None:
+    """There is no session without a store any more (#314), and an empty
+    store is what a deployment that has stored nothing has: the half the
+    activation assembled is the whole prompt, with no thread hop's worth
+    of block appended to it."""
     config = base_config()
     llm = RecordingLlm()
     servers = CountingServers()
-    session = session_with(servers, {"poet": llm}, memory=None, config=config)
+    session = session_with(servers, {"poet": llm}, config=config)
 
     await run_reply(session, "hello")
 
@@ -281,9 +281,9 @@ def prompt_events(caplog: pytest.LogCaptureFixture) -> list:
 
 
 async def test_activation_logs_what_the_know_how_half_holds(
-    caplog: pytest.LogCaptureFixture, tmp_path: Path
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    store = MemoryStore(tmp_path)
+    store = lane_memory()
     await store.remember("poet", "the user is vegetarian")
     config = base_config()
     guidance = (Guidance("home", GUIDANCE),)
@@ -351,9 +351,7 @@ async def test_the_event_counts_the_server_shipped_blocks_without_quoting_them(
     assert "house_style" not in written
 
 
-async def test_the_shipped_guidance_reaches_the_model(
-    tmp_path: Path,
-) -> None:
+async def test_the_shipped_guidance_reaches_the_model() -> None:
     """Under a heading that says the server is the one talking, which is
     the trust boundary made legible to the one reader that cannot see a
     provenance."""
@@ -361,7 +359,6 @@ async def test_the_shipped_guidance_reaches_the_model(
     session = session_with(
         CountingServers((ServerInstructions("home", "Call list_devices first."),)),
         {"poet": llm},
-        memory=None,
     )
 
     await run_reply(session, "hello")

@@ -39,10 +39,10 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Protocol
 
 from vinga_server.device.boundary import DeviceOutput
+from vinga_server.memory import MemoryStore
 from vinga_server.providers import ToolDef
 from vinga_server.tools import builtin, names
 from vinga_server.tools.mcp import McpServers
-from vinga_server.tools.memory import MemoryStore
 
 if TYPE_CHECKING:
     # Named for the annotations alone, so that stating what routing
@@ -110,12 +110,12 @@ class ThreadSearch(Protocol):
 class BuiltinTools:
     """The tools the server implements itself.
 
-    Owns every builtin name whether or not it can run. Asking to
-    `remember` where no memory is configured is a builtin asked for, and
-    what answers it is this source saying there is no such tool, in the
-    same words the runtime uses for a name nobody publishes: the
-    classification says which namespace the model reached into, and
-    whether the call then ran is what the result says.
+    Owns every builtin name whether or not it can run. A builtin this
+    server cannot run is still a builtin asked for, and what answers it
+    is this source saying there is no such tool, in the same words the
+    runtime uses for a name nobody publishes: the classification says
+    which namespace the model reached into, and whether the call then
+    ran is what the result says.
 
     Three of the four are offered here and executed by the runtime,
     because what they do is end the tool loop rather than produce a
@@ -130,6 +130,12 @@ class BuiltinTools:
     with: a tool that is simply absent is a tool a model invents, and a
     refusal it can read out is something the user hears.
 
+    `remember` is offered to every agent, unconditionally, because
+    remembered facts live in a schema this server migrates at every boot
+    (#314) and there is no deployment without one. It used to be offered
+    only where a memory directory was configured, which is the one
+    branch this class lost.
+
     `threads` is the search half of the resumption flow, absent in every
     deployment that has not switched resumption on and compared
     `is not None` for that reason.
@@ -138,7 +144,7 @@ class BuiltinTools:
     def __init__(
         self,
         agents: Sequence[str],
-        memory: MemoryStore | None,
+        memory: MemoryStore,
         timeout_s: float,
         threads: ThreadSearch | None = None,
     ) -> None:
@@ -153,8 +159,7 @@ class BuiltinTools:
         # no dead tool.
         if len(self._agents) > 1:
             tools.append(builtin.switch_agent_tool(self._agents))
-        if self._memory is not None:
-            tools.append(builtin.remember_tool())
+        tools.append(builtin.remember_tool())
         tools.append(builtin.new_conversation_tool())
         tools.append(builtin.resume_conversation_tool())
         return tools
@@ -163,7 +168,7 @@ class BuiltinTools:
         return claim.name in names.BUILTIN_TOOL_NAMES
 
     async def dispatch(self, claim: "records.ToolInvocation", agent: str) -> tuple[str, bool]:
-        if claim.name == names.REMEMBER and self._memory is not None:
+        if claim.name == names.REMEMBER:
             return await builtin.remember(self._memory, agent, claim.arguments or {}), False
         if claim.name == names.RESUME_CONVERSATION:
             # The search half. A call that named a conversation never

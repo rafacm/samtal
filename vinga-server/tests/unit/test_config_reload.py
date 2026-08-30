@@ -43,6 +43,7 @@ from tests.support.configs import config_with, world
 from tests.support.problems import refused as refused_body
 from tests.support.providers import BrokenTts, RecordingLlm, ScriptedLlm, built_world
 from tests.support.sessions import agent_providers, call, run_reply, session_for
+from tests.support.stores import memory as lane_memory
 from tests.support.tools_mcp import reading
 from vinga_server.app import _prompt_preview, config_diff_reader, config_reloader
 from vinga_server.config import Config, cli
@@ -1238,7 +1239,7 @@ async def test_the_preview_and_the_comparison_agree_with_an_activation() -> None
     generations = world(running, providers=scripted(running, llm))
     servers = McpServers.build(running)
     reload = ConfigReload(generations, servers, reading(stored))
-    preview = _prompt_preview(generations, servers, None)
+    preview = _prompt_preview(generations, servers, lane_memory())
     diff = config_diff_reader(generations, servers, reading(stored))
 
     pending = await diff()

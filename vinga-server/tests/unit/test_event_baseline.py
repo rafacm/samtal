@@ -87,18 +87,20 @@ def capture(
 
 def test_every_driver_names_a_path_of_its_own() -> None:
     """One driver per emit path, so a capture keyed by identity is a
-    capture of eighty-three paths rather than of however many survived a
+    capture of eighty-four paths rather than of however many survived a
     collision.
 
     Eighty since #283, when `BindingsSnapshotOnly` retired with the
     file-existence probe that was the only thing able to emit it,
     eighty-one since #190 gave a reply a second kind of boundary to
     move at, eighty-two since a consented recap became a checkpoint
-    worth announcing, and eighty-three since a provider built inside a
-    container says so when its endpoint is this machine (#340)."""
+    worth announcing, eighty-three since a provider built inside a
+    container says so when its endpoint is this machine (#340), and
+    eighty-four since the memory store's write path gained an event of
+    its own (#314)."""
     claimed = [driver.identity for driver in DRIVERS]
 
-    assert len(set(claimed)) == len(claimed) == 83
+    assert len(set(claimed)) == len(claimed) == 84
 
 
 def test_every_driven_path_produces_the_event_it_emits(
@@ -224,7 +226,7 @@ def test_every_catalog_variant_on_a_scoped_channel_is_produced(
 
 
 # Every record the drivers put on a scoped channel that is NOT one of
-# the eighty-one typed paths, by channel and by sentence.
+# the eighty-four typed paths, by channel and by sentence.
 #
 # These are the untyped diagnostics that survived #210: per-utterance
 # and per-listen lines a session writes, the filler cache's own line,
@@ -762,8 +764,11 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
         ("McpReloadApplied", ("duration_ms", "event", "outcome", "restarted", "started", "stopped",
                               "unchanged")),
     ),
-    "vinga_server.tools.memory:MemoryStore.read #1": (
+    "vinga_server.memory.store:MemoryStore.read #1": (
         ("MemoryUnreadable", ("agent", "error", "event")),
+    ),
+    "vinga_server.memory.store:MemoryStore._store #1": (
+        ("MemoryUnwritable", ("agent", "error", "event")),
     ),
     "vinga_server.ws:conversation #1": (
         ("AuthRejected", ("device", "event", "reason")),

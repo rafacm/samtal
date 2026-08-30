@@ -12,14 +12,16 @@ The pieces, in the order they are met:
 - `schema.py`: the `facts` table and the index the ordered read walks.
 - `migrations/`: the chain's Alembic environment and its baseline,
   `2001_agent_memory`.
-- `store.py`: `MEMORY_CHAIN`, the two engines, and `open_memory`.
+- `store.py`: `MEMORY_CHAIN`, the two engines, `open_memory`, and the
+  two sentences a caller speaks, `read(agent)` and
+  `remember(agent, fact)`.
 
-What this package holds today is the chain and the engines, and nothing
-reads or writes a row: the storage move (#314) lands the schema first,
-so that a milestone leaves a releasable `main` with an empty, migrated,
-unread schema, exactly the state the conversation record already ships
-in when recording is off. `read` and `remember` arrive with the cutover,
-on the store this package already owns.
+Memory is on whenever the server runs (#314). There is no section to
+configure and no store to build: the schema is migrated at every boot,
+an agent that has been told nothing reads as the empty string, and the
+`remember` tool is always offered. Per-agent control over what an agent
+may remember is #83's, and so are scopes, update, delete and the
+operator read surface.
 
 Nobody but the server reads this schema. `deploy/postgres-init.sql`
 creates it with `AUTHORIZATION` to the server role and grants the
