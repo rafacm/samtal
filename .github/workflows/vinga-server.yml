@@ -462,10 +462,11 @@ jobs:
       # `vinga_server` can only resolve to the installed wheel; the
       # script asserts that too rather than trusting it.
       #
-      # Both databases, because they have separate chains packaged
-      # separately: a wheel that shipped the domain migrations and
-      # omitted the conversations ones would pass the first half of this
-      # and fail on a deployment at the moment recording is turned on.
+      # Every chain, because they are packaged separately: a wheel that
+      # shipped the domain migrations and omitted the conversations ones
+      # would pass the first third of this and fail on a deployment at
+      # the moment recording is turned on, and one that omitted the
+      # memory migrations would fail it at the first boot.
       - name: Migrate a fresh database from the built wheel
         run: |
           uv build --wheel --out-dir "$RUNNER_TEMP/dist"
@@ -510,7 +511,8 @@ jobs:
           import vinga_server
           from vinga_server.config.models import DatabaseConfig
           from vinga_server.conversations.store import CONVERSATIONS_CHAIN, open_conversations
-          from vinga_server.db import DOMAIN_CHAIN, open_database
+          from vinga_server.db import DOMAIN_CHAIN, open_database, read_engine
+          from vinga_server.memory import MEMORY_CHAIN, open_memory
           from sqlalchemy import inspect, text
 
           installed = pathlib.Path(vinga_server.__file__).resolve()
@@ -639,6 +641,51 @@ jobs:
               if identity.get(name) != "YES":
                   sys.exit(f"the wheel's {name} table would reuse deleted row ids")
           print(f"migrated a fresh conversation store from {installed.parent}")
+
+          # Agent memory, the third chain, from the same installed
+          # artifact and into the same database: one database, three
+          # schemas, which is the arrangement a deployment has. The
+          # store's opener migrates and is closed again; the inspection
+          # goes through `db.read_engine`, which is what reading a
+          # database somebody else has migrated is for.
+          open_memory(settings).close()
+          memory_schema = MEMORY_CHAIN.schema
+          reader = read_engine(settings)
+          with reader.connect() as connection:
+              memory_revisions = {
+                  row[0]
+                  for row in connection.execute(
+                      text(f"select * from {memory_schema}.alembic_version")
+                  )
+              }
+              # The row id is an identity column for the reason the
+              # cursor tables above are: a sequence never hands out a
+              # value twice, which is what #83's stable fact identity
+              # and its tombstones will lean on.
+              memory_identity = {
+                  row[0]: row[1]
+                  for row in connection.execute(
+                      text(
+                          "select table_name, is_identity from information_schema.columns "
+                          "where table_schema = :schema and column_name = 'id'"
+                      ),
+                      {"schema": memory_schema},
+                  )
+              }
+          memory_tables = set(inspect(reader).get_table_names(schema=memory_schema))
+          reader.dispose()
+
+          # The head of the packaged chain. A new migration moves this
+          # line, deliberately, exactly as the two above.
+          if memory_revisions != {"2001_agent_memory"}:
+              sys.exit(f"the wheel's memory chain is at {sorted(memory_revisions)}, not ['2001_agent_memory']")
+          expected = {"facts"}
+          missing = expected - memory_tables
+          if missing:
+              sys.exit("the wheel's memory migrations did not create: " + ", ".join(sorted(missing)))
+          if memory_identity.get("facts") != "YES":
+              sys.exit("the wheel's facts table would reuse deleted row ids")
+          print(f"migrated a fresh memory store from {installed.parent}")
           PY
 
       # And the OpenAPI document, from the same installed artifact and
