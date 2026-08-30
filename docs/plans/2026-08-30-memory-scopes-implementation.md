@@ -808,3 +808,108 @@ Six, and none changes what the milestone ships.
   the device-note case end to end; and the lookup run on the event loop
   rather than off it.
 - Not verified: the `image` job, which builds and smokes the container.
+
+### PR review round
+
+External review of the branch as pushed to PR #361, at `08792dc0`
+against `origin/main`: backend codex (codex-cli 0.151.0), model
+gpt-5.6-sol, read-only sandbox, 2026-08-30, runtime 4m39s. Five
+findings, two P1, one P2 and two P3, verdict as received: mergeable
+after the listed fixes. Condensed below as received, each with its
+resolution and the commit that landed it.
+
+The two P1s share a shape, and it is the one this milestone was most
+exposed to: a rule about order stated over the wrong set. One said which
+tool calls have to run in the model's order and left out the tool that
+appends; the other said which memory to look in first and turned a
+question about rows into a question about scopes. Both were written down
+in the implementation doc as decisions, which is what made them
+reviewable.
+
+1. **P1: `remember` is reordered ahead of the fact edits at the cap.**
+   `ORDERED_TOOL_NAMES` excluded it on the grounds that appending is
+   order-free, while the loop runs every ordered call before the rest.
+   At a one-line cap a model-issued `remember` followed by
+   `update_memory` therefore ran as the update and then the append,
+   whose prune deleted the row the correction had just written; both
+   answered success, so the model was told a correction landed that
+   nothing kept. `forget` inverts the same way. Include `remember` in
+   the ordered lane and add cap-boundary tests for both pairs.
+
+   *Resolution* (`0f824079`): adopted whole. Every write to a memory is
+   in the lane now, which is the smallest rule that is true: what
+   couples an append to an edit is the prune a full scope runs on every
+   write rather than the address either of them names, and a rule that
+   let one overtake the other would have to know which scope was full to
+   know whether it mattered. `recall` stays out, since it reads. Two
+   tests drive the pairs through a real round on a scope with room for
+   one fact, and each fails against the mutation that takes remembering
+   back out.
+
+2. **P1: a restore with no number did not bring back the last thing
+   forgotten.** The tool asked the agent's memory for its newest held
+   row and the device's only if that refused, so a conversation that had
+   forgotten a fact and then a note about the room brought the fact
+   back. The implementation doc acknowledged the ordering and claimed it
+   changed nothing shipped. Put the cross-scope decision in
+   `MemoryStore`, select the newest eligible held row across both
+   memories in one serialized transaction, and test the mixed case.
+
+   *Resolution* (`a019baee`): adopted whole. `restore` takes the
+   memories the caller may reach as a set and picks the newest held row
+   across all of them, ordered by `forgotten_at` with the id breaking a
+   tie, in one transaction under the chain's lock; it prunes the memory
+   the row is actually in, and the id door is bounded by the same set.
+   `_written` grew the shape `_read` already had, a sequence of scopes,
+   because a statement that never found its row cannot name the memory
+   it was in. The deviation note is corrected rather than softened: it
+   now says the milestone shipped this wrong and the review round is
+   where it was found. The mixed test is arranged so that neither the
+   ids nor a per-memory order could answer it: the note is the older row
+   and the newer removal.
+
+3. **P2: the restore tool's production dispatch was untested.** The
+   restore tests called the executor directly, so removing the dispatch
+   arm left the suite green while the claimed "each tool offered,
+   executed" coverage stood.
+
+   *Resolution* (`7862ce2d`): adopted whole. The undo runs as a model
+   reaches it, `forget` in one reply and `restore_memory` in the next,
+   both as calls the session routes, with the tool result and the
+   restored row asserted; it fails with the dispatch arm removed. A tool
+   the runtime cannot route is a tool an agent cannot speak, whatever
+   the function behind it does.
+
+4. **P3: the glossary stated the precedence backwards.** It listed the
+   scopes agent, device, conversation and then said they inject "in that
+   order", which is the settled `conversation > agent > device` reversed.
+
+   *Resolution* (`1333c2b3`): adopted. The entry names the order rather
+   than pointing at the list it just gave.
+
+5. **P3: the changelog overstated prompt compatibility.** It claimed any
+   agent with fewer than 40 facts sends exactly the prompt it sent
+   before, and the block bounds bytes as well as lines: fewer than 40
+   facts can run past `CORE_BYTES` while fitting the former 8 KiB
+   storage cap.
+
+   *Resolution* (`1333c2b3`, with finding 4): adopted. The claim names
+   both limits and says what the one moving case does, which is inject
+   less and keep everything.
+
+### Verification after the review round
+
+- `uv run ruff check .`: clean. `uv run mypy`: clean (5 source files,
+  the events package).
+- `uv run pytest tests/unit -q`: 4730 passed, 19 skipped.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: the same.
+- `uv run pytest tests/integration -q`: 229 passed.
+- The five generated documents regenerate to their committed bytes, the
+  command-spellings census was regenerated after the changelog and
+  glossary edits, and `python scripts/check_doc_links.py .` checked 172
+  files with no failures.
+- Every guard above was run against its mutation before being trusted:
+  remembering taken back out of the ordered lane, against both cap
+  cases; the restore ordered by id alone, and decided one memory at a
+  time, against the mixed case; and the restore dispatch arm removed.
+- Not verified: the `image` job, which builds and smokes the container.
