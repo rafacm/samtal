@@ -90,9 +90,19 @@ memory chain.** `facts` renames `agent` to `owner`, gains
 `scope` (text, not null, `'agent'` for existing rows), and gains the
 held-for-undo pair `forgotten_at` and `forgotten_in` (both nullable
 text: when it was forgotten, and the thread it was forgotten in). The
-index becomes `ix_facts_scope` on `(scope, owner, id)`, the one
-access path there is (one owner's rows in insertion order, walked by
-the ordered read, the prune, and the lookup filter). A new table
+index becomes `ix_facts_scope` on `(scope, owner, id)`, the main
+access path (one owner's rows in insertion order, walked by the
+ordered read, the prune, and the lookup filter), and a partial
+index `ix_facts_forgotten` on `(forgotten_in, id)` where
+`forgotten_in IS NOT NULL` serves the paths that address held rows
+by thread (restore, erasure, retention, the sweep) without walking
+every fact under the writer lock. Two check constraints state what
+the code relies on: `scope` is `agent` or `device` (conversation
+data lives only in `state`), and `forgotten_at` and `forgotten_in`
+are null together or set together. The scope vocabulary is declared
+once, in the schema module, and the store, the events' scope field
+and the tool enum derive from it, the facts table's check being the
+two-member subset. A new table
 `state` carries `(conversation, key, value, updated_at)` with primary
 key `(conversation, key)`: upsert-by-key is the whole of its
 semantics, so the key is the identity and there is no id column. The
@@ -770,6 +780,11 @@ resolution.
    index, scanning all facts under the writer lock. Add the check
    constraints, a partial lifecycle index, and one declared scope
    vocabulary the store, events and tools derive from.
+
+   *Resolution*: adopted whole: the scope check, the
+   paired-null check, the `ix_facts_forgotten` partial index, and
+   the single declared vocabulary with the facts check as its
+   two-member subset are in the schema resolution.
 
 10. **P2: owner-list routes are unbounded.** The three owner
     listings return every owner with counts and no pagination
