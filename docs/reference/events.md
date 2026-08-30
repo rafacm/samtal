@@ -9,7 +9,7 @@ The structured events are this server's observability surface
 ([ADR](../adr/2026-08-04-json-logs-are-the-observability-surface.md)), and
 they carry metadata and nothing else
 ([ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)).
-This document is that surface written down: 59 events in 84 variants. What was
+This document is that surface written down: 60 events in 85 variants. What was
 said in a conversation is in the conversation store instead, keyed by the same
 `session` ([its reference](conversations-schema.md)).
 
@@ -78,13 +78,13 @@ another is a violation even when its fields are lawful.
 - `vinga_server.conversations.store`
 - `vinga_server.device.bindings`
 - `vinga_server.filler`
+- `vinga_server.memory.store`
 - `vinga_server.onboarding`
 - `vinga_server.ota`
 - `vinga_server.providers.openai_asr`
 - `vinga_server.providers.world`
 - `vinga_server.registry`
 - `vinga_server.tools.mcp`
-- `vinga_server.tools.memory`
 - `vinga_server.ws`
 
 ## What a value may be
@@ -245,7 +245,8 @@ meets them, from a device's check-in to the server's own lifecycle surfaces.
 | `mcp_tool_shadowed` | `vinga_server.tools.mcp` | WARNING | 1 |
 | `mcp_reload` | `vinga_server.tools.mcp` | INFO, WARNING | 2 |
 | `provider_reaches_loopback` | `vinga_server.providers.world` | WARNING | 1 |
-| `memory_unreadable` | `vinga_server.tools.memory` | WARNING | 1 |
+| `memory_unreadable` | `vinga_server.memory.store` | WARNING | 1 |
+| `memory_unwritable` | `vinga_server.memory.store` | WARNING | 1 |
 | `filler_disabled` | `vinga_server.filler` | WARNING | 1 |
 | `capture_started` | `vinga_server.capture` | INFO | 1 |
 | `capture_declined` | `vinga_server.capture` | WARNING | 3 |
@@ -1786,10 +1787,36 @@ providers.%s.%s reaches %s, which inside a container is the container itself rat
 
 An agent's memory could not be read; it remembers nothing this round.
 
-#### Variant 1: `vinga_server.tools.memory` at WARNING
+#### Variant 1: `vinga_server.memory.store` at WARNING
 
 ```text
 could not read memory for agent %s (%s); it remembers nothing this round
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `agent` (`IDENTIFIER`) | no |  |  |
+| 2 | `error` (`CLASS_NAME`) | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `error` | `CLASS_NAME` | yes | no |  |  |
+
+### `memory_unwritable`
+
+A fact an agent was asked to remember could not be stored, so nothing was
+remembered. The write path's own event, beside the read path's above: the two
+fail differently and answer differently. A read that fails is contained (the
+agent remembers nothing this round and the reply happens), while a write that
+fails is a sanitized refusal the model reads out, so this is where an operator
+learns what the database actually said, by class name and never by message.
+
+#### Variant 1: `vinga_server.memory.store` at WARNING
+
+```text
+could not store a fact for agent %s (%s); nothing was remembered
 ```
 
 | # | Argument | Nullable | Constraint | Note |
