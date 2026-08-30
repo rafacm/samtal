@@ -181,6 +181,7 @@ from vinga_server.device.session import DeviceSession
 from vinga_server.events.catalog import CHANNELS
 from vinga_server.filler import build_agent_fillers
 from vinga_server.logs import _STANDARD_ATTRIBUTES
+from vinga_server.memory.store import NOTHING_PURGED
 from vinga_server.ota import ACTIVATE_SEGMENT, OTA_PATH
 from vinga_server.providers import AsrResult, Usage, build_entry
 from vinga_server.providers.openai_asr import OpenAiAsr
@@ -1594,6 +1595,16 @@ async def drive_memory_unwritable(_: Path) -> None:
         pass
 
 
+def drive_memory_cleanup_failed(_: Path) -> None:
+    """The sweep on a store whose writer is pointed at nothing.
+
+    The third memory path, and the one with no agent to report for: it
+    acts for threads nobody owns any more, so its failure is neither a
+    refused write nor a lost read.
+    """
+    assert memory_that_cannot_write().sweep() == NOTHING_PURGED
+
+
 def drive_auth_rejected(directory: Path) -> None:
     with TestClient(create_app(apart(config_with_agent(), directory))) as client:
         try:
@@ -1753,6 +1764,11 @@ SERVER_DRIVERS: tuple[Driver, ...] = (
     Driver((RELOAD, "_apply", 1), drive_mcp_reload_applied, "mcp_reload"),
     Driver((MEMORY, "MemoryStore._read", 1), drive_memory_unreadable, "memory_unreadable"),
     Driver((MEMORY, "MemoryStore._written", 1), drive_memory_unwritable, "memory_unwritable"),
+    Driver(
+        (MEMORY, "MemoryStore._cleaned", 1),
+        drive_memory_cleanup_failed,
+        "memory_cleanup_failed",
+    ),
     Driver((WS, "conversation", 1), drive_auth_rejected, "auth_rejected"),
     Driver((WS, "conversation", 2), drive_session_rejected_at_capacity, "session_rejected"),
 )

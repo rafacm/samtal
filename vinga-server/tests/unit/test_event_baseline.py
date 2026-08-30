@@ -97,10 +97,11 @@ def test_every_driver_names_a_path_of_its_own() -> None:
     worth announcing, eighty-three since a provider built inside a
     container says so when its endpoint is this machine (#340), and
     eighty-four since the memory store's write path gained an event of
-    its own (#314)."""
+    its own (#314), and eighty-five since memory gained a cleanup that
+    acts for no agent at all (#83)."""
     claimed = [driver.identity for driver in DRIVERS]
 
-    assert len(set(claimed)) == len(claimed) == 84
+    assert len(set(claimed)) == len(claimed) == 85
 
 
 def test_every_driven_path_produces_the_event_it_emits(
@@ -769,6 +770,9 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
     ),
     "vinga_server.memory.store:MemoryStore._written #1": (
         ("MemoryUnwritable", ("agent", "error", "event", "scope")),
+    ),
+    "vinga_server.memory.store:MemoryStore._cleaned #1": (
+        ("MemoryCleanupFailed", ("error", "event")),
     ),
     "vinga_server.ws:conversation #1": (
         ("AuthRejected", ("device", "event", "reason")),

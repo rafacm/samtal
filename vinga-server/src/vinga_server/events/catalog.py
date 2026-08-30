@@ -2618,6 +2618,27 @@ class MemoryUnwritable(Variant):
     error: ClassName = value()
 
 
+@dataclass(frozen=True)
+class MemoryCleanupFailed(Variant):
+    """The memory of conversations that are gone could not be removed."""
+
+    CHANNEL: ClassVar[str] = MEMORY_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "could not remove the memory of conversations that are gone (%s); the next "
+        "sweep takes what this one did not"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("error",)
+
+    error: ClassName = value(
+        note=(
+            "The class of the failure, and the whole of what this event "
+            "carries. There is no agent and no scope, because what this "
+            "answers for is the memory of threads nobody owns any more."
+        )
+    )
+
+
 # --- filler.py --------------------------------------------------------
 
 
@@ -3095,6 +3116,19 @@ MEMORY_UNWRITABLE = declare(
     variants=(MemoryUnwritable,),
 )
 
+MEMORY_CLEANUP_FAILED = declare(
+    "memory_cleanup_failed",
+    note=(
+        "State and held facts belonging to conversations that are gone "
+        "could not be removed. Agent-free on purpose, beside the two "
+        "events above: the boot sweep and a session's own teardown act "
+        "for no agent and on no scope, so neither of the other two could "
+        "report this honestly. Nothing is lost by a failure here except "
+        "the space, and the next sweep takes what this one did not."
+    ),
+    variants=(MemoryCleanupFailed,),
+)
+
 FILLER_DISABLED = declare(
     "filler_disabled",
     note="Filler synthesis failed for one agent, so latency masking is off for it.",
@@ -3304,6 +3338,7 @@ __all__ = [
     "McpStopped",
     "McpToolCall",
     "McpToolShadowed",
+    "MemoryCleanupFailed",
     "MemoryUnreadable",
     "MemoryUnwritable",
     "MilestoneRecorded",
