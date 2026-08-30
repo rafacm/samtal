@@ -318,6 +318,29 @@ async def test_a_device_fact_is_not_an_agent_fact() -> None:
     assert store.read("poet") == "- the user is vegetarian"
 
 
+async def test_remembering_a_fact_over_the_byte_cap_still_keeps_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The released edge, kept. The prune has never gone below one fact,
+    so a single fact bigger than the whole cap is stored and read back,
+    and #314's deployments see exactly what they saw.
+
+    `add` refuses that fact, which is the rule this issue is bringing
+    in; `remember` is the sentence a shipped tool speaks, and it starts
+    refusing in the milestone whose changelog says so.
+    """
+    monkeypatch.setattr(store_module, "MAX_BYTES", 40)
+    store = memory()
+    await store.remember("poet", "x" * 41)
+
+    assert _rows("poet") == ["x" * 41]
+    assert store.read("poet") == "- " + "x" * 41
+    with pytest.raises(ValueError) as refusal:
+        await store.add(MemoryScope.AGENT, "poet", "y" * 41, agent="poet")
+    assert str(refusal.value) == store_module.TOO_LONG
+    assert _rows("poet") == ["x" * 41]
+
+
 async def test_an_add_too_long_for_its_scope_is_refused(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

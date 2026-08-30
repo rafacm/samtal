@@ -586,12 +586,25 @@ class MemoryStore:
     async def remember(self, agent: str, fact: str) -> None:
         """Keep one fact for this agent, normalized to a line and capped.
 
-        `add` under another name, on the one scope that existed before
-        there were scopes, and the id it returns is dropped: what a
-        caller of this sentence does with an id is nothing, and #83's
-        callers ask for `add` instead.
+        #314's sentence, behaving exactly as it was released, on the one
+        scope that existed before there were scopes. The id the insert
+        allocates is dropped, because what a caller of this sentence does
+        with one is nothing.
+
+        It writes through the same transaction `add` does and stops
+        short of one of `add`'s two refusals, deliberately. A fact whose
+        rendered line alone is over the byte cap has always been kept:
+        the prune never goes below one fact, so what a deployment stored
+        yesterday it stores today, and the tool an agent speaks through
+        does not start refusing a long sentence in a release whose
+        changelog says nothing above the store moved. The refusal is the
+        right answer, and it arrives on this path in the milestone that
+        announces it, beside the id this call still throws away.
         """
-        await self.add(MemoryScope.AGENT, agent, fact, agent=agent)
+        text = _one_line(fact)
+        if not text:
+            raise ValueError(NOTHING_TO_REMEMBER)
+        await asyncio.to_thread(self._add, agent, MemoryScope.AGENT, agent, text)
 
     async def add(
         self, scope: MemoryScope, owner: str, fact: str, *, agent: str
