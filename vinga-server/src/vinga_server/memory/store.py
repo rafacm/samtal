@@ -23,9 +23,11 @@ these three solves it.
 
 What a caller gets, in the order the sentences are met:
 
-- `read_for_prompt(agent, device, conversation)`, all three scopes
-  rendered in one round trip, and `read(agent)`, the agent's scope
-  whole, which is what #314's callers still speak.
+- `read_for_prompt(agent, device, conversation)`, every scope a prompt
+  is assembled from, rendered in one round trip. The agent's block is
+  the newest of its facts rather than the whole of them, and a caller
+  with no device or no thread behind it says so and gets the scopes it
+  asked for.
 - `add`, `update`, `forget` and `restore`, addressed by the id `add`
   answers with and bounded by the ownership of the row rather than by
   the model's good behavior; `remember` is `add` on the agent scope.
@@ -653,31 +655,6 @@ class MemoryStore:
             problem = DatabaseBusyError(BUSY) if is_busy(exc) else StorageError(UNWRITABLE)
         raise problem
 
-    def read(self, agent: str) -> str:
-        """This agent's facts, or an empty string when it has none.
-
-        Rendered as the prompt injects it: one `- fact` line per row, in
-        insertion order, with no trailing newline. Read per reply rather
-        than cached, so a fact remembered in one session is known to a
-        concurrent one on its next reply.
-
-        Synchronous, and on the read engine, which is the whole of why
-        the store holds two. Reads take no advisory lock, so this
-        answers while another connection is midway through a write and
-        can never wait out a lock timeout on the path that builds a
-        system prompt.
-
-        The agent's scope whole, uncapped by the core, which is what
-        keeps this the sentence #314's callers speak while the scoped
-        rendering arrives beside it.
-        """
-        return self._read(
-            agent,
-            (MemoryScope.AGENT,),
-            lambda connection: _rendered(_active(connection, MemoryScope.AGENT, agent)),
-            "",
-        )
-
     async def remember(self, agent: str, fact: str) -> None:
         """Keep one fact for this agent, normalized to a line and capped.
 
@@ -825,39 +802,45 @@ class MemoryStore:
             return NOTHING_PURGED
 
     def read_for_prompt(
-        self, agent: str, device: str | None, conversation: str
+        self, agent: str, device: str | None, conversation: str | None
     ) -> PromptMemory:
-        """Everything this reply's prompt needs to know, in one round
+        """Everything a prompt needs to know of memory, in one round
         trip.
 
-        One connection for all three scopes, which is the whole reason
-        this exists beside `read`: the reply path takes exactly one
-        off-loop hop per round, and three reads would take three. The
-        blocks come back rendered and in reading order, and what the
-        assembly does with them is its own business.
+        One connection for every scope it reaches: the reply path takes
+        exactly one off-loop hop per round, and a read per scope would
+        take three. The blocks come back rendered and in reading order,
+        and what the assembly does with them is its own business.
 
         Contained scope by scope in what it costs a reply: a database
         this server cannot read means the agent remembers nothing this
-        round and the reply happens, and every scope that was lost says
-        so, so an empty block is never silence about a failure.
+        round and the reply happens, and every scope that was reached
+        for and lost says so, so an empty block is never silence about a
+        failure.
 
         The agent's block is the core rather than the whole of the
-        scope, because the whole of it stopped fitting in a prompt when
-        the storage cap grew past it; what is not injected is what the
-        lookup is for.
+        scope, and the whole of it is never read here: the scope holds a
+        thousand facts and the block shows the newest forty of them, so
+        what is not injected is what the lookup is for.
 
-        A device that never identified itself has no device scope, and
-        that is said with None rather than reached with an owner nothing
+        A device that never identified itself has no device scope, and a
+        prompt assembled outside any conversation has no ledger. Both
+        are said with None rather than reached with an owner nothing
         matches: an empty string is a name a row could be stored under,
         and answering "no rows" by accident is not the same as saying
-        there is nothing to read.
+        there is nothing to read. The preview an operator asks for is
+        exactly that shape, one scope of the three.
         """
         return self._read(
             agent,
-            tuple(MemoryScope),
+            _reaching(device, conversation),
             lambda connection: PromptMemory(
-                state=_ledger_rendered(_ledger(connection, conversation)),
-                agent=_core(_active(connection, MemoryScope.AGENT, agent)),
+                state=(
+                    ""
+                    if conversation is None
+                    else _ledger_rendered(_ledger(connection, conversation))
+                ),
+                agent=_core(_newest(connection, MemoryScope.AGENT, agent, CORE_LINES)),
                 device=(
                     ""
                     if device is None
@@ -1322,6 +1305,25 @@ def _refuse_the_oversized(text: str, scope: MemoryScope) -> None:
         raise ValueError(TOO_LONG)
 
 
+def _reaching(
+    device: str | None, conversation: str | None
+) -> tuple[MemoryScope, ...]:
+    """Which scopes one prompt read is actually reading.
+
+    What the containment reports when the read is lost, so it has to be
+    what was reached for rather than the vocabulary: a preview with no
+    device and no thread behind it reads one scope, and a report naming
+    three would tell an operator that two scopes nobody asked about
+    could not be read.
+    """
+    reached = [MemoryScope.AGENT]
+    if conversation is not None:
+        reached.insert(0, MemoryScope.CONVERSATION)
+    if device is not None:
+        reached.append(MemoryScope.DEVICE)
+    return tuple(reached)
+
+
 def _active(
     connection: Connection, scope: MemoryScope, owner: str
 ) -> list[tuple[int, str]]:
@@ -1349,6 +1351,35 @@ def _active(
         .order_by(schema.facts.c.id)
     ).all()
     return [(row_id, f"- {fact}") for row_id, fact in rows]
+
+
+def _newest(
+    connection: Connection, scope: MemoryScope, owner: str, lines: int
+) -> list[tuple[int, str]]:
+    """The newest `lines` active facts of one owner, in reading order.
+
+    Bounded in the statement rather than sliced after it, which is the
+    two-tier shape made real: the agent scope holds up to `MAX_LINES`
+    facts and the block injects the newest few of them, so reading the
+    whole scope to render forty lines would spend on every round exactly
+    what the split exists to save.
+
+    Newest by which rows are taken and oldest-first in how they read,
+    which is not a contradiction: what falls out of the block is what
+    was said longest ago, and what remains is read in the order it was
+    said.
+    """
+    rows = connection.execute(
+        select(schema.facts.c.id, schema.facts.c.fact)
+        .where(
+            schema.facts.c.scope == scope,
+            schema.facts.c.owner == owner,
+            _ACTIVE,
+        )
+        .order_by(schema.facts.c.id.desc())
+        .limit(lines)
+    ).all()
+    return [(row_id, f"- {fact}") for row_id, fact in reversed(rows)]
 
 
 def _prune(
@@ -1417,13 +1448,14 @@ def _recorded(column: object) -> object:
     )
 
 
-def _core(stored: Sequence[tuple[int, str]]) -> str:
-    """The part of one agent's scope that is injected: the newest lines
-    that fit, rendered in the order they were remembered.
+def _core(newest: Sequence[tuple[int, str]]) -> str:
+    """The part of one agent's scope that is injected: of the newest
+    lines, the ones that fit inside the block's byte cap.
 
-    Newest by which are kept and oldest-first in how they read, which is
-    not a contradiction: what falls out of the block is what was said
-    longest ago, and what remains is read in the order it was said.
+    The line bound is the read's, since the statement asked for exactly
+    `CORE_LINES` of them; what is left here is the byte bound, which
+    cannot be asked of the database because it is counted on the
+    rendering.
 
     It trims to empty where it has to, unlike the prune, and the
     difference is what each of the two protects. The prune never goes
@@ -1433,7 +1465,7 @@ def _core(stored: Sequence[tuple[int, str]]) -> str:
     instead would put a block over its cap into every round's prompt,
     which is the one thing the cap exists to prevent.
     """
-    kept = list(stored[-CORE_LINES:])
+    kept = list(newest)
     while kept and len(_rendered(kept).encode("utf-8")) > CORE_BYTES:
         kept.pop(0)
     return _rendered(kept)

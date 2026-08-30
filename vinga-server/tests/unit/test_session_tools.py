@@ -331,7 +331,7 @@ async def test_remembering_is_offered_and_executed() -> None:
         "new_conversation",
         "resume_conversation",
     ]
-    assert "the user is vegetarian" in store.read("poet")
+    assert "the user is vegetarian" in facts(store)
 
     (result,) = [
         result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
@@ -355,7 +355,7 @@ async def test_a_builtin_asked_with_arguments_it_cannot_use_comes_back_as_an_err
     ]
     assert result.is_error
     assert 'needs a "text" argument' in result.content
-    assert store.read("poet") == ""
+    assert facts(store) == ""
 
 
 async def test_a_remembered_fact_is_in_the_next_replys_prompt() -> None:
@@ -571,6 +571,13 @@ async def test_a_write_and_a_clear_of_one_entry_land_in_the_model_s_order() -> N
 def ledger(store: MemoryStore, conversation: str) -> str:
     """One conversation's ledger as the next round would be sent it."""
     return store.read_for_prompt("poet", None, conversation).state
+
+
+def facts(store: MemoryStore) -> str:
+    """The poet's own remembered facts, as the next round would be sent
+    them: the prompt read with no device and no conversation, which is
+    the one scope this suite asks about."""
+    return store.read_for_prompt("poet", None, None).agent
 
 
 async def test_malformed_arguments_come_back_as_an_error_result() -> None:

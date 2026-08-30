@@ -1644,12 +1644,14 @@ def _runtime(api: FastAPI) -> None:
         audits is what the configuration produces now.
 
         It is keyed by the agent and by nothing else, so the memory it
-        shows is the agent's own. The other two blocks a live session can
-        be sent, what a conversation is currently keeping and what is
-        known about the device it is happening on, belong to a session
-        rather than to an agent and are absent here: a preview that
-        invented a device to show its notes would be a second prompt
-        assembler pretending to be the first.
+        shows is the agent's own, and as much of it as a reply is sent:
+        the newest facts, not everything the agent has been told, since
+        the rest is reachable only by looking it up. The other two blocks
+        a live session can be sent, what a conversation is currently
+        keeping and what is known about the device it is happening on,
+        belong to a session rather than to an agent and are absent here:
+        a preview that invented a device to show its notes would be a
+        second prompt assembler pretending to be the first.
 
         `async def`, like the status read beside it: the MCP slice is
         read on the loop that mutates it, so the answer cannot be half

@@ -99,6 +99,18 @@ def _held(owner: str, scope: str = "agent") -> list[tuple[str, str]]:
         holder.close()
 
 
+def injected(store: MemoryStore, agent: str = "poet") -> str:
+    """One agent's block as a reply is sent it.
+
+    The prompt read with no device and no conversation, which is the
+    whole of what an agent-keyed caller asks for and exactly what the
+    preview speaks. It is the newest of the scope rather than the whole
+    of it, so a test about what is stored reads the rows and a test about
+    what the model is told reads this.
+    """
+    return store.read_for_prompt(agent, None, None).agent
+
+
 def _state(conversation: str) -> list[tuple[str, str]]:
     """One conversation's ledger, by key, as the database holds it."""
     holder = _connection()
@@ -216,7 +228,7 @@ async def _closing(store: MemoryStore, within_s: float = 5.0) -> bool:
     """
     deadline = asyncio.get_running_loop().time() + within_s
     while asyncio.get_running_loop().time() < deadline:
-        if store.read("poet") == "":
+        if injected(store) == "":
             return True
         await asyncio.sleep(0.02)
     return False
@@ -227,9 +239,9 @@ async def test_a_remembered_fact_is_read_back_for_that_agent() -> None:
     await store.remember("poet", "the user is vegetarian")
     await store.remember("poet", "the user's dog is called Bosse")
 
-    assert store.read("poet") == "- the user is vegetarian\n- the user's dog is called Bosse"
+    assert injected(store) == "- the user is vegetarian\n- the user's dog is called Bosse"
     # And another agent's memory is its own, not this one.
-    assert store.read("tutor") == ""
+    assert injected(store, "tutor") == ""
 
 
 async def test_memory_is_keyed_by_agent_not_by_device() -> None:
@@ -239,7 +251,7 @@ async def test_memory_is_keyed_by_agent_not_by_device() -> None:
     bedroom = open_memory(DatabaseConfig())
     try:
         await kitchen.remember("poet", "the user is vegetarian")
-        assert "vegetarian" in bedroom.read("poet")
+        assert "vegetarian" in injected(bedroom)
     finally:
         bedroom.close()
 
@@ -250,14 +262,14 @@ async def test_an_agent_name_that_is_not_a_filename_is_just_a_name() -> None:
     store = memory()
     await store.remember("../poet in the kitchen", "a fact")
 
-    assert store.read("../poet in the kitchen") == "- a fact"
-    assert store.read("___poet_in_the_kitchen") == ""
+    assert injected(store, "../poet in the kitchen") == "- a fact"
+    assert injected(store, "___poet_in_the_kitchen") == ""
 
 
 async def test_a_fact_is_stored_as_one_line() -> None:
     store = memory()
     await store.remember("poet", "  a fact\nspread over  lines  ")
-    assert store.read("poet") == "- a fact spread over lines"
+    assert injected(store) == "- a fact spread over lines"
 
 
 async def test_remembering_nothing_is_refused() -> None:
@@ -271,7 +283,7 @@ async def test_the_line_cap_drops_the_oldest_facts(monkeypatch: pytest.MonkeyPat
     store = memory()
     for index in range(5):
         await store.remember("poet", f"fact {index}")
-    assert store.read("poet").splitlines() == ["- fact 2", "- fact 3", "- fact 4"]
+    assert injected(store).splitlines() == ["- fact 2", "- fact 3", "- fact 4"]
 
 
 async def test_the_byte_cap_drops_the_oldest_facts(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -279,9 +291,9 @@ async def test_the_byte_cap_drops_the_oldest_facts(monkeypatch: pytest.MonkeyPat
     store = memory()
     for index in range(6):
         await store.remember("poet", f"a fact numbered {index}")
-    lines = store.read("poet").splitlines()
+    lines = injected(store).splitlines()
     assert lines[-1] == "- a fact numbered 5"
-    assert len(store.read("poet").encode("utf-8")) <= 60
+    assert len(injected(store).encode("utf-8")) <= 60
 
 
 # Scopes, and the caps each of them is held to
@@ -303,7 +315,7 @@ async def test_an_added_fact_answers_the_id_it_is_addressed_by() -> None:
 
     assert isinstance(first, int)
     assert second > first
-    assert store.read("poet").splitlines() == ["- the user is vegetarian", "- the dog is Bosse"]
+    assert injected(store).splitlines() == ["- the user is vegetarian", "- the dog is Bosse"]
 
 
 async def test_a_device_fact_is_not_an_agent_fact() -> None:
@@ -316,7 +328,7 @@ async def test_a_device_fact_is_not_an_agent_fact() -> None:
 
     assert _rows("poet") == ["the user is vegetarian"]
     assert _rows("poet", scope="device") == ["the kettle is loud"]
-    assert store.read("poet") == "- the user is vegetarian"
+    assert injected(store) == "- the user is vegetarian"
 
 
 async def test_remembering_a_fact_over_the_byte_cap_still_keeps_it(
@@ -335,7 +347,7 @@ async def test_remembering_a_fact_over_the_byte_cap_still_keeps_it(
     await store.remember("poet", "x" * 41)
 
     assert _rows("poet") == ["x" * 41]
-    assert store.read("poet") == "- " + "x" * 41
+    assert injected(store) == "- " + "x" * 41
     with pytest.raises(ValueError) as refusal:
         await store.add(MemoryScope.AGENT, "poet", "y" * 41, agent="poet")
     assert str(refusal.value) == store_module.TOO_LONG
@@ -461,7 +473,7 @@ async def test_a_forgotten_fact_is_out_of_the_reading_and_can_come_back() -> Non
     spoken = await store.forget(MemoryScope.AGENT, "poet", gone, THREAD, agent="poet")
 
     assert spoken == "the user's dog is called Bosse"
-    assert store.read("poet") == "- the user is vegetarian"
+    assert injected(store) == "- the user is vegetarian"
     assert _held("poet") == [("the user's dog is called Bosse", THREAD)]
 
     brought_back = await store.restore(MemoryScope.AGENT, "poet", THREAD, agent="poet")
@@ -470,7 +482,7 @@ async def test_a_forgotten_fact_is_out_of_the_reading_and_can_come_back() -> Non
     assert _held("poet") == []
     # In the place it always had, because the held area kept the row and
     # not a copy of its words.
-    assert store.read("poet").splitlines() == [
+    assert injected(store).splitlines() == [
         "- the user is vegetarian",
         "- the user's dog is called Bosse",
     ]
@@ -882,6 +894,33 @@ async def test_the_prompt_read_of_an_empty_memory_is_three_empty_blocks() -> Non
     assert store.read_for_prompt("poet", "aa:bb", THREAD) == store_module.NOTHING_REMEMBERED
 
 
+async def test_a_prompt_read_with_no_device_and_no_thread_reads_one_scope(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """What an agent-keyed caller asks for, which is what the preview
+    is: this agent's own block, and no other scope reached for at all.
+
+    Both halves matter. Reaching for a device nobody named would answer
+    "no rows" by accident rather than saying there was nothing to read,
+    and a failure that reported three lost scopes would name two this
+    read never asked about.
+    """
+    store = memory()
+    await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
+    await store.add(MemoryScope.DEVICE, "aa:bb", "the kettle is loud", agent="poet")
+    await store.set_state(THREAD, "turn", "white to move", agent="poet")
+
+    assert store.read_for_prompt("poet", None, None) == store_module.PromptMemory(
+        state="", agent="- the user is vegetarian", device=""
+    )
+
+    with caplog.at_level("WARNING"):
+        assert memory_that_cannot_read().read_for_prompt("poet", None, None) == (
+            store_module.NOTHING_REMEMBERED
+        )
+    assert {record.scope for record in events(caplog, "memory_unreadable")} == {"agent"}
+
+
 async def test_the_prompt_read_takes_one_connection() -> None:
     """The property the call exists for. Three reads would be three
     round trips off the loop, and the reply path pays for one per
@@ -934,9 +973,9 @@ async def test_the_injected_core_is_the_newest_facts_and_the_rest_is_looked_up(
         f"- [{middle}] a cheese fact 1",
         f"- [{oldest}] a cheese fact 0",
     ]
-    # And the whole scope is what `read` still answers, uncapped by the
-    # core, which is what #314's callers are promised.
-    assert len(store.read("poet").splitlines()) == 3
+    # And nothing was dropped to make the block fit: what falls out of
+    # the core is out of the prompt, never out of the memory.
+    assert len(_rows("poet")) == 3
 
 
 def test_a_prompt_read_that_fails_loses_every_scope_and_says_so(
@@ -1273,7 +1312,7 @@ async def test_concurrent_appends_keep_every_fact() -> None:
     # process.
     store = memory()
     await asyncio.gather(*(store.remember("poet", f"fact {index}") for index in range(20)))
-    assert len(store.read("poet").splitlines()) == 20
+    assert len(injected(store).splitlines()) == 20
 
 
 async def test_a_fact_outlives_the_store_that_wrote_it() -> None:
@@ -1288,7 +1327,7 @@ async def test_a_fact_outlives_the_store_that_wrote_it() -> None:
 
     second = open_memory(DatabaseConfig())
     try:
-        assert second.read("poet") == "- the user is vegetarian"
+        assert injected(second) == "- the user is vegetarian"
     finally:
         second.close()
 
@@ -1297,7 +1336,7 @@ async def test_the_remember_tool_confirms_what_it_stored() -> None:
     store = memory()
     answer = await remember(store, "poet", {"text": "the user is vegetarian"})
     assert answer == "Remembered: the user is vegetarian"
-    assert "vegetarian" in store.read("poet")
+    assert "vegetarian" in injected(store)
 
 
 async def test_the_remember_tool_refuses_a_call_without_text() -> None:
@@ -1387,7 +1426,7 @@ async def test_a_prune_that_fails_takes_the_insert_with_it(
 
     assert str(refusal.value) == store_module.UNWRITABLE
     assert _rows("poet") == before
-    assert store.read("poet") == "\n".join(f"- {fact}" for fact in before)
+    assert injected(store) == "\n".join(f"- {fact}" for fact in before)
 
 
 async def test_two_writers_at_the_cap_cannot_lose_each_others_fact(
@@ -1436,7 +1475,7 @@ async def test_two_writers_at_the_cap_cannot_lose_each_others_fact(
             # transactions rather than against a stopwatch.
             assert await _waiting_on_a_lock(2), "the second writer never started"
         await asyncio.gather(parked, behind)
-        rendered = first.read("poet")
+        rendered = injected(first)
     finally:
         second.close()
         first.close()
@@ -1521,12 +1560,12 @@ async def test_a_call_arriving_during_a_close_is_refused_admission(
     """
     store = open_memory(DatabaseConfig())
     await store.remember("poet", "the user is vegetarian")
-    assert store.read("poet") == "- the user is vegetarian"
+    assert injected(store) == "- the user is vegetarian"
 
     store.close()
 
     with caplog.at_level("WARNING"):
-        assert store.read("poet") == ""
+        assert injected(store) == ""
         with pytest.raises(ConfigError) as refusal:
             await store.remember("poet", "a second fact")
 
@@ -1552,7 +1591,7 @@ def test_a_read_that_cannot_reach_its_database_remembers_nothing(
     store = memory_that_cannot_read()
 
     with caplog.at_level("WARNING"):
-        assert store.read("poet") == ""
+        assert injected(store) == ""
 
     record = only(caplog, "memory_unreadable")
     assert record.agent == "poet"
@@ -1577,7 +1616,7 @@ def test_a_read_answers_while_another_connection_holds_the_chain_lock(
         store = open_memory(DatabaseConfig())
         try:
             with the_lock_held(MEMORY_CHAIN):
-                assert store.read("poet") == "- the user is vegetarian"
+                assert injected(store) == "- the user is vegetarian"
         finally:
             store.close()
 
@@ -1650,7 +1689,7 @@ async def test_nothing_of_a_connection_reaches_a_surface_a_model_or_an_operator_
             # "nowhere" and a door left out is a door nothing asserts
             # about. The reads answer empty and the cleanup answers
             # nothing; only the writes refuse.
-            assert store.read("poet") == ""
+            assert injected(store) == ""
             assert unreadable.read_for_prompt("poet", "aa:bb", THREAD) == (
                 store_module.NOTHING_REMEMBERED
             )
