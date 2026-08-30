@@ -32,23 +32,30 @@ What the file is about, beyond the round trip:
 """
 
 import asyncio
+import contextlib
 import logging
 import uuid
+from collections.abc import Iterator
 from typing import Any
 
+import psycopg
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tests.support.apps import entered_app
 from tests.support.configs import base_config
+from tests.support.events import both_formats, only
 from tests.support.problems import paths, refused
-from tests.support.stores import memory, memory_rows
+from tests.support.stores import holding_the_write_lock, memory, memory_rows, the_lock_held
 from vinga_server import logs
 from vinga_server.config.api import MOUNT_PATH, build_api
+from vinga_server.config.loader import DatabaseBusyError, StorageError
 from vinga_server.config.models import DatabaseConfig
+from vinga_server.db import connection_url
 from vinga_server.memory import store as memory_store
 from vinga_server.memory.scopes import MemoryScope
+from vinga_server.memory.store import MEMORY_CHAIN
 
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
 
@@ -887,3 +894,212 @@ def test_neither_a_fact_nor_a_key_can_ride_a_request_target(
     assert (corrected.status_code, cleared.status_code) == (200, 200)
     assert targets and all(SENTINEL not in target for target in targets)
     assert all("scene" not in target for target in targets)
+
+
+# The failure paths, and what none of them says
+#
+# A refusal a caller provoked is exercised above. What is here is the
+# other half, and it is the half a value actually leaks through: a
+# statement the database refuses carries the statement it ran and the
+# values bound into it, and the values bound into these are a
+# remembered fact and a model-chosen key. Three of them, because the
+# boundary has to hold at three different moments: while a statement
+# runs, while the transaction commits, and before either, when another
+# writer is holding the chain's lock.
+
+
+def _connection() -> psycopg.Connection:
+    """A connection this suite owns, on nobody's engine, for installing
+    the triggers below."""
+    url = connection_url(DatabaseConfig()).set(drivername="postgresql")
+    return psycopg.connect(url.render_as_string(hide_password=False))
+
+
+@contextlib.contextmanager
+def _refusing(table: str, when: str, deferred: bool = False) -> Iterator[None]:
+    """A test-only trigger that refuses a statement on one table.
+
+    The cheapest genuine failure a live connection can meet: the
+    statement runs, the database refuses it, and the driver's error
+    still carries what the caller bound into it. `deferred` moves the
+    refusal to the commit, which is the second moment the boundary has
+    to cover and the one no failure injected into a call can reach.
+    """
+    name = f"refuse_{table}"
+    constraint = "constraint " if deferred else ""
+    timing = "after" if deferred else "before"
+    holder = _connection()
+    try:
+        holder.execute(
+            f"create function memory.{name}() returns trigger language plpgsql as "
+            f"$$ begin raise exception 'no {when} in this test'; end $$"
+        )
+        holder.execute(
+            f"create {constraint}trigger {name} {timing} {when} on memory.{table} "
+            + ("deferrable initially deferred " if deferred else "")
+            + f"for each row execute function memory.{name}()"
+        )
+        holder.commit()
+        yield
+    finally:
+        holder.execute(f"drop trigger if exists {name} on memory.{table}")
+        holder.execute(f"drop function if exists memory.{name}()")
+        holder.commit()
+        holder.close()
+
+
+@contextlib.contextmanager
+def _watching(api: FastAPI, refusal: type[Exception]) -> Iterator[list[Exception]]:
+    """Every refusal of one class the boundary raised, kept so a test
+    can walk its chain.
+
+    The production handler still answers, so the body and the log this
+    test reads are the ones a deployment sends; what this adds is the
+    exception object itself, which is where `__cause__` and
+    `__context__` live and where a driver's own error would be found if
+    the boundary had let it travel.
+    """
+    caught: list[Exception] = []
+    original = api.exception_handlers[refusal]
+
+    async def watched(request: Any, exc: Exception) -> Any:
+        caught.append(exc)
+        return await original(request, exc)
+
+    api.add_exception_handler(refusal, watched)
+    api.middleware_stack = None
+    try:
+        yield caught
+    finally:
+        api.add_exception_handler(refusal, original)
+        api.middleware_stack = None
+
+
+def _severed(problem: Exception) -> bool:
+    """Whether a refusal carries nothing of what it was decided from.
+
+    Both links, because they are two different mistakes: `raise X` inside
+    a handler sets `__context__`, and `raise X from Y` sets `__cause__`,
+    and an assertion about one of them passes the other.
+    """
+    return problem.__cause__ is None and problem.__context__ is None
+
+
+def test_a_correction_the_database_refuses_says_nothing_of_it(
+    api: FastAPI,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A statement that runs and is refused, with the corrected fact
+    still bound into it.
+
+    The whole no-leak surface of a write in one case: the body, both
+    shipped log formats, the event this API emits about a failure it
+    could not attribute to the caller, the process output, and the chain
+    of the refusal itself.
+    """
+    (number,) = told(MemoryScope.AGENT, AGENT, "the user likes rain")
+    client = TestClient(api, headers={"Authorization": f"Bearer {TOKEN}"})
+
+    with _refusing("facts", "update"), _watching(api, StorageError) as caught:
+        with caplog.at_level(logging.DEBUG):
+            answer = client.put(
+                f"/memory/agents/{AGENT}/facts/{number}", json={"fact": SENTINEL}
+            )
+
+    assert answer.status_code == 500
+    assert "log" in refused(answer.json(), 500)
+    assert SENTINEL not in answer.text
+    assert SENTINEL not in both_formats(caplog)
+    # The one event this failure produces says the class of what
+    # reached the handler, which is this module's own refusal rather
+    # than the driver's error, and carries no traceback to rebuild the
+    # rest from.
+    said = only(caplog, "api_storage_error")
+    assert said.getMessage().endswith("(StorageError)")
+    assert said.exc_info is None
+    [problem] = caught
+    assert SENTINEL not in str(problem)
+    assert _severed(problem)
+    captured = capsys.readouterr()
+    assert SENTINEL not in captured.out + captured.err
+    assert "Traceback" not in captured.err
+    assert [row["fact"] for row in memory_rows("facts", owner=AGENT)] == [
+        "the user likes rain"
+    ]
+
+
+def test_a_ledger_delete_the_commit_refuses_says_nothing_of_it(
+    api: FastAPI,
+    thread: str,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The second moment: the statements ran and the transaction would
+    not commit.
+
+    A deferred constraint trigger, so the refusal arrives out of the
+    commit rather than out of the call the handler made, which is the
+    one place a failure boundary written around the call alone would not
+    cover. The key the caller named is still bound into the statement
+    the error carries.
+    """
+    kept(thread, {SENTINEL: "a forest"})
+    client = TestClient(api, headers={"Authorization": f"Bearer {TOKEN}"})
+
+    with _refusing("state", "delete", deferred=True), _watching(api, StorageError) as caught:
+        with caplog.at_level(logging.DEBUG):
+            answer = client.request(
+                "DELETE", f"/memory/conversations/{thread}/state", json={"key": SENTINEL}
+            )
+
+    assert answer.status_code == 500
+    assert SENTINEL not in answer.text
+    assert SENTINEL not in both_formats(caplog)
+    [problem] = caught
+    assert SENTINEL not in str(problem)
+    assert _severed(problem)
+    captured = capsys.readouterr()
+    assert SENTINEL not in captured.out + captured.err
+    # Rolled back whole, which is what makes the count this would have
+    # answered with a count nobody was given.
+    assert len(memory_rows("state", conversation=thread)) == 1
+
+
+def test_a_write_another_writer_is_holding_says_it_may_be_retried(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The third moment, and the one status that is not a failure: the
+    chain's lock is held by somebody else, so nothing was changed and
+    the same request may be made again.
+
+    Chosen by the db classifier's closed set rather than by anything the
+    exception says, which is what this asserts by planting the sentinel
+    in the write and reading every surface afterwards.
+    """
+    (number,) = told(MemoryScope.AGENT, AGENT, "the user likes rain")
+
+    with holding_the_write_lock(monkeypatch, MEMORY_CHAIN):
+        api = build_api(TOKEN, DatabaseConfig())
+        client = TestClient(api, headers={"Authorization": f"Bearer {TOKEN}"})
+        with the_lock_held(MEMORY_CHAIN), _watching(api, DatabaseBusyError) as caught:
+            with caplog.at_level(logging.DEBUG):
+                answer = client.put(
+                    f"/memory/agents/{AGENT}/facts/{number}", json={"fact": SENTINEL}
+                )
+
+    assert answer.status_code == 409
+    sentence = refused(answer.json(), 409)
+    assert "again" in sentence
+    assert SENTINEL not in answer.text
+    assert SENTINEL not in both_formats(caplog)
+    [problem] = caught
+    assert SENTINEL not in str(problem)
+    assert _severed(problem)
+    captured = capsys.readouterr()
+    assert SENTINEL not in captured.out + captured.err
+    assert [row["fact"] for row in memory_rows("facts", owner=AGENT)] == [
+        "the user likes rain"
+    ]
