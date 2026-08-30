@@ -524,3 +524,130 @@ Named by role, homes confirmed against the authority taxonomy:
   `mcp` description and grant-paragraph rewrites, `domain-config.md`
   regenerated, body fixtures, concepts' control paragraph brought
   current, changelog.
+
+## Plan review round
+
+External review of commit 24863b14: backend codex (codex-cli
+0.151.0), model gpt-5.6-sol, sandbox read-only, 2026-08-30, runtime
+11m33s. Verdict as received: ready after the P1/P2 amendments.
+Findings condensed but faithful; each is amended below with its
+resolution.
+
+1. **P1: sequential cross-chain deletion can resurrect erased
+   memory.** The purge runs after the record transaction commits,
+   but memory writes participate in neither `erasure_order()` nor
+   the `erased()` fan-out, so an in-flight `set_state` or soft
+   `forget` can commit after the one-shot purge and recreate rows
+   for the erased thread; the planned "live `remember`" test cannot
+   catch it because agent and device remembering is not
+   thread-lifecycle data. Require an ordering protocol covering
+   every thread-keyed memory write across erasure and retention,
+   with tests forcing writes on both sides.
+
+2. **P1: a cleanup failure after the record commit has no truthful
+   outcome.** With the record deletion committed and the memory
+   purge still pending, a retry finds the conversation missing while
+   its state remains, the erasure response has already answered
+   counts, and the event vocabulary cannot report the failure
+   honestly because both memory events require an acting agent that
+   retention and the sweep do not have. Prefer atomic deletion;
+   otherwise define partial-completion semantics, durable retry, and
+   an agent-free lifecycle event, with truthful counts on both
+   `Erasure` and `ThreadErasure`.
+
+3. **P1: numeric fact operations lack an ownership boundary.** Ids
+   are global and guessable, and the plan never states that update,
+   forget, permanent erase, or restore constrain the row to the
+   current agent or device, so an agent could mutate another agent's
+   or device's fact. Specify the predicates for every id-addressed
+   operation, one fixed refusal for missing and inaccessible alike,
+   and cross-agent, cross-device, cross-conversation negative tests.
+
+4. **P1: recall excludes the facts whose ids editing needs.** The
+   injected core shows no ids and recall searches only what is not
+   injected, so on a later turn the model cannot obtain the id of a
+   core fact it needs to correct; the fact-41 boundary test would
+   preserve the defect. Recall must search all active facts
+   reachable by the current agent and device, with a result bound,
+   deterministic ordering, and a fixed refine-the-query
+   continuation.
+
+5. **P1: the cap rules do not preserve either bounds or undo.** The
+   plan does not say whether held rows are counted or prunable
+   (pruning them breaks undo; excluding them without a rule lets
+   restore overflow), updates can enlarge a scope past its cap, and
+   always-allowed state overwrites can violate `STATE_BYTES`.
+   Define one transactional invariant across add, update, soft
+   forget, restore, operator PUT, and state upsert, with oversized
+   items refused by a fixed sentence and the named boundary tests.
+
+6. **P2: recording-off deployments are cleaned only when they
+   reboot.** With recording off no thread rows land and no
+   retention runs, so unreachable state and held facts accumulate
+   until a restart; a boot-only sweep does not bound a long-running
+   process. Purge the connection's thread ids at session close
+   where threads cannot be resumed, with a test that proves rows
+   disappear without a restart.
+
+7. **P2: the proposed construction and shutdown order is currently
+   impossible.** The conversation store is constructed and started
+   before memory is opened, and its exit callback is registered
+   first, so the exit stack closes memory before the writer drains
+   and a teardown retention purge would call a closed store. M2
+   must name the composition reorder and the startup-failure and
+   shutdown-drain tests.
+
+8. **P1: the operator grammar places content and potential secrets
+   in argv and URLs.** Corrected fact text as a CLI positional
+   reaches shell history and process listings, and model-chosen
+   state keys in URL paths reach proxy and access logs; the CLI
+   guide prohibits exactly this for credentials and the
+   configuration boundary treats caller-chosen keys as possible
+   credential locations. Move fact text to file or stdin input,
+   carry state keys in request bodies, and extend the no-leak
+   tests to argv and access-log request targets.
+
+9. **P2: the schema omits the constraints and indexes its lifecycle
+   requires.** `scope` is unconstrained text, nothing ties
+   `forgotten_at` and `forgotten_in` together, and restore,
+   erasure, retention and sweep all query `forgotten_in` with no
+   index, scanning all facts under the writer lock. Add the check
+   constraints, a partial lifecycle index, and one declared scope
+   vocabulary the store, events and tools derive from.
+
+10. **P2: owner-list routes are unbounded.** The three owner
+    listings return every owner with counts and no pagination
+    contract, while conversation owners grow at thread-creation
+    pace and the conversations API bounds every page. Paginate all
+    owner collections with keyset cursors under the existing limit
+    discipline.
+
+11. **P2: memory enablement has no atomic reload clock.** The tool
+    snapshot is per reply while injection is per round, so a reload
+    mid-reply can let one reply observe half of a policy change.
+    Resolve one effective policy per reply and carry it to both
+    decisions, with a reload interleaving test.
+
+12. **P2: the upgrade test does not prove the promised 2001-to-2002
+    migration.** The named migration tests cover head, columns and
+    drift on fresh databases only, so lost rows in the rename would
+    pass; and the rename breaks any older process still serving
+    during a rolling upgrade. Seed a database at `2001_agent_memory`
+    with exact rows, migrate, and assert preserved bytes, scope,
+    null held fields and identity continuation; state the upgrade as
+    stop-then-start or design expand-and-contract.
+
+13. **P2: the `server.local_only` question remains incorrectly
+    answered.** The footprint never states memory egress: injected
+    and recalled content follows the active LLM provider, and
+    device scope sends household-wide facts to every sibling
+    agent's provider. Document that storage is local, egress
+    follows the provider, and `local_only` is the existing guard.
+
+14. **P2: the central resume and pre-first-turn behavior has no
+    end-to-end test.** Nothing drives state written before the
+    first turn commits through disconnect and explicit resume, the
+    exact case the grace period exists for. Name the end-to-end
+    resume test, the fresh-activation-is-clean case, the text-off
+    case, and same-reply visibility of state mutations without a
+    know-how rebuild.
