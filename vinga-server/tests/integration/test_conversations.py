@@ -22,6 +22,7 @@ from tests.integration.conftest import FRAME_BYTES, SAMPLE_RATE, speech_pcm
 from vinga_server.config import Config
 from vinga_server.config.models import DatabaseConfig, ProviderConfig
 from vinga_server.db import read_engine
+from vinga_server.runtime.prompt import STATE_HEADING
 
 DEVICE_MAC = "aa:bb:cc:dd:ee:31"
 
@@ -307,6 +308,142 @@ async def test_a_later_session_resumes_the_thread_an_earlier_one_left(serve) -> 
         for turn in read("select * from record.turns")
         if turn["conversation"] == earlier["conversation"]
     } == {sessions[0]["session"], sessions[1]["session"]}
+
+
+# What a conversation keeps, across a disconnect and back
+#
+# The case the grace period exists for, and the one nothing else can
+# drive: a note written before the thread's first turn has landed, a
+# device that then hangs up, and a second session that picks the thread
+# up again by name. What only this lane can say is that the ledger
+# really re-attaches, because the id it is keyed by is minted by a
+# session and the resume is a tool call a model makes over a socket.
+#
+# The prompt is read back out of the reply, which is what the scripted
+# provider's `{system}` is for: what the model was sent is otherwise
+# invisible from outside a served process, and it is exactly what is
+# under test.
+
+
+NOTE = "the tavern"
+
+STATE_NOTED = f"Noted scene: {NOTE}"
+
+
+def stateful_config() -> Config:
+    """An agent that writes one note about the conversation it is in,
+    on the first round of every turn."""
+    config = recording_config()
+    config.providers.llm["mock"] = ProviderConfig(
+        type="mock",
+        reply="It says {tool_result}.",
+        tool_when="battery",
+        tool_name="set_state",
+        tool_arguments={"key": "scene", "value": NOTE},
+    )
+    return config
+
+
+def resuming_onto_state_config() -> Config:
+    """The second session: search, pick what the search answered, and
+    then say what it was sent.
+
+    The brake is the note the first session wrote, which is in front of
+    this model only once the older thread has been rebuilt, so the
+    utterance after the move is an ordinary turn.
+    """
+    config = recording_config()
+    assert config.server.conversations is not None
+    config.server.conversations.resumption = True
+    config.providers.llm["mock"] = ProviderConfig(
+        type="mock",
+        reply="Where were we. {system}",
+        tool_when="battery",
+        tool_name="resume_conversation",
+        tool_arguments={"description": "battery"},
+        then_pattern='conversation "([0-9a-f]+)"',
+        then_arguments={"conversation": "{found}"},
+        tool_unless=STATE_NOTED,
+    )
+    return config
+
+
+def state_of(conversation: str) -> list[tuple[str, str]]:
+    return [
+        (row["key"], row["value"])
+        for row in read(
+            "select key, value from memory.state "
+            f"where conversation = '{conversation}' order by key"
+        )
+    ]
+
+
+async def test_a_conversations_notes_come_back_when_the_thread_does(serve) -> None:
+    """The whole of the lifecycle promise, end to end.
+
+    The note is written during the first turn's reply, which is before
+    that turn's row lands, so the thread it is keyed by does not exist
+    yet: it is exactly the state the sweep's grace period is for. The
+    device then hangs up, and a second session picks the thread up by
+    name; from that round on, what the model is sent carries the ledger
+    again.
+    """
+    async with serve(stateful_config()) as port:
+        await two_turns(port, DEVICE_MAC)
+
+    (earlier,) = read("select * from record.conversations")
+    assert state_of(earlier["conversation"]) == [("scene", NOTE)]
+    before = {turn["id"] for turn in read("select id from record.turns")}
+
+    async with serve(resuming_onto_state_config()) as port:
+        await two_turns(port, DEVICE_MAC)
+
+    resumed = [
+        turn
+        for turn in read("select * from record.turns order by id")
+        if turn["id"] not in before
+        and turn["conversation"] == earlier["conversation"]
+    ]
+    assert resumed, "the second session never moved onto the earlier thread"
+    # Every round on the thread it came back to was sent the ledger, and
+    # the block says which of the three scopes it is.
+    for turn in resumed:
+        assert STATE_HEADING in turn["reply"]
+        assert f"- scene: {NOTE}" in turn["reply"]
+    # And the note is still exactly what was written down, once: an
+    # upsert by key rather than a second entry.
+    assert state_of(earlier["conversation"]) == [("scene", NOTE)]
+
+
+async def test_a_new_thread_starts_with_nothing_written_down(serve) -> None:
+    """The other side of it, on the deployment that cannot resume.
+
+    Text storage off is the configuration in which a thread can never be
+    picked up again (`conversations.resumption` is refused with it), so
+    the second session opens a thread of its own and starts clean. What
+    an agent wants to keep across that has to be remembered rather than
+    written down, which is what the tool descriptions say.
+    """
+    config = stateful_config()
+    assert config.server.conversations is not None
+    config.server.conversations.text = False
+
+    async with serve(config) as port:
+        await two_turns(port, DEVICE_MAC)
+    (first,) = read("select * from record.conversations")
+    assert state_of(first["conversation"]) == [("scene", NOTE)]
+
+    async with serve(config) as port:
+        await two_turns(port, DEVICE_MAC)
+
+    threads = read("select * from record.conversations order by id")
+    assert len(threads) == 2, "the second session did not open a thread of its own"
+    second = threads[1]["conversation"]
+    assert second != first["conversation"]
+    # The second conversation kept its own note and inherited nothing:
+    # the ledger is the thread's, and this is a new thread.
+    assert state_of(second) == [("scene", NOTE)]
+    assert len(read("select * from memory.state")) == 2
 
 
 async def test_a_fresh_conversation_moves_the_session_onto_it(serve) -> None:
