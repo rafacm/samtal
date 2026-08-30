@@ -38,8 +38,14 @@ rectangle "vinga-server (FastAPI)" as SRV #EEF8EE {
   component "**WebSocket endpoint**\n/xiaozhi/v1/, Bearer gate before\nthe accept. SessionRegistry caps\nthe count and drains on shutdown" as WS
   component "**Session**\none per connection: handshake,\nconversation loop, tool loop,\nbarge-in gates" as SESS
   component "**Tool namespace**\nbuiltin | self_* | <entry>__*,\ncollision-free by construction" as TOOLS
-  component "**Agent memory** and optional\n**session capture**\nfacts per agent; wav + jsonl + json" as SIDE
+  component "Optional **session capture**\nwav + jsonl + json on a volume" as SIDE
   component "**Provider registry**\nbuilds the providers at startup,\nenforces server.local_only" as PREG
+}
+
+database "Postgres\nthe server's own state, one instance, three schemas" as DB #EEF0FA {
+  component "**domain**\nproviders, agents, devices,\nencrypted secrets" as DBDOM #EEF0FA
+  component "**record**\nconversations, turns, tool calls\nwhen recording is on" as DBREC #EEF0FA
+  component "**memory**\nwhat each agent was asked to remember,\none row per fact" as DBMEM #EEF0FA
 }
 
 rectangle "Pipeline providers, one set per agent\ncolour = the type's egress marking" as PROV #FFFBF0 {
@@ -81,6 +87,10 @@ AUDIO --> WS : **one WebSocket**\nbinary Opus frames + JSON control
 WS --> SESS
 SESS --> DISP : stt text, tts sentence_start
 SESS --> SIDE
+SESS --> DBMEM : reads the facts per reply,\nwrites one on `remember`
+SESS --> DBREC : the turn, when recording is on
+OTA --> DBDOM : which agent this device is bound to
+PREG --> DBDOM : the world it builds from
 SESS --> TOOLS : one flat tool list per reply
 TOOLS --> DEVMCP : tools/list, tools/call\nover the same WebSocket
 
@@ -131,6 +141,7 @@ legend right
 |<#D9EAD3>    | egress = False: stays on the machine |
 |<#FFE9C6>    | egress = None: the configuration decides, and must say so under local_only |
 |<#F4CCCC>    | egress = True: sends session data away |
+|<#EEF0FA>    | The server's own Postgres: configuration, record, memory |
 |<#FFE082>    | An endpoint that is always off the host |
 endlegend
 

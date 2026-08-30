@@ -152,7 +152,7 @@ against `llm.systems`, which is what the session actually sent.
 
 One test in that file used to compare `llm.systems` with
 `session.runtime._know_how.text`, with a stated reason, because its
-claim is exactly that with no memory store the cached half is the
+claim is exactly that with nothing remembered the cached half is the
 whole prompt. The #210 sweep found the reason did not hold: what the
 half holds is `runtime.prompt.know_how`'s answer, which is a public
 name and the one the activation itself calls, and that it was

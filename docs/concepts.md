@@ -400,8 +400,15 @@ has a wake word enabled and explains exactly this.
 
 Memory is keyed by agent, never by device, because an agent is one
 entity across rooms. This is the implemented behavior, one memory per
-agent, and where it is configured is in the
-[configuration reference](reference/domain-config.md).
+agent, and it is present in every deployment: there is nothing to
+configure and nothing to switch on. Remembered facts are stored in
+Postgres, in a schema of the server's own that it migrates at every
+boot (issue #314); the `memory:` section that used to name a directory
+of files has retired with the files.
+
+Whether a *particular* agent may remember at all is not answerable
+today, deliberately: per-agent control arrives with the scopes below,
+and until then every agent is offered the `remember` tool.
 
 Two decided directions build on it, and they are separate decisions:
 
@@ -409,8 +416,8 @@ Two decided directions build on it, and they are separate decisions:
   #83.* Three scopes (session, agent, device) with add, update, delete
   and lookup offered as tools, and no migration of what exists. That
   issue reaffirms the agent-keyed reasoning above rather than
-  replacing it. Where memory is *stored* moves to Postgres separately
-  (issue #314).
+  replacing it, and it is where per-agent control and the operator's
+  own read surface land.
 - **When users arrive the key becomes the (user, agent) pair**, so an
   agent shared by a household remembers each person separately. This
   refinement is **decided direction** (recorded on this page,
@@ -426,9 +433,11 @@ to share with all of them. This is **decided direction** (recorded on
 this page, 2026-08-21; no owning issue or decision record yet).
 
 Agent memory is distinct from what an agent appears to know inside one
-conversation; the [configuration
-reference](reference/domain-config.md) documents that distinction where
-memory is configured.
+conversation. Conversation history carries across a `switch_agent`
+handover, so an agent that has never stored a fact can still greet the
+user by name the moment it takes over: it is reading the transcript,
+not its own memory. The two are easy to conflate when a handover looks
+uncannily well informed.
 
 ## Meta capabilities
 

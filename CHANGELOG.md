@@ -13,11 +13,9 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   database gains a third schema, `memory`, with one table, `facts`, and
   a migration chain of its own whose baseline is `2001_agent_memory`.
   The server migrates it at every boot the way it migrates the
-  conversation record, and nothing reads or writes a row yet: remembered
-  facts still live in the files under `memory.dir`, and the store that
-  moves them into the database arrives in the next change. What lands
-  here is the storage the move needs, empty and current, so that this
-  release is one an existing deployment can take on its own.
+  conversation record. What lands here is the storage the move needs,
+  empty and current; the store that reads and writes it is the Changed
+  entry below.
   **Rerun [`deploy/postgres-init.sql`](deploy/postgres-init.sql)
   administratively before deploying this version.** The file now
   creates three schemas rather than two, and on the least-privilege
@@ -30,6 +28,56 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   with the same explicit revoke the `domain` schema carries, because the
   operator read surface for remembered facts is being designed as an
   addressed API rather than as raw tables.
+
+### Changed
+
+- **Agent memory is on whenever the server runs** (#314). It used to be
+  a deployment's choice: no `memory:` section meant no `remember` tool
+  and no injected block, because a file store needed a directory an
+  operator had to pick. A schema needs no such choice, so every agent is
+  offered `remember` and every reply is assembled with whatever that
+  agent has been told. An agent that has been told nothing gets no
+  memory block, exactly as an empty file rendered nothing. A deployment
+  that deliberately ran without memory loses that choice until #83 adds
+  per-agent control, which is where whether a given agent may remember
+  belongs.
+- **Remembered facts are stored in the database** (#314). The file
+  store is gone: `read` and `remember` now go through the `memory`
+  schema added above, one row per fact, with the same rendering, the
+  same normalization, the same refusal for an empty fact and the same
+  caps (200 lines or 8 KiB, oldest dropped first). The insert and the
+  pruning happen in one transaction under the schema's own writer lock,
+  so a fact written through one connection cannot be lost by a
+  concurrent write through another and no reply ever reads a memory
+  that is over its cap, neither of which the per-process lock and the
+  file rename could promise. Reads go through a separate read-only
+  connection and take no lock, so assembling a prompt never waits on a
+  write. Memory is in the backup story it was outside of: it travels in
+  the same `pg_dump` as the other two schemas, and there is no longer a
+  directory to back up beside the database. A write the database
+  refuses answers with a fixed sentence that repeats no part of the
+  connection, and emits the new `memory_unwritable` event carrying the
+  failure's class name; a read that fails is contained as it always
+  was, with `memory_unreadable` and a reply that happens anyway. That
+  event's channel moved to `vinga_server.memory.store` with the module
+  that emits it.
+  **Existing memory files are not carried over.** Whatever sits under
+  the old `memory.dir` is not read, not imported and not deleted by
+  this release. Database memory starts empty, so every agent begins the
+  first conversation after the upgrade remembering nothing and stores
+  each fact again the first time it is said; archiving or deleting the
+  old files is your own deliberate act.
+
+### Removed
+
+- **The `memory:` configuration section** (#314). It named a directory
+  for the file store that no longer exists, so it retired whole rather
+  than becoming a key that means nothing. A configuration file that
+  still carries it refuses the boot with one sentence saying remembered
+  facts live in the database now and the section is retired, and the
+  `VINGA_MEMORY` and `VINGA_MEMORY__...` environment overrides are
+  refused the same way in any spelling: the refusal names the variable
+  and never its value. Both example configuration files lose the block.
 
 ### Fixed
 

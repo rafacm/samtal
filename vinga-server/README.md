@@ -719,8 +719,8 @@ dots replaced (`self_audio_speaker_set_volume`), because both LLM APIs
 restrict tool names to `[A-Za-z0-9_-]`.
 
 **Builtins** are `switch_agent`, offered when the device is bound to
-more than one agent; `remember`, offered when memory is configured; and
-`new_conversation` and `resume_conversation`, always offered.
+more than one agent; and `remember`, `new_conversation` and
+`resume_conversation`, always offered.
 
 A successful `switch_agent` ends the current agent's reply: the new
 agent greets the user in its own prompt and its own voice, on its own
@@ -744,31 +744,34 @@ thread, and the third argument, `start_from`, is the user's answer to
 it; it is honoured only for the conversation the tool actually asked
 about, so a model cannot consent to a recap on the user's behalf.
 
-`remember` appends one fact to the agent's memory file:
+`remember` keeps one fact for the agent that was told it. The facts
+live in the `memory` schema of the database this server already keeps
+its other two stores in, one row per fact, injected into that agent's
+system prompt on every reply and capped at 8 KiB or 200 lines with the
+oldest dropped first. The insert and the pruning happen in one
+transaction under the schema's own writer lock, so two conversations
+talking to the same agent at once cannot lose each other's fact and no
+reply ever reads a memory that is over its cap. There is nothing to
+configure: the schema is migrated at every boot the way the record's
+is, and an agent that has been told nothing simply gets no memory block.
+Memory is keyed by agent and not by device, because an agent is one
+entity across rooms.
 
-```yaml
-memory:
-  dir: /var/lib/vinga/memory
-```
-
-One file per agent, created on first write and injected into that
-agent's system prompt on every reply, capped at 8 KiB or 200 lines with
-the oldest dropped first. Memory is keyed by agent and not by device: a
-agent is one entity across rooms. Leave the section out and there is
-no `remember` tool and no injection.
-
-No builtin is granted the way an MCP server is. Each appears under a
-structural condition instead, and the conditions are not agent-shaped.
-`switch_agent`'s is the device's: it exists exactly when the board is
-bound to more than one agent, and withholding it from one of them would
-strand a conversation on whichever agent has no way back, which is the
-receptionist handoff the tool was written for. `remember`'s is the
-deployment's: memory is configured or it is not, and where it is, the
+No builtin is granted the way an MCP server is. One appears under a
+structural condition and the other three are simply always there.
+`switch_agent`'s condition is the device's: it exists exactly when the
+board is bound to more than one agent, and withholding it from one of
+them would strand a conversation on whichever agent has no way back,
+which is the receptionist handoff the tool was written for. `remember`
+has no condition: every server keeps remembered facts, and the
 injection into the system prompt is unconditional, so an agent with the
-tool withheld would recall for ever and never learn. The two
-conversation tools have no condition at all, which is the same kind of
-answer: a tool that is simply absent is a tool a model invents, so they
-are offered wherever a conversation is and a server that cannot resume
+tool withheld would recall for ever and never learn. Whether a
+particular agent should be allowed to remember at all is genuinely
+per-agent policy, and it is
+[#83](https://github.com/rafacm/vinga/issues/83)'s to decide. The two
+conversation tools have no condition either, for a reason of their own:
+a tool that is simply absent is a tool a model invents, so they are
+offered wherever a conversation is and a server that cannot resume
 anything says so in a sentence the agent reads out. Tools with sound
 structural rules do not need a grant model on top of them; the day a
 builtin arrives whose availability is genuinely per-agent policy, the
@@ -1057,9 +1060,9 @@ while a conversation already talking as it finishes on the world it was
 built from and is served that world's prompt to the end. The `agents`
 section names both, and says whether `agent_defaults` moved. The one
 thing an agent carries that a reload does not move is its memory, which
-is keyed by its name. The whole `server`
-section (including the configuration file itself) is start-time as it
-always was.
+is keyed by its name, so the rows stay under the old name. The whole
+`server` section (including the configuration file itself) is
+start-time as it always was.
 
 **No session is dropped**, and when one meets the change depends on
 which half moved. The tools an agent may reach are snapshotted per
@@ -1259,8 +1262,8 @@ how the process runs is decided when it is deployed, and what it says
 and to whom is decided while it runs.
 
 **The server half is one YAML file.** `server:` (host, port, auth,
-onboarding, limits, logging, capture, which database to connect to)
-and an optional `memory:`. It is passed as
+onboarding, limits, logging, capture, which database to connect to).
+It is passed as
 `--config /path/to/config.yaml` or through the `VINGA_CONFIG`
 environment variable; with neither set, defaults apply, and it is
 handled by
@@ -1383,7 +1386,7 @@ and reach at its next check-in; one it deleted is one no session can be
 opened as from the moment the request answers, while a conversation
 already talking as it finishes on the world it was built from. The one
 thing an agent carries that a reload does not move is its memory, which
-is keyed by its name.
+is keyed by its name, so the rows stay under the old name.
 
 **Device bindings are the other way, applied by being noticed.** A
 running server reads the devices table and the default agent as a device
@@ -2236,10 +2239,10 @@ during a reply) are in the file anyway. Those are the frames that
 explain a misfire.
 
 Storage is 64 kB/s, so a fifteen minute session is about 58 MB and the
-2000 MB budget is around nine hours. Both bounds matter: agent memory
-and the model caches share the volume and grow underneath the budget,
-so capture declines to start and says why rather than being the thing
-that fills the disk.
+2000 MB budget is around nine hours. Both bounds matter: the model
+caches share the volume and grow underneath the budget, so capture
+declines to start and says why rather than being the thing that fills
+the disk.
 
 A capture cut off by a restart stays readable. The WAV header carries
 byte counts that are only patched on a clean close, so a truncated file
@@ -2665,6 +2668,17 @@ does not need the rerun for that, though rerunning is still the
 simplest way to be sure the analyst role's grants are what this
 release's file says.
 
+**What the memory files on disk do next is yours to decide.** Memory
+used to be one Markdown file per agent under a `memory:` directory this
+server was told about. That section has retired: a configuration file
+that still carries it refuses the boot and says so. The files
+themselves are left exactly where they are. This release does not read
+them, does not import them, and does not delete them; database memory
+starts empty, so every agent begins the first conversation after the
+upgrade remembering nothing, and each fact is stored again the first
+time it is said. Archiving those files, or removing them, is a
+deliberate act of yours and nothing here will do it for you.
+
 The release before it moved the file too, by renaming the store's
 schema from `conversations` to `record`, and a deployment crossing
 that one needs the rerun whether or not its server role owns the
@@ -2716,15 +2730,14 @@ pg_dump --format=custom --file "/backup/vinga-$(date +%F).dump" \
   "postgresql://vinga@db.internal:5432/vinga"
 ```
 
-Every schema travels in one dump, because they are one database.
+Every schema travels in one dump, because they are one database, and
+that now includes what the agents were asked to remember: memory is a
+schema rather than a directory, so a dump covers it and there is
+nothing beside the database left to back up.
 A restore is `pg_restore` into an empty database for the custom format
 above (`pg_restore --dbname ...`), or `psql --file` for a plain-text
 dump, and it is worth rehearsing on something disposable rather than
-first attempting on the day it is needed. Back it up alongside the
-memory directory, which is ordinary files on the data volume and is
-not in the database: the `memory` schema the dump carries is the empty
-one this release provisions, and remembered facts move into it in a
-later one.
+first attempting on the day it is needed.
 
 **A restore needs both halves of the secret.** The dump, and every
 master key still required to decrypt what it holds, which is why the
@@ -2771,7 +2784,8 @@ them, reaches a running server when it is asked to reload; a device
 binding and the default agent reach it at that device's next check-in,
 with nothing asked of the server. The one thing an agent carries that a
 reload does not move is its memory, which is keyed by its name, so
-renaming an agent still orphans what it remembered.
+renaming an agent still orphans what it remembered: the rows stay in
+the database under the old name and the renamed agent starts empty.
 
 ### The configuration API in a deployment
 
