@@ -1130,3 +1130,122 @@ their own mutations on the rebased tree.
   ledger delegation dropped, which is what stands in front of the key's
   normalization now that both doors issue one statement.
 - Not verified: the `image` job, which builds and smokes the container.
+
+### PR review round
+
+External review of the branch as pushed to PR #362, at `9a37fb37`
+against `origin/main`: backend codex (codex-cli 0.151.0), model
+gpt-5.6-sol, read-only sandbox, 2026-08-30, runtime 7m37s. Four
+findings, one P1 and three P2, verdict as received: mergeable after the
+listed fixes. Condensed below as received, each with its resolution and
+the commit that landed it.
+
+Three of the four are one shape, and it is this milestone's own: a rule
+stated in prose and enforced on the wrong set. Two of them are the same
+mistake about who decides what a value is. `null` was left to the
+framework, which cannot tell a body from no body; a string was left to
+the driver, which answers a caller's mistake as a broken server. The
+third is a bound the surface published and could not be walked past,
+and the fourth is the half of the no-leak family that was never driven.
+
+1. **P1: JSON `null` clears the entire conversation ledger.** The body
+   parses to `None` for both an absent body and an explicit `null`,
+   because FastAPI gives a parameter its default in both cases, while
+   the contract permits only a `MemoryStateKey` object where there is a
+   body at all. The malformed-body cases omitted `null`.
+
+   *Resolution* (`dfdaf572`): adopted whole. The difference is in the
+   request's bytes and nowhere else, so the body is read from the
+   request in an async dependency of its own and a request that carried
+   nothing answers a sentinel `ABSENT` that no JSON value can be.
+   `null` therefore meets `_sole` and the fixed 422, which is the one
+   thing taking a body here exists to make possible: a request that
+   lost its body must not erase everything, and a request that sent
+   `null` said something. A body that is not JSON now meets this
+   endpoint's own sentence rather than the framework's general one, and
+   neither repeats what would not parse. The regression test proves the
+   ledger unchanged; the mutations are the sentinel collapsed back to
+   `None` and the body declared rather than read.
+
+2. **P2: the CLI cannot traverse paginated memory listings.** Only
+   `limit` was forwarded and the renderers discarded `next_cursor`, so
+   an agent's facts past the first two hundred and the owners past the
+   first page were unreachable through the door this milestone
+   advertises as the audit surface.
+
+   *Resolution* (`00866b94`): adopted as a cursor rather than as a
+   walk, and the choice is the guide's bounded-wait practice deciding
+   it: one invocation stays one request, bounded by the endpoint's own
+   timeout, where a command that walked a whole listing would wait
+   without a bound that can be derived, since conversations hold memory
+   at thread-creation pace. A page that is not the last says what to
+   give `--cursor` for the rest, on stderr, which is where the practice
+   puts "what to run next" by name and what keeps a redirect holding
+   the facts and nothing else. The record's two nouns keep neither the
+   flag nor the notice, and the difference is written where it is: a
+   session list is a window onto a log that only grows, and a memory is
+   a bounded thing being audited. Tested by walking a scope of two
+   hundred and fifty facts through the CLI, feeding the notice back
+   verbatim, and asserting the union in order; the mutations are the
+   cursor not forwarded, the continuation discarded, and the
+   continuation printed to stdout.
+
+3. **P2: the no-leak family never drove a failure path.** It exercised
+   only the refusals a caller provokes, which are the ones written not
+   to quote anything back, and never a busy write, a driver failure or
+   a commit failure, nor the sanitizing boundary's own chain.
+
+   *Resolution* (`2538ef37`): adopted whole, as three cases for the
+   three moments the boundary has to hold at. A trigger refuses the
+   correction's update while it runs; a deferred constraint trigger
+   refuses the ledger's delete at the commit, which is the moment a
+   boundary written around the call alone would miss; and a second
+   writer holds the chain's lock, which is the one status here that is
+   not a failure. Each plants the sentinel where the write would bind
+   it and reads every surface it could come out on: the body, both
+   shipped log formats, the event the API emits about a failure it
+   cannot attribute to the caller, the process output, and both links
+   of the refusal's chain, since `raise X` inside a handler sets
+   `__context__` and `raise X from Y` sets `__cause__`. Run against the
+   boundary moved inside the transaction, the refusal raised from
+   within its handler, the driver's words used as the sentence, and the
+   classifier removed.
+
+4. **P2: database-invalid strings were misreported as server
+   failures.** A valid JSON string carrying a NUL byte, and a path
+   segment carrying one, reached PostgreSQL, which can store neither,
+   and the driver's refusal became a 500.
+
+   *Resolution* (`9a4f3ec4`): adopted whole, and widened to what the
+   finding's shape covers rather than to its example alone: a lone
+   surrogate is the other value a JSON string may hold and a driver
+   cannot encode. The rule has one home, `storable` in the store, and
+   every door asks it: the five tool doors that take text, the store's
+   own correction, the two request bodies, and the addresses, where
+   what is wrong is not what would be stored but what was addressed and
+   which therefore carries a sentence of its own. A predicate rather
+   than a refusal, for the reason `_oversized` is one: the doors raise
+   different things. Every refusal is decided before a connection, so
+   no row moves and no operator is told a healthy database refused a
+   write. Six mutations, one per asking door and two on the predicate.
+
+### Verification after the review round
+
+- `uv run ruff check .`: clean. `uv run mypy`: clean (5 source files,
+  the events package).
+- `uv run pytest tests/unit -q`: 4909 passed, 19 skipped.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`: 4909 passed,
+  19 skipped.
+- `uv run pytest tests/integration -q`: 233 passed.
+- The five generated documents regenerate to their committed bytes.
+  `cli.md` is regenerated in this round, because the grammar grew an
+  option and a help line; `api-openapi.json` is unchanged in content
+  and was re-rendered once because reading the body from the request
+  moved where the framework emits the declaration in the operation.
+  The census is current, and `python scripts/check_doc_links.py .`
+  checked 172 files with no failures.
+- Every new guard was run against the mutation it exists for before
+  being trusted, sixteen of them: the two above on the body, the three
+  on the cursor, the four on the failure boundary, the six on the
+  storable rule, and the boundary moved inside its transaction.
+- Not verified: the `image` job, which builds and smokes the container.
