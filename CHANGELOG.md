@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-08-30
+
+### Fixed
+
+- **The simulator's peer-close unit test no longer races the client's
+  own close** (#328). `test_a_peer_close_reason_is_read_and_never_relayed`
+  asserted which of two closes won: the scripted peer's 4001 and, after
+  `tts stop`, this side's own normal one. A contended runner could
+  process the normal close first, at which point the verdict is honestly
+  "the session ended normally" and the case failed, twice on CI in two
+  days on branches that touch nothing here. The peer now holds its 4001
+  until this side has reached its close, and this side's close waits for
+  the peer's frame to have been read, so the case pins the one
+  interleaving it is about. Both waits are bounded and both outcomes are
+  asserted, so a runner that outlives either bound says so by name
+  rather than handing the verdict back to the race. The client's
+  behavior is unchanged: it was correct on both sides of the race.
+
 ## 2026-08-29
 
 ### Added
