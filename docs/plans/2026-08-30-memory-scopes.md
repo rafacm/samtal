@@ -360,7 +360,12 @@ nested section (naming it replaces it wholly, so
 whole thing for that agent: no memory or state tools offered, no
 scope blocks injected, so a switched-off agent cannot read the
 device facts its siblings accrue either; the OFF state is honest
-rather than partial. No domain migration (the agent row is a JSON
+rather than partial. The policy has one clock: it is resolved once
+per reply, at the point the tool snapshot is already taken, and the
+resolved value is carried to both the offered tools and every
+round's injection, so a reload mid-reply can never hand one reply
+half of a policy change; a reload interleaving test pins that an
+agent observes either the old policy whole or the new one whole. No domain migration (the agent row is a JSON
 body), but the `mcp` field description that currently asserts
 "remember is offered to every agent" moves in the same change, and
 the README's grant-model paragraph, which names #83 as the decider,
@@ -809,6 +814,11 @@ resolution.
     mid-reply can let one reply observe half of a policy change.
     Resolve one effective policy per reply and carry it to both
     decisions, with a reload interleaving test.
+
+    *Resolution*: adopted; the per-reply clock is in the control
+    resolution, resolved where the tool snapshot is taken and
+    carried to every round's injection, with the interleaving test
+    pinning whole-or-whole.
 
 12. **P2: the upgrade test does not prove the promised 2001-to-2002
     migration.** The named migration tests cover head, columns and
