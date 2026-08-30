@@ -534,8 +534,9 @@ rather than extending it, so `mcp: []` is how an agent opts out of tools
 its siblings have. Each server's tools are offered under its entry name
 (`home__turn_on_light`), which is why an entry name has to be a plain
 `[A-Za-z0-9_-]+` name and cannot be `self` or a builtin's name
-(`switch_agent`, `remember`). Both transports the specification
-defines are supported:
+(`switch_agent`, `remember`, `set_state`, `clear_state`,
+`new_conversation`, `resume_conversation`). Both transports the
+specification defines are supported:
 
 ```bash
 vinga-server config mcp-server set home -f - <<'YAML'
@@ -719,8 +720,8 @@ dots replaced (`self_audio_speaker_set_volume`), because both LLM APIs
 restrict tool names to `[A-Za-z0-9_-]`.
 
 **Builtins** are `switch_agent`, offered when the device is bound to
-more than one agent; and `remember`, `new_conversation` and
-`resume_conversation`, always offered.
+more than one agent; and `remember`, `set_state`, `clear_state`,
+`new_conversation` and `resume_conversation`, always offered.
 
 A successful `switch_agent` ends the current agent's reply: the new
 agent greets the user in its own prompt and its own voice, on its own
@@ -756,6 +757,25 @@ configure: the schema is migrated at every boot the way the record's
 is, and an agent that has been told nothing simply gets no memory block.
 Memory is keyed by agent and not by device, because an agent is one
 entity across rooms.
+
+`set_state` and `clear_state` keep the other kind: a small ledger of
+what is currently true in the conversation happening now, under names
+the model chooses, where writing the same name again replaces what it
+held. It is what a game's scene and hit points, a board position, or
+the step of something in progress belong in, and it is injected as its
+own block above the remembered facts, because what is current outranks
+what was remembered. It is capped at 4 KiB or 50 entries, and a write
+past either is refused with a sentence rather than trimmed silently: a
+ledger that dropped entries is a ledger the model cannot trust.
+
+The ledger is keyed by the conversation, not by the connection, so it
+survives a device hanging up and comes back when that conversation is
+resumed. It is deleted in the same transaction as the thread it belongs
+to, whether that thread goes because it was erased through the API or
+because retention pruned it, and the deletion answers how much of it
+went. On a deployment that does not store conversation text a thread
+cannot be resumed at all, so every conversation there begins with an
+empty ledger and anything worth keeping has to be remembered instead.
 
 No builtin is granted the way an MCP server is. One appears under a
 structural condition and the other three are simply always there.
@@ -836,8 +856,13 @@ fragments it includes, in the order its layer lists them, because they
 are standing context the persona speaks within; then the guidance of
 each MCP entry the agent is granted, in the order the grants name them,
 each under its heading, and within one entry what the operator wrote
-first and what the server itself ships after it; then the remembered
-facts last, under the heading they have always had. Blocks are
+first and what the server itself ships after it; then what memory holds
+last, which is up to three blocks in the order they take precedence in:
+what this conversation is currently keeping, then the remembered facts
+under the heading they have always had, then what is known about the
+device. Each of those says its own rank in its heading, because the
+model is the one reader that cannot see where a line came from, and a
+scope holding nothing contributes no block at all. Blocks are
 separated by blank lines. One
 documented order beats a per-deployment permutation, and it is what lets
 a later feature compose against a known base.
@@ -883,12 +908,17 @@ session.
 The persona, the fragments and the guidance are assembled when a
 conversation starts
 and again when it switches agents, and held for the life of that
-activation; the remembered facts are read on every reply, so a fact
-stored by one conversation is known to a concurrent one on its next
-reply. So this command answers what a session opening now would be
-given, which is what an operator auditing a configuration wants, and a
-conversation that started before the last reload is holding the older
-text until it ends.
+activation; what memory holds is read on every reply, so a fact stored
+by one conversation is known to a concurrent one on its next reply and
+a note written in one round is read in the next. So this command
+answers what a session opening now would be given, which is what an
+operator auditing a configuration wants, and a conversation that
+started before the last reload is holding the older text until it ends.
+
+It shows the agent's own memory and no other scope, and that is the
+same honesty: what a conversation is keeping and what is known about a
+device belong to a session, and a preview that invented a device to
+show its notes would be a second assembler pretending to be the first.
 
 Over the API it is `GET /api/runtime/agents/{name}/prompt`, and it is a
 read of the running server rather than of the database: the agents this

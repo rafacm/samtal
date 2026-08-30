@@ -9,6 +9,25 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **A conversation can write down what is currently true in it** (#83).
+  Two new builtins, `set_state` and `clear_state`, keep a small keyed
+  ledger for the conversation happening now, under names the assistant
+  chooses; writing the same name again replaces what it held. It is
+  what a game's scene and hit points, a board position, or the step of
+  something in progress belong in, and it is injected as its own block
+  above the remembered facts, under a heading that says what is current
+  wins. Capped at 4 KiB or 50 entries, and a write past either is
+  refused with a sentence rather than trimmed, because a ledger that
+  drops entries is one the assistant cannot trust.
+  The ledger is keyed by the conversation rather than by the
+  connection, so it survives a device hanging up and comes back when
+  that conversation is resumed. It shares its conversation's lifetime
+  exactly: erasing a thread through the API or pruning it by retention
+  deletes it in the same transaction as the thread's turns, and a boot
+  sweeps whatever no transaction can reach. On a deployment that does
+  not store conversation text a thread can never be resumed, so every
+  conversation there starts with an empty ledger and anything worth
+  keeping has to be remembered with `remember` instead.
 - **Memory grows scopes, editing and a conversation ledger, in the
   storage** (#83). The `memory` schema gains a forward migration,
   `2002_memory_scopes`: `facts` is now addressed by a scope and an
@@ -60,6 +79,19 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **`set_state` and `clear_state` are reserved names** (#83). Builtin
+  tool names may not be used as `mcp_servers` entry names, and the set
+  has grown by two. A deployment with an entry called `set_state` or
+  `clear_state` refuses the boot with the existing sentence naming the
+  reserved set; rename the entry and its tools are published under the
+  new prefix.
+- **Erasing a session or a thread answers two more counts** (#83).
+  `state` and `held_facts` say how much of a conversation's memory went
+  with it, on both `DELETE /api/sessions...` and
+  `DELETE /api/conversations/{conversation}`, and `vinga session delete`
+  and `vinga conversation delete` print the pair. They come out of the
+  same transaction as the counts beside them, so a later failure cannot
+  make them false.
 - **Agent memory is on whenever the server runs** (#314). It used to be
   a deployment's choice: no `memory:` section meant no `remember` tool
   and no injected block, because a file store needed a directory an

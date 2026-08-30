@@ -398,26 +398,53 @@ has a wake word enabled and explains exactly this.
 
 **Implemented today, with the direction marked inline.**
 
-Memory is keyed by agent, never by device, because an agent is one
-entity across rooms. This is the implemented behavior, one memory per
-agent, and it is present in every deployment: there is nothing to
-configure and nothing to switch on. Remembered facts are stored in
-Postgres, in a schema of the server's own that it migrates at every
-boot (issue #314); the `memory:` section that used to name a directory
-of files has retired with the files.
+Memory has three scopes, and what tells them apart is whose the
+remembered thing is:
+
+- **Agent scope** is what an agent knows about the user, keyed by the
+  agent and never by the device, because an agent is one entity across
+  rooms: "remember I am vegetarian", said in the kitchen, holds in the
+  bedroom. This is the memory that has always existed, and the
+  `remember` tool writes it.
+- **Conversation state** is a keyed ledger of what is currently true in
+  the conversation happening now, written with `set_state` and cleared
+  with `clear_state`. It is not a record of what was said; it is what
+  the assistant would lose track of otherwise, and each name holds one
+  current value that writing the same name again replaces.
+- **Device scope** is what is known about the place and its household,
+  shared by every agent bound to that device. Its tools arrive with the
+  editing family.
+
+All three are present in every deployment: there is nothing to
+configure and nothing to switch on. They are stored in Postgres, in a
+schema of the server's own that it migrates at every boot (issue #314);
+the `memory:` section that used to name a directory of files has
+retired with the files.
+
+The injected prompt states its own precedence, because the assistant is
+the one reader that cannot see where a line came from: the conversation
+first, then the agent's remembered facts, then the device's notes, each
+under a heading saying which of the three it is and which of them wins.
+What is most current wins.
+
+**Conversation state shares its conversation's lifetime, exactly.** It
+is keyed by the thread rather than by the connection, so it survives a
+device hanging up and comes back when that conversation is resumed; and
+it is deleted in the same transaction as the thread, whether the thread
+goes because somebody erased it or because retention pruned it. The
+consequence is worth stating plainly: a deployment that does not store
+conversation text cannot resume a thread at all, so every conversation
+there starts with an empty ledger. Anything that should outlive the
+conversation has to be promoted to agent memory with `remember`, which
+is what a game agent's "save the game" and a tutor's "you have mastered
+this" actually are.
 
 Whether a *particular* agent may remember at all is not answerable
-today, deliberately: per-agent control arrives with the scopes below,
-and until then every agent is offered the `remember` tool.
+today, deliberately: per-agent control arrives with the scopes' own
+issue, and until then every agent is offered the memory tools.
 
-Two decided directions build on it, and they are separate decisions:
+One decided direction builds on the keying:
 
-- **Memory gets scopes and tool operations.** *Decided direction, issue
-  #83.* Three scopes (session, agent, device) with add, update, delete
-  and lookup offered as tools, and no migration of what exists. That
-  issue reaffirms the agent-keyed reasoning above rather than
-  replacing it, and it is where per-agent control and the operator's
-  own read surface land.
 - **When users arrive the key becomes the (user, agent) pair**, so an
   agent shared by a household remembers each person separately. This
   refinement is **decided direction** (recorded on this page,
@@ -433,11 +460,12 @@ to share with all of them. This is **decided direction** (recorded on
 this page, 2026-08-21; no owning issue or decision record yet).
 
 Agent memory is distinct from what an agent appears to know inside one
-conversation. Conversation history carries across a `switch_agent`
-handover, so an agent that has never stored a fact can still greet the
-user by name the moment it takes over: it is reading the transcript,
-not its own memory. The two are easy to conflate when a handover looks
-uncannily well informed.
+conversation, and the three are easy to conflate. What the assistant
+can see of the conversation it is in is its dialogue: it is reading the
+transcript, not remembering anything. What it writes down with
+`set_state` is the second kind, and it goes when that conversation
+does. Only what it remembers with `remember` is the kind that is still
+there next month.
 
 ## Meta capabilities
 
