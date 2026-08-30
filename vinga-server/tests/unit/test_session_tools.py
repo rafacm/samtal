@@ -682,6 +682,45 @@ async def test_a_correction_and_a_removal_of_one_fact_land_in_the_models_order()
     assert facts(store) == ""
 
 
+async def test_a_forgotten_fact_is_brought_back_through_the_tool_that_undoes_it() -> None:
+    """The undo end to end, as a model reaches it: `forget` in one reply
+    and `restore_memory` in the next, both as calls the session routes
+    rather than as functions this suite imports.
+
+    The dispatch arm is the whole of what this adds to the executor's own
+    tests: a tool the runtime cannot route is a tool an agent cannot
+    speak, whatever the function behind it does.
+    """
+    store = lane_memory()
+    fact_id = await store.add(
+        MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet"
+    )
+    script = ScriptedLlm(
+        [
+            [call("forget", id=fact_id)],
+            "I have forgotten that you are vegetarian.",
+            [call("restore_memory")],
+            "It is back.",
+        ]
+    )
+    session = session_for(base_config(), POET_MAC, {"poet": script}, memory=store)
+
+    await run_reply(session, "forget that I am vegetarian")
+    assert facts(store) == ""
+
+    assert await run_reply(session, "no, put that back") == ["It is back."]
+
+    forgotten, restored = [
+        result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
+    ]
+    assert not forgotten.is_error and not restored.is_error
+    assert restored.content == "Brought back: the user is vegetarian"
+    # And in the database, with the number it always had, which is what
+    # makes it the fact rather than a new one saying the same thing.
+    assert facts(store) == "- the user is vegetarian"
+    assert store.recall("poet", POET_MAC, "vegetarian").startswith(f"- [{fact_id}]")
+
+
 # A scope at its cap, where remembering is a mutation like any other
 #
 # Every write to a scope that is full also prunes it, so a `remember`
