@@ -1003,31 +1003,31 @@ vinga-server/README.md:1822  respell  config reload
 vinga-server/README.md:1841  respell  vinga-server config provider secret set llm claude
 vinga-server/README.md:1852  respell  config show
 vinga-server/README.md:1989  respell  vinga-server config provider set llm local
-vinga-server/README.md:2074  respell  vinga-server config agent-defaults set
-vinga-server/README.md:2275  respell  vinga-server config mcp-server status
-vinga-server/README.md:2298  respell  vinga events tail
-vinga-server/README.md:2301  respell  vinga events tail
-vinga-server/README.md:2302  respell  vinga events tail
+vinga-server/README.md:2076  respell  vinga-server config agent-defaults set
+vinga-server/README.md:2277  respell  vinga-server config mcp-server status
+vinga-server/README.md:2300  respell  vinga events tail
 vinga-server/README.md:2303  respell  vinga events tail
-vinga-server/README.md:2556  respell  vinga session delete
-vinga-server/README.md:2556  respell  vinga session purge
-vinga-server/README.md:2557  respell  vinga conversation delete
-vinga-server/README.md:2720  respell  vinga provider set llm claude
-vinga-server/README.md:2721  respell  vinga reload
-vinga-server/README.md:3026  respell  config apply
-vinga-server/README.md:3028  respell  config provider secret set
-vinga-server/README.md:3029  respell  config reload
-vinga-server/README.md:3053  respell  vinga-server config export
-vinga-server/README.md:3077  respell  config export
-vinga-server/README.md:3083  respell  config apply
-vinga-server/README.md:3085  respell  config provider secret set
-vinga-server/README.md:3086  respell  config reload
-vinga-server/README.md:3175  respell  vinga-server config ota-url
-vinga-server/README.md:3187  respell  vinga info
-vinga-server/README.md:3201  respell  config ota-url
-vinga-server/README.md:3259  respell  vinga-server config device pending list
-vinga-server/README.md:3266  respell  vinga-server config device pending claim
-vinga-server/README.md:3287  respell  vinga-server config reload
+vinga-server/README.md:2304  respell  vinga events tail
+vinga-server/README.md:2305  respell  vinga events tail
+vinga-server/README.md:2558  respell  vinga session delete
+vinga-server/README.md:2558  respell  vinga session purge
+vinga-server/README.md:2559  respell  vinga conversation delete
+vinga-server/README.md:2722  respell  vinga provider set llm claude
+vinga-server/README.md:2723  respell  vinga reload
+vinga-server/README.md:3028  respell  config apply
+vinga-server/README.md:3030  respell  config provider secret set
+vinga-server/README.md:3031  respell  config reload
+vinga-server/README.md:3055  respell  vinga-server config export
+vinga-server/README.md:3079  respell  config export
+vinga-server/README.md:3085  respell  config apply
+vinga-server/README.md:3087  respell  config provider secret set
+vinga-server/README.md:3088  respell  config reload
+vinga-server/README.md:3177  respell  vinga-server config ota-url
+vinga-server/README.md:3189  respell  vinga info
+vinga-server/README.md:3203  respell  config ota-url
+vinga-server/README.md:3261  respell  vinga-server config device pending list
+vinga-server/README.md:3268  respell  vinga-server config device pending claim
+vinga-server/README.md:3289  respell  vinga-server config reload
 vinga-server/config.deploy.example.sh:48  respell  vinga-server config reload
 vinga-server/config.deploy.example.sh:55  respell  vinga-server config apply
 vinga-server/config.deploy.example.yaml:63  respell  vinga-server config ota-url
@@ -1131,6 +1131,7 @@ vinga-server/src/vinga_server/events/catalog.py:2035  respell  vinga-server conf
 vinga-server/src/vinga_server/events/catalog.py:2184  respell  vinga-server config ota-url
 vinga-server/src/vinga_server/events/catalog.py:2213  respell  vinga-server config ota-url
 vinga-server/src/vinga_server/events/catalog.py:2229  respell  vinga-server config ota-url
+vinga-server/src/vinga_server/memory/__init__.py:35  respell  vinga memory
 vinga-server/src/vinga_server/onboarding/__init__.py:30  respell  vinga-server config ota-url
 vinga-server/src/vinga_server/onboarding/keys.py:37  respell  vinga-server config ota-url
 vinga-server/src/vinga_server/onboarding/keys.py:105  respell  vinga-server config ota-url

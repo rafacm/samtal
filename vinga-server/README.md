@@ -2018,8 +2018,10 @@ follow the active LLM provider's egress like the transcript and the
 persona do, so an agent on a cloud model sends what it remembered along
 with what was just said. The device scope is worth stating on its own: a
 note about the room or the household is shared by every agent bound to
-that board, so it reaches every one of their providers rather than only
-the provider of the agent that was told it. `server.local_only` is the
+that board that may remember, so it reaches every one of their providers
+rather than only the provider of the agent that was told it. An agent
+whose `memory` section is off is read none of it and sends none of it,
+which is the one lever that narrows this. `server.local_only` is the
 guard, and it is the same guard: a provider that sends session data off
 the host cannot be booted under it, and memory rides the boundary that
 draws.
