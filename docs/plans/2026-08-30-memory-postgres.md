@@ -115,6 +115,16 @@ moved-section machinery, one fixed value-free sentence saying
 remembered facts live in the database now and the section retired;
 without that arm, the pydantic extra-key refusal would answer with
 a validation error that never says what happened to the section.
+The environment spellings retire the same loud way: `VINGA_MEMORY`
+and every case-insensitive `VINGA_MEMORY__...` variable is today a
+valid door onto the section, and once the field is deleted
+pydantic-settings would ignore them silently, `extra="forbid"`
+notwithstanding, which is exactly the hole
+`_check_moved_environment` exists to close. It gains the memory
+arm: the refusal names the variable's name and the retirement, and
+never its value, with tests proving the name is reported, the
+value is absent from every surface, and a mixed-case spelling
+cannot slip through unrefused.
 
 **The store moves to its own package, and the event channel moves
 with it.** `vinga_server/memory/` with `schema.py`, `store.py`
@@ -447,6 +457,10 @@ resolution.
    every case-insensitive `VINGA_MEMORY__...` spelling with the
    same value-free retirement sentence, with tests that the name is
    reported and the value never is.
+
+   *Resolution*: adopted; the always-on resolution now retires both
+   spellings through `_check_moved_environment`'s new memory arm,
+   with the name-not-value and mixed-case tests named.
 
 6. **P2: the milestone split has no permanent owner for the chain
    opener.** M1 must declare and open the chain while `store.py` is
