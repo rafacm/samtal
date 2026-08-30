@@ -3633,6 +3633,1115 @@
           }
         }
       }
+    },
+    "/memory/agents": {
+      "get": {
+        "summary": "Read Agent Owners",
+        "description": "Which agents are remembering anything, and how much.\n\nEvery name that has a row, whether or not this deployment still\nhas an agent of that name: renaming an agent orphans its memory,\nwhich is documented rather than prevented, and this listing is\nwhere an operator sees that it happened.",
+        "operationId": "read_agent_owners_memory_agents_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "How many rows this page may hold: a whole number from 1 to 200, defaulting to 50. Anything else is refused.",
+              "title": "Limit"
+            },
+            "description": "How many rows this page may hold: a whole number from 1 to 200, defaulting to 50. Anything else is refused."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Where to carry on from: the owner name this API answered as the previous page's `next_cursor`. The page holds the owners strictly after it, which is what makes the walk total over a set of names. Absent means the first page.",
+              "title": "Cursor"
+            },
+            "description": "Where to carry on from: the owner name this API answered as the previous page's `next_cursor`. The page holds the owners strictly after it, which is what makes the walk total over a set of names. Absent means the first page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryOwners"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The limit or the cursor could not be read, the device in the path is not a MAC address, or the body is not the shape this endpoint takes. Nothing sent is quoted back.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/memory/devices": {
+      "get": {
+        "summary": "Read Device Owners",
+        "description": "Which boards have notes about them, and how many.\n\nA device's notes are shared by every agent bound to it, so this\nis also the listing that says which places a household's facts\nhave accrued in. A board that has been replaced leaves its notes\nbehind, and they are answered here.",
+        "operationId": "read_device_owners_memory_devices_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "How many rows this page may hold: a whole number from 1 to 200, defaulting to 50. Anything else is refused.",
+              "title": "Limit"
+            },
+            "description": "How many rows this page may hold: a whole number from 1 to 200, defaulting to 50. Anything else is refused."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Where to carry on from: the owner name this API answered as the previous page's `next_cursor`. The page holds the owners strictly after it, which is what makes the walk total over a set of names. Absent means the first page.",
+              "title": "Cursor"
+            },
+            "description": "Where to carry on from: the owner name this API answered as the previous page's `next_cursor`. The page holds the owners strictly after it, which is what makes the walk total over a set of names. Absent means the first page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryOwners"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The limit or the cursor could not be read, the device in the path is not a MAC address, or the body is not the shape this endpoint takes. Nothing sent is quoted back.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/memory/conversations": {
+      "get": {
+        "summary": "Read Conversation Owners",
+        "description": "Which conversations hold memory: what each is currently\nkeeping, and how much it has forgotten and could bring back.\n\nA thread's memory shares the thread's lifecycle, so a row here\nfor a thread the conversation record no longer has is a row the\nboot sweep has not reached yet. That is the audit point, and it\nis why nothing is filtered out.",
+        "operationId": "read_conversation_owners_memory_conversations_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "How many rows this page may hold: a whole number from 1 to 200, defaulting to 50. Anything else is refused.",
+              "title": "Limit"
+            },
+            "description": "How many rows this page may hold: a whole number from 1 to 200, defaulting to 50. Anything else is refused."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Where to carry on from: the owner name this API answered as the previous page's `next_cursor`. The page holds the owners strictly after it, which is what makes the walk total over a set of names. Absent means the first page.",
+              "title": "Cursor"
+            },
+            "description": "Where to carry on from: the owner name this API answered as the previous page's `next_cursor`. The page holds the owners strictly after it, which is what makes the walk total over a set of names. Absent means the first page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryConversations"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The limit or the cursor could not be read, the device in the path is not a MAC address, or the body is not the shape this endpoint takes. Nothing sent is quoted back.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/memory/agents/{name}/facts": {
+      "get": {
+        "summary": "Read Agent Facts",
+        "description": "What one agent remembers, oldest first, with the numbers a\ncorrection and a deletion are addressed by.\n\nThe whole of the scope rather than the part a prompt carries: a\nreply is sent the newest of these inside a byte cap and reaches\nthe rest by looking them up, and what an operator is auditing is\neverything that is stored. Facts this agent has forgotten are\nhere too, marked by `forgotten_at`.\n\nAn agent with nothing stored answers an empty page rather than a\nrefusal, which is also the answer for a name nothing is\nconfigured under.",
+        "operationId": "read_agent_facts_memory_agents__name__facts_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "How many rows this page may hold: a whole number from 1 to 200, defaulting to 50. Anything else is refused.",
+              "title": "Limit"
+            },
+            "description": "How many rows this page may hold: a whole number from 1 to 200, defaulting to 50. Anything else is refused."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Where to carry on from: a fact id this API answered with, as a whole number. The page holds the facts after it. Absent means the first page.",
+              "title": "Cursor"
+            },
+            "description": "Where to carry on from: a fact id this API answered with, as a whole number. The page holds the facts after it. Absent means the first page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryFacts"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The limit or the cursor could not be read, the device in the path is not a MAC address, or the body is not the shape this endpoint takes. Nothing sent is quoted back.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Erase Agent Memory",
+        "description": "Erase everything one agent remembers, in one transaction.\n\nAddressed at an owner rather than at a row, so an agent with\nnothing stored is erased of nothing and the count says so. This\nis the verb for an orphan the listings turned up: a renamed\nagent's rows have no other way out.",
+        "operationId": "erase_agent_memory_memory_agents__name__facts_delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryErasure"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Memory's write lock is held by another writer. Nothing was changed, and the same request may be made again.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The limit or the cursor could not be read, the device in the path is not a MAC address, or the body is not the shape this endpoint takes. Nothing sent is quoted back.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/memory/devices/{mac}/facts": {
+      "get": {
+        "summary": "Read Device Facts",
+        "description": "What is noted about one board and the place it stands in,\noldest first.\n\nShared by every agent bound to that board, which is the whole\npoint of the scope and the thing worth auditing about it: a note\nmade in one agent's conversation is read into every sibling's\nprompt on that device, and therefore reaches whatever provider\neach of them is configured with.",
+        "operationId": "read_device_facts_memory_devices__mac__facts_get",
+        "parameters": [
+          {
+            "name": "mac",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Mac"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "How many rows this page may hold: a whole number from 1 to 200, defaulting to 50. Anything else is refused.",
+              "title": "Limit"
+            },
+            "description": "How many rows this page may hold: a whole number from 1 to 200, defaulting to 50. Anything else is refused."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Where to carry on from: a fact id this API answered with, as a whole number. The page holds the facts after it. Absent means the first page.",
+              "title": "Cursor"
+            },
+            "description": "Where to carry on from: a fact id this API answered with, as a whole number. The page holds the facts after it. Absent means the first page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryFacts"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The limit or the cursor could not be read, the device in the path is not a MAC address, or the body is not the shape this endpoint takes. Nothing sent is quoted back.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Erase Device Memory",
+        "description": "Erase every note about one board, in one transaction, which\nis what a board leaving a household needs.",
+        "operationId": "erase_device_memory_memory_devices__mac__facts_delete",
+        "parameters": [
+          {
+            "name": "mac",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Mac"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryErasure"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Memory's write lock is held by another writer. Nothing was changed, and the same request may be made again.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The limit or the cursor could not be read, the device in the path is not a MAC address, or the body is not the shape this endpoint takes. Nothing sent is quoted back.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/memory/agents/{name}/facts/{id}": {
+      "put": {
+        "summary": "Correct Agent Fact",
+        "description": "Correct what one agent remembers, in place.\n\nThe number does not change and the fact keeps its place in the\nreading order, so a correction is a correction rather than a\ndeletion and a fresh write. What changes is the words and the\nmoment it was last written.\n\nThe same cap invariant every write to memory is held to: a fact\nwhose own line will not fit inside what its scope keeps for all\nof them is refused, because forgetting everything else would not\nmake room for it, and a correction that grows a fact re-prunes\nthe scope inside this transaction.\n\nA fact this agent has forgotten is not reachable here. It is\nwaiting to be brought back as it was said, and editing it there\nwould make that undo answer with something nobody said; erasing\nit below is the door that reaches it.",
+        "operationId": "correct_agent_fact_memory_agents__name__facts__id__put",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryCorrection"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryFact"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No fact of that number, or no entry of that name, is in this deployment's memory.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Memory's write lock is held by another writer. Nothing was changed, and the same request may be made again.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The limit or the cursor could not be read, the device in the path is not a MAC address, or the body is not the shape this endpoint takes. Nothing sent is quoted back.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Erase Agent Fact",
+        "description": "Erase one thing an agent remembers.\n\nA hard delete, held facts included, and nothing here keeps it\nfor an undo: the soft forgetting an agent does belongs to the\nconversation that spoke it, and this door is correction and\naudit rather than that flow. What is removed is gone at the next\nreply's prompt.",
+        "operationId": "erase_agent_fact_memory_agents__name__facts__id__delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryErasure"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No fact of that number, or no entry of that name, is in this deployment's memory.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Memory's write lock is held by another writer. Nothing was changed, and the same request may be made again.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The limit or the cursor could not be read, the device in the path is not a MAC address, or the body is not the shape this endpoint takes. Nothing sent is quoted back.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/memory/devices/{mac}/facts/{id}": {
+      "put": {
+        "summary": "Correct Device Fact",
+        "description": "Correct one of a board's notes, in place, under the same\nrules the agent half is corrected under.",
+        "operationId": "correct_device_fact_memory_devices__mac__facts__id__put",
+        "parameters": [
+          {
+            "name": "mac",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Mac"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryCorrection"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryFact"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No fact of that number, or no entry of that name, is in this deployment's memory.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Memory's write lock is held by another writer. Nothing was changed, and the same request may be made again.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The limit or the cursor could not be read, the device in the path is not a MAC address, or the body is not the shape this endpoint takes. Nothing sent is quoted back.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Erase Device Fact",
+        "description": "Erase one of a board's notes, under the same rules.",
+        "operationId": "erase_device_fact_memory_devices__mac__facts__id__delete",
+        "parameters": [
+          {
+            "name": "mac",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Mac"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryErasure"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No fact of that number, or no entry of that name, is in this deployment's memory.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Memory's write lock is held by another writer. Nothing was changed, and the same request may be made again.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The limit or the cursor could not be read, the device in the path is not a MAC address, or the body is not the shape this endpoint takes. Nothing sent is quoted back.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/memory/conversations/{conversation}/state": {
+      "get": {
+        "summary": "Read Conversation State",
+        "description": "What one conversation is currently keeping, by key.\n\nThe ledger the agent writes as it goes: the position on a board,\nthe scene it is in, what the lesson is up to. It is answered\nwhole rather than a page at a time, because a write past the\nledger's own caps is refused, so the whole of one is bounded.\n\nA thread that is keeping nothing answers an empty list, which is\nalso the answer for a thread that never existed.",
+        "operationId": "read_conversation_state_memory_conversations__conversation__state_get",
+        "parameters": [
+          {
+            "name": "conversation",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Conversation"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The limit or the cursor could not be read, the device in the path is not a MAC address, or the body is not the shape this endpoint takes. Nothing sent is quoted back.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Clear Conversation State",
+        "description": "Clear one entry of a conversation's ledger, or the whole of\nit.\n\nThe entry is named in the body and never in the path: a key is a\nword the model chose, so it can be credential-shaped, and a path\nreaches proxy and access logs where a body does not. A request\nwith no body at all clears the ledger, which is a deliberate\ndifference rather than a default: a request that lost its body\non the way would otherwise erase everything.\n\nA named entry that is not there is a 404. The whole-ledger form\nis not addressed at an entry, so it takes what is there and the\ncount says how much that was.\n\nThe deletion runs inside the order a thread's erasure publishes\nthrough, so it and a transaction erasing the same thread are\nordered rather than interleaved and this count is a count of\nrows this request took.",
+        "operationId": "clear_conversation_state_memory_conversations__conversation__state_delete",
+        "parameters": [
+          {
+            "name": "conversation",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Conversation"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryStateKey"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryStateErasure"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No fact of that number, or no entry of that name, is in this deployment's memory.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Memory's write lock is held by another writer. Nothing was changed, and the same request may be made again.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The limit or the cursor could not be read, the device in the path is not a MAC address, or the body is not the shape this endpoint takes. Nothing sent is quoted back.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Memory cannot be read or written, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4875,6 +5984,285 @@
         ],
         "title": "McpServerStatus",
         "description": "One configured MCP server, as the running server sees it.\n\nThe listing is keyed by the entry's name, because that is what the\noperator wrote and what every tool the server publishes is prefixed\nwith."
+      },
+      "MemoryConversation": {
+        "properties": {
+          "conversation": {
+            "type": "string",
+            "title": "Conversation",
+            "description": "The thread's uuid hex, which is what its ledger and the facts forgotten in it are keyed by, and what addresses the state read below. A thread the conversation record no longer has is still answered here, which is what makes this listing the audit door: what such a row means is that the boot sweep has not reached it yet."
+          },
+          "state": {
+            "type": "integer",
+            "title": "State",
+            "description": "How many notes this conversation is currently keeping."
+          },
+          "held_facts": {
+            "type": "integer",
+            "title": "Held Facts",
+            "description": "How many facts were forgotten in it and could still be brought back. They belong to an agent or to a board, not to this thread, but they share its lifecycle: the thread's erasure and its retention prune take them with it."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "conversation",
+          "state",
+          "held_facts"
+        ],
+        "title": "MemoryConversation",
+        "description": "One conversation, and how much memory is keyed to it."
+      },
+      "MemoryConversations": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryConversation"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "The conversations on this page, ascending by `conversation`. A thread appears once whether it holds a ledger, forgotten facts, or both."
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "What to send as `cursor` for the page after this one: the `conversation` of the last item here. Null when this was the last page."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "MemoryConversations",
+        "description": "One page of the conversations that hold memory."
+      },
+      "MemoryEntry": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key",
+            "description": "What the entry is called, chosen by the model. It is the identity of the row: writing the same one again replaces what it held."
+          },
+          "value": {
+            "type": "string",
+            "title": "Value",
+            "description": "What is currently true under that key, normalized to one line."
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At",
+            "description": "When it was last written, as an ISO-8601 instant in UTC."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "key",
+          "value",
+          "updated_at"
+        ],
+        "title": "MemoryEntry",
+        "description": "One entry of one conversation's ledger."
+      },
+      "MemoryErasure": {
+        "properties": {
+          "facts": {
+            "type": "integer",
+            "title": "Facts",
+            "description": "How many fact rows were deleted, held ones included. These are hard deletes and nothing here holds them for an undo: the spoken undo is the agent's door, and this one is correction and audit."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "facts"
+        ],
+        "title": "MemoryErasure",
+        "description": "What a deletion of facts took."
+      },
+      "MemoryFact": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "The fact's row id, never reused. It is what a correction and a deletion address, and it is this listing's cursor."
+          },
+          "fact": {
+            "type": "string",
+            "title": "Fact",
+            "description": "The fact as it is stored, normalized to one line. It is content: somebody said it in a room, so what is here is what the model will be sent."
+          },
+          "at": {
+            "type": "string",
+            "title": "At",
+            "description": "When it was last written, as an ISO-8601 instant in UTC. A correction refreshes it; being forgotten and brought back does not."
+          },
+          "forgotten_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Forgotten At",
+            "description": "When it was forgotten, in the same form, and null while it is active. A non-null value is the whole of what marks a held fact: it is out of every prompt, out of the lookup and out of its scope's caps until the conversation below brings it back."
+          },
+          "forgotten_in": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Forgotten In",
+            "description": "The conversation it was forgotten in, by uuid hex, and null while it is active. It is the one that can bring it back, and the thread whose end takes the row with it. Null exactly when `forgotten_at` is."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "fact",
+          "at",
+          "forgotten_at",
+          "forgotten_in"
+        ],
+        "title": "MemoryFact",
+        "description": "One remembered fact, as the operator surface answers it."
+      },
+      "MemoryFacts": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryFact"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "The facts on this page, ascending by id, which is the order they were stored in and the order the injected block reads in. Held facts are here beside the active ones, marked by their `forgotten_at`."
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "What to send as `cursor` for the page after this one: the `id` of the last item here, and the next page holds the facts after it. Null when this was the last page."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "MemoryFacts",
+        "description": "One page of one owner's facts, oldest first."
+      },
+      "MemoryOwner": {
+        "properties": {
+          "owner": {
+            "type": "string",
+            "title": "Owner",
+            "description": "Whose memory this is, read under the scope the path names: an agent's configured name, or a board's MAC in canonical form. It is what addresses the facts listing below it, and it is answered whether or not the deployment still has an agent or a binding of that name: renaming an agent and replacing a board both leave the rows where they were."
+          },
+          "facts": {
+            "type": "integer",
+            "title": "Facts",
+            "description": "How many rows this owner holds, the ones it has forgotten included. A forgotten fact is held rather than erased until the conversation that forgot it ends, so it is part of what is stored and is counted here."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "owner",
+          "facts"
+        ],
+        "title": "MemoryOwner",
+        "description": "One agent or one board, and how much it is remembering."
+      },
+      "MemoryOwners": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryOwner"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "The owners on this page, ascending by `owner`, which is the sort order."
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "What to send as `cursor` for the page after this one: the `owner` of the last item here, and the next page holds the owners strictly after it. Null when this was the last page."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "MemoryOwners",
+        "description": "One page of the owners in one scope, by owner."
+      },
+      "MemoryState": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryEntry"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "The entries, ascending by key, which is the order the injected block reads in: a ledger is a set of current truths rather than a history, so touching one entry does not move another."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "MemoryState",
+        "description": "What one conversation is currently keeping, whole.\n\nNot paginated, and that is a property of the thing rather than an\nomission: a ledger is bounded by the caps the store refuses a write\npast, so the whole of one is a page by construction."
+      },
+      "MemoryStateErasure": {
+        "properties": {
+          "state": {
+            "type": "integer",
+            "title": "State",
+            "description": "How many ledger entries were deleted: one for a request naming a key, and the whole ledger for a request with no body."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "title": "MemoryStateErasure",
+        "description": "What a deletion of conversation state took."
       },
       "PendingDevice": {
         "properties": {
@@ -6555,6 +7943,38 @@
           "secret"
         ],
         "title": "SecretValue",
+        "type": "object"
+      },
+      "MemoryCorrection": {
+        "additionalProperties": false,
+        "description": "The body of a correction: what the fact should say instead.",
+        "properties": {
+          "fact": {
+            "description": "What the fact should say from now on, normalized to one line before it is stored. The id it is addressed by does not change and its place in the reading order does not move; what changes is the words and the moment it was last written. A body rather than a path segment or a query argument, because a remembered fact is content: it reaches proxy and access logs from either of those and cannot be taken back.",
+            "title": "Fact",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fact"
+        ],
+        "title": "MemoryCorrection",
+        "type": "object"
+      },
+      "MemoryStateKey": {
+        "additionalProperties": false,
+        "description": "The body of a state deletion: which entry to clear.",
+        "properties": {
+          "key": {
+            "description": "The entry to clear. Sending no body at all clears the whole ledger, which is the deliberate difference between the two: a request that lost its body to a proxy or a client library would otherwise erase everything. The key travels here and never in the path, because keys are chosen by the model and a path reaches proxy and access logs where a body does not.",
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "title": "MemoryStateKey",
         "type": "object"
       },
       "ProvidersConfig": {

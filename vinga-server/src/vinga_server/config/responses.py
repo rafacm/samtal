@@ -1990,3 +1990,297 @@ class ThreadErasure(BaseModel):
             "the device is not this thread's and is not counted here."
         )
     )
+
+
+# What the memory namespace answers
+#
+# One scope-addressed surface over the three memories: the agents' own
+# facts, the boards' notes, and what each conversation is currently
+# keeping. Here rather than beside the routes for the reason the
+# conversation store's shapes are here: the CLI is the client and must
+# not pay for FastAPI to read an answer.
+#
+# The listings are an audit door before they are anything else, so an
+# owner with no configuration behind it is a row like any other: an
+# agent that was renamed and a board that was replaced both leave their
+# rows where they were, and a listing that hid them would hide exactly
+# what an operator opened it to find.
+
+
+class MemoryOwner(BaseModel):
+    """One agent or one board, and how much it is remembering."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    owner: str = Field(
+        description=(
+            "Whose memory this is, read under the scope the path names: an agent's "
+            "configured name, or a board's MAC in canonical form. It is what "
+            "addresses the facts listing below it, and it is answered whether or "
+            "not the deployment still has an agent or a binding of that name: "
+            "renaming an agent and replacing a board both leave the rows where "
+            "they were."
+        )
+    )
+    facts: int = Field(
+        description=(
+            "How many rows this owner holds, the ones it has forgotten included. A "
+            "forgotten fact is held rather than erased until the conversation that "
+            "forgot it ends, so it is part of what is stored and is counted here."
+        )
+    )
+
+
+class MemoryOwners(BaseModel):
+    """One page of the owners in one scope, by owner."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[MemoryOwner] = Field(
+        description="The owners on this page, ascending by `owner`, which is the sort order."
+    )
+    next_cursor: str | None = Field(
+        description=(
+            "What to send as `cursor` for the page after this one: the `owner` of the "
+            "last item here, and the next page holds the owners strictly after it. "
+            "Null when this was the last page."
+        )
+    )
+
+
+class MemoryConversation(BaseModel):
+    """One conversation, and how much memory is keyed to it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    conversation: str = Field(
+        description=(
+            "The thread's uuid hex, which is what its ledger and the facts forgotten "
+            "in it are keyed by, and what addresses the state read below. A thread "
+            "the conversation record no longer has is still answered here, which is "
+            "what makes this listing the audit door: what such a row means is that "
+            "the boot sweep has not reached it yet."
+        )
+    )
+    state: int = Field(
+        description="How many notes this conversation is currently keeping."
+    )
+    held_facts: int = Field(
+        description=(
+            "How many facts were forgotten in it and could still be brought back. "
+            "They belong to an agent or to a board, not to this thread, but they "
+            "share its lifecycle: the thread's erasure and its retention prune take "
+            "them with it."
+        )
+    )
+
+
+class MemoryConversations(BaseModel):
+    """One page of the conversations that hold memory."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[MemoryConversation] = Field(
+        description=(
+            "The conversations on this page, ascending by `conversation`. A thread "
+            "appears once whether it holds a ledger, forgotten facts, or both."
+        )
+    )
+    next_cursor: str | None = Field(
+        description=(
+            "What to send as `cursor` for the page after this one: the "
+            "`conversation` of the last item here. Null when this was the last page."
+        )
+    )
+
+
+class MemoryFact(BaseModel):
+    """One remembered fact, as the operator surface answers it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: int = Field(
+        description=(
+            "The fact's row id, never reused. It is what a correction and a deletion "
+            "address, and it is this listing's cursor."
+        )
+    )
+    fact: str = Field(
+        description=(
+            "The fact as it is stored, normalized to one line. It is content: "
+            "somebody said it in a room, so what is here is what the model will be "
+            "sent."
+        )
+    )
+    at: str = Field(
+        description=(
+            "When it was last written, as an ISO-8601 instant in UTC. A correction "
+            "refreshes it; being forgotten and brought back does not."
+        )
+    )
+    forgotten_at: str | None = Field(
+        description=(
+            "When it was forgotten, in the same form, and null while it is active. A "
+            "non-null value is the whole of what marks a held fact: it is out of "
+            "every prompt, out of the lookup and out of its scope's caps until the "
+            "conversation below brings it back."
+        )
+    )
+    forgotten_in: str | None = Field(
+        description=(
+            "The conversation it was forgotten in, by uuid hex, and null while it is "
+            "active. It is the one that can bring it back, and the thread whose end "
+            "takes the row with it. Null exactly when `forgotten_at` is."
+        )
+    )
+
+
+class MemoryFacts(BaseModel):
+    """One page of one owner's facts, oldest first."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[MemoryFact] = Field(
+        description=(
+            "The facts on this page, ascending by id, which is the order they were "
+            "stored in and the order the injected block reads in. Held facts are "
+            "here beside the active ones, marked by their `forgotten_at`."
+        )
+    )
+    next_cursor: int | None = Field(
+        description=(
+            "What to send as `cursor` for the page after this one: the `id` of the "
+            "last item here, and the next page holds the facts after it. Null when "
+            "this was the last page."
+        )
+    )
+
+
+class MemoryCorrection(BaseModel):
+    """The body of a correction: what the fact should say instead."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    fact: str = Field(
+        description=(
+            "What the fact should say from now on, normalized to one line before it "
+            "is stored. The id it is addressed by does not change and its place in "
+            "the reading order does not move; what changes is the words and the "
+            "moment it was last written. A body rather than a path segment or a "
+            "query argument, because a remembered fact is content: it reaches proxy "
+            "and access logs from either of those and cannot be taken back."
+        )
+    )
+
+
+class MemoryEntry(BaseModel):
+    """One entry of one conversation's ledger."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    key: str = Field(
+        description=(
+            "What the entry is called, chosen by the model. It is the identity of "
+            "the row: writing the same one again replaces what it held."
+        )
+    )
+    value: str = Field(
+        description="What is currently true under that key, normalized to one line."
+    )
+    updated_at: str = Field(
+        description="When it was last written, as an ISO-8601 instant in UTC."
+    )
+
+
+class MemoryState(BaseModel):
+    """What one conversation is currently keeping, whole.
+
+    Not paginated, and that is a property of the thing rather than an
+    omission: a ledger is bounded by the caps the store refuses a write
+    past, so the whole of one is a page by construction.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[MemoryEntry] = Field(
+        description=(
+            "The entries, ascending by key, which is the order the injected block "
+            "reads in: a ledger is a set of current truths rather than a history, so "
+            "touching one entry does not move another."
+        )
+    )
+
+
+class MemoryStateKey(BaseModel):
+    """The body of a state deletion: which entry to clear."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    key: str = Field(
+        description=(
+            "The entry to clear. Sending no body at all clears the whole ledger, "
+            "which is the deliberate difference between the two: a request that lost "
+            "its body to a proxy or a client library would otherwise erase "
+            "everything. The key travels here and never in the path, because keys "
+            "are chosen by the model and a path reaches proxy and access logs where "
+            "a body does not."
+        )
+    )
+
+
+class MemoryErasure(BaseModel):
+    """What a deletion of facts took."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    facts: int = Field(
+        description=(
+            "How many fact rows were deleted, held ones included. These are hard "
+            "deletes and nothing here holds them for an undo: the spoken undo is the "
+            "agent's door, and this one is correction and audit."
+        )
+    )
+
+
+class MemoryStateErasure(BaseModel):
+    """What a deletion of conversation state took."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    state: int = Field(
+        description=(
+            "How many ledger entries were deleted: one for a request naming a key, "
+            "and the whole ledger for a request with no body."
+        )
+    )
+
+
+def request_body(model: type[BaseModel], required: bool = True) -> dict[str, Any]:
+    """One route's request body, as the document describes it.
+
+    The schema is a reference into `components`, where `api.py` injects
+    the models a route declares this way: nothing in the running
+    application declares them as body types, deliberately, because
+    FastAPI's own validation echoes the input it rejected and a body
+    here can carry a credential-shaped value.
+
+    Here rather than in `api.py` because both API modules build one now,
+    and `api.py` is the module the other one may not import: it imports
+    them to register their routes, and the import cannot go both ways.
+    Nothing in this function is a FastAPI concern, which is what lets it
+    sit in the module that pays for pydantic alone.
+
+    `required` is false for the one body that is optional, the state
+    deletion's, where sending nothing is a different request rather than
+    a malformed one.
+    """
+    return {
+        "requestBody": {
+            "required": required,
+            "content": {
+                "application/json": {
+                    "schema": {"$ref": f"#/components/schemas/{model.__name__}"}
+                }
+            },
+        }
+    }
