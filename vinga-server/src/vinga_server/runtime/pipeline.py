@@ -2242,7 +2242,7 @@ class PipelineRuntime:
         for source in self._sources:
             if source.owns(classified):
                 return await source.dispatch(classified, self._agent)
-        return f'there is no tool called "{call.name}"', True
+        return no_such_tool(call.name)
 
     def _timeout_for(self, classified: ToolInvocation) -> float:
         """How long this call may take, answered by the source that owns
