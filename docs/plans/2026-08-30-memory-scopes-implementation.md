@@ -602,3 +602,188 @@ rather than the shape around it, a disclosure, and a count.
   the concurrent dispatch restored for the two state tools; the sweep
   put back in front of the record; and the purge wiring dropped, the
   exit callbacks reversed, and both at once.
+
+## M3: scoped facts and the editing tools
+
+PR TBD.
+
+### What landed
+
+In the order the commits tell it: the prompt's read bounded to the block
+it renders, the storage cap grown past it, and then the tool family one
+pair at a time, the device scope proven end to end, and the documents.
+
+- **The prompt read is bounded in the statement.** `_newest` asks the
+  database for the newest `CORE_LINES` active facts of an owner, and
+  `_core` is left with the byte bound alone. It is the two-tier shape
+  made real rather than an optimization: the agent scope now holds a
+  thousand facts and the block renders forty, so reading the scope to
+  slice it would spend on every round exactly what the split exists to
+  save.
+- **`read_for_prompt` answers a caller with no device and no thread,**
+  and reports only the scopes it reached for. That is what the prompt
+  preview is, and it is now the preview's own call: `GET
+  /runtime/agents/{name}/prompt` renders the block a reply would carry
+  rather than the whole scope, which it had been over-reporting since
+  the core existed.
+- **`MAX_LINES` and `MAX_BYTES` are 1000 and 65536.** The two hundred
+  lines in eight kilobytes they replace were a context budget wearing
+  another name: every stored line was injected, so what an agent could
+  accumulate was bounded by what a small model could be told. They bound
+  accumulation now, and nothing else.
+- **`remember` names a scope and answers a number.** The enum is
+  `FACT_SCOPES`, the default is the agent's own, and the owner of a
+  device fact comes off the session rather than out of the arguments,
+  exactly as the ledger tools' thread does. The confirmation is
+  `Remembered [id]: text`, because the number is otherwise nowhere: the
+  injected block shows none.
+- **`update_memory`, `forget`, `restore_memory` and `recall`,** with
+  their names in `BUILTIN_TOOL_NAMES` and their descriptions written
+  from the issue's worked examples: what belongs to the device, that
+  the words a removal answers with are to be said out loud, that
+  `restore_memory` with no number is the last thing forgotten, and that
+  `recall` is where the numbers come from. A numbered call is tried
+  against each memory the session can reach, the agent's own and then
+  the device's, and the store's ownership predicates are what bound it.
+  `recall` runs off the event loop like the prompt's own read.
+- **The device scope end to end.** Two agents on one board, one told
+  something about the room, the other's own prompt carrying it, driven
+  through the simulator across two server runs, since the binding order
+  is the only lever a simulator conversation has over which sibling
+  speaks.
+- **The documents.** The concepts page's Device paragraph says what a
+  board's own notes are and that moving hardware loses only those; its
+  Memory section's remaining markers become current behavior and it
+  answers the egress question; the glossary gains its Memory entry; the
+  server README carries the family in both spellings, the caps, the
+  block-and-lookup split and the storage-here-egress-with-the-prompt
+  paragraph; the changelog announces the family, the cap growth, the
+  refusal and the four reserved names. The census was regenerated after
+  the README edits.
+
+### The pins that translated
+
+- the offered-tool ordered literals in `test_session_tools.py`, three of
+  them, which grow the five names between `remember` and `set_state`;
+- `DUE_BUILTINS` in `tests/integration/test_tools.py`, the same names;
+- the reserved-entry-name parametrizations in `test_tool_names.py` and
+  `test_config_tools.py`, which now walk `RESERVED_ENTRY_NAMES` instead
+  of listing it: the set is what the rule is written from, and a listed
+  copy is the second structure that has to agree with it;
+- the `Remembered:` confirmation, which gains its number;
+- `test_the_memory_read_happens_off_the_event_loop`'s replacement
+  signature, for the conversation that may now be None;
+- every whole-scope `read` assertion in `test_memory_store.py`, which
+  became either the injected block (through one `injected` helper that
+  speaks the preview's own call) or the rows, depending on which of the
+  two the test was ever about;
+- every `store.remember(...)` in the suites, which is
+  `store.add(MemoryScope.AGENT, ...)` now;
+- the prompt route's description in `api-openapi.json`, regenerated.
+
+### The pins that retired
+
+Two, and both are a promise this project stops making.
+
+- **`test_remembering_a_fact_over_the_byte_cap_still_keeps_it`.** #314's
+  released edge: `remember` kept a single fact larger than the whole
+  cap, because the prune never goes below one fact, which left that
+  scope over its own bound for as long as the fact lived. M1 kept it
+  deliberately and said the refusal would arrive in the milestone whose
+  changelog announced it. This is that milestone: the refusal is on
+  every door, the changelog says so, and the test goes with the promise.
+- **The whole-scope read itself.** `read(agent)` was the sentence #314's
+  callers spoke, and the plan let it live while callers existed. Its
+  last caller was the preview, which had to start rendering the core to
+  stay a preview of a real session, so it retired here rather than
+  surviving as a sentence only tests speak. `MemoryStore.remember` went
+  the same way in the same milestone: once the tool needed the number,
+  `remember` was `add` with the id thrown away, and a pass-through that
+  can hold a different rule than the door beside it is worse than no
+  sentence at all.
+
+### Deviations from the plan
+
+Six, and none changes what the milestone ships.
+
+- **A numbered call searches the two memories in the tool layer, not in
+  the store.** The plan states the predicates as `(scope, owner)` on
+  each store operation, and a model names a number and not a memory. The
+  alternative was widening the store's operations to take both
+  addresses, which would have made the `scope` field on
+  `memory_unwritable` a guess: the row a failed statement was addressing
+  is not known until it is found. So `_wherever_it_is` tries the agent's
+  scope and then the device's, each call keeping its own honest scope,
+  and the last refusal travels because the store's sentence is identical
+  whichever memory refused.
+- **A restore with no number is therefore per memory, agent first.** "The
+  last thing you forgot" is exact wherever a conversation forgot facts
+  from one memory, which is every ordinary case; a conversation that
+  forgot one of each brings the agent's back first and says which fact
+  it was, so asking again reaches the other. It is a decision rather
+  than an accident and it is pinned by test.
+- **`read_for_prompt` takes `conversation: str | None`,** the widening
+  M2 gave the device. A prompt assembled outside any conversation has no
+  ledger, and saying so with None is what lets the preview speak this
+  call at all.
+- **`_device_of` asserts rather than refusing.** The handshake reads the
+  device's identity before a connection can be accepted, so a tool call
+  with no device behind it is a defect here rather than something to
+  tell a model about, which is exactly the rule `_conversation_of`
+  already keeps.
+- **The result wordings the plan did not fix.** `Corrected [id]: text`
+  and `Brought back: text`. The restore answers with no number on
+  purpose: the no-number door does not know one until the row is found,
+  and the store's restore answers with the words rather than the row.
+- **Two arguments are read leniently.** A number sent as a string of
+  digits is accepted, because a model reads it out of a lookup line and
+  hands it back as it read it; `permanently` is honoured only when it
+  arrives as an actual true, because a misread argument should fail
+  towards the removal that can be undone.
+
+### Discoveries
+
+- **No unit-level session had a device at all.** `tests/support/sessions`
+  transcribes `run`'s composition, and the one line it had never
+  transcribed was the first one: the edge sets the MAC off the handshake
+  before anything else can happen. Nothing had noticed, because nothing
+  below the websocket had ever asked what device it was on. Setting it
+  then failed on a second thing: `DeviceId` accepts only the canonical
+  form `normalize_mac` answers with, one fixture MAC is written in
+  capitals, and an identity that cannot be built refuses the whole
+  emission, which the lanes fail any test for producing. The helper
+  normalizes, exactly as the edge does.
+- **The block's line bound was the slice and nothing else.** Moving the
+  bound into the statement was only safe because `_core` stopped
+  slicing; the mutation that drops the `LIMIT` renders the whole scope,
+  and the boundary test catches it. Two places that both bound would
+  have been the third structure to keep in agreement.
+- **`__context__` alone does not catch a chained raise.** The refusal
+  that travels out of the numbered search is built inside the arm and
+  raised after it, and the mutation that raises `from` the caught one
+  passes an assertion about `__context__`: `raise X from Y` sets
+  `__cause__`. Both are asserted now.
+
+### Verification
+
+- `uv run ruff check .`: clean.
+- `uv run mypy`: clean (5 source files, the events package).
+- `uv run pytest tests/unit -q`: 4722 passed, 19 skipped.
+- `uv run pytest tests/unit -q -n auto --dist loadfile`, the shape CI
+  runs: the same.
+- `uv run pytest tests/integration -q`: 229 passed.
+- The five generated documents (`domain-config.md`,
+  `conversations-schema.md`, `events.md`, `api-openapi.json`, `cli.md`)
+  each regenerate to their committed bytes; `api-openapi.json` is
+  regenerated in this change and the other four are unchanged. The
+  command-spellings census was regenerated after the README edits, and
+  `python scripts/check_doc_links.py .` checked 172 files with no
+  failures.
+- Every new guard was run against the mutation it exists for before
+  being trusted: the prompt read reporting the vocabulary rather than
+  the scopes it reached; the core read without its bound; the numbered
+  search reaching the agent's memory alone; that search raising the
+  refusal from inside its handler; the scope argument ignored, against
+  the device-note case end to end; and the lookup run on the event loop
+  rather than off it.
+- Not verified: the `image` job, which builds and smokes the container.
