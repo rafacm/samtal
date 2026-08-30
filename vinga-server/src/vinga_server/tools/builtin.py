@@ -591,9 +591,9 @@ UNKNOWN_SCOPE = (
     'to, or "device", for something about this place and its household'
 )
 
-# And what the two numbered tools refuse a call that named no fact. They
-# name the lookup, because that is where a number comes from: the
-# injected block shows none.
+# And what the rest of the family refuses a call it cannot act on. The
+# three that address a fact by its number name the lookup, because that
+# is where a number comes from: the injected block shows none.
 UPDATE_NEEDS_A_NUMBER_AND_TEXT = (
     'update_memory needs the "id" of the fact to correct, which recall answers with, '
     'and the "text" to replace it with'

@@ -646,6 +646,14 @@ pair at a time, the device scope proven end to end, and the documents.
   against each memory the session can reach, the agent's own and then
   the device's, and the store's ownership predicates are what bound it.
   `recall` runs off the event loop like the prompt's own read.
+- **The numbered three join `ORDERED_TOOL_NAMES`.** M2's review round
+  made the two state tools run one at a time in the order the model
+  issued them, because both address an entry by a key the model chose.
+  A number is the same kind of identity: a correction and a removal of
+  one fact in a round decide each other, and a removal that overtook the
+  correction beside it would answer with words the correction had
+  already replaced, which the agent then says out loud. `remember` is
+  still unordered, since it appends, and `recall` changes nothing.
 - **The device scope end to end.** Two agents on one board, one told
   something about the room, the other's own prompt carrying it, driven
   through the simulator across two server runs, since the binding order
@@ -679,7 +687,10 @@ pair at a time, the device scope proven end to end, and the documents.
   two the test was ever about;
 - every `store.remember(...)` in the suites, which is
   `store.add(MemoryScope.AGENT, ...)` now;
-- the prompt route's description in `api-openapi.json`, regenerated.
+- the prompt route's description in `api-openapi.json`, regenerated;
+- M2's `the_first_write_parked` gate, which now takes the store calls to
+  hold rather than naming the ledger's two, so the numbered case is the
+  same arrangement with different tools.
 
 ### The pins that retired
 
@@ -768,7 +779,7 @@ Six, and none changes what the milestone ships.
 
 - `uv run ruff check .`: clean.
 - `uv run mypy`: clean (5 source files, the events package).
-- `uv run pytest tests/unit -q`: 4722 passed, 19 skipped.
+- `uv run pytest tests/unit -q`: 4726 passed, 19 skipped.
 - `uv run pytest tests/unit -q -n auto --dist loadfile`, the shape CI
   runs: the same.
 - `uv run pytest tests/integration -q`: 229 passed.
@@ -780,7 +791,9 @@ Six, and none changes what the milestone ships.
   `python scripts/check_doc_links.py .` checked 172 files with no
   failures.
 - Every new guard was run against the mutation it exists for before
-  being trusted: the prompt read reporting the vocabulary rather than
+  being trusted: the ordered dispatch reduced to the ledger's two, which
+  lets a removal overtake the correction beside it; the prompt read
+  reporting the vocabulary rather than
   the scopes it reached; the core read without its bound; the numbered
   search reaching the agent's memory alone; that search raising the
   refusal from inside its handler; the scope argument ignored, against

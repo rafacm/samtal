@@ -1591,12 +1591,13 @@ class PipelineRuntime:
 
         The exception is the calls `names.ORDERED_TOOL_NAMES` names,
         which run first and one at a time, in the order the model issued
-        them. They write one conversation's ledger by a key the model
-        chose, so two of them in a round can name the same entry and
-        what is current afterwards is whichever ran last: run
-        concurrently, the answer would be decided by which transaction
-        reached the chain's lock first rather than by what the model
-        asked for, and a set followed by a clear could leave the set.
+        them. Each writes something the model addressed by an identity
+        of its own choosing, a ledger key or a fact's number, so two of
+        them in a round can name the same thing and what is true
+        afterwards is whichever ran last: run concurrently, the answer
+        would be decided by which transaction reached the chain's lock
+        first rather than by what the model asked for, and a set
+        followed by a clear could leave the set.
 
         Before the rest rather than beside them, which costs a round
         trip nothing was waiting on and buys the simplest cancellation
