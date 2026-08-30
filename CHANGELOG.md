@@ -20,10 +20,17 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   everything an agent can reach, the ledger's writes, one call that
   answers a whole prompt's memory in a single round trip, and the
   purges that take a thread's memory when the thread goes.
-  Nothing above the store changed. No new tool is offered, no injected
-  prompt moves, and every agent remembers exactly what it did before:
-  what lands here is the storage and the sentences, and the behavior
-  arrives in the milestones that follow.
+  No agent-visible behavior changed. No new tool is offered, no
+  injected prompt moves, and every agent remembers exactly what it did
+  before: what lands here is the storage and the sentences, and the
+  behavior arrives in the milestones that follow.
+  One surface an operator reads did move. The `memory_unreadable` and
+  `memory_unwritable` events gain a `scope` field, one of
+  `conversation`, `agent` or `device`, and their sentences name it; a
+  third event, `memory_cleanup_failed`, reports a failure to remove the
+  memory of conversations that are gone, carrying the failure's class
+  name and no agent, because the paths it answers for act for none. A
+  consumer that pins event payload keys should expect the new field.
   **Stop the running server before starting this image.** The
   migration renames a column, so an older process still serving through
   it would fail its next memory statement. Stop, then start: this

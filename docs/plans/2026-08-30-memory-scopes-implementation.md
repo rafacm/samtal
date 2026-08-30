@@ -105,8 +105,8 @@ the sentinels, and the documents.
 
 ### Deviations from the plan
 
-Four, and one of them is a sequencing decision the plan left to be
-made here.
+Five, one of them a sequencing decision the plan left to be made here
+and one an amendment to the plan itself.
 
 - **The storage cap stays at 200 lines and 8192 bytes.** The plan grows
   the agent scope to `MAX_LINES = 1000` and `MAX_BYTES = 65536`
@@ -135,6 +135,19 @@ made here.
   which is the discipline `vinga_server.config` already keeps about its
   boot path: importing the package pulls in neither the driver nor the
   migrations. Seventeen import lines moved; nothing else did.
+- **The two events' `scope` field and `memory_cleanup_failed` landed
+  here rather than in M2, and the plan was amended to say so.** The
+  review flagged the mismatch: the plan listed both under M2 while this
+  milestone shipped them. What moved is the placement, not the code.
+  The emit sites are the operations M1 implements, and shipping an
+  event whose shape changes one release later serves no reader: an
+  operator's parser would meet `memory_unwritable` without a scope in
+  one release and with one in the next, for paths that never behaved
+  differently. M2 still owns everything the coupling needs; it no
+  longer owns the vocabulary its emitters were written with. The
+  changelog says the field arrived, since the event payload is a
+  compatibility surface and "nothing above the store changed" was not
+  true of it.
 - **Every mutating call takes the acting agent as a keyword.** The
   plan's operations are addressed by `(scope, owner)`, which under
   device scope makes the owner a MAC while the events' `agent` field

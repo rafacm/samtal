@@ -636,10 +636,14 @@ Named by role, homes confirmed against the authority taxonomy:
   `recall`, `set_state`, `clear_state`, `read_for_prompt`,
   `purge_threads`, `sweep`) implemented and tested at store level
   behind the unchanged `read` and `remember`; per-scope cap
-  constants; the wheel step and lane fixtures updated; changelog.
-  No caller changes; behavior is #314's exactly. Design footprint:
+  constants; the two memory events' `scope` field and the agent-free
+  `memory_cleanup_failed`, which the operations above are the emit
+  sites of; the wheel step and lane fixtures updated; changelog.
+  No caller changes; the agent-visible behavior is #314's exactly.
+  Design footprint:
   the store deepens in place, callers still see no database
-  vocabulary. Documentation footprint: the changelog and the README
+  vocabulary. Documentation footprint: the changelog (including the
+  events' new field) and the README
   upgrade section's stop-then-start sentence; nothing else, stated.
 - [ ] **M2: conversation state end to end.** The state tools, the
   state block and the three-block rendering (device block present
@@ -653,9 +657,8 @@ Named by role, homes confirmed against the authority taxonomy:
   and exit callbacks registered so the writer drains before memory
   closes) with startup-failure and shutdown-drain tests that force
   a retention purge during teardown, the erasure counts on both
-  response models and the CLI erasure rows, the events' scope field
-  and `memory_cleanup_failed`, concepts and README updates this
-  milestone falsifies, changelog. Design footprint: the coupling is ids
+  response models and the CLI erasure rows, concepts and README
+  updates this milestone falsifies, changelog. Design footprint: the coupling is ids
   handed where they are computed plus one callable seam; no module
   learns another's SQL. One behavior change alone in review: agents
   gain a ledger.
