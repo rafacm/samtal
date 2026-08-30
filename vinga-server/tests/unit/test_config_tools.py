@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from tests.support.configs import config_with
 from vinga_server.config import Config, McpServerConfig, resolve_env_references
 from vinga_server.config.models import AgentConfig, mcp_entry_fragment
+from vinga_server.tools import names
 
 STDIO = {"transport": "stdio", "command": "mcp-proxy", "args": ["http://ha/sse"]}
 HTTP = {"transport": "streamable_http", "url": "http://localhost:8000/mcp"}
@@ -124,13 +125,16 @@ def test_a_prompt_name_keeps_the_whitespace_it_was_written_with() -> None:
 
 
 @pytest.mark.parametrize(
-    "name",
-    ["self", "switch_agent", "remember", "set_state", "clear_state", "home.assistant"],
+    "name", [*names.RESERVED_ENTRY_NAMES, "home.assistant"]
 )
 def test_a_reserved_or_unusable_entry_name_fails_the_boot(name: str) -> None:
     """The section and the rule, and never the name: a name that fails
     the charset is exactly the string that must not be echoed, which is
-    the shape the prompt-fragment name rule already had."""
+    the shape the prompt-fragment name rule already had.
+
+    Walked off the reserved set rather than listed here, so a builtin
+    that joins it is refused at the boot without anyone remembering to
+    add it: the set is what the rule is written from."""
     with pytest.raises(ValidationError) as caught:
         config_with(mcp_servers={name: STDIO})
 

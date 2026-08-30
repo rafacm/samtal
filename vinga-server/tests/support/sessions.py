@@ -46,6 +46,7 @@ from tests.support.providers import ScriptedLlm, Unreachable, built_world
 from tests.support.sockets import LoopingSocket, RecordingSocket
 from tests.support.stores import memory as lane_memory
 from vinga_server.config import Config
+from vinga_server.config.models import normalize_mac
 from vinga_server.conversations.store import Half
 from vinga_server.device.session import DeviceSession
 from vinga_server.events import SessionEvents
@@ -170,11 +171,16 @@ def device_session(
         threads,
     )
     session = session_module.DeviceSession(cast(Any, websocket), generations, factory)
-    # White-box, deliberately, and the only three sites in this file that
-    # are. These lines are `run`'s own, transcribed: it resolves the
+    # White-box, deliberately, and the only four sites in this file that
+    # are. These lines are `run`'s own, transcribed: it reads the device
+    # off the handshake before anything else can happen, resolves the
     # binding, keeps the agents, captures the world it is going to build
     # from, and calls the factory with the session, the session's events
-    # object, those agents and that world. Nothing public does that half,
+    # object, those agents and that world. The MAC is first there and
+    # first here, normalized as the edge normalizes it, which is what
+    # makes a session built by this one that knows which device it is on:
+    # memory's device scope is addressed by it, every event carries it,
+    # and a served session has always had one. Nothing public does that half,
     # because the only caller that ever needs to is the edge itself, and
     # reaching it through `run` means a socket, a hello and a live task,
     # which is `open_session` below and a different test. What cannot be
@@ -183,6 +189,7 @@ def device_session(
     # device, both sides attribute their events to the same object, and
     # the world the runtime speaks through is the one the session says
     # it is holding.
+    session._mac = normalize_mac(mac)
     session._agents = config.agents_for_device(mac)
     session._generation = generations.current()
     session.runtime = factory(
