@@ -147,3 +147,53 @@ The changed test is the deliverable; what verifies it:
 
 - [ ] M1: the hold. The test change, the changelog entry, the
   implementation doc section; PR TBD.
+
+## Plan review round
+
+External review of commit 9111ba12: backend codex (codex-cli
+0.151.0), model gpt-5.6-sol, sandbox read-only, 2026-08-30, runtime
+about 5 minutes. Verdict: ready after the P1/P2 amendments. Findings
+condensed but faithful; resolutions appended per amendment.
+
+1. **P2: the timeout deliberately restores the original race.**
+   After the ten-second bound the wrapper delegates to the real
+   close and the old race decides the verdict, and `_close` treats
+   any normally returning wrapper as a successful close, so a
+   timeout can still pass or fail by scheduling, contradicting
+   by-construction determinism. The wait's expiry must be an
+   explicit synchronization failure even when the close code
+   happens to be 4001.
+
+2. **P2: the committed test has no deterministic bite.** The only
+   deterministic pre-fix failure uses a transient `time.sleep(0.3)`
+   the plan refuses to commit; the committed peer keeps the
+   back-to-back `tts stop` and 4001 close, under which the unfixed
+   test usually passes, so deleting the hold later would leave a
+   mostly green test and restore the flake. Commit sleep-free
+   coordination that forces the disputed interleaving: the peer
+   waits on an event after `tts stop`; the close wrapper sets the
+   event, waits for `close_code`, then delegates; both bounded
+   waits expose asserted timeout markers.
+
+3. **P2: the second sighting is left outside every milestone.** The
+   plan defers the #254 watch-table update to merge time, so if the
+   PR stalls the watch remains knowingly false. Recording run
+   33140677096 with its diagnosis must be an M1 completion
+   criterion, done before or with the PR; only #328's closing
+   comment stays merge-time bookkeeping.
+
+4. **P3: the cited 1011 test neither exists under that name nor
+   owns the mid-reply path.** The real case is
+   `test_a_peer_that_goes_away_mid_utterance_is_a_sentence_not_a_traceback`,
+   which closes after the first outgoing audio frame and tests
+   `_send_audio`, not a close during `_read_until_reply_ends`.
+   Reject the mid-reply alternative solely because it raises before
+   a `Reply` exists, and cite the 1011 case only as precedent for
+   polling `close_code`.
+
+5. **P3: the ordinary-turn test does not pin which side initiated
+   the 1000 close.** The scripted peer's handler returns after
+   `tts stop` and the support closes the connection when a handler
+   returns; both sides use 1000, so the assertion cannot identify
+   the initiator. Describe that test as pinning the normal-close
+   verdict only.
