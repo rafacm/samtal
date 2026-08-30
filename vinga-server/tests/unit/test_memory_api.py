@@ -570,6 +570,31 @@ def test_a_key_is_matched_as_the_writer_normalized_it(
     assert memory_rows("state", conversation=thread) == []
 
 
+@pytest.mark.parametrize("number", ["abc", "-1", "1.5", "9" * 30, "", SENTINEL])
+def test_a_number_that_is_not_one_is_refused_by_this_api(
+    client: TestClient, number: str
+) -> None:
+    """Parsed here rather than by the framework, and bounded by the
+    identity column's range as well as by its spelling.
+
+    Both halves are about which sentence a caller meets. The framework's
+    own refusal for a path segment is the body-shaped one this API
+    substitutes for its validation, which would tell somebody who
+    mistyped a number to send a JSON object; and a number past the
+    column's range would reach the driver and be answered as a storage
+    failure, which is a healthy database being called broken.
+    """
+    told(MemoryScope.AGENT, AGENT, "one")
+
+    answer = client.delete(f"/memory/agents/{AGENT}/facts/{number}")
+
+    assert answer.status_code in {404, 422}
+    if answer.status_code == 422:
+        assert "whole number" in refused(answer.json(), 422)
+    assert number not in answer.text or not number
+    assert len(memory_rows("facts", owner=AGENT)) == 1
+
+
 def test_erasing_an_unknown_fact_is_a_404_that_quotes_nothing(client: TestClient) -> None:
     told(MemoryScope.AGENT, AGENT, "one")
 

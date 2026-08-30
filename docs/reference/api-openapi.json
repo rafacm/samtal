@@ -4243,9 +4243,11 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
+              "type": "string",
+              "description": "Which fact, by the `id` the facts listing answers with: a whole number, never reused. Written as a string here because it is parsed by this API rather than by the framework, whose own refusal for a path segment describes a request body; what it has to be is a number and nothing else.",
               "title": "Id"
-            }
+            },
+            "description": "Which fact, by the `id` the facts listing answers with: a whole number, never reused. Written as a string here because it is parsed by this API rather than by the framework, whose own refusal for a path segment describes a request body; what it has to be is a number and nothing else."
           }
         ],
         "requestBody": {
@@ -4340,9 +4342,11 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
+              "type": "string",
+              "description": "Which fact, by the `id` the facts listing answers with: a whole number, never reused. Written as a string here because it is parsed by this API rather than by the framework, whose own refusal for a path segment describes a request body; what it has to be is a number and nothing else.",
               "title": "Id"
-            }
+            },
+            "description": "Which fact, by the `id` the facts listing answers with: a whole number, never reused. Written as a string here because it is parsed by this API rather than by the framework, whose own refusal for a path segment describes a request body; what it has to be is a number and nothing else."
           }
         ],
         "responses": {
@@ -4429,9 +4433,11 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
+              "type": "string",
+              "description": "Which fact, by the `id` the facts listing answers with: a whole number, never reused. Written as a string here because it is parsed by this API rather than by the framework, whose own refusal for a path segment describes a request body; what it has to be is a number and nothing else.",
               "title": "Id"
-            }
+            },
+            "description": "Which fact, by the `id` the facts listing answers with: a whole number, never reused. Written as a string here because it is parsed by this API rather than by the framework, whose own refusal for a path segment describes a request body; what it has to be is a number and nothing else."
           }
         ],
         "requestBody": {
@@ -4526,9 +4532,11 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "integer",
+              "type": "string",
+              "description": "Which fact, by the `id` the facts listing answers with: a whole number, never reused. Written as a string here because it is parsed by this API rather than by the framework, whose own refusal for a path segment describes a request body; what it has to be is a number and nothing else.",
               "title": "Id"
-            }
+            },
+            "description": "Which fact, by the `id` the facts listing answers with: a whole number, never reused. Written as a string here because it is parsed by this API rather than by the framework, whose own refusal for a path segment describes a request body; what it has to be is a number and nothing else."
           }
         ],
         "responses": {

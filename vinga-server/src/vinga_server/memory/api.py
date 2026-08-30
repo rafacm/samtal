@@ -66,7 +66,7 @@ from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager
 from typing import TYPE_CHECKING, Annotated, Any
 
-from fastapi import Body, Depends, FastAPI, Query, Request
+from fastapi import Body, Depends, FastAPI, Path, Query, Request
 from sqlalchemy import Connection
 
 from vinga_server import paging
@@ -121,6 +121,21 @@ _OWNER_LENGTH = 512
 _OWNER_CURSOR_REFUSED = (
     "cursor has to be one of the owner names this API answers with, or absent for the "
     "first page. What was sent is not quoted back"
+)
+
+# What a fact number that is not one is told.
+#
+# Parsed here rather than declared as an integer path parameter, for
+# exactly the reason every query argument on this API is: the
+# framework's own refusal for a path that will not parse is the
+# body-shaped sentence this API substitutes for its validation, which
+# would tell a caller who mistyped a number to send a JSON object; and a
+# number past the range of the identity column is a caller's mistake
+# that would otherwise reach the driver and be reported as a storage
+# failure, which is a healthy database being called broken.
+_NOT_A_FACT_NUMBER = (
+    "a fact is addressed by the number the facts listing answers with, as a whole "
+    "number. What was sent is not quoted back"
 )
 
 _NOT_A_MAC = (
@@ -247,6 +262,19 @@ OwnerCursorQuery = Annotated[
 # own. Not the model as a body type, deliberately and for the reason
 # `config/api.py` gives: FastAPI's validation echoes the input it
 # rejected, and what these two bodies carry is content.
+FactId = Annotated[
+    str,
+    Path(
+        description=(
+            "Which fact, by the `id` the facts listing answers with: a whole number, "
+            "never reused. Written as a string here because it is parsed by this API "
+            "rather than by the framework, whose own refusal for a path segment "
+            "describes a request body; what it has to be is a number and nothing "
+            "else."
+        )
+    ),
+]
+
 RawBody = Annotated[Any, Body()]
 
 # And the one body that may be absent, which is a different request
@@ -463,7 +491,9 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
         responses=problems(401, 404, 409, 422, 500, instead=MEMORY_PROBLEMS_INSTEAD),
         openapi_extra=request_body(MemoryCorrection),
     )
-    def correct_agent_fact(name: str, id: int, body: RawBody, writer: WriterDep) -> dict[str, Any]:
+    def correct_agent_fact(
+        name: str, id: FactId, body: RawBody, writer: WriterDep
+    ) -> dict[str, Any]:
         """Correct what one agent remembers, in place.
 
         The number does not change and the fact keeps its place in the
@@ -490,7 +520,9 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
         responses=problems(401, 404, 409, 422, 500, instead=MEMORY_PROBLEMS_INSTEAD),
         openapi_extra=request_body(MemoryCorrection),
     )
-    def correct_device_fact(mac: str, id: int, body: RawBody, writer: WriterDep) -> dict[str, Any]:
+    def correct_device_fact(
+        mac: str, id: FactId, body: RawBody, writer: WriterDep
+    ) -> dict[str, Any]:
         """Correct one of a board's notes, in place, under the same
         rules the agent half is corrected under."""
         return _corrected(writer, MemoryScope.DEVICE, _mac(mac), id, body)
@@ -500,7 +532,7 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
         response_model=MemoryErasure,
         responses=problems(401, 404, 409, 422, 500, instead=MEMORY_PROBLEMS_INSTEAD),
     )
-    def erase_agent_fact(name: str, id: int, writer: WriterDep) -> dict[str, int]:
+    def erase_agent_fact(name: str, id: FactId, writer: WriterDep) -> dict[str, int]:
         """Erase one thing an agent remembers.
 
         A hard delete, held facts included, and nothing here keeps it
@@ -516,7 +548,7 @@ def routes(api: FastAPI, problems: Callable[..., dict[int | str, dict[str, Any]]
         response_model=MemoryErasure,
         responses=problems(401, 404, 409, 422, 500, instead=MEMORY_PROBLEMS_INSTEAD),
     )
-    def erase_device_fact(mac: str, id: int, writer: WriterDep) -> dict[str, int]:
+    def erase_device_fact(mac: str, id: FactId, writer: WriterDep) -> dict[str, int]:
         """Erase one of a board's notes, under the same rules."""
         return _erased(writer, MemoryScope.DEVICE, _mac(mac), id)
 
@@ -627,16 +659,17 @@ def _corrected(
     writer: Callable[[], AbstractContextManager[Connection]],
     scope: MemoryScope,
     owner: str,
-    fact_id: int,
+    fact_id: str,
     body: object,
 ) -> dict[str, Any]:
     """One correction, whichever scope asked, with the body read before
     a transaction is opened: a body this endpoint cannot read is the
     caller's mistake and needs no connection to answer."""
     text = _fact(body)
+    number = _fact_id(fact_id)
 
     def correcting(connection: Connection) -> dict[str, Any]:
-        found = store.correct(connection, scope, owner, fact_id, text)
+        found = store.correct(connection, scope, owner, number, text)
         if found is None:
             raise UnknownEntityError(_UNKNOWN_FACT)
         return dict(found)
@@ -648,14 +681,16 @@ def _erased(
     writer: Callable[[], AbstractContextManager[Connection]],
     scope: MemoryScope,
     owner: str,
-    fact_id: int,
+    fact_id: str,
 ) -> dict[str, int]:
     """One addressed deletion, whichever scope asked. Addressed and not
     there is a 404 rather than an erasure of nothing: a caller that
     named one fact meant that fact."""
 
+    number = _fact_id(fact_id)
+
     def erasing(connection: Connection) -> int:
-        taken = store.erase_fact(connection, scope, owner, fact_id)
+        taken = store.erase_fact(connection, scope, owner, number)
         if not taken:
             raise UnknownEntityError(_UNKNOWN_FACT)
         return taken
@@ -713,6 +748,19 @@ def _written[T](
             _MEMORY_FAILED
         )
     raise problem
+
+
+def _fact_id(value: str) -> int:
+    """The number in the path, or the refusal naming what it has to be.
+
+    Bounded by the range of the identity column as well as by its
+    spelling, so a number no row can carry is the caller's mistake here
+    rather than a driver error and a storage failure further down.
+    """
+    number = paging.whole(value)
+    if number is None or number > paging.MAX_ROW_ID:
+        raise ConfigError(_NOT_A_FACT_NUMBER)
+    return number
 
 
 def _owner_cursor(value: str | None) -> str | None:
