@@ -265,17 +265,31 @@ def test_the_agent_defaults_section_is_inherited() -> None:
 
 
 def test_an_agents_own_section_replaces_the_inherited_one() -> None:
-    """Both directions, because a replacement that only ever turned
-    something off would be indistinguishable from a merge."""
+    """The empty section is what tells replacement from merging, and it
+    is the only case that does.
+
+    An agent that writes `memory: {enabled: true}` over disabled
+    defaults reads as enabled under either rule: replacement answers
+    with the agent's own section, and a merge would take the field the
+    agent wrote. `memory: {}` names the section and no field in it, so
+    replacement answers with a section whose `enabled` is the model's
+    declared default, which is on, while a merge would keep the
+    inherited `false` and leave this agent unable to remember. The
+    sibling under no section of its own is the inheritance beside it,
+    because a rule that replaced everything would be as wrong.
+    """
     config = base_config(
         agent_defaults={"llm": "mock", "asr": "mock", "vad": "mock", **OFF},
         agents={
             "poet": {"prompt": "POET", "tts": "tenor"},
-            "tutor": {"prompt": "TUTOR", "tts": "alto", **ON},
+            "tutor": {"prompt": "TUTOR", "tts": "alto", "memory": {}},
         },
     )
     assert not config.memory_for_agent("poet").enabled
     assert config.memory_for_agent("tutor").enabled
+    # And the section really is the agent's own rather than the layer's,
+    # which is what "wholly" means when there is one field to replace.
+    assert config.agents["tutor"].memory is not None
 
 
 # One clock per reply
